@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { isUuid } from '@/lib/party/resolveParty'
+import { isUuid } from '@/lib/party/contracts'
 import type { ApprovalDomain, DomainApprovalItem } from '@/lib/approvals/triage'
 
 export interface AgentProposal {

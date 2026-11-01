@@ -53,3 +53,7 @@ Hodnota `off` nebo `disabled` v `openbank.ledger.accounting-day.cron`,
 trigger a při startu neregistruje jeho heartbeat životnosti workflow. Nepřítomnost
 heartbeat u záměrně vypnuté úlohy neznamená úspěšné provedení. Ostatní metriky
 plánovačů zachovávají dosavadní chování.
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

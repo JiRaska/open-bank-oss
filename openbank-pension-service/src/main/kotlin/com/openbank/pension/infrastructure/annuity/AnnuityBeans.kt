@@ -18,6 +18,7 @@ import com.openbank.pension.application.exit.PayoutRequestRepository
 import com.openbank.pension.application.exit.ScaVerificationPort
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.FundAdministrationPort
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import io.quarkus.arc.All
 import jakarta.enterprise.context.ApplicationScoped
@@ -60,6 +61,7 @@ class AnnuityBeans {
         packs: JurisdictionPackRegistry,
         clock: Clock,
         @ConfigProperty(name = "openbank.pension.annuity.quote-timeout", defaultValue = "PT5S") quoteTimeout: Duration,
+        metrics: PensionMetrics,
     ) = AnnuityMarketplaceService(
         contracts,
         AnnuityStores(purchases, providers, payouts, instructions),
@@ -67,6 +69,7 @@ class AnnuityBeans {
         packs,
         clock,
         quoteTimeout,
+        metrics,
     )
 
     @Produces

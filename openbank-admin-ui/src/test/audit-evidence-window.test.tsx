@@ -35,7 +35,8 @@ function respondWith(count: number) {
   ))
   vi.stubGlobal('fetch', fetchMock)
   render(React.createElement(LanguageProvider, null, React.createElement(AuditPage)))
-  fireEvent.change(screen.getByLabelText('Aggregate ID'), { target: { value: AGGREGATE } })
+  fireEvent.click(screen.getByRole('button', { name: 'Technical ID (advanced)' }))
+  fireEvent.change(screen.getByLabelText('Technical ID (advanced)'), { target: { value: AGGREGATE } })
   fireEvent.click(screen.getByRole('button', { name: 'Search audit trail' }))
   return fetchMock
 }

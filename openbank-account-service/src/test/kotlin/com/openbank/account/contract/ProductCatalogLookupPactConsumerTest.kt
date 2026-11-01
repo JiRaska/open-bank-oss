@@ -14,8 +14,10 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.account.infrastructure.client.CatalogRevisionResponse
 import com.openbank.account.infrastructure.client.ProductCatalogClient
 import com.openbank.account.infrastructure.client.ProductCatalogResponse
+import com.openbank.account.infrastructure.client.ProductCatalogRevisionClient
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -28,20 +30,20 @@ import jakarta.ws.rs.Path as JaxrsPath
 
 /**
  * Consumer-driven contract for the ONE call account-service makes into
- * `openbank-product-catalog`: [ProductCatalogClient.getById], behind the fail-open
+ * `openbank-product-catalog`: [ProductCatalogClient.getById] and, since ADR-0341 D1, the v2
+ * published-revision read an account pins ([ProductCatalogRevisionClient]), behind the fail-closed
  * [com.openbank.account.infrastructure.client.ProductCatalogAdapter] (issue #668, ADR-0158 —
  * account-open product-existence validation). Until this test, account-service and
  * billing-service ([ProductCatalogFeesPactConsumerTest] in `openbank-billing-service`) were the
  * only two live callers of `openbank-product-catalog` with NO entry in `pacts/` — the same
  * uncontracted-consumer gap class that caused incident #2269 (ADR-0264 Phase A).
  *
- * Two interactions, matching the adapter's two live branches:
- *  - 200 with `id`/`code`/`status` — the only path that yields `ProductLookupResult.Found`;
- *  - 404 for an unknown product id — `ProductLookupResult.NotFound`, which the caller's open-time
- *    validation DOES act on (see the adapter's own KDoc: a confirmed 404 is not the same as an
- *    outage). The fail-open "unreachable/5xx" branch is `ProductCatalogAdapter`'s own generic
- *    `catch` — a contract cannot assert what happens when the provider never answers at all, so
- *    that branch has no test coverage of any kind today; not closed by this contract.
+ * Per read, the adapter's two answered branches:
+ *  - 200 — the only path that yields `ProductLookupResult.Found` / `RevisionResolution.Published`;
+ *  - 404 for an unknown product id — `NotFound` / `NoPublishedRevision`, which refuse the opening
+ *    with a 4xx (see the adapter's own KDoc: a confirmed 404 is not the same as an outage). The
+ *    "unreachable/5xx" branch, which now refuses the opening with a 503, cannot be expressed as a
+ *    contract (the provider never answers); `ProductCatalogAdapterTest` covers it.
  *
  * The two sides of the path are deliberately sourced differently — see
  * `openbank-card-issuance-service`'s `ProductCatalogPactConsumerTest` for the fuller rationale
@@ -96,6 +98,71 @@ class ProductCatalogLookupPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    /**
+     * ADR-0341 D1 / ADR-0352 phase 3: the PUBLISHED revision an account pins at opening. Same provider
+     * state billing's revision contract uses, so the provider replays one seeding for both consumers.
+     * `id`/`offeringId`/`number` are type-matched (the provider seeds them); `state` is the one value
+     * the adapter re-checks, so it is pinned exactly.
+     */
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun publishedRevisionPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a published v1-projected deposit revision exists for billing")
+        .uponReceiving("GET the published revision of a v1 product to pin at account opening")
+        .path(revisionContractPathFor(PUBLISHED_PRODUCT_ID))
+        .query("effectiveAt=$OPENING_INSTANT")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { o ->
+                o.uuid("id", UUID.fromString("0191c0de-0000-7000-8000-00000000b111"))
+                o.uuid("offeringId", UUID.fromString("0191c0de-0000-7000-8000-00000000a111"))
+                o.integerType("number", 1)
+                o.stringValue("state", "PUBLISHED")
+            }.build(),
+        )
+        .toPact()
+
+    @Pact(consumer = "openbank-account-service", provider = "openbank-product-catalog")
+    fun noPublishedRevisionPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no product exists with id $MISSING_PRODUCT_ID")
+        .uponReceiving("GET the published revision of an unknown v1 product to pin at account opening")
+        .path(revisionContractPathFor(MISSING_PRODUCT_ID))
+        .query("effectiveAt=$OPENING_INSTANT")
+        .method("GET")
+        .headers(mapOf("Accept" to "application/json"))
+        .willRespondWith()
+        .status(404)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "publishedRevisionPact")
+    fun `the revision client deserializes the published revision an account pins`(mockServer: MockServer) {
+        assertThat(REVISION_PATH_TEMPLATE)
+            .describedAs("ProductCatalogRevisionClient calls a path the provider does not serve")
+            .isEqualTo(PUBLISHED_REVISION_PATH_TEMPLATE)
+
+        val (status, body) = get(mockServer, revisionPathFor(PUBLISHED_PRODUCT_ID) + "?effectiveAt=$OPENING_INSTANT")
+
+        assertThat(status).isEqualTo(200)
+        val revision = mapper.readValue(body, CatalogRevisionResponse::class.java)
+        assertThat(revision.state).isEqualTo("PUBLISHED")
+        assertThat(UUID.fromString(revision.id)).isNotNull()
+        assertThat(UUID.fromString(revision.offeringId)).isNotNull()
+        assertThat(revision.number).isPositive()
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "noPublishedRevisionPact")
+    fun `an unknown product has no published revision to pin and answers 404`(mockServer: MockServer) {
+        val (status, _) = get(mockServer, revisionPathFor(MISSING_PRODUCT_ID) + "?effectiveAt=$OPENING_INSTANT")
+
+        // The reads turn this into CatalogRead.NotFound -> RevisionResolution.NoPublishedRevision (422).
+        assertThat(status).isEqualTo(404)
+    }
 
     @Test
     @PactTestFor(pactMethod = "productFoundPact")
@@ -182,5 +249,28 @@ class ProductCatalogLookupPactConsumerTest {
         }
 
         private fun pathFor(id: String): String = PATH_TEMPLATE.replace("{id}", id)
+
+        /** Billing's revision contract seeds this v1 product id under the shared provider state. */
+        const val PUBLISHED_PRODUCT_ID = "3f20a53e-5ea4-307a-8a0f-9605728381ba"
+
+        const val OPENING_INSTANT = "2099-01-01T00:00:00Z"
+
+        /** LITERAL, like [PRODUCT_BY_ID_PATH_TEMPLATE]: `openbank-product-catalog`'s openapi.yaml path. */
+        const val PUBLISHED_REVISION_PATH_TEMPLATE = "/api/v2/legacy-products/{productId}/published-revision"
+
+        private fun revisionContractPathFor(id: String): String =
+            PUBLISHED_REVISION_PATH_TEMPLATE.replace("{productId}", id)
+
+        private val REVISION_PATH_TEMPLATE: String = run {
+            val method = ProductCatalogRevisionClient::class.java.getMethod(
+                "getPublishedRevisionForLegacyProduct",
+                String::class.java,
+                String::class.java,
+            )
+            val classPath = ProductCatalogRevisionClient::class.java.getAnnotation(JaxrsPath::class.java).value
+            "$classPath${method.getAnnotation(JaxrsPath::class.java).value}"
+        }
+
+        private fun revisionPathFor(id: String): String = REVISION_PATH_TEMPLATE.replace("{productId}", id)
     }
 }

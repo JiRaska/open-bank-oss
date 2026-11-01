@@ -109,11 +109,16 @@ Zákaznický token (z customers realmu) se **nikdy nepřeposílá** — upstream
 - **Singleton `HttpClient`** po celou dobu života aplikace — jeden sdílený connection pool, žádný únik vlákna/fd na request.
 - **Vynucené HTTP/1.1** — výchozí JDK (HTTP/2 přes cleartext h2c) rozbíjí POST-s-tělem během upgrade handshake vůči in-cluster serverům, projevuje se to jako falešné 502.
 - **Explicitní timeouty** — connect timeout na builderu (`connect-timeout-ms`, default 5000), per-request timeout (`request-timeout-ms`, default 10000).
+- **Deadline sjednocené schránky notifikací** — sloučený feed stran sdílí jeden agregovaný deadline 10 s; každé upstream čtení dostane jen zbývající čas, takže sekvenční syntetická čtení zkracují svůj timeout místo spouštění nových vln. Deadline čte injektovaný monotónní ticker (v produkci `System::nanoTime`), takže jej testy řídí ve virtuálním čase. Striktní načtení inventáře zastoupení sdílí deadline volajícího pro upstream čtení i zpracování profilů. Vypršelý rozpočet odmítne ještě před odesláním požadavku; nedostupný inventář odmítne celou schránku místo vrácení pouze osobního profilu. Interní testovací overload také přijímá monotónní ticker, veřejné overloady nadále používají `System::nanoTime`.
 - **`@ConfigProperty` injekce do field (ne konstruktor)** — defaultní hodnoty Kotlin konstruktoru zastiňují Arc injekci, což tiše nechalo client secret `""` → každý fetch tokenu 401. Field injekce běží po konstrukci a aplikuje konfiguraci spolehlivě.
 - **Cache M2M tokenu** — `client_credentials` token cachován do 60 s před expirací; refresh je `@Synchronized`.
 - **Varianty operací** — `get` (JSON), `getRaw` (zachová upstream Content-Type pro camt.053 XML / MT940 / PDF, čte se jako `ByteArray`, aby nedošlo k poškození kódováním), `post` (idempotency-aware), `postAnonymous` (onboarding, bez party hlavičky).
 - **Režim selhání** — jakákoli výjimka transportu degraduje na JSON `502 {"error":"upstream unavailable"}`.
 - **Syntetická značka (ADR-0252)** — každý upstream request staví `upstreamRequest()`, který přidá `x-openbank-synthetic: true`, když vstupní filtr edge request přijal jako syntetický (MDC nebo OTel baggage, obojí nastavené jen pro principála z `openbank.synthetic.trusted-principals`). Hlavičku od klienta nikdy nekopíruje. Jedinou výjimkou je request na token. `UpstreamClientSyntheticTaintTest` hlídá chování i jediný vstupní bod.
+
+## Deadline sjednocené notifikační schránky
+
+Sjednocená notifikační schránka (`UnifiedNotificationInbox`) používá jeden monotónní souhrnný deadline 10 sekund (`UNIFIED_NOTIFICATION_TIMEOUT_SECONDS`) pro všechny party feedy. Syntetické požadavky zůstávají sekvenční na vlákně volajícího, aby zachovaly taint; každý upstream request dostane jen zbývající rozpočet deadline. Běžné požadavky čtou party feedy souběžně (nejvýše 16 současně na repliku, 128 ve frontě) pod stejným deadline. Po vypršení se další party už nevolají a schránka selže uzavřeně odpovědí `502 {"code":"NOTIFICATIONS_UNAVAILABLE"}` bez částečných výsledků.
 
 ## Model vlastnictví / IDOR
 

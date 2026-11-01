@@ -33,7 +33,7 @@ async function queryRange(query: string, signal: AbortSignal): Promise<Query> {
     for (const r of json.data.result) {
       const svc = r.metric.container ?? r.metric.application ?? r.metric.job ?? r.metric.service ?? 'unknown'
       const val = parseFloat(r.value[1])
-      if (!isNaN(val)) out[svc] = val
+      if (Number.isFinite(val)) out[svc] = val
     }
     return { rows: out, error: null }
   } catch (e) {
@@ -91,9 +91,9 @@ export async function GET() {
 
     const services = Array.from(allApps)
       .map(app => {
-        const used = heapUsed[app] ?? 0
-        const max = heapMax[app] ?? 0
-        const heapPct = max > 0 ? Math.round((used / max) * 100) : null
+        const used = heapUsed[app] ?? null
+        const max = heapMax[app] ?? null
+        const heapPct = used !== null && max !== null && max > 0 ? Math.round((used / max) * 100) : null
         const cpu = cpuRate[app] ?? null
         const rps = reqRate[app] ?? null
 
@@ -101,8 +101,8 @@ export async function GET() {
           name: app,
           short: short(app),
           heap: {
-            usedBytes: Math.round(used),
-            maxBytes: Math.round(max),
+            usedBytes: used !== null ? Math.round(used) : null,
+            maxBytes: max !== null ? Math.round(max) : null,
             pct: heapPct,
           },
           cpuCoresUsed: cpu !== null ? Math.round(cpu * 1000) / 1000 : null,

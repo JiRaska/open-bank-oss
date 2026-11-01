@@ -5,15 +5,8 @@
 package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
-import com.openbank.productcatalog.application.CatalogForbiddenException
-import com.openbank.productcatalog.application.CatalogNotFoundException
-import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
-import com.openbank.productcatalog.application.GenericCatalogService
-import com.openbank.productcatalog.application.port.out.PensionApprovalRole
-import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
 import com.openbank.productcatalog.infrastructure.security.CatalogRoles
-import com.openbank.productcatalog.infrastructure.security.CatalogScopeRoleMapper
-import io.quarkus.security.identity.SecurityIdentity
+import io.quarkus.security.Authenticated
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
@@ -25,25 +18,19 @@ import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
-import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.eclipse.microprofile.jwt.JsonWebToken
-import java.time.Instant
 import java.util.UUID
 
-data class PensionApprovalRequest(val reason: String)
-
-data class PensionApprovalResponse(val role: PensionApprovalRole, val digest: String, val approvedAt: Instant)
-
+/**
+ * DEPRECATED alias of [RevisionApprovalResource] kept for the compatibility window (#13429): the
+ * admin-ui Product Studio and OPA policy still call `/pension-approvals` and the
+ * `catalog.pensionApproval.*` actions. Same handler, same identity rules; remove together with
+ * its `non_kernel_files` entry in rules.yaml, which expires so this cannot become permanent.
+ */
+@Deprecated("use RevisionApprovalResource (/approvals)")
 @ApplicationScoped
 @Path("/api/v2/offerings/{offeringId}/revisions/{revisionId}/pension-approvals")
 @Produces(MediaType.APPLICATION_JSON)
-class PensionRevisionApprovalResource(
-    private val service: GenericCatalogService,
-    private val identity: SecurityIdentity,
-    private val scopeMapper: CatalogScopeRoleMapper,
-    @ConfigProperty(name = "openbank.catalog.security.scope-claim", defaultValue = "scope")
-    private val scopeClaim: String,
-) {
+class PensionRevisionApprovalResource(private val handler: RevisionApprovalHandler) {
     @GET
     @Authorize(
         action = "catalog.pensionApproval.read",
@@ -54,123 +41,18 @@ class PensionRevisionApprovalResource(
     suspend fun list(
         @PathParam("offeringId") offeringId: UUID,
         @PathParam("revisionId") revisionId: UUID,
-    ): List<PensionApprovalResponse> {
-        requirePensionServiceWhenMachine()
-        requireOwner(offeringId, revisionId)
-        return service.pensionApprovals(revisionId).map(::response)
-    }
-
-    /** OPA is advisory by default; a catalog-read scope alone must not expose approval evidence. */
-    private fun requirePensionServiceWhenMachine() {
-        val token = identity.principal as? JsonWebToken
-            ?: throw CatalogForbiddenException("a verified JWT is required for approval evidence")
-        val subject = token.subject ?: token.getClaim<String>("sub")
-        if (subject.isNullOrBlank() || !(isPensionService(token) || isHumanApprovalReader(token, subject))) {
-            throw CatalogForbiddenException("pension approval evidence reader identity is required")
-        }
-    }
-
-    private fun isPensionService(token: JsonWebToken): Boolean = token.getClaim<String>("azp") == "openbank-pension" &&
-        token.getClaim<String>("preferred_username") == "service-account-openbank-pension" &&
-        "ROLE_API" in identity.roles
-
-    private fun isHumanApprovalReader(token: JsonWebToken, subject: String): Boolean {
-        val username = token.getClaim<String>("preferred_username").orEmpty()
-        val humanToken = token.getClaim<String>("azp") == "openbank-admin-ui" &&
-            username.isNotBlank() &&
-            !username.startsWith("service-account-") &&
-            !username.startsWith("agent:") &&
-            !subject.startsWith("agent:") &&
-            "ROLE_API" !in identity.roles
-        return humanToken &&
-            scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles).any { it in APPROVAL_READER_ROLES }
-    }
+    ): List<RevisionApprovalResponse> = handler.list(offeringId, revisionId)
 
     @POST
     @Authorize(action = "catalog.pensionApproval.decide", resource = "#offeringId")
     @Path("/{role}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @RolesAllowed(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER)
-    @Suppress("ThrowsCount")
+    @Authenticated
     suspend fun approve(
         @PathParam("offeringId") offeringId: UUID,
         @PathParam("revisionId") revisionId: UUID,
-        @PathParam("role") role: PensionApprovalRole,
+        @PathParam("role") role: String,
         @HeaderParam("If-Match") ifMatch: String?,
-        request: PensionApprovalRequest,
-    ): Response {
-        val token = requireApprovalToken(role)
-        val approverName = requireHumanApprover(token)
-        requireOwner(offeringId, revisionId)
-        val issuer = token.issuer?.takeIf(String::isNotBlank)
-            ?: throw CatalogForbiddenException("token issuer is required")
-        val subject = (token.subject ?: token.getClaim<String>("sub"))?.takeIf(String::isNotBlank)
-            ?: throw CatalogForbiddenException("token subject is required")
-        val revision = ifMatch?.let { STRONG_ETAG.matchEntire(it)?.groupValues?.get(1)?.toLongOrNull() }
-            ?: throw CatalogPreconditionRequiredException("a strong If-Match revision is required")
-        val approved = service.approvePensionRevision(
-            revisionId,
-            revision,
-            role,
-            issuer,
-            subject,
-            approverName,
-            request.reason,
-        )
-        return Response.status(Response.Status.CREATED).entity(response(approved)).build()
-    }
-
-    @Suppress("ThrowsCount")
-    private fun requireApprovalToken(role: PensionApprovalRole): JsonWebToken {
-        val requiredRole = when (role) {
-            PensionApprovalRole.LEGAL_COUNSEL -> CatalogRoles.PENSION_LEGAL_APPROVER
-            PensionApprovalRole.PRODUCT_OWNER -> CatalogRoles.PENSION_PRODUCT_OWNER
-        }
-        val token = identity.principal as? JsonWebToken
-            ?: throw CatalogForbiddenException("a verified JWT principal is required")
-        // Raw realm roles can reach @RolesAllowed. Derive the decision again from the verified
-        // realm assignment and the independent approval scope on this exact JWT.
-        if (requiredRole !in scopeMapper.roles(token.getClaim<Any?>(scopeClaim), identity.roles)) {
-            throw CatalogForbiddenException("approval role and scope are required")
-        }
-        if (token.getClaim<String>("azp") != "openbank-admin-ui") {
-            throw CatalogForbiddenException("the Admin UI client is required for human pension approval")
-        }
-        return token
-    }
-
-    private fun requireHumanApprover(token: JsonWebToken): String {
-        val username = token.getClaim<String>("preferred_username").orEmpty()
-        val approverName = token.name ?: username
-        if (username.isBlank() || approverName.isBlank()) {
-            throw CatalogForbiddenException("a human pension approver is required")
-        }
-        if (
-            isMachineIdentity(username) ||
-            isMachineIdentity(approverName) ||
-            token.subject?.startsWith("agent:") == true
-        ) {
-            throw CatalogForbiddenException("a human pension approver is required")
-        }
-        return approverName
-    }
-
-    private fun isMachineIdentity(name: String) = name.startsWith("service-account-") || name.startsWith("agent:")
-
-    private suspend fun requireOwner(offeringId: UUID, revisionId: UUID) {
-        val revision = service.findRevision(revisionId)
-        if (revision.offeringId != offeringId) {
-            throw CatalogNotFoundException("revision $revisionId not found for offering $offeringId")
-        }
-    }
-
-    private fun response(approval: PensionRevisionApproval) =
-        PensionApprovalResponse(approval.role, approval.digest, approval.approvedAt)
-
-    private companion object {
-        private val APPROVAL_READER_ROLES =
-            setOf(CatalogRoles.PENSION_LEGAL_APPROVER, CatalogRoles.PENSION_PRODUCT_OWNER, CatalogRoles.PUBLISH)
-
-        val STRONG_ETAG = Regex("\\\"([0-9]+)\\\"")
-    }
+        request: RevisionApprovalRequest,
+    ): Response = handler.approve(offeringId, revisionId, role, ifMatch, request)
 }

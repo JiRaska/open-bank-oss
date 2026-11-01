@@ -29,7 +29,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await page.route('**/api/services/health', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ services: [] }),
+    body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [] }),
   }))
 })
 
@@ -89,7 +89,10 @@ test('keeps the desktop sidebar focusable across viewport changes', async ({ pag
 
   await page.setViewportSize({ width: 1280, height: 844 })
   await expect(sidebar).toHaveJSProperty('inert', false)
-  const dashboard = sidebar.locator('a[href="/dashboard"]').first()
+  // The workspace can change as permissions resolve. Exercise the unique active-route
+  // link in the core navigation, rather than an arbitrary first workspace shortcut.
+  const dashboard = sidebar.locator('a[href="/dashboard"][aria-current="page"]')
+  await expect(dashboard).toHaveCount(1)
   await dashboard.focus()
   await expect(dashboard).toBeFocused()
 
@@ -119,7 +122,10 @@ test('does not steal focus when an operator moves inside the drawer while permis
   await expect(initiallyChosenControl).toBeFocused()
   const chosenHref = await initiallyChosenControl.getAttribute('href')
   expect(chosenHref).not.toBeNull()
-  const chosenControl = page.locator(`#admin-sidebar:visible a[href="${chosenHref}"]`)
+  // The workspace shortcuts duplicate nav hrefs ("Test Intelligence" nav link vs the
+  // "… LIVE" workspace link), so the href locator matches 2 elements — .first() pins
+  // the core-navigation link, which is the focused one and the first control in DOM order.
+  const chosenControl = page.locator(`#admin-sidebar:visible a[href="${chosenHref}"]`).first()
   await expect(chosenControl).toBeFocused()
 
   releaseSession()

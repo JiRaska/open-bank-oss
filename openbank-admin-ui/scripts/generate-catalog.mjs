@@ -26,6 +26,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { runnableModules } from './service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -39,6 +40,16 @@ const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'catalog.
 
 function readText(p) {
   try { return readFileSync(p, 'utf-8') } catch { return null }
+}
+
+function releaseRegistered(name) {
+  try {
+    const config = JSON.parse(readText(path.join(REPO, 'release-please-config.json')) ?? '{}')
+    const manifest = JSON.parse(readText(path.join(REPO, '.release-please-manifest.json')) ?? '{}')
+    return Object.hasOwn(config.packages ?? {}, name) && Object.hasOwn(manifest, name)
+  } catch {
+    return false
+  }
 }
 
 // Money-path set + (optional) data-domain hints from the single governance source.
@@ -90,6 +101,7 @@ function readPorts(serviceDir) {
 }
 
 const gov = loadGovernance()
+const runnableNames = new Set(runnableModules(REPO).map(module => module.name))
 
 // Discover service modules: every top-level openbank-* dir that is a Gradle
 // module (has version.txt OR an openapi spec OR a build.gradle.kts). admin-ui and
@@ -109,20 +121,15 @@ for (const name of entries) {
   }
   const { hasOpenapi, apiVersion, apiTitle } = readOpenapi(dir)
   const isService = name.endsWith('-service') || name.endsWith('-payment') || name.endsWith('-instant')
-  // The convention plugin identifies a runnable Quarkus module more reliably
-  // than its name: risk-engine and product-catalog have no -service suffix.
-  const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
-  const runnable = (/^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
-    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")')))
-    // analytics-sink applies the Quarkus Gradle plugin directly (no convention plugin) but is a
-    // deployable service with its own port, so it belongs to the fleet too.
-    || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(buildScript)
+  const runnable = runnableNames.has(name)
   const { port, mgmtPort } = readPorts(dir)
   const moneyPath = gov.moneyPath.has(name)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
   const gaps = []
-  if (isService && !releaseVersion) gaps.push('missing version.txt')
+  if ((isService || runnable) && !releaseVersion) gaps.push('missing version.txt')
+  if (runnable && !releaseRegistered(name)) gaps.push('runnable backend component is not release-registered')
+  if (runnable && !readText(path.join(dir, 'governance.yaml'))) gaps.push('runnable backend component has no governance.yaml')
   if (moneyPath && !hasOpenapi) gaps.push('money-path service with no OpenAPI spec')
 
   services.push({

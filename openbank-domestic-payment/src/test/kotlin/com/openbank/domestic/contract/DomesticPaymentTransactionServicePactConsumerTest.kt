@@ -41,7 +41,8 @@ class DomesticPaymentTransactionServicePactConsumerTest {
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "valueDate": "2026-01-20",
-          "rail": "DOMESTIC"
+          "rail": "DOMESTIC",
+          "instructionType": "ONE_OFF"
         }
     """.trimIndent()
 
@@ -66,6 +67,15 @@ class DomesticPaymentTransactionServicePactConsumerTest {
                 // made all four replays green about it for the life of the contracts.
                 // stringValue, NOT stringType: this is the field the consumer branches on.
                 o.stringValue("status", "COMPLETED")
+                // #13217: SettlementAdapter settles only a booking that matches its request, so the
+                // provider must keep answering with these. Values, not types: they are what is compared.
+                o.stringValue("type", "DEBIT")
+                o.stringValue("sourceAccountId", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                o.stringValue("currencyCode", "CZK")
+                o.stringValue("rail", "DOMESTIC")
+                o.stringValue("instructionType", "ONE_OFF")
+                // Compared numerically (compareTo), so the provider's scale is free; the field must exist.
+                o.decimalType("amount", java.math.BigDecimal("1000.00"))
             }.build(),
         )
         .toPact()
@@ -84,5 +94,37 @@ class DomesticPaymentTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+        assertThat(body.getString("type")).isEqualTo("DEBIT")
+        assertThat(body.getString("rail")).isEqualTo("DOMESTIC")
+        assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
+    }
+
+    /**
+     * Missing credentials are an actual refusal contract. The shared provider state routes this
+     * interaction to TransactionNegativeAuthProviderVerificationTest, which has no @TestSecurity;
+     * the authenticated positive verifier excludes that state and cannot stand in for this proof.
+     */
+    @Pact(consumer = "openbank-domestic-payment", provider = "openbank-transaction-service")
+    fun initiateDomesticTransactionUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST initiate domestic transaction with no credentials")
+        .path("/api/v1/transactions")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "initiateDomesticTransactionUnauthenticatedPact")
+    fun `initiateTransaction without credentials is refused with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/transactions")
+            .then()
+            .statusCode(401)
     }
 }

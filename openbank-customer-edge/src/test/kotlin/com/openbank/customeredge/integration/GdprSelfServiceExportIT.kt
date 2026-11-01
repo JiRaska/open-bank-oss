@@ -4,6 +4,7 @@
 package com.openbank.customeredge.integration
 
 import com.openbank.customeredge.contract.StubUpstreamResource
+import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
@@ -49,6 +50,7 @@ private const val ART20_PATH = "/api/v1/parties/$GDPR_PARTY_ID/gdpr-portability-
  * parameter, and the `X-Customer-Party-Id` party-service scopes by is the JWT's party.
  */
 @QuarkusTest
+@QuarkusTestResource(StubUpstreamResource::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$GDPR_PARTY_ID", roles = ["ROLE_CUSTOMER"])
 @OidcSecurity(claims = [Claim(key = "party_id", value = GDPR_PARTY_ID)])
 class GdprSelfServiceExportIT {

@@ -20,11 +20,6 @@ quarkus:
   flyway:
     migrate-at-start: true
     locations: classpath:db/migration
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   log:
     level: INFO
     category:

@@ -8,7 +8,7 @@
 // four-eyes check compares two real people.
 import type { z } from 'zod'
 import { svcUrl } from '@/lib/services/bff'
-import { getJson, type Loaded } from '@/components/balance-sheet/api'
+import { getJson, type Loaded } from '@/lib/services/resourceClient'
 
 export const PENSION = 'pension-service'
 export const PENSION_FUND = 'pension-fund-service'

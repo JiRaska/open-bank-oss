@@ -7,23 +7,35 @@ package com.openbank.productcatalog.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.product.ir.ProductIrCanonical
+import com.openbank.libs.product.ir.ProductIrParser
+import com.openbank.libs.product.ir.ProductIrValidationException
+import com.openbank.libs.product.ir.ProductRevisionIr
+import com.openbank.libs.productrevision.IrSignerPort
+import com.openbank.libs.productrevision.IrSigningException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
-import com.openbank.productcatalog.application.port.out.PensionApprovalRole
-import com.openbank.productcatalog.application.port.out.PensionRevisionApproval
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
+import com.openbank.productcatalog.domain.catalog.CatalogValue
 import com.openbank.productcatalog.domain.catalog.MarketContext
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RelationshipKind
+import com.openbank.productcatalog.domain.catalog.RevisionApproval
+import com.openbank.productcatalog.domain.catalog.RevisionApprovalPolicy
 import com.openbank.productcatalog.domain.catalog.RevisionContent
+import com.openbank.productcatalog.domain.catalog.RevisionIrSignature
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.SchemaValidationResult
 import com.openbank.productcatalog.domain.catalog.SchemaViolation
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
+import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -49,6 +61,7 @@ class GenericCatalogService(
     private val validator: CatalogSchemaValidator,
     private val catalogJson: CatalogJson,
     private val clock: Clock,
+    private val irSigner: IrSignerPort,
 ) {
     suspend fun listSchemas(): List<CatalogSchema> = repository.listSchemas()
 
@@ -106,6 +119,7 @@ class GenericCatalogService(
         }
         findSchema(schemaRef)
         validateOrThrow(schemaRef, content.attributes)
+        parseBehaviour(content)
         validateRelationshipReferences(offeringId, content)
         val now = Instant.now(clock)
         return repository.createDraft(
@@ -146,6 +160,7 @@ class GenericCatalogService(
             throw CatalogConflictException("published revisions are immutable")
         }
         validateOrThrow(existing.schemaRef, content.attributes)
+        parseBehaviour(content)
         validateRelationshipReferences(existing.offeringId, content)
         return repository.updateDraft(
             existing.copy(
@@ -164,6 +179,61 @@ class GenericCatalogService(
 
     suspend fun publish(revisionId: UUID, expectedRevision: Long, checkerId: String, reason: String): ProductRevision {
         val draft = findRevision(revisionId)
+        if (draft.content.behaviour != null) {
+            // ADR-0352 §7: an IR-bearing revision is its own four-eyes action (catalog.publish-ir) and is
+            // signed on the way out; the plain publish path must never let one through unsigned.
+            throw CatalogConflictException("revision carries product IR; publish it through publish-ir")
+        }
+        return publishChecked(draft, expectedRevision, checkerId, reason, irSignature = null)
+    }
+
+    /**
+     * Publishes an IR-bearing revision (ADR-0352 §4, §7): validates the IR, computes its canonical
+     * `revisionHash`, obtains the publish-path signature over the revision identity envelope
+     * (product code, revision id and number, IR version, hash) and stores it next to
+     * the revision in the same transaction. A revision without IR is refused — use [publish].
+     */
+    suspend fun publishIr(
+        revisionId: UUID,
+        expectedRevision: Long,
+        checkerId: String,
+        reason: String,
+    ): ProductRevision {
+        val draft = findRevision(revisionId)
+        val ir = parseBehaviour(draft.content)
+            ?: throw CatalogConflictException("revision carries no product IR; publish it through publish")
+        // Transit `sign` is a blocking HTTP call (and may log in first); never on the event loop.
+        val signature = try {
+            // ADR-0352 §4: the signature binds the whole revision identity, not the bare hash, so it
+            // cannot be presented under another product's or another revision's pin.
+            val identity = RevisionIdentity(
+                productCode = ir.productCode,
+                revisionId = draft.id,
+                revisionNumber = draft.number,
+                irVersion = ir.irVersion,
+                revisionHash = ir.revisionHash,
+            )
+            withContext(Dispatchers.IO) { irSigner.sign(identity) }
+        } catch (e: IrSigningException) {
+            throw CatalogConflictException("revision cannot be signed: ${e.message}", e)
+        }
+        val evidence = RevisionIrSignature(
+            revisionHash = ir.revisionHash,
+            keyId = signature.keyId,
+            algorithm = signature.algorithm,
+            signature = signature.signature,
+            signedAt = Instant.now(clock),
+        )
+        return publishChecked(draft, expectedRevision, checkerId, reason, evidence)
+    }
+
+    private suspend fun publishChecked(
+        draft: ProductRevision,
+        expectedRevision: Long,
+        checkerId: String,
+        reason: String,
+        irSignature: RevisionIrSignature?,
+    ): ProductRevision {
         requireExpected(draft, expectedRevision)
         if (draft.state != RevisionState.DRAFT) {
             throw CatalogConflictException("published revisions are immutable")
@@ -177,41 +247,60 @@ class GenericCatalogService(
         requirePublishableBundleComponents(draft, draft.effectiveFrom ?: publicationAt)
         val hash = catalogJson.sha256(catalogJson.toContentNode(draft.content))
         return repository.publishDraft(
-            revisionId = revisionId,
+            revisionId = draft.id,
             expectedRevision = expectedRevision,
             checkerId = checkerId,
             reason = reason,
             contentHash = hash,
             at = publicationAt,
+            irSignature = irSignature,
         )
     }
 
+    /**
+     * The revision's IR as the parser sees it, or null when the content carries none. Throws
+     * `ProductIrValidationException` (an `IllegalArgumentException`, mapped to 400) for an invalid
+     * document — a draft that cannot be published is refused at the write, never at publication.
+     */
+    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? = content.behaviour?.let(::parseIr)
+
+    /**
+     * ADR-0352 phase 5b: the Studio IR editor's dry run. The same [parseIr] a revision write runs, so
+     * the editor cannot accept an IR the write would refuse, nor refuse one it would accept. Stores,
+     * signs and publishes nothing.
+     */
+    fun lintIr(behaviour: CatalogValue): IrLintResult = try {
+        val ir = parseIr(behaviour)
+        IrLintResult(ir, ProductIrCanonical.canonicalJson(ir), emptyList())
+    } catch (e: ProductIrValidationException) {
+        IrLintResult(null, null, e.problems)
+    }
+
+    private fun parseIr(behaviour: CatalogValue): ProductRevisionIr = ProductIrParser.fromTree(behaviour.toPlainTree())
+
     @Suppress("ThrowsCount")
-    suspend fun approvePensionRevision(
+    suspend fun approveRevision(
         revisionId: UUID,
         expectedRevision: Long,
-        role: PensionApprovalRole,
+        role: String,
         issuer: String,
         subject: String,
         actorName: String,
         reason: String,
-    ): PensionRevisionApproval {
+    ): RevisionApproval {
         val draft = findRevision(revisionId)
         requireExpected(draft, expectedRevision)
-        if (draft.schemaRef.id != PENSION_SCHEMA ||
-            draft.schemaRef.version != 2 ||
-            draft.state != RevisionState.DRAFT
-        ) {
-            throw CatalogConflictException("only draft pension pack v2 revisions accept role approvals")
+        val policy = approvalPolicy(draft)
+            ?: throw CatalogConflictException(
+                "schema ${draft.schemaRef.id}:${draft.schemaRef.version} declares no approval policy",
+            )
+        if (draft.state != RevisionState.DRAFT) {
+            throw CatalogConflictException("only draft revisions accept role approvals")
         }
-        if (draft.effectiveFrom == null) {
-            throw CatalogConflictException("pension approval requires an explicit effectiveFrom")
+        if (policy.role(role) == null) {
+            throw CatalogConflictException("approval role $role is not declared by the revision's schema")
         }
-        if (catalogJson.toContentNode(draft.content).path("attributes").path("reviewStatus").asText() !=
-            REVIEWED_STATUS
-        ) {
-            throw CatalogConflictException("pension revision has not declared legal and commercial review")
-        }
+        requireApprovable(draft, policy)
         require(issuer.isNotBlank() && subject.isNotBlank()) { "authenticated approver is required" }
         require(actorName.isNotBlank() && reason.isNotBlank()) { "approver and reason are required" }
         require(reason.length <= MAX_APPROVAL_REASON_LENGTH) { "approval reason is too long" }
@@ -219,20 +308,46 @@ class GenericCatalogService(
             throw CatalogForbiddenException("maker cannot approve their own revision")
         }
         validateOrThrow(draft.schemaRef, draft.content.attributes)
-        return repository.approvePensionRevision(revisionId, expectedRevision, role, issuer, subject, actorName, reason)
+        return repository.approveRevision(revisionId, expectedRevision, role, issuer, subject, actorName, reason)
     }
 
-    suspend fun pensionApprovals(revisionId: UUID): List<PensionRevisionApproval> {
+    suspend fun revisionApprovals(revisionId: UUID): List<RevisionApproval> {
         val revision = findRevision(revisionId)
-        if (revision.schemaRef.id != PENSION_SCHEMA || revision.schemaRef.version != 2) {
-            throw CatalogConflictException("revision is not pension pack v2")
+        if (approvalPolicy(revision) == null) {
+            throw CatalogConflictException("revision's schema declares no approval policy")
         }
-        return repository.pensionApprovals(revisionId)
+        return repository.revisionApprovals(revisionId)
+    }
+
+    /** Authorities that any registered policy binds to [role]; empty when no pack declares it. */
+    suspend fun authoritiesForRole(role: String): Set<String> =
+        listSchemas().mapNotNullTo(linkedSetOf()) { it.approvalPolicy?.role(role)?.authority }
+
+    /** The approval policy of the revision's exact schema version, or null when it has none. */
+    suspend fun approvalPolicy(revision: ProductRevision): RevisionApprovalPolicy? =
+        findSchema(revision.schemaRef).approvalPolicy
+
+    private fun requireApprovable(draft: ProductRevision, policy: RevisionApprovalPolicy) {
+        if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
+            throw CatalogConflictException("approval requires an explicit effectiveFrom")
+        }
+        val attributes = catalogJson.toContentNode(draft.content).path("attributes")
+        policy.requiredAttributes.forEach { (name, expected) ->
+            if (attributes.path(name).asText() != expected) {
+                throw CatalogConflictException("approval requires attribute $name = $expected")
+            }
+        }
     }
 
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublished(offeringId, effectiveAt)
             ?: throw CatalogNotFoundException("no published offering $offeringId is effective at $effectiveAt")
+
+    suspend fun findPublishedForLegacyProduct(productId: UUID, effectiveAt: Instant): ProductRevision =
+        repository.findPublishedForLegacyProduct(productId, effectiveAt)
+            ?: throw CatalogNotFoundException(
+                "no published revision of legacy product $productId is effective at $effectiveAt",
+            )
 
     private suspend fun validateOrThrow(
         ref: SchemaRef,
@@ -254,8 +369,6 @@ class GenericCatalogService(
     }
 
     private companion object {
-        const val PENSION_SCHEMA = "org.openbank.retirement.pension-savings"
-        const val REVIEWED_STATUS = "LEGAL_AND_COMMERCIAL_REVIEWED"
         const val MAX_APPROVAL_REASON_LENGTH = 4_096
     }
 
@@ -331,3 +444,10 @@ class GenericCatalogService(
         }
     }
 }
+
+/** Outcome of [GenericCatalogService.lintIr]: either a parsed IR with its canonical bytes, or problems. */
+data class IrLintResult(
+    val ir: ProductRevisionIr?,
+    val canonicalJson: String?,
+    val problems: List<ProductIrValidationException.Problem>,
+)

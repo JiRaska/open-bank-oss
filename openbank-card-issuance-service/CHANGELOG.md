@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.28.6](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.5...card-issuance-service-v0.28.6) (2026-10-26)
+
+
+### Bug Fixes
+
+* **card-issuance:** restore customer masked card reads ([#13691](https://github.com/JiRaska/open-bank-oss/issues/13691)) ([b3e8d80](https://github.com/JiRaska/open-bank-oss/commit/b3e8d805f49006a53d4903f2d594426eadb99e1d))
+
+## [0.28.5](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.4...card-issuance-service-v0.28.5) (2026-10-18)
+
+
+### Bug Fixes
+
+* **transaction:** remove the dead payment.scheme-accepted path (ADR-0108) ([#13158](https://github.com/JiRaska/open-bank-oss/issues/13158)) ([0140013](https://github.com/JiRaska/open-bank-oss/commit/014001337a587b8895e88c589212340fa9fbbf3e))
+
 ## [0.28.4](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.3...card-issuance-service-v0.28.4) (2026-10-16)
 
 

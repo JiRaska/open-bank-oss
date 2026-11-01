@@ -247,7 +247,7 @@ class PartyRepositoryImpl(
         kycLevel = party.kycAttributes.kycLevel.name
         kycCompletedAt = party.kycAttributes.kycCompletedAt
         kycExpiresAt = party.kycAttributes.kycExpiresAt
-        amlRiskScore = party.kycAttributes.amlRiskScore.name
+        amlRiskScore = party.kycAttributes.amlRiskScore?.name
         pepFlag = party.kycAttributes.pepFlag
         sanctionsFlag = party.kycAttributes.sanctionsFlag
         uboVerifiedAt = party.kycAttributes.uboVerifiedAt
@@ -325,7 +325,7 @@ class PartyRepositoryImpl(
             KycLevel.valueOf(kycLevel),
             kycCompletedAt,
             kycExpiresAt,
-            AmlRiskScore.valueOf(amlRiskScore),
+            amlRiskScore?.let(AmlRiskScore::valueOf),
             pepFlag,
             sanctionsFlag,
             uboVerifiedAt,
@@ -358,7 +358,7 @@ class PartyRepositoryImpl(
         it.kycLevel = kycAttributes.kycLevel.name
         it.kycCompletedAt = kycAttributes.kycCompletedAt
         it.kycExpiresAt = kycAttributes.kycExpiresAt
-        it.amlRiskScore = kycAttributes.amlRiskScore.name
+        it.amlRiskScore = kycAttributes.amlRiskScore?.name
         it.pepFlag = kycAttributes.pepFlag
         it.sanctionsFlag = kycAttributes.sanctionsFlag
         it.uboVerifiedAt = kycAttributes.uboVerifiedAt

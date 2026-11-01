@@ -7,7 +7,8 @@ const page = readFileSync(join(process.cwd(), 'src/app/docs/cloud-architecture/p
 describe('cloud architecture controls accessibility contract', () => {
   it('names nodes and exposes selection state without dangling references', () => {
     expect(page).toContain('type="button"')
-    expect(page).toContain('aria-label={`${t(...n.name)} — ${t(...m.label)}`}')
+    expect(page).toContain("aria-label={`${t(...n.name)}${pm ? ` ${pm.label}` : ''} — ${t(...m.label)}`}")
+    expect(page).toContain("{' '}{pm && <span")
     expect(page).toContain('aria-pressed={active} aria-controls={active ? \'cloud-architecture-selection\' : undefined}')
     expect(page).toContain('id="cloud-architecture-selection" className="card" role="region"')
   })

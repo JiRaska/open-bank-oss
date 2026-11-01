@@ -55,6 +55,31 @@ export default auth((req) => {
     return withCsp(NextResponse.next({ request: { headers: requestHeaders } }))
   }
 
+  // Envoy Gateway calls this path as HTTP ext_authz and appends the original tool URL.
+  // Do not canonicalize its trailing slash: a 308 is a denial to Envoy, which relays the
+  // Location to the browser and turns `/tools/<tool>/` into a blank direct visit to this API.
+  // The gate route performs its own session and role checks; this is only a proxy bypass.
+  if (pathname === "/api/gate" || pathname.startsWith("/api/gate/")) {
+    return NextResponse.next()
+  }
+
+  // `skipTrailingSlashRedirect` is needed for the Envoy gate, so retain Next's former
+  // canonical URL behavior for the console and formerly excluded routes explicitly.
+  // Next used to normalize these requests before routing, even when matcher excluded them.
+  if (pathname !== "/" && pathname.endsWith("/")) {
+    const canonicalUrl = new URL(req.url)
+    canonicalUrl.pathname = pathname.replace(/\/+$/, "")
+    return withCsp(NextResponse.redirect(canonicalUrl, 308))
+  }
+
+  // These surfaces remain unauthenticated after trailing-slash handling; their original
+  // no-slash requests pass through to their own handler or static asset.
+  if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")
+    || pathname === "/api/security/kpis/metrics"
+    || pathname.startsWith("/brand/") || pathname === "/favicon.ico" || pathname === "/robots.txt") {
+    return NextResponse.next()
+  }
+
   // The /auth/* pages (login, error, forbidden), the GDPR privacy notice, and
   // RFC 9116 security.txt are public — apply the nonce CSP but DON'T run the
   // auth gate (it would loop /auth/login → /auth/login, or make the incident
@@ -115,26 +140,22 @@ export const config = {
     // (service test inventory), api/catalog/health (service map), api/product-catalog and api/fx /
     // api/sanctions reachable WITHOUT a token — the same unauthenticated-info-disclosure class as
     // F-AUTH-01/02. They are consumed only by gated pages (security, system/tests, product-catalog,
-    // fees, devops), so the session cookie still reaches them; nothing pre-auth needs them. Now the
-    // ONLY exclusions are Auth.js's own handlers, Next static assets, and the public brand assets
-    // needed by the pre-auth login page — everything else is gated.
+    // fees, devops), so the session cookie still reaches them; nothing pre-auth needs them. The
+    // matcher includes these paths; the callback below explicitly passes through Auth.js handlers,
+    // the Prometheus scrape, and public static assets while gating the remaining application paths.
     // (k8s probes the pod via tcpSocket, not an /api path, so gating /api can't break liveness.)
     // NOTE: /auth/* is intentionally NOT excluded (ADR-0080 P1): the middleware must run there to
     // emit the nonce CSP on the pre-auth login page. The callback short-circuits /auth so the auth
-    // gate doesn't loop. api/auth stays excluded (Auth.js owns its own handlers; JSON, no CSP need).
-    // api/gate is excluded for a mechanical reason, NOT as a relaxation (ADR-0234): it is nginx's
-    // `auth_request` target for the /tools/* Ingress, and nginx maps any auth sub-response that is
-    // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
-    // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
-    // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
-    // The same exclusion covers the Envoy Gateway contract under /api/gate/<tool>/… (ADR-0324
-    // Phase 2), which must return its own 302 carrying the deep link rather than the middleware's.
-    // api/security/kpis/metrics is excluded so the in-cluster Prometheus ServiceMonitor
-    // (servicemonitor-admin-ui.yaml) can scrape it: Prometheus cannot hold a console
+    // gate doesn't loop. Auth.js handlers are passed through because they own their JSON/session
+    // contract. /api/gate is also passed through without the console auth check (ADR-0234): nginx's
+    // route and Envoy ext_authz route both perform their own session + role check. This path must
+    // reach its route handler with the original slash intact so an upstream 308 is not misread as
+    // an auth denial. /api/security/kpis/metrics is passed through so the in-cluster Prometheus
+    // ServiceMonitor (servicemonitor-admin-ui.yaml) can scrape it: Prometheus cannot hold a console
     // session, and a 302-to-login would read as a permanently-down target. The series it
     // exposes are aggregate posture gauges (counts and percentages from the weekly CI
     // snapshot), not secrets — the same exposure class as every Quarkus /q/metrics pod
     // scraped cluster-wide. The human-facing JSON sibling /api/security/kpis stays gated.
-    "/((?!api/auth|api/gate|api/security/kpis/metrics|_next/static|_next/image|brand/|favicon.ico|robots.txt).*)",
+    "/((?!_next/static|_next/image).*)",
   ],
 }

@@ -1,4 +1,7 @@
 quarkus:
+  # Experimental adaptive overload control; activate only in the measured pilot profile.
+  load-shedding:
+    enabled: false
   application:
     name: openbank-customer-edge
 
@@ -139,6 +142,10 @@ openbank:
     # Pension lifecycle (ADR-0334 S6): participant side and unit register. Caller edges are
     # declared in the GitOps workload env; provider rollout remains gated by #12350.
     pension-service-url: ${PENSION_SERVICE_URL:https://pension-service.pension.svc:8443}
+    # openbank.edge.pension.provider-entity-id comes ONLY from env OPENBANK_EDGE_PENSION_PROVIDER_ENTITY_ID
+    # (MicroProfile env mapping). It is the provider pension-service is configured with; the edge
+    # supplies it on every application. Deliberately not declared here: an empty `${X:}` expansion
+    # fails boot even for an Optional injection. Unset = onboarding refused (503).
     transaction-service-url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
     domestic-payment-service-url: ${DOMESTIC_PAYMENT_SERVICE_URL:http://domestic-payment.payments.svc:8116}
     sepa-payment-service-url: ${SEPA_PAYMENT_SERVICE_URL:http://sepa-payment.payments.svc:8115}
@@ -280,3 +287,25 @@ authz:
   openbank:
     upstream:
       tls-configuration-name: upstream
+
+
+"%load-shedding-pilot":
+  quarkus:
+    # 3.40.1.1 emits Connection: close on overload, invalid in HTTP/2.
+    # Keep this experimental listener on HTTP/1.1 until upstream fixes that path.
+    http:
+      http2: false
+    config:
+      profile:
+        parent: prod
+    load-shedding:
+      enabled: true
+      initial-limit: 100
+      max-limit: 200
+      priority:
+        enabled: false
+  openbank:
+    rate-limit:
+      # Replace only the inherited fixed global concurrency cap during this experiment.
+      # The independent customer identity quota remains enabled and unchanged.
+      enabled: false

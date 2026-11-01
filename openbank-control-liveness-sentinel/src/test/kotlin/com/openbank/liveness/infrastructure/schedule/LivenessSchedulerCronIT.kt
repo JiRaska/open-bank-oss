@@ -5,12 +5,16 @@
 
 package com.openbank.liveness.infrastructure.schedule
 
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.liveness.PostgresTestResource
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import jakarta.inject.Inject
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -50,6 +54,9 @@ class LivenessSchedulerCronIT {
     @Inject
     lateinit var scheduler: LivenessCheckScheduler
 
+    @Inject
+    lateinit var registry: MeterRegistry
+
     @Test
     fun `the real cron fires the scheduled check`() {
         val before = scheduler.fireCount
@@ -66,6 +73,24 @@ class LivenessSchedulerCronIT {
                 "for: the sentinel then evaluates nothing while its empty findings table reads " +
                 "as 'no stale controls'.",
         )
+    }
+
+    @Test
+    fun `the sentinel publishes its own heartbeat, and a skipped fire does not advance it`() {
+        val before = scheduler.fireCount
+        val deadline = Instant.now().plus(Duration.ofSeconds(TIMEOUT_SECONDS))
+        while (Instant.now().isBefore(deadline) && scheduler.fireCount == before) {
+            Thread.sleep(POLL_MILLIS)
+        }
+        assertTrue(scheduler.fireCount > before, "cron did not fire")
+
+        // LivenessSentinelHeartbeatAbsent needs this exact series; Temporal is disabled in this profile,
+        // so the fire was a skip and must read as 'not yet succeeded', never as a pass.
+        val recorded = registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+            .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "liveness-sentinel-check")
+            .gauge()
+        assertNotNull(recorded, "the sentinel's heartbeat series is not registered")
+        assertEquals(0.0, recorded!!.value())
     }
 
     private companion object {

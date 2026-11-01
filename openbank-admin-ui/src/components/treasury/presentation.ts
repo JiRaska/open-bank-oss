@@ -6,7 +6,7 @@
 // people or named systems, limit figures as money, ledger postings as "what was booked to which
 // account" — the idempotency keys and UUIDs stay available, but never as the primary content.
 
-import type { LedgerJournalEntry } from '@/lib/ledger/ledgerJournalContract'
+import type { LedgerJournalEntry } from '@/lib/ledger/contracts'
 import { formatMoneyCompact } from '@/lib/format/money'
 import { czechPlural, englishPlural } from '@/lib/i18n/plural'
 
