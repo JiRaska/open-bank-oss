@@ -10,6 +10,10 @@ allmods={p.name for p in root.glob('openbank-*') if (p/'build.gradle.kts').is_fi
 sample=['.github/gates/gates.yaml','.github/scripts/check-tofu-image-pull-through.py']+['openbank-infra/aws/envs/sandbox-platform/'+x+'.tf' for x in ['arc-runner-reaper','arc-runners','main','providers']]
 cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),('measured-infra',sample,'empty'),('mixed-account',sample+['openbank-account-service/src/main/kotlin/Sample.kt'],'account'),('gitops-reader',['openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml'],'full'),('adr-reader',['docs/adr/0039-ledger-as-golden-source-balance-as-projection.md'],'full'),('unknown-helper',['.github/scripts/check-tofu-image-pull-through-test-helper.py'],'full')]
 cases += [('canonical-runtime-image', ['.github/workflows/Dockerfile.deploy'], 'full'), ('shared-benchmark-build', ['openbank-libs-benchmarks/build.gradle.kts'], 'full'), ('shared-detekt-source', ['openbank-libs-detekt-rules/src/main/kotlin/Sample.kt'], 'full')]
+# #11560: a shared library's own src/test edit (exact #12298 path) builds only its owner,
+# alone and mixed with a docs page, never the fleet nor a cross-module reader.
+lend='openbank-libs-lending/src/test/kotlin/com/openbank/libs/lending/AmortizationSmallPrincipalTest.kt'
+cases += [('shared-lib-test-only', [lend], 'lending'), ('shared-lib-test-and-docs', [lend, 'docs/ROADMAP.md'], 'lending')]
 results=[]
 with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
  t=Path(tmp);g=t/'git';g.write_text('#!/bin/bash\nif [ "$1" = diff ] && [[ " $* " == *" --name-only "* ]]; then printf "%s\\n" "$OB_TEST_FILES"; elif [ "$1" = fetch ]; then exit 0; elif [ "$1" = merge-base ]; then /usr/bin/git rev-parse HEAD; else /usr/bin/git "$@"; fi\n');g.chmod(0o755)
@@ -23,7 +27,9 @@ with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
    selected=set((Path(env['SELECT_OUT'])/'changed.txt').read_text().split())
    if expected=='empty':assert not selected,(event,name,selected)
    elif expected=='full':assert selected==allmods,(event,name,selected)
+   elif expected=='lending':assert selected=={'openbank-libs-lending'},(event,name,sorted(selected))
    elif expected=='charter':assert {'openbank-agent-service','openbank-mcp-service'} <= selected and selected!=allmods,(event,name,selected)
    else:assert 'openbank-account-service' in selected and 'openbank-libs-runtime' in selected and selected!=allmods,(event,name,selected)
    results.append({'event':event,'case':name,'selected':sorted(selected),'exit':0})
 print('PASS',len(results),'actual push/PR selector scenarios')
+print(f'SUBJECTS={len(results)}')
