@@ -37,11 +37,11 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class SanctionsListTypeFilterIT {
 
-    private fun screen(body: String) = Given {
+    private fun screen(body: String, major: Int = 1) = Given {
         contentType("application/json")
         body(body)
     } When {
-        post("/api/v1/sanctions/screen")
+        post("/api/v$major/sanctions/screen")
     }
 
     private fun payload(listTypes: String?) = buildString {
@@ -80,8 +80,8 @@ class SanctionsListTypeFilterIT {
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `absent list types still means every list`() {
-        screen(payload(null)) Then {
+    fun `absent list types still means every list in v3`() {
+        screen(payload(null), major = 3) Then {
             statusCode(201)
             body("checkedLists", hasSize<String>(SanctionsListTypeCount.ALL))
         }
@@ -89,5 +89,5 @@ class SanctionsListTypeFilterIT {
 }
 
 private object SanctionsListTypeCount {
-    const val ALL = 7
+    const val ALL = 8
 }

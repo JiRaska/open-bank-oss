@@ -120,7 +120,11 @@ RESERVATION_CEILING_S = 4 * 3600
 # strict-lane merges — every strict merge was followed at once by the next strict update-branch.
 TRAIN_TURN_S = 30 * 60
 # Green carrier first (#13400): a VERIFIED green carrier merges before any strict-lane PR is served in
-# the same tick — it is never held for, nor voided by, a strict merge. Measured 2026-10-24 08:00Z to
+# the same tick — it is not voided by a strict merge. ONE exception, bounded to one tick per holder
+# head: a reservation holder that is itself GREEN on an up-to-date head merges first. Trade-off: the
+# holder carries the oldest reservation and a full fleet CI (~1.5 h, restarted from zero if main moves),
+# while the carrier is cheap to rebuild from green heads; deploy/release PRs riding a carrier lose one
+# tick, not an hour (#14191/#14338, #14183/#14327). Original rule, measured 2026-10-24 08:00Z to
 # 2026-10-25 11:50Z: 25 merges and 21 carriers; carrier #13853 went green at 10:29Z, was held for green
 # strict #13806 which merged in that very tick, and was rebuilt as #13857 (~1 h of CI lost); #13790 was
 # voided by #13679 the same way. Ten full-CI carriers ran 51-91 min (median ~61); strict merges arrive
@@ -169,6 +173,7 @@ STRICT_CONFLICT_COMMENT = ("merge-train: conflict — this strict-lane PR confli
                            "up on its own. It stays armed.")
 NOTICE_PATH_CAP = 20
 RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's inconclusive jobs were re-run once
+CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
@@ -452,7 +457,8 @@ def extra_verdict(states: list[str | None]) -> str | None:
 
 
 def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
-    """Only the latest App status on this exact head can admit an owner-approved codex PR.
+    """Only the App's owner decision can admit a codex PR: the latest one on this exact head, or (ADR-0343
+    2026-10-29) the newest on any head approval_chain() links it to through pure main-update merges.
 
     app_statuses() authenticates the producer and SHA. The canonical description additionally
     binds the PR number, so two PRs sharing a head cannot borrow each other's approval.
@@ -461,6 +467,64 @@ def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
         return True
     return (type(number) is int and number > 0
             and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
+
+
+APPROVAL_CHAIN_MAX = 16   # update merges an approval may survive; a longer run of them needs a re-approval
+
+
+def approval_chain(git, base: str, head: str) -> list[str]:
+    """`head`, then each earlier head an owner approval may have been given on and still cover.
+
+    Walks first parents back from `head` while the commit is a pure main-update merge: exactly two
+    parents, the second reachable from `base` (main brought in nothing but main), and its tree equal to
+    the tree `git merge-tree --write-tree` computes from the two parents — conflict-free and with no
+    edit smuggled into the merge. The walk stops at the first commit that is anything else (a push, a
+    hand-resolved conflict, a merge of a non-main branch), so an approval on any listed head covers
+    exactly the delta the owner reviewed. Deterministic and local: commits are immutable, so the chain
+    is a git fact, not a verdict; the decisions on it are always read live (owner_decision)."""
+    chain, c = [head], head
+    while len(chain) < APPROVAL_CHAIN_MAX:
+        parents = git("rev-list", "--parents", "-n", "1", c, check=False).stdout.split()
+        if len(parents) != 3 or not all(SHA_RE.fullmatch(x) for x in parents):
+            break
+        _, first, second = parents
+        if git("merge-base", "--is-ancestor", second, base, check=False).returncode != 0:
+            break
+        merged = git("merge-tree", "--write-tree", first, second, check=False)
+        if merged.returncode != 0:   # 1 = conflicted, anything else = could not compute: fail closed
+            break
+        tree = merged.stdout.split("\n", 1)[0].strip()
+        own = git("rev-parse", "--verify", "--quiet", f"{c}^{{tree}}", check=False).stdout.strip()
+        if not SHA_RE.fullmatch(tree) or tree != own:
+            break
+        chain.append(first)
+        c = first
+    return chain
+
+
+def remember_approval_chain(gh, git, base: str, head: str) -> list[str]:
+    chain = approval_chain(git, base, head)
+    gh.__dict__.setdefault("approval_chains", {})[head] = chain
+    return chain
+
+
+def owner_decision(gh, chain: list[str]) -> tuple[str, str] | None:
+    """The NEWEST App owner decision on any head of the chain, read live: a revoke posted on an earlier
+    head after an approval on a later one still revokes. None = no decision anywhere."""
+    best = None
+    for sha in chain:
+        rec = gh.app_status_latest(sha, OWNER_APPROVAL_CONTEXT)
+        if rec is not None and (best is None or rec[0] > best[0]):
+            best = rec
+    return (best[1], best[2]) if best else None
+
+
+def with_owner_decision(gh, app: dict, chain: list[str]) -> dict:
+    out = {k: v for k, v in app.items() if k != OWNER_APPROVAL_CONTEXT}
+    decision = owner_decision(gh, chain)
+    if decision is not None:
+        out[OWNER_APPROVAL_CONTEXT] = decision
+    return out
 
 
 def live_source_intent(gh, number: int, head: str) -> bool:
@@ -489,7 +553,12 @@ def live_source_intent(gh, number: int, head: str) -> bool:
         ref = source.get("ref")
         if not isinstance(ref, str) or not ref or TRAIN_BRANCH_RE.fullmatch(ref):
             return False
-        app = gh.app_statuses(head) if any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES) else None
+        app = None
+        if any(ref.startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+            # The chain was derived from git by live_candidates in this process; without it only the
+            # exact head counts (fail closed). Every decision on it is re-read live here.
+            chain = (gh.__dict__.get("approval_chains") or {}).get(head) or [head]
+            app = with_owner_decision(gh, {}, chain) if len(chain) > 1 and chain[0] == head else gh.app_statuses(head)
         return owner_approval_valid(number, ref, app)
 
 
@@ -512,7 +581,7 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         return False, "head is a fork"
     ref = pr.get("head_ref") or ""
     if not owner_approval_valid(pr.get("number"), ref, app):
-        return False, "codex PR needs owner approval on this exact head"
+        return False, "codex PR needs owner approval on this head or one it updated from main"
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
@@ -1348,6 +1417,19 @@ def owner_approval_error(repo: str, number: int, head: str, decision: str,
     return None
 
 
+def owner_status_line(statuses: list) -> str | None:
+    """Newest owner-approval status created by the App itself (login AND id); anyone else's is ignored.
+    The description is attacker-influenceable text on a shared summary, so strip all but plain
+    printable ASCII (no markdown/HTML metacharacters) and truncate."""
+    mine = [st for st in statuses if st.get("context") == OWNER_APPROVAL_CONTEXT
+            and (st.get("creator") or {}).get("login") == BOT_LOGIN and (st.get("creator") or {}).get("id") == BOT_ID]
+    if not mine:
+        return None
+    st = max(mine, key=lambda x: x["id"])
+    desc = re.sub(r"[^A-Za-z0-9 #:._-]", "", str(st.get("description") or ""))[:80]
+    return f"state={re.sub(r'[^a-z_]', '', str(st.get('state')))[:20]} description={desc}"
+
+
 def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     metadata = get(f"/repos/{gh.repo}")
     pr = gh.pr(number)
@@ -1462,6 +1544,16 @@ class GitHub:
                 out.setdefault(st["context"], (st["state"], st.get("description") or ""))
         return out
 
+    def app_status_latest(self, sha: str, context: str) -> tuple[int, str, str] | None:
+        """(id, state, description) of the App's latest `context` status on `sha`; ids order globally."""
+        rows = [st for st in paginate(f"/repos/{self.repo}/commits/{sha}/statuses")
+                if (st.get("creator") or {}).get("login") == BOT_LOGIN and st.get("context") == context
+                and type(st.get("id")) is int]
+        if not rows:
+            return None
+        st = max(rows, key=lambda r: r["id"])
+        return st["id"], st["state"], st.get("description") or ""
+
     def unverified(self, sha: str, guard: bool) -> str | None:
         """Why a write acting on `sha`'s verdict must NOT happen, re-read live (deciding): the ruleset —
         and, when `guard`, the merge guard on it — and every required context but `merge-train` itself
@@ -1516,12 +1608,14 @@ class GitHub:
         return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
 
     def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
-        """Re-run the cancelled (or inconclusively failed, #13400) jobs of the workflow runs behind
-        `contexts` on `sha` (once per carrier; the caller records it). True only when every run accepted."""
+        """Retry once per run, including CI's attempt-bound evidence ancestor. The caller keeps the
+        carrier's one-retry budget; a refused/uncertain write never triggers another scope of retry."""
         latest: dict[str, dict] = {}
         for check in paginate(f"/repos/{self.repo}/commits/{sha}/check-runs", "check_runs"):
             if check["name"] in contexts and (check["name"] not in latest or check["id"] > latest[check["name"]]["id"]):
                 latest[check["name"]] = check
+        if set(latest) != set(contexts):
+            return False
         runs = set()
         for check in latest.values():
             m = re.search(r"/actions/runs/([0-9]+)/job", check.get("details_url") or check.get("html_url") or "")
@@ -1530,7 +1624,50 @@ class GitHub:
             runs.add(int(m.group(1)))
         if not runs:
             return False
-        return all(api("POST", f"/repos/{self.repo}/actions/runs/{r}/rerun-failed-jobs", {})[0] == 201 for r in sorted(runs))
+        plans = []
+        for run in sorted(runs):
+            path = f"/repos/{self.repo}/actions/runs/{run}"
+            code, info = api("GET", path)
+            if (code != 200 or not isinstance(info, dict) or info.get("head_sha") != sha
+                    or info.get("status") != "completed" or type(info.get("run_attempt")) is not int
+                    or info["run_attempt"] < 1 or not isinstance(info.get("path"), str)):
+                return False
+            workflow = info["path"].split("@", 1)[0]
+            if not re.fullmatch(r"\.github/workflows/[^/]+\.ya?ml", workflow):
+                return False
+            retry = path + "/rerun-failed-jobs"
+            if workflow == ".github/workflows/ci.yml":
+                attempt = info["run_attempt"]
+                jobs = paginate(path + "/jobs?filter=latest", "jobs")
+                # Latest results can include a successful ancestor retained from an OLD attempt.
+                # Such a job cannot be retried by id, and its snapshot cannot authorize a new one.
+                conclusions = {"success", "skipped", "neutral", "failure", "cancelled", "timed_out",
+                               "action_required", "stale", "startup_failure"}
+                if not jobs or any(not isinstance(j, dict) or type(j.get("id")) is not int or j["id"] < 1
+                                   or j.get("run_id") != run or not isinstance(j.get("name"), str)
+                                   or j.get("status") != "completed" or j.get("conclusion") not in conclusions
+                                   or type(j.get("run_attempt")) is not int or not 1 <= j["run_attempt"] <= attempt
+                                   for j in jobs):
+                    return False
+                receiver_name = "Receive trusted ruleset evidence"
+                receivers = [j for j in jobs if j["name"] == receiver_name]
+                if len(receivers) > 1:
+                    return False
+                failed = [j for j in jobs if j["conclusion"] not in {"success", "skipped", "neutral"}]
+                descendants_only = all(j["name"] in {receiver_name, GATE_AGGREGATE_JOB}
+                                       or GATE_SHARD_JOB_RE.fullmatch(j["name"]) for j in failed)
+                if receivers and receivers[0]["run_attempt"] == attempt and descendants_only:
+                    # GitHub reruns this job AND its dependents in one attempt. Never retry a gate
+                    # first and then the receiver: that creates yet another attempt boundary.
+                    retry = f"/repos/{self.repo}/actions/jobs/{receivers[0]['id']}/rerun"
+                else:
+                    # Full CI is necessary when the receiver is inherited or another failed job
+                    # is outside its dependency closure. The separate Services CI is untouched.
+                    retry = path + "/rerun"
+            plans.append(retry)
+        # Finish every read before the first mutation. api() never retries an uncertain POST;
+        # no failed-only/full-run fallback is permitted after a refused receiver request either.
+        return all(api("POST", path, {})[0] == 201 for path in plans)
 
     def failures_inconclusive(self, sha: str, failing: list[str]) -> tuple[bool, str]:
         """Whether the carrier's failing contexts failed ONLY for inconclusive gate kinds (budget overrun,
@@ -1656,8 +1793,33 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             # Every open PR gets a decision line: a disarmed or draft PR used to be filtered out in
             # silence, so a settle log with no line for a PR could not say whether it was ever seen.
             log(f"#{p['number']:>6} skip      {'draft' if p.get('draft') else 'auto-merge not armed'}")
-    if armed:
-        git("fetch", "-q", "origin", *[f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}" for p in armed])
+    def spec(p: dict) -> str:
+        return f"+{gh.head_refspec(p['number'])}:refs/merge-train/pr-{p['number']}"
+    batch = git("fetch", "-q", "origin", *[spec(p) for p in armed], check=False) if armed else None
+    if batch is not None and batch.returncode != 0:
+        # One unfetchable head (GitHub sometimes never creates refs/pull/<n>/head) fails the whole
+        # batch. Ask the remote which refs exist — ls-remote runs no PR code. Fail-closed on every
+        # other outcome: rc 2 is the only "no such ref" answer; any other rc (network, auth) raises,
+        # and a batch failure with no ref found absent re-raises the fetch error, so an outage can
+        # never read as an empty candidate list.
+        fetchable, absent = [], 0
+        for p in armed:
+            ref = gh.head_refspec(p["number"])
+            probe = git("ls-remote", "--exit-code", "origin", ref, check=False)
+            if probe.returncode == 0:
+                fetchable.append(p)
+            elif probe.returncode == 2:
+                absent += 1
+                log(f"#{p['number']:>6} skip      head ref {ref} not fetchable — waits for a push")
+            else:
+                raise subprocess.CalledProcessError(probe.returncode, ["git", "ls-remote", "origin", ref],
+                                                    probe.stdout, probe.stderr)
+        if not absent:
+            raise subprocess.CalledProcessError(batch.returncode, ["git", "fetch", "origin", "<armed heads>"],
+                                                batch.stdout, batch.stderr)
+        armed = fetchable
+        if armed:
+            git("fetch", "-q", "origin", *[spec(p) for p in armed])
     out: list[Member] = []
     apps: dict[int, dict] = {}
     for p in armed:
@@ -1680,6 +1842,10 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
         view = pr_view(repo, p, files)
         view["special_paths"] = [x for c in entries if c.new_mode in SPECIAL_MODES for x in c.paths]
         app = gh.app_statuses(fetched)
+        if any(p["head"]["ref"].startswith(pre) for pre in EXCLUDED_BRANCH_PREFIXES):
+            chain = remember_approval_chain(gh, git, base, fetched)
+            if len(chain) > 1:   # an exact-head decision is already in `app`: no extra read
+                app = with_owner_decision(gh, app, chain)
         view["app"] = app                    # strict_lane reads the notice from it, no second read
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
@@ -1953,6 +2119,30 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
     return "published"
 
 
+def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: dict) -> bool:
+    """Fresh current-tip health before exceptional fix priority; never reuse planning reads.
+    Pending/missing results retain existing ancestor-red semantics. An observed healthy context
+    invalidates this plan, not the PR: the next tick reconstructs reservation and candidate order.
+    """
+    if not main_red:
+        return False
+    try:
+        with deciding():
+            current = gh.checks(base)
+        recovered = sorted(ctx for ctx in main_red if current.get(ctx) == "success")
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        reason = "current main health could not be read"
+    else:
+        if not recovered:
+            return False
+        reason = "current main recovered: " + ", ".join(recovered)
+    summary["in_flight"] = True  # suppress build as well as every later mutation this tick
+    summary["main_health_deferred"] = reason
+    log(f"::notice::{reason}; stale main-red priority discarded — next tick")
+    return True
+
+
+
 def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     """Judge every finished App carrier, then post the fast lane from live data."""
     summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
@@ -1970,6 +2160,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # Read the strict lane BEFORE settling any carrier: a reservation holds train merges as well as the
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
     base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+    if defer_recovered_main_red(gh, base, main_red, summary):
+        return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
                                            fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
                                            activity=gh.ci_activity)
@@ -2070,13 +2262,30 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
         if not problem and chain[0] != live_main:
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
+            hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
+            if (hstate == "green" and not shadow
+                    and git("merge-base", "--is-ancestor", live_main, hview["head_sha"], check=False).returncode == 0
+                    and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"):
+                # Green holder first, ONE tick per holder head: the holder is green on a head that contains
+                # live main (re-checked against live main, since an earlier carrier of this tick may have
+                # moved it), so it merges in THIS tick's strict_lane. A carrier merging first would push it
+                # behind main and restart ~1.5 h of full CI (#14191 after deploy #14338; #14183 after
+                # release #14327). The carrier is left open and NOT in flight; the yield is recorded on the
+                # holder head so the wait is bounded: if the holder is still green and unmerged next tick
+                # (merge refused, source intent changed, a train in flight, main-red deferral) the carrier
+                # takes the green-carrier-first path below instead of stalling behind it.
+                gh.post_status(hview["head_sha"], "success", f"green carrier #{carrier} waited one tick for this head",
+                               context=CARRIER_YIELD_CONTEXT)
+                log(f"carrier #{carrier}: green, but strict-lane #{holder} is green and up to date — it merges "
+                    f"first, the carrier waits one tick")
+                continue
             # Green carrier first (#13400): VERIFIED green on its exact head over live main, extra gates
-            # satisfied, so it merges now, before strict_lane runs below — never held for the holder and
-            # voided by its merge (#13853 / #13806). The holder waits one tick and is update-branched,
+            # satisfied, so it merges now, before strict_lane runs below — never held for a RUNNING holder,
+            # nor for a green one that already had its one tick (CARRIER_YIELD_CONTEXT)
+            # and voided by its merge (#13853 / #13806). The holder waits one tick and is update-branched,
             # inheriting its deferral record through the first parent, so no further carrier is built
             # under it. Before merging, withdraw any `merge-train` success the App left on the holder's
             # head (a refused merge earlier): auto-merge must not act on it while main moves under it.
-            hview = next((v for _st, v in strict if v["number"] == holder), None)
             if hview is not None and not shadow:
                 hstate = gh.app_statuses(hview["head_sha"]).get(STATUS_CONTEXT, ("", ""))[0]
                 if hstate == "success":
@@ -2142,6 +2351,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     # below must already see it.
     strict_lane(gh, git, base, strict, carrier_in_flight, shadow, summary, main_red, main_cache, holder, timed_out,
                 yield_why)
+    if summary.get("main_health_deferred"):
+        return summary
     if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any(is_carrier(p, repo) for p in gh.open_prs())
             and deferral_state(gh, git, strict, holder) == "open"):
@@ -2344,8 +2555,9 @@ def deferral_state(gh, git, strict: list, holder: int) -> str | None:
     """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
     RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
     published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
-    held. A VERIFIED green carrier is never held at all (green carrier first, #13400): it merges before
-    strict_lane runs, even past a green head. The carrier's merge puts the head behind main and its
+    held. A VERIFIED green carrier is held only for a GREEN, up-to-date holder, and only one tick per
+    holder head (CARRIER_YIELD_CONTEXT): that holder merges first. Past a running holder, or a green
+    one that already had its tick, it merges before strict_lane runs (green carrier first, #13400). Its merge puts the head behind main and its
     update-branch inherits the record through the first parent: after that one yield no further
     carrier is built under it, so the strict PR has priority until it merges or fails."""
     view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -2574,6 +2786,7 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         fixes = strict_fixes(gh, git, base, strict, main_red, cache)
         strict = sorted(strict, key=lambda sv: 0 if sv[1]["number"] in fixes else 1)  # stable: oldest first within
     updated = holder is not None  # main reserved (strict_reservation): no other strict-lane action while it runs
+    main_health_checked = False  # one final inventory read, shared by this strict-lane invocation
     for state, view in strict:
         n, head = view["number"], view["head_sha"]
         if holder is not None and n != holder:
@@ -2585,6 +2798,10 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
         if current and state == "pending" and n in (timed_out or []):
             continue
         fix = fixes.get(n)
+        if fix and state == "green" and not main_health_checked:
+            main_health_checked = True
+            if defer_recovered_main_red(gh, base, main_red, summary):
+                return
         if current and state == "pending":
             log(f"#{n:>6} strict    up to date, CI running: main reserved for it")
             summary["in_flight"] = True
@@ -2734,12 +2951,17 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
             "show HEAD:.github/scripts/merge-train.py", "python3 -I -S", '" owner-approval',
             '--pr "$OWNER_PR" --head "$OWNER_HEAD" --decision "$OWNER_DECISION"']
     errors = [f"owner approval writer missing {needle}" for needle in must if needle not in sec]
-    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}" not in code or "cancel-in-progress: false" not in code:
+    if "group: merge-train-owner-approval-${{ github.event_name }}-${{ github.ref }}-${{ github.actor }}-${{ inputs.pr }}" not in code or "cancel-in-progress: false" not in code:
         errors.append("owner decisions must serialize separately from untrusted PR verification")
     if sec.count("actions/checkout@") != 1 or sec.count("ref: main") != 1:
         errors.append("owner approval writer must check out main exactly once")
-    if sec.count("run:") != 1:
-        errors.append("owner approval writer must have only its isolated decision command")
+    for needle in (r"^[1-9][0-9]*$", r"^[0-9a-f]{40}$"):
+        if needle not in sec:
+            errors.append(f"owner approval writer must validate inputs with {needle}")
+    if sec.index("Validate decision inputs") > sec.index("actions/checkout@"):
+        errors.append("owner approval input validation must run before anything else")
+    if sec.count("run:") != 4:
+        errors.append("owner approval writer must have only validation, revoke-first, decision and summary commands")
     for forbidden in ("github.head_ref", "github.event.", "download-artifact", "gh pr merge", "gh pr review",
                       "contents: write", "statuses: write", "pull_request_target:"):
         if forbidden in code:
@@ -2858,6 +3080,7 @@ class FakeGitHub:
         self.carriers: dict[int, dict] = {}
         self._ci: dict[str, dict] = {}
         self.foreign_after_merge: str | None = None
+        self.refuse_merge: set[int] = set()
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
@@ -2937,13 +3160,25 @@ class FakeGitHub:
                 out.setdefault(ctx, (state, desc))
         return out
 
+    def app_status_latest(self, sha, context):
+        seqs = self.__dict__.get("_seq", {}).get(sha, [])
+        rows = self.statuses.get(sha, [])
+        for i in range(len(rows) - 1, -1, -1):
+            ctx, state, desc, creator = rows[i]
+            if ctx == context and creator == BOT_LOGIN:
+                return (seqs[i] if i < len(seqs) else 0), state, desc
+        return None
+
     def post_status(self, sha, state, description, context=STATUS_CONTEXT, creator=BOT_LOGIN, *, source_number=None):
         self.statuses.setdefault(sha, []).append((context, state, description, creator))
+        seq = self.__dict__.setdefault("_seq", {})
+        self.__dict__["_n"] = self.__dict__.get("_n", 0) + 1
+        seq[sha] = seq.get(sha, [])[:len(self.statuses[sha]) - 1] + [self._n]
 
     def comment(self, n, text): self.comments.append((n, text))
 
     def merge(self, n, head):
-        if self.prs[n]["head"]["sha"] != head:
+        if self.prs[n]["head"]["sha"] != head or n in self.refuse_merge:
             return None
         self.g("checkout", "-q", "-f", "main")
         if self.g("merge", "--squash", head, check=False).returncode != 0:
@@ -3191,6 +3426,132 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
+def retry_planner_self_test(check) -> None:
+    """Exercise the real GitHub adapter and HTTP transport scope, without live API access."""
+    import copy
+
+    sha, prefix = "a" * 40, "/repos/x/y/actions"
+    checks = [{"name": "gates (data)", "id": 901,
+               "details_url": "https://github.com/x/y/actions/runs/123/job/501"},
+              {"name": "Validate manifests", "id": 902,
+               "details_url": "https://github.com/x/y/actions/runs/123/job/502"}]
+    run = {"id": 123, "path": ".github/workflows/ci.yml", "head_sha": sha,
+           "run_attempt": 2, "status": "completed", "conclusion": "failure"}
+    def job(job_id, name, conclusion="success", attempt=2):
+        return {"id": job_id, "name": name, "status": "completed", "conclusion": conclusion,
+                "run_id": 123, "run_attempt": attempt}
+    jobs = [job(500, "Receive trusted ruleset evidence"), job(501, "gates (data)", "failure"),
+            job(502, "Validate manifests", "failure"), job(503, "UI build", attempt=1)]
+    saved = (_http_open, _api_sleep, os.environ.get("GH_TOKEN"), _api_slept[0], dict(_GET_MEMO))
+    receiver_post, full_post, failed_post = (f"{prefix}/jobs/500/rerun", f"{prefix}/runs/123/rerun",
+                                            f"{prefix}/runs/123/rerun-failed-jobs")
+
+    def exercise(label, *, metadata=None, listing=None, check_runs=None, want=None,
+                 read_error=None, post_error=None, extra_run=False):
+        metadata = copy.deepcopy(run if metadata is None else metadata)
+        listing = copy.deepcopy(jobs if listing is None else listing)
+        check_runs = copy.deepcopy(checks if check_runs is None else check_runs)
+        if extra_run:
+            check_runs.append({"name": "other", "id": 903,
+                               "details_url": "https://github.com/x/y/actions/runs/124/job/600"})
+        calls = []
+        def http(req, timeout):
+            parsed = urllib.parse.urlsplit(req.full_url)
+            path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+            calls.append((req.method, path, query))
+            if req.method == "POST":
+                if post_error:
+                    raise urllib.error.HTTPError(req.full_url, post_error, "fixture write refused", {}, io.BytesIO(b"fixture"))
+                return 201, b"{}", {}
+            if req.method != "GET":
+                raise AssertionError(f"unexpected method {req.method}")
+            if read_error and read_error in path:
+                raise urllib.error.HTTPError(req.full_url, 403, "fixture read refused", {}, io.BytesIO(b"fixture"))
+            if path == f"/repos/x/y/commits/{sha}/check-runs":
+                data = {"check_runs": check_runs}
+            elif path == f"{prefix}/runs/123":
+                data = metadata
+            elif path == f"{prefix}/runs/124":
+                data = {}  # An unreadable second plan must not cause the first write.
+            elif path == f"{prefix}/runs/123/jobs":
+                if query.get("filter") != ["latest"]:
+                    raise AssertionError("job listing must request latest results")
+                offset = (int(query.get("page", ["1"])[0]) - 1) * 100
+                data = {"jobs": listing[offset:offset + 100]}
+            else:
+                raise AssertionError(f"unexpected read {path}")
+            return 200, json.dumps(data).encode(), {}
+        globals()["_http_open"] = http
+        globals()["_api_sleep"] = lambda seconds: (_ for _ in ()).throw(AssertionError("no retries expected"))
+        _GET_MEMO.clear()
+        _api_slept[0] = 0
+        os.environ["GH_TOKEN"] = "offline-fixture"
+        result, error = None, None
+        try:
+            result = GitHub("x/y", "main", "offline://fixture").rerun_inconclusive(
+                sha, [item["name"] for item in checks] + (["other"] if extra_run else []))
+        except (ApiAbort, SystemExit) as exc:
+            error = type(exc).__name__
+        posts = [path for method, path, _ in calls if method == "POST"]
+        if want is None:
+            ok = not posts and result is not True
+        elif post_error:
+            ok = posts == [want] and result is not True
+        else:
+            ok = posts == [want] and result is True and error is None
+        check(f"retry planner: {label}", ok, f"result={result} error={error} posts={posts} calls={calls}")
+        return calls
+
+    try:
+        exercise("current receiver refreshes its descendants once", want=receiver_post)
+        inherited = copy.deepcopy(jobs)
+        inherited[0]["run_attempt"] = 1
+        exercise("old successful receiver requires one full CI run", listing=inherited, want=full_post)
+        exercise("absent current receiver requires one full CI run", listing=jobs[1:], want=full_post)
+        outside = copy.deepcopy(jobs)
+        outside[-1].update(conclusion="cancelled", run_attempt=2)
+        exercise("cancelled job outside receiver descendants requires full CI", listing=outside, want=full_post)
+        exercise("unrelated workflow keeps failed-only", metadata={**run, "path": ".github/workflows/security.yml"},
+                 want=failed_post)
+        exercise("workflow ref suffix still identifies actual CI", metadata={**run, "path": run["path"] + "@refs/pull/1/merge"},
+                 want=receiver_post)
+        for label, metadata in [("missing metadata", {}), ("wrong source", {**run, "head_sha": "b" * 40}),
+                                ("nonterminal run", {**run, "status": "in_progress"}),
+                                ("invalid attempt", {**run, "run_attempt": 0}),
+                                ("boolean attempt", {**run, "run_attempt": True}),
+                                ("unknown workflow", {**run, "path": ""})]:
+            exercise(label, metadata=metadata)
+        exercise("missing requested check", check_runs=checks[:1])
+        exercise("run read denied", read_error="/runs/123")
+        exercise("job read denied", read_error="/jobs")
+        exercise("empty job evidence", listing=[])
+        exercise("ambiguous receiver", listing=jobs + [job(600, "Receive trusted ruleset evidence")])
+        future = copy.deepcopy(jobs)
+        future[0]["run_attempt"] = 3
+        exercise("attempt advanced during read", listing=future)
+        exercise("unreadable later run causes no earlier write", extra_run=True)
+        for code in (403, 500):
+            exercise(f"receiver POST {code} never falls back to another write", want=receiver_post, post_error=code)
+        paged = [job(1000 + n, f"green-{n}") for n in range(100)] + jobs
+        calls = exercise("receiver on second page is found", listing=paged, want=receiver_post)
+        check("retry planner: jobs fully paginated", any(path.endswith("/jobs") and query.get("page") == ["2"]
+                                                       for _, path, query in calls), str(calls))
+        workflow = pathlib.Path(".github/workflows/ci.yml").read_text()
+        check("retry planner: current CI declares the selected receiver and direct gate dependency",
+              "name: Receive trusted ruleset evidence" in workflow
+              and "needs: [agent-admission, ruleset-evidence]" in workflow
+              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]" in workflow)
+    finally:
+        globals()["_http_open"], globals()["_api_sleep"] = saved[:2]
+        if saved[2] is None:
+            os.environ.pop("GH_TOKEN", None)
+        else:
+            os.environ["GH_TOKEN"] = saved[2]
+        _api_slept[0] = saved[3]
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[4])
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -3200,6 +3561,15 @@ def self_test() -> int:
         ran.append(label)
         if not cond:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
+
+    retry_planner_self_test(check)
+
+    freshness = subprocess.run(
+        [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
+        text=True, capture_output=True, timeout=15,
+    )
+    check("main-red freshness: actual settle/strict controller regressions", freshness.returncode == 0,
+          freshness.stdout + freshness.stderr)
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
@@ -3741,6 +4111,66 @@ def self_test() -> int:
                   and gh.app_statuses(h).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:"), str(gh.merged))
             reset()
 
+            # An approval survives an update that brought in only main (#13613): the train's update-branch
+            # merge must not void it, and nothing else may ride on it. Negative cases first.
+            def owner_updated(case):
+                """Approve #70 on H, move main, then give the PR head H' per `case`."""
+                gh.add_pr(70, "codex/owner-feature", "2026-01-01")
+                h0 = gh.prs[70]["head"]["sha"]
+                gh.post_status(h0, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+                wt = tempfile.mkdtemp(dir=root)
+                gh.g("worktree", "add", "-q", "--detach", wt, "main")
+
+                def wg(*a):
+                    return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=wt, env=base_env())
+
+                def put(rel, text):
+                    pathlib.Path(wt, rel).parent.mkdir(parents=True, exist_ok=True)
+                    pathlib.Path(wt, rel).write_text(text)
+                    wg("add", rel)
+                put("docs/one.md" if case == "conflict" else "docs/main-moved.md", "main\n")
+                wg("commit", "-q", "-m", "main moves")
+                moved = wg("rev-parse", "HEAD").stdout.strip()
+                gh.g("update-ref", "refs/heads/main", moved)
+                if case == "force-push":   # same change re-made on top of main: H is no longer an ancestor
+                    put("docs/one.md", "1\n")
+                    wg("commit", "-q", "-m", "p1 again")
+                else:
+                    wg("checkout", "-q", "--detach", h0)
+                    merged = sh(["git", "-c", "core.hooksPath=/dev/null", "merge", "-q", "--no-edit", moved],
+                                cwd=wt, env=base_env(), check=False)
+                    if case == "conflict":   # hand-resolved: the tree is not what git computes
+                        check("owner chain fixture: the conflict is real", merged.returncode != 0)
+                        put("docs/one.md", "1\nmain\n")
+                        wg("commit", "-q", "--no-edit")
+                    if case == "smuggle":    # a clean merge amended with an edit the owner never saw
+                        put("docs/smuggled.md", "x\n")
+                        wg("commit", "-q", "--amend", "--no-edit")
+                    if case == "extra":      # an ordinary commit after the update merge
+                        put("docs/extra.md", "x\n")
+                        wg("commit", "-q", "-m", "extra")
+                h1 = wg("rev-parse", "HEAD").stdout.strip()
+                gh.g("worktree", "remove", "--force", wt)
+                gh.g("branch", "-f", "codex/owner-feature", h1)
+                gh.prs[70]["head"]["sha"] = h1
+                if case == "revoke":   # revoked on H after the train moved the PR to H'
+                    gh.post_status(h0, "failure", "owner-revoked PR #70", OWNER_APPROVAL_CONTEXT)
+                return h0, h1
+
+            for case in ("extra", "smuggle", "conflict", "force-push", "revoke"):
+                owner_updated(case)
+                drain()
+                check(f"owner chain: approval on H does not cover a {case} head", gh.merged == [], f"{case}: {gh.merged}")
+                reset()
+                gh.g("branch", "-f", "codex/owner-feature", "p1")
+            h0, h1 = owner_updated("clean")
+            check("owner chain: the clean update is a main-only merge of H",
+                  remember_approval_chain(gh, Git(clone("chain")), gh.main_sha(), h1)[:2] == [h1, h0])
+            drain()
+            check("owner chain: approval on H survives a clean update merge with main", gh.merged == [70], str(gh.merged))
+            reset()
+            gh.g("branch", "-f", "codex/owner-feature", "p1")
+
             # 4-PR batch, #3 bad: bisect across ticks isolates #3; 1, 2, 4 merge.
             open_only("p1", "p2", "p3", "p4")
             drain()
@@ -4186,6 +4616,68 @@ def self_test() -> int:
             check("gate code + symlink: forced past qualifies, publish rejects it as the member's fault (bisect)",
                   rej is not None and rej.member_fault and "symlink" in str(rej), str(rej))
             reset()
+
+            # A PR whose head ref GitHub never created (refs/pull/<n>/head absent although the branch
+            # exists) made the ONE batched fetch exit 128 and crashed every settle tick, so nothing
+            # merged. It must be skipped — never a candidate, never green — and the rest still ride.
+            open_only("p1", "p2")
+            real_refspec = gh.head_refspec
+            gh.head_refspec = lambda n: "refs/pull/2/head" if n == 2 else real_refspec(n)
+            try:
+                crash = ""
+                try:
+                    cands, _apps = live_candidates(gh, Git(clone("settle")), "o/r", gh.required(), base0, Untrainable(SYN_INVENTORY))
+                except subprocess.CalledProcessError as exc:
+                    cands, crash = [], f"crashed: {exc}"
+            finally:
+                gh.head_refspec = real_refspec
+            check("unfetchable head ref: that PR is skipped, the tick survives, the others stay candidates",
+                  not crash and [m.number for m in cands] == [1], crash or str([m.number for m in cands]))
+            reset()
+
+            # Fail-closed negatives for that fallback: a transient ls-remote failure (rc 128, not
+            # rc 2 "no such ref") and a batch failure with every ref present must RAISE — an outage
+            # must never read as "nothing to merge" with exit 0.
+            def injected(real, fail):
+                def g(*a, check=True, **kw):
+                    r = fail(a)
+                    if r is None:
+                        return real(*a, check=check, **kw)
+                    if check and r.returncode != 0:
+                        raise subprocess.CalledProcessError(r.returncode, list(a), r.stdout, r.stderr)
+                    return r
+                return g
+
+            def boom(rc):
+                return subprocess.CompletedProcess([], rc, "", "fatal: unable to access remote")
+
+            def nth_fetch_fails(which, ls=None):
+                seen = []
+                def f(a):
+                    if a[0] == "fetch":
+                        seen.append(1)
+                        return boom(128) if len(seen) in which else None
+                    if a[0] == "ls-remote" and ls and a[-1] in ls:
+                        return boom(ls[a[-1]])
+                    return None
+                return f
+
+            for label, fail in [
+                ("ls-remote rc 128 (transient) raises, never drops the PR",
+                 nth_fetch_fails({1}, {"refs/heads/p2": 128})),
+                ("batch fetch failed with every ref present re-raises the fetch error",
+                 nth_fetch_fails({1})),
+                ("a ref present (rc 0) but the strict refetch failing raises",
+                 nth_fetch_fails({1, 2}, {"refs/heads/p2": 2}))]:
+                open_only("p1", "p2")
+                raised = False
+                try:
+                    cands, _apps = live_candidates(gh, injected(Git(clone("settle")), fail), "o/r", gh.required(), base0,
+                                                   Untrainable(SYN_INVENTORY))
+                except subprocess.CalledProcessError:
+                    raised, cands = True, []
+                check(f"unfetchable head ref: {label}", raised, str([m.number for m in cands]))
+                reset()
 
             # Review: during regeneration the generators see MAIN's copy of gate code (as of
             # generators), and the member's copy is back in the tree before anything is committed.
@@ -4710,24 +5202,52 @@ def self_test() -> int:
             gh.head_checks.clear()
             reset()
 
-            # (3) GREEN CARRIER FIRST (#13400), rebuilt from #13853/#13806 on 2026-10-25: the strict
-            # head and the carrier built under its CI are BOTH green in one tick. The carrier merges
-            # first; no `merge-train` success is ever posted on the strict head in that tick (GitHub
-            # auto-merge would act on it); the strict PR is update-branched on the next tick and
-            # merges after its CI — no second carrier, since its update inherits the deferral record.
+            # (3) GREEN HOLDER FIRST (#14191/#14338, #14183/#14327): the strict head and the carrier
+            # built under its CI are BOTH green in one tick. The holder is up to date, so it merges
+            # first; the carrier merging first would push it behind main and restart its full CI.
+            # The carrier merges nothing this tick (it is rebuilt over the new main later). This is
+            # the must-FAIL case: on code where the green carrier goes first, gh.merged == [1].
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            s = settle_now()
+            def yielded(sha):
+                return gh.app_statuses(sha).get(CARRIER_YIELD_CONTEXT, ("", ""))[0]
+            check("green holder first: green strict holder + green carrier -> the holder merges, the carrier does not",
+                  gh.merged == [35] and 1 not in gh.merged and gh.updates == [],
+                  f"{s} merged={gh.merged} updates={gh.updates}")
+            check("green holder first: the holder was merged on its own, un-updated head",
+                  gh.prs[35]["head"]["sha"] == pw_head, "head moved")
+            check("green holder first: the carrier is left open and NOT in flight; the yield is recorded on the holder head",
+                  not s["in_flight"] and any(c["state"] == "open" for c in gh.carriers.values()) and yielded(pw_head) == "success",
+                  f"{s} yielded={yielded(pw_head)!r}")
+            gh.updates.clear()
+            reset()
+
+            # (3a) BOUNDED WAIT, and the old green-carrier-first case restored: the holder is green but
+            # its merge is REFUSED on tick 1 (a stale `merge-train` success is left on it). The carrier
+            # waited ONE tick; on tick 2 the holder is still green and unmerged, so the carrier merges
+            # first and the stale success on the holder is withdrawn (no stall behind a stuck holder).
             gh.updates.clear()
             running_reservation_and_green_candidate()
             tick()
             pw_head = gh.prs[35]["head"]["sha"]
             gh.post_status(pw_head, "success", "strict lane: left by a refused merge")   # a stale success
-            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            gh.head_checks.clear()
+            gh.refuse_merge = {35}
+            s1 = settle_now()
+            check("bounded wait: tick 1 - green holder's merge refused, the carrier waited (nothing merged)",
+                  gh.merged == [] and yielded(pw_head) == "success" and not s1["in_flight"], f"{s1} merged={gh.merged}")
             s = settle_now()
-            check("green carrier first: green carrier + green strict holder -> the carrier merges, the strict PR waits",
+            check("green carrier first: holder still green and unmerged on tick 2 -> the carrier merges (wait is one tick)",
                   gh.merged == [1] and 35 not in gh.merged and not s["rejected"], f"{s} merged={gh.merged}")
             check("green carrier first: no merge-train success stands on the strict head while the carrier merges",
                   gh.app_statuses(pw_head).get(STATUS_CONTEXT, ("", ""))[0] != "success",
                   f"{gh.app_statuses(pw_head).get(STATUS_CONTEXT)}")
-            b_head = gh.prs[35]["head"]["sha"]        # updated right after the carrier merged (same tick or next)
+            gh.refuse_merge = set()
+            b_head = gh.prs[35]["head"]["sha"]
             if b_head == pw_head:
                 settle_now()
                 b_head = gh.prs[35]["head"]["sha"]
@@ -4739,6 +5259,18 @@ def self_test() -> int:
             check("green carrier first: strict PR is served next - updated once, merges after one more CI cycle",
                   gh.updates == [35] and st2 == "in-flight" and 35 in s3["merged"] and 2 not in gh.merged,
                   f"st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
+            gh.updates.clear()
+            reset()
+
+            # (3c) shadow mode never reaches the yield: nothing merges, no marker is posted.
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks.clear()
+            mode_settle(gh, Git(clone("settle")), "o/r", True)
+            check("shadow: a green holder + green carrier posts no yield marker and merges nothing",
+                  yielded(pw_head) == "" and gh.merged == [], f"yielded={yielded(pw_head)!r} merged={gh.merged}")
             gh.updates.clear()
             reset()
 
@@ -5811,7 +6343,7 @@ def self_test() -> int:
 # --------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval"])
+    ap.add_argument("mode", nargs="?", choices=["build", "publish", "settle", "owner-approval", "owner-status"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
@@ -5865,6 +6397,10 @@ def api_abort_exit(mode: str, exc: ApiAbort) -> int:
 
 
 def run_mode(gh, args, ap) -> int:
+    if args.mode == "owner-status":
+        line = owner_status_line(paginate(f"/repos/{gh.repo}/commits/{args.head}/statuses"))
+        print(line or "no App status found")
+        return 0 if line else 1
     if args.mode == "owner-approval":
         mode_owner_approval(gh, args.pr, args.head, args.decision)
         return 0
