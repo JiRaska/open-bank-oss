@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -78,11 +78,11 @@ paths:
         '202':
           description: Open accepted, workflow start pending
         '400':
-          description: Missing or invalid request field
+          description: Missing or invalid request field, rendered by libs-runtime
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `openedBy` agent identity, or
@@ -192,11 +192,11 @@ paths:
             Temporal client accepted the signal invocation. This does not assert that the workflow
             consumed the signal or persisted a contribution.
         '400':
-          description: Missing or invalid request field
+          description: Missing or invalid request field, rendered by libs-runtime
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `agentId`, or the signal type is
@@ -535,3 +535,68 @@ components:
       properties:
         error:
           type: string
+
+    ProblemDetail:
+      type: object
+      description: >-
+        Validation failures use the shared libs-runtime error body. The five required fields
+        are present in both ApiError and the ADR-0326 problem document; the latter may add
+        the RFC 9457 fields below. Unlike ErrorBody, this response has no `error` member.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        code:
+          type: string
+        correlationId:
+          type: string
+        retryable:
+          type: boolean
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        rejectedValue:
+          description: Always null; rejected input is not echoed.
