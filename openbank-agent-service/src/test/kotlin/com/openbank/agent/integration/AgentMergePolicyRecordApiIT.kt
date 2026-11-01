@@ -9,8 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.domain.mergerecord.MergeAuthorization
 import com.openbank.agent.domain.mergerecord.MergeAuthorizationKind
 import com.openbank.agent.domain.mergerecord.MergeAuthorizationScope
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -22,7 +23,11 @@ import java.time.Instant
 import javax.sql.DataSource
 
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class AgentMergePolicyRecordApiIT {
     @Inject
     lateinit var dataSource: DataSource

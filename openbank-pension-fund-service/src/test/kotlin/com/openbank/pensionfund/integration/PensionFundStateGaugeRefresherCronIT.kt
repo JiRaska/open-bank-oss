@@ -5,9 +5,10 @@
 package com.openbank.pensionfund.integration
 
 import com.openbank.libs.observability.WorkflowLivenessMetrics
-import com.openbank.pensionfund.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -22,7 +23,10 @@ import org.junit.jupiter.api.Test
  * then carry a series for every queue.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestProfile(PensionFundStateGaugeRefresherCronIT.EverySecond::class)
 class PensionFundStateGaugeRefresherCronIT {
 

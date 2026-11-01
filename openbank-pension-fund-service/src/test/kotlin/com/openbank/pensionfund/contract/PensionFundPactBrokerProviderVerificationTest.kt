@@ -11,10 +11,11 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pensionfund.application.port.PensionFundStore
-import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
@@ -35,7 +36,10 @@ import java.security.Principal
  * MissingStateChangeMethod and publishes a failure that blocks pension-service deploys.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestSecurity(user = "service-account-openbank-pension", roles = ["ROLE_API"])
 @Provider("openbank-pension-fund-service")
 @PactBroker
