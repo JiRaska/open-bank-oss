@@ -5,7 +5,7 @@
 
 package com.openbank.releasesteward.infrastructure.schedule
 
-import com.openbank.releasesteward.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
