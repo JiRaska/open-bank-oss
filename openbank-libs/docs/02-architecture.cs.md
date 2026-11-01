@@ -61,3 +61,5 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 - Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
 
 Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.
+
+Stejná tabulka přiřazuje topik `openbank.tpp.registry.event` službě tpp-registry-service, takže audit-service může označit změny registru TPP (registrace, zařazení na blacklist), které zapisuje do auditní stopy.

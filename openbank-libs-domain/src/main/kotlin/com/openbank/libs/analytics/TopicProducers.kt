@@ -66,6 +66,9 @@ object TopicProducers {
         // (swift-institution-transfers-out). The payload carries no sourceService field.
         "openbank.swift.institution-transfers" to "swift-service",
         "openbank.lending.events" to "lending-service",
+        // #13177: TPP register changes (TPP_REGISTERED / TPP_BLACKLISTED), tpp-registry-service's
+        // outbox (tpp-events-out). The payload carries no sourceService field.
+        "openbank.tpp.registry.event" to "tpp-registry-service",
         // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
         // this table and application.yaml's topics list), so SCA device enrollment
         // (DEVICE_ENROLLED) was never audited — a real PSD2/SCA gap, since sca-service is
