@@ -80,6 +80,11 @@ dependencies {
     // than a re-model of the clearing cycle. The domain package is framework-free (ADR-0002),
     // so only the domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-clearing-service"))
+    // REAL `SctInstPayment` aggregate (sepa-instant) and the REAL scheme rule that guards it
+    // (`SctInstSchemeRules.requireSchemeCurrency` — SCT Inst is euro-only, EPC rulebook), rather
+    // than a re-model of either. The domain package is framework-free (ADR-0002 — no
+    // jakarta/quarkus imports), so only the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-sepa-instant"))
 
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
