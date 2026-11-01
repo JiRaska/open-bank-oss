@@ -1386,6 +1386,32 @@ gates:
     run: |
       python3 .github/scripts/check-loki-rule-self-match.py
 
+  # ADR-0357: a decoy nobody reads is the ADR-0279 outcome again (HoneyEndpointHit over a
+  # filter no service configured, 0 hits in 7 days and unable to fire). Route and rule live
+  # in different files; this is the check between them. ENFORCED.
+  - id: edge-decoy-rule-parity
+    name: "every edge decoy route has a Loki rule reading it, and vice versa (ADR-0357, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30  # pure YAML scan of gitops/components; measured 9s locally incl. self-test
+    rationale: >-
+      Measured 2026-10-29: openbank.security.honey.paths is set in no service and no manifest,
+      the honeytoken metric series does not exist, and HoneyEndpointHit fired 0 times in 7 days
+      because its subject was never configured. The edge decoys are answered by Envoy and read
+      from the access log by route name, so the pairing is mechanical: an HTTPRoute named
+      edge-decoys-* must be selected by a loki_rule ConfigMap and every such selector must name
+      a declared route. Either half missing is a write-only control.
+    review_after: "2027-04-29"
+    min_subjects: 2   # edge-decoys-commodity and edge-decoys-targeted at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-edge-decoy-rule-parity.py"
+      - "openbank-infra/gitops/components/observability/httproute-edge-decoys.yaml"
+      - "openbank-infra/gitops/components/observability/loki-rules-edge-deception.yaml"
+    selftest: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py --selftest
+    run: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -7216,6 +7242,21 @@ gates:
     run: |
       python3 .github/scripts/check-product-ir-purity.py --root .
 
+  - id: product-revision-pinned
+    name: "product-bearing services persist the published catalog revision at contract opening (ADR-0341, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "ADR-0341 D1: a contract's terms come only from the revision it was opened under, so a service that creates a product-bearing aggregate without persisting a pin has no answer to 'what were this contract's terms'. Structural and decidable: migration column, entity @Column, creation path binds the pin; the list is derived from catalog product reference columns so a new product-bearing service cannot stay unlisted."
+    review_after: "2026-12-31"
+    verified: "2026-10-25 — account pinned, lending and card-issuance pending, 3 services excluded with reasons. In a scratch copy of the real tree each of: deleting `productRevisionPin = pin` from AccountService.openAccount, renaming the entity's @Column, and removing V33 turned it red (--enforce exit 1); restoring each turned it green. --self-test 15 cases"
+    budget_seconds: 10
+    min_subjects: 2  # 3 services under product_bearing_services.services at introduction (2026-10-25)
+    selftest: python3 .github/scripts/check-product-revision-pinned.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-revision-pinned.py"]
+    run: |
+      python3 .github/scripts/check-product-revision-pinned.py --root .
+
 
   - id: dr-restore-orchestration
     name: "DR restore transport, result validation and owned cleanup"
@@ -7278,6 +7319,21 @@ gates:
     selftest_inputs: [".github/scripts/check-cronjob-max-success-age.py", "openbank-infra/gitops/components/observability/prometheus-rules-jobs.yaml"]
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
+
+  - id: native-auto-merge-holds
+    name: "native auto-merge respects live draft and blocked holds"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      Arming auto-merge while a PR is draft, blocked, or has malformed readiness data can leave
+      it poised to merge later without a fresh intentional check; these fixtures keep each
+      arming workflow fail-closed on current PR readiness.
+    review_after: "2027-04-16"
+    budget_seconds: 30
+    min_subjects: 3
+    selftest_exempt: "is-a-test-suite - executes trusted verifier and actual workflow arming blocks against offline GitHub fixtures"
+    run: |
+      python3 .github/scripts/test-verify-dependabot-auto-merge.py
 
   # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
   # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any

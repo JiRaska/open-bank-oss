@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **customer-edge:** describe the personal notification page contract ([#14240](https://github.com/JiRaska/open-bank-oss/issues/14240)) ([b47e460](https://github.com/JiRaska/open-bank-oss/commit/b47e460c73f4dd67c659c8011cd45f8ff6c02c95))
+
+## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.0...customer-edge-v1.5.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **customer-edge:** name the subject when passkey token-exchange fails ([#14234](https://github.com/JiRaska/open-bank-oss/issues/14234)) ([be9b211](https://github.com/JiRaska/open-bank-oss/commit/be9b211f74c4b07b291e84e4c2b109203d9522e2))
+
 ## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.4...customer-edge-v1.5.0) (2026-10-26)
 
 
