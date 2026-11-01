@@ -67,11 +67,12 @@ class ReferralQualifiedMessagePactConsumerTest {
 
     private companion object {
         /**
-         * The `occurredAt` example, pinned to a UTC instant AND rendered in UTC. See
-         * `CardDelegationEventMessagePactConsumerTest.VALID_FROM` for the full story: the
-         * `(name, format, Date, TimeZone)` overload is the only one that pins the rendering —
-         * pact-jvm's default example is generated from the JVM's default timezone, so the same
-         * pact regenerates with a different string on CI and `pact-drift-check` reddens forever.
+         * The `occurredAt` example, pinned to a UTC instant AND rendered in UTC — the same
+         * drift story as the fleet's older delegation-event consumer pacts document in their
+         * `VALID_FROM` constants: the `(name, format, Date, TimeZone)` overload is the only one
+         * that pins the rendering — pact-jvm's default example is generated from the JVM's
+         * default timezone, so the same pact regenerates with a different string on CI and
+         * `pact-drift-check` reddens forever.
          */
         const val OCCURRED_AT_FORMAT = "yyyy-MM-dd'T'HH:mm:ssXXX"
         val OCCURRED_AT_EXAMPLE: Date = Date.from(Instant.parse("2026-01-01T00:00:00Z"))
