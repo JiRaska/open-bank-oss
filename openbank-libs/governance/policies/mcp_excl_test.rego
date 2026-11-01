@@ -12,7 +12,7 @@ test_service_account_denied_mcp_session if {
 
 test_real_operator_still_allowed if {
 	"operator-mcp-session" in rest.allowed_reasons with input as {
-		"principal": {"type": "HUMAN", "id": "jiri", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "jiri", "roles": ["ROLE_OPERATOR"]},
 		"action": "mcp.session.create",
 	}
 }

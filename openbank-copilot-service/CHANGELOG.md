@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.6...copilot-service-v0.17.7) (2026-10-16)
+
+
+### Bug Fixes
+
+* **copilot-service:** keep party payloads and model error text out of logs ([#12816](https://github.com/JiRaska/open-bank-oss/issues/12816)) ([4b2ff61](https://github.com/JiRaska/open-bank-oss/commit/4b2ff61dbddb74741ea87fc7782a085d15069aab))
+
 ## [0.17.6](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.5...copilot-service-v0.17.6) (2026-10-14)
 
 

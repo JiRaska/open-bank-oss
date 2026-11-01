@@ -7,7 +7,12 @@ info:
   # 1.3.0 -> 1.4.0: additive — `referralLink` (shareable link composed at issue time, persisted on
   # the invite) on the invite-issue response and on the ReferrerInvite list item. NULL on rows
   # issued before the column existed.
-  version: 1.4.0
+  # 1.4.0 -> 1.5.0: additive — GET /api/v1/referrals/programs/drafts (draft/unpublished programs,
+  # newest first): the marketing maker's work queue for the propose-then-approve flow; the
+  # ReferralProgram status enum widens with DRAFT for that read model. NOT a
+  # re-claim of 1.4.0: that number is taken by the referralLink bump above — a skipped number is
+  # harmless, a collided one is not.
+  version: 1.5.0
 paths:
   /api/v1/referrals/parties/{partyId}/invites:
     get:
@@ -56,6 +61,22 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/ReferralProgram'}
         "404": {description: Unknown or unpublished program}
+  /api/v1/referrals/programs/drafts:
+    get:
+      summary: List draft (unpublished) referral programs
+      description: >-
+        The marketing maker's work queue for the propose-then-approve flow: every DRAFT
+        program, newest first. The published catalog stays on GET /programs; drafts are
+        answered for ROLE_OPERATOR and ROLE_MARKETING only.
+      responses:
+        "200":
+          description: Draft referral programs (empty when none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReferralProgram'
   /api/v1/referrals/programs/{id}/invites:
     post:
       summary: Issue an opaque invite token
@@ -158,7 +179,10 @@ components:
         currency: {type: string, minLength: 3, maxLength: 3}
         qualifyingEvent: {type: string}
         attributionWindowEndsAt: {type: string, format: date-time}
-        status: {type: string, enum: [PUBLISHED]}
+        # GET /programs returns PUBLISHED only; GET /programs/drafts returns DRAFT only; EXPIRED
+        # exists in the ProgramStatus domain lifecycle but is not emitted by either read model
+        # yet — the enum still mirrors the domain enum verbatim (openapi-enum-domain-drift).
+        status: {type: string, enum: [DRAFT, PUBLISHED, EXPIRED]}
         maker: {type: string}
         checker: {type: string, nullable: true}
         createdAt: {type: string, format: date-time}

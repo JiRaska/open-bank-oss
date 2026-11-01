@@ -39,8 +39,9 @@ is a bug — that is the drift ADR-0212 already paid for once.
 - **`@ConfigProperty` on a primitive field needs a Kotlin initializer, and that initializer is the
   bug.** It generates the synthetic constructor Arc builds the bean through, so the annotation is
   never applied and the field keeps the literal whatever the environment says
-  (`configproperty-kotlin-defaults`). `AuthzProducer` therefore declares the OPA timeout as a
-  `Duration` (an object → `lateinit` works) rather than a `Long`.
+  (`configproperty-kotlin-defaults`). The OPA `PolicyDecisionPoint` now comes from libs-runtime's
+  `OpaPolicyDecisionPointProducer` (opted in via `openbank.authz.opa-pdp-producer.enabled`), which
+  reads `opa.timeout-ms` through `lateinit` field injection, so the trap no longer applies here.
 - **`openbank.temporal.enabled` is a BUILD-time property.** `@IfBuildProperty` is resolved during
   augmentation and frozen into the image; a container env var cannot flip it (lending's #6085). The
   `%prod` default is what ships. `%dev`/`%test` turn it off, and the worker half is switched

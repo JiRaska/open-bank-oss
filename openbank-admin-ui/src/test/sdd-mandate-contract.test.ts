@@ -27,6 +27,32 @@ describe('SDD mandate response contract', () => {
     expect(parseSddMandates([valid])).toEqual([valid])
   })
 
+  it('accepts canonical UUID values independently of version bits and omitted nullable dates', () => {
+    expect(parseSddMandates([{
+      ...valid,
+      id: '00000000-0000-0000-0000-000000000000',
+      accountId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+      lastCollectionDate: undefined,
+      lastPreNotificationDate: undefined,
+    }])).toMatchObject([{
+      id: '00000000-0000-0000-0000-000000000000',
+      accountId: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+      lastCollectionDate: null,
+      lastPreNotificationDate: null,
+    }])
+  })
+
+  it('preserves opaque creditor identifiers accepted by the service read contract', () => {
+    const mandates = [valid,
+      { ...valid, id: '33333333-3333-3333-b333-333333333333', umr: 'SYNTHETIC-OPAQUE-1', creditorIdentifier: 'opaque-legacy-id' },
+      { ...valid, id: '44444444-4444-4444-a444-444444444444', umr: 'SYNTHETIC-OPAQUE-2', creditorIdentifier: 'legacy/id:2' },
+    ]
+    expect(parseSddMandates(mandates)).toEqual(mandates)
+    expect(() => parseSddMandates([{ ...valid, creditorIdentifier: '' }])).toThrow('Invalid SDD creditorIdentifier')
+    expect(() => parseSddMandates([{ ...valid, creditorIdentifier: ' '.repeat(3) }])).toThrow('Invalid SDD creditorIdentifier')
+    expect(() => parseSddMandates([{ ...valid, creditorIdentifier: 'x'.repeat(36) }])).toThrow('Invalid SDD creditorIdentifier')
+  })
+
   it('rejects partial records and invented enum values', () => {
     expect(() => parseSddMandates([{ ...valid, sequenceType: 'MONTHLY' }])).toThrow('Invalid SDD sequenceType')
     expect(() => parseSddMandates([{ ...valid, b2bConfirmed: undefined }])).toThrow('Invalid SDD b2bConfirmed')

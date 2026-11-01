@@ -60,6 +60,14 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 
 ## Persistence
 
+Repositories use Hibernate Reactive. The JDBC datasource remains available for Flyway startup migrations,
+while `quarkus.hibernate-orm.blocking=false` prevents an unused blocking Hibernate factory from starting.
+This keeps migration access separate from reactive session creation. Do not disable the JDBC datasource
+or Hibernate Reactive to achieve this separation.
+
+`DocumentPersistenceModeProviderVerificationTest` checks the absence of a blocking factory, matching
+reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identity is missing.
+
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
 `HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
@@ -73,3 +81,7 @@ Drafts remain available for authoring review and preview. Seeding a draft preser
 published version of the same code; publish reviewed wording through the existing reviewed process.
 
 Live rendering also refuses any previously published template containing `LEGAL-REVIEW-REQUIRED`, before creating or storing a PDF. Existing fixed-ID seed rows are not rewritten; caller data cannot bypass this guard.
+
+## Outbox trace propagation
+
+The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.

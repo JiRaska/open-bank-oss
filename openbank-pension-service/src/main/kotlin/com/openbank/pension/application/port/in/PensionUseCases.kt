@@ -100,7 +100,11 @@ interface PensionContractUseCase {
     suspend fun resumeContributions(caller: Caller, id: UUID): PensionContract
     suspend fun get(caller: Caller, id: UUID): PensionContract
 
-    /** A participant sees exactly their own contracts; staff list by status. */
-    suspend fun list(caller: Caller, status: ContractStatus?, limit: Int): List<PensionContract>
+    /**
+     * A participant sees exactly their own contracts; staff list by status. [query] is a
+     * staff-only free-text search (contract/party id fragment, birth date, product line,
+     * payment reference); a participant caller's own list ignores it.
+     */
+    suspend fun list(caller: Caller, status: ContractStatus?, limit: Int, query: String? = null): List<PensionContract>
     suspend fun evaluateIncentives(command: IncentiveEvaluationCommand): List<IncentiveResult>
 }

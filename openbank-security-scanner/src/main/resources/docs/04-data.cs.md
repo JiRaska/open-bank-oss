@@ -133,3 +133,8 @@ Jde o data interního operátora, ne zákaznické PII. Zapisují se do `ict_inci
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+
+## Filtry incidentů
+
+Výpis incidentů předává stav a závažnost jako pojmenované parametry dotazu. Volitelné filtry a limity stránkování zachovávají dosavadní význam; hodnoty se nevkládají přímo do textu dotazu. Mapa parametrů nahrazuje zastaralý builder beze změny úložiště či API.

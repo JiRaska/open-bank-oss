@@ -15,6 +15,8 @@ const root = resolve(__dirname, '..')
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
 const sidebar = read('components/layout/Sidebar.tsx')
 const resource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/TreasuryResource.kt')
+const cashFlowResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/CashFlowResource.kt')
+const referenceResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/ReferenceResource.kt')
 const nostroResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/NostroResource.kt')
 
 const PAGES: [string, string, Permission][] = [
@@ -141,5 +143,28 @@ describe('nostro reconciliation (#10896) — UI grants never exceed NostroResour
       expect(hasPermission([role], 'treasury:nostro:read'), role).toBe(false)
       expect(hasPermission([role], 'treasury:nostro:upload'), role).toBe(false)
     }
+  })
+})
+
+describe('reference editor (least privilege) — reads reference data and nothing of the book', () => {
+  const classRoles = (src: string, cls: string) => {
+    const m = src.match(new RegExp(`@RolesAllowed\\(([^)]*)\\)\\s*\\n(?:@Suppress[^\\n]*\\n)?class ${cls}`))
+    expect(m, `${cls} class-level @RolesAllowed not found`).toBeTruthy()
+    return resolveRoles(m![1])
+  }
+
+  it('the cash-flow ledger is read by exactly the treasury:view set', () => {
+    expect(classRoles(cashFlowResource, 'CashFlowResource')).toEqual(granted('treasury:view'))
+  })
+
+  it('treasury:reference:read is exactly ReferenceResource\'s class-level @RolesAllowed', () => {
+    expect(granted('treasury:reference:read')).toEqual(classRoles(referenceResource, 'ReferenceResource'))
+  })
+
+  it('the editor gets reference reads and no deal, position, limit or cash-flow view', () => {
+    expect(hasPermission([ROLES.TREASURY_REFERENCE_EDITOR], 'treasury:reference:read')).toBe(true)
+    expect(hasPermission([ROLES.TREASURY_REFERENCE_EDITOR], 'treasury:view')).toBe(false)
+    expect(hasPermission([ROLES.TREASURY_REFERENCE_EDITOR], 'treasury:nostro:read')).toBe(false)
+    for (const role of OUTSIDE_THE_DESK) expect(hasPermission([role], 'treasury:reference:read'), role).toBe(false)
   })
 })

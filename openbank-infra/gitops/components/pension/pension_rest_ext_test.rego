@@ -11,7 +11,7 @@ pension_edge := "service-account-openbank-edge"
 # The S1 draft path is not a customer flow: contracts are born through onboarding (#12435).
 test_edge_may_not_create_a_contract_through_the_s1_draft_path if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.create",
 	}
 }
@@ -26,7 +26,7 @@ test_edge_may_not_submit_an_s1_draft if {
 # Known-positive twin: the edge still starts a contract the real way.
 test_edge_may_start_onboarding if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.onboarding.start",
 	}
 }
@@ -34,7 +34,7 @@ test_edge_may_start_onboarding if {
 # S8: the S1 shortcuts are retired — no principal reaches them.
 test_edge_may_not_use_the_retired_s1_termination if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": pension_edge, "roles": ["ROLE_API"]},
 		"action": "pension.contract.terminate",
 	}
 }
@@ -62,7 +62,7 @@ test_other_service_account_may_not_simulate if {
 
 test_operator_may_read_the_payout_queue if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.operator.exit-read",
 	}
 }
@@ -83,35 +83,35 @@ test_service_account_may_not_read_the_payout_queue if {
 
 test_operator_may_read_a_contract if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.contract.inspect",
 	}
 }
 
 test_operator_may_not_terminate if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.contract.terminate",
 	}
 }
 
 test_operator_may_not_change_strategy if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.contract.strategy",
 	}
 }
 
 test_other_service_account_may_not_create if {
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR", "ROLE_API"]},
 		"action": "pension.contract.create",
 	}
 }
 
 test_anonymous_may_not_read if {
 	not rest.allow with input as {
-		"principal": {"type": "ANONYMOUS", "id": "", "roles": []},
+		"principal": {"service_account": false, "type": "ANONYMOUS", "id": "", "roles": []},
 		"action": "pension.contract.inspect",
 	}
 }
@@ -198,9 +198,11 @@ test_provider_may_not_act_on_onboarding if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_relay_a_transfer_answer if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.operator.transfer",
 	}
 }
@@ -219,9 +221,11 @@ test_service_account_operator_may_not_relay if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_compliance_may_read_but_not_act if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "pension.operator.inspect",
 	}
 	not rest.allow with input as {
@@ -260,16 +264,18 @@ test_edge_may_not_ingest_payments if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_operate_claim_batches if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.funding.operate",
 	}
 }
 
 test_payments_staff_may_ingest if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "bob", "roles": ["ROLE_PAYMENTS"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "bob", "roles": ["ROLE_PAYMENTS"]},
 		"action": "pension.funding.ingest",
 	}
 }
@@ -302,9 +308,11 @@ test_operator_may_not_set_up_a_mandate if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_read_funding if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.funding.inspect",
 	}
 }
@@ -324,23 +332,25 @@ test_edge_may_sign_a_termination_and_confirm_a_payout if {
 
 test_operator_may_read_exits_but_not_move_money if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.exit.inspect",
 	}
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.exit.payout",
 	}
 	not rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.exit.terminate",
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_work_a_death_claim if {
 	every action in {"pension.death.inspect", "pension.death.notify", "pension.death.verify", "pension.death.approve"} {
 		rest.allow with input as {
-			"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+			"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 			"action": action,
 		}
 	}
@@ -394,9 +404,11 @@ test_other_service_account_may_not_change_beneficiaries if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_compliance_may_read_change_history_via_operator_view if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "pension.operator.inspect",
 	}
 }
@@ -424,9 +436,11 @@ test_edge_may_not_manage_annuity_partners if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_approve_an_annuity_partner if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.operator.annuity-approve",
 	}
 }
@@ -440,7 +454,7 @@ test_service_account_operator_may_not_approve_an_annuity_partner if {
 
 test_compliance_may_read_annuity_partners if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "pension.operator.annuity-read",
 	}
 }
@@ -457,10 +471,12 @@ test_compliance_may_not_write_annuity_partners if {
 tax_reporting_principal := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
 
 # must-ALLOW: tax-reporting's own client and staff oversight.
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_tax_reporting_and_staff_read_participant_aggregates if {
 	rest.allow with input as {"principal": tax_reporting_principal, "action": "pension.reporting.aggregate"}
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_AUDITOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "carol", "roles": ["ROLE_AUDITOR"]},
 		"action": "pension.reporting.aggregate",
 	}
 }
@@ -506,16 +522,18 @@ test_shared_api_service_account_may_not_read_a_contract_valuation if {
 	}
 }
 
+# Phase 2 contract: staff allow-cases carry the PEP marker (service_account: false);
+# without it the principal classifies fail-closed as a machine.
 test_operator_may_list_mandates if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "alice", "roles": ["ROLE_OPERATOR"]},
 		"action": "pension.operator.mandate-read",
 	}
 }
 
 test_compliance_may_list_mandates if {
 	rest.allow with input as {
-		"principal": {"type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
+		"principal": {"service_account": false, "type": "HUMAN", "id": "carol", "roles": ["ROLE_COMPLIANCE"]},
 		"action": "pension.operator.mandate-read",
 	}
 }
@@ -561,6 +579,8 @@ no_exclusions := {"authz": {"operator_read_any_excluded_actions": []}}
 
 pension_principal(id, roles) := {"type": "HUMAN", "id": id, "roles": roles}
 
+human_pension_principal(id, roles) := {"service_account": false, "type": "HUMAN", "id": id, "roles": roles}
+
 # must-DENY: the shared M2M client (ROLE_OPERATOR in the gitops realm, + ROLE_COMPLIANCE in CI),
 # an unrelated service, and an AI agent — for every participant read, with no exclusion list.
 test_machines_cannot_read_pension_participant_data if {
@@ -577,10 +597,12 @@ test_machines_cannot_read_pension_participant_data if {
 }
 
 # must-ALLOW: human operator, admin and compliance read every participant read.
+# Phase-2 contract: a human principal declares service_account == false explicitly
+# (`pension_principal` stays flagless — it is also used for machine must-DENY cases).
 test_human_staff_read_pension_participant_data if {
 	every action in pension_participant_reads {
 		every role in ["ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"] {
-			rest.allow with input as {"principal": pension_principal("alice", [role]), "action": action}
+			rest.allow with input as {"principal": human_pension_principal("alice", [role]), "action": action}
 				with data.rules as no_exclusions
 		}
 	}

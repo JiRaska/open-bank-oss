@@ -36,6 +36,7 @@ import io.temporal.client.WorkflowOptions
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.inject.Provider
 import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,7 +50,13 @@ class TransactionService(
     private val eventPublisher: TransactionEventPublisher,
     private val fxRatePort: FxRatePort,
     private val temporalConfig: TemporalConfig,
-    private val workflowClient: WorkflowClient,
+    // Provider, not WorkflowClient: the producer's lazy evaluates on FIRST injection and
+    // WorkflowServiceStubs connects eagerly, so a direct injection dials the Temporal
+    // frontend when this bean is created — including for READ paths that never use it.
+    // Provider.get() defers the dial to the first payment initiation. This is what lets
+    // the service boot (and serve reads) with no Temporal reachable; the perf read-baseline
+    // lane relies on it (perf/scenarios.yaml: transaction-read-baseline).
+    private val workflowClient: Provider<WorkflowClient>,
     private val clock: Clock,
 ) : TransactionUseCase {
 
@@ -60,13 +67,33 @@ class TransactionService(
     @Inject
     lateinit var tracer: Tracer
 
-    @Inject
+    /**
+     * Public constructor kept stable for the unit tests that construct this class by hand
+     * with a mock WorkflowClient (Provider wraps it without changing their call sites).
+     */
     constructor(
         transactionRepository: TransactionRepository,
         eventPublisher: TransactionEventPublisher,
         fxRatePort: FxRatePort,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
+        clock: Clock,
+    ) : this(
+        transactionRepository,
+        eventPublisher,
+        fxRatePort,
+        temporalConfig,
+        Provider { workflowClient },
+        clock,
+    )
+
+    @Inject
+    constructor(
+        transactionRepository: TransactionRepository,
+        eventPublisher: TransactionEventPublisher,
+        fxRatePort: FxRatePort,
+        temporalConfig: TemporalConfig,
+        workflowClient: Provider<WorkflowClient>,
     ) : this(
         transactionRepository,
         eventPublisher,
@@ -228,7 +255,7 @@ class TransactionService(
         // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
         // stub.execute(...) is a blocking Temporal client call; offload the blocking wait to the IO dispatcher.
         val state: SagaState = withContext(Dispatchers.IO) {
-            val stub = workflowClient.newWorkflowStub(
+            val stub = workflowClient.get().newWorkflowStub(
                 PaymentWorkflow::class.java,
                 WorkflowOptions.newBuilder()
                     .setTaskQueue(temporalConfig.taskQueue())
@@ -350,18 +377,13 @@ class TransactionService(
 
     /**
      * The loser of a concurrent duplicate-submission race: both contenders passed the replay
-     * check before either committed, and this transaction died on uq_transactions_idempotency.
+     * check before either committed, and this transaction died on the global registry primary key.
      * Recover to the same contract as the sequential path — return the winner's transaction and
      * start no second payment workflow. Anything that is not the idempotency-key conflict
      * propagates untouched.
      */
     private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Transaction {
-        // transactions is range-partitioned by booking_date: the violation surfaces under the
-        // per-partition auto-generated name (transactions_<year>_idempotency_key_booking_date_key),
-        // not the parent's uq_transactions_idempotency — match the column, not one spelling.
-        val isIdempotencyKeyConflict = generateSequence<Throwable>(e) { it.cause.takeIf { c -> c !== it } }
-            .any { it.message?.contains("idempotency", ignoreCase = true) == true }
-        if (!isIdempotencyKeyConflict) throw e
+        if (!TransactionIdempotencyConflict.isConflict(e)) throw e
         return transactionRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
     }
 

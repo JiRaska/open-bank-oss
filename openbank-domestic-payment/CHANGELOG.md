@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.3...domestic-payment-v1.3.0) (2026-10-30)
+
+
+### Features
+
+* **domestic-payment:** hold or reject fraud-flagged payments behind a default-off flag ([#14294](https://github.com/JiRaska/open-bank-oss/issues/14294)) ([fb6c2fd](https://github.com/JiRaska/open-bank-oss/commit/fb6c2fdfae852b3fdd030b49732942369e61c7d8))
+
+## [1.2.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.2...domestic-payment-v1.2.3) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sepa-payment:** alert on unsettled bookings and re-drive held settlement ([#13662](https://github.com/JiRaska/open-bank-oss/issues/13662)) ([bbc2b48](https://github.com/JiRaska/open-bank-oss/commit/bbc2b489726cd02d885cd0ed4452c814a17d1b1a))
+
+## [1.2.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.1...domestic-payment-v1.2.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **domestic-payment:** book via the generated transaction client and bind the answer to the request ([#13621](https://github.com/JiRaska/open-bank-oss/issues/13621)) ([c3de0a5](https://github.com/JiRaska/open-bank-oss/commit/c3de0a59fceea1653c4520d6a47a028ee21212a8))
+
+## [1.2.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.0...domestic-payment-v1.2.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* **domestic-payment,card-issuance,case-coordinator-agent:** protect request-derived log fields ([#12717](https://github.com/JiRaska/open-bank-oss/issues/12717)) ([9f5862a](https://github.com/JiRaska/open-bank-oss/commit/9f5862a0246f3918a633693429fc2e2df15c4f11))
+
+## [1.2.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.1.0...domestic-payment-v1.2.0) (2026-10-16)
+
+
+### Features
+
+* **payment-batches:** persist company-scoped drafts ([#12259](https://github.com/JiRaska/open-bank-oss/issues/12259)) ([743987d](https://github.com/JiRaska/open-bank-oss/commit/743987d92e9b1ad076bccddcfbefce008ba81f5c))
+
+## [1.1.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.1...domestic-payment-v1.1.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.0.0...domestic-payment-v1.0.1) (2026-10-14)
 
 

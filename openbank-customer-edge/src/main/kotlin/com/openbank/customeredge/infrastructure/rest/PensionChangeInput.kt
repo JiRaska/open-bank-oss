@@ -43,7 +43,7 @@ internal object PensionChangeInput {
         val answers = node?.path("answers")
         require(answers != null && answers.isObject) { "answers must be an object" }
         require(answers.size() <= MAX_ANSWERS) { "too many answers" }
-        return answers.fields().asSequence().associate { (key, value) ->
+        return answers.properties().asSequence().associate { (key, value) ->
             require(ANSWER_KEY.matches(key)) { "answer key $key is malformed" }
             val option = value.takeIf { it.isTextual }?.textValue()
             require(option != null && ANSWER_VALUE.matches(option)) { "answer $key must be an option code" }

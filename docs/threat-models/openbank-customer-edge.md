@@ -154,6 +154,8 @@ Trust boundaries:
 
 ## 6. Change log
 
+- **2026-10-25** — **Delegated accounts reach `GET /customer/v1/accounts` (#13711).** The merge of accounts shared WITH the caller only ran when the upstream body was a bare array, but account-service answers `{data, pagination}`, so a grantee never saw what they were given (fail-closed, but a functional gap). The edge now appends them into `data`, de-duplicated by id, and raises `pagination.totalCount` by the count appended when that field is present. Authority is unchanged: the grantee is the JWT `party_id`, and only ACTIVE `ACCOUNT` grants carrying a read capability are listed, each marked `sharedWithMe: true`. Cursors are not touched; shared accounts sit outside cursor pagination and ride on whichever page is fetched. Real-HTTP test `DelegatedAccountsListIT` covers present, absent, REVOKED and no-read-capability. No new outbound edge. Rollback: revert; shared accounts disappear from the list again, reads by id still work.
+
 - **2026-10-04** — **Canary customer trusted for the synthetic taint (ADR-0331).** `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS` names `service-account-openbank-synthetic-retail`, a customers-realm service account bound to one SYNTHETIC party. The identity's shape and the trust list are held by the enforced `synthetic-customer-identity` gate. S-5 residual updated.
 
 - **2026-10-04** — **Synthetic taint survives the edge (ADR-0252 phase 1, #4348).** `UpstreamClient` builds every upstream request through `upstreamRequest()`, which forwards the edge's own trusted taint decision as `x-openbank-synthetic`. Before this the marker died at the edge, so a canary customer would have been real to every service behind it. New threat S-5.
@@ -296,6 +298,37 @@ Trust boundaries:
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
 
+## Company payment drafts (slice 6)
+
+The customer routes are **off by default** under
+`openbank.edge.business-payment-batches.enabled=false`
+(`BUSINESS_PAYMENT_BATCHES_ENABLED=false`). Every method returns 404 before mandate resolution or
+backend access while disabled. This is a server-side gate; hiding the app entry alone is not an
+activation control. The HTTP tests exercise all four disabled methods and prove no draft request
+reaches domestic-payment.
+
+The edge requires a verified customer-realm JWT from the interactive `openbank-app` client
+(service accounts disabled in the realm template), a nonblank subject, and `X-Acting-For` on
+every draft route. Both machine-note claims (`client_id` and `clientId`) must be absent, even
+when their value is null or malformed. An optional username must be a nonblank human username;
+its absence remains compatible with the customer producer's mapper contract. Unreadable claims
+fail closed. A machine token with customer roles and a mapped party cannot become the editing
+human merely by presenting that party's mandate. The edge resolves the
+human's live representation mandate, and forwards only the verified company and human to the
+persisted domestic draft aggregate. A missing, invalid, foreign, or expired mandate fails closed.
+Batch IDs cannot switch company by changing the header because the owning service scopes reads
+and writes by company. The API has no submit or rail dispatch route in this slice.
+
+For item replacement, the edge forwards the human token identity as the editing actor; the
+backend persists it with the new revision. An unverified client header cannot name that actor.
+
+**Enablement:** deploy the schema and draft-owning service first, then the edge with the flag off.
+Keep it off until the money-moving follow-up has passed the independent money-path reviews,
+ADR-0312 signing, per-item idempotency and recovery tests, and a verified sandbox rollout. A
+separate reviewed GitOps change may then set `BUSINESS_PAYMENT_BATCHES_ENABLED=true` in sandbox;
+verify the enabled HTTP contract, company isolation, 404 for foreign IDs, and the app's business
+entry. Production enablement requires its own reviewed config change and observed rollout. On
+failure, set the flag back to false; retain stored drafts for reconciliation and retention review.
 
 ### Audit upstream client identity
 

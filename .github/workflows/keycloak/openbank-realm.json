@@ -31,7 +31,8 @@
     "realm": [
       { "name": "ROLE_OPERATOR" },
       { "name": "ROLE_COMPLIANCE" },
-      { "name": "ROLE_ADMIN" }
+      { "name": "ROLE_ADMIN" },
+      { "name": "ROLE_MERGE_RECORDER" }
     ]
   }
 }

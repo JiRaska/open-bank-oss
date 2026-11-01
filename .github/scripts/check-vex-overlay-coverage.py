@@ -88,9 +88,6 @@ NO_OVERLAY_YET: dict[str, str] = {
                        "largely shared with services that already have overlays, but nobody has "
                        "diffed it yet. Writing dispositions from that assumption rather than from "
                        "the resolved artifacts is the fabrication this gate's own header refuses.",
-    "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
-                "of the JVM dependency evidence used for the other three reaches it and there is "
-                "no npm triage material in the repository to write a disposition from.",
     "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
                                "Its dependency set is the ordinary reactive Quarkus stack largely "
                                "shared with services that already carry overlays, but 'largely "
@@ -103,6 +100,12 @@ NO_OVERLAY_YET: dict[str, str] = {
                               "services that already have overlays, but writing dispositions from "
                               "that assumption rather than the resolved runtimeClasspath artifacts "
                               "is exactly the fabrication this gate's own header refuses.",
+    "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
+                "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
+                "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
+                "No VEX overlay is written yet: dispositions must come from this module's own resolved "
+                "runtime classpath (it depends on openbank-libs-testing for the golden runner), not be "
+                "copied from a service. Delete this entry in the PR that writes the overlay.",
 }
 
 

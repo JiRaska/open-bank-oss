@@ -59,7 +59,7 @@ pension_fund_read_actions := {
 
 pension_fund_staff if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 }
 
 # Fund administrators: real staff only.
@@ -83,7 +83,7 @@ pension_service_account := "service-account-openbank-pension"
 # pension-service, and only pension-service, acts on the unit register for its contracts.
 allowed_reasons contains "service-pension-unit-register" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == pension_service_account
+	machine_named(pension_service_account)
 	"ROLE_API" in input.principal.roles
 	input.action in {"pension-fund.holding.inspect", "pension-fund.order.place", "pension-fund.fund.read", "pension-fund.strategy.read", "pension-fund.nav.read"}
 }
@@ -96,7 +96,7 @@ tax_reporting_service_account := "service-account-openbank-tax-reporting"
 # `.read` verb so neither operator-read-any nor compliance-read-any admits the shared account.
 allowed_reasons contains "service-tax-reporting-fund-aggregates" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == tax_reporting_service_account
+	machine_named(tax_reporting_service_account)
 	"ROLE_API" in input.principal.roles
 	input.action == "pension-fund.reporting.inspect"
 }

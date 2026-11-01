@@ -48,7 +48,7 @@ import rego.v1
 # (resolve a stuck application, service-desk correction — the pid/sca/consent pattern).
 allowed_reasons contains "operator-lending-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	startswith(input.action, "lending.")
@@ -154,7 +154,7 @@ allowed_reasons contains "compliance-lending-desk" if {
 # refuses when it is unset. This rule states the intent, and narrows the day the blanket
 # operator grant is tightened.
 allowed_reasons contains "edge-customer-intake" if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "lending.intake"
 }
 
@@ -170,7 +170,7 @@ allowed_reasons contains "edge-customer-intake" if {
 # Read-only by construction — the action has no write counterpart to be confused with, which is
 # why it needs no entry in the `prohibited` veto below.
 allowed_reasons contains "service-credit-offer-eligibility" if {
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "lending.creditOffer.eligibility"
 }
 
@@ -183,7 +183,7 @@ allowed_reasons contains "service-credit-offer-eligibility" if {
 # through OPA, and any other ROLE_API holder is still denied (lending_rest_ext_test.rego).
 allowed_reasons contains "service-risk-loan-book-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "lending.book.read"
 }
 
@@ -203,7 +203,7 @@ allowed_reasons contains "service-risk-loan-book-read" if {
 # CustomerEdgeResource.applyForLoan). The remaining ~12 lending writes not in the matrix grant
 # (acceleration.execute, advance, default.mark, ...) are closed by the exclusion alone.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"lending.approve",
 		"lending.collateralDecide",
@@ -234,7 +234,7 @@ prohibited if {
 # its roles, and no human without ROLE_ADMIN. maker != checker is enforced in LedgerBackfillService.
 prohibited if {
 	startswith(input.action, "lending.ledgerBackfill.")
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 }
 
 #
@@ -247,7 +247,7 @@ prohibited if {
 # administrator a party to every finance posting, which is the wrong segregation of duties.
 allowed_reasons contains "finance-ledger-backfill" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	"ROLE_FINANCE" in input.principal.roles
 	startswith(input.action, "lending.ledgerBackfill.")
 }

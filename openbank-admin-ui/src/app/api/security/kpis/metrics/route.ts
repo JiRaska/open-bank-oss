@@ -6,11 +6,13 @@ import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
 import { parseSecurityKpis } from '@/lib/security/kpiContract'
+import { securityKpiSnapshotReader } from '@/lib/security/kpiSnapshot'
 
 // ── Security KPIs: Prometheus text exposition of the CI-generated snapshot ───
 //
 // Same source as the sibling JSON route (../route.ts): the weekly
-// security-kpis.json baked into the image by .github/workflows/security-kpis.yml.
+// security-kpis.json published independently by .github/workflows/security-kpis.yml,
+// with the image-baked file retained only when no evidence store is configured.
 // This endpoint exists because the console is READ-ONLY for humans — the numbers
 // had no path into Prometheus, so no alert and no Grafana panel could see them.
 // Scraped via servicemonitor-admin-ui.yaml (observability); alerting rules live
@@ -28,6 +30,7 @@ import { parseSecurityKpis } from '@/lib/security/kpiContract'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
+export const runtime = 'nodejs'
 
 const TEAM_LABEL = '{team="security"}'
 
@@ -112,14 +115,21 @@ function gaugesFromSnapshot(kpis: Record<string, unknown>): Gauge[] {
 
 export async function GET(): Promise<NextResponse> {
   let gauges: Gauge[] = []
-  try {
-    const raw = await fs.readFile(snapshotFile(), 'utf-8')
-    gauges = gaugesFromSnapshot(parseSecurityKpis(JSON.parse(raw)) as unknown as Record<string, unknown>)
-  } catch {
-    // Absent/corrupt snapshot: still 200, with zero series. Prometheus records the
-    // target as up with no samples; SecurityKpiSnapshotStale/absent() semantics
-    // surface the gap instead of a scrape error storm.
-    gauges = []
+  const published = await securityKpiSnapshotReader.read()
+  if (published.snapshot) {
+    // Keep the generated timestamp from the original CI snapshot so Prometheus can
+    // alert on age; a current HTTP scrape does not make old evidence fresh.
+    gauges = gaugesFromSnapshot(published.snapshot as unknown as Record<string, unknown>)
+  } else if (published.status === 'disabled') {
+    try {
+      const raw = await fs.readFile(snapshotFile(), 'utf-8')
+      gauges = gaugesFromSnapshot(parseSecurityKpis(JSON.parse(raw)) as unknown as Record<string, unknown>)
+    } catch {
+      // Absent/corrupt snapshot: still 200, with zero series. Prometheus records the
+      // target as up with no samples; SecurityKpiSnapshotStale/absent() semantics
+      // surface the gap instead of a scrape error storm.
+      gauges = []
+    }
   }
 
   const lines: string[] = []

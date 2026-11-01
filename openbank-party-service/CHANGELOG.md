@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.0...party-service-v0.29.1) (2026-10-24)
+
+
+### Security
+
+* **libs:** preserve reactive guards and patch renderer decoder ([#13716](https://github.com/JiRaska/open-bank-oss/issues/13716)) ([dad97cf](https://github.com/JiRaska/open-bank-oss/commit/dad97cfb5f9e1b0a57c73320b3cefed0b239cabf))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.28.0...party-service-v0.29.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** classify transaction-service answers in one facade ([#13227](https://github.com/JiRaska/open-bank-oss/issues/13227)) ([3059929](https://github.com/JiRaska/open-bank-oss/commit/30599292ce6711d928fa25b96bf16eb57fa61138))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.27.0...party-service-v0.28.0) (2026-10-18)
+
+
+### Features
+
+* **admin-ui,party:** find clients by name, national ID or birth date instead of UUID; fix state incentives ([#13199](https://github.com/JiRaska/open-bank-oss/issues/13199)) ([3c3f742](https://github.com/JiRaska/open-bank-oss/commit/3c3f742dc0c39af010d9fa2fa8a3a7ad34b74713))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.26.0...party-service-v0.27.0) (2026-10-16)
+
+
+### Features
+
+* **tax-reporting:** CRS/FATCA information-exchange return family (ADR-0340) ([#13007](https://github.com/JiRaska/open-bank-oss/issues/13007)) ([8c85a90](https://github.com/JiRaska/open-bank-oss/commit/8c85a903f2511f6b0a421611d24bbe63f1ab3dc1))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.5...party-service-v0.26.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [0.25.5](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.4...party-service-v0.25.5) (2026-10-14)
 
 

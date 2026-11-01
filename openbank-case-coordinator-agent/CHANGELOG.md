@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.3](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.12.2...case-coordinator-agent-v0.12.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **case-coordinator-agent:** encode caller fields at the logging boundary ([#13029](https://github.com/JiRaska/open-bank-oss/issues/13029)) ([58f2041](https://github.com/JiRaska/open-bank-oss/commit/58f2041f7043ede0e40d5b5ff3b60f3af5a01b9b))
+
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.12.1...case-coordinator-agent-v0.12.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* **domestic-payment,card-issuance,case-coordinator-agent:** protect request-derived log fields ([#12717](https://github.com/JiRaska/open-bank-oss/issues/12717)) ([9f5862a](https://github.com/JiRaska/open-bank-oss/commit/9f5862a0246f3918a633693429fc2e2df15c4f11))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.12.0...case-coordinator-agent-v0.12.1) (2026-10-14)
 
 

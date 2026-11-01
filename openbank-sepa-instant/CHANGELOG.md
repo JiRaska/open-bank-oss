@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.1...sepa-instant-v0.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **sepa-payment:** send EPC PmtTpInf on pacs.008 for SCT and SCT Inst ([#13771](https://github.com/JiRaska/open-bank-oss/issues/13771)) ([f7ce734](https://github.com/JiRaska/open-bank-oss/commit/f7ce73471d1c7d26ab266b33f974e02607c1afc3))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.0...sepa-instant-v0.12.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **sepa-instant:** preserve settlement proof and omit provider payloads ([#13223](https://github.com/JiRaska/open-bank-oss/issues/13223)) ([b99d45e](https://github.com/JiRaska/open-bank-oss/commit/b99d45e14b336ae750eb0ff5f19f7ead257fcb41))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.5...sepa-instant-v0.12.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.4...sepa-instant-v0.11.5) (2026-10-14)
 
 

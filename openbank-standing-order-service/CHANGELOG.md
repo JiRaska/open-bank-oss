@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.19.0...standing-order-service-v0.19.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **standing-order:** persist the failure count with the failed outbox event ([#13744](https://github.com/JiRaska/open-bank-oss/issues/13744)) ([7d495ca](https://github.com/JiRaska/open-bank-oss/commit/7d495ca5a310c78fa10a7f38a70e3600af26cb8a))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.3...standing-order-service-v0.19.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** classify transaction-service answers in one facade ([#13227](https://github.com/JiRaska/open-bank-oss/issues/13227)) ([3059929](https://github.com/JiRaska/open-bank-oss/commit/30599292ce6711d928fa25b96bf16eb57fa61138))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.2...standing-order-service-v0.18.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **standing-order:** complete ONCE orders on confirm even without prior failures ([#12844](https://github.com/JiRaska/open-bank-oss/issues/12844)) ([2eff7c0](https://github.com/JiRaska/open-bank-oss/commit/2eff7c05497375c7ae4c64707c13786ccb82c62e))
+
 ## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.18.1...standing-order-service-v0.18.2) (2026-10-14)
 
 

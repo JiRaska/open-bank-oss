@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.7.0...card-processing-service-v0.7.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **card-processing:** persist the ledger posting state per clearing and re-drive it ([#13229](https://github.com/JiRaska/open-bank-oss/issues/13229)) ([a3c8c98](https://github.com/JiRaska/open-bank-oss/commit/a3c8c98272b098bb48170e2535ae6e67a6c673c9))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.6.1...card-processing-service-v0.7.0) (2026-10-18)
+
+
+### Features
+
+* **client-transaction:** classify transaction-service answers in one facade ([#13227](https://github.com/JiRaska/open-bank-oss/issues/13227)) ([3059929](https://github.com/JiRaska/open-bank-oss/commit/30599292ce6711d928fa25b96bf16eb57fa61138))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.6.0...card-processing-service-v0.6.1) (2026-10-14)
 
 

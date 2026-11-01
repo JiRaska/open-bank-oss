@@ -169,12 +169,15 @@ class UnifiedNotificationInboxTest {
 
     @Test
     fun `synthetic sequential reads shrink their per-call timeout within one deadline`() {
+        // Virtual ticker: each upstream read "takes" 60 ms of a 100 ms budget without sleeping,
+        // so the assertion is about the computed per-call timeouts, not scheduler latency.
+        val now = java.util.concurrent.atomic.AtomicLong()
         val upstream = mockk<UpstreamClient>()
         val budgets = mutableListOf<Long>()
         every { upstream.get(any(), any(), any()) } answers {
             val budget = thirdArg<Long>()
             budgets += budget
-            Thread.sleep(minOf(60, budget))
+            now.addAndGet(TimeUnit.MILLISECONDS.toNanos(minOf(60, budget)))
             if (budget < 60) {
                 Response.status(502).build()
             } else {
@@ -188,10 +191,10 @@ class UnifiedNotificationInboxTest {
                 mapper,
                 "http://notifications",
                 TimeUnit.MILLISECONDS.toNanos(100),
+                now::get,
             ).list(listOf(human, company, stranger), 20)
             assertThat(response.status).isEqualTo(502)
-            assertThat(budgets).hasSize(2)
-            assertThat(budgets[1]).isLessThan(budgets[0])
+            assertThat(budgets).containsExactly(100L, 40L)
         } finally {
             MDC.remove("synthetic")
         }
@@ -346,10 +349,25 @@ class UnifiedNotificationInboxTest {
             Response.status(503).build()
         }
         val resolver = ActingForResolver(upstream, mapper, Clock.systemUTC(), "http://party", true)
-        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100)
-        assertThatThrownBy { resolver.profilesOfStrict(human, deadline) }
+        val deadline = TimeUnit.MILLISECONDS.toNanos(100)
+        assertThatThrownBy { resolver.profilesOfStrict(human, deadline) { TimeUnit.MILLISECONDS.toNanos(40) } }
             .isInstanceOf(ServiceUnavailableException::class.java)
-        assertThat(timeoutMs).isBetween(1, 100)
+        assertThat(timeoutMs).isEqualTo(60)
+        verify(exactly = 1) { upstream.get(any(), human.toString(), 60) }
+    }
+
+    @Test
+    fun `expired mandate inventory budget never starts an upstream read`() {
+        for (elapsedMs in listOf(100L, 101L)) {
+            val upstream = mockk<UpstreamClient>()
+            val resolver = ActingForResolver(upstream, mapper, Clock.systemUTC(), "http://party", true)
+            val deadline = TimeUnit.MILLISECONDS.toNanos(100)
+            assertThatThrownBy {
+                resolver.profilesOfStrict(human, deadline) { TimeUnit.MILLISECONDS.toNanos(elapsedMs) }
+            }
+                .isInstanceOf(ServiceUnavailableException::class.java)
+            verify(exactly = 0) { upstream.get(any(), any(), any()) }
+        }
     }
 
     private fun resource(upstream: UpstreamClient, resolver: ActingForResolver = mockk()): CustomerEdgeResource {
