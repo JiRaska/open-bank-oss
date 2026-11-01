@@ -39,24 +39,42 @@ import java.time.LocalDate
 object F0200Mapper {
 
     fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
-        val lines = snapshot.lines
+        val lines = FinrepCoverage.onBalanceSheet(snapshot.lines)
         val income = sumNet(lines, "INCOME").negate()
         val expense = sumNet(lines, "EXPENSE")
         val netProfit = income.subtract(expense)
-        val interestIncome = creditBalance(lines, "3000", "4100", "4101", "4102", "4103", "4200", "4201")
-        val interestExpense = debitBalance(lines, "4000", "4010", "4011", "4012", "4013", "5200", "5201")
-        val feeIncome = creditBalance(lines, "4001", "4003")
+        // r0051 is interest income on financial assets at amortised cost: the existing book plus the
+        // ADR-0344 treasury loans (4220/4221) and reverse repo (4240/4241).
+        val amortisedCostInterestIncome = creditBalance(
+            lines,
+            "3000", "4100", "4101", "4102", "4103", "4200", "4201",
+            "4220", "4221", "4240", "4241",
+        )
+        // Securities (4210/4211) and derivative (4230/4231) interest: total r0010 only, because the
+        // chart does not split them by IFRS 9 category (owner to verify against the DPM workbook).
+        val interestIncome = amortisedCostInterestIncome.add(creditBalance(lines, "4210", "4211", "4230", "4231"))
+        // r0120 is interest expense on liabilities at amortised cost; repo 5240/5241 belongs there.
+        val amortisedCostInterestExpense = debitBalance(
+            lines,
+            "4000", "4010", "4011", "4012", "4013", "5200", "5201", "5240", "5241",
+        )
+        val interestExpense = amortisedCostInterestExpense.add(debitBalance(lines, "5230", "5231"))
+        val feeIncome = creditBalance(lines, "4001", "4003", "4004", "4005", "4006")
+        // ADR-0344 realised/unrealised treasury gains (4300-4311) are operating income through
+        // `income`; the losses (5300-5311) are netted in r0355 against them. Both reach r0670. No
+        // gains/losses row is emitted until its datapoint id is verified (#14284).
+        val treasuryLosses = debitBalance(lines, "5300", "5301", "5310", "5311")
         val exchangeDifference = creditBalance(lines, "4002", "5900")
         val impairment = debitBalance(lines, "5100", "5101", "5102", "5103")
 
         val cells = listOf(
             FinrepCell("r0010", "c0010", interestIncome),
-            FinrepCell("r0051", "c0010", interestIncome),
+            FinrepCell("r0051", "c0010", amortisedCostInterestIncome),
             FinrepCell("r0090", "c0010", interestExpense),
-            FinrepCell("r0120", "c0010", interestExpense),
+            FinrepCell("r0120", "c0010", amortisedCostInterestExpense),
             FinrepCell("r0200", "c0010", feeIncome),
             FinrepCell("r0310", "c0010", exchangeDifference),
-            FinrepCell("r0355", "c0010", income.subtract(interestExpense)),
+            FinrepCell("r0355", "c0010", income.subtract(interestExpense).subtract(treasuryLosses)),
             FinrepCell("r0460", "c0010", impairment),
             FinrepCell("r0491", "c0010", impairment),
             FinrepCell("r0610", "c0010", netProfit),

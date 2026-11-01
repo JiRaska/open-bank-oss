@@ -184,3 +184,17 @@ copy or invalid signature fails closed (no evaluation, no posting), each counted
 `outcome` of `openbank_product_revision_load_total` (`identity_mismatch` for a substituted
 revision); the catalog is a publication authority, never a dependency on
 the posting path. The API contract version is 2.9.0; the change is additive.
+
+### Linting a product IR (ADR-0352 phase 5b)
+
+`POST /api/v2/product-ir/lint` is the server-side dry run behind the Studio IR editor. The body is `{"ir": {...}}`, a Product IR v1 document exactly as it would be sent as a revision's `behaviour`. The endpoint applies the same trusted-profile bound and the same shared `ProductIrParser` as a revision write, so the editor cannot accept an IR the write would refuse, nor refuse one it would accept. It stores, signs and publishes nothing.
+
+- Roles: the same as any catalog authoring call (`@Authorize` action `catalog.author`): `OPERATOR`, `ADMIN`, or the catalog-scope role `CATALOG_SCOPE_AUTHOR`.
+- `200`: an invalid IR is still a 200, with `valid=false` and the parser's `problems` (each a JSON pointer `path` and a `message`), so an editor can show every problem at once. A valid IR returns `valid=true` with `productCode`, `irVersion`, `revisionHash` (SHA-256 of the canonical IR, the hash approvals bind to) and `canonicalIr` (the canonical JSON).
+- `400`: malformed request body, or a document that fails the trusted-profile bound.
+- `401`: unauthenticated.
+- `403`: the caller holds none of the roles above.
+
+The API contract version is 2.10.0; the change is additive.
+
+Catalog request bodies are decoded strictly: a body that repeats a JSON object key is rejected with `400` instead of the last value silently winning. The 1 MiB size and nesting-depth bounds on the IR lint body are unchanged.

@@ -15,7 +15,7 @@ import java.time.LocalDate
 /** Official FINREP F 01.02 liabilities total: r0300/c0010, datapoint 32592 (Framework 4.2). */
 object F0102Mapper {
     fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
-        val lines = snapshot.lines
+        val lines = FinrepCoverage.onBalanceSheet(snapshot.lines)
         val overdraft = NostroOverdraft.of(lines)
         val liabilities = lines
             .filter { it.accountType == "LIABILITY" }
@@ -26,8 +26,14 @@ object F0102Mapper {
         // aggregate deposits row r0120. Rows r0130/r0150 are debt securities and hedge-accounting
         // derivatives respectively, neither of which is present in this ledger chart (#13603).
         val creditInstitutions = creditBalance(lines, "2300", "2301", "2310", "2311").add(overdraft)
-        val deposits = creditBalance(lines, "2001", "2002", "2100", "2101", "2102", "2103", "2320")
-            .add(creditInstitutions)
+        // ADR-0344: repo payable 2430/2431 and its accrual 2420/2421 are deposits at amortised cost.
+        val deposits = creditBalance(
+            lines,
+            "2001", "2002", "2100", "2101", "2102", "2103", "2320",
+            "2420", "2421", "2430", "2431",
+        ).add(creditInstitutions)
+        // ADR-0344 derivative liabilities 2400/2401 and their accrual 2410/2411 are held for trading
+        // and reach total liabilities r0300 only: r0010/r0020 have no verified datapoint id yet.
         val taxPayable = creditBalance(lines, "2200")
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(

@@ -67,11 +67,13 @@ class DomesticPaymentActivitiesImplTest {
     private lateinit var screeningPort: SanctionsScreeningPort
     private lateinit var amlCasePort: AmlCasePort
     private lateinit var fraudScoringPort: FraudScoringPort
-    private lateinit var schemeGatewayPort: SchemeGatewayPort
-    private lateinit var settlementPort: SettlementPort
+
+    // Field initialisers run per test: JUnit 5 creates a fresh instance for every test method.
+    private val schemeGatewayPort: SchemeGatewayPort = mockk()
+    private val settlementPort: SettlementPort = mockk()
     private lateinit var accountLookupPort: AccountLookupPort
     private lateinit var customerNotificationPort: CustomerNotificationPort
-    private lateinit var metrics: DomainMetrics
+    private val metrics: DomainMetrics = mockk(relaxed = true)
 
     private val ownerPartyId: UUID = UUID.randomUUID()
 
@@ -88,7 +90,6 @@ class DomesticPaymentActivitiesImplTest {
         fraudScoringPort = mockk()
         accountLookupPort = mockk()
         customerNotificationPort = mockk()
-        metrics = mockk(relaxed = true)
         activities = object : DomesticPaymentActivitiesImpl(
             paymentRepository,
             bookingWrites,
@@ -103,6 +104,8 @@ class DomesticPaymentActivitiesImplTest {
             clock = Clock.systemUTC(),
             metrics = metrics,
             schemeSubmissionEnabled = false,
+            fraudEnforcementMetrics = mockk(relaxed = true),
+            fraudEnforcementEnabled = false,
         ) {
             override fun <T> vtx(block: suspend () -> T): T = runBlocking { block() }
         }
@@ -120,9 +123,6 @@ class DomesticPaymentActivitiesImplTest {
         coJustRun { paymentRepository.clearSchemeDispatch(any()) }
         coEvery { accountLookupPort.findPartyByAccountId(any()) } returns ownerPartyId
         coJustRun { customerNotificationPort.notifyPaymentFailed(any(), any(), any(), any()) }
-
-        schemeGatewayPort = mockk()
-        settlementPort = mockk()
         activitiesWithScheme = object : DomesticPaymentActivitiesImpl(
             paymentRepository,
             bookingWrites,
@@ -137,6 +137,8 @@ class DomesticPaymentActivitiesImplTest {
             clock = Clock.systemUTC(),
             metrics = metrics,
             schemeSubmissionEnabled = true,
+            fraudEnforcementMetrics = mockk(relaxed = true),
+            fraudEnforcementEnabled = false,
         ) {
             override fun <T> vtx(block: suspend () -> T): T = runBlocking { block() }
         }

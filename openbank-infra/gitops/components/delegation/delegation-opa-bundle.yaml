@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: delegation-service
     app.kubernetes.io/part-of: delegation
   annotations:
-    openbank.tech/policy-checksum: "c973d52798fcc44f"
+    openbank.tech/policy-checksum: "f663c479693a0031"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1409,6 +1409,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
