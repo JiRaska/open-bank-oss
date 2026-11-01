@@ -373,3 +373,40 @@ spec:
   connection:
     connectionLimit:
       value: 500
+  # Same edge security headers as the Gateway-wide policy below: a listener-scoped
+  # ClientTrafficPolicy REPLACES the Gateway-scoped one for that listener (no merge), so
+  # https-api must carry them itself or its locally generated responses lose them again.
+  headers:
+    lateResponseHeaders:
+      set:
+        - name: Strict-Transport-Security
+          value: "max-age=63072000; includeSubDomains; preload"
+        - name: X-Content-Type-Options
+          value: nosniff
+---
+# Edge security headers on EVERY response, including the ones Envoy generates itself (#14480).
+# Each HTTPRoute already sets HSTS and nosniff with a ResponseHeaderModifier, but that filter
+# only runs when a route matches: a request for an unknown path or host gets Envoy's own 404
+# (or a 503/redirect/local reply) without either header, where ingress-nginx sent both on
+# every response. lateResponseHeaders is an HCM-level header_mutation filter, so it encodes
+# local replies too. `set`, not `add`, so a backend or route that already sent the header is
+# not duplicated. Values are the ones every HTTPRoute in gitops/components uses. HSTS on the
+# plain-HTTP redirect listener is ignored by browsers (RFC 6797 s8.1), so Gateway-wide is safe.
+# Verify: curl --resolve <host>:443:<gw> -I https://<host>/does-not-exist
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: edge-security-headers
+  namespace: envoy-gateway-system
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: edge
+  headers:
+    lateResponseHeaders:
+      set:
+        - name: Strict-Transport-Security
+          value: "max-age=63072000; includeSubDomains; preload"
+        - name: X-Content-Type-Options
+          value: nosniff
