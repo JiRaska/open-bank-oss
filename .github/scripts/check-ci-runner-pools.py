@@ -84,7 +84,6 @@ import gatelib  # noqa: E402  (path must be set first)
 # Both entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
 # been applied, so they are declared capacity that does not exist (#6458).
 KNOWN_UNPROVISIONED: dict[str, str] = {
-    "openbank-train": "#14302 — helm_release.arc_train written, not yet applied",
     "openbank-batch": "#6458 — OpenTofu added by #8388, never applied",
     "openbank-dr": "#6458 — OpenTofu added by #8388, never applied",
 }
@@ -112,9 +111,6 @@ KNOWN_UNPROVISIONED: dict[str, str] = {
 # if the OpenTofu resource disappears while the entry remains (STALE-UNAPPLIED), and any
 # NEW job routed at an unapplied pool is reported, so the set cannot silently grow.
 KNOWN_UNAPPLIED: dict[str, str] = {
-    # Remove in the PR that moves merge-train.yml onto the label, after a cluster read
-    # shows `kubectl get autoscalingrunnersets -n arc-runners openbank-train`.
-    "openbank-train": "#14302 — helm_release.arc_train (arc-runners.tf), apply pending",
     "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
     "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
 }
