@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: balance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-48a6da90@sha256:01abc08cebdca2f23051089cdbe3c06cd418449d7560e9b298970ccea0b630a9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-873a9da1@sha256:c2cdb72ff506f3722e76ded446009d36704270961ae8eff22f962dfa1f58cb94
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
