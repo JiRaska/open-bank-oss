@@ -574,7 +574,7 @@ def _candidate_services(
             ),
             services,
         )
-        return {service for service, ok in zip(services, verdicts) if ok}
+        return {service for service, ok in zip(services, verdicts, strict=True) if ok}
 
 
 def resolve_reconcile_service_source(
