@@ -13,6 +13,9 @@ import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.fx.domain.model.FxConversion
 import com.openbank.fx.domain.model.FxRate
+import com.openbank.pension.domain.contribution.Contribution
+import com.openbank.pension.domain.model.PensionContract
+import com.openbank.pension.domain.statecontribution.StateContributionReturn
 import com.openbank.sdd.domain.model.SddMandate
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepainstant.domain.model.SctInstPayment
@@ -98,6 +101,15 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // replays. Same convention as sepaPayments/settlements above.
     val cardAuthorizations = mutableListOf<CardAuthorization>()
     val cardClearings = CardClearingBook()
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the REAL pension-service
+    // domain aggregates driven by PensionLifecycleScenario — the contract lifecycle, the
+    // append-only contribution credits and the statutory state-contribution returns — kept here
+    // so the Layer-3 invariants can assert no contract is left mid-flight and no return obligation
+    // outlives its statutory deadline. Same convention as sepaPayments/settlements above.
+    val pensionContracts = mutableListOf<PensionContract>()
+    val pensionContributions = mutableListOf<Contribution>()
+    val pensionReturns = mutableListOf<StateContributionReturn>()
 
     // Issue #14366 (Test Intelligence simulation gap, money path): the REAL `FxRate` fixings
     // and `FxConversion` aggregates driven by FxConversionScenario, kept here so the Layer-3
