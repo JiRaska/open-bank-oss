@@ -1234,6 +1234,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PositionClose' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
 
   /api/v1/treasury/positions/close-of-day/special:
     post:
@@ -1254,6 +1255,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PositionClose' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
 
   /api/v1/treasury/views/deal-filters:
     get:
