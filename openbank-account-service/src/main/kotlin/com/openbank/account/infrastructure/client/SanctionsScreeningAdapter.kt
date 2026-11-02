@@ -21,12 +21,13 @@ class SanctionsScreeningAdapter : AccountSanctionsScreeningPort {
     @RestClient
     lateinit var client: SanctionsServiceClient
 
-    override suspend fun screen(name: String, idempotencyKey: String): SanctionsScreenResult = try {
+    override suspend fun screen(name: String, idempotencyKey: String, subjectId: String): SanctionsScreenResult = try {
         val response = client.screen(
             SanctionsScreenRequest(
                 idempotencyKey = idempotencyKey,
                 entityType = "INDIVIDUAL",
                 name = name,
+                subjectId = subjectId,
             ),
         ).awaitSuspending()
         SanctionsScreenResult(

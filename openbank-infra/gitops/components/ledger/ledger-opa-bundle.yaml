@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "c488872efd7ab1f5"
+    openbank.tech/policy-checksum: "fe015d754afc4837"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -482,6 +482,16 @@ data:
     	input.action == "catalog.read"
     }
 
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
     allowed_reasons contains "pension-catalog-m2m-read-approval" if {
         input.principal.type == "HUMAN"
         input.principal.id == "service-account-openbank-pension"
@@ -941,6 +951,22 @@ data:
         input.action == "ledger.close.draft"
     }
 
+    # #12906: journal-approval queue reads and checker decisions are human-only. The
+    # explicit machine veto is required for reads because base operator-read-any would
+    # otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+    allowed_reasons contains "operator-journal-approval" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
+    prohibited if {
+        principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
     # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
     # operator-ledger-write above: it is a statutory close event (ADR-0078 D5), not a routine
     # posting, and unlike create/reverse it must NEVER be reachable by any SERVICE principal —
@@ -1020,6 +1046,9 @@ data:
     	# billing holds NO ledger.create on its own identity: its journals ride the shared
     	# openbank-services principal. This is its only ledger grant (#13709 review).
     	"service-account-openbank-billing": "billing",
+    	# treasury reports on the same identity it posts journals with (service-treasury-ledger-post);
+    	# this entry adds only the report for its own participant (#13167).
+    	"service-account-openbank-treasury": "treasury",
     }
 
     allowed_reasons contains "service-close-participation" if {
@@ -1553,6 +1582,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

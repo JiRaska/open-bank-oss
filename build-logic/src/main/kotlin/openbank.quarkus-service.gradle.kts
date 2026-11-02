@@ -2,7 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
+import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
+import javax.inject.Inject
+import org.gradle.api.file.FileSystemOperations
 
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
 // Centralises the boilerplate that used to be copy-pasted across 31 build.gradle.kts
@@ -12,11 +16,11 @@ import java.util.zip.ZipFile
 plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
     id("openbank.static-analysis")
+    id("openbank.packaged-library-sbom")
     // Fleet-wide Netty/Jackson/etc. patch-version floors (issue #461).
     id("openbank.dependency-vulnerability-pins")
 }
@@ -29,6 +33,39 @@ group = "com.openbank"
 // quarkus.application.version at build time, which ServiceInfoResource
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
+
+// Quarkus captures the application coordinates when its plugin is applied.
+// Set the canonical version first so its model and runner use the same version.
+pluginManager.apply("io.quarkus")
+
+// Model collection appends to mutable workspace descriptors. Sharing a descriptor
+// between launch modes changes the next test model and can execute tests again.
+// Capture established Maven coordinates here and give each model task its own
+// provider before evaluation ends: buildForApp registers afterEvaluate source wiring.
+// Eager task configuration is intentional for that lifecycle boundary.
+tasks.withType<QuarkusApplicationModelTask>().all {
+    projectDescriptor.set(ProjectDescriptorBuilder.buildForApp(project))
+}
+
+abstract class QuarkusPackagingFileOperations {
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+}
+
+// Quarkus 3.38 calls DeleteSpec.delete repeatedly, replacing earlier targets.
+// Its generated staging directory then retains obsolete versioned application JARs.
+// Clear that staging directory before augmentation; keep the cacheable app output
+// and dependency output under Quarkus ownership. This action also changes the task
+// implementation fingerprint, so previously contaminated cache entries are not reused.
+val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
+val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+tasks.named("quarkusAppPartsBuild") {
+    doFirst {
+        packagingFileOperations.fileSystemOperations.delete {
+            delete(quarkusGeneratedStaging.get().asFile)
+        }
+    }
+}
 
 // Every service publishes documentation from the same build that produces its JAR.
 // The generated page contains only facts from build inputs. It also supplies an
@@ -318,6 +355,30 @@ tasks.withType<Test>().configureEach {
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
+// Consumer contracts compile independently of the full service test suite.
+// Helpers stay in their existing test paths and are explicitly included by their owners.
+val consumerPactTestSourceSet =
+    sourceSets.create("consumerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactConsumerTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath = sourceSets.main.get().output + configurations.testCompileClasspath.get()
+        runtimeClasspath = output + sourceSets.main.get().output + configurations.testRuntimeClasspath.get()
+    }
+kotlin.target.compilations.getByName("consumerPactTest")
+    .associateWith(kotlin.target.compilations.getByName("main"))
+
+tasks.register<Test>("consumerPactTest") {
+    description = "Regenerates consumer Pact contracts without compiling unrelated service tests."
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = consumerPactTestSourceSet.output.classesDirs
+    classpath = consumerPactTestSourceSet.runtimeClasspath
+    filter.includeTestsMatching("*.contract.*PactConsumerTest")
+    // Pact files live outside this task's declared outputs: every invocation must regenerate.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
 // ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set
 // to run against the broker, and that `-D` is a tracked INPUT of whatever Test task runs it — so
 // invoking the ordinary `test` task with a broker URL set (the main-push "contract" build) is
@@ -374,50 +435,6 @@ val providerPactTest =
 // able to run WITHOUT it, so it never becomes an input the hosted "build" job pays for. Invoke it
 // explicitly: `./gradlew :service:providerPactTest -Dpactbroker.url=...`.
 
-// CycloneDX 2.x declares its destination as one @OutputDirectory. Give it its own
-// directory so it cannot claim Kover's verify.err or other report producers.
-val cyclonedxBomTask = tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
-    setIncludeConfigs(listOf("runtimeClasspath"))
-    setSkipConfigs(listOf("testCompileClasspath", "testRuntimeClasspath", "annotationProcessor", "kapt"))
-    setProjectType("application")
-    setSchemaVersion("1.5")
-    setDestination(layout.buildDirectory.dir("reports/cyclonedx").get().asFile)
-}
-
-// Existing image/release consumers use reports/bom.{json,xml}. Export only those
-// exact files; a Copy task targeting reports/ would reintroduce directory ownership.
-val exportCycloneDxBom = tasks.register("exportCycloneDxBom") {
-    dependsOn(cyclonedxBomTask)
-    inputs.dir(cyclonedxBomTask.flatMap { it.destination }).withPropertyName("sbomDirectory")
-    inputs.property("outputFormat", cyclonedxBomTask.flatMap { it.outputFormat })
-    inputs.property("outputName", cyclonedxBomTask.flatMap { it.outputName })
-    outputs.files(layout.buildDirectory.file("reports/bom.json"), layout.buildDirectory.file("reports/bom.xml"))
-    onlyIf {
-        val producer = cyclonedxBomTask.get()
-        producer.enabled && runCatching { producer.state.rethrowFailure() }.isSuccess &&
-            (producer.state.didWork || producer.state.upToDate)
-    }
-    doLast {
-        val producer = cyclonedxBomTask.get()
-        val formats = when (producer.outputFormat.get()) {
-            "all" -> setOf("json", "xml")
-            else -> setOf(producer.outputFormat.get())
-        }
-        for (format in listOf("json", "xml")) {
-            val target = layout.buildDirectory.file("reports/bom.$format").get().asFile
-            if (format in formats) {
-                val source = producer.destination.get().resolve("${producer.outputName.get()}.$format")
-                check(source.isFile) { "CycloneDX did not produce the enabled $format SBOM" }
-                target.parentFile.mkdirs()
-                source.copyTo(target, overwrite = true)
-            } else {
-                target.delete()
-            }
-        }
-    }
-}
-cyclonedxBomTask.configure { finalizedBy(exportCycloneDxBom) }
-
 // Reproducible archives (issue #8355, OpenSSF Silver build_reproducible): jar entries carry
 // mtimes by default, so two builds of the SAME commit differ byte-for-byte and no supply-chain
 // comparison (rebuild-and-compare, attestation verification) can ever say "identical". Gradle
@@ -439,17 +456,19 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
 kover {
     currentProject {
         sources {
-            // This separate compilation contains only provider-verification tests from
-            // src/test/kotlin; it must not enter the service production coverage denominator.
+            // These separate contract compilations contain only tests from src/test/kotlin;
+            // neither belongs in the service production coverage denominator.
             excludedSourceSets.add("providerPactTest")
+            excludedSourceSets.add("consumerPactTest")
         }
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
             // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
-            // task already executes these provider classes, so letting coverage pull in
-            // providerPactTest repeats verification and can publish to the broker during
-            // every build. Keep that task explicit for the contract lane only.
+            // task already includes consumer and provider classes. Keep contract tasks
+            // explicit: coverage must not repeat consumer regeneration or publish provider
+            // verification to the broker during every build.
             disabledForTestTasks.add("providerPactTest")
+            disabledForTestTasks.add("consumerPactTest")
         }
     }
 }

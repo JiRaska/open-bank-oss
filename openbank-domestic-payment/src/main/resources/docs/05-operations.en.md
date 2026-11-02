@@ -165,3 +165,9 @@ make a domestic transfer a SEPA payment. The default no-block XML remains unchan
 `DomesticPaymentPriority.INSTANT` still has no corresponding scheme code on this wire: choosing
 the domestic scheme's service-level/local-instrument code remains unresolved. Do not interpret
 this compatibility decision as proof that instant priority is communicated to the scheme.
+
+## Fraud enforcement flag (#4403, ADR-0084 §4.2)
+
+`openbank.domestic.fraud.enforcement-enabled` (env `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED`) is **off by default**. While off, every payment proceeds exactly as before and the would-be decision is only counted in `openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`. Calibrate on that metric before turning the flag on.
+
+With the flag on, the `fraudGate` workflow activity fails closed: only a real ALLOW proceeds, DECLINE rejects the payment as `FRAUD_SUSPECTED`, and every other verdict (CHALLENGE, REVIEW, UNKNOWN, any synthetic verdict) holds the payment before scheme submission and opens a `FRAUD_REVIEW` case. A hold is released only by the `resolveFraudHold(RELEASE)` workflow signal; a REJECT signal, or no signal within 48 h, rejects the payment. Nothing sends the signal on case closure yet, so do not enable the flag until that wiring exists. The fraud reject path sends no customer notification (tipping-off). Rollback: set the flag to `false`; payments already waiting keep waiting for their signal or the timeout.

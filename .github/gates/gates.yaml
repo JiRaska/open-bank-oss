@@ -76,6 +76,20 @@
 #
 gates:
 
+  - id: capacity-profile-consistency
+    name: "Proposed capacity profile is internally consistent (ADR-0356)"
+    group: registry
+    mode: enforced
+    rationale: "A qualification workload with inconsistent rates, duplicate YAML keys or invented scenario coverage cannot support reproducible measurements. This checks the profile contract only, not measured capacity or bank approval."
+    review_after: "2027-01-26"
+    budget_seconds: 30
+    min_subjects: 1
+    selftest: python3 .github/scripts/check-capacity-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-capacity-profile.py"]
+    run: |
+      python3 .github/scripts/check-capacity-profile.py --root .
+
   - id: test-intelligence-ecosystem
     name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
     group: kotlin
@@ -1386,6 +1400,32 @@ gates:
     run: |
       python3 .github/scripts/check-loki-rule-self-match.py
 
+  # ADR-0357: a decoy nobody reads is the ADR-0279 outcome again (HoneyEndpointHit over a
+  # filter no service configured, 0 hits in 7 days and unable to fire). Route and rule live
+  # in different files; this is the check between them. ENFORCED.
+  - id: edge-decoy-rule-parity
+    name: "every edge decoy route has a Loki rule reading it, and vice versa (ADR-0357, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 30  # pure YAML scan of gitops/components; measured 9s locally incl. self-test
+    rationale: >-
+      Measured 2026-10-29: openbank.security.honey.paths is set in no service and no manifest,
+      the honeytoken metric series does not exist, and HoneyEndpointHit fired 0 times in 7 days
+      because its subject was never configured. The edge decoys are answered by Envoy and read
+      from the access log by route name, so the pairing is mechanical: an HTTPRoute named
+      edge-decoys-* must be selected by a loki_rule ConfigMap and every such selector must name
+      a declared route. Either half missing is a write-only control.
+    review_after: "2027-04-29"
+    min_subjects: 2   # edge-decoys-commodity and edge-decoys-targeted at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-edge-decoy-rule-parity.py"
+      - "openbank-infra/gitops/components/observability/httproute-edge-decoys.yaml"
+      - "openbank-infra/gitops/components/observability/loki-rules-edge-deception.yaml"
+    selftest: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py --selftest
+    run: |
+      python3 .github/scripts/check-edge-decoy-rule-parity.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -1974,6 +2014,7 @@ gates:
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      python3 -m unittest discover -s perf/tests -p 'test_*.py' -v
       bash .github/scripts/tests/test-resolve-historical-service-ref.sh
       python3 .github/scripts/test-admin-ui-delivery-baseline.py
       python3 .github/scripts/test-admin-ui-evidence-plan.py
@@ -5636,6 +5677,25 @@ gates:
     run: |
       python3 openbank-infra/scripts/check-threat-models.py
 
+  # #9908: validate a service at the PR that activates its Argo Application OR
+  # first places its workload under an already automated Application. The app's
+  # literal source.path is the ownership link; staged desired state is not live.
+  # Existing model/backup rules and the actual OPA generators remain authorities.
+  - id: service-application-readiness
+    name: "automated Application prerequisites at source introduction (#9908)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: "A new auto-synced service previously arrived before its threat model, generated OPA bundle and initial backup declaration; each gap became visible only on a later PR."
+    review_after: "2027-04-14"
+    selftest_inputs: [".github/scripts/check-service-application-readiness.py", ".github/scripts/test_service_application_readiness.py"]
+    selftest: python3 .github/scripts/test_service_application_readiness.py
+    selftest_expect: pass
+    budget_seconds: 120
+    run: |
+      python3 .github/scripts/check-service-application-readiness.py --base "${PR_DIFF_BASE}"
+
   # ADR-0030 D2, diff-aware half (issue #265): when a PR moves a money-path
   # service's TRUST BOUNDARIES — inbound REST surface, a new outbound
   # HTTP/gRPC edge, authn/listener/transport keys in application.yaml, or
@@ -6679,7 +6739,7 @@ gates:
         # config-recorder-healer Lambda; the WeasyPrint render sidecar) and sat outside every
         # root (#6253). Not yet scripts/ or openbank-ap2-service/demo: they carry findings today.
         find .github/scripts openbank-infra/scripts docs openbank-infra/aws openbank-document-renderer \
-          openbank-treasury-service/src/test/parity-oracle -name '*.py' -type f | sort
+          openbank-treasury-service/src/test/parity-oracle perf/scripts perf/tests -name '*.py' -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
@@ -7216,6 +7276,61 @@ gates:
     run: |
       python3 .github/scripts/check-product-ir-purity.py --root .
 
+  # ADR-0352 §9 phase 6 — formal guarantees. Two gates, both advisory at introduction (ADR-0144):
+  #   product-ir-formal-properties  ProductFormalPropertiesTest (openbank-products, module CI lane)
+  #                                 asserts the five properties (termination, balance conservation,
+  #                                 monotone tiers, determinism, purity) and the v1 HALF_UP pin; this
+  #                                 gate only checks those assertions are present, enabled, unnarrowed.
+  #   product-ir-version-lifecycle  at most two irVersions supported, each with its schema, and a
+  #                                 removal only under a breaking-change marker.
+  - id: product-ir-formal-properties
+    name: "product interpreter formal-property assertions are present, enabled and unnarrowed (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "A property test that is deleted, @Disabled or narrowed to a hand-picked list reads like a passing one; the JVM half runs in the module CI lane, this half keeps its scope and assertions present."
+    review_after: "2027-04-30"
+    verified: "2026-10-29 — PRESENCE only, per named test: each of 6 assertion groups (5 properties + the HALF_UP pin) must sit inside its own test or helper body, so a helper definition or a known-negative cannot stand in for a deleted test; deleting any one of 8 property tests, flipping checkRates, dropping the base-rule filter, the per-rule filter in interpreterAccrual, the checkRates ordering block (a 'marginal rate' literal does not satisfy it), the finance scan or a golden, @Disabled, narrowing the scope and a build exclude each turn it red (--self-test, 23 cases). The JVM half was falsified separately: an unbalanced Post, a removed limit guard, System.nanoTime() in the interpreter and in DepositInterest, a falling tier, HALF_EVEN accrual and an always-true monotonicity check each turn ProductFormalPropertiesTest red"
+    budget_seconds: 10
+    min_subjects: 5   # five properties at introduction (2026-10-29)
+    selftest: python3 .github/scripts/check-product-ir-formal-properties.py --self-test
+    selftest_expect: pass
+    # The self-test reads the real test file as its known-good input, so a change to it re-runs the self-test.
+    selftest_inputs: [".github/scripts/check-product-ir-formal-properties.py", "openbank-products/src/test/kotlin/com/openbank/products/ProductFormalPropertiesTest.kt"]
+    run: |
+      python3 .github/scripts/check-product-ir-formal-properties.py --root .
+
+  - id: product-ir-version-lifecycle
+    name: "at most two irVersions supported; removing one is a declared breaking change (ADR-0352, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "A published revision is pinned to its irVersion; dropping that version from IrVersion.SUPPORTED makes every such revision fail to load, so the removal must be visible as breaking and the set must stay small enough to test both members."
+    review_after: "2027-04-30"
+    verified: "2026-10-29 — SUPPORTED=[1] on the real tree; three versions, a version without its schema, an empty set, an unresolvable member and a removal without `!:`/BREAKING CHANGE a pull_request with no base, an unreadable base ref and a base commit whose tree git cannot read each turn it red (--self-test, 16 cases); setOf(V1, 2, 3) in a copy of the real ProductIr.kt is red"
+    budget_seconds: 10
+    min_subjects: 1   # one supported irVersion at introduction (2026-10-29)
+    needs_base: optional
+    selftest: python3 .github/scripts/check-product-ir-version-lifecycle.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-ir-version-lifecycle.py"]
+    run: |
+      python3 .github/scripts/check-product-ir-version-lifecycle.py --root . \
+        --base "${PR_DIFF_BASE:-}" --title "${PR_TITLE:-}" --body "${PR_BODY:-}" --event "${GITHUB_EVENT_NAME:-}"
+
+  - id: product-revision-pinned
+    name: "product-bearing services persist the published catalog revision at contract opening (ADR-0341, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "ADR-0341 D1: a contract's terms come only from the revision it was opened under, so a service that creates a product-bearing aggregate without persisting a pin has no answer to 'what were this contract's terms'. Structural and decidable: migration column, entity @Column, creation path binds the pin; the list is derived from catalog product reference columns so a new product-bearing service cannot stay unlisted."
+    review_after: "2026-12-31"
+    verified: "2026-10-25 — account pinned, lending and card-issuance pending, 3 services excluded with reasons. In a scratch copy of the real tree each of: deleting `productRevisionPin = pin` from AccountService.openAccount, renaming the entity's @Column, and removing V33 turned it red (--enforce exit 1); restoring each turned it green. --self-test 15 cases"
+    budget_seconds: 10
+    min_subjects: 2  # 3 services under product_bearing_services.services at introduction (2026-10-25)
+    selftest: python3 .github/scripts/check-product-revision-pinned.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-product-revision-pinned.py"]
+    run: |
+      python3 .github/scripts/check-product-revision-pinned.py --root .
+
 
   - id: dr-restore-orchestration
     name: "DR restore transport, result validation and owned cleanup"
@@ -7278,6 +7393,21 @@ gates:
     selftest_inputs: [".github/scripts/check-cronjob-max-success-age.py", "openbank-infra/gitops/components/observability/prometheus-rules-jobs.yaml"]
     run: |
       python3 .github/scripts/check-cronjob-max-success-age.py
+
+  - id: native-auto-merge-holds
+    name: "native auto-merge respects live draft and blocked holds"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      Arming auto-merge while a PR is draft, blocked, or has malformed readiness data can leave
+      it poised to merge later without a fresh intentional check; these fixtures keep each
+      arming workflow fail-closed on current PR readiness.
+    review_after: "2027-04-16"
+    budget_seconds: 30
+    min_subjects: 3
+    selftest_exempt: "is-a-test-suite - executes trusted verifier and actual workflow arming blocks against offline GitHub fixtures"
+    run: |
+      python3 .github/scripts/test-verify-dependabot-auto-merge.py
 
   # Phase 2 of the verified service_account flag. The rego that reads it treats a principal
   # WITHOUT the field as a machine for staff rules, so it must not reach the cluster while any

@@ -4,7 +4,9 @@
 
 package com.openbank.pensionfund.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.common.http.TestHTTPResource
 import io.quarkus.test.junit.QuarkusTest
 import org.assertj.core.api.Assertions.assertThat
@@ -25,7 +27,10 @@ import javax.net.ssl.TrustManagerFactory
 
 /** Real listeners, PEM key loading, trust and hostname verification during the additive rollout. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @QuarkusTestResource(ServerTlsTestResource::class, restrictToAnnotatedClass = true)
 class ServerTlsIT {
     @TestHTTPResource(value = "/q/health/live", tls = true)

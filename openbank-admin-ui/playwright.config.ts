@@ -18,8 +18,9 @@ const buildProductionServer = useProductionServer && Boolean(process.env.CI) &&
 export default defineConfig({
   testDir: './e2e',
   // @deployed specs target the live sandbox via playwright.deployed.config.ts, not this stubbed server.
-  grepInvert: /@deployed/,
-  testIgnore: 'image-delivery.spec.ts',
+  // deployed-session.* sign in to the sandbox through Keycloak (playwright.deployed-session.config.ts).
+  grepInvert: /@deployed|@sandbox-session/,
+  testIgnore: ['image-delivery.spec.ts', 'deployed-session.*'],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   // Fail fast in CI — one retry on flake

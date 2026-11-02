@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test
  * in production.
  */
 @QuarkusTest
-@QuarkusTestResource(RedisTestResource::class)
+@QuarkusTestResource(RedisTestResource::class, restrictToAnnotatedClass = true)
 class ApprovalStoreWiringIT {
 
     @Inject

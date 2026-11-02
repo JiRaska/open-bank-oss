@@ -173,6 +173,13 @@ class WebAuthnKeycloakClient {
                 .build(),
             HttpResponse.BodyHandlers.ofString(),
         )
+        // Name the subject on failure. Keycloak's TOKEN_EXCHANGE_ERROR event carries no user id and
+        // the IllegalStateException message below does not either, so without this line a failed
+        // passkey sign-in cannot be traced to WHICH customer it locked out. The id is the
+        // pseudonymous Keycloak UUID (already logged at debug on success), never a username.
+        if (resp.statusCode() != HTTP_OK) {
+            Log.warnf("impersonate: token-exchange failed for kcUserId=%s status=%d", keycloakUserId, resp.statusCode())
+        }
         check(resp.statusCode() == HTTP_OK) {
             "Keycloak token-exchange returned ${resp.statusCode()}: ${resp.body()}"
         }

@@ -102,3 +102,9 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Kafka consumer group override
 
 The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.
+
+## Agent provenance stream (D5)
+
+The `agent-audit-events-in` channel consumes `openbank.agent.audit.events`, the AI-attribution events that agent-service produces, and appends them to the audit store. The deployed Deployment sets `AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true`; the baked `application.yaml` default stays `false`, so local runs and tests without a broker remain fail-closed. The consumer group is `audit-service-agent-provenance` and the offset reset is `earliest`, both supplied by the properties-file override ConfigMap described above.
+
+`AgentAuditConsumer` acknowledges a record only after the audit store has committed it. On failure it NACKs rather than rethrowing, because this handler uses manual acknowledgment and a rethrown exception would cancel the Kafka source instead of parking the record. The channel's `failure-strategy` is `dead-letter-queue`, with records parked on `openbank.dlq.audit.agent-audit-events-in`. A redelivery of an event id that is already stored is de-duplicated. `AgentAuditKafkaPersistenceIT` proves persistence of a sample event, the DLQ path and recovery against a real broker and PostgreSQL.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -15,6 +16,11 @@ import subprocess
 import tempfile
 import time
 import zipfile
+
+VERIFIER_SPEC = importlib.util.spec_from_file_location("packaged_library_sbom", Path(__file__).with_name("verify-packaged-library-sbom.py"))
+VERIFIER = importlib.util.module_from_spec(VERIFIER_SPEC)
+VERIFIER_SPEC.loader.exec_module(VERIFIER)
+RECEIPT = "reports/library-artifacts/verification.json"
 
 SERVICE = "openbank-context-service"
 WORKFLOW = ".github/workflows/services-ci.yml"
@@ -48,7 +54,7 @@ def valid_path(name):
 
 def payload_path(name):
     path = valid_path(name)
-    return name == "reports/bom.json" or (len(path.parts) > 1 and path.parts[0] == "quarkus-app")
+    return name in {"reports/bom.json", RECEIPT} or (len(path.parts) > 1 and path.parts[0] == "quarkus-app")
 
 
 def read_zip(raw):
@@ -103,6 +109,14 @@ def validate_bundle(raw, sha, run_id, attempt):
     bom = json_object(files["reports/bom.json"])
     require(bom.get("bomFormat") == "CycloneDX" and isinstance(bom.get("components"), list)
             and bool(bom["components"]), "invalid or empty SBOM")
+    require(RECEIPT in files, "missing library artifact receipt")
+    with tempfile.TemporaryDirectory(prefix="library-bundle-check-") as scratch:
+        base = Path(scratch)
+        for name, data in files.items():
+            target = base / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        VERIFIER.verify_receipt(bom, json_object(files[RECEIPT]), base / "quarkus-app")
     return files
 
 
@@ -116,7 +130,7 @@ def pack(service, sha, run_id, attempt, out, root=Path(".")):
     base = root / service / "build"
     require(not base.is_symlink() and not (base / "quarkus-app").is_symlink()
             and not (base / "reports").is_symlink(), "symlink build root")
-    paths = sorted((base / "quarkus-app").rglob("*")) + [base / "reports/bom.json"]
+    paths = sorted((base / "quarkus-app").rglob("*")) + [base / "reports/bom.json", base / RECEIPT]
     files, total = {}, 0
     for path in paths:
         require(not path.is_symlink(), "symlink build member")

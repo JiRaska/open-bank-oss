@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ---------------------------------------------------------------------------
+# Keycloak user-deletion watch.
+#
+# THE GAP THIS CLOSES
+#   A Keycloak user id is held by other systems — customer-edge binds each passkey to it, and
+#   party-service stores it as `parties.keycloak_sub` — so a deleted user cannot be recreated:
+#   a new user gets a new id and every link still points at the old one. The only way back is a
+#   point-in-time restore of keycloak-db. Keycloak records each deletion as an admin event and
+#   raises nothing; keycloak-realm-drift compares ROLES, daily, and never looks at people. So a
+#   scripted pass removing customer identities is silent until a customer cannot sign in.
+#
+# WHAT IT DOES
+#   Every 10 minutes: read the admin events (DELETE / USER) and the events config of both realms,
+#   and run `.github/scripts/check-keycloak-user-deletions.py` over them. Any customer-realm
+#   user deletion, a bulk pass in the staff realm, or admin events switched off fails the Job,
+#   and KeycloakUserDeletion (prometheus-rules.yaml) fires. The window (20 min) is twice the
+#   schedule, so one missed run does not drop an event; the alert clears on the next clean run.
+#   The decision logic lives in the repo and is unit-tested
+#   (openbank-infra/scripts/check_keycloak_user_deletions_test.py); this pod holds a credential
+#   and a network path, nothing worth testing.
+#
+# WHAT IT DOES NOT DO
+#   It does not block or restore. Keycloak has no veto hook for admin operations, and a job that
+#   writes to the identity provider is a bigger blast radius than the defect. Recovery is a
+#   human's: PITR keycloak-db to just before the first deletion and re-insert those users.
+#   It writes no ConfigMap and needs no RBAC: the report goes to the pod log, and it holds only
+#   user UUIDs and actor ids — never a username or e-mail.
+#
+# NAMESPACE `iam` for the same reason as keycloak-realm-drift: Keycloak's ingress admits the whole
+# namespace, so no NetworkPolicy change is needed.
+# ---------------------------------------------------------------------------
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: keycloak-user-deletion-watch
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-user-deletion-watch
+    app.kubernetes.io/part-of: iam
+# No Role/RoleBinding: the admin credential arrives via secretKeyRef, resolved by the kubelet.
+automountServiceAccountToken: false
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: keycloak-user-deletion-watch
+  namespace: iam
+  labels:
+    app.kubernetes.io/name: keycloak-user-deletion-watch
+    app.kubernetes.io/part-of: iam
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): a silent watch is an unwatched
+    # realm, so staleness alerts after an hour (six missed runs) via that generic rule.
+    openbank.tech/max-success-age-seconds: "3600"
+spec:
+  schedule: "*/10 * * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  # One failed Job object, not an archive — KubeJobFailed fires per surviving object
+  # (see keycloak-realm-drift.yaml).
+  failedJobsHistoryLimit: 1
+  startingDeadlineSeconds: 300
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 240
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: keycloak-user-deletion-watch
+        spec:
+          serviceAccountName: keycloak-user-deletion-watch
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: watch
+              image: docker.io/alpine/k8s:1.34.12
+              command: ["/bin/sh", "-ec"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: KC_URL
+                  value: http://keycloak.iam.svc:8080
+                - name: KC_ADMIN_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-bootstrap
+                      key: admin-username
+                - name: KC_ADMIN_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: keycloak-bootstrap
+                      key: admin-password
+              args:
+                - |
+                  set -eu
+                  git clone --depth 1 --quiet https://github.com/JiRaska/open-bank-oss.git /tmp/repo
+
+                  # Password via --data-urlencode from the env: never an argv entry in `ps`.
+                  TOKEN=$(curl -sS --fail-with-body \
+                    -X POST "${KC_URL}/realms/master/protocol/openid-connect/token" \
+                    -d "client_id=admin-cli" -d "grant_type=password" \
+                    --data-urlencode "username=${KC_ADMIN_USER}" \
+                    --data-urlencode "password=${KC_ADMIN_PASSWORD}" \
+                    | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+
+                  ARGS=""
+                  for REALM in openbank openbank-customers; do
+                    # Newest first; 1000 covers far more than one 20-minute window. A truncated
+                    # page could only HIDE events, so the cap is set well above any real burst.
+                    curl -sS --fail-with-body -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/admin-events?operationTypes=DELETE&resourceTypes=USER&first=0&max=1000" \
+                      > "/tmp/${REALM}-events.json"
+                    curl -sS --fail-with-body -H "Authorization: Bearer ${TOKEN}" \
+                      "${KC_URL}/admin/realms/${REALM}/events/config" \
+                      > "/tmp/${REALM}-config.json"
+                    ARGS="${ARGS} --events ${REALM}=/tmp/${REALM}-events.json --config ${REALM}=/tmp/${REALM}-config.json"
+                  done
+
+                  # Exit code IS the verdict: non-zero fails the Job and fires the alert.
+                  # shellcheck disable=SC2086
+                  python3 /tmp/repo/.github/scripts/check-keycloak-user-deletions.py \
+                    --now-ms "$(date +%s)000" --window-seconds 1200 --bulk-threshold 3 ${ARGS}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

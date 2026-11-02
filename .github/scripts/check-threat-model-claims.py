@@ -155,10 +155,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
     'openbank-domestic-payment|6. Change log|attemptSettlement':
         'retired by #4221 layer 3; `DomesticPaymentService.kt:125` says so in a comment',
-    'openbank-domestic-payment|6. Change log|fraudEnforcementEnabled':
-        'retired by #4221 layer 3; `FraudEnforcementFlagRetiredTest` locks its absence',
-    'openbank-domestic-payment|6. Change log|openbank.domestic.fraud.enforcement-enabled':
-        'removed by #4221; `application.yaml:174` records the removal in a comment',
     'openbank-fraud-service|6. Change log|fraudServiceUrl':
         'occurs only inside a comment in `fraud_rest_ext.rego`; not a policy input',
     'openbank-ledger-service|8. Change log|ledgerServiceUrl':

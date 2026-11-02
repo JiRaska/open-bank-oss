@@ -57,7 +57,7 @@ info:
   # Balance gains the `id` and `version` it always sent. No served behaviour changed.
   # 1.85.0 -> 1.86.0 (#13711): additive — optional `cursor` query parameter on GET /accounts;
   # delegated accounts are listed in the account page on the first page only.
-  version: 1.86.0
+  version: 1.87.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2586,6 +2586,10 @@ paths:
       responses:
         '200':
           description: Party-scoped notification page with total and exact unreadCount
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalNotificationPage'
 
   /notifications/unified:
     get:
@@ -8096,6 +8100,36 @@ components:
           type: [string, 'null']
         totalCount:
           type: [integer, 'null']
+
+    PersonalNotificationPage:
+      type: object
+      description: Token-party-scoped history. Counts cover the party, independently of this bounded page.
+      required: [items, total, unreadCount, page, size]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/PersonalNotificationSummary'}
+        total: {type: integer, format: int64, minimum: 0}
+        unreadCount: {type: integer, format: int64, minimum: 0}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1, maximum: 100}
+    PersonalNotificationSummary:
+      type: object
+      description: Notification-service metadata passed through unchanged; rendered body is excluded.
+      required: [id, partyId, channel, template, recipient, status, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        channel: {type: string}
+        template: {type: string}
+        templateRevision: {type: [integer, 'null'], format: int64}
+        recipient: {type: string}
+        subject: {type: [string, 'null']}
+        status: {type: string}
+        sentAt: {type: [string, 'null'], format: date-time}
+        visibleAt: {type: [string, 'null'], format: date-time}
+        readAt: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
 
     # Mirrors notification-service's NotificationPreferenceDto. No stored row defaults every
     # channel to true.

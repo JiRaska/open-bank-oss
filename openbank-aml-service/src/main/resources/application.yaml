@@ -98,6 +98,15 @@ mp:
         topic: openbank.aml.events
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Durable fan-out for HIGH/CRITICAL findings (ADR-0031 D9). The trigger body carries only
+      # sourceService + occurredAt; ce-id/ce-type headers retain correlation to the outbox event.
+      oversight-events-out:
+        connector: smallrye-kafka
+        client:
+          id: aml-oversight-${quarkus.uuid}
+        topic: openbank.oversight-triggers
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
       # Onboarding AML screening (ADR-0267 §2): open a screening case on PARTY_CREATED; the
       # AML outcome is the second key of the party activation gate.
