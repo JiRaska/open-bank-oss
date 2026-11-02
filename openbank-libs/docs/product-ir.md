@@ -165,6 +165,16 @@ three iterations took 3.3, 3.4 and 4.2 s, a mean of 3.6 s and about 5 µs per ev
 p99 of 0.048 ms per golden-set op, inside the 2 ms per-`evaluate` budget. The op allocates about
 5.4 GB, recorded in `alloc-baseline.json`.
 
+### Replay findings
+
+The first replay of the reference products found three behaviours. Each was decided as follows:
+
+| Finding | Decision |
+|---|---|
+| `term-deposit` had no balance rule in `prePosting`, so a withdrawal larger than the balance overdrew it | Defect, fixed in `openbank-products`: a `PROJECTED_BALANCE LT 0.00` reject (`INSUFFICIENT_FUNDS`), ordered before the early-withdrawal penalty so a refused withdrawal is never charged one |
+| The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full. Bounding it needs a new IR construct, and the v1 schema is immutable (ADR-0352 §1); tracked as #14207, folded into the IR v2 issue #14210 |
+| Capitalisation rounds accrued interest HALF_UP to the cent, so `accruedInterest` can carry a sub-cent negative remainder into the next period | Unchanged in this IR version. Capitalisation rounding is part of every published revision's behaviour, so changing it (to DOWN, or to sweeping the residue at maturity or close) is an IR-version decision, not a shared-arithmetic edit (#14210). Each HALF_UP capitalisation leaves `|r| <= 0.005`, carried rather than accumulated, and negative when the cent was rounded up; an `AT_MATURITY` revision keeps its last `r` on `ACCRUED_INTEREST_PAYABLE`. The replay reports this as the named limitation `v1-capitalisation-residue` and asserts the bound |
+
 ## Testing
 
 openbank-libs-testing holds the golden-scenario runner, `ProductArb` property

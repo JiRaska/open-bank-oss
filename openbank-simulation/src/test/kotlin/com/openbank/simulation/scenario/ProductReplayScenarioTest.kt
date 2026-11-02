@@ -12,6 +12,7 @@ import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.PinnedRevisionUnavailableException
 import com.openbank.libs.testing.product.PortfolioShape
 import com.openbank.libs.testing.product.SyntheticPortfolio
+import com.openbank.simulation.model.CapitalisationResidueTracker
 import com.openbank.simulation.model.ProductShadowBook
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -131,5 +132,47 @@ class ProductReplayScenarioTest {
             return (tiers + walk(rev.interest?.bonus?.predicate) + rev.fees.flatMap { walk(it.waiver) })
                 .filter { it.signum() > 0 }.distinct().sorted()
         }
+    }
+
+    @Test
+    fun `accrued interest closes against capitalisations for a periodic and an at-maturity product`() {
+        for (name in listOf("savings-fixed", "term-deposit")) {
+            val case = ProductReplayScenario.CASES.first { it.name == name }
+            val report = ProductReplayScenario.run(case, portfolio(case, 20_270_101L, 200), range)
+            val capitalised = report.closures.values.filter { it.residues.isNotEmpty() }
+            assertThat(capitalised).describedAs(name).isNotEmpty
+            for (c in capitalised) {
+                // Closure: what accrued, less what was capitalised and otherwise debited, is what is left.
+                assertThat(c.implied).describedAs(name)
+                    .isEqualByComparingTo(c.opening + c.accrued - c.capitalised - c.otherDebits)
+                // IR v1 limitation: HALF_UP leaves at most half a cent per capitalisation, not zero.
+                assertThat(c.residues).describedAs(name).allSatisfy {
+                    assertThat(it.abs()).isLessThanOrEqualTo(CapitalisationResidueTracker.V1_RESIDUE_BOUND)
+                }
+            }
+            assertThat(report.limitations).describedAs(name)
+                .containsExactly(ProductReplayScenario.V1_CAPITALISATION_RESIDUE)
+            assertThat(
+                report.violations.filter {
+                    it.startsWith("accrued-closure") || it.startsWith("capitalisation-")
+                },
+            )
+                .describedAs(name).isEmpty()
+        }
+    }
+
+    @Test
+    fun `the HALF_UP remainder carries across monthly capitalisations instead of accumulating`() {
+        val case = ProductReplayScenario.CASES.first { it.name == "savings-fixed" }
+        val report = ProductReplayScenario.run(case, portfolio(case, 20_270_101L, 200), range)
+        val multi = report.closures.values.filter { it.residues.size >= 12 }
+        assertThat(multi).isNotEmpty
+        // Each residue is the carried remainder after that capitalisation, so it stays inside one
+        // capitalisation's bound however many there were; an accumulating error would exceed it.
+        assertThat(multi.flatMap { it.residues }).allSatisfy {
+            assertThat(it.abs()).isLessThanOrEqualTo(CapitalisationResidueTracker.V1_RESIDUE_BOUND)
+        }
+        // And it is a real limitation, not a vacuous pass: some capitalisation rounded the cent up.
+        assertThat(multi.flatMap { it.residues }).anyMatch { it.signum() < 0 }
     }
 }
