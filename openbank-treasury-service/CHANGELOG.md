@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.0...treasury-service-v0.20.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **treasury:** alias SettlementRail to the iso20022 library enum ([#14381](https://github.com/JiRaska/open-bank-oss/issues/14381)) ([b2d7745](https://github.com/JiRaska/open-bank-oss/commit/b2d774577f4fb02619ef3483ad7f7d52d4f0f5f7))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.1...treasury-service-v0.20.0) (2026-10-30)
+
+
+### Features
+
+* **treasury:** posting matrix, credit exposure and day completion for every product ([#14182](https://github.com/JiRaska/open-bank-oss/issues/14182)) ([cd115b6](https://github.com/JiRaska/open-bank-oss/commit/cd115b635d8ac6d16c7fb33dd3bd4b276432ebd9))
+
+
+### Bug Fixes
+
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
 ## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.0...treasury-service-v0.19.1) (2026-10-30)
 
 

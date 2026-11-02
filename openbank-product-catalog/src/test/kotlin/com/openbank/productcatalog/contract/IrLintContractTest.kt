@@ -15,12 +15,15 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.DriverManager
+import java.util.UUID
 
 /**
  * API contract of ADR-0352 phase 5b on the catalog (openapi.yaml 2.10.0): `POST /api/v2/product-ir/lint`,
@@ -103,6 +106,119 @@ class IrLintContractTest {
                 body("revisionHash", equalTo(expected.revisionHash))
             } Extract { jsonPath().getString("canonicalIr") }
             assertThat(canonical).describedAs(file.fileName.toString()).isEqualTo(committed)
+        }
+    }
+
+    @Test
+    fun `a duplicate JSON key is refused, never last-wins - obp lint refuses the same document`() {
+        // Jackson's default keeps the LAST duplicate; IrJson (obp lint) rejects the document. Last-wins
+        // here would lint and save an IR the CLI refuses.
+        Given {
+            contentType("application/json")
+            body("""{"ir":{"irVersion":1,"productCode":"X","productCode":"Y","currency":"EUR","hooks":{}}}""")
+        } When {
+            post("/api/v2/product-ir/lint")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `a duplicate JSON key is refused on the revision write too`() {
+        // The write shares the request decoder. Control first: the same body WITHOUT the duplicate
+        // decodes and reaches the handler (unknown revision, so not a 400); with the duplicate it is
+        // refused at decode.
+        val path = "/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}"
+        val head = """{"schemaRef":{"id":"org.openbank.banking.deposit","version":1},""" +
+            """"name":{"en":"N"},"attributes":{}"""
+        val control = Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("$head}")
+        } When {
+            put(path)
+        } Extract { statusCode() }
+        assertThat(control).describedAs("control body must decode").isNotEqualTo(400)
+        Given {
+            contentType("application/json")
+            header("If-Match", "\"0\"")
+            body("""$head,"name":{"en":"M"}}""")
+        } When {
+            put(path)
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `an IR over the 1 MiB instance bound is a 400 before the parser runs`() {
+        val padding = "a".repeat(1024 * 1024 + 1)
+        Given {
+            contentType("application/json")
+            body("""{"ir":{"irVersion":1,"productCode":"X","currency":"EUR","hooks":{},"bogus":"$padding"}}""")
+        } When {
+            post("/api/v2/product-ir/lint")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `an IR nested past depth 64 is a 400 before the parser runs`() {
+        val deep = "[".repeat(70) + "]".repeat(70)
+        Given {
+            contentType("application/json")
+            body("""{"ir":{"irVersion":1,"productCode":"X","currency":"EUR","hooks":{},"bogus":$deep}}""")
+        } When {
+            post("/api/v2/product-ir/lint")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    fun `lint stores nothing`() {
+        val before = catalogRowCounts()
+        val committed = Files.readString(
+            Files.list(IR_DIR).use { s ->
+                s.filter { it.toString().endsWith(".json") }.sorted().findFirst().get()
+            },
+        )
+        Given {
+            contentType("application/json")
+            body("""{"ir":$committed}""")
+        } When {
+            post("/api/v2/product-ir/lint")
+        } Then {
+            statusCode(200)
+            body("valid", equalTo(true))
+        }
+        assertThat(catalogRowCounts()).isEqualTo(before)
+    }
+
+    private fun catalogRowCounts(): Map<String, Long> {
+        val config = ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            val tables = connection.createStatement().use { st ->
+                st.executeQuery(
+                    "select table_name from information_schema.tables where table_schema = current_schema() and table_type = 'BASE TABLE'",
+                ).use { rs ->
+                    generateSequence { if (rs.next()) rs.getString(1) else null }.toList()
+                }
+            }
+            assertThat(tables).contains("catalog_revisions", "catalog_audit", "catalog_outbox")
+            return tables.associateWith { table ->
+                connection.createStatement().use { st ->
+                    st.executeQuery("select count(*) from \"$table\"").use { rs ->
+                        rs.next()
+                        rs.getLong(1)
+                    }
+                }
+            }
         }
     }
 

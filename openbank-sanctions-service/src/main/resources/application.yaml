@@ -140,6 +140,9 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  api:
+    version: "3"
+    sunset-date: "Sat, 01 May 2027 00:00:00 GMT"
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
   # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
   # removes the ApprovalStore bean, and with it four-eyes.

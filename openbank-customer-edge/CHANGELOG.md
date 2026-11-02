@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **customer-edge:** describe the personal notification page contract ([#14240](https://github.com/JiRaska/open-bank-oss/issues/14240)) ([b47e460](https://github.com/JiRaska/open-bank-oss/commit/b47e460c73f4dd67c659c8011cd45f8ff6c02c95))
+
 ## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.0...customer-edge-v1.5.1) (2026-10-29)
 
 

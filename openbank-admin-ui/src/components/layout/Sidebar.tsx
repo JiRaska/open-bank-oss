@@ -8,6 +8,7 @@ import { useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { useInitialRoles } from '@/components/auth/InitialRolesContext'
 import {
   Activity,
   FilePlus,
@@ -273,8 +274,14 @@ const ALL_NAV: NavItem[] = [
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const initialRoles = useInitialRoles()
   const { t, language } = useLanguage()
-  const roles: string[] = session?.user?.roles ?? []
+  // The server already rendered this shell with the operator's roles (RootLayout reads
+  // the session cookie); until the client useSession() round-trip resolves, derive the
+  // SAME roles so hydration matches and the nav never re-paints under the user (the
+  // admin-operator-access journey measured a stable 0.12+ workspace CLS from that
+  // re-paint). When the session lands with identical roles the re-render is a no-op.
+  const roles: string[] = session?.user?.roles ?? initialRoles ?? []
   const roleSignature = roles.join('\u0000')
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
   const isLocked = (item: NavItem) =>

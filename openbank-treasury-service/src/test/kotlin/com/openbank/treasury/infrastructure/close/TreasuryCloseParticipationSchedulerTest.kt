@@ -77,6 +77,24 @@ class TreasuryCloseParticipationSchedulerTest {
         assertThat(report(accrualEnabled = false)).isNull()
     }
 
+    // --- #13883: an open posting intent is a journal the ledger may hold that treasury has not applied ---
+
+    @Test
+    fun `an open posting intent valued on the day holds it even after a complete pass`() {
+        ran()
+        evidence.postings[DAY] = DayJournalPostings(1, 0, 0, openIntents = 1)
+        assertThat(report()).isNull()
+    }
+
+    @Test
+    fun `an open posting intent also holds the day when accrual is switched off`() {
+        // No journal recorded at all: without the intent the day would be reported SKIPPED, short.
+        evidence.postings[DAY] = DayJournalPostings(0, 0, 0, openIntents = 1)
+        assertThat(report(accrualEnabled = false)).isNull()
+        evidence.postings[DAY] = DayJournalPostings(0, 0, 0)
+        assertThat(report(accrualEnabled = false)!!.outcome).isEqualTo(CloseOutcome.SKIPPED)
+    }
+
     @Test
     fun `no accrual run for the day reports nothing, so the ledger holds the day`() {
         assertThat(report()).isNull()

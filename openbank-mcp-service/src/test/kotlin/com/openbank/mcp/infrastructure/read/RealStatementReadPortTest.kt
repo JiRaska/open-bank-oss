@@ -44,7 +44,7 @@ class RealStatementReadPortTest {
     @Test
     fun `an exact legalSequence with currency calls the summary endpoint directly`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = FakeAccountServiceClient(mapOf("CZ01" to accountJson(internalId)))
+        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
         val statements = FakeStatementServiceClient(
             summaries = mapOf(Triple(internalId, "CZK", 3L) to statementJson(listOf("groceries" to null))),
         )
@@ -61,7 +61,7 @@ class RealStatementReadPortTest {
     fun `legalSequence without currency is a client error, not a silent guess`() {
         val port = RealStatementReadPort(
             FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01")),
-            FakeAccountServiceClient(mapOf("CZ01" to accountJson(internalId))),
+            accountServiceStub(mapOf("CZ01" to accountJson(internalId))),
             FakeStatementServiceClient(emptyMap()),
         )
 
@@ -72,7 +72,7 @@ class RealStatementReadPortTest {
     @Test
     fun `omitting both resolves the most recently CLOSED period`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
-        val accounts = FakeAccountServiceClient(mapOf("CZ01" to accountJson(internalId)))
+        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
         val periods = mapper.createArrayNode().apply {
             addObject().put("pocketCurrency", "CZK").put("legalSequenceNumber", 1L).put("status", "CLOSED")
             addObject().put("pocketCurrency", "CZK").put("legalSequenceNumber", 2L).put("status", "SUPERSEDED")
@@ -93,7 +93,7 @@ class RealStatementReadPortTest {
     fun `denies an account outside the granted consent scope before calling statement-service`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
         val statements = FakeStatementServiceClient(emptyMap())
-        val port = RealStatementReadPort(consent, FakeAccountServiceClient(emptyMap()), statements)
+        val port = RealStatementReadPort(consent, accountServiceStub(emptyMap()), statements)
 
         assertThatThrownBy { port.getStatementSummary(ctx, "CZ99-not-granted", "CZK", 1L) }
             .isInstanceOf(IllegalStateException::class.java)
@@ -109,7 +109,7 @@ class RealStatementReadPortTest {
                 Triple(internalId, "CZK", 1L) to statementJson(listOf(null to null, "monthly fee" to null)),
             ),
         )
-        val accounts = FakeAccountServiceClient(mapOf("CZ01" to accountJson(internalId)))
+        val accounts = accountServiceStub(mapOf("CZ01" to accountJson(internalId)))
         val port = RealStatementReadPort(consent, accounts, statements)
 
         val entries = port.getStatementSummary(ctx, "CZ01", "CZK", 1L).path("entries")

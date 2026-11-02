@@ -16,6 +16,7 @@ enum class SanctionsListType {
     FATF_HIGH_RISK,
     PEP_GLOBAL,
     CNB_DOMESTIC,
+    CZ_TERRORISTS,
 }
 enum class MatchType { EXACT, FUZZY, PHONETIC, ALIAS }
 

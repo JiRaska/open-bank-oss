@@ -6,21 +6,30 @@ package com.openbank.treasury.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.Roles
 import com.openbank.treasury.application.port.`in`.CashFlowUseCase
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.TreasuryCalendarEvent
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryEventType
+import com.openbank.treasury.application.port.out.DayCompletionRepository
+import com.openbank.treasury.application.port.out.PositionClose
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
+import com.openbank.treasury.application.port.out.SavedFilter
+import com.openbank.treasury.application.port.out.ViewsRepository
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
@@ -72,6 +81,12 @@ class TreasuryResource {
 
     @Inject
     lateinit var cashFlows: CashFlowUseCase
+
+    @Inject
+    lateinit var views: ViewsRepository
+
+    @Inject
+    lateinit var dayCompletion: DayCompletionRepository
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -172,6 +187,21 @@ class TreasuryResource {
         deals.get(id).journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) }
 
     @GET
+    @Path("/day-completion/{date}")
+    @Operation(
+        summary = "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)",
+    )
+    @Authorize(action = "treasury.deal.read")
+    suspend fun dayCompletion(@PathParam("date") date: LocalDate): DayCompletionResponse =
+        DayCompletionResponse.from(date, dayCompletion.day(date))
+
+    @GET
+    @Path("/posting-rules")
+    @Operation(summary = "The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)")
+    @Authorize(action = "treasury.reference.read")
+    fun postingRules(): List<PostingRuleDto> = deals.postingRules().map(PostingRuleDto::from)
+
+    @GET
     @Path("/deals/{id}/versions")
     @Operation(summary = "The deal's versions with a summary of what changed")
     @Authorize(action = "treasury.deal.read", resource = "#id")
@@ -212,6 +242,78 @@ class TreasuryResource {
         bookId,
         types?.split(',')?.map { TreasuryEventType.valueOf(it.trim()) }?.toSet(),
     )
+
+    @POST
+    @Path("/positions/close-of-day")
+    @RolesAllowed(BACK_OFFICE)
+    @Operation(summary = "Record a close-of-day position snapshot")
+    @Authorize(action = "treasury.position.close")
+    suspend fun closeOfDay(@HeaderParam("Idempotency-Key") key: String?, request: PositionCloseRequest): Response =
+        close(requireKey(key), request, special = false)
+
+    @POST
+    @Path("/positions/close-of-day/special")
+    @RolesAllowed(BACK_OFFICE)
+    @Operation(summary = "Record a special (out-of-cycle or scenario) position close")
+    @Authorize(action = "treasury.position.close")
+    suspend fun closeSpecial(@HeaderParam("Idempotency-Key") key: String?, request: PositionCloseRequest): Response =
+        close(requireKey(key), request, special = true)
+
+    private suspend fun close(key: String, request: PositionCloseRequest, special: Boolean): Response {
+        val date = requireNotNull(request.date) { "date is required" }
+        val a = actor()
+        require(a.type == ActorType.HUMAN) { "only a person records a position close" }
+        val report = deals.positions(date)
+        val close = views.recordClose(
+            PositionClose(
+                snapshotId = Ids.newId(),
+                date = date,
+                bookId = request.bookId,
+                scenario = request.scenario,
+                special = special,
+                closedBy = a.id,
+                closedAt = java.time.Instant.now(),
+                positionsJson = objectMapper.writeValueAsString(PositionsResponse.from(report)),
+            ),
+            key,
+        )
+        return Response.status(Response.Status.CREATED).entity(PositionCloseResponse.from(close, objectMapper)).build()
+    }
+
+    @GET
+    @Path("/views/deal-filters")
+    @Operation(summary = "The caller's saved blotter filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun filters(): List<SavedFilterDto> = views.filters(actor().id).map {
+        SavedFilterDto.from(it, objectMapper)
+    }
+
+    @POST
+    @Path("/views/deal-filters")
+    @Operation(summary = "Save (or replace by name) one of the caller's blotter filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun saveFilter(request: SavedFilterDto): Response {
+        val name = requireNotNull(request.name?.takeIf { it.isNotBlank() && it.length <= MAX_FILTER_NAME }) {
+            "name is required (1..$MAX_FILTER_NAME)"
+        }
+        val filter = requireNotNull(request.filter?.takeIf { it.isObject }) { "filter must be a JSON object" }
+        val saved = views.saveFilter(SavedFilter(actor().id, name, filter.toString(), java.time.Instant.now()))
+        return Response.status(Response.Status.CREATED).entity(SavedFilterDto.from(saved, objectMapper)).build()
+    }
+
+    @DELETE
+    @Path("/views/deal-filters/{name}")
+    @Operation(summary = "Delete one of the caller's saved filters")
+    @Authorize(action = "treasury.deal.read")
+    suspend fun deleteFilter(@PathParam("name") name: String): Response = if (views.deleteFilter(
+            actor().id,
+            name,
+        )
+    ) {
+        Response.noContent().build()
+    } else {
+        Response.status(Response.Status.NOT_FOUND).build()
+    }
 
     @POST
     @Path("/deals")
@@ -394,6 +496,52 @@ class TreasuryResource {
         deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
             .let { view(id) }
 
+    /**
+     * #13883: an operator closes the OPEN posting intent of a deal's settlement, maturity or reversal
+     * that cannot complete, releasing its day's close hold. Its own OPA action
+     * (`treasury.posting-intent.close`, approvers only, never an agent); the domain refuses a
+     * non-person and, four eyes, the posting's own actor and the deal's approver (422). Who and why
+     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists; 409
+     * POSTING_IN_FLIGHT when it may still be posting (younger than the grace, or claimed).
+     */
+    @POST
+    @Path("/deals/{id}/posting-intent/close")
+    @RolesAllowed(APPROVER)
+    @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
+    @Authorize(action = "treasury.posting-intent.close", resource = "#id")
+    suspend fun closePostingIntent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ClosePostingIntentRequest?,
+    ): Response {
+        val idempotencyKey = requireKey(key)
+        requireNotNull(request) { "a request body is required" }
+        val event = requireNotNull(request.event) { "event is required" }
+        require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
+        val reason = requireNotNull(request.reason) { "reason is required" }
+        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor(), idempotencyKey)) {
+            PostingIntentCloseOutcome.CLOSED -> Response.noContent().build()
+            PostingIntentCloseOutcome.NOT_OPEN -> Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+            // Resolved by the service (a replay is CLOSED, a reuse 400); listed for exhaustiveness.
+            PostingIntentCloseOutcome.DUPLICATE_KEY -> throw IllegalArgumentException(
+                "Idempotency-Key already used for a different request",
+            )
+            PostingIntentCloseOutcome.IN_FLIGHT -> Response.status(Response.Status.CONFLICT)
+                .entity(
+                    mapOf(
+                        "error" to "POSTING_IN_FLIGHT",
+                        "message" to "the $event posting on deal $id may still be in flight (younger than the " +
+                            "grace period, or claimed by the reconciler); retry in a few minutes",
+                    ),
+                )
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+    }
+
     @GET
     @Path("/counterparties")
     @Operation(summary = "Counterparty limits with current exposure and headroom per currency")
@@ -429,6 +577,7 @@ const val APPROVER = "ROLE_TREASURY_APPROVER"
 /** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
 const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"
 
+private const val MAX_FILTER_NAME = 64
 private const val DEFAULT_QUEUE = 100
 
 /** ADR-0344 D3: proposes reference-data changes. Never approves them (that is [APPROVER]). */
@@ -445,3 +594,6 @@ const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"
  * term author (the domain), never an AI agent, and no other treasury role releases.
  */
 const val PAYMENT_RELEASER = "ROLE_TREASURY_PAYMENT_RELEASER"
+
+/** The lifecycle events that record a posting intent (#13883). */
+private val CLOSABLE_EVENTS = setOf("SETTLED", "MATURED", "REVERSED")

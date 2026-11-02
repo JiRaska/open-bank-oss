@@ -4,11 +4,17 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.out.PositionClose
+import com.openbank.treasury.application.port.out.SavedFilter
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.ProductType
+import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
 /** The blotter filters (ADR-0344 catalogue); every field optional and ANDed. */
 data class DealFilter(
@@ -117,3 +123,59 @@ object DealExport {
 }
 
 data class SendConfirmationRequest(val documentId: String? = null, val channel: String? = null)
+
+data class PositionCloseRequest(val date: LocalDate? = null, val bookId: String? = null, val scenario: String? = null)
+
+data class PositionCloseResponse(
+    val snapshotId: UUID,
+    val date: LocalDate,
+    val bookId: String?,
+    val scenario: String?,
+    val special: Boolean,
+    val closedBy: String,
+    val closedAt: Instant,
+    val positions: JsonNode,
+) {
+    companion object {
+        fun from(c: PositionClose, mapper: ObjectMapper) = PositionCloseResponse(
+            c.snapshotId,
+            c.date,
+            c.bookId,
+            c.scenario,
+            c.special,
+            c.closedBy,
+            c.closedAt,
+            mapper.readTree(c.positionsJson).path("positions"),
+        )
+    }
+}
+
+data class SavedFilterDto(val name: String? = null, val filter: JsonNode? = null, val updatedAt: Instant? = null) {
+    companion object {
+        fun from(f: SavedFilter, mapper: ObjectMapper) =
+            SavedFilterDto(f.name, mapper.readTree(f.filterJson), f.updatedAt)
+    }
+}
+
+/** ADR-0344 D7: one bank day's completion record; a step with no recorded run is PENDING. */
+data class DayCompletionResponse(val date: LocalDate, val steps: List<DayStepDto>) {
+    companion object {
+        fun from(date: LocalDate, recorded: List<com.openbank.treasury.domain.model.DayStepRecord>) =
+            DayCompletionResponse(
+                date,
+                com.openbank.treasury.domain.model.DayStepRecord.day(date, recorded).map {
+                    DayStepDto(it.step.name, it.status.name, it.count, it.journals, it.refused, it.detail, it.at)
+                },
+            )
+    }
+}
+
+data class DayStepDto(
+    val step: String,
+    val status: String,
+    val count: Int?,
+    val journals: Int,
+    val refused: Int,
+    val detail: String?,
+    val at: Instant?,
+)

@@ -33,7 +33,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  *
  * `@TestSecurity` is absent here on purpose, so the request arrives anonymous and
  * `LedgerResource`'s `@RolesAllowed` answers 401 — the behaviour the consumer encoded. Same split
- * as `TransactionPactFolderProviderVerificationTest` / `TransactionNegativeAuthPactVerificationTest`
+ * as `TransactionPactFolderProviderVerificationTest` / `TransactionNegativeAuthProviderVerificationTest`
  * in openbank-transaction-service, which this class mirrors.
  *
  * ## Why the split is safe

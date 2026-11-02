@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.sanctions.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -37,11 +38,11 @@ import java.util.UUID
 @QuarkusTestResource(PostgresTestResource::class)
 class SanctionsListTypeFilterIT {
 
-    private fun screen(body: String) = Given {
+    private fun screen(body: String, major: Int = 1) = Given {
         contentType("application/json")
         body(body)
     } When {
-        post("/api/v1/sanctions/screen")
+        post("/api/v$major/sanctions/screen")
     }
 
     private fun payload(listTypes: String?) = buildString {
@@ -80,8 +81,8 @@ class SanctionsListTypeFilterIT {
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `absent list types still means every list`() {
-        screen(payload(null)) Then {
+    fun `absent list types still means every list in v3`() {
+        screen(payload(null), major = 3) Then {
             statusCode(201)
             body("checkedLists", hasSize<String>(SanctionsListTypeCount.ALL))
         }
@@ -89,5 +90,5 @@ class SanctionsListTypeFilterIT {
 }
 
 private object SanctionsListTypeCount {
-    const val ALL = 7
+    const val ALL = 8
 }

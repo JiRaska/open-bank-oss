@@ -2,7 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
+import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
+import javax.inject.Inject
+import org.gradle.api.file.FileSystemOperations
 
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
 // Centralises the boilerplate that used to be copy-pasted across 31 build.gradle.kts
@@ -12,7 +16,6 @@ import java.util.zip.ZipFile
 plugins {
     id("org.jetbrains.kotlin.jvm")
     id("org.jetbrains.kotlin.plugin.allopen")
-    id("io.quarkus")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
@@ -30,6 +33,39 @@ group = "com.openbank"
 // quarkus.application.version at build time, which ServiceInfoResource
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
+
+// Quarkus captures the application coordinates when its plugin is applied.
+// Set the canonical version first so its model and runner use the same version.
+pluginManager.apply("io.quarkus")
+
+// Model collection appends to mutable workspace descriptors. Sharing a descriptor
+// between launch modes changes the next test model and can execute tests again.
+// Capture established Maven coordinates here and give each model task its own
+// provider before evaluation ends: buildForApp registers afterEvaluate source wiring.
+// Eager task configuration is intentional for that lifecycle boundary.
+tasks.withType<QuarkusApplicationModelTask>().all {
+    projectDescriptor.set(ProjectDescriptorBuilder.buildForApp(project))
+}
+
+abstract class QuarkusPackagingFileOperations {
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+}
+
+// Quarkus 3.38 calls DeleteSpec.delete repeatedly, replacing earlier targets.
+// Its generated staging directory then retains obsolete versioned application JARs.
+// Clear that staging directory before augmentation; keep the cacheable app output
+// and dependency output under Quarkus ownership. This action also changes the task
+// implementation fingerprint, so previously contaminated cache entries are not reused.
+val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
+val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+tasks.named("quarkusAppPartsBuild") {
+    doFirst {
+        packagingFileOperations.fileSystemOperations.delete {
+            delete(quarkusGeneratedStaging.get().asFile)
+        }
+    }
+}
 
 // Every service publishes documentation from the same build that produces its JAR.
 // The generated page contains only facts from build inputs. It also supplies an
@@ -319,6 +355,30 @@ tasks.withType<Test>().configureEach {
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
+// Consumer contracts compile independently of the full service test suite.
+// Helpers stay in their existing test paths and are explicitly included by their owners.
+val consumerPactTestSourceSet =
+    sourceSets.create("consumerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactConsumerTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath = sourceSets.main.get().output + configurations.testCompileClasspath.get()
+        runtimeClasspath = output + sourceSets.main.get().output + configurations.testRuntimeClasspath.get()
+    }
+kotlin.target.compilations.getByName("consumerPactTest")
+    .associateWith(kotlin.target.compilations.getByName("main"))
+
+tasks.register<Test>("consumerPactTest") {
+    description = "Regenerates consumer Pact contracts without compiling unrelated service tests."
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    testClassesDirs = consumerPactTestSourceSet.output.classesDirs
+    classpath = consumerPactTestSourceSet.runtimeClasspath
+    filter.includeTestsMatching("*.contract.*PactConsumerTest")
+    // Pact files live outside this task's declared outputs: every invocation must regenerate.
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
+}
+
 // ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set
 // to run against the broker, and that `-D` is a tracked INPUT of whatever Test task runs it — so
 // invoking the ordinary `test` task with a broker URL set (the main-push "contract" build) is
@@ -396,17 +456,19 @@ tasks.withType<org.gradle.jvm.tasks.Jar>().configureEach {
 kover {
     currentProject {
         sources {
-            // This separate compilation contains only provider-verification tests from
-            // src/test/kotlin; it must not enter the service production coverage denominator.
+            // These separate contract compilations contain only tests from src/test/kotlin;
+            // neither belongs in the service production coverage denominator.
             excludedSourceSets.add("providerPactTest")
+            excludedSourceSets.add("consumerPactTest")
         }
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
             // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
-            // task already executes these provider classes, so letting coverage pull in
-            // providerPactTest repeats verification and can publish to the broker during
-            // every build. Keep that task explicit for the contract lane only.
+            // task already includes consumer and provider classes. Keep contract tasks
+            // explicit: coverage must not repeat consumer regeneration or publish provider
+            // verification to the broker during every build.
             disabledForTestTasks.add("providerPactTest")
+            disabledForTestTasks.add("consumerPactTest")
         }
     }
 }
