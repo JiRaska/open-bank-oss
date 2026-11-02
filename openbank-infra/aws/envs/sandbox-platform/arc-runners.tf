@@ -517,6 +517,16 @@ resource "kubectl_manifest" "ec2nodeclass_runners" {
       # ~4Gi + headroom). This makes the NVMe switch net cost-NEGATIVE: free fast
       # NVMe for ephemeral + a smaller paid gp3 root than before the runner-disk work.
       instanceStorePolicy = "RAID0"
+      # Explicit IMDSv2-only, one hop: a pod (one network hop past the node) cannot
+      # reach the node role's credentials. These equal Karpenter v1's defaults, so
+      # stating them changes no NodeClass hash and drifts no node; it pins them
+      # against a future default change (security review of #14625).
+      metadataOptions = {
+        httpEndpoint            = "enabled"
+        httpProtocolIPv6        = "disabled"
+        httpTokens              = "required"
+        httpPutResponseHopLimit = 1
+      }
       blockDeviceMappings = [{
         deviceName = "/dev/xvda"
         ebs = {
@@ -1262,7 +1272,13 @@ resource "helm_release" "arc_dr" {
 # shares a runner with PR data processed by code:
 #   * runners are EPHEMERAL, one job per pod (ARC default): settle/publish
 #     (App token) and build (no secrets, runs main's generators over PR trees)
-#     always get distinct, fresh pods, exactly as on hosted runners;
+#     always get distinct, fresh pods. Unlike hosted runners they MAY run on the
+#     same train node, one after the other (the workflow's concurrency group
+#     serialises runs, `needs:` serialises jobs). Residual risk: build executes
+#     no PR code (main's generators only, over PR files as data; the train
+#     refuses members that touch generator paths), so a node escape needs a
+#     parser exploit in main's own tooling. ARC cannot label pods per job, so a
+#     job-kind podAntiAffinity is not expressible; the risk is accepted;
 #   * the pod SA has NO cloud role and mounts NO Kubernetes token: the only
 #     credential that ever exists in the pod is the App token minted inside the
 #     job, scoped to GitHub;
@@ -1401,6 +1417,14 @@ resource "helm_release" "arc_train" {
         serviceAccountName           = kubernetes_service_account.arc_train[0].metadata[0].name
         automountServiceAccountToken = false
         priorityClassName            = "openbank-ci"
+        # uid 1001 = the image's `runner` user (actions-runner base image adduser).
+        securityContext = {
+          runAsNonRoot   = true
+          runAsUser      = 1001
+          runAsGroup     = 1001
+          fsGroup        = 1001
+          seccompProfile = { type = "RuntimeDefault" }
+        }
         # Train nodes ONLY: required affinity + the train toleration and no other,
         # so these pods can neither land on a runner node nor share one.
         nodeSelector = { "openbank.io/pool" = "train" }
@@ -1425,19 +1449,29 @@ resource "helm_release" "arc_train" {
         # python3-yaml (yamllint's dependency) — see runner-image/Dockerfile.
         volumes = [
           { name = "train-hook", configMap = { name = kubernetes_config_map.arc_train_hook[0].metadata[0].name, defaultMode = 365 } }, # 0555
+          { name = "work", emptyDir = {} },
+          { name = "tmp", emptyDir = {} },
         ]
         containers = [
           {
             name  = "runner"
             image = local.runner_image
+            # readOnlyRootFilesystem stays FALSE: the runner writes its own state
+            # under /home/runner (_diag, runner settings) and the build job installs
+            # opa into $HOME/bin, so a read-only root needs a live-tested set of
+            # writable mounts first. _work and /tmp are emptyDirs already.
             securityContext = {
               allowPrivilegeEscalation = false
+              readOnlyRootFilesystem   = false
+              capabilities             = { drop = ["ALL"] }
             }
             env = [
               { name = "ACTIONS_RUNNER_HOOK_JOB_STARTED", value = "/opt/openbank-train-hook/job-started.sh" },
             ]
             volumeMounts = [
               { name = "train-hook", mountPath = "/opt/openbank-train-hook", readOnly = true },
+              { name = "work", mountPath = "/home/runner/_work" },
+              { name = "tmp", mountPath = "/tmp" },
             ]
             resources = {
               # build does a full-history clone of main and squashes up to 8 heads.
@@ -1449,4 +1483,65 @@ resource "helm_release" "arc_train" {
       }
     }
   })]
+}
+
+# Egress for train runner pods (security review of #14625): DNS to kube-dns, and
+# HTTPS to the internet only (GitHub API/git, the opa download). Denied: the VPC
+# (every pod and node IP — so no in-cluster service, including the keycloak and
+# agent-service grants gen-network-policies.py gives the arc-runners namespace),
+# the Service CIDR, and the instance metadata endpoints. ARC labels each runner
+# pod with its scale set name, which is what selects train pods only.
+resource "kubernetes_network_policy" "arc_train_egress" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-train-egress"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+  }
+  spec {
+    pod_selector {
+      match_labels = { "actions.github.com/scale-set-name" = "openbank-train" }
+    }
+    policy_types = ["Ingress", "Egress"]
+    # No ingress rule: nothing may connect to a train pod.
+    egress {
+      to {
+        namespace_selector {
+          match_labels = { "kubernetes.io/metadata.name" = "kube-system" }
+        }
+        pod_selector {
+          match_labels = { "k8s-app" = "kube-dns" }
+        }
+      }
+      ports {
+        port     = "53"
+        protocol = "UDP"
+      }
+      ports {
+        port     = "53"
+        protocol = "TCP"
+      }
+    }
+    egress {
+      to {
+        ip_block {
+          cidr = "0.0.0.0/0"
+          except = [
+            local.train_egress_vpc_cidr,
+            local.train_egress_service_cidr,
+            "169.254.0.0/16", # IMDS 169.254.169.254, pod-identity agent 169.254.170.23
+          ]
+        }
+      }
+      ports {
+        port     = "443"
+        protocol = "TCP"
+      }
+    }
+  }
+}
+
+locals {
+  # Same values the dind address-pool comment above documents.
+  train_egress_vpc_cidr     = "10.80.0.0/16"
+  train_egress_service_cidr = "172.20.0.0/16"
 }

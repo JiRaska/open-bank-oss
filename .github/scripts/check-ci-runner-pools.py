@@ -59,6 +59,15 @@
 #      workload off the train's dedicated nodes (PR code runs in privileged dind on the
 #      build pool). Only the resources in TRAIN_TAINT_OWNERS may name that key; anything
 #      else under openbank-infra that does is a finding.
+#  10. WORKFLOW-UNPARSEABLE (fatal). A workflow this gate cannot parse is one whose
+#      runs-on it cannot see; it used to be skipped silently. Now it is a finding.
+#      GitHub runner labels are case-insensitive, so every label comparison here
+#      lower-cases first (`OpenBank-Train` routes to openbank-train).
+#  11. BLANKET-TOLERATION (fatal, baselined). A toleration with `operator: Exists` and
+#      no key tolerates EVERY taint, including openbank.io/train. Any in an
+#      openbank-infra manifest (*.yaml / *.tf) is a finding unless KNOWN_BLANKET_TOLERATIONS
+#      names the file with a reason. Measured 2026-11-02: none in the repo. Helm-chart
+#      DEFAULTS that are not written in this repo are outside what a repo scan can see.
 #   The runner itself refuses any job that is not merge-train.yml@main via its
 #   ACTIONS_RUNNER_HOOK_JOB_STARTED hook (arc-runners.tf), so lint is not the only control.
 #   5. USES-UNAPPLIED (reported, baselined in KNOWN_UNAPPLIED). There are THREE states,
@@ -141,6 +150,9 @@ KNOWN_EXPR_RUNS_ON: dict[tuple[str, str, str], str] = {
         "context-service arm64 main build; resolves to ubuntu-24.04-arm | ubuntu-latest only",
 }
 
+# file path -> reason. Empty today (measured 2026-11-02).
+KNOWN_BLANKET_TOLERATIONS: dict[str, str] = {}
+
 TRAIN_TAINT_KEY = "openbank.io/train"
 # The only OpenTofu resources allowed to name the train taint key.
 TRAIN_TAINT_OWNERS = {"kubectl_manifest.nodepool_train", "helm_release.arc_train"}
@@ -165,9 +177,9 @@ def load_pool_policy(root: Path) -> tuple[dict[str, str], list[str], dict[str, t
     restricted: dict[str, tuple[set[str], bool]] = {}
     for name, body in (ci.get("pools") or {}).items():
         if isinstance(body, dict) and body.get("scale_set"):
-            pools[name] = body["scale_set"]
+            pools[name] = str(body["scale_set"]).lower()
             if "allowed_workflows" in body:
-                restricted[body["scale_set"]] = (
+                restricted[str(body["scale_set"]).lower()] = (
                     set(body.get("allowed_workflows") or []),
                     body.get("pull_request_target_base_context") is True,
                 )
@@ -235,6 +247,65 @@ def scan_runs_on_shapes(root: Path):
                     yield rel, job_id, "expr", t
 
 
+def unparseable_workflows(root: Path) -> list[str]:
+    out = []
+    wf_dir = root / ".github/workflows"
+    for wf in sorted(list(wf_dir.glob("*.yml")) + list(wf_dir.glob("*.yaml"))):
+        try:
+            doc = yaml.safe_load(wf.read_text())
+        except yaml.YAMLError as e:
+            out.append(f"WORKFLOW-UNPARSEABLE {wf.relative_to(root).as_posix()}: {str(e).splitlines()[0]} "
+                       f"— its runs-on cannot be checked.")
+            continue
+        if not isinstance(doc, dict):
+            out.append(f"WORKFLOW-UNPARSEABLE {wf.relative_to(root).as_posix()}: not a mapping.")
+    return out
+
+
+_TF_BLANKET_RE = re.compile(r'\{[^{}]*operator\s*=\s*"Exists"[^{}]*\}')
+
+
+def blanket_tolerations(root: Path, baseline: dict[str, str]) -> list[str]:
+    hits: set[str] = set()
+    infra = root / "openbank-infra"
+    if not infra.is_dir():
+        return []
+
+    def walk(o, rel):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "tolerations" and isinstance(v, list):
+                    for t in v:
+                        if isinstance(t, dict) and t.get("operator") == "Exists" and not t.get("key"):
+                            hits.add(rel)
+                walk(v, rel)
+        elif isinstance(o, list):
+            for x in o:
+                walk(x, rel)
+
+    for f in sorted(infra.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(root).as_posix()
+        if f.suffix in {".yaml", ".yml"}:
+            try:
+                for d in yaml.safe_load_all(f.read_text(errors="replace")):
+                    walk(d, rel)
+            except yaml.YAMLError:
+                continue  # templated manifests; gitops validation owns their syntax
+        elif f.suffix == ".tf":
+            text = f.read_text(errors="replace")
+            for m in _TF_BLANKET_RE.finditer(text):
+                if "key" not in m.group(0) and "toleration" in text[max(0, m.start() - 400):m.start()].lower():
+                    hits.add(rel)
+    out = [f"BLANKET-TOLERATION {h}: a key-less `operator: Exists` toleration tolerates every taint, "
+           f"including '{TRAIN_TAINT_KEY}'. Give it a key, or baseline it in KNOWN_BLANKET_TOLERATIONS."
+           for h in sorted(hits - set(baseline))]
+    out += [f"STALE-BLANKET {b} is baselined but no longer has a blanket toleration — remove it."
+            for b in sorted(set(baseline) - hits)]
+    return out
+
+
 def train_taint_violations(root: Path) -> list[str]:
     out = []
     infra = root / "openbank-infra"
@@ -279,9 +350,10 @@ def scan_workflows(root: Path):
             if not isinstance(job, dict):
                 continue
             for label in _labels(job.get("runs-on")):
-                if "${{" in label:  # expression — not statically decidable
+                if "${{" in label:  # expression — EXPR-RUNS-ON decides these
                     continue
-                yield (wf.relative_to(root).as_posix(), job_id, label, events)
+                # GitHub matches runner labels case-insensitively.
+                yield (wf.relative_to(root).as_posix(), job_id, label.lower(), events)
 
 
 def evaluate(
@@ -289,6 +361,7 @@ def evaluate(
     baseline: dict[str, str] | None = None,
     unapplied: dict[str, str] | None = None,
     expr_baseline: dict[tuple[str, str, str], str] | None = None,
+    blanket_baseline: dict[str, str] | None = None,
 ) -> tuple[list[str], list[str], int, int]:
     """Return (findings, gaps, n_pools, n_labels_seen).
 
@@ -366,6 +439,9 @@ def evaluate(
     for key in sorted(set(expr_baseline) - seen_expr):
         findings.append(f"STALE-EXPR {key} is in KNOWN_EXPR_RUNS_ON but no such runs-on exists — remove it.")
     findings.extend(train_taint_violations(root))
+    findings.extend(unparseable_workflows(root))
+    findings.extend(blanket_tolerations(
+        root, KNOWN_BLANKET_TOLERATIONS if blanket_baseline is None else blanket_baseline))
 
     # Ratchet, both directions.
     for pool, scale_set in sorted(pools.items()):
@@ -496,16 +572,35 @@ def self_test() -> int:
         ("control: the train's own resources may name the taint",
          _rules(), "push", "openbank-build", empty, None, empty, "w.yml", {},
          'resource "helm_release" "arc_train" {\n  tolerations = [{ key = "openbank.io/train" }]\n}\n'),
+        # Second review of #14625.
+        ("WORKFLOW-UNPARSEABLE: a workflow that does not parse is a finding, not a skip",
+         _rules(train=True), "push", "openbank-build", empty, "WORKFLOW-UNPARSEABLE", empty, "w.yml", {}, "",
+         {".github/workflows/broken.yml": "jobs:\n  a: [unclosed\n"}),
+        ("WORKFLOW-RESTRICTED: a mixed-case label still routes to openbank-train",
+         _rules(train=True), "push", "OpenBank-Train", empty, "WORKFLOW-RESTRICTED", empty, "w.yml"),
+        ("BLANKET-TOLERATION: a key-less Exists toleration in a manifest",
+         _rules(), "push", "openbank-build", empty, "BLANKET-TOLERATION", empty, "w.yml", {}, "",
+         {"openbank-infra/gitops/ds.yaml": "spec:\n  tolerations:\n    - operator: Exists\n"}),
+        ("BLANKET-TOLERATION: a key-less Exists toleration in OpenTofu",
+         _rules(), "push", "openbank-build", empty, "BLANKET-TOLERATION", empty, "w.yml", {},
+         'resource "helm_release" "x" {\n  tolerations = [{ operator = "Exists" }]\n}\n'),
+        ("control: a KEYED Exists toleration is not blanket",
+         _rules(), "push", "openbank-build", empty, None, empty, "w.yml", {}, "",
+         {"openbank-infra/gitops/ds.yaml": "spec:\n  tolerations:\n    - key: openbank.io/runner\n      operator: Exists\n"}),
     ]
     rc = 0
     for i, (desc, rules, event, label, baseline, expect, unapplied, *rest) in enumerate(cases, 1):
         wf_name = rest[0] if rest else "w.yml"
         expr_bl = rest[1] if len(rest) > 1 else {}
         extra_tf = rest[2] if len(rest) > 2 else ""
+        extra_files = rest[3] if len(rest) > 3 else {}
         wf = (f"on:\n  {event}:\n    branches: [main]\n"
               f"jobs:\n  a:\n    runs-on: {label}\n    steps: [{{run: 'true'}}]\n")
         with tempfile.TemporaryDirectory() as td:
             root = _fixture(Path(td), rules, _TF + extra_tf, wf, wf_name)
+            for rel, body in extra_files.items():
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                (root / rel).write_text(body)
             findings, gaps, n_pools, _ = evaluate(root, baseline, unapplied, expr_bl)
             findings = findings + gaps
             if n_pools == 0:
