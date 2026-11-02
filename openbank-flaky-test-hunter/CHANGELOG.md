@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.3...flaky-test-hunter-v0.15.4) (2026-11-01)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** retire expired schedule allowlist and move dated gate deadlines ([#14445](https://github.com/JiRaska/open-bank-oss/issues/14445)) ([318e35f](https://github.com/JiRaska/open-bank-oss/commit/318e35f86c52bd4d3b2dedddaa1a041a6da685db))
+
 ## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.2...flaky-test-hunter-v0.15.3) (2026-11-01)
 
 
