@@ -3,13 +3,14 @@ package com.openbank.incentive.integration
 
 import com.openbank.incentive.infrastructure.outbox.IncentiveOutboxDispatcher
 import com.openbank.incentive.infrastructure.persistence.OutboxEntities
-import com.openbank.incentive.it.IncentivePostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.libs.persistence.outbox.SentOutboxRetention
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
@@ -46,7 +47,10 @@ import java.util.concurrent.Executors
 import javax.sql.DataSource
 
 @QuarkusTest
-@QuarkusTestResource(IncentivePostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_incentive_it")],
+)
 @QuarkusTestResource(IncentiveRestContractIT.InMemoryKafkaResource::class)
 // #12448: customer-incentive calls are admitted only from customer-edge's own service-account token.
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])

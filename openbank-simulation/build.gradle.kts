@@ -93,6 +93,12 @@ dependencies {
     // of either. The domain package is framework-free (ADR-0002), so only the domain POJOs land
     // on the classpath, not a runtime.
     implementation(project(":openbank-card-processing-service"))
+    // REAL fx-service domain — the `FxRate` fixing with its ČNB-origin `inverted()` side-swap
+    // (a customer selling CZK is quoted 1/ask of the stored FOREIGN→CZK fixing, never a naive
+    // 1/bid) and the `FxConversionMath` margin/target-amount arithmetic — rather than a
+    // re-model of either. The domain package is framework-free (ADR-0002), so only the domain
+    // POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-fx-service"))
 
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
@@ -145,6 +151,13 @@ dependencies {
     // charge code, value-date format) and MT103 status vocabulary — rather than a re-model of
     // the cross-border rail. The domain package is framework-free (ADR-0002).
     implementation(project(":openbank-swift-service"))
+
+    // ADR-0352 phase 4: ProductReplayScenario replays the published reference products
+    // (openbank-products) through the pure interpreter with the production arithmetic
+    // (openbank-libs-finance); the synthetic portfolio generator is test data (openbank-libs-testing).
+    implementation(project(":openbank-products"))
+    implementation(project(":openbank-libs-finance"))
+    testImplementation(project(":openbank-libs-testing"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
