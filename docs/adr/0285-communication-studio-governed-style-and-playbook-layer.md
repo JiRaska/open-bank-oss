@@ -147,23 +147,13 @@ says so in the audit envelope (`style_version: baseline`).
 The service is **not** placed inside notification-service next to the ADR-0176 catalogue (see
 Alternatives): sending and voice are different concerns with different editors.
 
-### D6 — Realm roles until the ADR-0229 single-source pipeline exists
+### D6 — Roles come from `rules.yaml`, not from the realm
 
-`openbank-infra/gitops/components/keycloak/realm-template.json` currently declares
-`ROLE_COMMS_EDITOR` (maker: draft, submit) and `ROLE_COMMS_APPROVER` (checker: approve,
-publish, retire) and assigns them to separate human operator identities. The communication-service
-endpoints enforce those roles with `@RolesAllowed`; publish and approval decisions additionally
-use their own `@Authorize` actions and four-eyes policy. `rules.yaml: authz.role_action_matrix`
-declares only the safe `commstyle.approval.read` grant for `ROLE_COMMS_APPROVER`. It cannot be
-the source of the maker role while maker endpoints have no `@Authorize` action, or of the
-write grants while its generic matrix permit path lacks the explicit service-account exclusion
-in the action-specific OPA rules. A service account must never publish the bank's voice.
-
-When ADR-0229 supplies a single-source role pipeline, it may generate realm entries from a
-governed role definition after the maker action names and the human-only write policy are
-represented without widening access. Until then, the realm template is the source of role
-membership; the endpoint annotations, action-specific policies and four-eyes check remain
-independent authorization controls.
+`ROLE_COMMS_EDITOR` (maker: draft, submit), `ROLE_COMMS_APPROVER` (checker: approve, publish,
+retire) and read access for the contact centre are declared in `rules.yaml:
+authz.role_action_matrix` and flow into the realm, OPA bundles and the admin-ui through the
+ADR-0229 single-source pipeline. A service account is never granted `commstyle.publish`
+(`shared_m2m_matrix_write_grants` stays empty for it): the bank's voice is set by people.
 
 ### D7 — The admin-ui workspace `/communication`
 
@@ -255,13 +245,13 @@ change to which model a persona uses (that is `ModelGateway` config and ADR-0175
 2026-09-11, retroactively, after seven PRs had landed against a status that still said
 `planned` — which is why this section exists.
 
-| Decision | Command | Expected | Current status (2026-10-06) |
+| Decision | Command | Expected | 2026-09-11 |
 |---|---|---|---|
 | D1 registry split | `grep -n 'core.v1, style.v1' openbank-libs/governance/prompts/registry.yaml` | one line | holds (#9165) |
 | D3 four-eyes | `grep -n 'commstyle.publish' openbank-libs/governance/rules.yaml` under `four_eyes.actions`; `grep -n commstyle-publish openbank-libs/governance/policies/rest.rego` | both non-empty | holds (#9150) |
 | D5 service | `cat openbank-communication-service/version.txt`; `ls openbank-infra/gitops/components/communication/` | a version; a Rollout, OPA bundle, TLS, secret | holds (0.1.0) |
 | D5 consumer | `git grep -il 'communication' openbank-copilot-service/src/main` | non-empty, and `style_version` written to the audit envelope | **fails** — empty (#9703) |
-| D6 roles | `grep -n 'ROLE_COMMS_' openbank-infra/gitops/components/keycloak/realm-template.json`; `grep -n 'ROLE_COMMS_' openbank-communication-service/src/main/kotlin/com/openbank/communication/infrastructure/rest/*.kt`; `grep -n 'commstyle.approval.read' openbank-libs/governance/rules.yaml` | editor and approver declared in the realm and enforced on endpoints; the safe approval read action appears in the matrix | holds (#9784, #9801); action-specific OPA and four-eyes rules govern writes |
+| D6 roles | `grep -n 'ROLE_COMMS_' openbank-libs/governance/rules.yaml` inside `authz.role_action_matrix` | two role keys with `commstyle.*` grants | partially, see Amendment 2026-11-02: `ROLE_COMMS_APPROVER` → `commstyle.approval.read` only; membership in `realm-template.json` (#9784, #9801) |
 | D7 admin-ui | `ls openbank-admin-ui/src/app/communication/` | `page.tsx`, `[personaId]`, `edit/` | holds (#9173, #9634) |
 | D4 evals-on-publish | the publish endpoint refuses a draft whose golden-set replay regresses | a rejected publish in a test | not yet measured — golden-set editor is CRUD only (#9634) |
 
@@ -288,3 +278,23 @@ change to which model a persona uses (that is `ModelGateway` config and ADR-0175
 - ADR-0229 — roles single source of truth, persona-driven IA
 - ADR-0235 — continuous AI assurance
 - Issue #3187 — `ui-assistant` v1 prompt disclosure
+
+## Amendment 2026-11-02: interim role source for D6 (#9703)
+
+D6 stands unchanged as the target. Until the ADR-0229 single-source role pipeline exists, the
+interim state is as follows:
+
+- `openbank-infra/gitops/components/keycloak/realm-template.json` is the source of membership
+  for `ROLE_COMMS_EDITOR` and `ROLE_COMMS_APPROVER`. The two roles go to separate human
+  operator identities.
+- communication-service enforces the roles with `@RolesAllowed`. Publish and approval also
+  carry their own `@Authorize` actions and the four-eyes policy.
+- `rules.yaml: authz.role_action_matrix` grants only the read-only `commstyle.approval.read`
+  action to `ROLE_COMMS_APPROVER`. The maker actions and the write grants are not in the
+  matrix yet, for two reasons. The maker endpoints have no `@Authorize` action to name. And
+  writes must stay human-only, which is enforced by the action-specific OPA rules rather than
+  by the generic matrix permit.
+- A service account is still never granted `commstyle.publish`.
+
+When ADR-0229 can express those actions without widening access, the matrix becomes the
+source, as D6 says, and this amendment lapses.
