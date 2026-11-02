@@ -69,12 +69,20 @@ spec:
             # Production must supply its assigned provider identity before real-money launch.
             - name: OPENBANK_PENSION_PROVIDER_ENTITY_ID
               value: "00000000-0000-4000-8000-000000000001"
+            # Private-CA TLS listener (8443) for in-cluster service callers, same shape as
+            # pension-fund-service: tax-reporting reads its aggregates over it. Plain 8171 stays
+            # open for the existing callers until their own HTTPS cutover.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
               value: /mnt/internal-tls/tls.key
             - name: QUARKUS_HTTP_SSL_PORT
               value: "8443"
+            # Verify the caller's client certificate against openbank-ca. The image requires one on
+            # 8443 (%prod quarkus.http.ssl.client-auth, build-time); tax-reporting presents
+            # tax-reporting-internal-tls.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
             # Keep old callers working until the separately verified HTTPS cutover.
             - name: QUARKUS_HTTP_INSECURE_REQUESTS
               value: enabled
