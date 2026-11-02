@@ -87,11 +87,6 @@ NO_OVERLAY_YET: dict[str, str] = {
                                "dispositions from it is the fabrication this gate's own header "
                                "refuses. Delete this entry in the PR that writes the overlay — the "
                                "gate fails on a declaration outliving its subject.",
-    "communication-service": "#9148 - new service (ADR-0285 phase 2), no VEX overlay written yet. "
-                              "Its dependency set is the ordinary reactive Quarkus stack shared with "
-                              "services that already have overlays, but writing dispositions from "
-                              "that assumption rather than the resolved runtimeClasspath artifacts "
-                              "is exactly the fabrication this gate's own header refuses.",
     "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
                 "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
                 "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
