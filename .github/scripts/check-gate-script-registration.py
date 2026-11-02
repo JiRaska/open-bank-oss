@@ -68,6 +68,10 @@ MANIFEST = REPO / ".github/gates/gates.yaml"
 # here is a claim a human made, and the check fails on a STALE one (a helper that has since been
 # registered, or one that no longer exists) so this list cannot quietly become permanent.
 HELPERS: dict[str, str] = {
+    "check-billing-annual-issuance-history.py": (
+        "operator-run preflight over untracked, operator-held CSV exports (never a CI input); "
+        "its unit tests live in test-billing-annual-issuance-history.py"
+    ),
     "check-recorded-source-manifests.py": (
         "invoked via the quoted `helper` variable in resolve-record-deployment-version.sh; "
         "that resolver's self-test also runs its --self-test"
