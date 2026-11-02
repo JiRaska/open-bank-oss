@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fraud-service
     app.kubernetes.io/part-of: fraud
   annotations:
-    openbank.tech/policy-checksum: "ce99394ecf6091e9"
+    openbank.tech/policy-checksum: "2404c4bdf04456ec"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1350,6 +1350,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "7afed047ab62bf17"
+    openbank.tech/policy-checksum: "1c4faf408d9893a0"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1305,6 +1305,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+// Consumer contracts share this test helper without compiling the full test suite.
+kotlin.sourceSets.named("consumerPactTest") {
+    kotlin.include("com/openbank/customeredge/infrastructure/rest/InMemoryPaymentSessionBackend.kt")
+}
+
 // Multiple Quarkus profiles retain application/Kafka state during the suite. The full
 // suite exhausted Gradle's default test heap after adding the isolated overload profile.
 // Keep the measured increase local to this service's test JVMs.

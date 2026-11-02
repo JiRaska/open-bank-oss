@@ -4,6 +4,8 @@
 
 package com.openbank.vop.infrastructure.adapter
 
+import com.openbank.clients.account.AccountClient
+import com.openbank.clients.account.AccountLookup
 import com.openbank.vop.application.port.out.AccountHolderNameLookupPort
 import com.openbank.vop.application.port.out.NameLookupUnavailableException
 import com.openbank.vop.infrastructure.client.AccountServiceClient
@@ -36,9 +38,12 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  */
 @ApplicationScoped
 open class AccountHolderNameLookupAdapter(
-    @RestClient private val accounts: AccountServiceClient,
+    @RestClient accountService: AccountServiceClient,
     @RestClient private val parties: PartyServiceClient,
 ) : AccountHolderNameLookupPort {
+
+    /** ADR-0319 facade over the generated client: a 404 on hop 1 is [AccountLookup.NotFound], not a failure. */
+    private val accounts = AccountClient(accountService)
 
     @Inject
     lateinit var self: AccountHolderNameLookupAdapter
@@ -52,10 +57,10 @@ open class AccountHolderNameLookupAdapter(
     @Retry(maxRetries = 2, delay = 200, jitter = 100, retryOn = [Exception::class])
     @Timeout(RESILIENCE_TIMEOUT_MS)
     open fun lookupWithResilience(iban: String): Uni<String?> = accounts.getAccountByIban(iban)
-        .flatMap { account ->
-            val partyId = account.partyId
+        .flatMap { lookup ->
+            val partyId = (lookup as? AccountLookup.Found)?.account?.partyId?.toString()
             if (partyId.isNullOrBlank()) {
-                // The account exists but carries no party link — no name is resolvable.
+                // NotFound (hop-1 404, "we hold no name for this IBAN"), or an account with no party link.
                 Uni.createFrom().item(null as String?)
             } else {
                 parties.getParty(partyId).map { party ->
@@ -72,7 +77,8 @@ open class AccountHolderNameLookupAdapter(
         // Fault Tolerance judges this method by the Uni it returns. Recovering outside left
         // @Retry replaying every unknown IBAN three times and @CircuitBreaker counting each as a
         // failure, so a handful of them opened the breaker and turned *genuine* verifications
-        // into NO_DATA for 10s. Mapped here, a 404 is simply a success carrying null.
+        // into NO_DATA for 10s. Mapped here, a 404 is simply a success carrying null. Hop 1's 404
+        // already arrives as AccountLookup.NotFound from the facade; this recovery is hop 2's.
         .onFailure(::isNotFound).recoverWithItem(null as String?)
 
     /** A 404 on either hop means "we hold no name for this IBAN" — a NO_DATA answer, not an error. */

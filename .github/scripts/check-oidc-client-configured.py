@@ -108,7 +108,7 @@ def workload_env(root: pathlib.Path):
         if "\\" not in source and not any(kind in source for kind in WORKLOAD_KINDS):
             continue
         try:
-            docs = list(yaml.safe_load_all(source))
+            docs = gatelib.loads_all(source)
         except yaml.YAMLError:
             continue
         for d in docs:

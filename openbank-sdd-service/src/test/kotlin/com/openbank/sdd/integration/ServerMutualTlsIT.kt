@@ -4,7 +4,7 @@
 
 package com.openbank.sdd.integration
 
-import com.openbank.sdd.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.http.TestHTTPResource
 import io.quarkus.test.junit.QuarkusTest

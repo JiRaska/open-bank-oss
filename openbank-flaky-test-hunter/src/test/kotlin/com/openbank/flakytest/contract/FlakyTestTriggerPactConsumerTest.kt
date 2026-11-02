@@ -42,6 +42,30 @@ class FlakyTestTriggerPactConsumerTest {
         .body("""{"workflowId":"$WORKFLOW_ID"}""")
         .toPact()
 
+    @Pact(consumer = "openbank-admin-ui", provider = "openbank-flaky-test-hunter")
+    fun missingIdentityPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no identity is presented")
+        .uponReceiving("reject a flaky-test workflow trigger with no identity")
+        .path("/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+        .method("POST")
+        .matchHeader(
+            "Idempotency-Key",
+            "^flaky-test-hunter-operator-manual-\\d{4}-\\d{2}-\\d{2}$",
+            IDEMPOTENCY_KEY,
+        )
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "missingIdentityPact")
+    fun `admin UI is refused without an identity`(mockServer: MockServer) {
+        given()
+            .header("Idempotency-Key", IDEMPOTENCY_KEY)
+            .`when`().post("${mockServer.getUrl()}/api/v1/flaky-test-hunter/check/trigger-async-idempotent")
+            .then().statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "asyncTriggerPact")
     fun `admin UI receives an admission handle`(mockServer: MockServer) {

@@ -113,6 +113,15 @@ schválení vlastnictví dat. Používá syntetická data a simulované externí
 izolaci současně běžících nasazení se skutečnými OIDC/OPA tokeny, skutečné vypořádání plateb
 ani kompletně propojený produkční tok peněz. Tyto schopnosti zůstávají v #12472 a #12479.
 
+## Contract testing (consumer pacts)
+
+Consumer pact test `PensionFundPactConsumerTest` se kompiluje v izolovaném source setu
+`consumerPactTest`, který záměrně kompiluje pouze `**/*PactConsumerTest.kt` plus helpery,
+které jednotlivé služby explicitně zahrnou (izolace v CI, viz konvence
+`openbank.quarkus-service`). Jeho in-memory backend fondových pokynů
+(`InMemoryFundOrderPlans`) proto musí zůstat uvedený v include `consumerPactTest` v
+`build.gradle.kts`; bez něj `compileConsumerPactTestKotlin` selže s unresolved reference.
+
 ## Provozní metriky
 
 Management endpoint metrik publikuje čítače přechodů a výsledků penzijních operací včetně
@@ -139,3 +148,7 @@ příklady nabídek.
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Zasílání zpráv při lokálním vývoji
+
+Profil `%dev` nemá žádné přepsání konektorů. `smallrye-in-memory` je závislost jen pro testy, proto v dev zůstávají kanály na konektoru `smallrye-kafka` a broker spouští Quarkus Kafka Dev Services. Konektor v paměti používá jen profil `%test` (#13175).

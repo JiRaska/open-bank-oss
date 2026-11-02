@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  pull_request_review:
-    types: [submitted, dismissed, edited]
 
 permissions:
   contents: read
@@ -18,8 +16,7 @@ concurrency:
   # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
   # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
   # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # Review events have their own lane: a review must not cancel the PR push run that
-  # provides required checks (including service builds from a separate workflow).
+  # Review submissions do not change build inputs and do not trigger code CI.
   # The key stays O(1) — a sha or event name, never a list (#3082).
   group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || github.event_name }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
@@ -32,7 +29,7 @@ jobs:
     outputs:
       proceed: ${{ steps.admit.outputs.proceed }}
     steps:
-      - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+      - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # base.sha is frozen on older PRs; admission reads policy and pinned requirements
@@ -339,7 +336,7 @@ jobs:
     name: Admin UI
     needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - &admin-ui-verdict
@@ -469,6 +466,7 @@ jobs:
               throw exhausted();
             };
             let workflow;
+            let artifactCache;
             let poll = 0;
             while (Date.now() < deadline) {
               if (!workflow) {
@@ -476,9 +474,36 @@ jobs:
                   ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
                 })));
               }
-              const {data} = await read(timeout => github.rest.actions.listArtifactsForRepo({
-                ...context.repo, name, per_page: 100, request: {timeout}
-              }));
+              // Keep the existing exact-name, first-page (100) scope. Cache only this
+              // receiver invocation's valid response, never a snapshot or producer verdict.
+              const query = {...context.repo, name, per_page: 100};
+              const key = JSON.stringify([query.owner, query.repo, query.name, query.per_page]);
+              let response;
+              try {
+                response = await read(timeout => github.rest.actions.listArtifactsForRepo({
+                  ...query,
+                  ...(artifactCache?.key === key ? {headers: {'if-none-match': artifactCache.etag}} : {}),
+                  request: {timeout}
+                }));
+              } catch (error) {
+                if (error.status !== 304) throw error;
+                response = {status: 304};
+              }
+              if (Date.now() >= deadline) throw exhausted();
+              let data;
+              if (response.status === 304) {
+                if (!artifactCache || artifactCache.key !== key) {
+                  throw new Error('Conditional artifact response has no matching body; NOT_EVALUATED');
+                }
+                data = artifactCache.data;
+              } else {
+                data = response.data;
+                if (response.status !== 200 || !data || !Array.isArray(data.artifacts)) {
+                  throw new Error('Invalid artifact-list response; NOT_EVALUATED');
+                }
+                const etag = response.headers?.etag;
+                artifactCache = typeof etag === 'string' && etag.trim() ? {key, etag, data} : undefined;
+              }
               for (const artifact of data.artifacts) {
                 if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
                 const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
@@ -679,7 +704,7 @@ jobs:
       # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
       # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -767,7 +792,7 @@ jobs:
     name: Validate manifests
     needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Verify agent PR admission
