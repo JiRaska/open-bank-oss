@@ -135,6 +135,16 @@ allowed_reasons contains "treasury-approver-write" if {
 	}
 }
 
+# #13883: closing a deal's stuck posting intent releases its value day's close hold although the
+# ledger may hold a journal under its key. Its own action so it can be granted, audited and denied
+# apart from reversing a deal; approvers only. The domain additionally refuses a non-person, the
+# posting's own actor and the deal's approver.
+allowed_reasons contains "treasury-posting-intent-close" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.posting-intent.close"
+}
+
 # ADR-0315 D4: a counterparty-limit breach blocks booking unless a SENIOR approver records an
 # override with a reason. Its own role and its own action, so an ordinary approver cannot override
 # and a senior cannot book through this rule; the domain additionally refuses the creator, the

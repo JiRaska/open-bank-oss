@@ -38,6 +38,12 @@ set -euo pipefail
 # DEPLOY_COVERAGE_ROOT lets the self-test point this at a fixture repo. Production never sets
 # it, so the default stays "the repo this script lives in".
 ROOT="${DEPLOY_COVERAGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Fixed-string reason matching is shared with the large-output regression below.
+contains_output() {
+  # grep -q may stop reading early; a here-string cannot SIGPIPE a printf producer.
+  grep -qF -- "$2" <<< "$1"
+}
+
 # --- self-test ------------------------------------------------------------------------
 # A service that release-please RELEASES and gitops REFERENCES, but auto-deploy does not
 # build, is a service whose new version never reaches the cluster. Nothing fails: the release
@@ -51,6 +57,22 @@ if [ "${1:-}" = "--self-test" ]; then
   set +e
   td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
   fails=0
+  # An early matching reason followed by more than a pipe buffer must not become a false miss.
+  large_output=$(printf 'deployable workload(s) [literal]\n'; printf '%0200000d' 0; printf '\nlast reason\n')
+  for attempt in 1 2 3; do
+    contains_output "$large_output" 'deployable workload(s) [literal]' || {
+      echo "::error::self-test: large matching reason lost under pipefail (attempt $attempt)" >&2
+      fails=$((fails+1))
+    }
+  done
+  if contains_output "$large_output" 'deployable workload(s) l' ||
+      contains_output "$large_output" 'absent reason'; then
+    echo "::error::self-test: reason matching must remain fixed-string and reject absent text" >&2
+    fails=$((fails+1))
+  fi
+  contains_output "$large_output" 'last reason' || {
+    echo "::error::self-test: last large-output reason was lost" >&2; fails=$((fails+1))
+  }
 
   mkrepo() { # mkrepo <dir> <released-csv> <all-services-csv> <gitops-csv> [allowlist-csv] [baseline-csv]
     local d="$1" rel="$2" all="$3" gito="$4" allow="${5:-}" base="${6:-}"
@@ -70,7 +92,7 @@ if [ "${1:-}" = "--self-test" ]; then
     out=$(DEPLOY_COVERAGE_ROOT="$d" bash "$0" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! contains_output "$out" "$sub"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }

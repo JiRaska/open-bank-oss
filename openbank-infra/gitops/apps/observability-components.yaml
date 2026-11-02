@@ -28,3 +28,9 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=false
+      # Canary for #12037: client-side apply diffs against the last-applied annotation, and an
+      # annotation removed from git was observed to stay on the live object while the app read
+      # Synced. Server-side apply owns fields via managedFields and removes a field this manager
+      # stopped declaring. Roll out to the remaining client-side Applications only after the
+      # live removal canary on this one is observed.
+      - ServerSideApply=true

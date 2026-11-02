@@ -141,8 +141,12 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
-validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
+Legacy v1 product-not-found responses retain `{ "error": "<message>" }` for existing Pacts.
+When banking compatibility is disabled, the six documented product detail, update, code lookup,
+activation, deactivation, and per-product fee 404 responses come from the shared mapper as
+`ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`). Those six responses accept both
+bodies. V2 returns `ApiError`; schema validation uses 422 with ordered
+`{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
@@ -196,3 +200,5 @@ the posting path. The API contract version is 2.9.0; the change is additive.
 - `403`: the caller holds none of the roles above.
 
 The API contract version is 2.10.0; the change is additive.
+
+Catalog request bodies are decoded strictly: a body that repeats a JSON object key is rejected with `400` instead of the last value silently winning. The 1 MiB size and nesting-depth bounds on the IR lint body are unchanged.

@@ -15,6 +15,7 @@ import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryEventType
 import com.openbank.treasury.application.port.out.DayCompletionRepository
 import com.openbank.treasury.application.port.out.PositionClose
+import com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 import com.openbank.treasury.application.port.out.SavedFilter
 import com.openbank.treasury.application.port.out.ViewsRepository
 import com.openbank.treasury.domain.model.Actor
@@ -22,6 +23,7 @@ import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.DealKind
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -494,6 +496,52 @@ class TreasuryResource {
         deals.reverse(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key))
             .let { view(id) }
 
+    /**
+     * #13883: an operator closes the OPEN posting intent of a deal's settlement, maturity or reversal
+     * that cannot complete, releasing its day's close hold. Its own OPA action
+     * (`treasury.posting-intent.close`, approvers only, never an agent); the domain refuses a
+     * non-person and, four eyes, the posting's own actor and the deal's approver (422). Who and why
+     * are recorded on the intent and appended to its history. 404 when no OPEN intent exists; 409
+     * POSTING_IN_FLIGHT when it may still be posting (younger than the grace, or claimed).
+     */
+    @POST
+    @Path("/deals/{id}/posting-intent/close")
+    @RolesAllowed(APPROVER)
+    @Operation(summary = "Close a deal's open posting intent that cannot complete (operator, audited)")
+    @Authorize(action = "treasury.posting-intent.close", resource = "#id")
+    suspend fun closePostingIntent(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ClosePostingIntentRequest?,
+    ): Response {
+        val idempotencyKey = requireKey(key)
+        requireNotNull(request) { "a request body is required" }
+        val event = requireNotNull(request.event) { "event is required" }
+        require(event in CLOSABLE_EVENTS) { "event must be one of $CLOSABLE_EVENTS" }
+        val reason = requireNotNull(request.reason) { "reason is required" }
+        return when (deals.closePostingIntent(id, PostingEvent.valueOf(event), reason, actor(), idempotencyKey)) {
+            PostingIntentCloseOutcome.CLOSED -> Response.noContent().build()
+            PostingIntentCloseOutcome.NOT_OPEN -> Response.status(Response.Status.NOT_FOUND)
+                .entity(mapOf("error" to "NOT_FOUND", "message" to "no open posting intent for $event on deal $id"))
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+            // Resolved by the service (a replay is CLOSED, a reuse 400); listed for exhaustiveness.
+            PostingIntentCloseOutcome.DUPLICATE_KEY -> throw IllegalArgumentException(
+                "Idempotency-Key already used for a different request",
+            )
+            PostingIntentCloseOutcome.IN_FLIGHT -> Response.status(Response.Status.CONFLICT)
+                .entity(
+                    mapOf(
+                        "error" to "POSTING_IN_FLIGHT",
+                        "message" to "the $event posting on deal $id may still be in flight (younger than the " +
+                            "grace period, or claimed by the reconciler); retry in a few minutes",
+                    ),
+                )
+                .type(MediaType.APPLICATION_JSON)
+                .build()
+        }
+    }
+
     @GET
     @Path("/counterparties")
     @Operation(summary = "Counterparty limits with current exposure and headroom per currency")
@@ -546,3 +594,6 @@ const val BACK_OFFICE = "ROLE_TREASURY_BACK_OFFICE"
  * term author (the domain), never an AI agent, and no other treasury role releases.
  */
 const val PAYMENT_RELEASER = "ROLE_TREASURY_PAYMENT_RELEASER"
+
+/** The lifecycle events that record a posting intent (#13883). */
+private val CLOSABLE_EVENTS = setOf("SETTLED", "MATURED", "REVERSED")

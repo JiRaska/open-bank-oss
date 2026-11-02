@@ -31,6 +31,9 @@ object TreasuryCloseJobs {
     const val REASON_DAY_CLOSED = "ledger refused the posting: ACCOUNTING_DAY_CLOSED"
     const val REASON_DEAL_FAILED = "deal(s) failed to accrue"
     const val REASON_ACCRUAL_UNFINISHED = "deal(s) left unaccrued (pass budget reached)"
+
+    /** #13883: deals whose accrual waits on a posting intent that may hold a journal. */
+    const val REASON_ACCRUAL_DEFERRED = "deal(s) deferred by an open or operator-closed posting intent"
     const val REASON_PASS_FAILED = "accrual pass failed before completing"
     const val REASON_PASS_ABANDONED = "pass started and never completed"
     const val REASON_JOURNAL_EVENTS_DEAD = "journal event(s) never delivered (outbox gave up)"

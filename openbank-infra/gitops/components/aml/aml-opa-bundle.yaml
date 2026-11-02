@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "6b6f6b3161a9c22c"
+    openbank.tech/policy-checksum: "6ae130e7f86abeba"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1340,6 +1340,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

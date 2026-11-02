@@ -47,7 +47,11 @@ import java.time.LocalDate
  *    day waits until none associated with its journal value day is still PENDING, DISPATCHING or
  *    FAILED; DEAD ones make the day REFUSED. Unattributable events hold their creation day;
  *  - **unapplied acknowledgement**: a lifecycle journal has no matching committed deal transition.
- *    A completed accrual pass does not prove that the lifecycle state and its event committed.
+ *    A completed accrual pass does not prove that the lifecycle state and its event committed;
+ *  - **open posting intent** (#13883): settle, mature or reverse decided to post a journal valued on
+ *    the day and has not applied it. The ledger may already hold that journal while treasury has not
+ *    even recorded it, so the day's count would be short; `PostingIntentReconcileScheduler` re-runs
+ *    the command under the same key and completes it.
  *
  * The day's journal count is the `deal_journals` rows with that economic value day: accruals,
  * settlements, maturities and reversals acknowledged by the ledger.
@@ -138,6 +142,14 @@ class TreasuryCloseParticipationScheduler(
                 "treasury day-close for %s not reported: %d journal event(s) still in the outbox",
                 day,
                 postings.pending,
+            )
+            return@flatMap Uni.createFrom().nullItem()
+        }
+        if (postings.openIntents > 0) {
+            log.infof(
+                "treasury day-close for %s not reported: %d posting intent(s) still open",
+                day,
+                postings.openIntents,
             )
             return@flatMap Uni.createFrom().nullItem()
         }

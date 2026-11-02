@@ -102,6 +102,9 @@ class InterestAccrualScheduler @Inject constructor(
                 if (r.failures.isEmpty() && r.unassessed == 0) liveness?.recordSuccess()
                 if (r.journals > 0) log.infof("interest accrual posted %d journal(s)", r.journals)
                 if (r.unassessed > 0) log.warnf("interest accrual pass budget spent: %d deal(s) left", r.unassessed)
+                if (r.deferred > 0) {
+                    log.infof("interest accrual deferred %d deal(s) with an open posting intent (#13883)", r.deferred)
+                }
                 recordEvidence(asOf, r)
                 if (r.failures.isEmpty() && r.unassessed == 0) healEarlierDays(asOf)
             }
@@ -131,6 +134,7 @@ class InterestAccrualScheduler @Inject constructor(
             if (closedDay > 0) "$closedDay ${TreasuryCloseJobs.REASON_DAY_CLOSED}" else null,
             if (otherFailed > 0) "$otherFailed ${TreasuryCloseJobs.REASON_DEAL_FAILED}" else null,
             if (r.unassessed > 0) "${r.unassessed} ${TreasuryCloseJobs.REASON_ACCRUAL_UNFINISHED}" else null,
+            if (r.deferred > 0) "${r.deferred} ${TreasuryCloseJobs.REASON_ACCRUAL_DEFERRED}" else null,
         )
         TreasuryCloseJobs.record(
             closeJobRuns,
@@ -138,7 +142,9 @@ class InterestAccrualScheduler @Inject constructor(
             asOf,
             TreasuryCloseJobs.ACCRUAL,
             items = r.deals,
-            refused = r.failures.size + r.unassessed,
+            // #13883: a deferred deal is assessed for liveness and healing (the pass did all it could),
+            // but in the DAY report it is unaccrued, so the day is not reported RAN without it.
+            refused = r.failures.size + r.unassessed + r.deferred,
             reason = reasons.joinToString("; ").ifBlank { null },
         ).awaitSuspending()
     }

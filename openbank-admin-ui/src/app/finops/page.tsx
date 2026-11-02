@@ -14,12 +14,20 @@ import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { SourceUnavailable } from '@/lib/services/useServiceResource'
+import type { BffFailure } from '@/lib/services/bff'
+
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { lifecycleSchema, resourcesSchema, costsSchema, rightSizingSchema, aiCostsSchema, anomaliesSchema, type FinOpsAnomaly, type DailyCost, type ServiceCost } from '@/lib/finops/overviewContracts'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
+
+function rejectUnavailable(raw: unknown, kind: BffFailure): unknown {
+  if (raw && typeof raw === 'object' && (raw as { available?: unknown }).available === false) throw new SourceUnavailable(kind)
+  return raw
+}
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
@@ -224,8 +232,10 @@ function FinOpsContent() {
   const resourcesResource = useServiceResource('/api/finops/resources', { select: raw => resourcesSchema.parse(raw), maxWakeRetries: 0 })
   const costsResource = useServiceResource('/api/finops/costs', { select: raw => costsSchema.parse(raw), maxWakeRetries: 0 })
   const rightSizingResource = useServiceResource('/api/finops/right-sizing', { select: raw => rightSizingSchema.parse(raw), maxWakeRetries: 0 })
-  const aiCostsResource = useServiceResource('/api/finops/ai-costs', { select: raw => aiCostsSchema.parse(raw), maxWakeRetries: 0 })
-  const anomaliesResource = useServiceResource('/api/finops/anomalies', { select: raw => anomaliesSchema.parse(raw), maxWakeRetries: 0 })
+  // `{ available: false }` is the routes' explicit "upstream absent" answer. It must not read
+  // as a crash, and must not read as a verified empty result either.
+  const aiCostsResource = useServiceResource('/api/finops/ai-costs', { select: raw => aiCostsSchema.parse(rejectUnavailable(raw, 'not_deployed')), maxWakeRetries: 0 })
+  const anomaliesResource = useServiceResource('/api/finops/anomalies', { select: raw => anomaliesSchema.parse(rejectUnavailable(raw, 'unreachable')), maxWakeRetries: 0 })
   // A failed refresh must not make an old value look current. Each source renders independently.
   const lifecycle = lifecycleResource.unavailable ? null : lifecycleResource.data
   const resources = resourcesResource.unavailable ? null : resourcesResource.data
@@ -238,8 +248,8 @@ function FinOpsContent() {
     { name: t('Využití zdrojů', 'Resource utilisation'), resource: resourcesResource },
     { name: t('Cloudové náklady', 'Cloud costs'), resource: costsResource },
     { name: t('Dimenzování zdrojů', 'Right-sizing'), resource: rightSizingResource },
-    { name: t('AI náklady', 'AI costs'), resource: aiCostsResource },
-    { name: t('Nákladové anomálie', 'Cost anomalies'), resource: anomaliesResource },
+    { name: t('AI náklady', 'AI costs'), resource: aiCostsResource, service: t('Most Langfuse → Prometheus (ADR-0112)', 'Langfuse → Prometheus bridge (ADR-0112)') },
+    { name: t('Nákladové anomálie', 'Cost anomalies'), resource: anomaliesResource, service: 'Alertmanager' },
   ]
   const loading = sections.some(section => section.resource.loading)
   const [lastRefresh, setLastRefresh] = useState(() => new Date())
@@ -309,9 +319,9 @@ function FinOpsContent() {
       />
 
       <div aria-live="polite">
-        {sections.map(({ name, resource }) => resource.unavailable ? (
+        {sections.map(({ name, resource, service }: { name: string; resource: typeof sections[number]['resource']; service?: string }) => resource.unavailable ? (
           <section key={name} aria-label={name} className="mb-4">
-            <DataUnavailable kind={resource.unavailable.kind} feature={name} service="FinOps" lang={language} dense>
+            <DataUnavailable kind={resource.unavailable.kind} feature={name} service={service ?? 'FinOps'} lang={language} dense>
               <button type="button" onClick={resource.reload} className="btn-secondary" style={{ color: 'var(--text-primary)', background: 'var(--surface)' }} aria-label={t(`Zkusit znovu: ${name}`, `Retry ${name}`)}>{t('Zkusit znovu', 'Retry')}</button>
             </DataUnavailable>
           </section>

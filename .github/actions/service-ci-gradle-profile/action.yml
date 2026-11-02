@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Retain Gradle task profile
+description: Sanitize and retain advisory profiles for the caller-selected service.
+runs:
+  using: composite
+  steps:
+    - name: Sanitize Gradle task profile
+      id: gradle-task-profile
+      if: always()
+      continue-on-error: true
+      shell: bash
+      run: |
+        python3 .github/scripts/sanitize-gradle-task-profile.py \
+          --profiles build/reports/profile \
+          --wrapper gradle/wrapper/gradle-wrapper.properties \
+          --out "$SERVICE/build/test-intelligence/gradle-task-profile.json"
+    - name: Retain Gradle task profile
+      if: always() && steps.gradle-task-profile.outcome == 'success'
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: gradle-task-profile-${{ env.SERVICE }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ env.SERVICE }}/build/test-intelligence/gradle-task-profile.json
+        if-no-files-found: warn
+        retention-days: 3

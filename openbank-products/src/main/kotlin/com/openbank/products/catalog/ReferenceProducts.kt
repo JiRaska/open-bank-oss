@@ -149,6 +149,12 @@ object ReferenceProducts {
             schedule("open.schedule-maturity", tag = "MATURITY", cadence = Cadence.AT_MATURITY)
         }
         prePosting {
+            // Checked before the penalty, so a refused withdrawal is never charged one.
+            reject(
+                "posting.no-overdraft",
+                postingComparison(PostingAttribute.PROJECTED_BALANCE, WaiveOperator.LT, "0.00"),
+                reasonCode = "INSUFFICIENT_FUNDS",
+            )
             earlyWithdrawalPenalty("posting.early-withdrawal")
         }
         scheduled {

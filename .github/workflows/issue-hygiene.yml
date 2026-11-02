@@ -24,12 +24,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: issue-hygiene-${{ github.event.pull_request.number }}
+  group: issue-hygiene-${{ github.event.pull_request.number }}-${{ github.event.pull_request.state }}
   cancel-in-progress: true
 
 jobs:
   issue-hygiene:
     name: issue-hygiene
+    if: github.event.pull_request.state == 'open'
     # actions/github-script only — no self-hosted-pool dependency.
     runs-on: ubuntu-latest
     timeout-minutes: 10  # measured max 6s

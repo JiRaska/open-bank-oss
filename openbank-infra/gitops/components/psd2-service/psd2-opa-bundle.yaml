@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: psd2-service
     app.kubernetes.io/part-of: psd2
   annotations:
-    openbank.tech/policy-checksum: "43a7d8c855109bdf"
+    openbank.tech/policy-checksum: "24777ef9fc54568a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1374,6 +1374,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

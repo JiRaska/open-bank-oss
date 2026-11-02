@@ -50,6 +50,7 @@ import javax.sql.DataSource
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_billing_annual_summary_it")],
+    restrictToAnnotatedClass = true,
 )
 class BillingAnnualFeeSummaryIdempotencyIT {
 

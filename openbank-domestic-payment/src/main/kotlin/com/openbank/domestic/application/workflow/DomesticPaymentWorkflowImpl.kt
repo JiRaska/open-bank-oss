@@ -51,6 +51,13 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         /** Workflow.getVersion change id gating the settlement retry policy for in-flight runs. */
         const val SETTLEMENT_RETRY_CHANGE_ID = "settlement-unbounded-retry"
         private const val SETTLEMENT_RETRY_VERSION = 1
+
+        /** Workflow.getVersion change id gating the fraud gate (#4403) for in-flight runs. */
+        const val FRAUD_ENFORCEMENT_CHANGE_ID = "fraud-enforcement"
+        private const val FRAUD_ENFORCEMENT_VERSION = 1
+
+        /** A held payment with no analyst decision by then is REJECTED, never released. */
+        val FRAUD_HOLD_TIMEOUT: Duration = Duration.ofHours(48)
         private const val UNLIMITED_ATTEMPTS = 0
         val SETTLEMENT_MAX_INTERVAL: Duration = Duration.ofMinutes(5)
         val SETTLEMENT_SCHEDULE_TO_CLOSE: Duration = Duration.ofDays(7)
@@ -65,6 +72,13 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
 
     private val settlementActivities: DomesticPaymentActivities =
         Workflow.newActivityStub(DomesticPaymentActivities::class.java, settlementActivityOptions)
+
+    private var fraudReviewDecision: FraudReviewDecision? = null
+
+    override fun resolveFraudHold(decision: FraudReviewDecision) {
+        // First answer wins; a late or duplicate signal cannot overturn a decision already taken.
+        if (fraudReviewDecision == null) fraudReviewDecision = decision
+    }
 
     override fun process(paymentId: UUID): DomesticPaymentStatus {
         val decision = activities.screenPayment(paymentId)
@@ -81,7 +95,21 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
                 // legacy DomesticPaymentService flow ran this after screening cleared; the workflow
                 // defined the activity but never invoked it, so making Temporal the sole orchestrator
                 // would have silently dropped shadow fraud scoring. Restored here.
-                activities.shadowFraudScore(paymentId)
+                val fraudVersion = Workflow.getVersion(
+                    FRAUD_ENFORCEMENT_CHANGE_ID,
+                    Workflow.DEFAULT_VERSION,
+                    FRAUD_ENFORCEMENT_VERSION,
+                )
+                if (fraudVersion == Workflow.DEFAULT_VERSION) {
+                    // A run that started before #4403 replays the shadow-only step it recorded.
+                    activities.shadowFraudScore(paymentId)
+                } else {
+                    val rejectCause = fraudGateRejectCause(paymentId)
+                    if (rejectCause != null) {
+                        activities.rejectForFraud(paymentId, rejectCause)
+                        return DomesticPaymentStatus.REJECTED
+                    }
+                }
                 val schemeStatus = activities.submitScheme(paymentId)
                 // ADR-0108: if scheme accepted (SENT_TO_CLEARING), book the funds.
                 if (schemeStatus == DomesticPaymentStatus.SENT_TO_CLEARING) {
@@ -101,6 +129,23 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
             ScreeningDecision.REVIEW -> {
                 // Payment is held in RECEIVED for human decision via the AML case lifecycle.
                 DomesticPaymentStatus.RECEIVED
+            }
+        }
+    }
+
+    /**
+     * #4403: run the fraud gate. Returns null when the payment may proceed to the scheme, or the
+     * cause it must be rejected for. A HOLD waits for [resolveFraudHold]; a timeout fails closed.
+     */
+    private fun fraudGateRejectCause(paymentId: UUID): FraudRejectCause? = when (activities.fraudGate(paymentId)) {
+        FraudGateAction.PROCEED -> null
+        FraudGateAction.REJECT -> FraudRejectCause.DECLINED
+        FraudGateAction.HOLD -> {
+            val answered = Workflow.await(FRAUD_HOLD_TIMEOUT) { fraudReviewDecision != null }
+            when {
+                !answered -> FraudRejectCause.HOLD_TIMED_OUT
+                fraudReviewDecision == FraudReviewDecision.RELEASE -> null
+                else -> FraudRejectCause.REVIEW_REJECTED
             }
         }
     }
