@@ -40,6 +40,14 @@
 #      BOTH directions: a baseline entry that becomes provisioned, or that names a pool
 #      no longer declared, is also an error — so today's debt cannot quietly become
 #      permanent, and cannot quietly be forgotten once paid.
+#   6. WORKFLOW-RESTRICTED (fatal). A pool that declares `allowed_workflows` may be
+#      targeted only by those workflow files. openbank-train exists for merge-train.yml
+#      alone (ADR-0343): it is the runner the App token is minted on, so a second
+#      workflow on it would both steal the train's isolated capacity and put foreign
+#      code next to the train's trust assumptions.
+#      Such a pool may also declare `pull_request_target_base_context: true`, which
+#      exempts an ALLOWED workflow's `pull_request_target` trigger (base context, no PR
+#      checkout) from PR-POOL. A `pull_request` trigger is never exempt.
 #   5. USES-UNAPPLIED (reported, baselined in KNOWN_UNAPPLIED). There are THREE states,
 #      not two, and #8388 is why this class exists. "Declared in rules.yaml", "written in
 #      OpenTofu" and "running in the cluster" are different facts, and `load_provisioned`
@@ -76,6 +84,7 @@ import gatelib  # noqa: E402  (path must be set first)
 # Both entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
 # been applied, so they are declared capacity that does not exist (#6458).
 KNOWN_UNPROVISIONED: dict[str, str] = {
+    "openbank-train": "#14302 — helm_release.arc_train written, not yet applied",
     "openbank-batch": "#6458 — OpenTofu added by #8388, never applied",
     "openbank-dr": "#6458 — OpenTofu added by #8388, never applied",
 }
@@ -103,6 +112,9 @@ KNOWN_UNPROVISIONED: dict[str, str] = {
 # if the OpenTofu resource disappears while the entry remains (STALE-UNAPPLIED), and any
 # NEW job routed at an unapplied pool is reported, so the set cannot silently grow.
 KNOWN_UNAPPLIED: dict[str, str] = {
+    # Remove in the PR that moves merge-train.yml onto the label, after a cluster read
+    # shows `kubectl get autoscalingrunnersets -n arc-runners openbank-train`.
+    "openbank-train": "#14302 — helm_release.arc_train (arc-runners.tf), apply pending",
     "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
     "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
 }
@@ -113,13 +125,26 @@ PR_EVENTS = {"pull_request", "pull_request_target"}
 
 def load_declared_pools(root: Path) -> tuple[dict[str, str], list[str]]:
     """Return {pool_name: scale_set} and pr_jobs_allowed_pools from rules.yaml."""
+    pools, pr_allowed, _ = load_pool_policy(root)
+    return pools, pr_allowed
+
+
+def load_pool_policy(root: Path) -> tuple[dict[str, str], list[str], dict[str, tuple[set[str], bool]]]:
+    """Also return {scale_set: (allowed_workflows, pull_request_target_base_context)} for
+    every pool that restricts which workflows may target it."""
     rules = yaml.safe_load((root / "openbank-libs/governance/rules.yaml").read_text())
     ci = (rules or {}).get("ci_runners") or {}
     pools = {}
+    restricted: dict[str, tuple[set[str], bool]] = {}
     for name, body in (ci.get("pools") or {}).items():
         if isinstance(body, dict) and body.get("scale_set"):
             pools[name] = body["scale_set"]
-    return pools, list(ci.get("pr_jobs_allowed_pools") or [])
+            if "allowed_workflows" in body:
+                restricted[body["scale_set"]] = (
+                    set(body.get("allowed_workflows") or []),
+                    body.get("pull_request_target_base_context") is True,
+                )
+    return pools, list(ci.get("pr_jobs_allowed_pools") or []), restricted
 
 
 def load_provisioned(root: Path) -> set[str]:
@@ -187,7 +212,7 @@ def evaluate(
     """
     baseline = KNOWN_UNPROVISIONED if baseline is None else baseline
     unapplied = KNOWN_UNAPPLIED if unapplied is None else unapplied
-    pools, pr_allowed = load_declared_pools(root)
+    pools, pr_allowed, restricted = load_pool_policy(root)
     tf_declared = load_provisioned(root)
     # An OpenTofu resource nobody has applied is not capacity. Intersecting with what the
     # *.tf actually declares keeps a stale entry from inventing a pool that is not there.
@@ -210,6 +235,16 @@ def evaluate(
                 f"ci_runners.pools.*.scale_set. Nothing will ever pick that job up."
             )
             continue
+        pr_events = events & PR_EVENTS
+        if label in restricted:
+            allowed_wfs, prt_base = restricted[label]
+            if wf not in allowed_wfs:
+                findings.append(
+                    f"WORKFLOW-RESTRICTED {wf}: job '{job}' targets '{label}', which only "
+                    f"{sorted(allowed_wfs)} may use (rules.yaml ci_runners.pools.*.allowed_workflows)."
+                )
+            elif prt_base:
+                pr_events = pr_events - {"pull_request_target"}
         if label in unapplied_sets:
             gaps.append(
                 f"USES-UNAPPLIED {wf}: job '{job}' targets '{label}', whose OpenTofu "
@@ -221,10 +256,10 @@ def evaluate(
                 f"USES-UNPROVISIONED {wf}: job '{job}' targets '{label}', which no "
                 f"OpenTofu runnerScaleSetName provisions. That job queues forever."
             )
-        if events & PR_EVENTS and label not in pr_allowed_sets:
+        if pr_events and label not in pr_allowed_sets:
             findings.append(
                 f"PR-POOL {wf}: job '{job}' runs on '{label}' from a "
-                f"{sorted(events & PR_EVENTS)} trigger; rules.yaml "
+                f"{sorted(pr_events)} trigger; rules.yaml "
                 f"pr_jobs_allowed_pools permits only {sorted(pr_allowed_sets)}."
             )
 
@@ -272,24 +307,28 @@ def evaluate(
 _BASE_POOLS = {"build": "openbank-build", "deploy": "openbank-deploy"}
 
 
-def _rules(extra_pools: dict[str, str] | None = None) -> str:
+def _rules(extra_pools: dict[str, str] | None = None, train: bool = False) -> str:
     pools = dict(_BASE_POOLS)
     pools.update(extra_pools or {})
     body = "".join(f"    {n}:\n      scale_set: {s}\n" for n, s in pools.items())
+    if train:
+        body += ("    train:\n      scale_set: openbank-train\n"
+                 "      allowed_workflows: [.github/workflows/merge-train.yml]\n"
+                 "      pull_request_target_base_context: true\n")
     return "ci_runners:\n  pools:\n" + body + "  pr_jobs_allowed_pools: [build]\n"
 
 
-_TF = 'resource "helm_release" "b" {\n  values = [yamlencode({\n    runnerScaleSetName = "openbank-build"\n  })]\n}\nresource "helm_release" "d" {\n  values = [yamlencode({\n    runnerScaleSetName = "openbank-deploy"\n  })]\n}\n'
+_TF = 'resource "helm_release" "b" {\n  values = [yamlencode({\n    runnerScaleSetName = "openbank-build"\n  })]\n}\nresource "helm_release" "d" {\n  values = [yamlencode({\n    runnerScaleSetName = "openbank-deploy"\n  })]\n}\nresource "helm_release" "t" {\n  values = [yamlencode({\n    runnerScaleSetName = "openbank-train"\n  })]\n}\n'
 
 
-def _fixture(tmp: Path, rules: str, tf: str, workflow: str) -> Path:
+def _fixture(tmp: Path, rules: str, tf: str, workflow: str, wf_name: str = "w.yml") -> Path:
     root = tmp
     (root / "openbank-libs/governance").mkdir(parents=True, exist_ok=True)
     (root / "openbank-libs/governance/rules.yaml").write_text(rules)
     (root / "openbank-infra").mkdir(parents=True, exist_ok=True)
     (root / "openbank-infra/arc.tf").write_text(tf)
     (root / ".github/workflows").mkdir(parents=True, exist_ok=True)
-    (root / ".github/workflows/w.yml").write_text(workflow)
+    (root / ".github/workflows" / wf_name).write_text(workflow)
     return root
 
 
@@ -321,13 +360,27 @@ def self_test() -> int:
          {"openbank-build": "#6458"}),
         ("STALE-UNAPPLIED: an unapplied entry whose OpenTofu resource is gone",
          _rules(), "push", "openbank-deploy", empty, "STALE-UNAPPLIED", {"openbank-vanished": "#6458"}),
+        # openbank-train (#14302). The control: merge-train.yml, on its real trigger set
+        # including pull_request_target (base context), is clean.
+        ("control: merge-train.yml on the train pool, pull_request_target in base context",
+         _rules(train=True), "pull_request_target", "openbank-train", empty, None, empty,
+         "merge-train.yml"),
+        # The must-fail: any OTHER workflow on the train label, even a plain push one.
+        ("WORKFLOW-RESTRICTED: another workflow targets openbank-train",
+         _rules(train=True), "push", "openbank-train", empty, "WORKFLOW-RESTRICTED", empty, "w.yml"),
+        # The exemption is for pull_request_target only: a pull_request trigger checks out PR
+        # code, so it stays a PR-POOL finding even inside the allowed workflow.
+        ("PR-POOL: merge-train.yml gaining a pull_request trigger on the train pool",
+         _rules(train=True), "pull_request", "openbank-train", empty, "PR-POOL", empty,
+         "merge-train.yml"),
     ]
     rc = 0
-    for i, (desc, rules, event, label, baseline, expect, unapplied) in enumerate(cases, 1):
+    for i, (desc, rules, event, label, baseline, expect, unapplied, *rest) in enumerate(cases, 1):
+        wf_name = rest[0] if rest else "w.yml"
         wf = (f"on:\n  {event}:\n    branches: [main]\n"
               f"jobs:\n  a:\n    runs-on: {label}\n    steps: [{{run: 'true'}}]\n")
         with tempfile.TemporaryDirectory() as td:
-            root = _fixture(Path(td), rules, _TF, wf)
+            root = _fixture(Path(td), rules, _TF, wf, wf_name)
             findings, gaps, n_pools, _ = evaluate(root, baseline, unapplied)
             findings = findings + gaps
             if n_pools == 0:

@@ -14,6 +14,10 @@
 #   openbank-deploy — post-merge ECR push + ArgoCD sync. Its pod SA carries
 #                     IRSA scoped to ECR push only; a PR job can never schedule
 #                     here (workflow routing + the ci-runner-governance lint).
+#   openbank-train  — merge-train.yml ONLY (ADR-0343). Capacity isolation, not
+#                     trust: the train is the repo's merge path and must not
+#                     queue behind PR CI on the 20-job hosted cap. No cloud
+#                     role, no dind, no SA token (see helm_release.arc_train).
 #
 # All gated behind var.arc_runner_enabled (needs the arc-github-app secret).
 # ===========================================================================
@@ -45,8 +49,9 @@ locals {
     deploy = "2"
     batch  = "2"
     dr     = "1"
+    train  = "0.5"
   }
-  runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners
+  runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners + var.arc_train_max_runners
   runners_nodepool_cpu_limit = local.runners_max_pods * local.runner_node_vcpu
   runner_tolerations = [{
     key      = "openbank.io/runner"
@@ -1238,6 +1243,87 @@ resource "helm_release" "arc_dr" {
             resources = {
               requests = { cpu = local.runner_cpu_request.dr, memory = "1Gi", "ephemeral-storage" = "4Gi" }
               limits   = { memory = "2Gi" }
+            }
+          },
+        ]
+      }
+    }
+  })]
+}
+
+# ---------------------------------------------------------------------------
+# train scale set — runs-on: openbank-train (ADR-0343, #14302). The merge train
+# (.github/workflows/merge-train.yml) is the merge path for the whole repo; on
+# GitHub-hosted runners each of its jobs queued 30-49 min behind PR CI on the
+# 20-job hosted cap, so one tick took ~2.5h. A dedicated pool is the only
+# priority lever ARC has (no job preemption), the same reasoning as the
+# build/batch split.
+#
+# Trust posture — the train's invariant is that the GitHub App token never
+# shares a runner with PR data processed by code:
+#   * runners are EPHEMERAL, one job per pod (ARC default): settle/publish
+#     (App token) and build (no secrets, runs main's generators over PR trees)
+#     always get distinct, fresh pods, exactly as on hosted runners;
+#   * the pod SA has NO cloud role and mounts NO Kubernetes token: the only
+#     credential that ever exists in the pod is the App token minted inside the
+#     job, scoped to GitHub;
+#   * no dind, no privileged init containers, no hostPath caches — nothing on
+#     the node outlives the pod, so no state crosses from build to publish.
+# Only merge-train.yml may target this label (rules.yaml ci_runners.pools.train
+# .allowed_workflows, enforced by check-ci-runner-pools.py).
+# minRunners=0: a tick is a few short jobs; idle spend is $0.
+# ---------------------------------------------------------------------------
+resource "kubernetes_service_account" "arc_train" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-train"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    # Deliberately NO eks.amazonaws.com/role-arn and no pod identity association:
+    # the train needs GitHub API access only, via the App token minted in-job.
+  }
+  automount_service_account_token = false
+}
+
+resource "helm_release" "arc_train" {
+  count            = var.arc_runner_enabled ? 1 : 0
+  name             = "openbank-train"
+  namespace        = kubernetes_namespace.arc_runners[0].metadata[0].name
+  create_namespace = false
+  repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
+  chart            = "gha-runner-scale-set"
+  version          = var.arc_controller_version
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_service_account.arc_train]
+
+  values = [yamlencode({
+    githubConfigUrl    = var.github_config_url
+    githubConfigSecret = "arc-github-app"
+    runnerScaleSetName = "openbank-train"
+    minRunners         = 0
+    maxRunners         = var.arc_train_max_runners
+    template = {
+      metadata = { annotations = local.runner_pod_annotations }
+      spec = {
+        serviceAccountName           = kubernetes_service_account.arc_train[0].metadata[0].name
+        automountServiceAccountToken = false
+        priorityClassName            = "openbank-ci"
+        nodeSelector                 = local.runner_node_selector
+        tolerations                  = local.runner_tolerations
+        affinity                     = local.runner_affinity
+        # No dind, no gradle/tool caches, no privileged init: the train runs git +
+        # stdlib python3 + a checksum-pinned opa (installed by the job). The image
+        # already carries git (base image, git-core PPA), python3 3.12 and
+        # python3-yaml (yamllint's dependency) — see runner-image/Dockerfile.
+        containers = [
+          {
+            name  = "runner"
+            image = local.runner_image
+            securityContext = {
+              allowPrivilegeEscalation = false
+            }
+            resources = {
+              # build does a full-history clone of main and squashes up to 8 heads.
+              requests = { cpu = local.runner_cpu_request.train, memory = "2Gi", "ephemeral-storage" = "8Gi" }
+              limits   = { memory = "4Gi" }
             }
           },
         ]

@@ -2736,6 +2736,15 @@ ci_runners:
       secrets_source: vault             # fetched at job time, never written to disk
       secrets_persisted_to_disk: false
       triggers: [push_main, tag]        # a pull_request job must NEVER target this scale set
+    train:                             # the merge train (ADR-0343, #14302): capacity isolation from PR CI on the 20-job hosted cap
+      scale_set: openbank-train
+      cloud_write_credentials: false    # pod SA has no cloud role and automountServiceAccountToken=false
+      secrets: github_app_token_minted_in_job   # settle/publish only; build carries none
+      image_builds: none                # no dind, no privileged containers
+      ephemeral_per_job: true           # one job per pod: the App-token jobs and the PR-data build job never share a runner
+      allowed_workflows: [.github/workflows/merge-train.yml]   # ANY other workflow on this label is a finding
+      pull_request_target_base_context: true   # merge-train.yml's pull_request_target trigger checks out main only; a pull_request trigger is still PR-POOL
+      isolation_rationale: "the train is the merge path for the whole repo; on hosted runners each job queued 30-49 min behind PR CI (run 41470334012), ~2.5h per tick"
   # A PR-triggered job may target build or batch (both credential-free); targeting deploy from a PR
   # is a governance violation the CI lint must reject.
   pr_jobs_allowed_pools: [build, batch]

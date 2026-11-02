@@ -351,3 +351,12 @@ variable "arc_dr_max_runners" {
   type        = number
   default     = 1
 }
+
+variable "arc_train_max_runners" {
+  description = "Max concurrent runner pods in the openbank-train scale set (merge-train.yml only; ADR-0343)."
+  type        = number
+  # The train's concurrency group runs one tick at a time and its jobs are
+  # sequential (settle -> build -> publish), so 1 is the steady state; 2 covers a
+  # pod still terminating while the next job starts.
+  default = 2
+}
