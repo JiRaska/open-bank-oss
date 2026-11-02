@@ -97,7 +97,9 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
     # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
     if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
         return None
-    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
+    # An armed PR marked `stuck` (cannot merge: conflict or failed check, #14498) no longer holds
+    # its kind; stuck_armed() names it so the workflow disarms it before arming a successor.
+    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and not (p.get("armed") and p.get("stuck"))]
     if any(p.get("armed") for p in deploy):
         return None
     pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
@@ -120,6 +122,11 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
     # older ones. Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
     prefix = next(x for x in DEPLOY_PREFIXES if pending[0]["head"].startswith(x))
     return [p for p in pending if p["head"].startswith(prefix)][-1]
+
+
+def stuck_armed(prs: list[dict]) -> list[dict]:
+    """Armed deploy PRs that cannot merge; each freezes its kind until disarmed (#14498)."""
+    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("armed") and p.get("stuck")]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -248,6 +255,12 @@ def self_test() -> int:
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
+    stuck = {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True, "stuck": True}
+    check("a stuck armed PR does not freeze the flush (#14498)",
+          (flush(prs + [stuck], T, T - W, W) or {}).get("number") == 11)
+    check("a stuck armed PR is named for disarming", [p["number"] for p in stuck_armed(prs + [stuck])] == [13])
+    check("a healthy armed PR is never named for disarming",
+          stuck_armed(prs + [{**stuck, "stuck": False}]) == [])
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
               "state": "open", "repair_priority": True, "draft": True, "blocked": True}
     check("explicit open draft/blocked repair defers elapsed timer",
@@ -405,9 +418,15 @@ def main() -> int:
     if a.cmd == "flush":
         last = last_deploy_from_commits(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
+        prs = json.load(open(a.prs_json))
+        stuck = stuck_armed(prs)
+        for p in stuck:
+            print(f"::warning::deploy window: armed deploy PR #{p['number']} cannot merge; disarming it so its kind is not frozen (#14498)", file=sys.stderr)
+        pick = flush(prs, a.now, last, a.window, manual_head)
         print(f"arm={pick['number'] if pick else ''}")
         print(f"arm_head={pick['head'] if pick else ''}")
+        if stuck:
+            print(f"disarm={' '.join(str(p['number']) for p in stuck)}")
         return 0
     if a.cmd == "carry":
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
