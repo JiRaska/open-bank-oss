@@ -49,9 +49,8 @@ locals {
     deploy = "2"
     batch  = "2"
     dr     = "1"
-    train  = "0.5"
   }
-  runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners + var.arc_train_max_runners
+  runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners
   runners_nodepool_cpu_limit = local.runners_max_pods * local.runner_node_vcpu
   runner_tolerations = [{
     key      = "openbank.io/runner"
@@ -1273,6 +1272,60 @@ resource "helm_release" "arc_dr" {
 # .allowed_workflows, enforced by check-ci-runner-pools.py).
 # minRunners=0: a tick is a few short jobs; idle spend is $0.
 # ---------------------------------------------------------------------------
+# Dedicated NodePool (security review of #14625, HIGH). openbank-build pods run PR
+# code in PRIVILEGED dind; a container escape on a shared node could read a train
+# pod's App token. So train runners never share a node with any other workload:
+# their own NodePool with a taint only they tolerate, and a REQUIRED node affinity
+# on the pool label. check-ci-runner-pools.py (TRAIN-TAINT-TOLERATED) fails if any
+# other resource in openbank-infra names the taint key.
+# Small spot node (2 vCPU arm64), scale from zero; consolidateAfter 2m so the node
+# lives only while train jobs run plus a short tail.
+resource "kubectl_manifest" "nodepool_train" {
+  count      = var.arc_runner_enabled ? 1 : 0
+  depends_on = [helm_release.karpenter, kubectl_manifest.ec2nodeclass_runners]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata   = { name = "train" }
+    spec = {
+      template = {
+        metadata = { labels = { "openbank.io/pool" = "train" } }
+        spec = {
+          taints = [{
+            key    = "openbank.io/train"
+            value  = "true"
+            effect = "NoSchedule"
+          }]
+          requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
+            { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m"] },
+            { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
+            { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = ["2"] },
+            { key = "topology.kubernetes.io/zone", operator = "In", values = ["eu-north-1a"] }
+          ]
+          # Same node class as the runner pool (AMI, node role, subnets); the
+          # isolation boundary is the EC2 instance, which this NodePool owns alone.
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "runners"
+          }
+          expireAfter = "24h"
+        }
+      }
+      disruption = {
+        consolidationPolicy = "WhenEmpty"
+        consolidateAfter    = "2m"
+      }
+      # One 2-vCPU node fits both maxRunners pods (0.5 vCPU each); 4 allows a replacement.
+      limits = { cpu = "4" }
+    }
+  })
+}
+
 resource "kubernetes_service_account" "arc_train" {
   count = var.arc_runner_enabled ? 1 : 0
   metadata {
@@ -1284,6 +1337,48 @@ resource "kubernetes_service_account" "arc_train" {
   automount_service_account_token = false
 }
 
+# RUNTIME CONTROL (security review of #14625). The lint in check-ci-runner-pools.py
+# is a build-time control only; this is the one that holds on the runner itself.
+# The runner executes ACTIONS_RUNNER_HOOK_JOB_STARTED before the first step of
+# every job, with the job's GITHUB_* default variables set; a non-zero exit fails
+# the job before any of its steps (and before any secret-bearing step) runs.
+# A job reaches this pod only by naming the label; whatever routed it here —
+# a literal, an expression, a reusable-workflow call — it is refused unless it
+# is merge-train.yml on main, in this repository, from an event the train uses.
+locals {
+  train_job_started_hook = <<-EOT
+    #!/bin/bash
+    # openbank-train job-started hook (#14302, ADR-0343). Fails closed.
+    set -u
+    want_ref="JiRaska/open-bank-oss/.github/workflows/merge-train.yml@refs/heads/main"
+    ref="$${GITHUB_WORKFLOW_REF:-}"
+    repo="$${GITHUB_REPOSITORY:-}"
+    event="$${GITHUB_EVENT_NAME:-}"
+    if [ "$ref" != "$want_ref" ] || [ "$repo" != "JiRaska/open-bank-oss" ]; then
+      echo "::error::openbank-train refuses workflow_ref='$ref' repo='$repo': only $want_ref may run here"
+      exit 1
+    fi
+    case "$event" in
+      schedule|push|workflow_run|pull_request_target|workflow_dispatch) ;;
+      *)
+        echo "::error::openbank-train refuses event '$event' (allowed: schedule push workflow_run pull_request_target workflow_dispatch)"
+        exit 1 ;;
+    esac
+    echo "openbank-train: admitted $ref on $event"
+  EOT
+}
+
+resource "kubernetes_config_map" "arc_train_hook" {
+  count = var.arc_runner_enabled ? 1 : 0
+  metadata {
+    name      = "openbank-train-job-hook"
+    namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+  }
+  data = {
+    "job-started.sh" = local.train_job_started_hook
+  }
+}
+
 resource "helm_release" "arc_train" {
   count            = var.arc_runner_enabled ? 1 : 0
   name             = "openbank-train"
@@ -1292,7 +1387,7 @@ resource "helm_release" "arc_train" {
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set"
   version          = var.arc_controller_version
-  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_runners, kubernetes_service_account.arc_train]
+  depends_on       = [helm_release.arc_controller, kubectl_manifest.nodepool_train, kubernetes_service_account.arc_train, kubernetes_config_map.arc_train_hook]
 
   values = [yamlencode({
     githubConfigUrl    = var.github_config_url
@@ -1306,13 +1401,31 @@ resource "helm_release" "arc_train" {
         serviceAccountName           = kubernetes_service_account.arc_train[0].metadata[0].name
         automountServiceAccountToken = false
         priorityClassName            = "openbank-ci"
-        nodeSelector                 = local.runner_node_selector
-        tolerations                  = local.runner_tolerations
-        affinity                     = local.runner_affinity
+        # Train nodes ONLY: required affinity + the train toleration and no other,
+        # so these pods can neither land on a runner node nor share one.
+        nodeSelector = { "openbank.io/pool" = "train" }
+        tolerations = [{
+          key      = "openbank.io/train"
+          operator = "Equal"
+          value    = "true"
+          effect   = "NoSchedule"
+        }]
+        affinity = {
+          nodeAffinity = {
+            requiredDuringSchedulingIgnoredDuringExecution = {
+              nodeSelectorTerms = [{
+                matchExpressions = [{ key = "openbank.io/pool", operator = "In", values = ["train"] }]
+              }]
+            }
+          }
+        }
         # No dind, no gradle/tool caches, no privileged init: the train runs git +
         # stdlib python3 + a checksum-pinned opa (installed by the job). The image
         # already carries git (base image, git-core PPA), python3 3.12 and
         # python3-yaml (yamllint's dependency) — see runner-image/Dockerfile.
+        volumes = [
+          { name = "train-hook", configMap = { name = kubernetes_config_map.arc_train_hook[0].metadata[0].name, defaultMode = 365 } }, # 0555
+        ]
         containers = [
           {
             name  = "runner"
@@ -1320,9 +1433,15 @@ resource "helm_release" "arc_train" {
             securityContext = {
               allowPrivilegeEscalation = false
             }
+            env = [
+              { name = "ACTIONS_RUNNER_HOOK_JOB_STARTED", value = "/opt/openbank-train-hook/job-started.sh" },
+            ]
+            volumeMounts = [
+              { name = "train-hook", mountPath = "/opt/openbank-train-hook", readOnly = true },
+            ]
             resources = {
               # build does a full-history clone of main and squashes up to 8 heads.
-              requests = { cpu = local.runner_cpu_request.train, memory = "2Gi", "ephemeral-storage" = "8Gi" }
+              requests = { cpu = "0.5", memory = "2Gi", "ephemeral-storage" = "8Gi" }
               limits   = { memory = "4Gi" }
             }
           },
