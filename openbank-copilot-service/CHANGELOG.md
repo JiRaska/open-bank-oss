@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.8](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.7...copilot-service-v0.17.8) (2026-11-02)
+
+
+### Bug Fixes
+
+* **copilot-service:** document shared authentication and expired-token error bodies ([#14513](https://github.com/JiRaska/open-bank-oss/issues/14513)) ([addf736](https://github.com/JiRaska/open-bank-oss/commit/addf7363b525824e743c480cc9e4ac52de8194e0))
+
 ## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.6...copilot-service-v0.17.7) (2026-10-16)
 
 
