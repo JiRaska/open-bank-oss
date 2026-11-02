@@ -5051,6 +5051,22 @@ gates:
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
 
+  - id: service-ci-path-selection-scenarios
+    name: "Services CI selector replays real push/PR path sets against the real tree (#11560)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the test. It drives the extracted module selector with a
+      stubbed `git diff` for both events; falsified by making filter-lib-test-only-paths.py pass its
+      input through, or by making the fleet-scanner expansion ignore the changed paths (a shared
+      library test-only change then selects more than its owner).
+    rationale: "The scenario file existed but nothing ran it, so a shared-library test-only change that fanned out to cross-module readers or the full fleet could regress unseen (#11560)."
+    review_after: "2027-05-01"
+    budget_seconds: 45   # 22 selector runs over the real module tree
+    min_subjects: 22
+    run: |
+      python3 .github/scripts/test-service-ci-path-selection.py
+
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
   # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
