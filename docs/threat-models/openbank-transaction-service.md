@@ -326,20 +326,15 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   is mandatory at the gateway; revisit if the gateway becomes optional.
 - Reversal now has the four-eyes *mechanism* wired (§4a) but not enforced
   (`authz.four-eyes.enforce=false`) — a candidate for a follow-up rollout under issue #413.
-- **Temporal orchestration path (ADR-0120 Phase 1, flag-gated OFF).** When
-  `openbank.transaction.orchestration.temporal.enabled=true`, `initiateTransaction` drives the payment
-  through a durable `PaymentWorkflow` instead of `PaymentSagaOrchestrator`; activities wrap the **same**
-  ports with identical arguments, so the §4 money-direction and the ADR-0039 D-2 hold-release invariant
-  are preserved (success path never releases the hold; balance projection does). New trust surface: the
-  worker opens a synchronous gRPC connection to the Temporal frontend (`:7233`) at startup — a *boot*
-  failure if the `openbank-payments` Temporal namespace is unprovisioned or the NetworkPolicy blocks it
-  (the `payments` k8s namespace is already allowlisted in `temporal-platform-ingress`). Workflow history
-  becomes a second store of in-flight payment state (durable, replayable — a DORA Art. 17 positive); it
-  must be access-controlled like the saga table. The ledger idempotency key on the Temporal path is
-  `workflow-<txid>-ledger` (distinct from the saga path's `saga-<txid>-ledger`): safe because a
-  transaction is initiated under exactly one flag value, but the canary cutover (Phase 4) must not
-  re-initiate an in-flight saga transaction under the workflow path. Flag is OFF in all environments;
-  this change is inert until a separately-approved cutover.
+- **Temporal orchestration (ADR-0120 Phase 5: sole orchestrator).** `initiateTransaction` always
+  drives the payment through the durable `PaymentWorkflow`; `PaymentSagaOrchestrator` and the
+  `openbank.transaction.orchestration.temporal.enabled` flag were removed (`TransactionService.kt`
+  records this). Activities wrap the same ports, so the §4 money-direction and the ADR-0039 D-2
+  hold-release invariant are preserved (success path never releases the hold; balance projection
+  does). Trust surface: the worker's gRPC connection to the Temporal frontend (`:7233`, namespace
+  `openbank-payments`), which carries no transport authentication today (#6066). Workflow history is a
+  second store of in-flight payment state and must be access-controlled. The ledger idempotency key
+  is `workflow-<txid>-ledger`.
 
 ## 6. Change log
 
