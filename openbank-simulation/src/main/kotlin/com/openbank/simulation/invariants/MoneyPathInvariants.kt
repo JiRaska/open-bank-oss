@@ -4,6 +4,7 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
@@ -11,6 +12,7 @@ import com.openbank.delegation.domain.model.SpendWindows
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.libs.domain.money.Money
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -195,6 +197,52 @@ object MoneyPathInvariants {
             world.domesticPayments.forEach { payment ->
                 if (payment.status !in terminal) {
                     return Violation(name, "domestic payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `ClearingBatch` and
+     * `ClearingItem` driven by [com.openbank.simulation.scenario.ClearingCycleScenario] must
+     * reach a terminal status (SETTLED / FAILED / REVERSED) by the time a step has fully
+     * settled — a batch left IN_CLEARING is the silent money-in-flight defect this layer
+     * exists to surface. On top of completeness, the netting conservation cross-checks the
+     * batch against its own items with the kernel Money: the batch total must still equal the
+     * sum of the item amounts that were batched, and totalCredit/netPosition must hold the
+     * bilateral offset (totalCredit == totalDebit, netPosition == totalDebit - totalCredit)
+     * production's fold produces — a batch whose totals drifted from its items fails here.
+     */
+    val clearingCompleteness = object : Invariant {
+        private val terminal = setOf(
+            ClearingStatus.SETTLED,
+            ClearingStatus.FAILED,
+            ClearingStatus.REVERSED,
+        )
+
+        override val name = "clearing-completeness"
+        override fun check(world: World): Violation? {
+            world.clearingBatches.forEach { batch ->
+                if (batch.status !in terminal) {
+                    return Violation(name, "clearing batch ${batch.id} stuck in ${batch.status}")
+                }
+                val itemSum = world.clearingItems
+                    .filter { it.batchId == batch.id }
+                    .fold(Money.zero(batch.currency)) { acc, item -> acc + Money.of(item.amount, item.currency) }
+                if (itemSum.amount.compareTo(batch.totalDebit) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} totalDebit != sum of its items")
+                }
+                if (batch.totalCredit.compareTo(batch.totalDebit) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} totalCredit != totalDebit")
+                }
+                if (batch.netPosition.compareTo(batch.totalDebit.subtract(batch.totalCredit)) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} netPosition != totalDebit - totalCredit")
+                }
+            }
+            world.clearingItems.forEach { item ->
+                if (item.status !in terminal) {
+                    return Violation(name, "clearing item ${item.id} stuck in ${item.status}")
                 }
             }
             return null
@@ -665,6 +713,7 @@ object MoneyPathInvariants {
         sepaPaymentCompleteness,
         settlementCompleteness,
         domesticPaymentCompleteness,
+        clearingCompleteness,
         sctInstPaymentCompleteness,
         billingFeeConservation,
         interestCapitalizationConservation,

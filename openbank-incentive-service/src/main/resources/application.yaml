@@ -73,6 +73,8 @@ openbank:
       dispatch-enabled: false
     incentive:
       customer-caller-principal: service-account-openbank-edge
+      # Throwaway test pepper (>= 32 chars); production supplies PROMO_CODE_PEPPER.
+      code-pepper: integration-pepper-with-32-characters-minimum
   quarkus:
     management:
       enabled: false

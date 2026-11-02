@@ -5,9 +5,9 @@ package com.openbank.dispute.integration
 
 import com.openbank.dispute.infrastructure.outbox.DisputeOutboxDispatcher
 import com.openbank.dispute.infrastructure.persistence.repository.DisputeOutboxRepositoryImpl
-import com.openbank.dispute.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource

@@ -12,7 +12,7 @@ describe('screen feedback refresh contract', () => {
     expect(source).toContain('type="button"')
     expect(source).toContain('disabled={loading}')
     expect(source).toContain('aria-busy={loading}')
-    expect(source).toContain("aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}")
+    expect(source).toContain("aria-label={language === 'cs' ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}")
     expect(source).toContain("fetch('/api/feedback/screen-feedback'")
   })
 })

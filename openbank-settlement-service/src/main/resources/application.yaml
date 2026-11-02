@@ -151,6 +151,11 @@ authz:
       gl:
         debit-account-id: "a0000000-0000-0000-0000-000000000002"
         credit-account-id: "a0000000-0000-0000-0000-000000000002"
+  mp:
+    messaging:
+      outgoing:
+        settlement-events-out:
+          connector: smallrye-in-memory
 
 mp:
   messaging:

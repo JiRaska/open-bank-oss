@@ -8,10 +8,11 @@ package com.openbank.agent.integration
 import com.openbank.agent.application.ProposalService
 import com.openbank.agent.domain.proposal.ProposalState
 import com.openbank.agent.infrastructure.audit.AgentAuditOutbox
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.every
 import io.mockk.spyk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -40,7 +41,11 @@ import javax.sql.DataSource
 // into other @QuarkusTest classes sharing the same test JVM whose own @TestProfile expects an empty
 // key (e.g. OpenAiCompatibleModelProviderBootTest) — surfaced by the Quarkus 3.37.2 BOM bump, which
 // let this un-isolated resource's config win over a sibling class's TestProfile override.
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class ProposalApiIT {
 
     @Inject

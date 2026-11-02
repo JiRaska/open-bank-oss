@@ -4,6 +4,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_FALLBACK_EMAIL_BODY
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_PUSH_BODY
 import com.openbank.notification.application.port.out.PushMessage
@@ -66,7 +67,7 @@ import java.util.function.Supplier
  */
 @QuarkusTest
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @Suppress("LargeClass") // One real-DB consumer fixture keeps all ack, persistence, and delivery assertions together.
 class NotificationConsumerIT {
 

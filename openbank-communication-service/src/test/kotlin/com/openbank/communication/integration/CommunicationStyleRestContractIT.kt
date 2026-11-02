@@ -5,7 +5,7 @@
 
 package com.openbank.communication.integration
 
-import com.openbank.communication.it.CommunicationPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -42,7 +42,7 @@ import javax.sql.DataSource
  * profile's comment.
  */
 @QuarkusTest
-@QuarkusTestResource(CommunicationPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class CommunicationStyleRestContractIT {
 
     @Inject

@@ -4,7 +4,7 @@
 
 package com.openbank.treasury.integration
 
-import com.openbank.treasury.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.nostro.NostroFixtures
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource

@@ -20,7 +20,7 @@ class Psd2DomesticCurrencyContractTest {
         val currency = contract.path("components").path("schemas").path("PisCzechPaymentRequest")
             .path("properties").path("instructedAmount").path("properties").path("currency")
 
-        assertThat(contract.path("info").path("version").asText()).isEqualTo("2.8.0")
+        assertThat(contract.path("info").path("version").asText()).isEqualTo("2.9.0")
         assertThat(berlin.path("requestBody").path("description").asText()).contains("domestic-cz requires CZK")
         assertThat(berlin.path("responses").path("400").path("description").asText())
             .contains("FORMAT_ERROR", "non-CZK")
