@@ -59,3 +59,9 @@ Unknown classes refuse assembly. Treasury requires explicit portfolio-local ISIN
 for government/corporate debt; a CFI code alone is not issuer evidence. The contract fixture is
 checked against the producer's actual response serialization and the consumer's DTO/assembler.
 This does not establish official regulator taxonomy or deployment of the company instance.
+
+## Pension-fund API v2 client transition
+
+Pension fund period figures are read from `GET /api/v2/reporting/funds/{fundId}/period-figures`. Query periods, machine identity, authentication configuration and returned figures are unchanged. The separate pension participant-aggregate client remains on `/api/v2/pension/reporting`; other tax providers and this service's own public API do not change versions. Consumer Pact and real reporting fixtures explicitly use the v2 fund path.
+
+A separately approved client rollout requires v2 capability across every active fund backend. The provider's deprecated v1 alias permits existing callers during transition, but source fixtures do not prove live capability or regulator delivery. Roll back clients before a v1-only provider, and preserve the provider's revision pins and widened fee precision. No provisioning, submission or deployment is authorized by this change.

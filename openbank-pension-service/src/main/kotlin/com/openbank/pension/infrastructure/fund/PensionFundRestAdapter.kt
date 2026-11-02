@@ -39,7 +39,7 @@ import java.time.LocalDate
 import java.util.UUID
 
 /** pension-fund-service's unit register API (its openapi.yaml, ADR-0334 S4) — the routes this service uses. */
-@Path("/api/v1")
+@Path("/api/v2")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 // pension-service's OWN client-credentials token (Keycloak client `openbank-pension`, ROLE_API
