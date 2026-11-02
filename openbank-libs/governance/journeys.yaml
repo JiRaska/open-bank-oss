@@ -63,6 +63,9 @@ journeys:
       that is up but serving the wrong thing (an ingress pointing at a dead backend, an
       edge returning 5xx instead of an auth challenge) is caught here.
     status: active
+    covers:
+      - openbank-customer-edge
+      - openbank-admin-ui
     severity: page
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml
@@ -84,6 +87,8 @@ journeys:
       HTTP handler and Postgres-backed projection. This is deliberately a service journey,
       not a claim about an authenticated customer or a payment.
     status: active
+    covers:
+      - openbank-product-catalog
     severity: ticket
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
@@ -105,6 +110,8 @@ journeys:
       The public Admin UI reaches and renders its Keycloak SSO boundary in a real browser. This
       proves the unauthenticated hand-off only; it does not claim an authenticated operator flow.
     status: active
+    covers:
+      - openbank-admin-ui
     severity: ticket
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
@@ -128,6 +135,8 @@ journeys:
       proving the deployed fx-service REST edge, its RBAC + OPA authorization path and the
       rate projection together, not merely that a pod answers.
     status: active
+    covers:
+      - openbank-fx-service
     severity: page
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-fx-read.yaml
@@ -154,6 +163,8 @@ journeys:
       the Keycloak SSO boundary rather than serving the protected console directly. This
       proves the public auth gate only, not an authenticated operator session.
     status: active
+    covers:
+      - openbank-admin-ui
     severity: ticket
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
@@ -219,6 +230,8 @@ journeys:
       credentials or device being used as monitoring infrastructure. Completing an SCA challenge
       is NOT yet checked (needs the phase-3 canary authenticator, #4348).
     status: active
+    covers:
+      - openbank-customer-edge
     severity: ticket
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-customer-authentication.yaml
@@ -250,6 +263,7 @@ journeys:
     covers:
       - openbank-account-service
       - openbank-balance-service
+      - openbank-customer-edge
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-account-overview.yaml
     schedule: "5,20,35,50 * * * *"
     target_schedule: "*/15 * * * *"
@@ -389,6 +403,8 @@ journeys:
       realm, and only the harness runs from CI — the same vantage the credential-free
       admin-ui-sso-boundary and admin-ui-security-excellence journeys already run from.
     status: active
+    covers:
+      - openbank-admin-ui
     severity: ticket
     money_moving: false
     workflow: .github/workflows/admin-ui-browser-synthetic.yml
@@ -427,6 +443,9 @@ journeys:
       in their net worth, labelled with its valuation source and age, with every revaluation
       kept in the holding's valuation history.
     status: active
+    covers:
+      - openbank-wealth-service
+      - openbank-customer-edge
     severity: ticket
     money_moving: false
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-wealth-declared-holding.yaml

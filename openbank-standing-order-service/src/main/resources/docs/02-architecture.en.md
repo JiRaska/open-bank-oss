@@ -179,3 +179,7 @@ unreadable, failed, in-progress or unknown responses propagate as uncertain comp
 the existing retry and dead-letter path, without confirming execution or recording a definitive
 failure. Every attempt retains the event's deterministic idempotency key. The existing handling
 of HTTP 400/422 and 409 is preserved. This change does not alter the separate SEPA rail path.
+
+## Account-service read (ADR-0319)
+
+The creditor-IBAN lookup (`GET /api/v1/accounts/iban/{iban}`) goes through the client generated from account-service's own `openapi.yaml` (`openbank-client-account`), via its `AccountClient` facade. Only a found account owned by the order's own party becomes an internal transfer target; a 404, any other failure, or another party's account records the execution as failed.

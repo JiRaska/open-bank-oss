@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ap2-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ap2-service:sandbox-37ccc183@sha256:6307542e56cb512325095cbdbf5ee447026d6a8b1066e703232eb3feda1da486
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ap2-service:sandbox-48a6da90@sha256:4d3560246c4d2cdb5964cc5a7f2ff0d0f521b0f8695ed1613f1ae80be093f464
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

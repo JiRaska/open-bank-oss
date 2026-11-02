@@ -56,6 +56,10 @@ catalog action (ADR-0259). This is the CLI's only network call.
 `ProductBehaviourDiff` of phase 4 lives in openbank-libs-testing and `obp diff` is rewired to it
 once that lands.
 
+The reference term deposit refuses any posting that would take it below zero, as savings does.
+A scheduled savings fee still posts in full on a dormant account (accepted in IR v1, #14207). See "Replay findings" in
+`openbank-libs/docs/product-ir.md`.
+
 Everything runs offline against the one pure interpreter in `openbank-libs-domain`; output is
 canonical JSON. Rates, fees and thresholds in the reference products are illustrative shapes, not
 anyone's commercial terms.

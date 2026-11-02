@@ -96,6 +96,10 @@ Symptom: every proxied call returns `{"error":"upstream unavailable"}`.
 
 This is the IDOR guard working as designed: the `accountId` did not resolve to the JWT party. Confirm the account belongs to the calling party in account-service; a 403 is returned (not 404) deliberately, to avoid an existence oracle.
 
+## Unified notification inbox timeouts
+
+`GET` on the combined notification inbox is bounded by one 10-second aggregate deadline across all of the caller's party feeds. If any feed is slow or fails, or the deadline expires, the response is `502` with `{"code":"NOTIFICATIONS_UNAVAILABLE"}` and no partial inbox is returned; the cause is logged as `Unified notification feed unavailable`. Check notification-service latency first. Concurrency is capped per replica (16 in flight, 128 queued), so a saturated replica can also surface as this 502.
+
 ## Metric naming
 
 Every custom Micrometer counter is registered with the `openbank.` prefix (the `metric-name-prefix` CI gate rejects a new unprefixed name). Prometheus scrapes dots as underscores and appends `_total` to counters: `openbank_onboarding_funnel_events_total{step,action}`, `openbank_credit_funnel_events_total{step,action}`, `openbank_feedback_submissions_total` and `openbank_feedback_emit_failures_total`. Older unprefixed names (`onboarding_funnel_events_total`, `credit_funnel_events_total`, `feedback_submissions_total`, `feedback_emit_failures_total`) are no longer emitted once this version is deployed, so dashboards and alerts must use the prefixed names; the in-repo PrometheusRules already do.

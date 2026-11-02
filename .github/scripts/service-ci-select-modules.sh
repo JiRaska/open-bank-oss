@@ -134,6 +134,10 @@ select_modules() {
              && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
             CHANGED="$CHANGED openbank-client-transaction"
           fi
+          if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+             && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+            CHANGED="$CHANGED openbank-client-account"
+          fi
           # Preserve readers of filtered cross-module fixtures on main as well as PRs.
         CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
           --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
@@ -283,6 +287,10 @@ select_modules() {
       if grep -qE '(^| )openbank-transaction-service( |$)' <<< " $CHANGED " \
          && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
         CHANGED="$CHANGED openbank-client-transaction"
+      fi
+      if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+         && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+        CHANGED="$CHANGED openbank-client-account"
       fi
       # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
       # Derived from test sources; rationale in the script header.

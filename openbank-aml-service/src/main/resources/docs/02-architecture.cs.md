@@ -174,3 +174,7 @@ Událost `aml.case.created.v1` s rizikem `HIGH` nebo `CRITICAL` se ze stejného 
 ## Sdílená závažnost případu (ADR-0353)
 
 `AmlRiskLevel` je typealias `AmlCaseSeverity` z `openbank-libs-fincrime`, jediné deklarace, kterou používají i platební kanály při otevření případu. Hodnoty (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`) i sloupec `aml_cases.risk_level` se nemění. Škála hodnotí výstrahu, ne klienta: rizikový rating klienta vede kyc-service a z této škály se nikdy neodvozuje.
+
+## Čtení z account-service (ADR-0319)
+
+Sweep rozlišení strany čte `GET /api/v1/accounts/{accountId}` přes klienta generovaného z vlastního `openapi.yaml` account-service (`openbank-client-account`) a jeho fasádu `AccountClient`. 404 tiše znamená neznámého vlastníka; každé jiné selhání se zaloguje a také znamená neznámého vlastníka, takže se řádek zkusí znovu při dalším sweepu.

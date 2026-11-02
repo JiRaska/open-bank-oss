@@ -5,8 +5,9 @@
 package com.openbank.settlement.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.settlement.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -20,7 +21,10 @@ import java.util.concurrent.CyclicBarrier
 import javax.sql.DataSource
 
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 class SettlementAuditAtomicityIT {
     @Inject lateinit var dataSource: DataSource
 

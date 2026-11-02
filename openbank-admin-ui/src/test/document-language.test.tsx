@@ -15,6 +15,12 @@ vi.mock('next/headers', () => ({
   headers: vi.fn(async () => new Headers()),
 }))
 
+// RootLayout reads the session via auth() to seed sidebar roles (single-paint SSR). The
+// document-language suite has no session and no Next server runtime — resolve to null.
+vi.mock('@/auth', () => ({
+  auth: vi.fn(async () => null),
+}))
+
 function Probe() {
   const { language, setLanguage } = useLanguage()
   return (
