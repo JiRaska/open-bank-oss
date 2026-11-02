@@ -10,6 +10,8 @@ import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.fx.domain.model.FxConversionMath
+import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.libs.domain.money.Money
@@ -270,6 +272,81 @@ object MoneyPathInvariants {
             world.sctInstPayments.forEach { payment ->
                 if (payment.status !in terminal) {
                     return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `FxConversion` driven
+     * by [com.openbank.simulation.scenario.FxConversionScenario] must reach a terminal status
+     * (SETTLED / FAILED / REVERSED) by the time a step has fully settled — the FX analogue of
+     * [domesticPaymentCompleteness]. A conversion left PENDING (booked, never settled nor
+     * failed) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val fxConversionCompleteness = object : Invariant {
+        private val terminal = setOf(
+            FxConversionStatus.SETTLED,
+            FxConversionStatus.FAILED,
+            FxConversionStatus.REVERSED,
+        )
+
+        override val name = "fx-conversion-completeness"
+        override fun check(world: World): Violation? {
+            world.fxConversions.forEach { conversion ->
+                if (conversion.status !in terminal) {
+                    return Violation(name, "fx conversion ${conversion.id} stuck in ${conversion.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every SETTLED `FxConversion`
+     * must reprice EXACTLY under the REAL [FxConversionMath] against the REAL `FxRate` fixing
+     * it references — which must exist and must have been valid at the conversion's creation
+     * time ([FxRate.isValid]) — and must carry the real 0.5% margin. A scenario that priced off
+     * a stale or expired fixing, drifted the margin, or re-modelled the target-amount rounding
+     * fails here, replayed against the production arithmetic rather than a copy of it.
+     */
+    val fxMoneyConservation = object : Invariant {
+        override val name = "fx-money-conservation"
+        override fun check(world: World): Violation? {
+            world.fxConversions.forEach { conversion ->
+                if (conversion.status != FxConversionStatus.SETTLED) return@forEach
+                val rate = world.fxRates.firstOrNull { it.id == conversion.rateId }
+                    ?: return Violation(
+                        name,
+                        "fx conversion ${conversion.id} settled against unknown rate ${conversion.rateId}",
+                    )
+                if (!rate.isValid(conversion.createdAt)) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} settled against expired rate ${conversion.rateId}",
+                    )
+                }
+                val expectedTo = FxConversionMath.convertedAmountMinorUnits(
+                    conversion.fromAmountMinorUnits,
+                    conversion.fromCurrency,
+                    conversion.toCurrency,
+                    conversion.appliedRate,
+                )
+                if (expectedTo != conversion.toAmountMinorUnits) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} toAmount=${conversion.toAmountMinorUnits}" +
+                            " but the real math prices $expectedTo",
+                    )
+                }
+                val expectedFee = FxConversionMath.feeMinorUnits(conversion.fromAmountMinorUnits)
+                if (expectedFee != conversion.feeMinorUnits) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} fee=${conversion.feeMinorUnits}" +
+                            " but the real math charges $expectedFee",
+                    )
                 }
             }
             return null
@@ -715,6 +792,8 @@ object MoneyPathInvariants {
         domesticPaymentCompleteness,
         clearingCompleteness,
         sctInstPaymentCompleteness,
+        fxConversionCompleteness,
+        fxMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
