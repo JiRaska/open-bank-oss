@@ -57,7 +57,7 @@ info:
   # Balance gains the `id` and `version` it always sent. No served behaviour changed.
   # 1.85.0 -> 1.86.0 (#13711): additive — optional `cursor` query parameter on GET /accounts;
   # delegated accounts are listed in the account page on the first page only.
-  version: 1.88.0
+  version: 1.89.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
