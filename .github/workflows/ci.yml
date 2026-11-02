@@ -244,10 +244,8 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
 
-      - name: Inventory admin UI routes covered by axe specs
-        run: |
-          python3 ../.github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
-          python3 ../.github/scripts/check-admin-ui-a11y-route-coverage.py
+      # check-admin-ui-a11y-route-coverage.py is declared in gates.yaml (admin-ui-a11y-route-coverage),
+      # not here: this job is conditional, so a gate inside it silently narrows (#3629).
 
       - name: E2E tests (Playwright)
         id: browser_e2e
