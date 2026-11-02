@@ -1426,6 +1426,32 @@ gates:
     run: |
       python3 .github/scripts/check-edge-decoy-rule-parity.py
 
+  # ADR-0359 phase 1: a honeytoken fails silently two ways — unwired (renamed lure, tripwire
+  # still matching the old name) or armed (someone grants it permissions). ENFORCED.
+  - id: honeytoken-wiring
+    name: "every honeytoken is wired to a tripwire and holds no permission (ADR-0359, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
+    rationale: >-
+      The honey ServiceAccount in arc-runners and the canary IAM key are only safe because they
+      are powerless, and only useful because a tripwire names them. Neither property is visible
+      at runtime: an unwired lure produces exactly the silence a quiet week produces, and an
+      armed one is a real credential in the namespace that runs public-PR code. The gate pairs
+      every honey SA with a CloudWatch metric filter, forbids any binding to it, pins the canary
+      user to a single explicit Deny "*", and requires the EventBridge rules to opt in to
+      read-only management events so the attacker's first call (sts:GetCallerIdentity) alerts.
+    review_after: "2027-04-29"
+    min_subjects: 2   # deploy-prod SA + canary IAM user at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-honeytoken-wiring.py"
+      - "openbank-infra/gitops/components/platform/honey-serviceaccount.yaml"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+    selftest: |
+      python3 .github/scripts/check-honeytoken-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-honeytoken-wiring.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
