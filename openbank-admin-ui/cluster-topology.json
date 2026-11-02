@@ -2,9 +2,10 @@
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
   "generatedAt": "2026-10-30T07:40:38.000Z",
+  "inputFingerprint": "sha256:2af4a4d01daa03a61d4a4ddc194bf36a1174f2544f26f0095a7c81f434d4f020",
   "counts": {
     "namespaces": 85,
-    "networkPolicies": 143,
+    "networkPolicies": 144,
     "externalSecrets": 236,
     "clusterPolicies": 0
   },
@@ -855,17 +856,17 @@
         "en": "Network (segmentation)"
       },
       "icon": "network",
-      "status": "planned",
+      "status": "partial",
       "analogy": {
         "cs": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 143 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
-        "en": "The zero-trust ideal is deny-by-default between namespaces. Reality: only 143 NetworkPolicies declared → traffic between namespaces is largely open."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 144 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 144 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy (143 / 85)",
+        "NetworkPolicy manifests (144)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -1129,10 +1130,10 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "143 / 85 ns má NetworkPolicy → většina provozu otevřená",
-        "en": "143 / 85 ns have a NetworkPolicy → most traffic open"
+        "cs": "144 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "144 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
-      "status": "planned"
+      "status": "partial"
     },
     {
       "item": {
@@ -1189,10 +1190,10 @@
         "en": "a set of kyverno policies"
       },
       "reality": {
-        "cs": "0 ClusterPolicy (image-verify)",
-        "en": "0 ClusterPolicy (image-verify)"
+        "cs": "0 ClusterPolicy deklarovaných v GitOpsu; runtime stav neověřen",
+        "en": "0 ClusterPolicies declared in GitOps; runtime state unverified"
       },
-      "status": "partial"
+      "status": "planned"
     }
   ]
 }
