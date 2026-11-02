@@ -137,6 +137,10 @@ describe('FinOps independent evidence sources', () => {
     let available = false
     mount(path => path.endsWith('/anomalies') ? json({ available, anomalies: [] }) : undefined)
     await screen.findByRole('button', { name: 'Retry Cost anomalies' })
+    expect(screen.getByText('Alertmanager is not responding')).toBeInTheDocument()
+    expect(screen.getByText('Langfuse → Prometheus bridge (ADR-0112) is not deployed in this environment')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Cost anomalies' })).queryByText(/An unexpected error occurred/)).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'AI costs' })).queryByText(/An unexpected error occurred/)).not.toBeInTheDocument()
     expect(screen.queryByText(/No active cost anomalies/)).not.toBeInTheDocument()
     available = true
     fireEvent.click(screen.getByRole('button', { name: 'Retry Cost anomalies' }))

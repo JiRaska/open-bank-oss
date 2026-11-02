@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "22793fc1fd05fe89"
+    openbank.tech/policy-checksum: "35b983089f5aad99"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1365,6 +1365,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*

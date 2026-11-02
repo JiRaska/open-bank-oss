@@ -20,6 +20,10 @@ the `obp` CLI. A released component (`version.txt`): every product change is a r
 `obp sign` and `obp propose` refuse here by design: signing belongs to product-catalog's
 `publish-ir` (four-eyes action `catalog.publish-ir`), proposing is ADR-0352 phase 5.
 
+The reference term deposit refuses any posting that would take it below zero, as savings does.
+A scheduled savings fee still posts in full on a dormant account (accepted in IR v1, #14207). See "Replay findings" in
+`openbank-libs/docs/product-ir.md`.
+
 Everything runs offline against the one pure interpreter in `openbank-libs-domain`; output is
 canonical JSON. Rates, fees and thresholds in the reference products are illustrative shapes, not
 anyone's commercial terms.

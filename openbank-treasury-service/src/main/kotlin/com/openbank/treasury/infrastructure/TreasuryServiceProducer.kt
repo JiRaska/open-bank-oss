@@ -24,6 +24,7 @@ import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.PortfolioStatementRepository
 import com.openbank.treasury.application.port.out.ReferenceRepository
+import com.openbank.treasury.application.usecase.BookCategories
 import com.openbank.treasury.application.usecase.CashFlowService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
@@ -85,25 +86,45 @@ class TreasuryServiceProducer {
         productLimits: ProductLimitConfig,
         schedules: ScheduleService,
         references: ReferenceRepository,
+        cashFlows: CashFlowRepository,
+        marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
         meters: io.micrometer.core.instrument.MeterRegistry,
-    ): TreasuryDealUseCase = TreasuryDealService(
-        deals,
-        counterparties,
-        ledger,
-        objectMapper,
-        clock,
-        // #10896: treasury has no fx-service client yet, so there is no mid to compare with. Enabling
-        // the check without one flags EVERY FX spot deal "mid unavailable" — loud, not silent.
-        FxMidRatePort.NONE,
-        FxRateTolerance(rateCheckEnabled, tolerancePercent),
-        confirmationRequired,
-        quotes,
-        productLimits.toPolicy(),
-        schedules,
-        ProductMandate(references, productLimits.toPolicy(), clock)::policy,
-        // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
-        { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
-    )
+        intents: com.openbank.treasury.application.port.out.PostingIntentPort,
+        @ConfigProperty(name = "openbank.treasury.posting-intent.max-resume-age", defaultValue = "PT4H")
+        maxResumeAge: java.time.Duration,
+        @ConfigProperty(name = "openbank.treasury.posting-intent.grace", defaultValue = "PT2M")
+        intentGrace: java.time.Duration,
+        @ConfigProperty(name = "openbank.treasury.posting-intent.claim-batch", defaultValue = "100")
+        claimBatch: Int,
+    ): TreasuryDealUseCase {
+        // The grace's bound against the ledger timeouts is checked at BOOT by PostingIntentGraceCheck.
+        return TreasuryDealService(
+            deals,
+            counterparties,
+            ledger,
+            objectMapper,
+            clock,
+            // #10896: treasury has no fx-service client yet, so there is no mid to compare with. Enabling
+            // the check without one flags EVERY FX spot deal "mid unavailable" — loud, not silent.
+            FxMidRatePort.NONE,
+            FxRateTolerance(rateCheckEnabled, tolerancePercent),
+            confirmationRequired,
+            quotes,
+            productLimits.toPolicy(),
+            schedules,
+            ProductMandate(references, productLimits.toPolicy(), clock)::policy,
+            cashFlows,
+            BookCategories(references, clock)::of,
+            com.openbank.treasury.application.usecase.CreditTermsSource(references, marketData)::on,
+            // ADR-0342 (#13882): a journal first recorded for a day that has already ended.
+            { event -> meters.counter("openbank.treasury.close.late_journals", "event", event.name).increment() },
+            // #13883: settle, mature and reverse record a posting intent before contacting the ledger.
+            intents,
+            maxResumeAge,
+            intentGrace,
+            claimBatch,
+        )
+    }
 
     /** ADR-0344 D3/D4: reference validation and schedule generation through openbank-libs-finance. */
     @Produces
@@ -121,6 +142,7 @@ class TreasuryServiceProducer {
         marketData: com.openbank.treasury.application.port.out.MarketDataRepository,
         objectMapper: ObjectMapper,
         clock: Clock,
+        dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository,
     ): com.openbank.treasury.application.usecase.FixingService =
         com.openbank.treasury.application.usecase.FixingService(
             flows,
@@ -129,6 +151,7 @@ class TreasuryServiceProducer {
             marketData,
             objectMapper,
             clock,
+            dayCompletion = dayCompletion,
         )
 
     /** ADR-0344 D5: no feed ingests the interbank indices yet; the port is where one plugs in. */

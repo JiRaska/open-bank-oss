@@ -5,9 +5,10 @@
 'use client'
 
 import Link from 'next/link'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { bi, localize, pick, type Localized } from '@/lib/i18n/bilingual'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@/lib/regulatory/exportReadiness'
@@ -20,7 +21,7 @@ import {
 } from '@/lib/regulatory/generatedReports'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-type Report = (typeof REPORTS)[number]
+type Report = Localized<(typeof REPORT_CATALOG)[number]>
 
 // A single, shared shape for what an export contains — used both to render the
 // visual preview table and to serialise to JSON/CSV, so the operator sees
@@ -109,6 +110,7 @@ const TEMPLATE_PATHS: Record<string, string[]> = {
 const DEPLOYMENT_ENVIRONMENT = process.env.NEXT_PUBLIC_GLITCHTIP_ENVIRONMENT?.trim() || 'unknown'
 const IS_TEST_ENVIRONMENT = DEPLOYMENT_ENVIRONMENT !== 'production'
 
+/** @czech-artefact FINREP cell names as filed with the CNB; used only in the Czech export artefact. */
 const CELL_LABELS: Record<string, string> = {
   'F01.01:r0010:c0010': 'Hotovost, centrální banky a vklady na požádání',
   'F01.01:r0040:c0010': 'Ostatní vklady na požádání',
@@ -210,7 +212,11 @@ function lastCompletedMonthEnd(): string {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).toISOString().slice(0, 10)
 }
 
-function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
+/** @czech-artefact The export is a Czech regulatory filing preview, independent of the UI language. */
+function buildExportRows(shown: Report, data: PreviewData): ExportRow[] {
+  // The artefact is a Czech regulatory filing preview regardless of the UI language.
+  const catalogEntry = REPORT_CATALOG.find(r => r.id === shown.id)
+  const report: Report = catalogEntry ? localize(catalogEntry, 'cs') : shown
   const meta: ExportRow[] = [
     { field: 'Klasifikace artefaktu', value: IS_TEST_ENVIRONMENT ? 'TEST_ONLY' : 'INTERNÍ REGULATORNÍ NÁHLED' },
     { field: 'Prostředí', value: DEPLOYMENT_ENVIRONMENT },
@@ -276,123 +282,125 @@ function triggerDownload(filename: string, content: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
-const REPORTS = [
+// Catalogue entries carry { cs, en } for every user-visible field; the page resolves them
+// with localize() for the active language, while the export artefact stays Czech (filed in Czech).
+const REPORT_CATALOG = [
   {
     id: 'sdat-payments',
-    name: 'SDAT — Platební statistika',
-    authority: 'CNB',
-    regulation: 'Vyhláška č. 314/2013 Sb.',
-    frequency: 'Měsíčně',
-    deadline: '15. den následujícího měsíce',
+    name: bi('SDAT — Platební statistika', 'SDAT — Payment statistics'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('Vyhláška č. 314/2013 Sb.', 'Decree No. 314/2013 Coll.'),
+    frequency: bi('Měsíčně', 'Monthly'),
+    deadline: bi('15. den následujícího měsíce', '15th day of the following month'),
     deadlineRule: { kind: 'monthly-day', day: 15 } as DeadlineRule,
-    description: 'Statistika platebního styku — počty a objemy plateb dle kanálu, typu a měny',
+    description: bi('Statistika platebního styku — počty a objemy plateb dle kanálu, typu a měny', 'Payment statistics — payment counts and volumes by channel, type and currency'),
     sdatCode: 'PLAT',
-    fields: ['Počet transakcí', 'Objem v CZK', 'Počet SEPA plateb', 'Počet domácích plateb', 'Počet přeshraničních plateb'],
+    fields: [bi('Počet transakcí', 'Transaction count'), bi('Objem v CZK', 'Volume in CZK'), bi('Počet SEPA plateb', 'SEPA payment count'), bi('Počet domácích plateb', 'Domestic payment count'), bi('Počet přeshraničních plateb', 'Cross-border payment count')],
   },
   {
     id: 'sdat-accounts',
-    name: 'SDAT — Statistika vkladů',
-    authority: 'CNB',
-    regulation: 'Vyhláška č. 314/2013 Sb.',
-    frequency: 'Měsíčně',
-    deadline: '15. den následujícího měsíce',
+    name: bi('SDAT — Statistika vkladů', 'SDAT — Deposit statistics'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('Vyhláška č. 314/2013 Sb.', 'Decree No. 314/2013 Coll.'),
+    frequency: bi('Měsíčně', 'Monthly'),
+    deadline: bi('15. den následujícího měsíce', '15th day of the following month'),
     deadlineRule: { kind: 'monthly-day', day: 15 } as DeadlineRule,
-    description: 'Statistika vkladů a úvěrů — zůstatky, úrokové sazby, počty účtů',
+    description: bi('Statistika vkladů a úvěrů — zůstatky, úrokové sazby, počty účtů', 'Deposit and loan statistics — balances, interest rates, account counts'),
     sdatCode: 'VKLA',
-    fields: ['Celkové vklady CZK', 'Celkové vklady EUR', 'Průměrná úroková sazba', 'Počet aktivních účtů'],
+    fields: [bi('Celkové vklady CZK', 'Total deposits CZK'), bi('Celkové vklady EUR', 'Total deposits EUR'), bi('Průměrná úroková sazba', 'Average interest rate'), bi('Počet aktivních účtů', 'Active account count')],
   },
   {
     id: 'aml-far',
-    name: 'FAÚ — Hlášení podezřelých obchodů (SAR)',
-    authority: 'FAÚ (Finanční analytický úřad)',
-    regulation: 'Zákon č. 253/2008 Sb. (AML zákon)',
-    frequency: 'Ad-hoc (do 24h od zjištění)',
-    deadline: 'Do 24 hodin',
+    name: bi('FAÚ — Hlášení podezřelých obchodů (SAR)', 'FAÚ — Suspicious activity report (SAR)'),
+    authority: bi('FAÚ (Finanční analytický úřad)', 'FAÚ (Financial Analytical Office)'),
+    regulation: bi('Zákon č. 253/2008 Sb. (AML zákon)', 'Act No. 253/2008 Coll. (AML Act)'),
+    frequency: bi('Ad-hoc (do 24h od zjištění)', 'Ad-hoc (within 24h of detection)'),
+    deadline: bi('Do 24 hodin', 'Within 24 hours'),
     deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
-    description: 'Hlášení podezřelých obchodů a transakcí dle AML zákona',
+    description: bi('Hlášení podezřelých obchodů a transakcí dle AML zákona', 'Reporting of suspicious trades and transactions under the AML Act'),
     sdatCode: 'SAR',
-    fields: ['ID zákazníka', 'Popis podezřelé aktivity', 'Výše transakce', 'Datum zjištění', 'Kontaktní osoba MLRO'],
+    fields: [bi('ID zákazníka', 'Customer ID'), bi('Popis podezřelé aktivity', 'Description of suspicious activity'), bi('Výše transakce', 'Transaction amount'), bi('Datum zjištění', 'Detection date'), bi('Kontaktní osoba MLRO', 'MLRO contact person')],
   },
   {
     id: 'cnb-capital',
-    name: 'CNB — Kapitálová přiměřenost (COREP)',
-    authority: 'CNB',
-    regulation: 'CRR/CRD IV (EU 575/2013)',
-    frequency: 'Čtvrtletně',
-    deadline: '30 dní po konci čtvrtletí',
+    name: bi('CNB — Kapitálová přiměřenost (COREP)', 'CNB — Capital adequacy (COREP)'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('CRR/CRD IV (EU 575/2013)', 'CRR/CRD IV (EU 575/2013)'),
+    frequency: bi('Čtvrtletně', 'Quarterly'),
+    deadline: bi('30 dní po konci čtvrtletí', '30 days after quarter end'),
     deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
-    description: 'Common Reporting — kapitálová přiměřenost, rizikové expozice, pákový poměr',
+    description: bi('Common Reporting — kapitálová přiměřenost, rizikové expozice, pákový poměr', 'Common Reporting — capital adequacy, risk exposures, leverage ratio'),
     sdatCode: 'COREP',
-    fields: ['Tier 1 kapitál', 'Tier 2 kapitál', 'RWA', 'CAR ratio', 'Leverage ratio'],
+    fields: [bi('Tier 1 kapitál', 'Tier 1 capital'), bi('Tier 2 kapitál', 'Tier 2 capital'), bi('RWA', 'RWA'), bi('CAR ratio', 'CAR ratio'), bi('Leverage ratio', 'Leverage ratio')],
   },
   {
     id: 'cnb-finrep',
-    name: 'CNB — Finanční výkazy (FINREP)',
-    authority: 'CNB',
-    regulation: 'IAS/IFRS + EBA ITS',
-    frequency: 'Čtvrtletně',
-    deadline: '30 dní po konci čtvrtletí',
+    name: bi('CNB — Finanční výkazy (FINREP)', 'CNB — Financial statements (FINREP)'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('IAS/IFRS + EBA ITS', 'IAS/IFRS + EBA ITS'),
+    frequency: bi('Čtvrtletně', 'Quarterly'),
+    deadline: bi('30 dní po konci čtvrtletí', '30 days after quarter end'),
     deadlineRule: { kind: 'days-after-quarter', days: 30 } as DeadlineRule,
-    description: 'Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky',
+    description: bi('Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky', 'Financial Reporting — balance sheet, profit and loss, off-balance-sheet items'),
     sdatCode: 'FINREP',
-    fields: ['Aktiva celkem', 'Závazky celkem', 'Vlastní kapitál', 'Čistý úrokový výnos', 'Provozní náklady'],
+    fields: [bi('Aktiva celkem', 'Total assets'), bi('Závazky celkem', 'Total liabilities'), bi('Vlastní kapitál', 'Equity'), bi('Čistý úrokový výnos', 'Net interest income'), bi('Provozní náklady', 'Operating expenses')],
   },
   {
     id: 'cnb-lcr',
-    name: 'CNB — Krytí likvidity (LCR)',
-    authority: 'CNB',
-    regulation: 'CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61',
-    frequency: 'Měsíčně',
-    deadline: '30 dní po konci měsíce',
+    name: bi('CNB — Krytí likvidity (LCR)', 'CNB — Liquidity coverage (LCR)'),
+    authority: bi('CNB', 'CNB'),
+    regulation: bi('CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61', 'CRR/CRD IV (EU 575/2013) + Delegated Regulation (EU) 2015/61'),
+    frequency: bi('Měsíčně', 'Monthly'),
+    deadline: bi('30 dní po konci měsíce', '30 days after month end'),
     deadlineRule: { kind: 'days-after-month', days: 30 } as DeadlineRule,
-    description: 'Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR',
+    description: bi('Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR', 'Liquidity Coverage Ratio — liquid assets, outflows, inflows and the LCR calculation'),
     sdatCode: 'LCR',
     // Per-template Czech labels rather than field names: this report is a bundle of four COREP
     // templates (like cnb-capital's C_01.00 + C_02.00), so "key fields" is more useful as
     // "which template" than as a flattened field list.
-    fields: ['C 72.00 – Likvidní aktiva', 'C 73.00 – Odtoky', 'C 74.00 – Přítoky', 'C 76.00 – Výpočet LCR'],
+    fields: [bi('C 72.00 – Likvidní aktiva', 'C 72.00 – Liquid assets'), bi('C 73.00 – Odtoky', 'C 73.00 – Outflows'), bi('C 74.00 – Přítoky', 'C 74.00 – Inflows'), bi('C 76.00 – Výpočet LCR', 'C 76.00 – LCR calculation')],
   },
   {
     id: 'ecb-payments',
-    name: 'ECB — Statistika platebního styku',
-    authority: 'ECB / ČNB',
-    regulation: 'ECB/2013/43 Regulation',
-    frequency: 'Ročně',
-    deadline: '31. března',
+    name: bi('ECB — Statistika platebního styku', 'ECB — Payment statistics'),
+    authority: bi('ECB / ČNB', 'ECB / CNB'),
+    regulation: bi('ECB/2013/43 Regulation', 'ECB/2013/43 Regulation'),
+    frequency: bi('Ročně', 'Annually'),
+    deadline: bi('31. března', '31 March'),
     deadlineRule: { kind: 'annual', month: 3, day: 31 } as DeadlineRule,
-    description: 'Statistika platebního styku pro ECB — počty a hodnoty platebních transakcí',
+    description: bi('Statistika platebního styku pro ECB — počty a hodnoty platebních transakcí', 'Payment statistics for the ECB — counts and values of payment transactions'),
     sdatCode: 'ECB-PAYM',
-    fields: ['Počet platebních účtů', 'Počet karet', 'Objem bezhotovostních plateb', 'Počet ATM'],
+    fields: [bi('Počet platebních účtů', 'Payment account count'), bi('Počet karet', 'Card count'), bi('Objem bezhotovostních plateb', 'Cashless payment volume'), bi('Počet ATM', 'ATM count')],
   },
   {
     id: 'fatca-report',
-    name: 'FATCA — Hlášení US osob',
-    authority: 'Finanční správa ČR / IRS',
-    regulation: 'FATCA (US zákon) + CRS OECD',
-    frequency: 'Ročně',
-    deadline: '30. června',
+    name: bi('FATCA — Hlášení US osob', 'FATCA — US persons report'),
+    authority: bi('Finanční správa ČR / IRS', 'Czech Financial Administration / IRS'),
+    regulation: bi('FATCA (US zákon) + CRS OECD', 'FATCA (US law) + OECD CRS'),
+    frequency: bi('Ročně', 'Annually'),
+    deadline: bi('30. června', '30 June'),
     deadlineRule: { kind: 'annual', month: 6, day: 30 } as DeadlineRule,
-    description: 'Hlášení účtů US osob a entit finančnímu úřadu pro přeposlání IRS',
+    description: bi('Hlášení účtů US osob a entit finančnímu úřadu pro přeposlání IRS', 'Reporting of accounts held by US persons and entities to the tax office for forwarding to the IRS'),
     sdatCode: 'FATCA',
-    fields: ['Jméno US osoby', 'TIN (US daňové číslo)', 'Zůstatek účtu', 'Příjmy z US zdrojů'],
+    fields: [bi('Jméno US osoby', 'US person name'), bi('TIN (US daňové číslo)', 'TIN (US tax number)'), bi('Zůstatek účtu', 'Account balance'), bi('Příjmy z US zdrojů', 'US-source income')],
   },
   {
     id: 'dora-ict',
-    name: 'DORA — ICT Incident Reporting',
-    authority: 'CNB / EBA',
-    regulation: 'DORA (EU 2022/2554) — od 17.1.2025',
-    frequency: 'Ad-hoc (do 4h od zjištění)',
-    deadline: 'Počáteční hlášení do 4 hodin',
+    name: bi('DORA — ICT Incident Reporting', 'DORA — ICT Incident Reporting'),
+    authority: bi('CNB / EBA', 'CNB / EBA'),
+    regulation: bi('DORA (EU 2022/2554) — od 17.1.2025', 'DORA (EU 2022/2554) — since 17 Jan 2025'),
+    frequency: bi('Ad-hoc (do 4h od zjištění)', 'Ad-hoc (within 4h of detection)'),
+    deadline: bi('Počáteční hlášení do 4 hodin', 'Initial report within 4 hours'),
     deadlineRule: { kind: 'ad-hoc' } as DeadlineRule,
-    description: 'Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení',
+    description: bi('Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení', 'Reporting of major ICT incidents under DORA — initial, intermediate and final reports'),
     sdatCode: 'DORA-INC',
-    fields: ['Klasifikace incidentu', 'Dopad na zákazníky', 'RTO/RPO', 'Příčina', 'Nápravná opatření'],
+    fields: [bi('Klasifikace incidentu', 'Incident classification'), bi('Dopad na zákazníky', 'Customer impact'), bi('RTO/RPO', 'RTO/RPO'), bi('Příčina', 'Root cause'), bi('Nápravná opatření', 'Remediation')],
   },
 ]
 
 const DATA_SOURCE_CONFIG = {
-  implemented: { label: 'Implementovaný náhled', text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', icon: <FileText size={13} /> },
-  catalog: { label: 'Katalog — bez zdroje', text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)', icon: <AlertTriangle size={13} /> },
+  implemented: { label: bi('Implementovaný náhled', 'Implemented preview'), text: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)', icon: <FileText size={13} /> },
+  catalog: { label: bi('Katalog — bez zdroje', 'Catalogue — no source'), text: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)', icon: <AlertTriangle size={13} /> },
 }
 
 function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
@@ -406,7 +414,8 @@ function dueOf(report: Report): string {
 
 export default function RegulatoryPage() {
   const [selected, setSelected] = useState<string | null>(null)
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const REPORTS = useMemo(() => localize(REPORT_CATALOG, language), [language])
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null)
   // The export now opens a visual preview first (operator visually checks the
   // table before committing to a download) — `preview` holds the report whose
@@ -561,7 +570,7 @@ export default function RegulatoryPage() {
   const catalogueOnlyCount = REPORTS.length - implementedPreviewCount
 
   const authorities = REPORTS.reduce((acc, r) => {
-    const key = r.authority.includes('CNB') ? 'ČNB' : r.authority.includes('FAÚ') ? 'FAÚ' : r.authority.includes('ECB') ? 'ECB' : 'Ostatní'
+    const key = r.authority.includes('CNB') ? t('ČNB', 'CNB') : r.authority.includes('FAÚ') ? 'FAÚ' : r.authority.includes('ECB') ? 'ECB' : t('Ostatní', 'Other')
     acc[key] = (acc[key] || 0) + 1
     return acc
   }, {} as Record<string, number>)
@@ -609,7 +618,7 @@ export default function RegulatoryPage() {
               if (count === 0) return null;
               const percent = (count / REPORTS.length) * 100;
               const color = DATA_SOURCE_CONFIG[st].text;
-              return <div key={st} style={{ width: `${percent}%`, background: color }} title={`${DATA_SOURCE_CONFIG[st].label}: ${count}`} />
+              return <div key={st} style={{ width: `${percent}%`, background: color }} title={`${pick(DATA_SOURCE_CONFIG[st].label, language)}: ${count}`} />
             })}
           </div>
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
@@ -619,7 +628,7 @@ export default function RegulatoryPage() {
               return (
                 <div key={st} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: cfg.text }} />
-                  <span style={{ color: 'var(--text-secondary)' }}>{cfg.label}</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>{pick(cfg.label, language)}</span>
                   <span style={{ fontWeight: 600 }}>{count}</span>
                 </div>
               )
@@ -686,7 +695,7 @@ export default function RegulatoryPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <span style={{ fontSize: '13px', fontWeight: 700 }}>{report.name}</span>
                     <span style={{ fontSize: '10px', padding: '2px 6px', background: cfg.bg, color: cfg.text, borderRadius: '4px', border: `1px solid ${cfg.border}`, fontWeight: 600 }}>
-                      {cfg.label}
+                      {pick(cfg.label, language)}
                     </span>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>{report.sdatCode}</span>
                   </div>
@@ -842,7 +851,7 @@ export default function RegulatoryPage() {
                   kind={previewData.kind === 'template_not_deployed' ? 'not_found' : previewData.kind}
                   service={isGeneratedReportId(preview.id) ? 'regulatory reporting sources' : 'FINREP / COREP service'}
                   feature={t('regulatorní šablony', 'regulatory templates')}
-                  lang="cs"
+                  lang={language}
                   dense
                   // C_02.00 has a dependency the other templates do not: finrep-service's read from
                   // openbank-risk-engine's Pillar 1 snapshot (RISK_ENGINE_UNAVAILABLE — a real
@@ -857,11 +866,8 @@ export default function RegulatoryPage() {
                   // route matches but nothing implements that template id yet. That reads exactly
                   // like a generic backend error unless named — an operator would otherwise go
                   // looking for an outage that does not exist.
-                  // Literal Czech, not `t()` — this panel is always rendered `lang="cs"` (see the
-                  // `DataUnavailable` call below), so its own copy must not silently flip to
-                  // English while the panel around it stays Czech.
                   title={previewData.kind === 'template_not_deployed'
-                    ? 'Šablona zatím není na backendu nasazena'
+                    ? t('Šablona zatím není na backendu nasazena', 'Template is not deployed on the backend yet')
                     : undefined}
                   detail={preview.id === 'cnb-capital' && previewData.kind === 'error'
                     ? t(
@@ -869,7 +875,10 @@ export default function RegulatoryPage() {
                         'finrep-service returned an error rendering C 02.00 (Own Funds Requirements) — most likely its read from the risk engine failed (the Pillar 1 capital calculation). Values will not display until the risk-engine read recovers; try loading the preview again.',
                       )
                     : previewData.kind === 'template_not_deployed'
-                      ? 'finrep-service ještě neobsahuje implementaci této šablony COREP LCR — čeká na sloučení odpovídajícího finrep pull requestu. Jakmile bude nasazena, náhled se načte automaticky bez dalšího zásahu.'
+                      ? t(
+                        'finrep-service ještě neobsahuje implementaci této šablony COREP LCR — čeká na sloučení odpovídajícího finrep pull requestu. Jakmile bude nasazena, náhled se načte automaticky bez dalšího zásahu.',
+                        'finrep-service does not implement this COREP LCR template yet — it is waiting for the matching finrep pull request to merge. Once deployed, the preview loads automatically with no further action.',
+                      )
                       : undefined}
                 />
               ) : (

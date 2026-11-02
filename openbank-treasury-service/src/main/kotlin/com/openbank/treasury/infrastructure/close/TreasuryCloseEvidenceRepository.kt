@@ -86,6 +86,7 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
                 dead = (row[2] as Number).toInt(),
                 lastSettlementAt = row[COL_LAST_SETTLEMENT]?.let { asInstant(it) },
                 unapplied = (row[COL_UNAPPLIED] as Number).toInt(),
+                openIntents = (row[COL_OPEN_INTENTS] as Number).toInt(),
             )
         }
     }
@@ -172,6 +173,7 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
         const val P_VALUE_DATE = 3
         const val COL_LAST_SETTLEMENT = 3
         const val COL_UNAPPLIED = 4
+        const val COL_OPEN_INTENTS = 5
 
         // Positional parameters of LATEST_PASS_SQL.
         const val P_LATEST_JOB = 1
@@ -211,6 +213,9 @@ class TreasuryCloseEvidenceRepository(private val sf: Mutiny.SessionFactory) : T
                 "AND event IN ('SETTLED', 'MATURED')), " +
                 "(SELECT count(*) FROM deal_journals j WHERE j.value_date = ?3 " +
                 "AND j.event IN ('SETTLED', 'MATURED', 'REVERSED') AND NOT EXISTS " +
-                "(SELECT 1 FROM deal_transitions t WHERE t.deal_id = j.deal_id AND t.to_state = j.event))"
+                "(SELECT 1 FROM deal_transitions t WHERE t.deal_id = j.deal_id AND t.to_state = j.event)), " +
+                // #13883: a lifecycle post decided for this value day and not yet applied, whether or
+                // not treasury has recorded the ledger's answer: the ledger may hold its journal.
+                "(SELECT count(*) FROM deal_posting_intent WHERE status = 'OPEN' AND value_date = ?3)"
     }
 }

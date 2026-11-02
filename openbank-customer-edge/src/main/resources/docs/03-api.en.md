@@ -204,3 +204,7 @@ Question ids and option codes must each contain 1–64 ASCII letters, digits, un
 periods or hyphens; option values must be strings. Free text, arrays and numeric
 answers are rejected rather than forwarded as scored answers. The edge rebuilds
 the outgoing body from the accepted fields and preserves the submitted answer order.
+
+## Notification page contract
+
+`GET /notifications` returns `{ items, total, unreadCount, page, size }` (`PersonalNotificationPage`). The edge always forwards the token party to notification-service, so `total` and `unreadCount` cover that party's whole history (never negative) rather than the returned page, and `unreadCount` is never null here, unlike the unscoped operator list upstream. `limit` is clamped to 1–100 (default 20) and `page` to 0 or more before the upstream call; `size` echoes the applied limit. Items are metadata only: the rendered body is never returned, and `subject`, `sentAt`, `visibleAt`, `readAt` and `templateRevision` may be null.

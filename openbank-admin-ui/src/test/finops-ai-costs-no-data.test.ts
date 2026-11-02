@@ -30,6 +30,22 @@ describe('GET /api/finops/ai-costs without data', () => {
     expect(body.agents).toEqual([])
   })
 
+  it('reports unavailable when the Langfuse bridge exports langfuse_up 0', async () => {
+    // The exporter (ai-platform/langfuse-exporter.yaml) sets langfuse_up 0 on any failed poll
+    // while keeping its counters; the route must not read those stale counters as live figures.
+    const fetchMock = vi.fn(async (url: string) =>
+      decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('0') : promResult('2.5'))
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+
+    const body = await (await GET()).json()
+
+    expect(body.available).toBe(false)
+    expect(body.totalCostLast7dUsd).toBeNull()
+    expect(body.agents).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('reports no total when the bridge is up but exports no agent series', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string) =>
       decodeURIComponent(String(url)).includes('langfuse_up') ? promResult('1') : emptyResult))

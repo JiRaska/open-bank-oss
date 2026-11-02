@@ -151,3 +151,7 @@ Eventy jsou **append-only**; opravy se dělají kompenzačním eventem (např. `
 - **API verze v URL** (`/api/v1/...`). Breaking změny = `/api/v2/...`, v1 běží paralelně 6 měsíců.
 - **Event verze v topic name** (`...v1`). Schema evolution: jen additive (přidání optional fieldů), breaking = nový topic.
 - **OpenAPI diff** v CI proti `main` — fail pokud removed endpoint / required-added field bez verze bumpu.
+
+## Autentizace listenerů
+
+Pod `/api/*` je na obou listenerech přijímán jen mechanismus bearer a oprávnění nově vyžaduje autentizovaného volajícího místo toho, aby povolovalo všechny. Důvěryhodný klientský certifikát na mTLS listeneru je pouze transportní autentizace. Trasa bez vlastní bezpečnostní anotace je proto bez bearer tokenu odmítnuta. Veřejné trasy s metadaty `GET /api/v1/info` a `GET /api/v1/config` jsou výslovně povoleny bez něj.
