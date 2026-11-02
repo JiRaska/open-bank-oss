@@ -39,7 +39,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # upgrades pip to a verified version and installs every (transitive) runtime dependency.
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
-FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime-base
 
 # Runtime-only shared libraries WeasyPrint needs (text shaping via Pango +
 # HarfBuzz, image decoding via libjpeg/openjp2). This mirrors the official
@@ -66,6 +66,9 @@ ENV PATH="/opt/venv/bin:${PATH}"
 WORKDIR /app
 COPY app.py .
 
+# Shared root-owned layers end here; each target below sets the non-root USER itself, so the
+# production prune needs no switch back to the privileged user.
+FROM runtime-base AS runtime
 USER openbank
 
 EXPOSE 8200
@@ -86,15 +89,23 @@ COPY tests /app/tests
 ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["-q", "-o", "cache_dir=/tmp/pytest-cache", "tests"]
 
-FROM runtime AS production
+FROM runtime-base AS production
 # The production image never installs anything at runtime, so pip is dead weight there. It
 # also VENDORS certifi, msgpack, urllib3 and setuptools, which Trivy reports by their vendored
 # versions: a critical certifi advisory in pip's bundle blocked this image's deploy
 # while the renderer itself imports none of them. Removing both copies (the venv's and the base
 # image's) takes them out of the scanned filesystem; the test stage above keeps pip.
-USER root
 RUN rm -rf /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.* \
         /opt/venv/lib/python3.*/site-packages/pip /opt/venv/lib/python3.*/site-packages/pip-*.dist-info \
         /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
         /usr/local/lib/python3.*/site-packages/pip /usr/local/lib/python3.*/site-packages/pip-*.dist-info
+
 USER openbank
+
+EXPOSE 8200
+
+# Liveness/readiness probe target — GET /health, 200 == ok.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import urllib.request as u,sys; sys.exit(0 if u.urlopen('http://127.0.0.1:8200/health', timeout=2).status == 200 else 1)"
+
+ENTRYPOINT ["python", "app.py"]
