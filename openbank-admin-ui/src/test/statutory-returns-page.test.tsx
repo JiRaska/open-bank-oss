@@ -5,6 +5,7 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import StatutoryReturnsPage from '@/app/regulatory/statutory-returns/page'
+import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -26,7 +27,7 @@ describe('statutory returns read-only view', () => {
         status: 'ASSEMBLED', dueDate: '2026-09-20', submittedAt: null, submissionReference: null }])
     })
     vi.stubGlobal('fetch', fetchMock)
-    render(<StatutoryReturnsPage />)
+    render(<LanguageProvider initialLanguage="cs"><StatutoryReturnsPage /></LanguageProvider>)
 
     expect(await screen.findByText('Source not bound')).toBeInTheDocument()
     expect(screen.getAllByText(/PSP10-12-FUND/)).toHaveLength(2)
@@ -39,7 +40,7 @@ describe('statutory returns read-only view', () => {
 
   it('shows a service failure rather than invented empty returns', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => response({ error: 'Unknown service: tax-reporting-service' }, 404)))
-    render(<StatutoryReturnsPage />)
+    render(<LanguageProvider initialLanguage="cs"><StatutoryReturnsPage /></LanguageProvider>)
 
     expect(await screen.findByText(/Tax-reporting-service není v tomto prostředí nasazená/)).toBeInTheDocument()
     expect(screen.queryByText('API nehlásí žádný překročený termín.')).not.toBeInTheDocument()
