@@ -1314,6 +1314,25 @@ def api_retry_delay(method: str, code: int | None, headers, attempt: int) -> flo
     return min(API_BACKOFF_CAP_S, API_BACKOFF_BASE_S * (2 ** attempt))
 
 
+# Quota accounting (#quota): requests actually sent this process, memo hits, and the last
+# x-ratelimit-* headers seen. Logged once per mode so each tick's REST cost is measurable from
+# its log instead of estimated. Read-only bookkeeping; never consulted by any decision.
+API_STATS = {"sent": 0, "memo_hits": 0, "used": "", "remaining": "", "resource": ""}
+
+
+def _note_ratelimit(headers) -> None:
+    for k in ("used", "remaining", "resource"):
+        v = _header(headers, f"x-ratelimit-{k}")
+        if v:
+            API_STATS[k] = v
+
+
+def api_stats_line(mode: str) -> str:
+    return (f"merge-train {mode}: api requests sent={API_STATS['sent']} memo_hits={API_STATS['memo_hits']} "
+            f"x-ratelimit-used={API_STATS['used'] or '?'} remaining={API_STATS['remaining'] or '?'} "
+            f"resource={API_STATS['resource'] or '?'}")
+
+
 def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
     data = json.dumps(body).encode() if body is not None else None
     memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
@@ -1321,19 +1340,23 @@ def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
     if method != "GET":
         _GET_MEMO.clear()
     elif memo and path in _GET_MEMO:
+        API_STATS["memo_hits"] += 1
         return 200, json.loads(_GET_MEMO[path])
     for attempt in range(API_RETRY_ATTEMPTS):
         req = urllib.request.Request(API + path, method=method, data=data)
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("X-GitHub-Api-Version", "2022-11-28")
         req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+        API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
+            _note_ratelimit(_h)
             if memo and status == 200:
                 _GET_MEMO[path] = raw or b"null"
             return status, json.loads(raw or b"null")
         except urllib.error.HTTPError as e:
             code, headers, text = e.code, e.headers, e.read().decode(errors="replace")[:300]
+            _note_ratelimit(headers)
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             code, headers, text = None, None, f"{type(e).__name__}: {e}"
         delay = api_retry_delay(method, code, headers, attempt)
@@ -6378,6 +6401,8 @@ def guard_api(mode: str, run) -> int:
         return run()
     except ApiAbort as exc:
         return api_abort_exit(mode, exc)
+    finally:
+        log(api_stats_line(mode))
 
 
 def api_abort_exit(mode: str, exc: ApiAbort) -> int:
