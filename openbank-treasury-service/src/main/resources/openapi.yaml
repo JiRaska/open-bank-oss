@@ -67,7 +67,7 @@ info:
   #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
   # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
   #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
-  version: 1.24.0
+  version: 1.25.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -1233,6 +1233,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PositionClose' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
 
   /api/v1/treasury/positions/close-of-day/special:
     post:
@@ -1253,6 +1254,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PositionClose' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
 
   /api/v1/treasury/views/deal-filters:
     get:
