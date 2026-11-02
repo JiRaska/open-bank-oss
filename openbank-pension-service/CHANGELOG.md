@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.2](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.1...pension-service-v3.1.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **pension:** let quarkusDev boot on Kafka dev services ([#14407](https://github.com/JiRaska/open-bank-oss/issues/14407)) ([b487492](https://github.com/JiRaska/open-bank-oss/commit/b487492dbaaec882fce804a0efaeb755345b0d90))
+
 ## [3.1.1](https://github.com/JiRaska/open-bank-oss/compare/pension-service-v3.1.0...pension-service-v3.1.1) (2026-10-29)
 
 
