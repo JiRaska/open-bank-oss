@@ -87,3 +87,14 @@ ENTRYPOINT ["python", "-m", "pytest"]
 CMD ["-q", "-o", "cache_dir=/tmp/pytest-cache", "tests"]
 
 FROM runtime AS production
+# The production image never installs anything at runtime, so pip is dead weight there. It
+# also VENDORS certifi, msgpack, urllib3 and setuptools, which Trivy reports by their vendored
+# versions: a critical certifi advisory in pip's bundle blocked this image's deploy
+# while the renderer itself imports none of them. Removing both copies (the venv's and the base
+# image's) takes them out of the scanned filesystem; the test stage above keeps pip.
+USER root
+RUN rm -rf /opt/venv/bin/pip /opt/venv/bin/pip3 /opt/venv/bin/pip3.* \
+        /opt/venv/lib/python3.*/site-packages/pip /opt/venv/lib/python3.*/site-packages/pip-*.dist-info \
+        /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.* \
+        /usr/local/lib/python3.*/site-packages/pip /usr/local/lib/python3.*/site-packages/pip-*.dist-info
+USER openbank
