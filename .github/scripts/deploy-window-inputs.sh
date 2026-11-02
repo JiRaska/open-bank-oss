@@ -45,9 +45,7 @@ jq '[.[][] | ([.labels[].name] | index("merge-priority:repair") != null) as $rep
 # A query error fails loudly (set -e): guessing "not stuck" would restore the freeze silently.
 for n in $(jq -r '.[] | select(.armed) | .number' "$out/prs.json"); do
   view=$(gh pr view "$n" --repo "$repo" --json mergeStateStatus,statusCheckRollup)
-  stuck=$(jq -r '(.mergeStateStatus == "DIRTY") or any(.statusCheckRollup[];
-    ((.conclusion // .state // "") | ascii_upcase) as $c
-    | $c == "FAILURE" or $c == "ERROR" or $c == "TIMED_OUT" or $c == "CANCELLED" or $c == "ACTION_REQUIRED")' <<< "$view")
+  stuck=$(python3 .github/scripts/deploy-window.py stuck <<< "$view")
   jq --argjson n "$n" --argjson stuck "$stuck" 'map(if .number == $n then .stuck = $stuck else . end)' \
     "$out/prs.json" > "$out/prs.json.tmp" && mv "$out/prs.json.tmp" "$out/prs.json"
 done

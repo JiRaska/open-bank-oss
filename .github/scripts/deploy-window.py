@@ -124,6 +124,20 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
     return [p for p in pending if p["head"].startswith(prefix)][-1]
 
 
+# Only a definitive "cannot merge" counts (#14498 review): a merge conflict, or a check that
+# FAILED / TIMED_OUT. CANCELLED is deliberately excluded: a superseded or concurrency-cancelled
+# run is routine and would otherwise disarm a healthy deploy PR.
+STUCK_CONCLUSIONS = {"FAILURE", "TIMED_OUT"}
+
+
+def is_stuck(view: dict) -> bool:
+    """view: `gh pr view --json mergeStateStatus,statusCheckRollup`."""
+    if view.get("mergeStateStatus") == "DIRTY":
+        return True
+    return any(str(c.get("conclusion") or c.get("state") or "").upper() in STUCK_CONCLUSIONS
+               for c in view.get("statusCheckRollup") or [])
+
+
 def stuck_armed(prs: list[dict]) -> list[dict]:
     """Armed deploy PRs that cannot merge; each freezes its kind until disarmed (#14498)."""
     return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("armed") and p.get("stuck")]
@@ -259,6 +273,14 @@ def self_test() -> int:
     check("a stuck armed PR does not freeze the flush (#14498)",
           (flush(prs + [stuck], T, T - W, W) or {}).get("number") == 11)
     check("a stuck armed PR is named for disarming", [p["number"] for p in stuck_armed(prs + [stuck])] == [13])
+    roll = lambda *cs: {"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"conclusion": c} for c in cs]}
+    check("a merge conflict is stuck", is_stuck({"mergeStateStatus": "DIRTY", "statusCheckRollup": []}))
+    check("a FAILURE check is stuck", is_stuck(roll("SUCCESS", "FAILURE")))
+    check("a TIMED_OUT check is stuck", is_stuck(roll("TIMED_OUT")))
+    check("a single CANCELLED check is NOT stuck", not is_stuck(roll("SUCCESS", "CANCELLED")))
+    check("pending / green checks are NOT stuck", not is_stuck(roll(None, "SUCCESS")))
+    check("a failed commit status (state) is stuck",
+          is_stuck({"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"state": "FAILURE"}]}))
     check("a healthy armed PR is never named for disarming",
           stuck_armed(prs + [{**stuck, "stuck": False}]) == [])
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
@@ -401,6 +423,7 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    sub.add_parser("stuck", help="stdin: gh pr view --json mergeStateStatus,statusCheckRollup; prints true/false")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
     for p in (d, f):
@@ -432,6 +455,9 @@ def main() -> int:
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
                           lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
+        return 0
+    if a.cmd == "stuck":
+        print("true" if is_stuck(json.load(sys.stdin)) else "false")
         return 0
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
