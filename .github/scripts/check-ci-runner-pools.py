@@ -48,6 +48,19 @@
 #      Such a pool may also declare `pull_request_target_base_context: true`, which
 #      exempts an ALLOWED workflow's `pull_request_target` trigger (base context, no PR
 #      checkout) from PR-POOL. A `pull_request` trigger is never exempt.
+#   7. EXPR-RUNS-ON (fatal, fail closed). A `runs-on` containing `${{` cannot be decided
+#      statically, so it could resolve to a restricted label (openbank-train) and slip
+#      past WORKFLOW-RESTRICTED. Every one is a finding unless KNOWN_EXPR_RUNS_ON pins it
+#      by (workflow, job, sha256 of the exact expression) with a reason: editing the
+#      expression voids the entry. A pinned entry that no longer matches is STALE-EXPR.
+#   8. GROUP-RUNS-ON (fatal). `runs-on: {group: ...}` routes by runner group, not by
+#      label, and a group can contain any scale set. No workflow uses it; none may.
+#   9. TRAIN-TAINT-TOLERATED (fatal). The `openbank.io/train` taint keeps every other
+#      workload off the train's dedicated nodes (PR code runs in privileged dind on the
+#      build pool). Only the resources in TRAIN_TAINT_OWNERS may name that key; anything
+#      else under openbank-infra that does is a finding.
+#   The runner itself refuses any job that is not merge-train.yml@main via its
+#   ACTIONS_RUNNER_HOOK_JOB_STARTED hook (arc-runners.tf), so lint is not the only control.
 #   5. USES-UNAPPLIED (reported, baselined in KNOWN_UNAPPLIED). There are THREE states,
 #      not two, and #8388 is why this class exists. "Declared in rules.yaml", "written in
 #      OpenTofu" and "running in the cluster" are different facts, and `load_provisioned`
@@ -68,6 +81,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import sys
@@ -118,6 +132,23 @@ KNOWN_UNAPPLIED: dict[str, str] = {
     "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
     "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
 }
+
+# Expression-valued runs-on that provably resolve only to hosted labels. Key:
+# (workflow, job, sha256(expression)[:16]). Both expressions below are
+# `<cond> && 'ubuntu-24.04-arm' || 'ubuntu-latest'`: their only possible values are
+# those two string literals, neither an openbank-* label. Measured 2026-11-02: these
+# are the only two expression-valued runs-on in .github/workflows.
+KNOWN_EXPR_RUNS_ON: dict[tuple[str, str, str], str] = {
+    (".github/workflows/_service-ci-pr.yml", "build", "79b6f4df3bd05f09"):
+        "context-service arm64 main build; resolves to ubuntu-24.04-arm | ubuntu-latest only",
+    (".github/workflows/_service-ci.yml", "build", "79b6f4df3bd05f09"):
+        "context-service arm64 main build; resolves to ubuntu-24.04-arm | ubuntu-latest only",
+}
+
+TRAIN_TAINT_KEY = "openbank.io/train"
+# The only OpenTofu resources allowed to name the train taint key.
+TRAIN_TAINT_OWNERS = {"kubectl_manifest.nodepool_train", "helm_release.arc_train"}
+_TF_BLOCK_RE = re.compile(r'^(resource|data|locals|module|variable|output)\b(?:\s+"([^"]+)")?(?:\s+"([^"]+)")?', re.M)
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')
 PR_EVENTS = {"pull_request", "pull_request_target"}
@@ -179,6 +210,64 @@ def _events(doc) -> set[str]:
     return set()
 
 
+def expr_hash(expr: str) -> str:
+    return hashlib.sha256(expr.encode()).hexdigest()[:16]
+
+
+def scan_runs_on_shapes(root: Path):
+    """Yield (workflow, job, kind, detail) for runs-on values that are expressions or groups."""
+    wf_dir = root / ".github/workflows"
+    for wf in sorted(list(wf_dir.glob("*.yml")) + list(wf_dir.glob("*.yaml"))):
+        try:
+            doc = yaml.safe_load(wf.read_text())
+        except yaml.YAMLError:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for job_id, job in (doc.get("jobs") or {}).items():
+            if not isinstance(job, dict) or "runs-on" not in job:
+                continue
+            r = job["runs-on"]
+            rel = wf.relative_to(root).as_posix()
+            if isinstance(r, dict) and "group" in r:
+                yield rel, job_id, "group", str(r.get("group"))
+            texts = [r] if isinstance(r, str) else (
+                [x for x in r if isinstance(x, str)] if isinstance(r, list) else
+                [str(v) for v in r.values()] if isinstance(r, dict) else [str(r)])
+            for t in texts:
+                if "${{" in t:
+                    yield rel, job_id, "expr", t
+
+
+def train_taint_violations(root: Path) -> list[str]:
+    out = []
+    infra = root / "openbank-infra"
+    if not infra.is_dir():
+        return out
+    for f in sorted(infra.rglob("*")):
+        if not f.is_file() or f.suffix not in {".tf", ".yaml", ".yml", ".json", ".tpl", ".tmpl"}:
+            continue
+        text = f.read_text(errors="replace")
+        if TRAIN_TAINT_KEY not in text:
+            continue
+        rel = f.relative_to(root).as_posix()
+        if f.suffix != ".tf":
+            out.append(f"TRAIN-TAINT-TOLERATED {rel} names '{TRAIN_TAINT_KEY}'; only "
+                       f"{sorted(TRAIN_TAINT_OWNERS)} may.")
+            continue
+        starts = list(_TF_BLOCK_RE.finditer(text))
+        for i, m in enumerate(starts):
+            end = starts[i + 1].start() if i + 1 < len(starts) else len(text)
+            body = text[m.start():end]
+            if TRAIN_TAINT_KEY not in "\n".join(l for l in body.splitlines() if not l.lstrip().startswith("#")):
+                continue
+            name = f"{m.group(2)}.{m.group(3)}" if m.group(1) == "resource" else m.group(1)
+            if name not in TRAIN_TAINT_OWNERS:
+                out.append(f"TRAIN-TAINT-TOLERATED {rel}: {name} names '{TRAIN_TAINT_KEY}'; only "
+                           f"{sorted(TRAIN_TAINT_OWNERS)} may (train nodes must host train pods alone).")
+    return out
+
+
 def scan_workflows(root: Path):
     """Yield (workflow_path, job_id, label, events) for every runs-on label."""
     wf_dir = root / ".github/workflows"
@@ -203,6 +292,7 @@ def evaluate(
     root: Path,
     baseline: dict[str, str] | None = None,
     unapplied: dict[str, str] | None = None,
+    expr_baseline: dict[tuple[str, str, str], str] | None = None,
 ) -> tuple[list[str], list[str], int, int]:
     """Return (findings, gaps, n_pools, n_labels_seen).
 
@@ -262,6 +352,24 @@ def evaluate(
                 f"{sorted(pr_events)} trigger; rules.yaml "
                 f"pr_jobs_allowed_pools permits only {sorted(pr_allowed_sets)}."
             )
+
+    expr_baseline = KNOWN_EXPR_RUNS_ON if expr_baseline is None else expr_baseline
+    seen_expr = set()
+    for wf, job, kind, detail in scan_runs_on_shapes(root):
+        if kind == "group":
+            findings.append(f"GROUP-RUNS-ON {wf}: job '{job}' routes by runner group '{detail}', "
+                            f"which can reach any scale set including restricted ones.")
+            continue
+        key = (wf, job, expr_hash(detail))
+        seen_expr.add(key)
+        if key not in expr_baseline:
+            findings.append(
+                f"EXPR-RUNS-ON {wf}: job '{job}' has expression-valued runs-on {detail!r} "
+                f"(hash {key[2]}); it could resolve to a restricted label. Use a literal, or pin "
+                f"it in KNOWN_EXPR_RUNS_ON with a proof it cannot resolve to an openbank-* label.")
+    for key in sorted(set(expr_baseline) - seen_expr):
+        findings.append(f"STALE-EXPR {key} is in KNOWN_EXPR_RUNS_ON but no such runs-on exists — remove it.")
+    findings.extend(train_taint_violations(root))
 
     # Ratchet, both directions.
     for pool, scale_set in sorted(pools.items()):
@@ -373,15 +481,36 @@ def self_test() -> int:
         ("PR-POOL: merge-train.yml gaining a pull_request trigger on the train pool",
          _rules(train=True), "pull_request", "openbank-train", empty, "PR-POOL", empty,
          "merge-train.yml"),
+        # Security review of #14625: an expression can resolve to openbank-train at run time.
+        ("EXPR-RUNS-ON: an unpinned expression-valued runs-on (could be openbank-train)",
+         _rules(train=True), "push", "\"${{ inputs.r || 'openbank-train' }}\"", empty,
+         "EXPR-RUNS-ON", empty, "w.yml"),
+        ("control: a pinned expression-valued runs-on is clean",
+         _rules(train=True), "push", "\"${{ inputs.r && 'ubuntu-latest' }}\"", empty, None, empty,
+         "w.yml", {(".github/workflows/w.yml", "a", expr_hash("${{ inputs.r && 'ubuntu-latest' }}")): "x"}),
+        ("EXPR-RUNS-ON: a pinned expression that was EDITED no longer matches its pin",
+         _rules(train=True), "push", "\"${{ inputs.r && 'openbank-train' }}\"", empty,
+         "EXPR-RUNS-ON", empty,
+         "w.yml", {(".github/workflows/w.yml", "a", expr_hash("${{ inputs.r && 'ubuntu-latest' }}")): "x"}),
+        ("GROUP-RUNS-ON: routing by runner group",
+         _rules(train=True), "push", "{group: Default}", empty, "GROUP-RUNS-ON", empty, "w.yml"),
+        ("TRAIN-TAINT-TOLERATED: another resource tolerates openbank.io/train",
+         _rules(), "push", "openbank-build", empty, "TRAIN-TAINT-TOLERATED", empty, "w.yml", {},
+         'resource "helm_release" "arc_build" {\n  tolerations = [{ key = "openbank.io/train" }]\n}\n'),
+        ("control: the train's own resources may name the taint",
+         _rules(), "push", "openbank-build", empty, None, empty, "w.yml", {},
+         'resource "helm_release" "arc_train" {\n  tolerations = [{ key = "openbank.io/train" }]\n}\n'),
     ]
     rc = 0
     for i, (desc, rules, event, label, baseline, expect, unapplied, *rest) in enumerate(cases, 1):
         wf_name = rest[0] if rest else "w.yml"
+        expr_bl = rest[1] if len(rest) > 1 else {}
+        extra_tf = rest[2] if len(rest) > 2 else ""
         wf = (f"on:\n  {event}:\n    branches: [main]\n"
               f"jobs:\n  a:\n    runs-on: {label}\n    steps: [{{run: 'true'}}]\n")
         with tempfile.TemporaryDirectory() as td:
-            root = _fixture(Path(td), rules, _TF, wf, wf_name)
-            findings, gaps, n_pools, _ = evaluate(root, baseline, unapplied)
+            root = _fixture(Path(td), rules, _TF + extra_tf, wf, wf_name)
+            findings, gaps, n_pools, _ = evaluate(root, baseline, unapplied, expr_bl)
             findings = findings + gaps
             if n_pools == 0:
                 print(f"SELF-TEST FAIL case {i} ({desc}): fixture parsed no pools")
