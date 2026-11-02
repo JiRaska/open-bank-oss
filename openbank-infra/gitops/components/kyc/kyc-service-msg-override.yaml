@@ -51,7 +51,13 @@ data:
     mp.messaging.incoming.party-events-in.group.id=kyc-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
     # sanctions-list-changes-in (ADR-0256): restored once the deployed image carried the channel
-    # connector (#12781). A new Kafka channel is TWO deploys (.github/CLAUDE.md, #8877/#8882): a
-    # ConfigMap naming a channel the running image lacks is a boot failure (SRMSG00071).
+    # connector (#12781; sandbox-d6685693 declares it). A new Kafka channel is TWO deploys
+    # (.github/CLAUDE.md, #8877/#8882): a ConfigMap naming a channel the running image lacks is a
+    # boot failure (SRMSG00071).
+    # `latest`, NOT `earliest`: kyc-service-sanctions-list is a NEW group with no committed
+    # offset, so `earliest` would re-read the whole openbank.sanctions.screening.event topic and
+    # open a re-screening case for every historical diff at once. The fallback group
+    # (openbank-kyc-service) has been consuming the channel until now; the cost of `latest` is that
+    # a diff published while the pod restarts onto the new group is not replayed.
     mp.messaging.incoming.sanctions-list-changes-in.group.id=kyc-service-sanctions-list
-    mp.messaging.incoming.sanctions-list-changes-in.auto.offset.reset=earliest
+    mp.messaging.incoming.sanctions-list-changes-in.auto.offset.reset=latest
