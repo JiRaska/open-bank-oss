@@ -3,7 +3,7 @@
 
 package com.openbank.referral.integration
 
-import com.openbank.referral.it.ReferralPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -37,7 +37,7 @@ import javax.sql.DataSource
  * `an account opened during onboarding qualifies when the referee redeems the code later` red.
  */
 @QuarkusTest
-@QuarkusTestResource(ReferralPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "checker@openbank.test", roles = ["ROLE_OPERATOR"])
 class ReferralQualificationIT {
     @Inject

@@ -30,11 +30,10 @@ const ScreenPainChart = dynamic(
   { ssr: false, loading: () => <div style={{ height: 320 }} aria-hidden="true" /> },
 )
 
-const CATEGORY_LABEL_CS: Record<string, string> = {
-  BUG: 'Chyba', IDEA: 'Nápad', CONFUSING: 'Nesrozumitelné',
-}
-const CATEGORY_LABEL_EN: Record<string, string> = {
-  BUG: 'Bug', IDEA: 'Idea', CONFUSING: 'Confusing',
+const CATEGORY_LABEL: Record<string, { cs: string; en: string }> = {
+  BUG: { cs: 'Chyba', en: 'Bug' },
+  IDEA: { cs: 'Nápad', en: 'Idea' },
+  CONFUSING: { cs: 'Nesrozumitelné', en: 'Confusing' },
 }
 
 function formatFeedbackTimestamp(value: string | null | undefined, locale: string): string {
@@ -65,20 +64,20 @@ export default function ScreenFeedbackPage() {
 
   useEffect(() => { void load() }, [load])
 
-  const catLabel = (c: string) => (cs ? CATEGORY_LABEL_CS[c] : CATEGORY_LABEL_EN[c]) ?? c
+  const catLabel = (c: string) => CATEGORY_LABEL[c]?.[language === 'cs' ? 'cs' : 'en'] ?? c
 
   if (loading && !data) {
-    return <div className="page"><p role="status" aria-live="polite">{cs ? 'Načítám…' : 'Loading…'}</p></div>
+    return <div className="page"><p role="status" aria-live="polite">{language === 'cs' ? 'Načítám…' : 'Loading…'}</p></div>
   }
   if (!data?.available) {
     return (
       <div className="page">
-        <PageHeader icon={<MessageSquare size={18} aria-hidden="true" />} title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'} subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'} />
+        <PageHeader icon={<MessageSquare size={18} aria-hidden="true" />} title={language === 'cs' ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'} subtitle={language === 'cs' ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'} />
         <DataUnavailable
           kind={data?.error ? 'unreachable' : 'no_data'}
           service="ClickHouse"
-          feature={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
-          lang={cs ? 'cs' : 'en'}
+          feature={language === 'cs' ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
+          lang={language === 'cs' ? 'cs' : 'en'}
         />
       </div>
     )
@@ -95,36 +94,36 @@ export default function ScreenFeedbackPage() {
     <div className="page">
       <PageHeader
         icon={<MessageSquare size={18} aria-hidden="true" />}
-        title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
-        subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'}
+        title={language === 'cs' ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
+        subtitle={language === 'cs' ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'}
         actions={<button
           type="button"
           className="btn btn-secondary"
           onClick={() => void load()}
           disabled={loading}
           aria-busy={loading}
-          aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}
+          aria-label={language === 'cs' ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}
         >
-          <RefreshCw size={16} aria-hidden="true" /> {cs ? 'Obnovit' : 'Refresh'}
+          <RefreshCw size={16} aria-hidden="true" /> {language === 'cs' ? 'Obnovit' : 'Refresh'}
         </button>}
       />
 
       <section>
-        <h2>{cs ? 'Které obrazovky bolí' : 'Which screens hurt'}</h2>
+        <h2>{language === 'cs' ? 'Které obrazovky bolí' : 'Which screens hurt'}</h2>
         <ScreenPainChart data={chartData} cs={cs} />
       </section>
 
       <section>
-        <h2>{cs ? 'Poslední hlášení' : 'Recent reports'}</h2>
+        <h2>{language === 'cs' ? 'Poslední hlášení' : 'Recent reports'}</h2>
         <table className="table">
           <thead>
             <tr>
-              <th>{cs ? 'Kdy' : 'When'}</th>
-              <th>{cs ? 'Obrazovka' : 'Screen'}</th>
-              <th>{cs ? 'Typ' : 'Category'}</th>
-              <th>{cs ? 'Komentář' : 'Comment'}</th>
-              <th>{cs ? 'Prostředí' : 'Context'}</th>
-              <th>{cs ? 'Snímek' : 'Screenshot'}</th>
+              <th>{language === 'cs' ? 'Kdy' : 'When'}</th>
+              <th>{language === 'cs' ? 'Obrazovka' : 'Screen'}</th>
+              <th>{language === 'cs' ? 'Typ' : 'Category'}</th>
+              <th>{language === 'cs' ? 'Komentář' : 'Comment'}</th>
+              <th>{language === 'cs' ? 'Prostředí' : 'Context'}</th>
+              <th>{language === 'cs' ? 'Snímek' : 'Screenshot'}</th>
             </tr>
           </thead>
           <tbody>
@@ -144,22 +143,22 @@ export default function ScreenFeedbackPage() {
       </section>
 
       <section>
-        <h2>{cs ? 'Kde to selhává' : 'Where it breaks'}</h2>
+        <h2>{language === 'cs' ? 'Kde to selhává' : 'Where it breaks'}</h2>
         <p className="muted">
-          {cs
+          {language === 'cs'
             ? 'Kombinace prostředí seřazené podle počtu chybových hlášení. Když se hlásí jen jedna kombinace, jde o chybu vykreslení, ne o produktový problém.'
             : 'Context combinations ranked by bug reports. A fault confined to one combination is a rendering regression, not a product problem.'}
         </p>
         <table className="table">
           <thead>
             <tr>
-              <th>{cs ? 'Obrazovka' : 'Screen'}</th>
-              <th>{cs ? 'Platforma' : 'Platform'}</th>
+              <th>{language === 'cs' ? 'Obrazovka' : 'Screen'}</th>
+              <th>{language === 'cs' ? 'Platforma' : 'Platform'}</th>
               <th>OS</th>
-              <th>{cs ? 'Motiv' : 'Theme'}</th>
-              <th>{cs ? 'Jazyk' : 'Locale'}</th>
-              <th>{cs ? 'Chyby' : 'Bugs'}</th>
-              <th>{cs ? 'Celkem' : 'Total'}</th>
+              <th>{language === 'cs' ? 'Motiv' : 'Theme'}</th>
+              <th>{language === 'cs' ? 'Jazyk' : 'Locale'}</th>
+              <th>{language === 'cs' ? 'Chyby' : 'Bugs'}</th>
+              <th>{language === 'cs' ? 'Celkem' : 'Total'}</th>
             </tr>
           </thead>
           <tbody>

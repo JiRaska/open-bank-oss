@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.incentive.integration
 
-import com.openbank.incentive.it.IncentivePostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Given
@@ -20,7 +21,10 @@ import java.util.UUID
  * handler with a hand-built DTO cannot construct that state.
  */
 @QuarkusTest
-@QuarkusTestResource(IncentivePostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_incentive_it")],
+)
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
 class IncentiveNullCodeElementIT {
     @Test

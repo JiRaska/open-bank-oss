@@ -4,7 +4,7 @@
 package com.openbank.audit.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.audit.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
