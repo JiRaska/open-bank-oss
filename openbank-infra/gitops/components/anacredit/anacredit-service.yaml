@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: anacredit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-37ccc183@sha256:fa2948e8405e6fa0cbd8f38e1671c544356cc44fae3481a9ccf1451053aa1c7d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-anacredit-service:sandbox-48a6da90@sha256:d8e03b0e41ce93a38d45a9564cc5a5a3bab1c848817f23b846a47473fa5861e5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

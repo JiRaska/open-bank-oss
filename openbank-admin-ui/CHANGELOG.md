@@ -1,5 +1,19 @@
 # Changelog
 
+## [3.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.3...admin-ui-v3.16.0) (2026-11-01)
+
+
+### Features
+
+* **admin-ui:** show synthetic journey verdicts in the evidence matrix ([#14362](https://github.com/JiRaska/open-bank-oss/issues/14362)) ([4509c9a](https://github.com/JiRaska/open-bank-oss/commit/4509c9aaef9ae0f72a20515c5b7618cbeacca667))
+
+## [3.15.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.2...admin-ui-v3.15.3) (2026-10-31)
+
+
+### Bug Fixes
+
+* **admin-ui:** read k6 journey p95 as seconds in Test Intelligence ([#14357](https://github.com/JiRaska/open-bank-oss/issues/14357)) ([1c8f2f1](https://github.com/JiRaska/open-bank-oss/commit/1c8f2f1a60c8ac2a28aea5ab88542752bfebfaad))
+
 ## [3.15.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.1...admin-ui-v3.15.2) (2026-10-30)
 
 

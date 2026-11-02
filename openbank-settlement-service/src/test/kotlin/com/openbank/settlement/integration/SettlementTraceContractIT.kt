@@ -4,10 +4,11 @@
 
 package com.openbank.settlement.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import com.openbank.libs.testing.trace.TraceContractProfile
-import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -49,7 +50,10 @@ import java.util.UUID
  * important write, so it is the right first contract here.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 @TestProfile(SettlementTraceContractIT.SettlementTraceProfile::class)
 class SettlementTraceContractIT {
 

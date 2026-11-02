@@ -318,4 +318,6 @@ BuildInfo.maxHeapMib          // 3994
 BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 ```
 
+`buildTime` je okamžik, kdy `processResources` vygenerovalo `openbank-build-info.properties`. Záměrně není vstupem Gradle tasku, takže beze změny libs si artefakt ponechá původní časovou značku a jeho resources i navazující testovací classpath zůstávají cacheovatelné.
+
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.

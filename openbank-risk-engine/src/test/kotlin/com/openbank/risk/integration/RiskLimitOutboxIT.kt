@@ -6,6 +6,7 @@ package com.openbank.risk.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.SentOutboxRetention
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.out.LimitEventOutbox
 import com.openbank.risk.domain.Fixtures
@@ -13,7 +14,6 @@ import com.openbank.risk.domain.limits.LimitDefinition
 import com.openbank.risk.domain.limits.LimitEvaluation
 import com.openbank.risk.domain.limits.LimitMetric
 import com.openbank.risk.domain.limits.LimitStatus
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
