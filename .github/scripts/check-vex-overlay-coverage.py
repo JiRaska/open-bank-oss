@@ -62,9 +62,7 @@ CONFIG = Path("release-please-config.json")
 # the changelog path, which is release-registration lockstep (CLAUDE.md rule 2) and the owner's
 # call, not a gate author's. Declared so the two known cases are visible and any NEW one is red.
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
-NO_RELEASE_COMPONENT: dict[str, str] = {
-    "openbank-campaign-service": "campaign-service",
-}
+NO_RELEASE_COMPONENT: dict[str, str] = {}
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
 NO_OVERLAY_YET: dict[str, str] = {
@@ -253,7 +251,8 @@ def self_test() -> int:
     for key, val, needle in (
         ("openbank-not-a-package", "ghost", "not a registered package"),
         ("openbank-ledger-service", "ledger-service", "HAS a `component` now"),
-        ("openbank-campaign-service", "no-such-overlay", "does not exist -- stale"),
+        # The "overlay does not exist" direction needs a package with no `component`; since
+        # #7597 there is none, so it cannot be exercised against the live config.
     ):
         saved = NO_RELEASE_COMPONENT.get(key)
         NO_RELEASE_COMPONENT[key] = val
