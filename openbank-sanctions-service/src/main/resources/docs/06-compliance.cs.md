@@ -12,6 +12,7 @@
 | **PSD2 (EU 2015/2366)** | Provádění platebních transakcí | Sankční kontrola je povinnou bránou před provedením platby (ADR-0032) |
 | **Doporučení FATF** | Posílená due diligence pro vysoce rizikové jurisdikce | Seznam `FATF_HIGH_RISK` označuje převody do/z vysoce rizikových zemí |
 | **Zákon č. 1/2023 Sb.** | Vnitrostátní sankční seznam vedený MZV | Seznam `CNB_DOMESTIC` (import z `cz_national_sanctions`) |
+| **Nařízení vlády č. 210/2008 Sb.** | Česká protiteroristická označení; samostatný právní režim vedle vnitrostátního sankčního seznamu | Seznam `CZ_TERRORISTS` z oficiálních SPARQL otevřených dat e-Sbírky, nikdy z komerčně licencovaného mirroru OpenSanctions |
 | **GDPR (EU 2016/679)** | PII v screeningových požadavcích (jméno, datum narození, identifikátory) | PII maskováno v logu; základ čl. 6 odst. 1 písm. c) – právní povinnost; výmaz přepsán AML směrnicí |
 | **DORA (EU 2022/2554)** | Operační odolnost finančních služeb | Health probes, audit eventy, záruka outboxu, SLO, runbooky |
 

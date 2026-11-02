@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.0...fraud-service-v0.18.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **fraud:** bound score rail metric labels ([#14146](https://github.com/JiRaska/open-bank-oss/issues/14146)) ([c73484f](https://github.com/JiRaska/open-bank-oss/commit/c73484ff92472c406db485154ffd2c135070e355))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.2...fraud-service-v0.18.0) (2026-10-26)
 
 

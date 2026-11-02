@@ -5,11 +5,11 @@ package com.openbank.referral.integration
 
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.infrastructure.outbox.ReferralOutboxDispatcher
 import com.openbank.referral.infrastructure.persistence.repository.ReferralOutboxRepositoryImpl
-import com.openbank.referral.it.ReferralPostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -33,7 +33,7 @@ import java.util.UUID
     value = ReferralOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
     restrictToAnnotatedClass = true,
 )
-@QuarkusTestResource(ReferralPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class ReferralOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
     // The test config leaves the dispatcher off so other ITs own their rows; this suite drives

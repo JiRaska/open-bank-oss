@@ -72,6 +72,7 @@ class NostroReconciliationServiceTest {
         val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
 
         assertThat(ledger.queries).containsExactly(
+            "lines:1002:2026-09-17..2026-09-23",
             "lines:1002:2026-09-24..2026-09-25",
             "lines:1002:2026-09-26..2026-10-02",
             "balance:1002:EUR:2026-09-23",
@@ -105,6 +106,7 @@ class NostroReconciliationServiceTest {
         val r = service.reconcile(stored(NostroFixtures.xml()).id)
 
         assertThat(ledger.queries).containsExactly(
+            "lines:1001:2026-09-18..2026-09-24",
             "lines:1001:2026-09-25..2026-09-25",
             "lines:1001:2026-09-26..2026-10-02",
             "balance:1001:CZK:2026-09-24",
@@ -142,6 +144,135 @@ class NostroReconciliationServiceTest {
         assertThat(r.matches.map { it.line.description }).anyMatch { it?.contains("settled") == true }
     }
 
+    // #13886: the closing and opening balances are compared by value date, like the lines.
+    private fun eurBalances(opening: String, closing: String) {
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-23"))] = BigDecimal(opening)
+        ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal(closing)
+    }
+
+    @Test
+    fun `a settlement entered two days after its in-period value date is no closing balance break`() =
+        runBlocking<Unit> {
+            val (maturity, placement) = NostroFixtures.eurLedgerLines()
+            ledger.lines += "1002" to maturity
+            ledger.lines += "1002" to placement.copy(
+                entryDate = LocalDate.parse("2026-09-27"),
+                valueDate = LocalDate.parse("2026-09-25"),
+            )
+            // By entry date the 2500 credit is not in the 25th's balance yet: 50000 + 10000.
+            eurBalances("50000.00", "60000.00")
+            val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+            assertThat(r.matches).hasSize(2)
+            assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+            assertThat(r.closingDifference).isEqualByComparingTo("0")
+            assertThat(r.openingDifference).isEqualByComparingTo("0")
+            assertThat(r.reconciled).isTrue()
+        }
+
+    @Test
+    fun `a line entered in the period but valued after it is taken out of the closing balance`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        val forward = NostroFixtures.line(
+            "400.00",
+            com.openbank.treasury.domain.model.Side.DEBIT,
+            currency = "EUR",
+        ).copy(valueDate = LocalDate.parse("2026-09-26"))
+        ledger.lines += "1002" to forward
+        eurBalances("50000.00", "57900.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.unmatchedLedgerLines).doesNotContain(forward)
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.reconciled).isTrue()
+    }
+
+    @Test
+    fun `a previous period's settlement entered late is part of the value-dated opening balance`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        // Valued on the opening day, entered the next day: by entry date the opening lacks it.
+        ledger.lines += "1002" to NostroFixtures.line(
+            "300.00",
+            com.openbank.treasury.domain.model.Side.DEBIT,
+            date = LocalDate.parse("2026-09-24"),
+            currency = "EUR",
+        ).copy(valueDate = LocalDate.parse("2026-09-23"))
+        eurBalances("49700.00", "57500.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("50000.00")
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.reconciled).isTrue()
+    }
+
+    @Test
+    fun `a forward-valued CREDIT entered in the period is added back to the closing balance`() = runBlocking<Unit> {
+        NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+        ledger.lines += "1002" to NostroFixtures.line(
+            "400.00",
+            com.openbank.treasury.domain.model.Side.CREDIT,
+            currency = "EUR",
+        ).copy(valueDate = LocalDate.parse("2026-09-26"))
+        eurBalances("50000.00", "57100.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.reconciled).isTrue()
+    }
+
+    @Test
+    fun `a line entered before the period and valued after it shifts neither balance into a break`() =
+        runBlocking<Unit> {
+            NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
+            // Entered 2026-09-20 (in both entry-dated balances), valued 2026-09-28 (in neither).
+            ledger.lines += "1002" to NostroFixtures.line(
+                "700.00",
+                com.openbank.treasury.domain.model.Side.DEBIT,
+                date = LocalDate.parse("2026-09-20"),
+                currency = "EUR",
+            ).copy(valueDate = LocalDate.parse("2026-09-28"))
+            eurBalances("50700.00", "58200.00")
+            val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+            assertThat(r.ledgerOpeningBalance).isEqualByComparingTo("50000.00")
+            assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+            assertThat(r.unmatchedLedgerLines).isEmpty()
+            assertThat(r.reconciled).isTrue()
+        }
+
+    @Test
+    fun `a line in another currency on the nostro GL never shifts the native balance`() = runBlocking<Unit> {
+        val (maturity, placement) = NostroFixtures.eurLedgerLines()
+        ledger.lines += "1002" to maturity
+        ledger.lines += "1002" to placement
+        // A late-entered CZK line on the same GL: not part of the EUR balance the ledger answers.
+        ledger.lines += "1002" to NostroFixtures.line(
+            "9999.00",
+            com.openbank.treasury.domain.model.Side.DEBIT,
+            date = LocalDate.parse("2026-09-27"),
+        ).copy(valueDate = LocalDate.parse("2026-09-25"))
+        eurBalances("50000.00", "57500.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.ledgerClosingBalance).isEqualByComparingTo("57500.00")
+        assertThat(r.closingDifference).isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `a real closing difference survives the value-date adjustment`() = runBlocking<Unit> {
+        val (maturity, placement) = NostroFixtures.eurLedgerLines()
+        ledger.lines += "1002" to maturity
+        ledger.lines += "1002" to placement.copy(
+            entryDate = LocalDate.parse("2026-09-27"),
+            valueDate = LocalDate.parse("2026-09-25"),
+        )
+        eurBalances("50000.00", "59900.00")
+        val r = service.reconcile(stored(NostroFixtures.eurXml()).id)
+
+        assertThat(r.closingDifference).isEqualByComparingTo("100.00")
+        assertThat(r.reconciled).isFalse()
+    }
+
     @Test
     fun `balances are not stated only when the ledger does not hold the GL - and it says so`() = runBlocking<Unit> {
         NostroFixtures.eurLedgerLines().forEach { ledger.lines += "1002" to it }
@@ -177,6 +308,7 @@ class NostroReconciliationServiceTest {
             val r = service.reconcile(stored(xml).id)
 
             assertThat(ledger.queries).containsExactly(
+                "lines:1001:2026-09-14..2026-09-20",
                 "lines:1001:2026-09-21..2026-09-25",
                 "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-20",
@@ -200,6 +332,7 @@ class NostroReconciliationServiceTest {
             val r = service.reconcile(stored(NostroFixtures.xml()).id)
 
             assertThat(ledger.queries).containsExactly(
+                "lines:1001:2026-09-18..2026-09-24",
                 "lines:1001:2026-09-25..2026-09-25",
                 "lines:1001:2026-09-26..2026-10-02",
                 "balance:1001:CZK:2026-09-24",

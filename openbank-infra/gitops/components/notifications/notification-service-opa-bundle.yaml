@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "5af037de24e6065c"
+    openbank.tech/policy-checksum: "b84c516f12d63913"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -479,6 +479,16 @@ data:
     allowed_reasons contains "pension-catalog-m2m-read" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-pension"
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
     	"CATALOG_SCOPE_READ" in input.principal.roles
     	input.action == "catalog.read"
     }
@@ -2009,6 +2019,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
