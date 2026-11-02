@@ -69,6 +69,34 @@ src/main/kotlin/com/openbank/simulation/
 | `interest-capitalization-conservation` | `Σ capitalized ≤ Σ accrued`, `gross == net + tax`, both journal legs actually posted |
 | `statement-close-integrity` | a period is persisted **iff** `ReconciliationPolicy` reconciled — never on a mismatch, never skipped on success |
 
+### Product replay (ADR-0352 phase 4)
+
+`ProductReplayScenario` uses a different time scale from the money-path interleaving above, so it
+runs outside the per-step `World` loop. It publishes each reference product from
+`openbank-products`, signs it with a fixed simulation HMAC key, and loads it back through
+`PinnedRevisionLoader`, the path a consumer uses. Then it replays a seeded `SyntheticPortfolio`
+for three simulated years (2027–2029: one leap year, 36 month ends) through the one pure
+interpreter. Every `Post`, and every accepted customer posting against a settlement line, is
+booked into `ProductShadowBook`, an in-memory double-entry book. Its positions are exact
+`BigDecimal`s because accrual lines carry six decimal places, which `LedgerState`'s `Money` would
+round away.
+
+| Invariant | Meaning |
+|---|---|
+| `product-money-conservation` | every `Post` of the run is balanced per currency |
+| `shadow-trial-balance` | the shadow book's trial balance is zero at every simulated day end |
+| `shadow-deposit-reconciles` | each customer's deposit position in the book equals the replay's final balance |
+| `no-negative-balance` | no day-end balance below the product's overdraft floor (0, or -500.00 for the current account) |
+| `monotone-tier` | a larger balance never accrues less interest on the same day, tier edges included |
+| `bounded-termination` | evaluations stay within the replay's structural bound |
+
+`ProductReplayScenarioTest` has two sides, like the scenarios above. A book that drops a line
+fails `shadow-trial-balance`. A floor tighter than the product's fails `no-negative-balance`. A
+revision signed with another key is refused before it replays. `ProductBacktestTest` diffs the
+reference savings product against a +25 bp revision. It checks that the reported aggregate accrual
+delta equals one computed independently in the test, and that identical revisions give an empty
+diff.
+
 ## Run it
 
 ```bash

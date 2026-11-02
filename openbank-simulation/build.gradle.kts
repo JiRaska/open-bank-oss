@@ -138,6 +138,13 @@ dependencies {
     // the cross-border rail. The domain package is framework-free (ADR-0002).
     implementation(project(":openbank-swift-service"))
 
+    // ADR-0352 phase 4: ProductReplayScenario replays the published reference products
+    // (openbank-products) through the pure interpreter with the production arithmetic
+    // (openbank-libs-finance); the synthetic portfolio generator is test data (openbank-libs-testing).
+    implementation(project(":openbank-products"))
+    implementation(project(":openbank-libs-finance"))
+    testImplementation(project(":openbank-libs-testing"))
+
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
