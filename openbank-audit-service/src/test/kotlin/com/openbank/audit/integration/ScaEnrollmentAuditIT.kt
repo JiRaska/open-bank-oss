@@ -6,8 +6,8 @@ package com.openbank.audit.integration
 import com.openbank.audit.application.AuditConsumer
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
-import com.openbank.audit.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport

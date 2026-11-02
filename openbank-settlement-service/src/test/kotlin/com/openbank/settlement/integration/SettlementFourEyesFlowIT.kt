@@ -4,9 +4,10 @@
 
 package com.openbank.settlement.integration
 
-import com.openbank.settlement.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.settlement.it.SettlementOpaTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -41,7 +42,10 @@ class SettlementFourEyesProfile : QuarkusTestProfile {
  * ROLE_OPERATOR in the realm are refused the queue by identity.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 @QuarkusTestResource(SettlementOpaTestResource::class, restrictToAnnotatedClass = true)
 @TestProfile(SettlementFourEyesProfile::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)

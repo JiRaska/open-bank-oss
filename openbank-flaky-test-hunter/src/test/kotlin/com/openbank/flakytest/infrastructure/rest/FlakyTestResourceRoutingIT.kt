@@ -4,9 +4,9 @@
 
 package com.openbank.flakytest.infrastructure.rest
 
-import com.openbank.flakytest.PostgresTestResource
 import com.openbank.flakytest.application.port.incoming.OperatorWorkflowStatus
 import com.openbank.flakytest.application.usecase.FlakyTestHunterService
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource

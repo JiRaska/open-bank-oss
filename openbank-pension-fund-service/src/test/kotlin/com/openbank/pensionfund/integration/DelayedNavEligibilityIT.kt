@@ -4,8 +4,9 @@
 
 package com.openbank.pensionfund.integration
 
-import com.openbank.pensionfund.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -22,7 +23,10 @@ import java.util.UUID
 
 /** Publication dates, order status and transaction count through HTTP and real PostgreSQL. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class DelayedNavEligibilityIT {
     companion object {

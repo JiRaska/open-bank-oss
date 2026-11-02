@@ -4,9 +4,10 @@
 
 package com.openbank.pensionfund.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pensionfund.it.PensionFundOpaTestResource
-import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -19,7 +20,10 @@ import java.util.UUID
 
 /** Real HTTP + enforced, generated OPA policy: both security layers must agree. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @QuarkusTestResource(PensionFundOpaTestResource::class, restrictToAnnotatedClass = true)
 @TestProfile(PensionFundHoldingEnforcedAuthzIT.EnforcedProfile::class)
 class PensionFundHoldingEnforcedAuthzIT {

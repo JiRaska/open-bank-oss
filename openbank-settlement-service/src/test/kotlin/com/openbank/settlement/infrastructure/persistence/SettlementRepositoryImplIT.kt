@@ -4,12 +4,13 @@
 
 package com.openbank.settlement.infrastructure.persistence
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
-import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -36,7 +37,10 @@ import java.util.UUID
  * VertxContextSupport.subscribeAndAwait, mirroring AmlOutboxDispatchIT (aml-service).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 class SettlementRepositoryImplIT {
 
     @Inject
