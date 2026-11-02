@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.11](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.10...psd2-service-v0.11.11) (2026-11-02)
+
+
+### Bug Fixes
+
+* **psd2:** distinguish TPP registry denial from an outage ([#14201](https://github.com/JiRaska/open-bank-oss/issues/14201)) ([618bc93](https://github.com/JiRaska/open-bank-oss/commit/618bc931b908b58f03a7e48500579f17670f9822))
+
 ## [0.11.10](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.9...psd2-service-v0.11.10) (2026-10-14)
 
 
