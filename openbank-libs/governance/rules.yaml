@@ -42,31 +42,11 @@ deploy_holds:
     # Migrated from deploy branches (issue #11503). Entries inherited from deploy PR #12948
     # recorded no reason and were released; money-path services carry a staged wave entry in
     # their place. Every entry with its own issue, reason or release condition is kept.
-    openbank-account-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-billing-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-clearing-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-domestic-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-fx-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-interest-service:
       all_of:
       - issue: "#13167"
@@ -84,35 +64,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-lending-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sdd-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-instant:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-standing-order-service:
-      issue: '#11503'
-      reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-      release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-swift-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-treasury-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
@@ -4003,16 +3954,6 @@ product_bearing_services:
   # `adoption: pinned` arms the three structural checks (migration column, entity @Column, creation path
   # binds the pin); `pending` is reported, never failed, until that service's adoption PR flips it.
   services:
-    openbank-account-service:
-      adoption: pinned
-      contract_table: accounts
-      pin_column: product_revision_id
-      entity: openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt
-      creation:
-        file: openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
-        function: openAccount
-        aggregate: Account
-        pin_argument: productRevisionPin
     openbank-lending-service:
       adoption: pending
       reason: "loan_application.catalog_revision_id exists (ADR-0264) but is set only when a caller sends catalogOfferingId, which none does; ADR-0352 §9 defers lending's pin to IR v2 (#668)"
