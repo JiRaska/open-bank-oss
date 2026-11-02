@@ -520,7 +520,9 @@ EOF
 "This deploy PR pins services that an owner holds on${block_list}, so it will not be armed. The owner hold on${block_list} must be recorded in main's \`rules.yaml: deploy_holds\` (or${block_list} released) before this PR can deploy. $BLOCK_NOTICE_MARKER"; then
       echo "::warning::supersede: could not post the owner-hold block notice on #$KEEP."
     fi
-    return 1
+    # Exit 3, distinct from every other refusal: an owner hold blocks only THIS deploy kind, so
+    # deploy-window-flush.yml falls through to the other kind instead of failing the run (#14237).
+    return 3
   fi
   if [ "$stale_keep" -ne 0 ]; then
     return 1
@@ -897,18 +899,19 @@ HOOK
   }
   keep_noticed() { grep -cE "^pr comment $1 .*supersede-owner-hold-blocks" "$hev" || true; }
   local path_sha path_name
-  # case 37 — owner hold + overlapping pins blocks the survivor on EVERY verdict path:
+  # case 37 — owner hold + overlapping pins blocks the survivor on EVERY verdict path, always with
+  # rc=3 (the owner-hold refusal deploy-window-flush.yml falls through on, #14237):
   # coverage SKIP (ancestor, uncovered files), SKIP (diverged) and STALE_KEEP (keep is older).
   for path_name in coverage-skip:$OLD diverged:$CCC; do
     path_sha="${path_name#*:}"
     out="$(ov_run owner 13061 13060 "$path_sha" 2>&1)" && rc=0 || rc=$?
-    if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
+    if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' \
        || [ "$(keep_noticed 13061)" != 1 ] || grep -q '^pr close' "$hev"; then
       echo "SELF-TEST FAIL case 37 (${path_name%%:*}): owner hold + overlap did not block #13061; rc=$rc notices=$(keep_noticed 13061)"; ok=1; dump_out "$out"
     fi
   done
   out="$(ov_run owner 13061 13060 "$NEW" "$OLD" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -eq 0 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
+  if [ "$rc" -ne 3 ] || ! contains_text "$out" 'overlap: openbank-kyc-service' || [ "$(keep_noticed 13061)" != 1 ]; then
     echo "SELF-TEST FAIL case 37 (stale-keep): owner overlap not reported/noticed; rc=$rc"; ok=1; dump_out "$out"
   fi
   # CLOSE path: case 32's pair shares the sanctions manifest.

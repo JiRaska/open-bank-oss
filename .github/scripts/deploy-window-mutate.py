@@ -112,6 +112,13 @@ def reselect(number: int, head: str, base: str) -> bool:
         decision_args = (int(time.time()), window.last_deploy_from_commits(commits),
                          int(os.getenv("DEPLOY_WINDOW_SECONDS", "1800")),
                          window.manual_deploy_head(event))
+        # Kinds the pick step refused for an owner hold this run (#14237). Without them the
+        # recheck would select the held kind again and refuse the fallthrough it just made.
+        excluded = tuple(k for k in os.getenv("EXCLUDE_KINDS", "").split() if k)
+        unknown = [k for k in excluded if k not in window.DEPLOY_PREFIXES]
+        if unknown:
+            raise ValueError(f"unknown excluded deploy kind: {unknown}")
+        decision_args = (*decision_args, excluded)
         choice = window.flush(prs, *decision_args)
         if choice is None and any(p.get("repair_priority") and p.get("state", "open") == "open"
                                   for p in prs):

@@ -48,7 +48,7 @@ class DeployWindowMutateTest(unittest.TestCase):
     def execute(self, *, rules=None, final_rules=None, first=None, latest=None,
                 prs=None, commits=None, main=None, inventory_main=BASE, source_main=BASE,
                 source_error=False, inventory_error=False, policy_error=False,
-                event=None, branch=BRANCH, app_id=str(APP_ID)):
+                event=None, branch=BRANCH, app_id=str(APP_ID), extra_env=None):
         first = copy.deepcopy(first if first is not None else pull())
         first["head"]["ref"] = branch
         latest = copy.deepcopy(latest if latest is not None else first)
@@ -109,6 +109,7 @@ class DeployWindowMutateTest(unittest.TestCase):
             event_file.write_text(json.dumps(event or {}))
             environment = {"GITHUB_REPOSITORY": REPO, "GITOPS_APP_ID": app_id,
                            "GITHUB_EVENT_PATH": str(event_file), "DEPLOY_WINDOW_SECONDS": "1800"}
+            environment.update(extra_env or {})
             error = None
             with patch.dict(os.environ, environment, clear=True), patch.object(mutator, "gh", fake_gh), \
                     patch.object(mutator, "run", fake_run), patch.object(mutator.time, "time", return_value=5000):
@@ -320,6 +321,22 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         changed = inventory()
         changed[0]["head_sha"] = "c" * 40
         self.assert_refused(prs=changed)
+
+    def test_owner_held_kind_excluded_arms_the_other_kind(self):
+        # #14237: the pick step refused the older gitops kind for an owner hold and fell through
+        # to admin-ui. The recheck must honour that exclusion, or it refuses the fallthrough.
+        held = {"number": 8, "head": "chore/gitops-auto-deploy-held", "head_sha": "c" * 40,
+                "created_at": "2025-12-31", "armed": False, "state": "open",
+                "repair_priority": False}
+        branch = "chore/admin-ui-deploy-example"
+        rows = inventory()
+        rows[0]["head"] = branch
+        self.assert_refused(branch=branch, prs=rows + [held])
+        error, calls, _ = self.execute(branch=branch, prs=rows + [held],
+                                       extra_env={"EXCLUDE_KINDS": "chore/gitops-auto-deploy-"})
+        self.assertIsNone(error)
+        self.assertEqual(sum(args[:2] == ("api", "graphql") for args in calls), 1)
+        self.assert_refused(branch=branch, prs=rows + [held], extra_env={"EXCLUDE_KINDS": "bogus/"})
 
     def test_source_or_inventory_failure_never_arms(self):
         self.assert_refused(source_error=True)

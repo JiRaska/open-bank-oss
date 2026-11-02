@@ -91,8 +91,11 @@ def manual_deploy_head(event: dict) -> str | None:
 
 
 def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
-          manual_head: str | None = None) -> dict | None:
-    """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
+          manual_head: str | None = None, exclude_kinds: tuple[str, ...] = ()) -> dict | None:
+    """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}].
+
+    exclude_kinds: deploy prefixes refused this run for an owner hold (supersede rc 3). They are
+    skipped so a held kind cannot starve the other one (#14237); an armed PR still blocks all."""
     # Explicit maintainer intent outranks both the timer and manual producer completion.
     # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
     if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
@@ -100,7 +103,9 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
     deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
     if any(p.get("armed") for p in deploy):
         return None
-    pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
+    pending = sorted((p for p in deploy if not p.get("armed")
+                      and not (exclude_kinds and p["head"].startswith(tuple(exclude_kinds)))),
+                     key=lambda p: (p["created_at"], p["number"]))
     if not pending:
         return None
     if manual_head:
@@ -246,6 +251,11 @@ def self_test() -> int:
     prs2 = prs + [{"number": 14, "head": "chore/admin-ui-deploy-d", "created_at": "2026-09-30T10:09:00Z", "armed": False}]
     pick = flush(prs2, T, T - W, W)
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
+    # #14237: a kind refused for an owner hold falls through to the other kind in the same run.
+    pick = flush(prs2, T, T - W, W, exclude_kinds=("chore/admin-ui-deploy-",))
+    check("owner-held kind excluded -> the other kind is armed", pick is not None and pick["number"] == 12)
+    check("both kinds excluded -> nothing armed",
+          flush(prs2, T, T - W, W, exclude_kinds=DEPLOY_PREFIXES) is None)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
@@ -385,6 +395,8 @@ def main() -> int:
     f.add_argument("--prs-json", required=True, help="file: [{number, head, created_at, armed}]")
     f.add_argument("--commits-json", required=True)
     f.add_argument("--event-json", help="GitHub's workflow_run event payload for manual deploy intent")
+    f.add_argument("--exclude-kind", action="append", default=[], choices=list(DEPLOY_PREFIXES),
+                   help="deploy prefix refused for an owner hold this run; repeatable (#14237)")
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
@@ -405,7 +417,8 @@ def main() -> int:
     if a.cmd == "flush":
         last = last_deploy_from_commits(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
+        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head,
+                     tuple(a.exclude_kind))
         print(f"arm={pick['number'] if pick else ''}")
         print(f"arm_head={pick['head'] if pick else ''}")
         return 0

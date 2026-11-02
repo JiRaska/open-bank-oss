@@ -65,57 +65,70 @@ jobs:
           echo "::error::GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unavailable - refusing to arm deploy PRs with GITHUB_TOKEN (its merge would trigger no workflows)."
           exit 1
 
-      - name: Pick the deferred deploy PR to arm
-        id: pick
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/deploy-window"
-          bash .github/scripts/deploy-window-inputs.sh "$d"
-          python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
-            --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
-            --now "$(date -u +%s)" | tee "$d/selection" >> "$GITHUB_OUTPUT"
-          arm=$(sed -n 's/^arm=//p' "$d/selection")
-          echo "selected_main=$(cat "$d/main.sha")" >> "$GITHUB_OUTPUT"
-          if [ -n "$arm" ]; then
-            echo "selected_head=$(jq -er --argjson number "$arm" '.[] | select(.number == $number) | .head_sha' "$d/prs.json")" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Verify deferred GitOps image source freshness
-        if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ARM: ${{ steps.pick.outputs.arm }}
-        run: |
-          set -euo pipefail
-          git fetch --depth=100 origin main
-          git reset --hard origin/main
-          gh pr diff "$ARM" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root .
-
       - name: Install deploy-hold parser
-        if: steps.pick.outputs.arm != ''
         run: |
           python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
           "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
             -r .github/scripts/pyyaml-requirements.txt
 
-      - name: Close superseded deploy PRs (refuses a rollback)
-        if: steps.pick.outputs.arm != ''
+      # Pick, verify and supersede per deploy kind. supersede-deploy-prs.sh exits 3 when an owner
+      # hold blocks the picked PR: that refuses only its KIND, so the next pass excludes it and
+      # tries the other kind, instead of failing the run and starving both (#14237). Any other
+      # refusal (rollback, unreadable evidence, stale pin) still fails the run.
+      - name: Pick, verify and supersede the deferred deploy PR to arm
+        id: pick
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
-          ARM: ${{ steps.pick.outputs.arm }}
-          ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
           DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
         run: |
           set -euo pipefail
-          case "$ARM_HEAD" in
-            chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
-            chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
-            *) echo "::error::unexpected deploy head ${ARM_HEAD}"; exit 1 ;;
-          esac
-          bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
+          d="$RUNNER_TEMP/deploy-window"
+          bash .github/scripts/deploy-window-inputs.sh "$d"
+          excludes=()
+          excluded_kinds=""
+          fetched=false
+          arm=""
+          arm_head=""
+          for _pass in 1 2; do
+            python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
+              --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
+              --now "$(date -u +%s)" ${excludes[@]+"${excludes[@]}"} | tee "$d/selection"
+            arm=$(sed -n 's/^arm=//p' "$d/selection")
+            arm_head=$(sed -n 's/^arm_head=//p' "$d/selection")
+            [ -n "$arm" ] || break
+            case "$arm_head" in
+              chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
+              chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
+              *) echo "::error::unexpected deploy head ${arm_head}"; exit 1 ;;
+            esac
+            if [ "$prefix" = chore/gitops-auto-deploy- ]; then
+              if [ "$fetched" = false ]; then
+                git fetch --depth=100 origin main
+                git reset --hard origin/main
+                fetched=true
+              fi
+              gh pr diff "$arm" --repo "$GITHUB_REPOSITORY" \
+                | python3 .github/scripts/deploy-window.py verify --root .
+            fi
+            rc=0
+            bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$arm" || rc=$?
+            [ "$rc" -eq 0 ] && break
+            if [ "$rc" -ne 3 ]; then exit "$rc"; fi
+            echo "::warning::deploy window: #$arm is held by an owner; trying the other deploy kind (#14237)."
+            excludes+=(--exclude-kind "$prefix")
+            excluded_kinds="$excluded_kinds $prefix"
+            arm=""
+            arm_head=""
+          done
+          {
+            echo "arm=$arm"
+            echo "arm_head=$arm_head"
+            echo "selected_main=$(cat "$d/main.sha")"
+            echo "exclude_kinds=$excluded_kinds"
+            if [ -n "$arm" ]; then
+              echo "selected_head=$(jq -er --argjson number "$arm" '.[] | select(.number == $number) | .head_sha' "$d/prs.json")"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: Arm the verified deployment for the merge train
         if: steps.pick.outputs.arm != ''
@@ -124,6 +137,7 @@ jobs:
           ARM: ${{ steps.pick.outputs.arm }}
           SELECTED_MAIN: ${{ steps.pick.outputs.selected_main }}
           SELECTED_HEAD: ${{ steps.pick.outputs.selected_head }}
+          EXCLUDE_KINDS: ${{ steps.pick.outputs.exclude_kinds }}
         run: |
           set -euo pipefail
           # The helper repeats the live selection/hold checks, verifies train ownership,
