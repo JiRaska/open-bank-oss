@@ -119,6 +119,28 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
+  New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
+  runs started earlier replay the shadow-only step) call a `fraudGate` activity that returns
+  `PROCEED|HOLD|REJECT`. The flag `openbank.domestic.fraud.enforcement-enabled` is read by that
+  activity and defaults to `false`; while false every payment proceeds exactly as before and the
+  would-be decision is only counted (`openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`).
+  With it on: a real ALLOW proceeds; DECLINE rejects with `FRAUD_SUSPECTED` (not `SANCTIONS_HIT`);
+  CHALLENGE, REVIEW, UNKNOWN and **any synthetic verdict, ALLOW included,** hold the payment before
+  scheme submission and open a `FRAUD_REVIEW` case in the existing AML case store. A hold is released
+  only by the `resolveFraudHold(RELEASE)` workflow signal; `REJECT`, or no signal within 48 h, rejects
+  the payment. **Fail closed**: a hold never expires into a pass, and a case that fails to open still
+  ends in rejection on timeout. **Tipping-off**: the fraud reject path sends no customer notification and
+  writes no `rejectDetail`; the cause is in the log and in
+  `openbank_fraud_enforcement_rejections_total{cause}` only. **STRIDE**: integrity/availability risk of
+  a miscalibrated verdict holding or rejecting a legitimate payment (mitigated by the default-off flag and
+  shadow calibration on the decision metric first); elevation risk on the release signal, which only a
+  Temporal client can send (no HTTP surface added). No new trust boundary, endpoint, DB change or event
+  schema change. **Residual**: nothing yet sends the signal when an analyst closes the case, so with
+  the flag on every held payment is rejected at 48 h; wiring case resolution to the signal is a
+  follow-up before the flag is turned on. Rollback: set the flag to `false` (new holds stop at once;
+  payments already waiting keep waiting for their signal or timeout) or revert the PR.
+
 - **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
 - **2026-10-24** — **No `PmtTpInf` on the domestic pacs.008, by decision (#13663).** `openbank-libs-iso20022` gained an optional payment-type block; `SchemeGatewayAdapter` passes `paymentTypeInformation = null` explicitly instead of inheriting it. The EPC service level `SEPA` applies to EUR SEPA schemes, not to a domestic clearing transfer, so sending it would misdescribe the payment. The emitted XML is byte-identical to before. **Residual:** the domestic scheme's own priority or instant code (`DomesticPaymentPriority.INSTANT`) is still not stated on the wire; adding it needs the domestic scheme's code list, not an EPC code.
 - **2026-10-15** — **Outbound account-service edge: request-derived values no longer reach logs** (CodeQL

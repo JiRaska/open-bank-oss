@@ -258,6 +258,10 @@ spec:
               args:
                 - run
                 - --quiet
+                - -o
+                - experimental-prometheus-rw
+                - --tag
+                - journey=account-overview
                 - /scripts/journey.js
               env:
                 # Optional on purpose: an unprovisioned identity must yield a red run with an
@@ -281,6 +285,14 @@ spec:
                 # holds money. Changing this value is a deliberate human fixture act.
                 - name: FIXTURE_ACCOUNT_ID
                   value: "6c53a70d-88f1-479d-b784-dd70ef32191b"
+                # Runtime perf evidence for the test-intelligence matrix (mirrors
+                # cronjob-journey-public-edge.yaml). A remote-write failure does NOT fail
+                # the run — k6 still exits 0 — so the kube-state-metrics Job verdict stays
+                # authoritative for alerting (prometheus-rules-journey.yaml).
+                - name: K6_PROMETHEUS_RW_SERVER_URL
+                  value: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                - name: K6_PROMETHEUS_RW_TREND_STATS
+                  value: "p(95),p(99),avg,max"
               volumeMounts:
                 - name: script
                   mountPath: /scripts

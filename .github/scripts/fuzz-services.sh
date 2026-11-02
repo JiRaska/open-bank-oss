@@ -249,9 +249,38 @@ EOF
   # (measured twice: the first two runs of this control extracted themselves and the stub
   # never started — the self-matching trap the control-3 comment above already documents).
   sed -n "/STUBEOF' &\$/,/^STUBEOF/p" "$0" | sed '1d;$d' > "${ST_TMP}/stub.py"
-  FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 >/dev/null 2>&1 &
+  wait_for_stub () {
+    python3 - "$1" "$2" "$3" <<'PY'
+import http.client
+import os
+from pathlib import Path
+import sys
+import time
+
+port, pid, log = int(sys.argv[1]), int(sys.argv[2]), Path(sys.argv[3])
+deadline = time.monotonic() + 5.0
+while (remaining := deadline - time.monotonic()) > 0:
+    try:
+        os.kill(pid, 0)
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=min(0.25, remaining))
+        try:
+            connection.request("GET", "/__fuzz_stub_ready")
+            response = connection.getresponse()
+            if response.status == 204 and response.getheader("X-Fuzz-Stub-Pid") == str(pid):
+                sys.exit(0)
+        finally:
+            connection.close()
+    except (OSError, http.client.HTTPException):
+        pass
+    time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+print(f"SELF-TEST: stub on local port {port} did not start with child PID {pid}; final diagnostic:")
+print("\n".join(log.read_text(errors="replace").splitlines()[-4:]) if log.exists() else "no stderr")
+sys.exit(1)
+PY
+  }
+  FUZZ_STUB_SELF_TEST=1 FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 >"${ST_TMP}/opa-stub.log" 2>&1 &
   ST_STUB_PID=$!
-  sleep 1
+  if ! wait_for_stub 18181 "$ST_STUB_PID" "${ST_TMP}/opa-stub.log"; then ST_RC=1; fi
   ST_POST="$(curl -s -w '|%{http_code}' -X POST http://127.0.0.1:18181/v1/data/openbank/rest/allow \
               -H 'Content-Type: application/json' -d '{"input":{"principal":{"id":"anonymous"}}}' \
               http://127.0.0.1:18181/v1/data/openbank/rest/allow 2>/dev/null || true)"
@@ -262,9 +291,101 @@ EOF
     '{"result": true}|200{"result": true}|200') ;;
     *) echo "SELF-TEST FAIL 5: OPA stub did not answer two keep-alive POSTs with the allow body (got: ${ST_POST})"; ST_RC=1 ;;
   esac
+  # The PSD2 cross-service fixture is a denial, never an authorization. Its response must
+  # match the requested TPP ID or the real guard rejects it as an upstream failure.
+  FUZZ_STUB_SELF_TEST=1 FUZZ_TPP_DENIAL_PORT=18182 python3 "${ST_TMP}/stub.py" 18182 18183 >"${ST_TMP}/tpp-stub.log" 2>&1 &
+  ST_TPP_PID=$!
+  if ! wait_for_stub 18182 "$ST_TPP_PID" "${ST_TMP}/tpp-stub.log"; then ST_RC=1; fi
+  ST_TPP_RESULT="$(curl -s -w '|%{http_code}' \
+    'http://127.0.0.1:18182/api/v1/tpp-registry/check?tppId=CZ-CNB-PACT-UNREGISTERED&role=AISP' || true)"
+  ST_TPP_OTHER="$(curl -s -o /dev/null -w '%{http_code}' \
+    'http://127.0.0.1:18183/api/v1/tpp-registry/check?tppId=CZ-CNB-PACT-UNREGISTERED&role=AISP' || true)"
+  ST_TPP_BAD="$(curl -s -o /dev/null -w '%{http_code}' \
+    'http://127.0.0.1:18182/api/v1/tpp-registry/check?tppId=&role=AISP' || true)"
+  ST_TPP_OTHER_PATH="$(curl -s -o /dev/null -w '%{http_code}' \
+    'http://127.0.0.1:18182/api/v1/tpp-registry/other?tppId=CZ-CNB-PACT-UNREGISTERED&role=AISP' || true)"
+  ST_TPP_WRONG_METHOD="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    'http://127.0.0.1:18182/api/v1/tpp-registry/check?tppId=CZ-CNB-PACT-UNREGISTERED&role=AISP' || true)"
+  ST_TPP_DUPLICATE="$(curl -s -o /dev/null -w '%{http_code}' \
+    'http://127.0.0.1:18182/api/v1/tpp-registry/check?tppId=one&tppId=two&role=AISP' || true)"
+  kill "${ST_TPP_PID}" 2>/dev/null; wait "${ST_TPP_PID}" 2>/dev/null || true
+  if ! python3 - "${ST_TPP_RESULT}" "${ST_TPP_OTHER}" "${ST_TPP_BAD}" \
+      "${ST_TPP_OTHER_PATH}" "${ST_TPP_WRONG_METHOD}" "${ST_TPP_DUPLICATE}" <<'PY'
+import json
+import sys
+
+try:
+    body, status = sys.argv[1].rsplit("|", 1)
+    response = json.loads(body)
+    assert status == "403"
+    assert response == {
+        "tppId": "CZ-CNB-PACT-UNREGISTERED",
+        "authorized": False,
+        "roles": [],
+        "reason": "TPP not found in registry",
+    }
+    assert sys.argv[2:] == ["404"] * 5
+except (AssertionError, ValueError):
+    sys.exit(1)
+PY
+  then
+    echo "SELF-TEST FAIL 6: PSD2 registry stub must deny a matching TPP and leave other/malformed requests absent"
+    ST_RC=1
+  fi
+  # Control 7 exercises the evidence fixture at the handler boundary. Execute the actual
+  # heredoc class with a fake request/response so this control needs no second listener.
+  if ! python3 - "$0" <<'PY'
+import io
+import json
+import sys
+from types import SimpleNamespace
+
+source = open(sys.argv[1], encoding="utf-8").read()
+python = source.split("<<'STUBEOF' &\n", 1)[1].split("\nSTUBEOF\n", 1)[0]
+definitions = python.split("\nfor port in sys.argv[1:]:", 1)[0]
+namespace = {}
+exec(compile(definitions, sys.argv[1], "exec"), namespace)
+Handler = namespace["Absent"]
+
+def dispatch(path, method="GET", port=8113):
+    handler = object.__new__(Handler)
+    handler.server = SimpleNamespace(server_address=("127.0.0.1", port))
+    handler.command, handler.path = method, path
+    handler.headers, handler.rfile, handler.wfile = {}, io.BytesIO(), io.BytesIO()
+    handler._headers_buffer = []
+    handler.send_response = lambda code: setattr(handler, "status", code)
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    handler._absent()
+    return handler.status, handler.wfile.getvalue()
+
+status, body = dispatch("/api/v1/audit/evidence/synthetic-aggregate")
+assert status == 200
+response = json.loads(body)
+assert response["attestation"] == "audit-chain"
+assert response["truncated"] is False and response["tampered"] is False
+assert response["entryCount"] == 0 and response["entries"] == []
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate", port=8114)[0] == 404
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate/extra")[0] == 404
+assert dispatch("/api/v1/audit/evidence/synthetic-aggregate", "POST")[0] == 404
+assert dispatch("/unrelated")[0] == 404
+PY
+  then
+    echo "SELF-TEST FAIL 7: audit evidence stub contract or 404 boundaries regressed"
+    ST_RC=1
+  fi
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (5 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (7 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
+fi
+
+# Schemathesis exposes one extension-module slot through SCHEMATHESIS_HOOKS. Do not
+# silently replace a caller-provided hook; this harness needs the slot for response
+# isolation and does not yet support composing multiple modules.
+FUZZ_SERVICES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${SCHEMATHESIS_HOOKS:-}" ]; then
+  echo "::error::SCHEMATHESIS_HOOKS is already set; fuzz-services cannot safely compose hooks"
+  exit 2
 fi
 
 mkdir -p fuzz-reports
@@ -326,9 +447,11 @@ for svc in $SERVICES; do
   # default names another openbank service that is NOT running in this job, and without a stub its
   # absence masquerades as a server-error finding — measured on run 34017868446, ledger's
   # POST /api/v1/ledger/fx-revaluation answered 500 solely because fx-service (8119) was down;
-  # same class as the Redis/OPA/Temporal traps in the header. The stub answers 404 to everything:
-  # the "absent" answer these cross-service readers are written to expect (the fx adapter maps 404
-  # to null and skips the leg), so schemathesis measures the HTTP surface, not the harness.
+  # same class as the Redis/OPA/Temporal traps in the header. Missing-service routes default to
+  # 404; the OIDC issuer, OPA decision, audit-evidence and PSD2 TPP-registry cases have narrow
+  # explicit fixtures: the "absent" answer these cross-service readers are written to expect (the
+  # fx adapter maps 404 to null and skips the leg), so schemathesis measures the HTTP surface, not
+  # the harness. PSD2's registry is the narrow exception: its absent TPP contract is a 403 denial DTO.
   # Never stub ports this job already provisions (postgres, redis) or shares with other infra
   # defaults (keycloak 8080, otel 4317), and never the service's own port. OPA 8181 is likewise
   # excluded from the 404 stubs — it gets its own ALLOW stub below, not a 404.
@@ -336,6 +459,17 @@ for svc in $SERVICES; do
   STUB_PORTS="$(grep -oE 'url: \$\{[A-Za-z0-9_]+:http://localhost:[0-9]+' "$APP_YAML" \
     | grep -oE '[0-9]+$' | sort -un \
     | grep -vxE "${PORT}|5432|6379|8080|4317|8181" || true)"
+  TPP_DENIAL_PORT=""
+  if [ "$svc" = "openbank-psd2-service" ]; then
+    TPP_DENIAL_PORT="$(grep -oE 'url: \$\{TPP_REGISTRY_SERVICE_URL:http://localhost:[0-9]+' "$APP_YAML" \
+      | grep -oE '[0-9]+$' | head -1 || true)"
+    if [ -z "$TPP_DENIAL_PORT" ] || ! printf '%s\n' "$STUB_PORTS" | grep -Fxq "$TPP_DENIAL_PORT"; then
+      echo "::error::[${svc}] TPP registry fixture port is not a derived absent-service stub"
+      OVERALL=1
+      docker rm -f fuzz-pg fuzz-redis >/dev/null 2>&1 || true
+      continue
+    fi
+  fi
   # The OUTBOUND half of OIDC (quarkus.oidc-client) is NOT covered by "%dev disables OIDC" — the
   # dev profile switches off the inbound resource server only, and the M2M token mint precedes the
   # HTTP call: with no Keycloak in this job the OidcClientRequestReactiveFilter dies on
@@ -345,8 +479,8 @@ for svc in $SERVICES; do
   # this way, because the token fetch to the (excluded) keycloak port happens BEFORE the stubbed
   # fx-service call. Fix it the same derived way: a service declaring `oidc-client:` gets a stub
   # token issuer on 18099 (discovery + a static fake token), pointed there by a system property so
-  # it wins over any `${...:default}` spelling; the minted token is only ever presented to the
-  # 404 stubs, which validate nothing.
+  # it wins over any `${...:default}` spelling; the minted token is only ever presented to
+  # harness stubs, never to a real downstream service.
   OIDC_FLAGS=()
   if grep -qE '^  oidc-client:' "$APP_YAML"; then
     echo "==> [${svc}] config declares oidc-client — stubbing the token issuer on 18099 (outbound M2M mint)"
@@ -374,20 +508,26 @@ for svc in $SERVICES; do
   # the 404 set above excludes 8181 explicitly, and only the OPA set adds it back — so no
   # double-bind is possible. (The first version of the allow stub folded 8181 INTO the 404
   # list, which worked only because one process serves both, but printed the allow port in
-  # the "404-for-everything" line — a lie in the log while triaging run 34274283230.)
+  # the generic absent-service line — inaccurate while triaging run 34274283230.)
   STUB_PID=""
   if [ -n "${STUB_PORTS}" ] || [ -n "${OPA_STUB_PORTS}" ]; then
-    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s) with 404-for-everything: $(echo ${STUB_PORTS})"
-    python3 - ${STUB_PORTS} ${OPA_STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
+    [ -n "${STUB_PORTS}" ] && echo "==> [${svc}] stubbing absent cross-service port(s); unspecified routes answer 404: ${STUB_PORTS//$'\n'/ }"
+    [ -n "${TPP_DENIAL_PORT}" ] && echo "==> [${svc}] registry check on derived port ${TPP_DENIAL_PORT} returns denied-TPP 403 only"
+    # shellcheck disable=SC2086 # The derived newline-separated port set is intentionally split into arguments.
+    FUZZ_TPP_DENIAL_PORT="${TPP_DENIAL_PORT:-0}" python3 - ${STUB_PORTS} ${OPA_STUB_PORTS} >/dev/null 2>&1 <<'STUBEOF' &
 import http.server
+import json
 import os
 import sys
 import threading
 import time
+from urllib.parse import parse_qs, urlsplit
 
 # The port the OPA allow behaviour binds to; overridable so the self-test can exercise the
 # handler on a throwaway port without colliding with anything on 8181.
 OPA_PORT = int(os.environ.get("FUZZ_OPA_STUB_PORT", "8181"))
+AUDIT_EVIDENCE_STUB_PORT = int(os.environ.get("FUZZ_AUDIT_EVIDENCE_STUB_PORT", "8113"))
+TPP_DENIAL_PORT = int(os.environ.get("FUZZ_TPP_DENIAL_PORT", "0"))
 
 
 class Absent(http.server.BaseHTTPRequestHandler):
@@ -415,6 +555,29 @@ class Absent(http.server.BaseHTTPRequestHandler):
 
     def _absent(self):
         self._drain_body()
+        if os.environ.get("FUZZ_STUB_SELF_TEST") == "1" and self.path == "/__fuzz_stub_ready":
+            self.send_response(204)
+            self.send_header("X-Fuzz-Stub-Pid", str(os.getpid()))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        # The fuzz job runs no TPP registry. Reproduce the provider's pinned unknown-TPP
+        # denial contract for PSD2 only; never synthesize an authorized identity.
+        if self.server.server_address[1] == TPP_DENIAL_PORT and self.command == "GET":
+            target = urlsplit(self.path)
+            if target.path == "/api/v1/tpp-registry/check":
+                query = parse_qs(target.query, keep_blank_values=True)
+                tpp_ids = query.get("tppId", [])
+                roles = query.get("role", [])
+                if len(tpp_ids) == 1 and tpp_ids[0] and len(roles) == 1 and roles[0] in {"AISP", "PISP"}:
+                    body = json.dumps({
+                        "tppId": tpp_ids[0],
+                        "authorized": False,
+                        "roles": [],
+                        "reason": "TPP not found in registry",
+                    }).encode()
+                    self._answer(403, body)
+                    return
         # OIDC token-issuer stub: the outbound oidc-client discovers the realm and mints a token
         # BEFORE the cross-service call; without these two answers the mint throws and the caller
         # answers 500 without the 404 stub ever being asked (see the caller-side comment).
@@ -437,6 +600,34 @@ class Absent(http.server.BaseHTTPRequestHandler):
         # keeps the 404 — the stub answers allow only where a PDP answer is asked for.
         if self.server.server_address[1] == OPA_PORT and self.path.startswith("/v1/data/"):
             self._answer(200, b'{"result": true}')
+            return
+        # audit-service's evidence route returns a valid empty bundle for an aggregate with
+        # no recorded rows. This narrow fixture models that response so lending's fuzz lane
+        # measures its HTTP surface instead of mapping an absent audit dependency's 404 to 503.
+        # This fixture does not model audit roles/OPA or caller-token forwarding; those
+        # downstream authorization and transport failures remain adapter-test responsibilities.
+        # All other paths and methods keep the fail-closed absent-service response below.
+        evidence_prefix = "/api/v1/audit/evidence/"
+        evidence_path = urlsplit(self.path).path
+        aggregate_id = evidence_path[len(evidence_prefix):] if evidence_path.startswith(evidence_prefix) else ""
+        if (self.server.server_address[1] == AUDIT_EVIDENCE_STUB_PORT
+                and self.command == "GET" and aggregate_id and "/" not in aggregate_id):
+            body = json.dumps({
+                "aggregateId": aggregate_id,
+                "attestation": "audit-chain",
+                "entryCount": 0,
+                "truncated": False,
+                "tampered": False,
+                "hashStatusCounts": {
+                    "VERIFIED": 0,
+                    "MISMATCH": 0,
+                    "LEGACY_UNVERIFIABLE": 0,
+                    "UNCHAINED": 0,
+                },
+                "fullChainVerification": "/api/v1/audit/integrity",
+                "entries": [],
+            }).encode()
+            self._answer(200, body)
             return
         self._answer(404, b'{"status":404,"title":"absent (fuzz cross-service stub)"}')
 
@@ -569,7 +760,7 @@ STUBEOF
       #   --hypothesis-deadline removed (no equivalent); --request-timeout unit ms -> seconds;
       #   --experimental=openapi-3.1 removed (default now); --junit-xml -> --report junit
       #   --report-junit-path
-      schemathesis run "$SPEC" \
+      SCHEMATHESIS_HOOKS="${FUZZ_SERVICES_DIR}/fuzz_response_isolation.py" schemathesis run "$SPEC" \
         --url "http://localhost:${PORT}" \
         --checks not_a_server_error \
         --max-examples "${MAX_EXAMPLES}" \

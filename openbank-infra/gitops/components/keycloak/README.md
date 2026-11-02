@@ -73,6 +73,18 @@ prints nothing useful.
 - A user needs `firstName`/`lastName`/`email`, or Keycloak 26 answers "Account is not
   fully set up" with no hint why.
 
+### Client scopes and the reserved `openid` protocol scope
+
+Every `defaultClientScopes` / `optionalClientScopes` entry must resolve to a
+`clientScopes[].name` in the same template (rule R12). An explicit realm import does not
+make an undeclared reference work: Keycloak logs `Referenced client scope ... doesn't
+exist` and silently drops the assignment. In particular, `openid` is the reserved OIDC
+**protocol** scope, not a client scope to define or assign. Clients still request it in the
+authorization request's `scope` parameter; removing its invalid client-scope assignment
+does not remove OIDC authentication or the `openid` token scope. Built-in client scopes
+such as `email` and `offline_access`, by contrast, need their standard definitions when an
+explicit template assigns them.
+
 ## Role scope: `fullScopeAllowed: false` plus explicit `scopeMappings`
 
 Keycloak 26 deprecates the per-client "Full scope allowed" switch and logs a WARN for every

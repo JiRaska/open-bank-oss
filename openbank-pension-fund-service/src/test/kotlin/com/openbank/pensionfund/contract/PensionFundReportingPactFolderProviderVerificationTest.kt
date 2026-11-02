@@ -11,9 +11,10 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pensionfund.application.port.PensionFundStore
-import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
@@ -36,7 +37,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * on main-push; both share [TaxReportingPensionFundPactStates].
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestSecurity(user = "service-account-openbank-tax-reporting", roles = ["ROLE_API"])
 @Provider("openbank-pension-fund-service")
 @PactFolder("../pacts")

@@ -47,7 +47,11 @@ HELPER = "openbank-treasury-service/src/test/kotlin/com/openbank/treasury/parity
 SOURCES = {"independent-oracle", "hand-computed", "published-example"}
 # ADR-0344 delivery phases: the products whose cash-flow ledger is on main. Every one needs a
 # fixture; a later phase adds its products here in the same PR that adds their fixtures.
-REQUIRED_PRODUCTS = ("MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA")
+REQUIRED_PRODUCTS = (
+    "MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA",
+    # Phase 2 (posting-rule matrix + CreditExposure): every remaining ADR-0344 product.
+    "CASH", "TREASURY_BILL", "BILL_OF_EXCHANGE", "BOND", "LOAN", "FX_FORWARD", "FX_SWAP", "REPO", "REVERSE_REPO",
+)
 REQUIRED = ("id", "product", "source", "sourceNote", "deal", "expected", "tolerance")
 FLOW_KEYS = ("legIndex", "periodIndex", "kind", "paymentDate", "notional", "rate", "amount")
 DATE_KEYS = {"accrualStart", "accrualEnd", "fixingDate", "paymentDate", "tradeDate", "valueDate",

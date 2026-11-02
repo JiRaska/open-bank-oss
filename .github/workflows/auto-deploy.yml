@@ -1375,6 +1375,7 @@ jobs:
         with:
           ref: ${{ needs.changes.outputs.source_commit }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install deploy-hold parser
         run: |
@@ -1403,6 +1404,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
           RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
         run: |
           set -euo pipefail
@@ -1430,9 +1432,9 @@ jobs:
           # and therefore NO workflow run at all. Not skipped, absent. It renders as "waiting",
           # never as broken, and the image is never deployed.
           #
-          # Safe because the rewrite is deterministic — pin each image: to the tag just built —
-          # so recomputing against a newer main is always correct.
-          git fetch --depth=100 origin main
+          # Reconciliation preserves concurrently advanced pins when the complete source
+          # trees differ only in GitOps image pins; manual rebuilds retain their intent.
+          git fetch origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           IMAGE_DIGESTS='${{ needs.build-push.outputs.image_digests }}'
@@ -1481,7 +1483,8 @@ jobs:
             SELECTED_DIGESTS="$(jq -cn --argjson m "$SELECTED_DIGESTS" --argjson src "$IMAGE_DIGESTS" --arg k "$svc" '$m + {($k): $src[$k]}')"
           done
           python3 .github/scripts/rewrite-reconcile-image-pins.py \
-            . "$ECR_REGISTRY" "$SELECTED_TAGS" "$SELECTED_DIGESTS"
+            . "$ECR_REGISTRY" "$SELECTED_TAGS" "$SELECTED_DIGESTS" \
+            --preserve-concurrent "$GITHUB_EVENT_NAME" "$INPUT_RECONCILE" "$SOURCE_COMMIT"
           while IFS= read -r f; do UPDATED+=("$f"); done \
             < <(git diff --name-only -- openbank-infra/gitops/components)
 
