@@ -554,6 +554,10 @@ jobs:
 
   gates:
     name: gates (${{ matrix.slug }})
+    permissions:
+      actions: read       # readiness R8 verifies the exact api-fuzz run artifact
+      contents: read
+      pull-requests: read
     needs: [agent-admission, ruleset-evidence]
     # Missing evidence must produce NOT_EVALUATED in the gate report while the
     # independent governance checks still run. Admission refusal still blocks all.
