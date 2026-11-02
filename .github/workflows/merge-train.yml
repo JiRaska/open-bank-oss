@@ -16,7 +16,7 @@
 # RUNNERS (#14302): every job runs on the dedicated ARC scale set `openbank-train`, which only this
 # workflow may target (rules.yaml ci_runners.pools.train, check-ci-runner-pools.py). ARC runners
 # are ephemeral, one job per pod, so build (PR data, no secrets) and settle/publish (App token)
-# never share a runner — the same separation hosted runners gave. The pod has no cloud role and no
+# never share a pod. They may share the dedicated train node in sequence (see arc-runners.tf). The pod has no cloud role and no
 # Kubernetes token; the App token minted in-job is the only credential it ever holds.
 # settle and publish run this script as it exists on origin/main, under `python3 -I -S`, with no
 # system or global git config, and never check out, install or execute anything from a PR.
