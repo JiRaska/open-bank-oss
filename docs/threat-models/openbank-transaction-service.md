@@ -328,7 +328,7 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   (`authz.four-eyes.enforce=false`) — a candidate for a follow-up rollout under issue #413.
 - **Temporal orchestration (ADR-0120 Phase 5: sole orchestrator).** `initiateTransaction` always
   drives the payment through the durable `PaymentWorkflow`; `PaymentSagaOrchestrator` and the
-  `openbank.transaction.orchestration.temporal.enabled` flag were removed (`TransactionService.kt`
+  orchestration enable flag were removed (`TransactionService.kt`
   records this). Activities wrap the same ports, so the §4 money-direction and the ADR-0039 D-2
   hold-release invariant are preserved (success path never releases the hold; balance projection
   does). Trust surface: the worker's gRPC connection to the Temporal frontend (`:7233`, namespace
