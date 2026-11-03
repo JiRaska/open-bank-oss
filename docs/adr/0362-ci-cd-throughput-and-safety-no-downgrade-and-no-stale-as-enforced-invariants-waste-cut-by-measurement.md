@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, gitops, governance]
-summary: "No-downgrade and no-stale become enforced invariants (a GitOps pin only moves forward from live main; every test script is run by something), and CI waste is cut only where a 7-day measurement locates it: evidence churn, main-red watch, full-fleet deploy PRs."
+summary: "No-downgrade and no-stale become enforced invariants (a GitOps pin only moves forward from live main; every test script is run by something); CI waste is cut only where a 7-day measurement locates it."
 followup: "#14698 #14700 — pin gate and reachability gate shipped as PRs; auto-deploy union-of-newer-pins, merge-train self-test call budget and the deploy-PR fleet exemption are planned"
 ---
 
