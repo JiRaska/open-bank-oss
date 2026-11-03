@@ -49,9 +49,7 @@ def caller_block(modules):
                      '    permissions:', '      contents: read', '      actions: read', '      id-token: write',
                      f'    uses: ./{CALLEES[lane]}',
                      '    with:', f'      service: {module}', '    secrets:',
-                     '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"),
-                     '      GRADLE_CACHE_URL: ' + expression('secrets.GRADLE_CACHE_URL'),
-                     '      GRADLE_CACHE_READ_PASSWORD: ' + expression('secrets.GRADLE_CACHE_READ_PASSWORD'), '']
+                     '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']
     return '\n'.join(rows).rstrip()
 
 

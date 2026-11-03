@@ -56,8 +56,13 @@ service build to it with an asymmetric trust split:
    branch. A pull request, including a same-repo one, can never obtain the write credential,
    because environment secrets are released only to jobs running on the allowed branch.
 3. **Outside AWS.** The node runs on a small dedicated host outside the AWS account, so cache
-   traffic from GitHub-hosted runners costs no NAT, ALB or AWS egress. Its URL and credentials
-   live only in repository secrets, never in tracked files.
+   traffic from GitHub-hosted runners costs no NAT, ALB or AWS egress. Its URL and the read-only
+   credential are repository variables, never tracked files. They are variables rather than
+   secrets because a reusable workflow reads `vars` directly, while a secret would have to be
+   passed by every one of ~170 callers, and that pushed `services-ci.yml` past GitHub's
+   expanded-workflow size limit (`Maximum object size exceeded`). The read credential only
+   grants reads of build output from public source. The write credential stays an environment
+   secret.
 4. **Fail open.** An unreachable node makes Gradle log a warning and build normally. The cache
    can make a build faster. It can never be the reason a build fails.
 

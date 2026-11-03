@@ -89,19 +89,10 @@ on:
         # already gate on pactbroker.url / an empty password.
         description: "Pact Broker password (ADR-0092) — publishing pacts + verification results."
         required: false
-      GRADLE_CACHE_URL:
-        # ADR-0363 remote Gradle build cache. Unset (forks, or no cache provisioned) leaves
-        # GRADLE_REMOTE_CACHE_URL blank, which settings.gradle.kts treats as "no remote cache".
-        description: "Remote Gradle build cache URL (ADR-0363)."
-        required: false
-      GRADLE_CACHE_READ_PASSWORD:
-        description: "Read-only credential for the remote Gradle build cache (ADR-0363)."
-        required: false
       GRADLE_CACHE_WRITE_PASSWORD:
-        # Declared only so the expression type-checks. No caller passes it: it is an ENVIRONMENT
-        # secret of `gradle-cache-writer`, which takes precedence inside the build job and exists
-        # only for a push to main (ADR-0363).
-        description: "Write credential for the remote Gradle build cache; environment secret, never passed."
+        # Never passed by a caller: an ENVIRONMENT secret of `gradle-cache-writer` (ADR-0363),
+        # declared only so the expression type-checks. Kept tiny: this file is expanded per
+        # caller and GitHub caps the expanded workflow size.
         required: false
 
 permissions:
@@ -138,11 +129,14 @@ jobs:
       # compiler error.
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      # Remote build cache (ADR-0363). Fails open: an unreachable node is a warning, not a failure.
-      GRADLE_REMOTE_CACHE_URL: ${{ secrets.GRADLE_CACHE_URL }}
+      # Remote build cache (ADR-0363). URL and the read-only credential are repo VARIABLES, not
+      # secrets: a reusable workflow sees vars directly, while secrets would have to be passed by
+      # all ~170 callers, which pushed services-ci.yml past GitHub's expanded-size limit. The read
+      # credential grants only reads of build output from public source. Fails open.
+      GRADLE_REMOTE_CACHE_URL: ${{ vars.GRADLE_CACHE_URL }}
       GRADLE_REMOTE_CACHE_PUSH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'true' || 'false' }}
       GRADLE_REMOTE_CACHE_USER: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'ci-write' || 'ci-read' }}
-      GRADLE_REMOTE_CACHE_PASSWORD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD || secrets.GRADLE_CACHE_READ_PASSWORD }}
+      GRADLE_REMOTE_CACHE_PASSWORD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD || vars.GRADLE_CACHE_READ_PASSWORD }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

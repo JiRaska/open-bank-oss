@@ -36,14 +36,7 @@ name: _service-ci-pr
       PACT_BROKER_PASSWORD:
         description: "Pact Broker password (ADR-0092) \u2014 publishing pacts + verification results."
         required: false
-      GRADLE_CACHE_URL:
-        description: Remote Gradle build cache URL (ADR-0363).
-        required: false
-      GRADLE_CACHE_READ_PASSWORD:
-        description: Read-only credential for the remote Gradle build cache (ADR-0363).
-        required: false
       GRADLE_CACHE_WRITE_PASSWORD:
-        description: Write credential for the remote Gradle build cache; environment secret, never passed.
         required: false
 permissions:
   contents: read
@@ -62,13 +55,13 @@ jobs:
       GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      GRADLE_REMOTE_CACHE_URL: ${{ secrets.GRADLE_CACHE_URL }}
+      GRADLE_REMOTE_CACHE_URL: ${{ vars.GRADLE_CACHE_URL }}
       GRADLE_REMOTE_CACHE_PUSH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') &&
         secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'true' || 'false' }}
       GRADLE_REMOTE_CACHE_USER: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') &&
         secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'ci-write' || 'ci-read' }}
       GRADLE_REMOTE_CACHE_PASSWORD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '')
-        && secrets.GRADLE_CACHE_WRITE_PASSWORD || secrets.GRADLE_CACHE_READ_PASSWORD }}
+        && secrets.GRADLE_CACHE_WRITE_PASSWORD || vars.GRADLE_CACHE_READ_PASSWORD }}
     steps:
     - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       with:
