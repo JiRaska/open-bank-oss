@@ -659,6 +659,30 @@ gates:
   # so its own self-test is the only place its RED is reachable before it acts on real PRs. Case 1 is
   # the #6231 interleaving and must exit non-zero; case 2 is the ordinary supersede and must still
   # close the older PR, so a fail-everything script does not satisfy it either.
+  # Owner rule: no downgrades, ever. auto-deploy pins every selected service to its own source
+  # sha against whatever main holds, and builds do not finish in commit order — so a deploy PR cut
+  # before a newer deploy merged rewrites newer pins to older ones with no textual conflict and
+  # every job green. Measured 2026-11-03 on #14579: 34 pins moved, all forward against the PR's
+  # merge-base, 22 BACKWARD against live main. supersede-deploy-prs.sh compares open deploy PRs
+  # with each other, never with main's pins; this gate compares the PR's new pins with live main.
+  - id: deploy-pin-monotonic
+    name: "a GitOps image pin only moves forward along main's history unless the PR is labelled deploy-revert"
+    group: gitops
+    mode: enforced
+    rationale: "A deploy PR for an older source sha opened after a newer one merged rewrites main's newer pins to older ones with no conflict and every job green (#14579: 22 of 34 pins backward against live main); nothing before this compared a deploy PR's pins with the pins main holds now."
+    review_after: "2027-05-03"
+    budget_seconds: 60   # self-test builds one small git repo (~3 s); the gate itself is one diff + one fetch
+    min_subjects: 50   # 75 sandbox image pins under openbank-infra/gitops on 2026-11-03
+    needs_base: optional
+    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py"]
+    selftest: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --self-test
+    selftest_expect: pass
+    # ${PR_DIFF_BASE:-}: on a push to main there is no base and nothing to block; the checker
+    # counts its subjects and exits 0 there (GITHUB_EVENT_NAME=push), and exits 2 on a PR without one.
+    run: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --root . --base "${PR_DIFF_BASE:-}"
+
   - id: supersede-deploy-prs-ancestry
     selftest_exempt: "is-a-test-suite — the run: IS supersede-deploy-prs.sh --self-test"
     name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
