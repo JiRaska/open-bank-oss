@@ -784,6 +784,100 @@ class ResolveReconcileSourceTest(unittest.TestCase):
             )
         self.assertEqual(result, (self.OLDER, "35", 1))
 
+    def test_global_build_inputs_differ_is_proven_only_from_two_readable_trees(self):
+        import os
+        import tempfile
+
+        def git(*args, cwd):
+            return subprocess.run(
+                ["git", "-c", "commit.gpgsign=false", "-c", "user.email=t@example.com",
+                 "-c", "user.name=t", *args],
+                cwd=cwd, check=True, capture_output=True, text=True,
+            ).stdout.strip()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            git("init", "-q", ".", cwd=tmp)
+            for d in ("build-logic", "gradle", "config"):
+                os.makedirs(os.path.join(tmp, d))
+                Path(tmp, d, "f").write_text("1\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "base", cwd=tmp)
+            base = git("rev-parse", "HEAD", cwd=tmp)
+            Path(tmp, "README.md").write_text("x\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "docs", cwd=tmp)
+            same = git("rev-parse", "HEAD", cwd=tmp)
+            Path(tmp, "build-logic", "f").write_text("2\n")
+            git("add", "-A", cwd=tmp)
+            git("commit", "-qm", "build-logic", cwd=tmp)
+            changed = git("rev-parse", "HEAD", cwd=tmp)
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                self.assertTrue(MODULE._global_build_inputs_differ(base, changed))
+                self.assertFalse(MODULE._global_build_inputs_differ(base, same))
+                # Unreadable evidence is never "differs": fall back to the full proof.
+                self.assertFalse(MODULE._global_build_inputs_differ("f" * 40, changed))
+            finally:
+                os.chdir(cwd)
+
+    def test_resolver_skips_per_service_proofs_when_global_build_inputs_differ(self):
+        runs = {
+            "workflow_runs": [
+                self.run_record(30, "c" * 40, "2026-10-17T12:00:00Z"),
+            ]
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            if urlsplit(request.full_url).path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse(runs)
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_global_build_inputs_differ", return_value=True),
+            patch.object(MODULE, "_is_gradle_module", return_value=True),
+            patch.object(MODULE, "_push_might_build_service") as might_build,
+            patch.object(MODULE, "_tree_equivalent", return_value=True) as equivalent,
+            self.assertRaises(MODULE.VerificationError),
+        ):
+            MODULE.resolve_reconcile_service_source(
+                SERVICE, self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(might_build.call_count, 0)
+        self.assertEqual(equivalent.call_count, 0)
+
+    def test_self_built_service_is_not_skipped_by_gradle_global_inputs(self):
+        runs = {"workflow_runs": [self.run_record(30, "c" * 40, "2026-10-17T12:00:00Z")]}
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse(runs)
+            if path.endswith("/runs/30/attempts/1/jobs"):
+                return FixtureResponse(job_fixture())
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_global_build_inputs_differ", return_value=True),
+            patch.object(MODULE, "_is_gradle_module", return_value=False),
+            patch.object(MODULE, "_push_might_build_service", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True) as equivalent,
+            patch.object(MODULE, "_exact_pact_exists", return_value=True),
+        ):
+            result = MODULE.resolve_reconcile_service_source(
+                SERVICE, self.TIP, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        self.assertEqual(result[0], "c" * 40)
+        self.assertGreaterEqual(equivalent.call_count, 1)
+
+
     def test_resolver_api_failure_is_a_refusal(self):
         def fail_urlopen(_request, timeout):
             del timeout

@@ -11,6 +11,7 @@ build and contract child jobs. Every API or schema failure is a refusal.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import os
@@ -451,6 +452,68 @@ def _expected_verification_jobs(
         return None
 
 
+@functools.lru_cache(maxsize=1)
+def _global_input_dirs() -> list[str]:
+    """The directories every Gradle service's equivalence proof requires byte-equal.
+
+    Read from the comparator itself so the two cannot drift; unreadable means no
+    prefilter (the full proof still runs), never a guess.
+    """
+    try:
+        text = Path(SCRIPT_DIR, "pact-version-tree-equivalent.sh").read_text()
+    except OSError:
+        return []
+    match = re.search(r"(?m)^GLOBAL_IN_SCOPE_DIRS=\(([^)]*)\)", text)
+    return match.group(1).split() if match else []
+
+
+def _tree_ids(rev: str, dirs: list[str], deadline: float | None) -> list[str] | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "-q", *[f"{rev}:{d}" for d in dirs]],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_bounded_timeout(deadline, 30),
+    )
+    ids = result.stdout.split()
+    return ids if result.returncode == 0 and len(ids) == len(dirs) else None
+
+
+def _global_build_inputs_differ(
+    source_sha: str, target_sha: str, *, deadline: float | None = None
+) -> bool:
+    """True only when both trees are readable and a shared Gradle build input differs.
+
+    pact-version-tree-equivalent.sh refuses any Gradle service whose build-logic, gradle
+    or config tree differs, so one cheap rev-parse per run replaces a ~1 s comparator
+    process per (run, service). Anything unreadable returns False: run the full proof.
+    """
+    dirs = _global_input_dirs()
+    if not dirs:
+        return False
+    try:
+        old = _tree_ids(source_sha, dirs, deadline)
+        new = _tree_ids(target_sha, dirs, deadline)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return old is not None and new is not None and old != new
+
+
+def _is_gradle_module(service: str, sha: str, *, deadline: float | None = None) -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["git", "cat-file", "-e", f"{sha}:{service}/build.gradle.kts"],
+                check=False,
+                capture_output=True,
+                timeout=_bounded_timeout(deadline, 30),
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # unknown: do not take the shortcut
+
+
 def _is_ancestor(
     source_sha: str, target_sha: str, *, deadline: float | None = None
 ) -> bool:
@@ -593,6 +656,7 @@ def resolve_reconcile_service_sources(
     pending = set(services)
     resolved: dict[str, dict[str, str | int]] = {}
     ancestor_cache: dict[str, bool] = {}
+    gradle_cache: dict[str, bool] = {}
     newest_seen: str | None = None
     for page in _iter_json_pages(runs_url, token, deadline=deadline):
         for run in page:
@@ -621,8 +685,16 @@ def resolve_reconcile_service_sources(
             if not ancestor_cache[sha]:
                 continue
             candidates: set[str] = set()
+            globals_differ = _global_build_inputs_differ(sha, tip_sha, deadline=deadline)
             for service in pending:
                 _require_time_remaining(deadline)
+                if globals_differ:
+                    if service not in gradle_cache:
+                        gradle_cache[service] = _is_gradle_module(
+                            service, tip_sha, deadline=deadline
+                        )
+                    if gradle_cache[service]:
+                        continue
                 if run.get("event") == "push" and not _push_might_build_service(
                     service, sha, deadline=deadline
                 ):
