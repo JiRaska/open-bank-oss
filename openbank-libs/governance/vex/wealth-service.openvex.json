@@ -1,0 +1,29 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/wealth-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "notes": [
+    "Scope: the release VEX of wealth-service-v0.3.2 lists exactly one finding, CVE-2025-14969 (under_investigation), from the release SBOM scan; this overlay records the verdict for that finding only. It does not cover container OS packages. Reassess when the resolved hibernate-reactive-core artifact or the scanner findings change."
+  ],
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Verified for this component, not inherited: `./gradlew :openbank-wealth-service:dependencies --configuration runtimeClasspath` (run 2026-11-01 against origin/main ebb47e7d1) resolves org.hibernate.reactive:hibernate-reactive-core to 3.4.2.Final. The advisory's single-interval range (< 4.2.1) spans parallel release lines and does not classify the 3.4.x line, which was released after the fix. The resolved jar's sha256 is 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, the value pinned in gradle/verification-metadata.xml, so the inspected bytes are the shipped bytes. `javap -p -c` of that jar shows the effects of upstream fix commit cd7f104e10de918004707ca0e26e3840976f780a: SqlClientConnection.close() invokes validateNoTransactionInProgressOnClose(), the class carries the post-fix 'private boolean closed' field, and Log declares liveTransactionDetectedOnClose(). The probe's ability to discriminate (fix absent in 4.2.0.Final, present in 4.2.1.Final) was established when the fleet overlays recorded this verdict (#4533/#4707); it was not re-run for this statement. The vulnerable close implementation is not present in the resolved artifact.",
+      "timestamp": "2026-11-01T12:00:00Z",
+      "products": [
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final?type=jar"
+        },
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final"
+        }
+      ]
+    }
+  ],
+  "timestamp": "2026-11-01T12:00:00Z"
+}

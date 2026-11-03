@@ -309,14 +309,8 @@ authz:
       enabled: false
   authz:
     enforce: "false"
-  mp:
-    messaging:
-      incoming:
-        domestic-payment-events-in:
-          connector: smallrye-in-memory
-      outgoing:
-        participant-notifications-out:
-          connector: smallrye-in-memory
+  # No %dev messaging override: smallrye-in-memory is a test-only dependency, so dev keeps
+  # smallrye-kafka and Quarkus Kafka Dev Services supplies the broker (#13175).
 
 "%test":
   openbank:

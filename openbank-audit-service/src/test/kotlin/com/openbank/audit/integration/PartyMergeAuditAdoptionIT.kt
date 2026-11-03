@@ -7,7 +7,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.audit.application.AuditConsumer
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.PartyMergeIndexRepository
-import com.openbank.audit.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

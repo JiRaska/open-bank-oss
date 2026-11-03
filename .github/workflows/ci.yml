@@ -262,6 +262,31 @@ jobs:
           OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
+      # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
+      # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
+      # renders inside the pinned Playwright image (scripts/visual.sh), the environment the
+      # baselines are made in, so a host font or arch change cannot read as a diff. ADVISORY until
+      # its flake rate is measured over 10 consecutive runs: continue-on-error keeps the job green
+      # while the envelope below still records a failed `visual` verdict for Test Intelligence.
+      - name: Visual regression (Playwright baselines)
+        id: visual
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: bash scripts/visual.sh
+
+      - name: Retain visual diff images
+        # actual / expected / diff PNG per failed comparison plus the HTML report that shows them
+        # side by side. continue-on-error above makes `outcome` the honest signal here.
+        if: always() && steps.visual.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: |
+            openbank-admin-ui/build/visual-results/artifacts/
+            openbank-admin-ui/build/visual-results/report/
+          retention-days: 14
+
       - name: Build Admin UI Test Intelligence envelope
         if: always()
         continue-on-error: true
@@ -269,6 +294,10 @@ jobs:
           DIAGNOSTIC_ARGS=()
           if [[ "${{ steps.browser_e2e.outcome }}" == "failure" ]]; then
             DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
+          fi
+          if [[ "${{ steps.visual.outcome }}" == "success" || "${{ steps.visual.outcome }}" == "failure" ]]; then
+            DIAGNOSTIC_ARGS+=(--visual-report build/visual-results/visual.xml
+              --visual-diff-artifact "visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}")
           fi
           python3 ../.github/scripts/collect-test-run-evidence.py \
             --service . --component openbank-admin-ui --out build/test-intelligence/run.json \

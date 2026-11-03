@@ -7,12 +7,12 @@ package com.openbank.treasury.integration
 import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationSink
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.TreasuryCloseEvidencePort
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.infrastructure.close.TreasuryCloseParticipationScheduler
 import com.openbank.treasury.infrastructure.scheduler.InterestAccrualScheduler
-import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
