@@ -264,7 +264,7 @@ def prefetch(root: pathlib.Path, repo: str, pairs) -> None:
         _FETCHED.update(wanted)
         # Each lazy tree/blob read is its own ~2-3 s round trip; do them concurrently so the
         # serial loop below finds everything local.
-        by_ref = dict(zip(todo, fulls))
+        by_ref = dict(zip(todo, fulls, strict=True))
         warm = [(by_ref[r], path) for r, path in pairs if isinstance(by_ref.get(r), str)]
         with ThreadPoolExecutor(max_workers=8) as ex:
             list(ex.map(lambda fp: _git_show(root, fp[0], fp[1]), warm))
