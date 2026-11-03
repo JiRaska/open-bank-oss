@@ -182,6 +182,12 @@ def _api_show(repo: str, ref: str, path: str):
     return Unreadable(kind, last_stderr)
 
 
+# Only ONE file is read from each deployed commit, so fetch the commit alone and let `git show`
+# pull the single tree path + blob lazily (promisor). Without this every `--depth 1` fetch
+# downloaded the WHOLE repository snapshot: 15 distinct deployed shas took 352 s from an empty
+# repo (131-173 s on the CI runner, budget 108 s); the filtered form is ~2 s and ~1 MB per sha.
+_FETCH_FILTER = ["--filter=tree:0"]
+
 _FULL_SHA_CACHE: dict = {}
 _FETCHED: set = set()
 
@@ -222,12 +228,46 @@ def _fetch_commit(root: pathlib.Path, full_sha: str) -> bool:
     """Bring one commit into a shallow clone over git transport (no REST quota spent)."""
     if full_sha in _FETCHED:
         return True
-    p = subprocess.run(["git", "fetch", "--depth", "1", "--quiet", "origin", full_sha],
+    p = subprocess.run(["git", "fetch", "--depth", "1", *_FETCH_FILTER, "--quiet", "origin", full_sha],
                        cwd=root, capture_output=True, text=True)
     if p.returncode == 0:
         _FETCHED.add(full_sha)
         return True
     return False
+
+
+def prefetch(root: pathlib.Path, repo: str, pairs) -> None:
+    """Resolve every distinct deployed sha concurrently, then fetch them in ONE git call.
+
+    Measured 2026-11-03: each `git fetch origin <sha>` costs ~3.4 s here (the remote advertises
+    ~15k refs, mostly refs/pull) plus ~0.8 s for the abbreviated->full REST resolution, and they
+    ran serially per distinct sha. 7 shas was ~30 s; 15 shas was 130 s+ and tripped the budget.
+    One batched fetch pays that negotiation once. If the batch fails (one sha not on the remote
+    fails them all) the per-sha path in `git_show` still runs and attributes the failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    refs = {r for r, _ in pairs}
+    todo = sorted({r for r in refs
+                   if subprocess.run(["git", "cat-file", "-e", f"{r}^{{commit}}"], cwd=root,
+                                      capture_output=True).returncode != 0})
+    if not todo:
+        return
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        fulls = list(ex.map(lambda r: _resolve_full_sha(root, repo, r), todo))
+    wanted = sorted({f for f in fulls if isinstance(f, str) and f not in _FETCHED})
+    if not wanted:
+        return
+    p = subprocess.run(["git", "fetch", "--depth", "1", *_FETCH_FILTER, "--quiet", "origin", *wanted],
+                       cwd=root, capture_output=True, text=True)
+    if p.returncode == 0:
+        _FETCHED.update(wanted)
+        # Each lazy tree/blob read is its own ~2-3 s round trip; do them concurrently so the
+        # serial loop below finds everything local.
+        by_ref = dict(zip(todo, fulls))
+        warm = [(by_ref[r], path) for r, path in pairs if isinstance(by_ref.get(r), str)]
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            list(ex.map(lambda fp: _git_show(root, fp[0], fp[1]), warm))
 
 
 def git_show(root: pathlib.Path, ref: str, path: str, repo: str):
@@ -355,6 +395,8 @@ def main() -> int:
         return 2
 
     errors, quota_blocked, checked = [], [], 0
+    prefetch(root, repo, {(images[s], f"{s}/src/main/resources/application.yaml")
+                          for s in declared if s in images})
     for svc, channels in sorted(declared.items()):
         sha = images.get(svc)
         if not sha:
