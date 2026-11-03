@@ -315,10 +315,26 @@ select_modules() {
   fi
 
   # PRs must retain the same conservative unknown-path fallback as main.
+  # Content-based exemption (ADR-0362 item 5). A GitOps component manifest is build-relevant by
+  # PATH (JVM tests read ConfigMaps and policies), which is why every auto-deploy PR — a diff of
+  # nothing but `image:` pin lines — fanned out to the full fleet: 52 runs/week at ~500 build-min,
+  # 13 % of the hosted pool (measured 2026-11-03). The exemption is decided on the DIFF, never the
+  # path: every changed line of the file must be a sandbox image pin, and there must be at least
+  # one (an empty or unreadable diff is NOT pin-only — fail closed to the fleet). #14411 was closed
+  # for path-based false negatives; this is a strict subset of the old behaviour.
+  pin_only_gitops_diff() {
+    local f="$1" lines
+    case "$f" in openbank-infra/gitops/components/*.yaml|openbank-infra/gitops/components/*.yml) ;; *) return 1 ;; esac
+    lines="$(git diff "$DIFF_BASE" HEAD -- "$f" 2>/dev/null | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' || true)"
+    [ -n "$lines" ] || return 1
+    ! grep -qvE '^[-+][[:space:]]*image:[[:space:]]*["'"'"']?[^[:space:]"'"'"'@]+:sandbox-[0-9a-f]{7,40}(-run[0-9]+)?(@sha256:[0-9a-f]{64})?["'"'"']?[[:space:]]*$' <<< "$lines"
+  }
+
   if [ "$EVENT_NAME" = "pull_request" ]; then
     while IFS= read -r f; do
       [ -z "$f" ] && continue
       is_inert_service_path "$f" && continue
+      if pin_only_gitops_diff "$f"; then echo "Decision: ${f} changes only sandbox image pins -> no service build for it."; continue; fi
       case "$f" in
         openbank-libs/governance/*|pacts/*.json|.github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) continue ;;
         openbank-*/*)
