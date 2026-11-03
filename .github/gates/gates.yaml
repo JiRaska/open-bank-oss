@@ -692,11 +692,12 @@ gates:
       second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
       against live PRs, so this is where it can go red before it acts.
     review_after: "2027-03-30"
-    budget_seconds: 15
+    budget_seconds: 45
     run: |
       set -e
       python3 .github/scripts/deploy-window.py --self-test
       python3 .github/scripts/test-deploy-producer-isolation.py
+      python3 .github/scripts/test-check-deploy-source-freshness.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"

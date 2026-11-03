@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import tempfile
@@ -52,6 +53,10 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.write("config/detekt.yml", "config: {}\n")
         self.write("build-logic/build.gradle.kts", "plugins {}\n")
         self.write(".github/workflows/Dockerfile.deploy", "FROM scratch\n")
+        # pact-version-tree-equivalent.sh fails closed unless it can read both augmentation-time
+        # build properties from auto-deploy.yml exactly once at each revision.
+        self.write(".github/workflows/auto-deploy.yml",
+                   "env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n")
         self.write("build.gradle.kts", "plugins {}\n")
         self.write("settings.gradle.kts", "rootProject.name = \"fixture\"\n")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
@@ -62,8 +67,13 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+        # Hermetic: a CI runner has no user.name/user.email, so a bare `git commit` exits 1.
+        env = {**os.environ,
+               "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+               "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+               "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        return subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=self.root,
+                              check=True, capture_output=True, text=True, env=env).stdout.strip()
 
     def write(self, relative: str, content: str) -> None:
         path = self.root / relative
