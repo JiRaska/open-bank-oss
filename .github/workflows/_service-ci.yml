@@ -114,7 +114,7 @@ jobs:
     # environment secret of `gradle-cache-writer`, whose deployment-branch policy admits `main`
     # only, so a pull request cannot obtain it even by editing this file. Every other event
     # runs with no environment and the read-only credential.
-    environment: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && 'gradle-cache-writer' || '' }}
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
@@ -129,14 +129,6 @@ jobs:
       # compiler error.
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      # Remote build cache (ADR-0363). URL and the read-only credential are repo VARIABLES, not
-      # secrets: a reusable workflow sees vars directly, while secrets would have to be passed by
-      # all ~170 callers, which pushed services-ci.yml past GitHub's expanded-size limit. The read
-      # credential grants only reads of build output from public source. Fails open.
-      GRADLE_REMOTE_CACHE_URL: ${{ vars.GRADLE_CACHE_URL }}
-      GRADLE_REMOTE_CACHE_PUSH: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'true' || 'false' }}
-      GRADLE_REMOTE_CACHE_USER: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD != '' && 'ci-write' || 'ci-read' }}
-      GRADLE_REMOTE_CACHE_PASSWORD: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '') && secrets.GRADLE_CACHE_WRITE_PASSWORD || vars.GRADLE_CACHE_READ_PASSWORD }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -190,6 +182,18 @@ jobs:
       # so this is resolved in a step where env IS available, same as the original single job.
       - name: Resolve GRADLE_USER_HOME
         run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
+
+      # Remote build cache (ADR-0363): read everywhere, write only on a push to main. URL and the
+      # read credential are repo VARIABLES and the logic is one step, not job env expressions:
+      # this file is expanded once per Services CI caller (~170) and GitHub caps the expanded
+      # size. Fails open: a blank URL leaves the remote cache off in settings.gradle.kts.
+      - name: Remote build cache
+        env: {W: "${{ secrets.GRADLE_CACHE_WRITE_PASSWORD }}", R: "${{ vars.GRADLE_CACHE_READ_PASSWORD }}", U: "${{ vars.GRADLE_CACHE_URL }}", H: "${{ inputs.ref }}"}
+        run: |
+          u=ci-read p=$R w=false
+          if [ "$GITHUB_EVENT_NAME$GITHUB_REF$H" = pushrefs/heads/main ] && [ -n "$W" ]; then u=ci-write p=$W w=true; fi
+          [ -n "$p" ] && echo "::add-mask::$p"
+          printf 'GRADLE_REMOTE_CACHE_%s\n' "URL=$U" "USER=$u" "PASSWORD=$p" "PUSH=$w" >> "$GITHUB_ENV"
 
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
