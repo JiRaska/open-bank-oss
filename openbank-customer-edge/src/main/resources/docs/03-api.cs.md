@@ -4,7 +4,7 @@
 
 - **Veřejná báze:** `https://customer.open-bank.tech/customer/v1` (sandbox)
 - **In-cluster app port:** 8128
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — zdroj: `src/main/resources/openapi.yaml` (`info.version: 1.6.0`)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — zdroj: `src/main/resources/openapi.yaml` (`info.version: 1.88.0`)
 
 Kontrakt **je** formalizován v `openapi.yaml`. URL prefix je `/customer/v1` (pozn.: jde o vlastní zákaznickou verzní osu edge, odlišnou od `/api/v1` jednotlivých upstreamů).
 
@@ -44,9 +44,10 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /statements/{accountId}` | `accounts:read` | seznam období uzávěrek |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency v allow-listu |
 | `GET /notifications?limit=&page=` | `accounts:read` | stránkovaný feed podle party, celkový a přesný nepřečtený počet |
-| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | posledních 1–100 položek osoby a aktuálně zastupovaných firem; volitelný filtr oprávněného profilu |
+| `GET /notifications/unified?limit=&partyId=&cursor=` | `accounts:read` | nejnovějších 1–100 položek osoby a aktuálně zastupovaných firem; volitelný filtr oprávněného profilu a keyset kurzor `nextCursor` (neplatný kurzor = 400) |
 | `GET /notifications/{id}?partyId=` | `accounts:read` | detail; původní `partyId` z jednotného seznamu vybere oprávněný profil |
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | označí notifikaci oprávněného profilu jako přečtenou |
+| `PATCH /notifications/read-all?partyId=` | `accounts:read` | označí všechny notifikace vybraného nebo oprávněného profilu jako přečtené |
 | `GET /profile` | `accounts:read` | vlastní profil party volajícího |
 | `POST /domestic-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
 | `POST /sepa-payments` | `payments:initiate` | obohaceno; `Idempotency-Key` vyžadován |
@@ -70,7 +71,7 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 
 ### Jednotný seznam notifikací
 
-Bez `partyId` se spojí notifikace přihlášené osoby a všech firem z aktuálního seznamu mandátů. Každá položka nese své původní `partyId`; při otevření nebo označení firemní položky jako přečtené jej předejte příslušnému endpointu. Výslovný filtr `partyId` musí patřit osobě nebo platnému mandátu. Odpověď obsahuje posledních 1–100 položek s `page: 0`; starší historii poskytuje dosavadní seznam vybraného profilu. `total` a `unreadCount` jsou součty odpovědí jednotlivých profilů pozorovaných během požadavku, nikoli atomický snímek při souběžných zápisech. Nedostupný seznam mandátů vrací 503, cizí filtr 403 a selhání či nesoulad profilu v některém feedu 502 bez částečných položek.
+Bez `partyId` se spojí notifikace přihlášené osoby a všech firem z aktuálního seznamu mandátů. Každá položka nese své původní `partyId`; při otevření nebo označení firemní položky jako přečtené jej předejte příslušnému endpointu. Výslovný filtr `partyId` musí patřit osobě nebo platnému mandátu. Odpověď obsahuje až 100 položek s `page: 0` a neprůhledný `nextCursor`; pro starší položky jej pošlete zpět jako `cursor`. Kurzor je vázán na sadu oprávněných profilů, takže změna mandátů nebo filtru vyžaduje začít znovu, a nové příchozí položky starší stránku neposunou. Neplatný nebo cizí kurzor vrací 400. Stránka s kurzorem vrací 502, pokud poskytovatel notifikací nepotvrdí keyset režim, aby rolling nasazení tiše neopakovalo první stránku. `total` a `unreadCount` jsou součty odpovědí jednotlivých profilů pozorovaných během požadavku, nikoli atomický snímek při souběžných zápisech. Nedostupný seznam mandátů vrací 503, cizí filtr 403 a selhání či nesoulad profilu v některém feedu 502 bez částečných položek.
 
 ## Vybrané requesty
 
@@ -164,7 +165,7 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 
 ## Verzování
 
-- **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.6.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
+- **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.88.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
 - Upstream volání míří na vlastní `/api/v1` každé služby.
 - **OpenAPI diff** v CI hlídá breaking změny bez bumpu kontraktu.
 
