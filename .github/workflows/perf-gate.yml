@@ -66,6 +66,12 @@ jobs:
               "openbank-ledger-service",
               "openbank-balance-service",
               "openbank-transaction-service",
+              "openbank-consent-service",
+              "openbank-domestic-payment",
+              "openbank-fx-service",
+              "openbank-sca-service",
+              "openbank-sepa-instant",
+              "openbank-sepa-payment",
           ]
           override = (os.environ.get("OVERRIDE") or "").split()
           services = override or list(DECLARED)
@@ -182,6 +188,8 @@ jobs:
       # Official Grafana GHCR linux/amd64 manifest for k6 v0.54.0. A version tag alone is
       # mutable; the digest is the executable supply-chain identity.
       K6_IMAGE: ghcr.io/grafana/k6:0.54.0@sha256:32000aaa40b848add83425ed7cc77535c343ca473498b0bd29464d00fdca6c79
+      # The same image the Quarkus Kafka dev-service would pull, pinned by its index digest.
+      KAFKA_IMAGE: docker.io/apache/kafka-native:4.2.0@sha256:777f2dddec6970003f1f27922a8c317d87140567b0537e801d35669ad9a81faf
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -210,6 +218,16 @@ jobs:
           set -euo pipefail
           mkdir -p perf-reports
 
+          # Teardown runs on every exit, including the `exit 1` paths below: under `set -e` a
+          # trailing cleanup block is skipped exactly when a lane fails.
+          DEV_PID=""
+          teardown() {
+            if [ -n "$DEV_PID" ]; then kill "$DEV_PID" 2>/dev/null || true; fi
+            pkill -f "quarkusDev" 2>/dev/null || true
+            docker rm -f perf-pg perf-redis perf-kafka >/dev/null 2>&1 || true
+          }
+          trap teardown EXIT
+
           echo "==> [${SERVICE}] starting postgres db=${DB}"
           docker rm -f perf-pg >/dev/null 2>&1 || true
           docker run -d --name perf-pg -p 5432:5432 \
@@ -237,14 +255,25 @@ jobs:
           docker rm -f perf-redis >/dev/null 2>&1 || true
           docker run -d --name perf-redis -p 6379:6379 redis:8.0-alpine >/dev/null
 
+          # Kafka is started here, not by Quarkus dev-services: the dev-service races its own
+          # start script (`sh: /tmp/testcontainers_start.sh: Text file busy`, exit 126) and
+          # failed the balance-service boot on run 41183559088 while ledger booted on the same
+          # image minutes later. A plain container the gate owns has no such race.
+          echo "==> [${SERVICE}] starting throwaway kafka"
+          docker rm -f perf-kafka >/dev/null 2>&1 || true
+          docker run -d --name perf-kafka -p 9092:9092 "${KAFKA_IMAGE}" >/dev/null
+
           echo "==> [${SERVICE}] starting quarkusDev on port ${PORT}"
-          # transaction-service: with no Temporal frontend in the throwaway stack, the worker
-          # registrar must be told not to register — the WorkflowClient injection is lazy
-          # (fix #14076), so reads never dial, but an enabled worker would dial at startup.
-          EXTRA_PROPS=()
-          if [ "${SERVICE}" = "openbank-transaction-service" ]; then
-            EXTRA_PROPS=(-Dopenbank.transaction.worker.enabled=false)
-          fi
+          # No Temporal frontend exists in the throwaway stack, so every worker registrar must
+          # be told not to register — an enabled worker dials at startup and readiness never
+          # turns UP (domestic-payment and sepa-payment hung that way on run 41183628397).
+          # Every registrar follows `openbank.<service>.worker.enabled`, so the switch is
+          # derived from the module's own source instead of a per-service list.
+          EXTRA_PROPS=(-Dquarkus.kafka.devservices.enabled=false -Dkafka.bootstrap.servers=localhost:9092)
+          while read -r switch; do
+            [ -n "$switch" ] && EXTRA_PROPS+=("-D${switch}=false")
+          done < <(grep -rhoE '"openbank\.[a-z-]+\.worker\.enabled"' "${SERVICE}/src/main" | tr -d '"' | sort -u || true)
+          echo "==> [${SERVICE}] boot overrides: ${EXTRA_PROPS[*]}"
           ./gradlew ":${SERVICE}:quarkusDev" \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
             -Dquarkus.datasource.reactive.url="postgresql://localhost:5432/${DB}" \
@@ -316,9 +345,6 @@ jobs:
               --summary-export "perf-reports/${SERVICE}-summary.json" \
               "$SCRIPT" | tee "perf-reports/${SERVICE}-k6.log"
 
-          kill "$DEV_PID" 2>/dev/null || true
-          pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f perf-pg perf-redis >/dev/null 2>&1 || true
 
       - name: Build performance Test Intelligence envelope
         if: always()
