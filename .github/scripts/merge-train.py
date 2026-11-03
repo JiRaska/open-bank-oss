@@ -1209,7 +1209,7 @@ def record_problem(record_desc: str | None, record_creator: str | None, sha_tree
 # Transient GitHub API failures (#13400). On 2026-10-26 one 503 in publish (16:33Z, a check-runs GET) and
 # one installation-quota 403 in build (16:39Z) each killed a tick's carrier, ~25 min of fast lane lost.
 # ONE policy, here, in the only helper every mode's API call goes through:
-# - retried with bounded exponential backoff: 502/503/504, a connection reset/refusal or timeout, and a
+# - retried with bounded exponential backoff: 500/502/503/504, a connection reset/refusal or timeout, and a
 #   SECONDARY rate limit (403/429 carrying Retry-After). Only for GET — a write whose response was lost
 #   may have been applied (a retried update-branch would answer 422 and read as a refusal), so a
 #   transient failure on a write aborts the tick instead;
@@ -1221,7 +1221,7 @@ def record_problem(record_desc: str | None, record_creator: str | None, sha_tree
 # bisected or halved, the batch stays armed for the next tick. Sleep is bounded per call
 # (API_RETRY_ATTEMPTS, API_BACKOFF_CAP_S) and per process (API_RETRY_BUDGET_S, 5 min against the
 # 30-45 min step timeouts in merge-train.yml).
-TRANSIENT_HTTP = frozenset({502, 503, 504})
+TRANSIENT_HTTP = frozenset({500, 502, 503, 504})   # 500: run 41640891760, check-runs page 2
 API_RETRY_ATTEMPTS = 5
 API_BACKOFF_BASE_S = 2.0
 API_BACKOFF_CAP_S = 60.0
@@ -6236,6 +6236,66 @@ def self_test() -> int:
                 except BaseException as exc:
                     ok, detail = False, f"{type(exc).__name__}: {exc}"
                 check("api: Retry-After and a reset are retried on a GET; a write is never retried", ok, detail)
+
+                # (e2) a bare 500 is transient (run 41640891760: check-runs page 2 -> 500 killed the tick).
+                # Stubbed at _http_open: 500 then 200 succeeds; 500 always raises ApiAbort after
+                # API_RETRY_ATTEMPTS; 404 is returned at once; a page-2 failure never yields a partial list.
+                def stub_http(script):
+                    calls: list[str] = []
+
+                    def http(req, timeout):
+                        calls.append(req.full_url)
+                        out = script(len(calls), req.full_url)
+                        if isinstance(out, int):
+                            raise urllib.error.HTTPError(req.full_url, out, "x", {}, io.BytesIO(b"boom"))
+                        return 200, json.dumps(out).encode(), {}
+                    return http, calls
+
+                saved_open = globals()["_http_open"]
+                try:
+                    slept.clear()
+                    _api_slept[0] = 0.0
+                    http, calls = stub_http(lambda n, u: 500 if n == 1 else {"ok": 1})
+                    globals()["_http_open"] = http
+                    got = api("GET", "/repos/o/r/pulls/1")
+                    check("api: a 500 then a 200 is retried and succeeds",
+                          got == (200, {"ok": 1}) and len(calls) == 2 and len(slept) == 1, f"{got} {calls} {slept}")
+
+                    slept.clear()
+                    _api_slept[0] = 0.0
+                    http, calls = stub_http(lambda n, u: 500)
+                    globals()["_http_open"] = http
+                    try:
+                        api("GET", "/repos/o/r/pulls/1")
+                        raised = False
+                    except ApiAbort:
+                        raised = True
+                    check("api: a 500 on every attempt raises ApiAbort after API_RETRY_ATTEMPTS (fail closed)",
+                          raised and len(calls) == API_RETRY_ATTEMPTS and sum(slept) <= API_RETRY_BUDGET_S,
+                          f"raised={raised} calls={len(calls)} slept={slept}")
+
+                    slept.clear()
+                    _api_slept[0] = 0.0
+                    http, calls = stub_http(lambda n, u: 404)
+                    globals()["_http_open"] = http
+                    got = api("GET", "/repos/o/r/pulls/9")
+                    check("api: a 404 is not retried", got[0] == 404 and len(calls) == 1 and not slept, f"{got} {calls}")
+
+                    slept.clear()
+                    _api_slept[0] = 0.0
+                    full = {"check_runs": [{"n": i} for i in range(100)]}
+                    http, calls = stub_http(lambda n, u: full if u.endswith("&page=1") else 500)
+                    globals()["_http_open"] = http
+                    try:
+                        part = paginate("/repos/o/r/commits/" + "a" * 40 + "/check-runs", "check_runs")
+                    except ApiAbort:
+                        part = None
+                    check("api: a page-2 failure raises and never returns a partial check-run list",
+                          part is None and len([u for u in calls if u.endswith("&page=2")]) == API_RETRY_ATTEMPTS,
+                          f"part={part and len(part)} calls={len(calls)}")
+                finally:
+                    globals()["_http_open"] = saved_open
+                reset()
 
                 # (f) quota: a steady-state settle tick asks nothing twice (#13739 shape: a strict PR whose
                 # update-branch is refused, next to an idle candidate). Counted on the fixture.
