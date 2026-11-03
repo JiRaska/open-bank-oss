@@ -69,3 +69,5 @@ versioned worker pilot (ADR-0355). `openbank-libs-temporal` retains its compile-
 1.25.1 contract, and other services retain their existing SDK version. This is not
 a fleet-wide runtime upgrade. Original histories gate forward replay; new histories
 must not be assumed readable by the old SDK.
+
+`TopicProducers` attributes `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` to account-service (#9073); audit-service and analytics-sink subscribe to both before the producer switches.
