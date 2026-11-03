@@ -97,6 +97,9 @@ labels:
   - name: blocked
     color: "b60205"
     description: "Cannot proceed — waiting on a dependency, a decision, or another issue."
+  - name: deploy-revert
+    color: "b60205"
+    description: "Explicit rollback: this PR moves a GitOps image pin BACKWARD on purpose (gate deploy-pin-monotonic, #14698)."
   - name: good-first-issue
     color: "7057ff"
     description: "Small, well-scoped, good entry point for a new contributor."
