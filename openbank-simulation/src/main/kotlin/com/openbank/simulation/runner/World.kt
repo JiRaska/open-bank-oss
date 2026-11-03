@@ -4,6 +4,7 @@
 
 package com.openbank.simulation.runner
 
+import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.SettlementPosition
@@ -27,6 +28,7 @@ import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.BalanceStore
 import com.openbank.simulation.model.BillingFeeLedger
 import com.openbank.simulation.model.CardAuthorizationBook
+import com.openbank.simulation.model.CardClearingBook
 import com.openbank.simulation.model.DelegationSpendBook
 import com.openbank.simulation.model.InterestAccrualBook
 import com.openbank.simulation.model.LedgerState
@@ -95,6 +97,13 @@ class World(val context: SimulationContext, val config: SimulationConfig) {
     // Layer-3 invariants can assert every instant payment reaches a terminal state. Same
     // convention as sepaPayments/settlements above.
     val sctInstPayments = mutableListOf<SctInstPayment>()
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the REAL `CardAuthorization`
+    // aggregates driven by CardClearingScenario through the REAL AuthorizationLifecycle policy,
+    // plus the per-authorisation book of posted presentments the clearing-conservation invariant
+    // replays. Same convention as sepaPayments/settlements above.
+    val cardAuthorizations = mutableListOf<CardAuthorization>()
+    val cardClearings = CardClearingBook()
 
     // Issue #14366 (Test Intelligence simulation gap, money path): the REAL pension-service
     // domain aggregates driven by PensionLifecycleScenario — the contract lifecycle, the

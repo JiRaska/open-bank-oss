@@ -9,6 +9,7 @@ import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
 import com.openbank.simulation.scenario.CardAuthorizationScenario
+import com.openbank.simulation.scenario.CardClearingScenario
 import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
@@ -85,6 +86,12 @@ class SimulationRunner(
             // the fault profile and is checked by the same invariant sweep every step.
             SctInstSettlementScenario.step(world)
             context.scheduler.drain()
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // card-presentment path — REAL CardAuthorization lifecycle through the REAL
+            // AuthorizationLifecycle policy (clear/reverse/expire, refusals as values) — so it
+            // shares the fault profile and is checked by the cardAuthorizationCompleteness /
+            // cardClearingConservation invariants.
+            CardClearingScenario.step(world)
             // Issue #14366 (Test Intelligence simulation gap, money path): interleave the FX
             // conversion path — REAL FxRate fixing with its ČNB-origin inverted() side-swap and
             // REAL FxConversionMath margin/target arithmetic — so it shares the fault profile
@@ -146,6 +153,9 @@ class SimulationRunner(
             // it — every authorization must be terminal before the invariant sweep below.
             CardAuthorizationScenario.step(world)
             context.scheduler.drain()
+            // Release card holds the (now final) virtual clock has carried past their expiry — the
+            // expiry job's job; see CardClearingScenario.sweepExpired.
+            CardClearingScenario.sweepExpired(world)
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
                 if (violation != null) return SeedResult(seed, violation, step)
