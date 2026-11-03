@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.1...products-v0.3.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **libs:** refuse an early withdrawal whose penalty would overdraw the deposit ([#14208](https://github.com/JiRaska/open-bank-oss/issues/14208)) ([a47f366](https://github.com/JiRaska/open-bank-oss/commit/a47f36616049a7aa1c7a3dc00a780aee0d7bee00))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.0...products-v0.3.1) (2026-11-02)
 
 

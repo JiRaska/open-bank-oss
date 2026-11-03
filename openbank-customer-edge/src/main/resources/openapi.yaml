@@ -59,7 +59,9 @@ info:
   # delegated accounts are listed in the account page on the first page only.
   # 1.87.0 -> 1.88.0 (#12260): additive — optional `cursor` and `nextCursor` keyset history on
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
-  version: 1.88.0
+  # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
+  # GET /pension/transfers (a pension-service read refusal, never a change refusal).
+  version: 1.89.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1055,6 +1057,7 @@ paths:
                 items: {$ref: '#/components/schemas/PensionTransfer'}
         '400': {description: 'Invalid direction or pending'}
         '401': {description: Missing or invalid bearer token}
+        '403': {description: 'PENSION_ACCESS_DENIED (pension-service refused the read; never a change refusal)'}
         '502': {description: Pension service unavailable}
   /pension/transfers/{transferId}:
     get:
