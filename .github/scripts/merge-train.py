@@ -898,13 +898,34 @@ class Git:
         self.workdir, self.token = workdir, token
         self._memo: dict[tuple, subprocess.CompletedProcess] = {}
 
+    # Subcommands that compare TWO revisions when given two, but read the WORKTREE or the INDEX when
+    # given one (`diff <sha>`), or when told to (`--cached`, `--staged`, `--no-index`, `--work-tree`).
+    # Neither is a function of the shas, so those shapes are never memoised (review on the first
+    # draft: a squash-merge or a generator run in the same workdir would otherwise be served a
+    # stale answer from a merge gate's own cache).
+    _TWO_REV_SUBCOMMANDS = frozenset({"diff", "diff-tree", "merge-base", "merge-tree"})
+    _NEVER_MEMO_FLAGS = frozenset({"--cached", "--staged", "--no-index", "--work-tree", "--index"})
+
     def _memo_key(self, args: tuple[str, ...]) -> tuple | None:
+        """The argv if its output is a pure function of immutable shas, else None (never memoised).
+
+        Every positional must be a full 40-hex sha (optionally `^{tree}`, `^{commit}`, `:path`, or a
+        `..`/`...` range of two full shas); a `--` pathspec separator or anything after it, a symbolic
+        ref, an abbreviated sha, an index/worktree flag, or a single revision to a two-revision
+        subcommand all return None."""
         sub = next((a for a in args if not a.startswith("-")), None)
         if sub not in self._MEMO_SUBCOMMANDS:
             return None
-        positional = [a for a in args[args.index(sub) + 1:] if not a.startswith("-")]
+        rest = args[args.index(sub) + 1:]
+        if "--" in rest or any(a.split("=", 1)[0] in self._NEVER_MEMO_FLAGS for a in rest):
+            return None
+        positional = [a for a in rest if not a.startswith("-")]
         if not positional or not all(self._SHA_ARG.match(a) for a in positional):
             return None
+        if sub in self._TWO_REV_SUBCOMMANDS:
+            revs = sum(2 if ".." in a else 1 for a in positional)
+            if revs < 2:
+                return None
         return args
 
     def __call__(self, *args: str, check: bool = True, auth: bool = False) -> subprocess.CompletedProcess:
@@ -3476,6 +3497,56 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
+def git_memo_self_test(check) -> None:
+    """The Git memo serves only answers that are pure functions of immutable shas.
+
+    Negative cases first: a worktree-reading `diff <sha>` must NOT be served from the memo after the
+    worktree changes, and index/worktree flags, pathspecs, symbolic refs and short shas never form a
+    key. Then the positive case, so a memo that quietly stopped caching is noticed too."""
+    with tempfile.TemporaryDirectory() as d:
+        git = Git(d)
+        git("init", "-q", "-b", "main")
+        pathlib.Path(d, "f.txt").write_text("one\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "one")
+        a = git("rev-parse", "HEAD").stdout.strip()
+        pathlib.Path(d, "f.txt").write_text("two\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "two")
+        b = git("rev-parse", "HEAD").stdout.strip()
+        # 1. diff <sha> reads the worktree: never memoised, so a worktree change is seen.
+        first = git("diff", a).stdout
+        pathlib.Path(d, "f.txt").write_text("three\n")
+        second = git("diff", a).stdout
+        check("git memo: `diff <sha>` (worktree) is re-read after the worktree changes", first != second,
+              "a worktree-reading diff was served from the memo")
+        check("git memo: `diff <sha>` forms no key", git._memo_key(("diff", a)) is None)
+        for shape in (("diff", "--cached", a, b), ("diff", "--staged", a, b), ("diff", "--no-index", a, b),
+                      ("diff", a, b, "--", "f.txt"), ("diff", a[:12], b), ("diff", "main", b), ("diff", a, "HEAD"),
+                      ("merge-base", a), ("diff-tree", a), ("rev-parse", "HEAD"), ("show", "main:f.txt"),
+                      ("log", "-1", "origin/main")):
+            check(f"git memo: {' '.join(shape)} forms no key", git._memo_key(shape) is None)
+        # 2. index-reading diff with two shas and --cached: still re-read after `git add`.
+        pathlib.Path(d, "f.txt").write_text("four\n")
+        before = git("diff", "--cached", a).stdout
+        git("add", "f.txt")
+        after = git("diff", "--cached", a).stdout
+        check("git memo: `diff --cached` is re-read after the index changes", before != after)
+        git("reset", "-q", "--hard", b)
+        # 3. pure shapes ARE memoised, and a write clears them.
+        for shape in (("diff", "--stat", a, b), ("diff", "--raw", "-z", f"{a}..{b}"), ("rev-list", f"{a}..{b}"),
+                      ("show", "-s", "--format=%H", b), ("rev-parse", f"{b}^{{tree}}"), ("merge-base", a, b),
+                      ("show", f"{b}:f.txt"), ("ls-tree", "-r", b), ("cat-file", "-e", f"{b}^{{commit}}")):
+            check(f"git memo: {' '.join(shape)} forms a key", git._memo_key(shape) is not None)
+        git("diff", "--stat", a, b)
+        n = SPAWNS[0]
+        git("diff", "--stat", a, b)
+        check("git memo: a pure two-sha diff is served from the memo (no spawn)", SPAWNS[0] == n)
+        git("checkout", "-q", "--detach", a)
+        git("diff", "--stat", a, b)
+        check("git memo: a write clears the memo (spawn again)", SPAWNS[0] == n + 2)
+        r = git("show", "-s", "--format=%H", "0" * 40, check=False)
+        check("git memo: a failing read is not cached", r.returncode != 0 and ("show", "-s", "--format=%H", "0" * 40) not in git._memo)
+
+
 def retry_planner_self_test(check) -> None:
     """Exercise the real GitHub adapter and HTTP transport scope, without live API access."""
     import copy
@@ -3620,6 +3691,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    git_memo_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
