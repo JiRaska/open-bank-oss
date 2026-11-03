@@ -52,7 +52,30 @@ def same_sources(left, right, *, root=None):
     return True
 
 
+def is_ancestor(older, newer, *, root=None):
+    command = ['git'] if root is None else ['git', '-C', str(root)]
+    return subprocess.run([*command, 'merge-base', '--is-ancestor', older, newer],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
 def decision(event, reconcile, initial, current, candidate, source, *, root=None):
+    # EVERY event, before anything else: a pin never moves BACKWARD. `current` is the pin main holds
+    # now; if it already names a descendant of this run's source, a newer deploy landed for this
+    # service while this build was running and rewriting it would roll the service back — the
+    # #14579 shape (22 of 34 pins). Preserve main's value: the deploy PR then carries only the
+    # services this source genuinely advances (ADR-0362 item 3; gate deploy-pin-monotonic is the
+    # backstop). A diverged or unresolvable main pin fails closed: the rewrite is rejected and the
+    # run is red, which is louder than a silent rewind.
+    if current != initial and current != candidate:
+        if not re.fullmatch(r'[0-9a-f]{40}', source):
+            raise ValueError('invalid build source')
+        current_commit = resolve(re.sub(r'-run[1-9][0-9]*$', '', current), root=root)
+        target_commit = git('rev-parse', '--verify', source + '^{commit}', root=root).decode().strip()
+        if current_commit != target_commit:
+            if is_ancestor(target_commit, current_commit, root=root):
+                return 'preserve'
+            if not is_ancestor(current_commit, target_commit, root=root):
+                raise ValueError('main pin diverged from this build source; refusing to move it')
     if event != 'schedule' and not (event == 'workflow_dispatch' and reconcile == 'true'):
         return 'publish'
     if current == initial or current == candidate:
