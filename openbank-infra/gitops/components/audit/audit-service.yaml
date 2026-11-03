@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-48a6da90@sha256:0602408e8d94d4fe6501ffbc20c83ccc0bc72ef0a50918c43a1aefd54daffb00
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-0f099f8b@sha256:efb4b874190ce954f693fea67fd21b060b9b293b57806839aae24d7a067ac2a3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

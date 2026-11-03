@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: account-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-7f966f31
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-0f099f8b@sha256:a9c1331faba6a75cc8852f31ce1ee0ec5b758ed400e20b033d46af667922a6d4
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
