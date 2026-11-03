@@ -89,11 +89,6 @@ on:
         # already gate on pactbroker.url / an empty password.
         description: "Pact Broker password (ADR-0092) — publishing pacts + verification results."
         required: false
-      GRADLE_CACHE_WRITE_PASSWORD:
-        # Never passed by a caller: an ENVIRONMENT secret of `gradle-cache-writer` (ADR-0363),
-        # declared only so the expression type-checks. Kept tiny: this file is expanded per
-        # caller and GitHub caps the expanded workflow size.
-        required: false
 
 permissions:
   contents: read
