@@ -88,21 +88,6 @@ jobs:
         bash \"$SERVICE_CI_HELPERS/diagnostic-actions.sh\" restore \"$SERVICE_CI_HELPERS\"\n"
     - name: Resolve GRADLE_USER_HOME
       run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
-    - name: Remote build cache
-      env:
-        W: ${{ secrets.GRADLE_CACHE_WRITE_PASSWORD }}
-        R: ${{ vars.GRADLE_CACHE_READ_PASSWORD }}
-        U: ${{ vars.GRADLE_CACHE_URL }}
-        H: ${{ inputs.ref }}
-      run: 'u=ci-read p=$R w=false
-
-        if [ "$GITHUB_EVENT_NAME$GITHUB_REF$H" = pushrefs/heads/main ] && [ -n "$W" ]; then u=ci-write p=$W w=true; fi
-
-        [ -n "$p" ] && echo "::add-mask::$p"
-
-        printf ''GRADLE_REMOTE_CACHE_%s\n'' "URL=$U" "USER=$u" "PASSWORD=$p" "PUSH=$w" >> "$GITHUB_ENV"
-
-        '
     - name: Normalize DOCKER_HOST for Testcontainers (#873)
       run: "if [ -z \"${DOCKER_HOST:-}\" ] || [ \"${DOCKER_HOST:-}\" = \"tcp://localhost:2375\" ]; then\n  echo \"DOCKER_HOST=unix:///var/run/docker.sock\"\
         \ >> \"$GITHUB_ENV\"\n  echo \"normalized DOCKER_HOST -> unix:///var/run/docker.sock\"\nelse\n  echo \"DOCKER_HOST\
