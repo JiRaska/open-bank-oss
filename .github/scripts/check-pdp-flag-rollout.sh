@@ -76,16 +76,32 @@ is_ancestor() {
     git merge-base --is-ancestor "$1" "$2"
     return
   fi
+  local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
+  # #14011: one GitOps invocation compares the same immutable (marker, source) pair once per
+  # consumer pin, ~70 calls for ~9 distinct pairs. Commits are immutable, so a DEFINITIVE answer
+  # is reused, keyed by the exact inputs (a short and a full SHA are different keys). Unknown,
+  # malformed and transport-error answers are never cached: they stay failures, and a later
+  # success re-asks rather than overwriting a failure already counted for an earlier pin.
+  # A file per key, not an associative array: macOS ships Bash 3.2.
+  if [ -n "${COMPARE_CACHE_DIR:-}" ]; then
+    cache="${COMPARE_CACHE_DIR}/${1}_${2}"
+    if [ -f "$cache" ]; then
+      status="$(cat "$cache")"
+      [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+      return
+    fi
+  fi
   # Only a definitive verdict ends the loop. A transport error, rate limit or malformed answer
   # is "could not look": retried, then still LAGGING (fail-closed), never read as current. The
   # old single attempt turned one transient API failure into a red main (sca-service 2026-10-31,
   # the same pin had passed 70/0 twice in the preceding 30 minutes).
-  local status attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
   while :; do
     if status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)"; then
       case "$status" in
-        ahead|identical) return 0 ;;
-        behind|diverged) return 1 ;;
+        ahead|identical|behind|diverged)
+          [ -z "$cache" ] || printf '%s\n' "$status" > "$cache"
+          [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+          return ;;
       esac
     fi
     [ "$attempt" -ge "$max" ] && break
@@ -136,6 +152,13 @@ run() {
       echo "::error::shallow clone and no gh/GH_TOKEN: the ancestry test cannot run. Use fetch-depth: 0." >&2
       return 2
     fi
+  fi
+  # Fresh compare cache per GitOps invocation (#14011); live mode reads stay uncached.
+  COMPARE_CACHE_DIR=""
+  if [ "$source" = gitops ] && [ "$API" -eq 1 ]; then
+    COMPARE_CACHE_DIR="$(mktemp -d)"
+    # shellcheck disable=SC2064 # expand now: the path is fixed for this invocation
+    trap "rm -rf '$COMPARE_CACHE_DIR'" EXIT
   fi
   marker="$(marker_commit)"
   if [ -z "$marker" ]; then
@@ -237,6 +260,55 @@ selftest() {
     marker="$(marker_commit)"
     [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
     unset -f gh
+    # Compare cache (#14011) is exercised with a single attempt so a scripted transport error is observable.
+    export PDP_ROLLOUT_API_ATTEMPTS=1
+    # Compare cache (#14011): count compare requests against a scripted API. Removing the
+    # cache makes the repeated-verdict counts 2 instead of 1, so these cases fail without it.
+    calls="$tmp/compare-calls"; flaky="$tmp/flaky-once"; : > "$calls"; : > "$flaky"
+    gh() {
+      case "$*" in
+        *"compare/"*)
+          echo x >> "$calls"
+          case "$*" in
+            *"compare/mk1...aaaaaaaa "*|*"compare/mk1...aaaaaaaaaaaa "*|*"compare/mk2...aaaaaaaa "*) echo ahead ;;
+            *"compare/mk1...bbbbbbbb "*) echo behind ;;
+            *"compare/mk1...cccccccc "*)
+              if [ -s "$flaky" ]; then echo ahead; else echo x > "$flaky"; return 1; fi ;;
+            *) echo surprising-status ;;
+          esac ;;
+        *) return 1 ;;
+      esac
+    }
+    ncalls() { wc -l < "$calls" | tr -d '[:space:]'; }
+    COMPARE_CACHE_DIR="$tmp/cache1"; mkdir -p "$COMPARE_CACHE_DIR"
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } \
+      || { echo "selftest FAIL: repeated positive verdict not current" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated positive compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 bbbbbbbb || is_ancestor mk1 bbbbbbbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated negative compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    { is_ancestor mk2 aaaaaaaa && is_ancestor mk1 aaaaaaaaaaaa; } \
+      || { echo "selftest FAIL: distinct marker / longer short SHA not current" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: distinct marker or SHA length shared a cache key" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 cccccccc; then echo "selftest FAIL: transport error read as current" >&2; f=1; fi
+    is_ancestor mk1 cccccccc || { echo "selftest FAIL: success after an uncached error rejected" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: a transport error was cached" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 dddddddd || is_ancestor mk1 dddddddd; then echo "selftest FAIL: unknown status read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: an unknown status was cached" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR="$tmp/cache2"; mkdir -p "$COMPARE_CACHE_DIR"
+    is_ancestor mk1 aaaaaaaa || { echo "selftest FAIL: fresh cache verdict" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: a new invocation reused an old cache" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR=""
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } || { echo "selftest FAIL: uncached verdict" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: live/uncached mode reused a verdict" >&2; f=1; }
+    unset -f gh ncalls
+    unset PDP_ROLLOUT_API_ATTEMPTS
+
     # Transient compare-API failures: retried, but a never-answering API stays LAGGING.
     export PDP_ROLLOUT_RETRY_SLEEP=0
     calls="$tmp/calls"; : > "$calls"

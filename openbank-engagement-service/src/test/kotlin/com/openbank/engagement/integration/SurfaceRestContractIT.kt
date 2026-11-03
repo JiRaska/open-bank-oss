@@ -4,6 +4,7 @@
 
 package com.openbank.engagement.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -40,7 +41,7 @@ import java.util.UUID
 @QuarkusTest
 @TestSecurity(user = "edge@openbank.test", roles = ["ROLE_OPERATOR"])
 @QuarkusTestResource(SurfaceRestContractIT.NoKafkaResource::class)
-@QuarkusTestResource(EngagementPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class SurfaceRestContractIT {
 
     class NoKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -349,7 +350,7 @@ class SurfaceRestContractIT {
         body().jsonPath()
     }
 
-    /** The JDBC URL is the one EngagementPostgresTestResource injected — never a second copy. */
+    /** The JDBC URL is the one PostgresTestResource injected — never a second copy. */
     private fun insertAdverseState(partyId: UUID, state: String) {
         openTestDatabase().use { conn ->
             conn.prepareStatement(

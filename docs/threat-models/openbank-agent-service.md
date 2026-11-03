@@ -159,12 +159,13 @@ browser-provider hiding and the unchanged client-credentials fallback.
   producer's `eventId` is the row's `entry_id`, so an at-least-once redelivery de-duplicates rather
   than double-chaining (`AgentAuditRedeliveryIT`).
   **Residual, stated rather than implied:**
-  - **The transport is off by default.** `AGENT_AUDIT_KAFKA_ENABLED` defaults to `false` (#6209's
-    deliberate rollout choice), and the gitops `group.id`/`auto.offset.reset` override that
-    audit-service needs is deliberately not added yet. Until both land, AI provenance is durable in
-    agent-service's *local* outbox and has not reached the tamper-evident trail — the outbox grows
-    unbounded and no `audit_entries` row exists. This is a rollout state, not a design gap, but it
-    is the state today and no green test contradicts it.
+  - **The transport is enabled by deployment, not by default.** The baked defaults of
+    `AGENT_AUDIT_KAFKA_ENABLED` (agent-service) and `AUDIT_AGENT_AUDIT_KAFKA_ENABLED`
+    (audit-service) remain `false`, which keeps local dev and tests fail-closed. The GitOps
+    manifests set both to `true`, and audit-service's msg-override ConfigMap supplies the
+    consumer's `group.id`/`auto.offset.reset` (#14200). An environment deployed without those
+    overrides keeps provenance in agent-service's *local* outbox only, where it never reaches the
+    tamper-evident trail.
   - **`aggregate_id` degrades to the `unknown` sentinel.** The envelope spells the acted-on
     resource `aggregateId`; `AuditConsumer.inferAggregateId` derives that column from a fixed chain
     of business id field names and cannot see it. The row is therefore attributable to the actor
