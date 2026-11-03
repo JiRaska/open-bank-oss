@@ -24,6 +24,11 @@ APPS = PurePosixPath("openbank-infra/gitops/apps")
 COMPONENTS = PurePosixPath("openbank-infra/gitops/components")
 OPA_IMAGE = re.compile(r"(^|/)opa(?::|@)")
 CHECKSUM = "openbank.tech/policy-checksum"
+# ADR-0358: an Application reading deploy/sandbox at pins/<component> renders a verbatim
+# copy of components/<component> at a main commit (deploy-pin-branch-contract enforces
+# byte-equality), so its readiness subject is that component on this checkout.
+PIN_BRANCH = "deploy/sandbox"
+PINS = PurePosixPath("pins")
 
 
 def git_env() -> dict[str, str]:
@@ -44,6 +49,10 @@ def source_path(root: Path, app: dict) -> PurePosixPath:
     if not isinstance(raw, str) or not raw:
         raise ValueError("Application has no literal spec.source.path")
     p = PurePosixPath(raw)
+    source = (app.get("spec") or {}).get("source") or {}
+    if (source.get("targetRevision") == PIN_BRANCH and len(p.parts) == 2
+            and p.parent == PINS and p.name not in ("", ".", "..")):
+        p = COMPONENTS / p.name
     if p.is_absolute() or ".." in p.parts or not under(p, COMPONENTS):
         raise ValueError(f"unsafe/non-component Application source.path: {raw}")
     cursor = root
