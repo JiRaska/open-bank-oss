@@ -133,6 +133,18 @@ TRAIN_TURN_S = 30 * 60
 # 2 x the ~61 min median and above the 91 min longest measured run. Older, the carrier no longer holds
 # the strict lane (it may still merge if it goes green first).
 CARRIER_PRIORITY_S = 120 * 60
+# Fast lane's turn (ADR-0360): the train's turn above protects carriers, never the FAST lane, whose PRs
+# are not train candidates. With strict PRs queued, every reservation end was followed in the very next
+# tick by the next strict update-branch, so the fast lane was held for whole reservations back to back.
+# Measured 2026-11-02: no merge to main 18:27Z-23:59Z+ while #14595 and #14607 each ran into the 240 min
+# ceiling and #14644 was reserved straight after; fast PRs #14523/#14610/#14620 green and held every tick.
+# So whenever a reservation ENDS — the strict PR merged, or it was released (stall/ceiling) — and green
+# fast-lane PRs wait unposted, the next reservation starts one turn later. Main never moves under a
+# reserved head (the fast merges land BEFORE the next update-branch), so nothing is merged untested
+# against main that was not before. Bounded both ways: one turn per reservation end, at most this long
+# from the App's own marker on main's head; a fast merge moves main and ends the trigger itself.
+FAST_TURN_S = 30 * 60
+FAST_TURN_CONTEXT = "merge-train/fast-turn"   # App marker on main's head: "opened <epoch>"
 SQUASH_PR_RE = re.compile(r"(?:\(#|^#)(\d+)\)?$")
 OK_STATES = frozenset({"success"})
 # A cancelled (or stale) check ran nothing that could be judged — "Canceling since a higher priority
@@ -2343,6 +2355,11 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
     fast, train_waiting = partition(git, base, cands, fragments)
     yield_why = train_turn(gh, git, base, train_waiting,
                            any(is_carrier(p, repo) and carrier_holds_strict(p) for p in gh.open_prs()))
+    if holder is None and not yield_why and not main_red:
+        # A reservation already running is never affected; the fast lane only gets the gap between two.
+        yield_why = fast_turn(gh, git, base,
+                              [m for m in fast if apps.get(m.number, {}).get(STATUS_CONTEXT, ("",))[0] != "success"],
+                              bool(timed_out), shadow)
     if timed_out:
         summary["timed_out"] = timed_out
         # Released: never reserving again on that head, and served after every other strict-lane PR.
@@ -2519,6 +2536,36 @@ def train_turn(gh, git, base: str, train_waiting: list, carrier_open: bool, now:
     if not ct.isdigit() or now - int(ct) > TRAIN_TURN_S:
         return None
     return f"train's turn after a strict-lane merge ({len(train_waiting)} train candidate(s) waiting)"
+
+
+def fast_turn(gh, git, base: str, fast_unposted: list, reservation_ended: bool, shadow: bool,
+              now: float | None = None) -> str | None:
+    """Why the strict lane must not START a reservation this tick because the FAST lane is owed its turn
+    (ADR-0360), or None. Owed when green fast-lane PRs wait that were never posted and the last
+    reservation over this main ENDED — main's head is a strict-lane merge, or a reservation over it was
+    released (`reservation_ended`: stall or ceiling). The turn opens with an App marker on main's head
+    and lasts at most FAST_TURN_S from it; it ends early when every waiting fast PR has been posted or
+    when a fast merge moves main (the new head is neither strict nor released over). A marker that
+    cannot be written opens no turn (today's behaviour), and shadow never writes one."""
+    if shadow or not fast_unposted:
+        return None
+    if not (reservation_ended or last_merge_was_strict(gh, git, base)):
+        return None
+    now = time.time() if now is None else now
+    state, desc = gh.app_statuses(base).get(FAST_TURN_CONTEXT, ("", ""))
+    m = re.fullmatch(r"opened (\d+)", desc or "") if state == "success" else None
+    if m is None:
+        try:
+            gh.post_status(base, "success", f"opened {int(now)}", context=FAST_TURN_CONTEXT)
+        except (SystemExit, Exception) as e:   # noqa: BLE001 - fail toward today's behaviour, never abort settle
+            log(f"::warning::fast turn marker on main {base[:12]} not written ({e}) — no fast turn")
+            return None
+        opened = int(now)
+    else:
+        opened = int(m.group(1))
+    if now - opened > FAST_TURN_S:
+        return None
+    return f"fast lane's turn after a reservation ended ({len(fast_unposted)} fast-lane PR(s) waiting)"
 
 
 def reservation_expired(git, head: str, now: float, activity=None, green: bool = False) -> str | None:
@@ -5460,6 +5507,89 @@ def self_test() -> int:
                 TRAIN_TURN_S = saved_turn
             gh.updates.clear()
             reset()
+
+            # FAST LANE'S TURN (ADR-0360), rebuilt from 2026-11-02 18:27Z-23:59Z: strict #14595 and #14607
+            # each hit the 240 min ceiling and #14644 was update-branched in the next tick, so fast PRs
+            # #14523/#14610/#14620 were "held: main reserved" for 5.5 h and nothing merged. The train's
+            # turn never applied: fast PRs are not train candidates. Every case below fails on the code
+            # before this change (the next strict PR was update-branched at once; the fast lane got []).
+            global FAST_TURN_S
+            gh.update_branch = update_then_run_ci
+            try:
+                # (1) after a strict MERGE: pW merges; next tick pF (fast, green) goes before pW2's update.
+                open_only("pW", "pW2", "pF")
+                s1 = settle_now()                          # pW merges; fast held (main moved this tick)
+                gh.updates.clear()
+                s = settle_now()
+                check("fast turn: after a strict merge, a waiting fast PR is posted before the next reservation",
+                      gh.merged == [35] and 34 in s["fast"] and gh.updates == [] and not s["in_flight"],
+                      f"{s1} {s} merged={gh.merged} updates={gh.updates}")
+                fm = gh.main_sha()
+                check("fast turn: the turn is recorded by the App on main's head",
+                      gh.app_statuses(fm).get(FAST_TURN_CONTEXT, ("", ""))[1].startswith("opened "),
+                      str(gh.app_statuses(fm)))
+                # the fast PR merges (auto-merge on the posted status): main's head is now a fast merge,
+                # so the turn is over and the strict lane is served in that same tick — no second turn.
+                gh.merge(34, gh.prs[34]["head"]["sha"])
+                open_only("p1")
+                gh.prs[1]["auto_merge"] = None             # not a candidate: only the strict lane remains
+                s = settle_now()
+                check("fast turn: one turn per reservation end — after the fast merge the strict lane updates",
+                      gh.updates == [36] and s["in_flight"], f"{s} updates={gh.updates}")
+                gh.updates.clear()
+                reset()
+
+                # (2) after a reservation RELEASED at the ceiling (no merge): the 2026-11-02 shape.
+                open_only("pW", "pW2", "pF")
+                pathlib.Path(origin, "docs").mkdir(parents=True, exist_ok=True)
+                pathlib.Path(origin, "docs/moved.md").write_text("m\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "-m", "main moves: every strict PR is behind")
+                gh.g("checkout", "-q", "-f", "-B", "pW-cur", "pW")
+                gh.g("merge", "-q", "--no-edit", "main")
+                gh.g("checkout", "-q", "-f", "main")
+                cur = gh.g("rev-parse", "pW-cur").stdout.strip()
+                gh.prs[35]["head"].update(ref="pW-cur", sha=cur)
+                gh.head_checks[cur] = {"gates (data)": None}           # its CI never finished
+                ct = int(gh.g("show", "-s", "--format=%ct", cur).stdout.strip())
+                gh.activity[cur] = ct + RESERVATION_CEILING_S          # still trickling: only the ceiling ends it
+                gh.updates.clear()
+                real_time_ft = time.time
+                time.time = lambda: ct + RESERVATION_CEILING_S + 60
+                try:
+                    s = settle_now()
+                    check("fast turn: a reservation released at the ceiling gives the fast lane its turn first",
+                          s.get("timed_out") == [35] and 34 in s["fast"] and gh.updates == [],
+                          f"{s} updates={gh.updates}")
+                    saved_ft = FAST_TURN_S
+                    FAST_TURN_S = -1
+                    try:
+                        s = settle_now()
+                        check("fast turn: bounded — expired, the next strict PR is update-branched",
+                              gh.updates == [36], f"{s} updates={gh.updates}")
+                    finally:
+                        FAST_TURN_S = saved_ft
+                finally:
+                    time.time = real_time_ft
+                    gh.head_checks.clear()
+                    gh.activity.clear()
+                gh.updates.clear()
+                reset()
+
+                # (3) a running reservation is never affected: the fast lane stays held under it.
+                open_only("pW", "pW2", "pF")
+                settle_now()                                # pW merges
+                gh.prs[34]["state"] = "closed"              # no fast PR waits: no turn, pW2 is updated
+                gh.updates.clear()
+                s = settle_now()
+                gh.prs[34]["state"] = "open"                # a fast PR arrives during pW2's reservation
+                s2 = settle_now()
+                check("fast turn: no fast PR waiting -> no turn; one arriving under a running reservation is held",
+                      gh.updates == [36] and s2["in_flight"] and s2["fast"] == [], f"{s} {s2} updates={gh.updates}")
+                gh.updates.clear()
+                reset()
+            finally:
+                del gh.update_branch
 
             # PROGRESS-BASED RESERVATION (#13400): the reservation ends when the holder's CI STALLS or
             # passes the ceiling, never because it is slow. #13204 lapsed at 64 min on three heads
