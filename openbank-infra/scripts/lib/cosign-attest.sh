@@ -330,11 +330,26 @@ cosign_attest_slsa_provenance() {
   rm -f "$attest_out"
 
   echo "==> cosign verify-attestation (slsaprovenance) ${image}"
-  if ! envelopes="$(COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" \
-       --type slsaprovenance "$image" 2>/dev/null)"; then
-    echo "ERROR: cosign verify-attestation (slsaprovenance) failed for ${image} — the attestation did not land." >&2
-    return 1
-  fi
+  # Bounded re-read: the envelope was just appended to the .att tag, and one auto-deploy run
+  # (#13587) failed this verify ~2 s after a successful attest while its sibling services
+  # passed. A retry only re-reads; the run-binding check below still decides. stderr is kept
+  # so the next failure names its cause instead of reading as "did not land".
+  local verify_err attempt
+  verify_err="$(mktemp "${TMPDIR:-/tmp}/cosign-slsa-verify.XXXXXX")"
+  for attempt in 1 2 3; do
+    if envelopes="$(COSIGN_YES=true "$bin" verify-attestation --key "$COSIGN_KEY" \
+         --type slsaprovenance "$image" 2>"$verify_err")"; then
+      break
+    fi
+    if [ "$attempt" -eq 3 ]; then
+      echo "ERROR: cosign verify-attestation (slsaprovenance) failed for ${image} — the attestation did not land." >&2
+      sed 's/^/       /' "$verify_err" >&2
+      rm -f "$verify_err"
+      return 1
+    fi
+    sleep "${COSIGN_VERIFY_RETRY_SECONDS:-5}"
+  done
+  rm -f "$verify_err"
 
   # Bind the verify to THIS run: require our buildInvocationId among the verified envelopes
   # (same append-only .att trap as the SBOM binding above — any-match is not proof).
