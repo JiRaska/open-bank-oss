@@ -61,11 +61,7 @@ TEST_GLOBS = ("test-*.py", "test-*.sh", "test-*.mjs", "test-*.cjs", "test_*.py",
 DISCOVER_RE = re.compile(r"unittest\s+discover\s+(?:.*?\s)?-s\s+['\"]?([^\s'\"]+)['\"]?(?:.*?\s)?-p\s+['\"]?([^\s'\"]+)['\"]?")
 
 # name -> reason. Entries are checked in BOTH directions (see header).
-KNOWN_UNREACHABLE: dict[str, str] = {
-    # #14697 fixes its 3 failures on main and names it in gates.yaml; this entry becomes stale (and
-    # this gate fails) the moment that lands — delete the line then.
-    "test-check-deploy-source-freshness.py": "wired and fixed by #14697; failing on main until it merges",
-}
+KNOWN_UNREACHABLE: dict[str, str] = {}
 
 
 def strip_comments(text: str) -> str:
