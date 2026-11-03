@@ -364,7 +364,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
 | [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
 | [0359](0359-visual-regression-lane-with-committed-container-rendered-baselines.md) | Visual regression lane with committed container-rendered baselines | Accepted | Partial | admin-ui,testing | — |
-| [0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md) | Remote Gradle build cache for hosted CI, written only from main | Proposed | Planned | ci,supply-chain,capacity | — |
+| [0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md) | Remote Gradle build cache for hosted CI, written only from main | Proposed | Partial | ci,supply-chain,capacity | — |
 
 ## By tag
 

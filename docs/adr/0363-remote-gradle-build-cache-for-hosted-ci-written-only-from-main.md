@@ -1,7 +1,8 @@
 ---
 date: 2026-11-03
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#14733 — node live; owner creates the main-only environment and secrets, then the FROM-CACHE share is measured on a .github-only PR"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -99,10 +100,11 @@ service build to it with an asymmetric trust split:
 **Neutral**
 - `check-gradle-cache-writers.py` governs the GitHub Actions cache only. It is unaffected.
 
-**Enforcement.** A new enforced gate, `remote-build-cache-write-scope`, will fail any job that is
-reachable from `pull_request` or `pull_request_target` and sets `GRADLE_REMOTE_CACHE_PUSH`
-to anything but `false`, or references the write credential. Until it lands, `delivery-status`
-stays `planned`.
+**Enforcement.** The enforced gate `remote-build-cache-write-scope`
+(`check-remote-build-cache-write-scope.py`) fails a job that sets `GRADLE_REMOTE_CACHE_PUSH` without
+a push-to-main condition, references the write credential outside a push-to-main
+`environment: gradle-cache-writer`, or passes that credential to a reusable workflow. The node
+itself rejects writes from the read-only account, so the workflow is not the only line.
 
 ### Delivery check
 

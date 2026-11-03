@@ -2007,6 +2007,20 @@ gates:
     run: |
       python3 .github/scripts/check-gradle-user-home-isolation.py
 
+  # ADR-0363: only a push to main may write the remote Gradle build cache. The real boundary is
+  # the `gradle-cache-writer` environment's branch policy plus the node rejecting writes from
+  # the read-only account; this keeps the workflow side from drifting onto those alone.
+  - id: remote-build-cache-write-scope
+    name: "remote Gradle build cache is written only from main (ADR-0363)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
+    selftest: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py --self-test
+    run: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py
+
   # The governance gates in this job (threat-model coverage + diff, network-policy
   # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
   # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
