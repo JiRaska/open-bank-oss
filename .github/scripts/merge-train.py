@@ -2905,6 +2905,9 @@ TOP = [
     ("never cancels a train in flight", "cancel-in-progress: false"),
     ("event-driven: main moved", "push:"),
     ("event-driven: a required-context producer finished", "workflow_run:"),
+    # #14643: unfiltered, every PR's CI completion queued a run that replaced the one
+    # pending slot before a hosted runner took it. Only carriers (train/**) and main decide anything.
+    ("workflow_run debounced to carriers and main", 'branches: [main, "train/**"]'),
     ("event-driven: a PR was armed", "auto_merge_enabled"),
 ]
 _ISOLATION = [("script from origin/main", "show origin/main:.github/scripts/merge-train.py"),
