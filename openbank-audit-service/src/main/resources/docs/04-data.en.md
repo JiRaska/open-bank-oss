@@ -75,3 +75,5 @@ See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure ana
 ## Bank-own transfer rail status (ADR-0344 phase 1b)
 
 audit-service also reads `openbank.swift.institution-transfers`, swift-service's status of each bank-own transfer. It is money-path: each status is a transfer the rail executed. Rows are attributed to `swift-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).
+
+audit-service also subscribes to `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` (#9073), both attributed to `account-service` through `TopicProducers`. The subscriptions land before account-service moves those events off `openbank.accounts.account.created`, so no event is missed during the switch; the audit KafkaUser holds Read on both topics.
