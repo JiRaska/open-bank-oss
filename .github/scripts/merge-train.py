@@ -5564,6 +5564,7 @@ def self_test() -> int:
                 gh.head_checks.clear()
             check("reservation: a GREEN holder BEHIND main past the ceiling is not merged",
                   35 not in gh.merged, f"{s} merged={gh.merged}")
+            gh.updates.clear()
             reset()
             # (f) pending, no activity for 20 min: still a stall.
             s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60)
