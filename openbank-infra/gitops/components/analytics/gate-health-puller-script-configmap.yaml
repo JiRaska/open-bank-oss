@@ -249,3 +249,202 @@ data:
 
     if __name__ == "__main__":
         main()
+  pull_runs.py: |
+    #!/usr/bin/env python3
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    """Pull completed workflow runs and their jobs into ClickHouse (ADR-0255 Tier 2 extension).
+
+    pull.py sees ci.yml gate rows only. This sees EVERY workflow, which is what answers
+    "where does CI time and failure actually go": queue time per runner label, cancellation
+    churn per workflow, the first failing step per job. Measured 2026-11-03 by hand: more
+    than 1000 runs a day, and the manual crawl to count them exhausted the very API quota
+    whose exhaustion it was trying to explain. This makes it a query instead.
+
+    Quota-bounded by construction, not by hope:
+      - runs are listed by `created>=` over a short lookback, at most MAX_RUN_PAGES pages
+      - jobs are fetched only for (run, attempt) pairs ClickHouse does not already hold,
+        and never for a run whose conclusion is `skipped` (no job ever started)
+      - at most MAX_JOB_FETCHES job reads per tick. A backlog drains over later ticks.
+    Every tick logs the token's remaining core quota, so the cost of this job is itself a
+    number in its log rather than a claim in this comment.
+
+    Same honesty rule as pull.py: an API or insert failure exits non-zero. Rows already
+    inserted in this tick stay (ReplacingMergeTree makes the retry a no-op), nothing partial
+    is fabricated.
+    """
+    import base64
+    import datetime as dt
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    REPO = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    TOKEN = os.environ.get("GITHUB_TOKEN", "")
+    API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    LOOKBACK_HOURS = int(os.environ.get("RUNS_LOOKBACK_HOURS", "3"))
+    MAX_RUN_PAGES = int(os.environ.get("RUNS_MAX_PAGES", "10"))
+    MAX_JOB_FETCHES = int(os.environ.get("RUNS_MAX_JOB_FETCHES", "200"))
+    CLICKHOUSE_URL = os.environ["CLICKHOUSE_URL"]
+    CLICKHOUSE_USER = os.environ["CLICKHOUSE_USER"]
+    CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
+    LOG = "[ci-runs-puller]"
+
+
+    def gh(path):
+        req = urllib.request.Request(
+            f"{API}{path}",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read()), resp.headers.get("X-RateLimit-Remaining")
+
+
+    def ch_time(iso_z):
+        """GitHub UTC ISO-8601 -> ClickHouse JSONEachRow DateTime64 (see pull.py)."""
+        return iso_z.rstrip("Z").replace("T", " ") if iso_z else None
+
+
+    def clickhouse(query, body=None):
+        url = f"{CLICKHOUSE_URL}/?query=" + urllib.parse.quote(query)
+        req = urllib.request.Request(url, data=body, method="POST" if body is not None else "GET")
+        auth = f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode("ascii")
+        req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("ascii"))
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise SystemExit(f"ClickHouse request failed (HTTP {exc.code}): {detail}")
+
+
+    def insert(table, rows):
+        if not rows:
+            print(f"{LOG} {table}: 0 row(s) to insert")
+            return
+        body = "\n".join(json.dumps(r) for r in rows).encode("utf-8")
+        clickhouse(f"INSERT INTO openbank_analytics.{table} FORMAT JSONEachRow", body)
+        print(f"{LOG} {table}: inserted {len(rows)} row(s)")
+
+
+    def known_job_attempts():
+        out = clickhouse(
+            "SELECT DISTINCT run_id, run_attempt FROM openbank_analytics.ci_workflow_jobs "
+            f"WHERE created_at >= now() - INTERVAL {LOOKBACK_HOURS * 2} HOUR FORMAT TSV"
+        )
+        return {tuple(int(x) for x in line.split("\t")) for line in out.splitlines() if line}
+
+
+    def list_runs(since):
+        runs, remaining = [], None
+        for page in range(1, MAX_RUN_PAGES + 1):
+            q = urllib.parse.urlencode(
+                {"status": "completed", "created": f">={since}", "per_page": 100, "page": page}
+            )
+            data, remaining = gh(f"/repos/{REPO}/actions/runs?{q}")
+            batch = data.get("workflow_runs", [])
+            runs.extend(batch)
+            if len(batch) < 100:
+                break
+        else:
+            print(f"{LOG} hit RUNS_MAX_PAGES={MAX_RUN_PAGES} — older runs in the window are skipped this tick", file=sys.stderr)
+        return runs, remaining
+
+
+    def run_row(run):
+        return {
+            "run_id": run["id"],
+            "run_attempt": run.get("run_attempt") or 1,
+            "workflow": run.get("name") or "",
+            "workflow_path": run.get("path") or "",
+            "event": run.get("event") or "",
+            "head_branch": run.get("head_branch") or "",
+            "head_sha": run["head_sha"],
+            "status": run.get("status") or "",
+            "conclusion": run.get("conclusion") or "",
+            "created_at": ch_time(run["created_at"]),
+            "run_started_at": ch_time(run.get("run_started_at")),
+            "updated_at": ch_time(run["updated_at"]),
+        }
+
+
+    def job_row(run, job):
+        failed = next(
+            (s.get("name", "") for s in job.get("steps") or [] if s.get("conclusion") == "failure"),
+            "",
+        )
+        return {
+            "job_id": job["id"],
+            "run_id": run["id"],
+            "run_attempt": job.get("run_attempt") or run.get("run_attempt") or 1,
+            "workflow": run.get("name") or "",
+            "job_name": job.get("name") or "",
+            "status": job.get("status") or "",
+            "conclusion": job.get("conclusion") or "",
+            "created_at": ch_time(job.get("created_at") or run["created_at"]),
+            "started_at": ch_time(job.get("started_at")),
+            "completed_at": ch_time(job.get("completed_at")),
+            "runner_labels": job.get("labels") or [],
+            "runner_group": job.get("runner_group_name") or "",
+            "failed_step": failed,
+        }
+
+
+    def jobs_for(run):
+        attempt = run.get("run_attempt") or 1
+        jobs, page = [], 1
+        while True:
+            data, remaining = gh(
+                f"/repos/{REPO}/actions/runs/{run['id']}/attempts/{attempt}/jobs?per_page=100&page={page}"
+            )
+            batch = data.get("jobs", [])
+            jobs.extend(batch)
+            if len(batch) < 100:
+                return jobs, remaining
+            page += 1
+
+
+    def main():
+        if not TOKEN:
+            raise SystemExit("GITHUB_TOKEN not set — refusing to report a silent no-op as success")
+        now = dt.datetime.now(dt.timezone.utc)
+        since = (now - dt.timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        runs, remaining = list_runs(since)
+        print(f"{LOG} {len(runs)} completed run(s) created since {since}")
+        insert("ci_workflow_runs", [run_row(r) for r in runs])
+
+        known = known_job_attempts()
+        pending = [
+            r for r in runs
+            if r.get("conclusion") != "skipped"
+            and (r["id"], r.get("run_attempt") or 1) not in known
+        ]
+        fetched, rows = 0, []
+        for run in pending[:MAX_JOB_FETCHES]:
+            try:
+                jobs, remaining = jobs_for(run)
+            except urllib.error.URLError as exc:
+                # One unreadable run must not discard the rest of the tick. It stays
+                # "not known" and is retried next tick.
+                print(f"{LOG} run {run['id']}: jobs read failed: {exc}", file=sys.stderr)
+                continue
+            fetched += 1
+            rows.extend(job_row(run, j) for j in jobs)
+        print(
+            f"{LOG} jobs fetched for {fetched}/{len(pending)} new run attempt(s) "
+            f"(cap {MAX_JOB_FETCHES}); core quota remaining={remaining}"
+        )
+        insert("ci_workflow_jobs", rows)
+        if pending and fetched == 0:
+            raise SystemExit("every job read failed — refusing to report this tick as success")
+
+
+    if __name__ == "__main__":
+        main()
