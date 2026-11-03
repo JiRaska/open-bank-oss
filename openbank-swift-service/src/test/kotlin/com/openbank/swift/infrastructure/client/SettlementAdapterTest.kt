@@ -5,6 +5,7 @@
 package com.openbank.swift.infrastructure.client
 
 import com.openbank.clients.transaction.TransactionCompletionUncertainException
+import com.openbank.clients.transaction.UnsettledOutcome
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
 import com.openbank.swift.application.port.out.SettlementUnavailableException
@@ -50,7 +51,7 @@ class SettlementAdapterTest {
 
     private fun assertAllUnsettledZero() {
         val counters = registry.find(SwiftSettlementMetrics.METRIC).counters()
-        assertThat(counters).hasSize(SwiftSettlementMetrics.Outcome.entries.size)
+        assertThat(counters).hasSize(SwiftSettlementMetrics.ALL_OUTCOMES.size)
         assertThat(counters.sumOf { it.count() }).isZero()
     }
 
@@ -60,7 +61,7 @@ class SettlementAdapterTest {
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 0.0""",
         )
-        metrics.unsettled(SwiftSettlementMetrics.Outcome.MISMATCH)
+        metrics.unsettled(UnsettledOutcome.MISMATCH)
         assertSingleUnsettled("mismatch")
         assertThat(registry.scrape()).contains(
             """openbank_payment_unsettled_total{outcome="mismatch",rail="SWIFT",} 1.0""",
@@ -68,8 +69,26 @@ class SettlementAdapterTest {
         registry.meters.forEach { meter ->
             assertThat(meter.id.tags.map { it.key }).containsExactlyInAnyOrder("rail", "outcome")
             assertThat(meter.id.getTag("rail")).isEqualTo("SWIFT")
-            assertThat(meter.id.getTag("outcome")).isIn(SwiftSettlementMetrics.Outcome.entries.map { it.label })
+            assertThat(meter.id.getTag("outcome")).isIn(SwiftSettlementMetrics.ALL_OUTCOMES.map { it.label })
         }
+    }
+
+    @Test
+    fun `scraped outcome labels are byte-identical to the series the alerts select on`() {
+        // Literal on purpose (#13669): the shared core moved to openbank-client-transaction and the
+        // SWIFT-only values became an extension; neither may rename or drop a Prometheus series.
+        val scraped = registry.find(SwiftSettlementMetrics.METRIC).counters().map { it.id.getTag("outcome") }
+        assertThat(scraped).containsExactlyInAnyOrder(
+            "mismatch",
+            "failed-replay",
+            "conflict",
+            "unexpected-status",
+            "transport-error",
+            "redrive-exhausted",
+            "bad-data",
+            "redrive-error",
+            "late-completion",
+        )
     }
 
     private fun created(id: UUID, status: Int = 201): Response =

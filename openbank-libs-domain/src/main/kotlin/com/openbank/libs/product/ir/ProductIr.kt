@@ -20,7 +20,10 @@ import java.math.BigDecimal
 object IrVersion {
     const val V1: Int = 1
 
-    /** Every `irVersion` the interpreter accepts. Removal of a version is a breaking change (ADR-0352). */
+    /**
+     * Every `irVersion` [ProductIrParser] accepts; it refuses any other, so a revision never reaches the
+     * interpreter under an unsupported version. Removal of a version is a breaking change (ADR-0352).
+     */
     val SUPPORTED: Set<Int> = setOf(V1)
 }
 
