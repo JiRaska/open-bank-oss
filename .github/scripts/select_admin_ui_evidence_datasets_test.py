@@ -68,6 +68,18 @@ class DatasetSelectionTests(unittest.TestCase):
         self.assertIn("dataset: ${{ fromJSON(needs.authorize-source.outputs.datasets) }}", source)
         self.assertIn('if [ -n "$ROLLBACK_SNAPSHOT" ] && [ "$SELECTED_DATASET" = all ]; then', source)
 
+    def test_test_intelligence_contracts_carry_broker_verdicts(self):
+        # Without quality-report.json every published contract row was `unknown` with no
+        # reason (132/132) while the Broker held 102 passed + 30 pending-verification.
+        source = WORKFLOW.read_text(encoding="utf-8")
+        branch = source.split("test-intelligence)", 1)[1].split(";;", 1)[0]
+        quality = branch.index("scripts/collect-quality-report.mjs")
+        self.assertLess(quality, branch.index("collect-admin-ui-test-evidence.py"))
+        for name in ("PACT_BROKER_URL", "PACT_BROKER_USERNAME", "PACT_BROKER_PASSWORD"):
+            self.assertIn(f"{name}: ${{{{ matrix.dataset == 'test-intelligence' && ", source)
+        # Pact provenance is git history; a depth-1 clone stamps HEAD on every Pact.
+        self.assertIn("fetch-depth: ${{ matrix.dataset == 'test-intelligence' && '0' || '1' }}", source)
+
 
 if __name__ == "__main__":
     unittest.main()

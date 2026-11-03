@@ -40,7 +40,7 @@ Služba dodržuje hexagonální (ports & adapters) uspořádání OpenBank (ADR-
 
 ### Aplikace (`application`)
 - **Vstupní porty** (`port.in`): `OpenDisputeUseCase`, `UpdateDisputeUseCase`, `GetDisputeUseCase`.
-- **Výstupní porty** (`port.out`): `DisputeRepository`, `DisputeEvidenceRepository`, `DisputeTimelineRepository`, `DisputeOutboxRepository`, `DisputeOutboxEventPublisher`.
+- **Výstupní porty** (`port.out`): `DisputeRepository`, `DisputeEvidenceRepository`, `DisputeTimelineRepository`, `DisputeOutboxRepository`; publikace jde přes sdílený port knihovny `OutboxEventPublisher`.
 - **Implementace use-case**: `DisputeService` implementuje všechny tři vstupní porty. Generuje referenci `DSP-…`, počítá `resolutionDeadline` z `resolution-sla-days`, zapisuje agregát přes repository a při každé mutaci připojuje `DisputeTimelineEvent`. `withdraw`/`escalate` delegují na `update` s odpovídajícím stavem.
 
 ### Infrastruktura (`infrastructure`)
@@ -69,7 +69,7 @@ Vzor transakční outbox odděluje DB zápis od publikace do Kafky:
 | `OpenDisputeUseCase` / `UpdateDisputeUseCase` / `GetDisputeUseCase` | in | `DisputeResource` |
 | `DisputeRepository` / `…EvidenceRepository` / `…TimelineRepository` | out | Panache repository impl |
 | `DisputeOutboxRepository` | out | `DisputeOutboxRepositoryImpl` |
-| `DisputeOutboxEventPublisher` | out | `KafkaDisputeOutboxEventPublisher` |
+| `OutboxEventPublisher` | out | `KafkaDisputeOutboxEventPublisher` |
 
 ## Průřezové aspekty
 

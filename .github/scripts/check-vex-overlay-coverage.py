@@ -73,13 +73,6 @@ NO_OVERLAY_YET: dict[str, str] = {
     # gate reported it in the direction that matters -- a declaration outliving its subject --
     # which turned main red for every PR until this landed. That is the check working, not a
     # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
-    "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
-                               "Its dependency set is the ordinary reactive Quarkus stack largely "
-                               "shared with services that already carry overlays, but 'largely "
-                               "shared' is an assumption and not a resolved artifact list. Writing "
-                               "dispositions from it is the fabrication this gate's own header "
-                               "refuses. Delete this entry in the PR that writes the overlay — the "
-                               "gate fails on a declaration outliving its subject.",
     "communication-service": "#9148 - new service (ADR-0285 phase 2), no VEX overlay written yet. "
                               "Its dependency set is the ordinary reactive Quarkus stack shared with "
                               "services that already have overlays, but writing dispositions from "
