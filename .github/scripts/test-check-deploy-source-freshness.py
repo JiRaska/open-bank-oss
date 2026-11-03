@@ -52,6 +52,10 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.write("config/detekt.yml", "config: {}\n")
         self.write("build-logic/build.gradle.kts", "plugins {}\n")
         self.write(".github/workflows/Dockerfile.deploy", "FROM scratch\n")
+        # pact-version-tree-equivalent.sh fails closed unless it can read both augmentation-time
+        # build properties from auto-deploy.yml exactly once at each revision.
+        self.write(".github/workflows/auto-deploy.yml",
+                   "env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n")
         self.write("build.gradle.kts", "plugins {}\n")
         self.write("settings.gradle.kts", "rootProject.name = \"fixture\"\n")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
