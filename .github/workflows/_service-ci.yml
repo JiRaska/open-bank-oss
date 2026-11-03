@@ -114,7 +114,6 @@ jobs:
     # environment secret of `gradle-cache-writer`, whose deployment-branch policy admits `main`
     # only, so a pull request cannot obtain it even by editing this file. Every other event
     # runs with no environment and the read-only credential.
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
