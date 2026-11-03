@@ -14,14 +14,14 @@ a failure from a fixture that works on the runner. Both are environment leaking 
 
 Measured 2026-11-03 on `origin/main`: 37 files under `.github/scripts` run `git init` and
 `git commit`; 36 set an identity in the file and the 37th through a shared helper
-(`merge-train.py`'s `Git`, whose `base_env()` sets it); 28 neutralise signing, 9 do not.
+(the train driver's `Git`, whose `base_env()` sets it); 28 neutralise signing, 9 do not.
 
 THE RULE
 --------
 Every file under `.github/scripts` that invokes `git init` must, in the same file:
   1. provide an identity: `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` in an env, `user.name` via
      `git config` or `-c`, or a recognised shared helper (`gatelib.hermetic_git_env`,
-     `merge-train.py`'s `Git`/`base_env`), AND
+     the train driver's `Git`/`base_env`), AND
   2. neutralise signing: `commit.gpgsign=false` (config or `-c`), or isolate the global and system
      config (`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_NOSYSTEM` / `GIT_CONFIG_SYSTEM`), or the same helpers.
 
@@ -148,7 +148,7 @@ def self_test() -> int:
         "identity via config, no gpgsign": ('g("init", "-q"); g("config", "user.name", "t"); g("commit", "-m", "x")', 1),
         "identity + GIT_CONFIG_GLOBAL isolation": ('git init -q; export GIT_CONFIG_GLOBAL=/dev/null; git -c user.name=t commit -qm x', 0),
         "shared helper": ('env = gatelib.hermetic_git_env(); run(["git", "init"], env=env)', 0),
-        "merge-train Git helper": ('git = train.Git(root); git("init", "-q", "-b", "main")', 0),
+        "train.Git helper": ('git = train.Git(root); git("init", "-q", "-b", "main")', 0),
         "settings only in a comment": ('# GIT_AUTHOR_NAME=t commit.gpgsign=false\nrun(["git", "init"])', 2),
         "gpgsign via git config args": ('g("init"); g("config", "user.name", "t"); g("config", "commit.gpgsign", "false")', 0),
         "gpgsign via shell git config": ('git init -q && git config user.name s && git config commit.gpgsign false', 0),
