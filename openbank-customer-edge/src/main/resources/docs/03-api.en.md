@@ -4,7 +4,7 @@
 
 - **Public base:** `https://customer.open-bank.tech/customer/v1` (sandbox)
 - **In-cluster app port:** 8128
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — source: `src/main/resources/openapi.yaml` (`info.version: 1.6.0`)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8128/q/openapi) — source: `src/main/resources/openapi.yaml` (`info.version: 1.88.0`)
 
 The contract **is** formalised in `openapi.yaml`. The URL prefix is `/customer/v1` (note: this is the edge's own customer-facing version axis, distinct from each upstream's `/api/v1`).
 
@@ -48,9 +48,10 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
 | `GET /notifications?limit=&page=` | `accounts:read` | party-scoped page, total and exact unread count |
-| `GET /notifications/unified?limit=&partyId=` | `accounts:read` | latest 1–100 items across the person and current company mandates; optional authorized origin filter |
+| `GET /notifications/unified?limit=&partyId=&cursor=` | `accounts:read` | newest 1–100 items across the person and current company mandates; optional authorized origin filter and keyset cursor |
 | `GET /notifications/{id}?partyId=` | `accounts:read` | notification detail; origin `partyId` from unified items selects an authorized profile |
 | `PATCH /notifications/{id}/read?partyId=` | `accounts:read` | mark an authorized origin notification read |
+| `PATCH /notifications/read-all?partyId=` | `accounts:read` | mark every notification of the selected or an authorized origin profile read |
 | `GET /profile` | `accounts:read` | the caller's own party profile |
 | `POST /domestic-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
 | `POST /sepa-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
@@ -74,7 +75,7 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 
 ### Unified notification inbox
 
-Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains the latest 1–100 items with `page: 0`; use the existing selected-profile list for older history. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; a failed or mismatched party feed returns 502 without partial items.
+Omitting `partyId` merges the authenticated person and every company in the current mandate inventory. Each item carries its origin `partyId`; pass that value to the detail and mark-read routes when opening a company item. An explicit `partyId` filter must belong to the person or a current mandate. The response contains up to 100 items with `page: 0` and an opaque `nextCursor`; send it back as `cursor` to read older items. The cursor is bound to the authorized profile set, so a changed mandate inventory or filter requires starting again, and new arrivals do not shift an older page. An invalid or foreign cursor returns 400. A cursor page also returns 502 when the notification provider does not confirm keyset mode, so a rolling deployment cannot silently repeat the first page. `total` and `unreadCount` sum the party responses seen during this request, so concurrent writes do not form one atomic snapshot. A failed mandate inventory returns 503; an unauthorized filter returns 403; a failed or mismatched party feed returns 502 without partial items.
 
 ## Selected requests
 
@@ -167,7 +168,7 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 
 ## Versioning
 
-- **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.6.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.9.0`).
+- **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.88.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.9.0`).
 - Upstream calls target each service's own `/api/v1`.
 - **OpenAPI diff** in CI guards against breaking changes without a contract bump.
 
@@ -189,7 +190,7 @@ The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at ru
 - `CustomerPensionChangeResource` adds the follow-up flows of `docs/ux/pension-client-flows.md` (pension-service API 1.2.0): the questionnaire (question set, draft, profile, warnings and their acknowledgement), contribution-schedule and beneficiary preview and change, annual and payout statements, payout eligibility, and annuity offers, selection and cancellation.
 - Exit operations expose termination quotes/notices/signing and payout quotes/status/confirmation. `PUT /contracts/{contractId}/payouts/{payoutId}/account` forwards the SCA challenge for a held account change; pension-service decides when that change becomes effective.
 
-Pension mutations carrying an `Idempotency-Key` parameter require a nonblank caller key: they reject an absent key rather than generating a replacement. SCA-protected routes require the challenge header declared in OpenAPI. Document-bound operations (application signing, exit, strategy change, mandate set-up and cancel, schedule and beneficiary changes, annuity selection and cancellation) forward the challenge without consuming it in edge; pension-service spends it against the document it signs. Without a challenge these answer 403 `SCA_REQUIRED` with the exact `pension-<operation>:<hash>` linking to raise, read from the preview or annuity purchase where pension-service issues the hash. Pause/resume and withdrawal consume the challenge in edge under the `pension.<operation>:` namespace. Upstream refusals the app must act on (`REASSESSMENT_REQUIRED`, `WARNINGS_REQUIRED`, `STRATEGY_NOT_PERMITTED`, `INCONSISTENT_ANSWERS`) are projected field by field; any other upstream body is withheld.
+Pension mutations carrying an `Idempotency-Key` parameter require a nonblank caller key: they reject an absent key rather than generating a replacement. SCA-protected routes require the challenge header declared in OpenAPI. Document-bound operations (application signing, exit, strategy change, mandate set-up and cancel, schedule and beneficiary changes, annuity selection and cancellation) forward the challenge without consuming it in edge; pension-service spends it against the document it signs. Without a challenge these answer 403 `SCA_REQUIRED` with the exact `pension-<operation>:<hash>` linking to raise, read from the preview or annuity purchase where pension-service issues the hash. Pause/resume and withdrawal consume the challenge in edge under the `pension.<operation>:` namespace. Reads of transfers (`GET /pension/transfers` and the transfer detail) answer an upstream 403 with 403 `PENSION_ACCESS_DENIED` (access to the pension information was denied); a read carries no challenge or debit account, so it never returns `PENSION_CHANGE_REFUSED`, and other upstream refusals are projected as before. Upstream refusals the app must act on (`REASSESSMENT_REQUIRED`, `WARNINGS_REQUIRED`, `STRATEGY_NOT_PERMITTED`, `INCONSISTENT_ANSWERS`) are projected field by field; any other upstream body is withheld.
 
 These are implemented routes, not evidence that the upstream services are deployed. Pension-service and pension-fund-service rollout prerequisites and remaining collaborator stubs are tracked in #12350 and their PRs; illustrative projections are not guarantees of investment returns.
 

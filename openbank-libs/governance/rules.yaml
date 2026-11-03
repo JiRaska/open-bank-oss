@@ -688,6 +688,10 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.treasury.payments"
         reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
+      - topic: "openbank.accounts.account.status-changed"
+        reason: "#9073 stage 1 of 2, consumer-first: audit-service and analytics-sink subscribe, with the topic and ACLs, before account-service publishes there. Today AccountEventPublisher ignores the topic its callers name and emits status changes on account-events-out (account.created); the producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
+      - topic: "openbank.accounts.savings-withdrawal.approved"
+        reason: "#9073 stage 1 of 2, consumer-first: same sequencing as account.status-changed above; the account-service producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
