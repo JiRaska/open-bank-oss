@@ -579,8 +579,61 @@ def changed_files(base: str, head: str = "HEAD") -> list[str]:
     return [ln for ln in out.stdout.splitlines() if ln]
 
 
+FENCE = re.compile(r"^ {0,3}(?P<f>`{3,}|~{3,})")
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+
+
+def strip_code(body: str) -> str:
+    """Blank out fenced and indented code so a `[x]` pasted into a code block is not a tick (#14684).
+
+    Lines are replaced by empty lines (not removed) so the section structure is unchanged.
+    An unclosed fence runs to the end of the body, as in CommonMark. An indented block
+    (4+ spaces or a tab) only starts after a blank line and not inside a list item, so a
+    nested list under `- [ ]` stays a list.
+    """
+    out: list[str] = []
+    fence: str | None = None
+    in_indented = False
+    in_list = False
+    prev_blank = True
+    for ln in body.split("\n"):
+        if fence is not None:
+            m = FENCE.match(ln)
+            if m and m.group("f")[0] == fence[0] and len(m.group("f")) >= len(fence) \
+                    and not ln.strip().lstrip(fence[0]):
+                fence = None
+            out.append("")
+            prev_blank = False
+            continue
+        m = FENCE.match(ln)
+        if m and not (m.group("f")[0] == "`" and "`" in ln[m.end():]):
+            fence, in_indented, in_list = m.group("f"), False, False
+            out.append("")
+            prev_blank = False
+            continue
+        blank = not ln.strip()
+        indented = ln.startswith(("    ", "\t"))
+        if in_indented and (blank or indented):
+            out.append("")
+            continue
+        in_indented = False
+        if indented and prev_blank and not in_list:
+            in_indented = True
+            out.append("")
+            continue
+        if not blank:
+            if LIST_ITEM.match(ln):
+                in_list = True
+            elif not indented:
+                in_list = False
+        prev_blank = blank
+        out.append(ln)
+    return "\n".join(out)
+
+
 def unticked(body: str) -> tuple[str, list[str]] | None:
     """None = section absent; otherwise (section, [unticked box texts])."""
+    body = strip_code(body)
     m = SECTION.search(body)
     if not m:
         return None
@@ -888,6 +941,23 @@ def self_test() -> int:
     r3 = unticked(other)
     if r3 is None or r3[1]:
         print("self-test FAIL: box in the next section leaked into the check"); bad += 1
+    ticked_section = "\n".join(b.group(0) for b in BOX.finditer(ticked))
+    # Ticks inside fenced or indented code are not ticks: a pasted, pre-ticked template in a code
+    # block must not satisfy the gate (#14684). Each must reach the gate as a body with NO boxes.
+    for label, wrapped in [
+        ("``` fence", "```\n" + ticked_section + "\n```"),
+        ("~~~ fence", "~~~\n" + ticked_section + "\n~~~"),
+        ("unclosed fence", "```md\n" + ticked_section),
+        ("4-space indented block", "\n" + "\n".join("    " + ln for ln in ticked_section.splitlines())),
+        ("tab indented block", "\n" + "\n".join("\t" + ln for ln in ticked_section.splitlines())),
+    ]:
+        rc_ = unticked("## Security checklist\n" + wrapped + "\n")
+        if rc_ is None or BOX.search(rc_[0]):
+            print(f"self-test FAIL: ticks inside a code block were counted ({label})"); bad += 1
+    # Controls: real ticks around a fence still count, and a nested list item is not code.
+    mixed = unticked("## Security checklist\n```\n- [ ] fake\n```\n- [ ] real\n  - [x] nested\n\n    - [x] deep\n")
+    if mixed is None or mixed[1] != ["real"] or len(list(BOX.finditer(mixed[0]))) != 3:
+        print("self-test FAIL: code-block stripping broke ordinary boxes"); bad += 1
     # ── the release-derived exclusion, both directions (#9230) ───────────────────────────────
     #
     # The must-FAIL half is the load-bearing one: an exclusion that also let a real money-path
