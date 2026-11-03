@@ -113,6 +113,8 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # trickling forever; it is measured from the head's committer time, which update-branch sets.
 RESERVATION_STALL_S = 15 * 60
 RESERVATION_CEILING_S = 4 * 3600
+# Hard cap for a GREEN holder (exempt from the ceiling above, #14624): measured from the same committer time.
+GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 # Lane fairness (ADR-0343): after a strict-lane merge the train gets the next turn — no strict-lane
 # update-branch while train candidates wait — for at most this long after that merge, so a train that
 # cannot be built never freezes the strict lane. Two ticks of the */10 cron at its measured p90 gap.
@@ -2529,7 +2531,7 @@ def reservation_expired(git, head: str, now: float, activity=None, green: bool =
     a stall too. `activity(head)` = newest check-run started_at/completed_at (epoch) or None.
     The stall rule applies only while CI is PENDING: a `green` head is finished, not stalled, and
     merges this tick (#13608 was released ~15 min after going green). The ceiling bounds a CI that
-    never finishes, so it too applies only while NOT green (#14624: starved ticks carried a green,
+    never finishes, so it too applies only while NOT green, with GREEN_HOLDER_CAP_S as the bound for a green one (#14624: starved ticks carried a green,
     up-to-date holder past 240 min and it was released, discarding ~3h of finished CI). `green` is
     strict_lane_state's verdict on THIS head and strict_reservation only asks for a head that contains
     live main; the merge itself (strict_lane) re-checks main, source intent and pins the head. A green
@@ -2539,6 +2541,10 @@ def reservation_expired(git, head: str, now: float, activity=None, green: bool =
         return "head committed in the future"
     if not green and now - int(ct) > RESERVATION_CEILING_S:
         return f"> {RESERVATION_CEILING_S // 60} min ceiling"
+    if green and now - int(ct) > GREEN_HOLDER_CAP_S:
+        # A green holder is exempt from the ceiling, not from a bound: one whose merge is refused every
+        # tick (ruleset, hook, auto-merge) must not hold main forever.
+        return f"green but unmerged > {GREEN_HOLDER_CAP_S // 60} min hard cap"
     last = int(ct)
     seen = activity(head) if activity else None
     if seen is not None:
@@ -5565,6 +5571,14 @@ def self_test() -> int:
             check("reservation: a GREEN holder BEHIND main past the ceiling is not merged",
                   35 not in gh.merged, f"{s} merged={gh.merged}")
             gh.updates.clear()
+            reset()
+            # (d) green, merge refused every tick, past the hard cap: released (bounded escape).
+            open_only("pW", "pF")
+            gh.refuse_merge.add(35)
+            s = reservation_at(GREEN_HOLDER_CAP_S + 60, 60, checks={})
+            check("reservation: a GREEN holder whose merge is refused every tick is released past the hard cap",
+                  s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
+            gh.refuse_merge.clear()
             reset()
             # (f) pending, no activity for 20 min: still a stall.
             s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60)
