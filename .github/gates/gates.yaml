@@ -2014,6 +2014,9 @@ gates:
     name: "remote Gradle build cache is written only from main (ADR-0363)"
     group: supplychain
     mode: enforced
+    rationale: "A cache entry written from pull-request code would be served to every later build on main, so the write path must stay main-only on the workflow side too."
+    review_after: "2027-05-03"
+    min_subjects: 80   # 97 workflow files observed 2026-11-03
     budget_seconds: 20
     selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
     selftest: |
