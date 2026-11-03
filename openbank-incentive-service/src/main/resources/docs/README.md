@@ -23,3 +23,7 @@ The service includes the Quarkus OpenTelemetry extension for HTTP and database i
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Test profile configuration
+
+`application.yaml` carries a `%test`-profile `code-pepper` so `@QuarkusTest` classes can boot without the production secret. It is a throwaway value that never applies outside the test profile; deployed environments supply `PROMO_CODE_PEPPER`.

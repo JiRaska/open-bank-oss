@@ -4,16 +4,26 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
+import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindows
+import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.fx.domain.model.FxConversionMath
+import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
+import com.openbank.libs.domain.money.Money
+import com.openbank.pension.domain.model.ContractStatus
+import com.openbank.pension.domain.statecontribution.ReturnStatus
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
 import com.openbank.sepa.domain.model.SepaPaymentStatus
+import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.DelegationSpendBook
@@ -26,6 +36,7 @@ import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -166,6 +177,303 @@ object MoneyPathInvariants {
             world.settlements.forEach { settlement ->
                 if (settlement.status !in terminal) {
                     return Violation(name, "settlement ${settlement.id} stuck in ${settlement.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `DomesticPayment`
+     * driven by [com.openbank.simulation.scenario.DomesticClearingScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RETURNED / CANCELLED) by the time a step has fully
+     * settled — the domestic analogue of [sepaPaymentCompleteness]. A payment left RECEIVED
+     * (never validated), VALIDATED (never dispatched), or SENT_TO_CLEARING (never settled nor
+     * returned) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val domesticPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            DomesticPaymentStatus.SETTLED,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.RETURNED,
+            DomesticPaymentStatus.CANCELLED,
+        )
+
+        override val name = "domestic-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.domesticPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "domestic payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `ClearingBatch` and
+     * `ClearingItem` driven by [com.openbank.simulation.scenario.ClearingCycleScenario] must
+     * reach a terminal status (SETTLED / FAILED / REVERSED) by the time a step has fully
+     * settled — a batch left IN_CLEARING is the silent money-in-flight defect this layer
+     * exists to surface. On top of completeness, the netting conservation cross-checks the
+     * batch against its own items with the kernel Money: the batch total must still equal the
+     * sum of the item amounts that were batched, and totalCredit/netPosition must hold the
+     * bilateral offset (totalCredit == totalDebit, netPosition == totalDebit - totalCredit)
+     * production's fold produces — a batch whose totals drifted from its items fails here.
+     */
+    val clearingCompleteness = object : Invariant {
+        private val terminal = setOf(
+            ClearingStatus.SETTLED,
+            ClearingStatus.FAILED,
+            ClearingStatus.REVERSED,
+        )
+
+        override val name = "clearing-completeness"
+        override fun check(world: World): Violation? {
+            world.clearingBatches.forEach { batch ->
+                if (batch.status !in terminal) {
+                    return Violation(name, "clearing batch ${batch.id} stuck in ${batch.status}")
+                }
+                val itemSum = world.clearingItems
+                    .filter { it.batchId == batch.id }
+                    .fold(Money.zero(batch.currency)) { acc, item -> acc + Money.of(item.amount, item.currency) }
+                if (itemSum.amount.compareTo(batch.totalDebit) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} totalDebit != sum of its items")
+                }
+                if (batch.totalCredit.compareTo(batch.totalDebit) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} totalCredit != totalDebit")
+                }
+                if (batch.netPosition.compareTo(batch.totalDebit.subtract(batch.totalCredit)) != 0) {
+                    return Violation(name, "clearing batch ${batch.id} netPosition != totalDebit - totalCredit")
+                }
+            }
+            world.clearingItems.forEach { item ->
+                if (item.status !in terminal) {
+                    return Violation(name, "clearing item ${item.id} stuck in ${item.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `SctInstPayment`
+     * driven by [com.openbank.simulation.scenario.SctInstSettlementScenario] must reach a
+     * terminal status (SETTLED / REJECTED / RECALLED / TIMEOUT) by the time a step has fully
+     * settled — the instant-payment analogue of [sepaPaymentCompleteness]. A payment left
+     * PENDING (screening hold that never decided) or PROCESSING (scheme submission that never
+     * settled) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `PensionContract`
+     * driven by [com.openbank.simulation.scenario.PensionLifecycleScenario] must be either a
+     * legitimately open contract (ACTIVE / SUSPENDED) or a terminal one (PAID_OUT /
+     * TRANSFERRED_OUT / CLOSED) once a step has fully settled — never left DRAFT (never
+     * submitted), PENDING_ACTIVATION (submitted, never funded) or TERMINATING (exit requested,
+     * never concluded). A contract parked mid-flight is the silent money-in-flight defect this
+     * invariant exists to surface; the open/terminal sets mirror the REAL
+     * `ContractStatus` transition table.
+     */
+    val pensionContractCompleteness = object : Invariant {
+        private val settled = setOf(
+            ContractStatus.ACTIVE,
+            ContractStatus.SUSPENDED,
+            ContractStatus.PAID_OUT,
+            ContractStatus.TRANSFERRED_OUT,
+            ContractStatus.CLOSED,
+        )
+
+        override val name = "pension-contract-completeness"
+        override fun check(world: World): Violation? {
+            world.pensionContracts.forEach { contract ->
+                if (contract.status !in settled) {
+                    return Violation(name, "pension contract ${contract.id} stuck in ${contract.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every statutory
+     * `StateContributionReturn` obligation must be SETTLED once its real statutory deadline has
+     * passed — the deadline the scenario computed with the REAL `CzStateContributionCalendar`
+     * (ZDPS §18). A return left DUE/REPORTED/CONFIRMED past `dueBy` is a missed statutory
+     * obligation to the agency: real money the platform owes with a regulatory clock on it.
+     */
+    val pensionReturnTimeliness = object : Invariant {
+        override val name = "pension-return-timeliness"
+        override fun check(world: World): Violation? {
+            val today = world.context.clock.instant().atZone(ZoneOffset.UTC).toLocalDate()
+            world.pensionReturns.forEach { obligation ->
+                if (obligation.status != ReturnStatus.SETTLED && obligation.overdue(today)) {
+                    return Violation(
+                        name,
+                        "pension return ${obligation.id} ${obligation.status} past dueBy ${obligation.dueBy}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    val sctInstPaymentCompleteness = object : Invariant {
+        private val terminal = setOf(
+            SctInstStatus.SETTLED,
+            SctInstStatus.REJECTED,
+            SctInstStatus.RECALLED,
+            SctInstStatus.TIMEOUT,
+        )
+
+        override val name = "sct-inst-payment-completeness"
+        override fun check(world: World): Violation? {
+            world.sctInstPayments.forEach { payment ->
+                if (payment.status !in terminal) {
+                    return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `CardAuthorization`
+     * driven by [com.openbank.simulation.scenario.CardClearingScenario] must be internally
+     * consistent and never a stale hold — (1) `clearedAmountMinorUnits` never exceeds the
+     * authorised amount, (2) a decline carries its reason exactly when the status is DECLINED
+     * (the status exists to keep a refused customer answerable from the row), and (3) no hold
+     * outlives its own `expiresAt`: an APPROVED / PARTIALLY_CLEARED authorisation whose expiry
+     * has passed is a permanent freeze on money the customer cannot spend — the silent
+     * money-in-flight defect this invariant exists to surface. A hold still inside its window
+     * is legitimate and passes.
+     */
+    val cardAuthorizationCompleteness = object : Invariant {
+        override val name = "card-authorization-completeness"
+        override fun check(world: World): Violation? {
+            val now = world.context.clock.instant()
+            world.cardAuthorizations.forEach { authorization ->
+                if (authorization.clearedAmountMinorUnits > authorization.amountMinorUnits) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} cleared ${authorization.clearedAmountMinorUnits}" +
+                            " of ${authorization.amountMinorUnits}",
+                    )
+                }
+                if ((authorization.status == AuthorizationStatus.DECLINED) != (authorization.declineReason != null)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} status ${authorization.status} with declineReason" +
+                            " ${authorization.declineReason}",
+                    )
+                }
+                if (authorization.status.holdsFunds && now.isAfter(authorization.expiresAt)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} holds ${authorization.heldAmountMinorUnits}" +
+                            " past its expiresAt ${authorization.expiresAt}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): per authorisation, the Σ of
+     * presentment amounts the scenario posted through the REAL `AuthorizationLifecycle.clear`
+     * must equal the authorisation's own `clearedAmountMinorUnits` — a clearing that posted
+     * twice, or a presentment the aggregate silently lost, breaks the equality for exactly the
+     * authorisation it belongs to. Posted amounts are keyed per authorisation (same convention
+     * as [swiftMoneyConservation]), so a reversal or an unrelated posting cannot mask a gap.
+     */
+    val cardClearingConservation = object : Invariant {
+        override val name = "card-clearing-conservation"
+        override fun check(world: World): Violation? {
+            world.cardClearings.postedIds().forEach { authorizationId ->
+                val authorization: CardAuthorization? =
+                    world.cardAuthorizations.firstOrNull { it.id == authorizationId }
+                val posted = world.cardClearings.postedAmount(authorizationId)
+                if (authorization == null || authorization.clearedAmountMinorUnits != posted) {
+                    return Violation(
+                        name,
+                        "card $authorizationId posted $posted but cleared" +
+                            " ${authorization?.clearedAmountMinorUnits ?: "unknown authorization"}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `FxConversion` driven
+     * by [com.openbank.simulation.scenario.FxConversionScenario] must reach a terminal status
+     * (SETTLED / FAILED / REVERSED) by the time a step has fully settled — the FX analogue of
+     * [domesticPaymentCompleteness]. A conversion left PENDING (booked, never settled nor
+     * failed) is the silent money-in-flight defect this invariant exists to surface.
+     */
+    val fxConversionCompleteness = object : Invariant {
+        private val terminal = setOf(
+            FxConversionStatus.SETTLED,
+            FxConversionStatus.FAILED,
+            FxConversionStatus.REVERSED,
+        )
+
+        override val name = "fx-conversion-completeness"
+        override fun check(world: World): Violation? {
+            world.fxConversions.forEach { conversion ->
+                if (conversion.status !in terminal) {
+                    return Violation(name, "fx conversion ${conversion.id} stuck in ${conversion.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every SETTLED `FxConversion`
+     * must reprice EXACTLY under the REAL [FxConversionMath] against the REAL `FxRate` fixing
+     * it references — which must exist and must have been valid at the conversion's creation
+     * time ([FxRate.isValid]) — and must carry the real 0.5% margin. A scenario that priced off
+     * a stale or expired fixing, drifted the margin, or re-modelled the target-amount rounding
+     * fails here, replayed against the production arithmetic rather than a copy of it.
+     */
+    val fxMoneyConservation = object : Invariant {
+        override val name = "fx-money-conservation"
+        override fun check(world: World): Violation? {
+            world.fxConversions.forEach { conversion ->
+                if (conversion.status != FxConversionStatus.SETTLED) return@forEach
+                val rate = world.fxRates.firstOrNull { it.id == conversion.rateId }
+                    ?: return Violation(
+                        name,
+                        "fx conversion ${conversion.id} settled against unknown rate ${conversion.rateId}",
+                    )
+                if (!rate.isValid(conversion.createdAt)) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} settled against expired rate ${conversion.rateId}",
+                    )
+                }
+                val expectedTo = FxConversionMath.convertedAmountMinorUnits(
+                    conversion.fromAmountMinorUnits,
+                    conversion.fromCurrency,
+                    conversion.toCurrency,
+                    conversion.appliedRate,
+                )
+                if (expectedTo != conversion.toAmountMinorUnits) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} toAmount=${conversion.toAmountMinorUnits}" +
+                            " but the real math prices $expectedTo",
+                    )
+                }
+                val expectedFee = FxConversionMath.feeMinorUnits(conversion.fromAmountMinorUnits)
+                if (expectedFee != conversion.feeMinorUnits) {
+                    return Violation(
+                        name,
+                        "fx conversion ${conversion.id} fee=${conversion.feeMinorUnits}" +
+                            " but the real math charges $expectedFee",
+                    )
                 }
             }
             return null
@@ -608,6 +916,15 @@ object MoneyPathInvariants {
         auditCompleteness,
         sepaPaymentCompleteness,
         settlementCompleteness,
+        domesticPaymentCompleteness,
+        clearingCompleteness,
+        sctInstPaymentCompleteness,
+        cardAuthorizationCompleteness,
+        cardClearingConservation,
+        pensionContractCompleteness,
+        pensionReturnTimeliness,
+        fxConversionCompleteness,
+        fxMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,

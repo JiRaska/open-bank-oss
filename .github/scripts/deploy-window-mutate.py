@@ -109,20 +109,23 @@ def reselect(number: int, head: str, base: str) -> bool:
         prs = json.loads((root / "prs.json").read_text(encoding="utf-8"))
         commits = json.loads((root / "commits.json").read_text(encoding="utf-8"))
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-        decision_args = (int(time.time()), window.last_deploy_from_commits(commits),
+        decision_args = (int(time.time()), window.last_deploy_by_kind(commits),
                          int(os.getenv("DEPLOY_WINDOW_SECONDS", "1800")),
                          window.manual_deploy_head(event))
-        choice = window.flush(prs, *decision_args)
-        if choice is None and any(p.get("repair_priority") and p.get("state", "open") == "open"
-                                  for p in prs):
+        # The flush offers one candidate per deploy kind and the workflow falls through a
+        # refused kind, so the arm is valid iff it is STILL one of the same candidates.
+        def offered(candidates: list[dict]) -> bool:
+            return any(c["number"] == number and c.get("head_sha") == head for c in candidates)
+
+        choices = window.flush_candidates(prs, *decision_args)
+        if not choices and any(p.get("repair_priority") and p.get("state", "open") == "open"
+                               for p in prs):
             # A newly marked repair is an expected successful deferral, not a failure.
             # Prove it is the only selection difference; this counterfactual never arms.
             unprioritized = [{**p, "repair_priority": False} for p in prs]
-            without_repair = window.flush(unprioritized, *decision_args)
-            if (without_repair and without_repair["number"] == number
-                    and without_repair.get("head_sha") == head):
+            if offered(window.flush_candidates(unprioritized, *decision_args)):
                 return False
-        if not choice or choice["number"] != number or choice.get("head_sha") != head:
+        if not offered(choices):
             raise ValueError("deploy selection deferred or changed (window, repair, armed PR or head)")
         return True
 

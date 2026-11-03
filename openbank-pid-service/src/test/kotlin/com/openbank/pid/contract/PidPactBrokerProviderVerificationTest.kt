@@ -11,6 +11,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.ContactAttributes
@@ -85,7 +86,7 @@ import java.util.concurrent.TimeUnit
  * below; anything added to [PidPactFolderProviderVerificationTest] belongs here in the same commit.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.pid.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "ROLE_ADMIN"])
 @Provider("openbank-pid-service")
 @PactBroker
@@ -127,6 +128,12 @@ class PidPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        // Negative contract (ADR-0279 #3): an id the caller cannot resolve must answer 404, not 200
+        // and not 500. The recorded pact is happy-path only, so the boundary is pinned here.
+        io.restassured.RestAssured.given()
+            .get("/api/v1/parties/dddddddd-dddd-4ddd-8ddd-dddddddddddd")
+            .then()
+            .statusCode(404)
         context?.target = HttpTestTarget("localhost", testPort.toInt())
         context?.addStateChangeHandlers(this)
     }

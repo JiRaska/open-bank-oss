@@ -16,7 +16,7 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR 0002): doménu bez fr
         │     ┌───────────────────────┼───────────────────────┐    │
         │     ▼                       ▼                       ▼     │
         │ ConsentRepository    ConsentOutboxRepository ScaChallengeClient
-        │  (stav + outbox,      (dispatch → Kafka)      (REST → sca)  │
+        │  (stav + outbox,      (claim/mark řádků)      (REST → sca)  │
         │   jedna transakce)                                         │
         └─────┬───────────────────────┬───────────────────┬─────────┘
               ▼                        ▼                   ▼
@@ -40,7 +40,7 @@ Služba dodržuje hexagonální architekturu OpenBank (ADR 0002): doménu bez fr
 ### Aplikace (`application/`)
 
 - **Vstupní porty** (`port/in/ConsentUseCases.kt`): `CreateConsentUseCase`, `ActivateConsentUseCase`, `RevokeConsentUseCase`, `GetConsentUseCase`, `ValidateConsentUseCase` se svými command DTO.
-- **Výstupní porty** (`port/out/`): `ConsentRepository` (jeho `save(consent, event)` uloží změnu stavu i řádek outboxu v jedné transakci), `ScaChallengeClient` plus outbox porty (`ConsentOutboxRepository`, `ConsentOutboxEventPublisher`).
+- **Výstupní porty** (`port/out/`): `ConsentRepository` (jeho `save(consent, event)` uloží změnu stavu i řádek outboxu v jedné transakci), `ScaChallengeClient` a `ConsentOutboxRepository`. Dispatcher pro doručení do Kafky používá sdílený port `libs.persistence.outbox.OutboxEventPublisher`.
 - `usecase/ConsentService.kt` — jediná `@ApplicationScoped` implementace všech pěti vstupních portů. Rovněž defenzivně znovu aplikuje strop platnosti a definuje typované doménové výjimky (např. `ConsentNotFoundException`, `ConsentNotOwnedByPartyException`, `ConsentScaNotCompletedException`).
 
 ### Adaptéry (`infrastructure/`)
@@ -76,12 +76,12 @@ SCA klient je vyztužen `@Timeout(2000)`, `@Retry(maxRetries=2)` a `@CircuitBrea
 Události životního cyklu se zapisují transakčně se změnou souhlasu (vzor transakční outbox):
 
 ```
-ConsentService.publish(event)
-   → insert řádku do consent_outbox (status PENDING)
+ConsentService → ConsentRepository.save(consent, event)
+   → uložení souhlasu + řádku consent_outbox (status PENDING) v jedné transakci
             │
             ▼  každých 5s (ConsentOutboxDispatcher, @Scheduled, SKIP concurrent)
-   listProcessable(BATCH_SIZE=25)
-   → publishWithResilience(payload)        @Bulkhead @CircuitBreaker @Retry @Timeout(3000)
+   claimProcessable(BATCH_SIZE=25)
+   → publishWithResilience(entry)          @Bulkhead @CircuitBreaker @Retry @Timeout(3000)
        · úspěch  → markSent(eventId)
        · selhání → markFailed(eventId, error)   (attempt_count++, retry v dalším ticku)
    → Kafka topic openbank.consent.events
@@ -95,7 +95,8 @@ Dispatcher polyká chyby na nejvyšší úrovni, takže scheduler nikdy nespadne
 |---|---|---|
 | `CreateConsentUseCase` / `ActivateConsentUseCase` / `RevokeConsentUseCase` / `GetConsentUseCase` / `ValidateConsentUseCase` | in | `ConsentResource` |
 | `ConsentRepository` | out | `ConsentRepositoryImpl` (Panache reactive, PostgreSQL); `save(consent, event)` zapíše změnu stavu + řádek outboxu v jedné transakci (poté dispatcher → Kafka) |
-| `ConsentOutboxRepository` / `ConsentOutboxEventPublisher` | out | `ConsentOutboxRepositoryImpl` / `KafkaConsentOutboxEventPublisher` |
+| `ConsentOutboxRepository` | out | `ConsentOutboxRepositoryImpl` (přebírá a označuje řádky outboxu) |
+| sdílený `OutboxEventPublisher` | out | `KafkaConsentOutboxEventPublisher` (odesílá převzaté události do Kafky) |
 | `ScaChallengeClient` | out | `ResilientScaChallengeClient` → `sca-service` |
 | `PolicyDecisionPoint` | out | `OpaSidecarPolicyDecisionPoint` (OPA sidecar) |
 

@@ -4,6 +4,7 @@
 
 package com.openbank.notification.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
