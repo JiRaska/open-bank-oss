@@ -312,6 +312,18 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  - id: issue-kind-classifier-self-test
+    name: "issue kind classifier flags zero and several kinds (rules.yaml: issues.kinds, enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 11   # classifier fixture cases
+    rationale: "issue-kind.yml removes needs-kind wherever the classifier says ok; a classifier that cannot go red would silently clear the backlog's only kind-debt signal. Its fixtures hold missing, ambiguous, exempt and ok cases, and the real rules.yaml kind set must parse."
+    review_after: "2027-05-03"
+    selftest_exempt: "is-a-test-suite — the run is issue-kind.py --selftest"
+    run: |
+      python3 .github/scripts/issue-kind.py --selftest
+
   # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
   # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
   # to fail until every libs-runtime consumer has been rebuilt and deployed.
