@@ -200,6 +200,10 @@ def self_test() -> int:
             ["git", "-C", str(root), "config", "user.name", "gate-selftest"],
             check=True,
         )
+        subprocess.run(   # a signing global config must not reach the fixture (check-git-fixture-hermetic)
+            ["git", "-C", str(root), "config", "commit.gpgsign", "false"],
+            check=True,
+        )
         import os
 
         for name, status, days_ago, extra in fixtures:
