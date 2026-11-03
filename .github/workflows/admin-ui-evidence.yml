@@ -105,6 +105,11 @@ jobs:
         with:
           ref: ${{ needs.authorize-source.outputs.sha }}
           persist-credentials: false
+          # Pact provenance is `git log -1 -- pacts/<file>`: a depth-1 clone answers
+          # HEAD for every Pact, so the Broker would be asked about versions it never
+          # saw. Full history, no blobs, only for the dataset that needs it.
+          fetch-depth: ${{ matrix.dataset == 'test-intelligence' && '0' || '1' }}
+          filter: ${{ matrix.dataset == 'test-intelligence' && 'blob:none' || '' }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "26"
@@ -128,6 +133,12 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           # Enable only after the deployed Admin UI accepts the optional topology content key.
           OPENBANK_ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY: ${{ vars.ADMIN_UI_CONTENT_INCLUDE_CLUSTER_TOPOLOGY }}
+          # Read only by collect-quality-report.mjs for the per-Pact provider-verification
+          # verdict (same vars admin-ui-deploy.yml passes its build). Without them every
+          # contract row is published as `unknown` with no reason, however green the Broker.
+          PACT_BROKER_URL: ${{ matrix.dataset == 'test-intelligence' && vars.PACT_BROKER_URL || '' }}
+          PACT_BROKER_USERNAME: ${{ matrix.dataset == 'test-intelligence' && vars.PACT_BROKER_USERNAME || '' }}
+          PACT_BROKER_PASSWORD: ${{ matrix.dataset == 'test-intelligence' && secrets.PACT_BROKER_PASSWORD || '' }}
         run: |
           set -euo pipefail
           case "$DATASET" in
@@ -140,6 +151,10 @@ jobs:
               echo "EVIDENCE_FILE=$RUNNER_TEMP/readiness.json" >> "$GITHUB_ENV"
               ;;
             test-intelligence)
+              # collect-test-intelligence.mjs takes contract verdicts from this file; absent,
+              # it falls back to bare Pact files with no Broker verdict at all.
+              (cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "$GITHUB_WORKSPACE")
+              jq -e '.contracts | length > 0' openbank-admin-ui/quality-report.json >/dev/null
               python3 .github/scripts/collect-admin-ui-test-evidence.py --repo-root "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/test-intelligence.json"
               echo "EVIDENCE_FILE=$RUNNER_TEMP/test-intelligence.json" >> "$GITHUB_ENV"
               ;;
