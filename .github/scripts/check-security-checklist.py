@@ -579,61 +579,76 @@ def changed_files(base: str, head: str = "HEAD") -> list[str]:
     return [ln for ln in out.stdout.splitlines() if ln]
 
 
-FENCE = re.compile(r"^ {0,3}(?P<f>`{3,}|~{3,})")
+FENCE_ANY = re.compile(r"^[\s>]*(?:(?:[-*+]|\d+[.)])\s+)*(?P<f>`{3,}|~{3,})(?P<rest>.*)$")
+QUOTE_BOX = re.compile(r"^[ \t]*>[\s>]*(?:(?:[-*+]|\d+[.)])\s*)?\[[ xX]\]")
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 
 
-def strip_code(body: str) -> str:
-    """Blank out fenced and indented code so a `[x]` pasted into a code block is not a tick (#14684).
+def code_boxes(body: str) -> list[str]:
+    """Checkbox lines that sit in anything that COULD be code or a quote, under ANY reading.
 
-    Lines are replaced by empty lines (not removed) so the section structure is unchanged.
-    An unclosed fence runs to the end of the body, as in CommonMark. An indented block
-    (4+ spaces or a tab) only starts after a blank line and not inside a list item, so a
-    nested list under `- [ ]` stays a list.
+    Fail closed instead of parsing Markdown the way GitHub does (#14684). The gate cannot know
+    whether GitHub renders an ambiguous construct as code, so it refuses to guess: a box line is
+    reported if it is
+      * inside a fence under the strict CommonMark rule (opener char/length, bare closer), OR
+        under a loose rule where ANY fence-looking line toggles code on/off — the two disagree
+        exactly on malformed closers, and either one placing the box in code is a failure;
+      * a fence opened at ANY indentation or behind list markers / `>` prefixes;
+      * in a blockquote (`>` prefix), fenced or not;
+      * in an indented-code candidate (4+ spaces or a tab after a blank line, outside a list).
+    The scan starts at the top of the WHOLE body, so a fence opened before the heading (and
+    swallowing it) still covers the section; only lines inside the section are reported.
+    Over-reporting makes the author write a plain task list; under-reporting would let a pasted
+    `[x]` satisfy the control, so every doubt resolves to a failure.
     """
-    out: list[str] = []
-    fence: str | None = None
+    found: list[str] = []
+    sm = SECTION.search(body)
+    if not sm:
+        return found
+    rest = body[sm.end():]
+    nxt = NEXT_HEADING.search(rest)
+    lo, hi = sm.end(), sm.end() + (nxt.start() if nxt else len(rest))
+    pos = 0
+    strict: tuple[str, int] | None = None
+    loose = False
     in_indented = False
     in_list = False
     prev_blank = True
     for ln in body.split("\n"):
-        if fence is not None:
-            m = FENCE.match(ln)
-            if m and m.group("f")[0] == fence[0] and len(m.group("f")) >= len(fence) \
-                    and not ln.strip().lstrip(fence[0]):
-                fence = None
-            out.append("")
-            prev_blank = False
-            continue
-        m = FENCE.match(ln)
-        if m and not (m.group("f")[0] == "`" and "`" in ln[m.end():]):
-            fence, in_indented, in_list = m.group("f"), False, False
-            out.append("")
-            prev_blank = False
-            continue
+        at = pos
+        pos += len(ln) + 1
         blank = not ln.strip()
+        m = FENCE_ANY.match(ln)
+        is_fence = bool(m) and not (m.group("f")[0] == "`" and "`" in m.group("rest"))
+        if is_fence:
+            ch, n = m.group("f")[0], len(m.group("f"))
+            if strict is None:
+                strict = (ch, n)
+            elif strict[0] == ch and n >= strict[1] and not m.group("rest").strip():
+                strict = None
+            loose = not loose
+            in_indented = False
+            prev_blank = False
+            continue
+        is_box = bool(BOX.match(ln)) or bool(QUOTE_BOX.match(ln))
         indented = ln.startswith(("    ", "\t"))
         if in_indented and (blank or indented):
-            out.append("")
-            continue
-        in_indented = False
-        if indented and prev_blank and not in_list:
-            in_indented = True
-            out.append("")
-            continue
+            pass
+        else:
+            in_indented = indented and prev_blank and not in_list
+        if lo <= at < hi and is_box and (strict is not None or loose or in_indented or QUOTE_BOX.match(ln)):
+            found.append(ln.strip())
         if not blank:
             if LIST_ITEM.match(ln):
                 in_list = True
             elif not indented:
                 in_list = False
         prev_blank = blank
-        out.append(ln)
-    return "\n".join(out)
+    return found
 
 
 def unticked(body: str) -> tuple[str, list[str]] | None:
     """None = section absent; otherwise (section, [unticked box texts])."""
-    body = strip_code(body)
     m = SECTION.search(body)
     if not m:
         return None
@@ -722,6 +737,14 @@ def run(root: Path, body: str, base: str, enforce: bool,
         _write_summary(summary)
         return 1 if enforce else 0
     section, missing = res
+    in_code = code_boxes(body)
+    if in_code:
+        print("::error::checkbox inside a code block / quote — write the checklist as a plain task list")
+        for ln in in_code[:10]:
+            print(f"  {ln}")
+        summary.append("\nSecurity checklist has checkbox line(s) inside a code block / quote.")
+        _write_summary(summary)
+        return 1 if enforce else 0
     # Count distinct canonical categories, never arbitrary checked boxes or duplicate labels.
     # Auto-answered categories may remain unticked, but cannot replace an omitted question.
     present = {item_of(b.group("text").strip()) for b in BOX.finditer(section)}
@@ -942,22 +965,52 @@ def self_test() -> int:
     if r3 is None or r3[1]:
         print("self-test FAIL: box in the next section leaked into the check"); bad += 1
     ticked_section = "\n".join(b.group(0) for b in BOX.finditer(ticked))
-    # Ticks inside fenced or indented code are not ticks: a pasted, pre-ticked template in a code
-    # block must not satisfy the gate (#14684). Each must reach the gate as a body with NO boxes.
-    for label, wrapped in [
+    # FAIL CLOSED on any box inside code or a quote (#14684). We do not try to parse Markdown the
+    # way GitHub does: for every ambiguous construct the answer is "a box sits in something that
+    # could be code", and that fails the gate. Over-stripping therefore hides nothing (a stripped
+    # box is a failure), and under-stripping is moot (any fence/quote around a box is a failure).
+    def code_verdict(body: str) -> bool:
+        return bool(code_boxes(body))
+
+    tk = ticked_section.splitlines()
+    must_fail = [
         ("``` fence", "```\n" + ticked_section + "\n```"),
         ("~~~ fence", "~~~\n" + ticked_section + "\n~~~"),
         ("unclosed fence", "```md\n" + ticked_section),
-        ("4-space indented block", "\n" + "\n".join("    " + ln for ln in ticked_section.splitlines())),
-        ("tab indented block", "\n" + "\n".join("\t" + ln for ln in ticked_section.splitlines())),
-    ]:
-        rc_ = unticked("## Security checklist\n" + wrapped + "\n")
-        if rc_ is None or BOX.search(rc_[0]):
-            print(f"self-test FAIL: ticks inside a code block were counted ({label})"); bad += 1
-    # Controls: real ticks around a fence still count, and a nested list item is not code.
-    mixed = unticked("## Security checklist\n```\n- [ ] fake\n```\n- [ ] real\n  - [x] nested\n\n    - [x] deep\n")
-    if mixed is None or mixed[1] != ["real"] or len(list(BOX.finditer(mixed[0]))) != 3:
-        print("self-test FAIL: code-block stripping broke ordinary boxes"); bad += 1
+        ("4-space indented block", "\n" + "\n".join("    " + ln for ln in tk)),
+        ("tab indented block", "\n" + "\n".join("\t" + ln for ln in tk)),
+        ("fence inside a list item", "- item\n  ```\n" + "\n".join("  " + ln for ln in tk) + "\n  ```"),
+        ("fence directly on a list marker", "- ```\n" + ticked_section + "\n  ```"),
+        ("fence indented 4 spaces", "    ```\n" + "\n".join("    " + ln for ln in tk) + "\n    ```"),
+        ("fence indented 8 spaces", "        ~~~\n" + ticked_section + "\n        ~~~"),
+        ("blockquoted fence", "> ```\n" + "\n".join("> " + ln for ln in tk) + "\n> ```"),
+        ("blockquoted fence, bare box lines", "> ```\n" + ticked_section + "\n> ```"),
+        ("blockquoted box", "\n".join("> " + ln for ln in tk)),
+        ("nested blockquoted box", ">> - [x] Auth / crypto"),
+        ("~~~ fence closed by a mismatched fence", "~~~\n" + ticked_section + "\n```"),
+        ("~~~~ fence closed by a shorter fence", "~~~~\n" + ticked_section + "\n~~~"),
+        ("fence closer with trailing text", "```\n" + ticked_section + "\n``` x"),
+    ]
+    for label, wrapped in must_fail:
+        if not code_verdict("## Security checklist\n" + wrapped + "\n"):
+            print(f"self-test FAIL: a box inside code/quote did not fail closed ({label})"); bad += 1
+    # Must-PASS: ordinary and nested task lists, and fences OUTSIDE the checklist section.
+    must_pass = [
+        ("plain ticked", ticked_section),
+        ("plain unticked", "- [ ] real"),
+        ("nested list", "- [ ] real\n  - [x] nested\n\n    - [x] deep\n- [x] after"),
+        ("inline code on a box line", "- [x] ran `git log` and ```x``` sweep"),
+    ]
+    for label, text in must_pass:
+        if code_verdict("## Security checklist\n" + text + "\n"):
+            print(f"self-test FAIL: an ordinary task list was rejected ({label})"); bad += 1
+    outside = ("## Summary\n```\n- [x] pasted log\n```\n> - [x] quoted elsewhere\n\n"
+               "## Security checklist\n" + ticked_section + "\n\n## Notes\n~~~\n- [x] later\n~~~\n")
+    if code_verdict(outside):
+        print("self-test FAIL: code/quote OUTSIDE the checklist section failed the gate"); bad += 1
+    r_out = unticked(outside)
+    if r_out is None or r_out[1]:
+        print("self-test FAIL: ticked checklist beside outside-section code was flagged"); bad += 1
     # ── the release-derived exclusion, both directions (#9230) ───────────────────────────────
     #
     # The must-FAIL half is the load-bearing one: an exclusion that also let a real money-path
@@ -1029,6 +1082,12 @@ def self_test() -> int:
     for label, body in incomplete:
         if fixture([f"{svc}/src/main/kotlin/Money.kt"], body) == 0:
             print(f"self-test FAIL: incomplete canonical checklist accepted ({label})"); bad += 1
+    # End to end through run(): a fully ticked checklist that sits in a fence / quote must be a
+    # FAILURE on a money-path diff, not a pass (#14684). Without the hook in run() these exit 0.
+    for label, wrapped in [("fenced", "```\n" + ticked + "\n```"),
+                           ("blockquoted", "\n".join("> " + ln for ln in ticked.splitlines()))]:
+        if fixture([f"{svc}/src/main/kotlin/Money.kt"], wrapped) == 0:
+            print(f"self-test FAIL: money-path run() passed a {label} checklist"); bad += 1
     if fixture([f"{svc}/src/main/kotlin/Money.kt"], ticked) != 0:
         print("self-test FAIL: complete canonical checklist rejected"); bad += 1
     complete_unknown = ticked.replace("## Security checklist", "## Security checklist\n- [ ] Unknown human question")
