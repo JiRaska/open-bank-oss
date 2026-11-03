@@ -3,9 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.lock.ClusterLock
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

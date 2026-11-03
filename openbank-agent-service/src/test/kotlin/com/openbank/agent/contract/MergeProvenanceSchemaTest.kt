@@ -8,8 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -20,7 +21,11 @@ import java.io.File
 
 /** Validate native OpenAPI 3.1 null unions; 3.0's nullable flag is ignored by JSON Schema. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class MergeProvenanceSchemaTest {
     private val mapper = ObjectMapper()
     private val document = Yaml().load<Map<String, Any>>(File("src/main/resources/openapi.yaml").readText())

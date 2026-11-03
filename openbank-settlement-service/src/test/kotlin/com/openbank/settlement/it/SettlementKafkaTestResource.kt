@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.apache.kafka.clients.admin.Admin
@@ -13,7 +14,7 @@ import org.testcontainers.utility.DockerImageName
 import java.util.concurrent.TimeUnit
 
 class SettlementKafkaTestResource : QuarkusTestResourceLifecycleManager {
-    private val postgres = PostgresTestResource()
+    private val postgres = PostgresTestResource().apply { init(mapOf("db" to "openbank_settlement_it")) }
     private var broker: RedpandaContainer? = null
 
     private var started = false

@@ -4,11 +4,12 @@
 
 package com.openbank.incentive.integration
 
-import com.openbank.incentive.it.IncentivePostgresTestResource
 import com.openbank.incentive.it.TraceContractProfile
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -39,7 +40,10 @@ import java.time.Instant
  */
 @QuarkusTest
 @QuarkusTestResource(IncentiveTraceContractIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(IncentivePostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_incentive_it")],
+)
 @TestProfile(TraceContractProfile::class)
 class IncentiveTraceContractIT {
 

@@ -4,10 +4,10 @@
 package com.openbank.dispute.integration
 
 import com.openbank.dispute.infrastructure.persistence.repository.DisputeOutboxRepositoryImpl
-import com.openbank.dispute.it.PostgresTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

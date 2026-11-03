@@ -40,6 +40,7 @@ Peněžní částky jsou `NUMERIC(20,2)` se samostatnou `CHAR(3)` ISO-4217 `curr
 | **V2** | `V2__installment_interest_accrual.sql` | Přidá `installment.interest_accrued` + `accrued_at`; parciální `idx_installment_accruable` (servicing smyčka, ADR-0028 Fáze 2) |
 | **V3** | `V3__hibernate_sequences.sql` | `CREATE SEQUENCE lending_outbox_seq INCREMENT BY 50` — Panache alokace id potřebuje `<table>_seq`; CREATE TABLE vytvořilo jen `<table>_id_seq` a generování je `none`. Rollback: `DROP SEQUENCE lending_outbox_seq;` |
 | **V4** | `V4__loan_provisioning.sql` | Přidá `loan_provisioning` (historie IFRS 9 stage/ECL) + `idx_loan_provisioning_loan_period` (ADR-0028 Fáze 3). Rollback: `DROP TABLE loan_provisioning;` |
+| **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Přesměruje default `lending_outbox.id` na `lending_outbox_seq` — nativní inserty (`loan.interest_accrued`) braly id z BIGSERIAL sekvence od 1 a kolidovaly s poolovanými id z Panache entity cesty (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
 
 **Pravidlo (CLAUDE.md):** nikdy needituj migraci po jejím nasazení do živé DB — přidej novou verzovanou migraci. `validate-on-migrate` je vypnuto; `QUARKUS_FLYWAY_REPAIR_AT_START` použij jen jako dočasné zotavovací opatření.
 
