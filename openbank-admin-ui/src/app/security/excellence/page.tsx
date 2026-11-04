@@ -324,13 +324,17 @@ async function fetchFuzz(snap: KpisSnapshot | null): Promise<Patch> {
   // Auth-blocked operations ran no handler logic: say so next to the green, never fold them in.
   const notRun = z.totalNotRun ?? 0
   const blockedSvc = z.authBlockedServices ?? 0
-  const notRunCs = notRun || blockedSvc ? ` · ${notRun} operací neproběhlo (jen 401/403)${blockedSvc ? `, ${blockedSvc} služeb zcela blokováno` : ''}` : ''
-  const notRunEn = notRun || blockedSvc ? ` · ${notRun} ops not run (401/403 only)${blockedSvc ? `, ${blockedSvc} services fully auth-blocked` : ''}` : ''
+  const notRunNote = notRun || blockedSvc
+    ? {
+        cs: ` · ${notRun} operací neproběhlo (jen 401/403)${blockedSvc ? `, ${blockedSvc} služeb zcela blokováno` : ''}`,
+        en: ` · ${notRun} ops not run (401/403 only)${blockedSvc ? `, ${blockedSvc} services fully auth-blocked` : ''}`,
+      }
+    : { cs: '', en: '' }
   return {
     status: z.coveragePct < 100 ? 'degraded' : 'ok',
     score: z.coveragePct,
-    metricCs: `${z.tested}/${z.inScope} služeb profuzzováno · ${z.totalExercised} operací${notRunCs}${z.excludedCount ? ` · ${z.excludedCount} vyjmuto` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
-    metricEn: `${z.tested}/${z.inScope} services fuzzed · ${z.totalExercised} ops${notRunEn}${z.excludedCount ? ` · ${z.excludedCount} excluded` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+    metricCs: `${z.tested}/${z.inScope} služeb profuzzováno · ${z.totalExercised} operací${notRunNote.cs}${z.excludedCount ? ` · ${z.excludedCount} vyjmuto` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
+    metricEn: `${z.tested}/${z.inScope} services fuzzed · ${z.totalExercised} ops${notRunNote.en}${z.excludedCount ? ` · ${z.excludedCount} excluded` : ''}${z.runDate ? ` · ${z.runDate}` : ''}`,
   }
 }
 
