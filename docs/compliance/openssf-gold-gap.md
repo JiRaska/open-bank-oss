@@ -76,7 +76,7 @@ cannot verify · ❌ not met.
 | `hardened_site` | ✅ | Measured live 2026-08-06: both `https://open-bank.tech` and `https://admin.open-bank.tech` return `strict-transport-security: max-age=63072000; includeSubDomains; preload`, a `content-security-policy` with `object-src 'none'` and `base-uri 'self'`, and an `x-frame-options` header |
 | `security_review` (≤5y) | ✅ | External web pentest of `admin.open-bank.tech`, 2026-06-10, recorded in `docs/adr/0080-pentest-remediation-p0-p2.md`. Note that ADR's own `delivery-status: partial` — the *review* is what this criterion asks for, remediation is tracked separately |
 | `hardening` | ✅ | Measured across `openbank-infra/gitops/`: 64 files declaring `kind: NetworkPolicy` (default-deny fleet-wide), 102 files setting `seccompProfile`, 42 namespaces with `pod-security.kubernetes.io/enforce: restricted`, plus per-service OPA bundles under `openbank-infra/gitops/components/`. Falco is deployed (its namespace is live in the cluster) |
-| `dynamic_analysis` | ✅ | `.github/workflows/dast-zap-baseline.yml` (ZAP baseline), `.github/workflows/api-fuzz.yml` + `api-fuzz-authenticated.yml` (schemathesis), `.clusterfuzzlite/` + `.github/workflows/cflite-pr.yml` (ClusterFuzzLite) |
+| `dynamic_analysis` | ✅ | `.github/workflows/dast-zap-baseline.yml` (ZAP baseline), `.github/workflows/api-fuzz.yml` (schemathesis, two passes: auth-enforcement and handler surface), `.clusterfuzzlite/` + `.github/workflows/cflite-pr.yml` (ClusterFuzzLite) |
 
 ## What was measured, and what was not
 

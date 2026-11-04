@@ -13,6 +13,8 @@ plus the prepare step's scope file into ONE machine-readable verdict:
   * excluded  — services skipped OUT LOUD, with the reason (never silently dropped)
   * tested    — in-scope services where some pass exercised handler logic (exercised > 0)
   * auth-blocked — every operation answered only 401/403 in every pass: NOT RUN
+  * notRun    — per service, an UPPER BOUND on operations that never got past 401/403
+                (the authz-OFF pass's auth-blocked count; ids are not reported)
   * per-service exercised/authBlocked so the console can say what a green is worth
 
 A matrix leg that failed before writing an ops record shows up as `no-evidence` —
@@ -61,6 +63,10 @@ def aggregate(artifacts: Path, scope_file: Path, run_url: str) -> dict:
         # Operations no pass ever got past 401/403 ran NO handler logic: they are NOT RUN,
         # never passed. With an OFF record that is its residual auth_blocked; without one,
         # every ON-blocked operation is unexercised.
+        # notRun is an UPPER BOUND, not an exact set: it is the OFF pass's auth-blocked COUNT
+        # (schemathesis reports a count, not the operation ids), and an operation blocked in OFF
+        # may still have reached handler logic in ON (an anonymous-grant endpoint). It can
+        # over-state what was not run, never under-state it.
         if "authz OFF" in by_lane:
             not_run = num("authz OFF", "auth_blocked")
         else:

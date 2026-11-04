@@ -8,8 +8,8 @@
 # today — `dr-restore-verify.yml` is the only one that tries and has never run. Putting cluster
 # read credentials into Actions is a decision for the owner, not something a workflow should
 # quietly assume. So this runs on demand and prints its findings; promote it to a `schedule:`
-# once (and only once) that credential question is answered, exactly as the file header of
-# api-fuzz-authenticated.yml intends for itself.
+# once (and only once) that credential question is answered — the same dispatch-first rule the
+# former api-fuzz-authenticated.yml followed (folded into api-fuzz.yml by #14762).
 #
 # The COMPARISON half needs none of that and is already enforced on every PR as the gate
 # `runtime-conformance-comparators` — it is a pure function of (snapshot, repo) with a 22-case

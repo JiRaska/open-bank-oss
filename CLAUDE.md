@@ -763,7 +763,7 @@ fire from *outside* it, so they stay here:
 - **Parallel agents land on the SAME artifact routinely — "what else touched this file today" is
   as load-bearing a question as "are the checks green".** Three instances on 2026-08-01 alone:
   `check-probe-port-listener.py` vs `check-probe-port-has-listener.py` (#2984/#3009),
-  `security.yml` (#3103/#3079), `api-fuzz-authenticated.yml` (#3024/#3079). None was visible to
+  `security.yml` (#3103/#3079), `api-fuzz-authenticated.yml` (#3024/#3079; that workflow has since been folded into `api-fuzz.yml`). None was visible to
   CI — #3009 was fully green — and each was found only by comparing CONTENT:
   `git diff origin/main origin/<branch> -- <file>`, or a shasum of the file on both sides.
   The three outcomes differ, so measure before deciding: identical content (#3103's `security.yml`
