@@ -10,6 +10,8 @@ import io.quarkus.arc.Arc
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.URLClassLoader
@@ -23,7 +25,18 @@ import java.util.concurrent.atomic.AtomicReference
     value = PostgresRedpandaTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_party_fuzz_it")],
 )
+@TestProfile(PartyFuzzRegressionIT.FreshApplication::class)
 class PartyFuzzRegressionIT {
+
+    /**
+     * A profile of its own makes Quarkus boot a FRESH application for this class, so no earlier
+     * test in the shared JVM can have created [FlagdProducer] already. Without it the test could
+     * pass vacuously: the bean would be handed back ready-made and the foreign-loader creation
+     * path never exercised. With it, only `@Startup` can have created the bean before this runs.
+     */
+    class FreshApplication : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf("openbank.fuzz-regression.profile" to "fresh")
+    }
 
     /**
      * GET /api/v1/parties and /parties/search answered 500 `SRCFG00015: No configuration is
