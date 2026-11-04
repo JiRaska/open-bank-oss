@@ -243,7 +243,7 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
         return 0
     allowed, why = revert_allowed(root, base, repo, number, head_ref, labels_of)
     if allowed:
-        for path, image, old, new, verdict in bad:
+        for _path, image, old, new, verdict in bad:
             print(f"::notice::explicit revert: {image} {old[:8]} -> {new[:8]} is {verdict} ({why})")
         return 0
     for path, image, old, new, verdict in bad:
@@ -348,7 +348,7 @@ def self_test() -> int:
         for status, want in (("ahead", OK), ("identical", OK), ("behind", DOWNGRADE), ("diverged", DIVERGED), ("garbage", UNKNOWN)):
             fake = subprocess.CompletedProcess([], 0, stdout=status + "\n", stderr="")
             real_run = subprocess.run
-            subprocess.run = lambda *a, **k: fake  # type: ignore[assignment]
+            subprocess.run = lambda *a, _f=fake, **k: _f  # type: ignore[assignment]
             try:
                 check(f"compare API status {status!r} -> {want}", ancestry_api("o/r", "a" * 8, "b" * 8) == want)
             finally:
