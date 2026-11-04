@@ -1120,7 +1120,8 @@ PYSTUB
   # verify. `if: always()` would close that fallback while the replacement is unarmable. The
   # step must (a) come after "Verify GitOps image source freshness" and (b) carry no
   # always()/failure()/cancelled() override of the implicit success() gate.
-  local wf="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../workflows/auto-deploy.yml"
+  local wf
+  wf="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../workflows/auto-deploy.yml"
   if ! python3 - "$wf" <<'PY'
 import re, sys
 src = open(sys.argv[1], encoding="utf-8").read()
