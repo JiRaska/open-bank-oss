@@ -42,7 +42,9 @@ jobs:
   build:
     name: ${{ inputs.service }} (build)
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+      && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini'
+      || 'ubuntu-latest') }}
     timeout-minutes: 45
     permissions:
       contents: read
