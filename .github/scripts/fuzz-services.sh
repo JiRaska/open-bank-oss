@@ -116,7 +116,7 @@
 # Services for default datasource as it has explicit configuration"). What was left was an
 # observability stack and a Kafka broker, pulled on every one of ~26 jobs, for nothing.
 #
-# The identical fix landed on the AUTHENTICATED lane on 2026-08-14 (#4703, api-fuzz-authenticated.yml)
+# The identical fix landed on the former AUTHENTICATED lane on 2026-08-14 (#4703, api-fuzz-authenticated.yml, since folded into api-fuzz.yml)
 # and was never carried across to this one; the two lanes had drifted for eighteen days with the
 # unauthenticated one — the surface reachable without a credential — reporting nothing at all.
 #
