@@ -136,6 +136,20 @@ gates:
     run: |
       python3 .github/scripts/check-trace-contract-evidence.py
 
+  - id: test-layer-applicability
+    name: "Test-layer applicability register names real components, reasons every exclusion and lists every money-path service (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    min_subjects: 40   # 61 include/exclude entries on 2026-10-31
+    budget_seconds: 10
+    rationale: "openbank-libs/governance/test-layer-applicability.yaml is the denominator of the Test Intelligence e2e/trace/simulation layers, so a component it leaves out reads as not applicable rather than missing. That is where a missing test can be laundered: an unlisted money-path service, a misspelled component, or an exclusion with no reason. The collector only warns; this gate fails, and its self-test feeds each of those shapes and must see findings."
+    review_after: "2027-10-31"
+    selftest: python3 .github/scripts/check-test-layer-applicability.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-test-layer-applicability.py"]
+    run: |
+      python3 .github/scripts/check-test-layer-applicability.py
+
   - id: pitest-threshold-single-source
     name: "pitest.yml reads one mutation threshold in every lane (enforced)"
     group: lint
@@ -5032,7 +5046,9 @@ gates:
     mode: enforced
     rationale: "Individual platform job results avoid both rate-limited REST rosters and stale artifact successes across partial reruns; generated callers must cover every canonical module and preserve bounded lanes."
     review_after: "2027-04-23"
-    budget_seconds: 10
+    # Re-derived 2026-11-02 (#14370) per derive-gate-observability-budgets.py, ceil(max(p95*3,
+    # max*1.5, 5)): p95 ~9.8s, max 10.1s over 24 runs. 10 failed on budget alone with passing content.
+    budget_seconds: 30
     min_subjects: 83
     selftest: |
       python3 .github/scripts/generate-service-ci-jobs.py --self-test

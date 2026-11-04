@@ -4,6 +4,8 @@
 
 package com.openbank.simulation.invariants
 
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
+import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.SpendReservation
@@ -15,6 +17,9 @@ import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.pension.domain.model.ContractStatus
+import com.openbank.pension.domain.statecontribution.ReturnStatus
 import com.openbank.sdd.domain.lifecycle.MandateLifecycle
 import com.openbank.sdd.domain.model.MandateStatus
 import com.openbank.sdd.domain.model.SequenceType
@@ -23,6 +28,7 @@ import com.openbank.sepainstant.domain.model.SctInstStatus
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.model.DelegationSpendBook
+import com.openbank.simulation.model.ScreeningRecord
 import com.openbank.simulation.runner.World
 import com.openbank.standingorder.domain.model.Frequency
 import com.openbank.standingorder.domain.model.StandingOrder
@@ -32,6 +38,7 @@ import com.openbank.transaction.domain.saga.SagaState
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -259,6 +266,59 @@ object MoneyPathInvariants {
      * PENDING (screening hold that never decided) or PROCESSING (scheme submission that never
      * settled) is the silent money-in-flight defect this invariant exists to surface.
      */
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `PensionContract`
+     * driven by [com.openbank.simulation.scenario.PensionLifecycleScenario] must be either a
+     * legitimately open contract (ACTIVE / SUSPENDED) or a terminal one (PAID_OUT /
+     * TRANSFERRED_OUT / CLOSED) once a step has fully settled — never left DRAFT (never
+     * submitted), PENDING_ACTIVATION (submitted, never funded) or TERMINATING (exit requested,
+     * never concluded). A contract parked mid-flight is the silent money-in-flight defect this
+     * invariant exists to surface; the open/terminal sets mirror the REAL
+     * `ContractStatus` transition table.
+     */
+    val pensionContractCompleteness = object : Invariant {
+        private val settled = setOf(
+            ContractStatus.ACTIVE,
+            ContractStatus.SUSPENDED,
+            ContractStatus.PAID_OUT,
+            ContractStatus.TRANSFERRED_OUT,
+            ContractStatus.CLOSED,
+        )
+
+        override val name = "pension-contract-completeness"
+        override fun check(world: World): Violation? {
+            world.pensionContracts.forEach { contract ->
+                if (contract.status !in settled) {
+                    return Violation(name, "pension contract ${contract.id} stuck in ${contract.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every statutory
+     * `StateContributionReturn` obligation must be SETTLED once its real statutory deadline has
+     * passed — the deadline the scenario computed with the REAL `CzStateContributionCalendar`
+     * (ZDPS §18). A return left DUE/REPORTED/CONFIRMED past `dueBy` is a missed statutory
+     * obligation to the agency: real money the platform owes with a regulatory clock on it.
+     */
+    val pensionReturnTimeliness = object : Invariant {
+        override val name = "pension-return-timeliness"
+        override fun check(world: World): Violation? {
+            val today = world.context.clock.instant().atZone(ZoneOffset.UTC).toLocalDate()
+            world.pensionReturns.forEach { obligation ->
+                if (obligation.status != ReturnStatus.SETTLED && obligation.overdue(today)) {
+                    return Violation(
+                        name,
+                        "pension return ${obligation.id} ${obligation.status} past dueBy ${obligation.dueBy}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
     val sctInstPaymentCompleteness = object : Invariant {
         private val terminal = setOf(
             SctInstStatus.SETTLED,
@@ -272,6 +332,75 @@ object MoneyPathInvariants {
             world.sctInstPayments.forEach { payment ->
                 if (payment.status !in terminal) {
                     return Violation(name, "sct-inst payment ${payment.id} stuck in ${payment.status}")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): every `CardAuthorization`
+     * driven by [com.openbank.simulation.scenario.CardClearingScenario] must be internally
+     * consistent and never a stale hold — (1) `clearedAmountMinorUnits` never exceeds the
+     * authorised amount, (2) a decline carries its reason exactly when the status is DECLINED
+     * (the status exists to keep a refused customer answerable from the row), and (3) no hold
+     * outlives its own `expiresAt`: an APPROVED / PARTIALLY_CLEARED authorisation whose expiry
+     * has passed is a permanent freeze on money the customer cannot spend — the silent
+     * money-in-flight defect this invariant exists to surface. A hold still inside its window
+     * is legitimate and passes.
+     */
+    val cardAuthorizationCompleteness = object : Invariant {
+        override val name = "card-authorization-completeness"
+        override fun check(world: World): Violation? {
+            val now = world.context.clock.instant()
+            world.cardAuthorizations.forEach { authorization ->
+                if (authorization.clearedAmountMinorUnits > authorization.amountMinorUnits) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} cleared ${authorization.clearedAmountMinorUnits}" +
+                            " of ${authorization.amountMinorUnits}",
+                    )
+                }
+                if ((authorization.status == AuthorizationStatus.DECLINED) != (authorization.declineReason != null)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} status ${authorization.status} with declineReason" +
+                            " ${authorization.declineReason}",
+                    )
+                }
+                if (authorization.status.holdsFunds && now.isAfter(authorization.expiresAt)) {
+                    return Violation(
+                        name,
+                        "card ${authorization.id} holds ${authorization.heldAmountMinorUnits}" +
+                            " past its expiresAt ${authorization.expiresAt}",
+                    )
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #14366 (Test Intelligence simulation gap, money path): per authorisation, the Σ of
+     * presentment amounts the scenario posted through the REAL `AuthorizationLifecycle.clear`
+     * must equal the authorisation's own `clearedAmountMinorUnits` — a clearing that posted
+     * twice, or a presentment the aggregate silently lost, breaks the equality for exactly the
+     * authorisation it belongs to. Posted amounts are keyed per authorisation (same convention
+     * as [swiftMoneyConservation]), so a reversal or an unrelated posting cannot mask a gap.
+     */
+    val cardClearingConservation = object : Invariant {
+        override val name = "card-clearing-conservation"
+        override fun check(world: World): Violation? {
+            world.cardClearings.postedIds().forEach { authorizationId ->
+                val authorization: CardAuthorization? =
+                    world.cardAuthorizations.firstOrNull { it.id == authorizationId }
+                val posted = world.cardClearings.postedAmount(authorizationId)
+                if (authorization == null || authorization.clearedAmountMinorUnits != posted) {
+                    return Violation(
+                        name,
+                        "card $authorizationId posted $posted but cleared" +
+                            " ${authorization?.clearedAmountMinorUnits ?: "unknown authorization"}",
+                    )
                 }
             }
             return null
@@ -423,6 +552,60 @@ object MoneyPathInvariants {
     }
 
     /**
+     * ADR-0032 §B: the real `ScreeningPolicy`'s verdict over a conversion's screened names and the
+     * payment path's disposition of that conversion must never disagree. A BLOCK must refuse and
+     * never execute; a REVIEW alert must be resolved exactly once — false positive (released,
+     * then executed) or confirmed hit (escalated, refused, never executed) — never silently
+     * dropped, never double-resolved; a CLEAR must execute and never be refused. A conversion that
+     * executed under a BLOCK, or a REVIEW alert that vanished without a resolution, is exactly the
+     * class of defect a sanctions-path audit exists to catch.
+     */
+    val screeningDispositionIntegrity = object : Invariant {
+        override val name = "screening-disposition-integrity"
+        override fun check(world: World): Violation? {
+            world.screening.conversions().forEach { conversionId ->
+                val r = world.screening.record(conversionId) ?: return@forEach
+                dispositionDisagreement(r)?.let { detail ->
+                    return Violation(name, "conversion $conversionId: $detail")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * The per-conversion half of [screeningDispositionIntegrity] — extracted so `check` stays
+     * within the nesting budget. Returns the first disagreement between the decision and the
+     * disposition, or null when they match.
+     */
+    private fun dispositionDisagreement(r: ScreeningRecord): String? = when (r.decision) {
+        ScreeningDecision.BLOCK -> when {
+            r.executed -> "BLOCK but executed"
+            !r.refused -> "BLOCK never refused"
+            else -> null
+        }
+        ScreeningDecision.REVIEW -> reviewDisagreement(r)
+        ScreeningDecision.CLEAR -> when {
+            r.refused -> "CLEAR but refused"
+            !r.executed -> "CLEAR but never executed"
+            else -> null
+        }
+    }
+
+    private fun reviewDisagreement(r: ScreeningRecord): String? = when {
+        r.resolutionCount == 0 -> "REVIEW alert silently dropped"
+        r.resolutionCount > 1 -> "REVIEW alert resolved ${r.resolutionCount} times"
+        !r.reviewWasOpened -> "REVIEW was resolved without ever opening an alert"
+        r.reviewOpen || !r.reviewResolved ->
+            "REVIEW is not settled (open=${r.reviewOpen}, resolved=${r.reviewResolved})"
+        r.reviewEscalatedToBlock && (!r.refused || r.executed) ->
+            "escalated hit must refuse and never execute (refused=${r.refused}, executed=${r.executed})"
+        !r.reviewEscalatedToBlock && r.refused -> "false positive released but refused"
+        !r.reviewEscalatedToBlock && !r.executed -> "false positive released but never executed"
+        else -> null
+    }
+
+    /**
      * ADR-0035 §E / ADR-0078, issue #667: a statement period is persisted *if and only if* the
      * real `ReconciliationPolicy` decided `Reconciled` for that close attempt — never on a
      * `Mismatch` (no partial, self-inconsistent legal document is ever produced) and never skipped
@@ -436,6 +619,116 @@ object MoneyPathInvariants {
                 val persisted = world.statementCloses.wasPersisted(attempt)
                 if (reconciled != persisted) {
                     return Violation(name, "close attempt $attempt: reconciled=$reconciled but persisted=$persisted")
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Issue #12839 follow-up (Refs #12830): the standing-order execution conservation laws, per
+     * order, checked once a step has fully settled (same "settled" semantics as
+     * [billingFeeConservation]):
+     *
+     * 1. `Σ posted == |confirmed dates| × order amount` — every confirmed execution date produced
+     *    exactly one payment journal of exactly the order amount, and no other execution did. A
+     *    replayed/duplicated due event, or a failure that moved money anyway, breaks the equality
+     *    (the standing-order analogue of ADR-0143's fee conservation);
+     * 2. ONCE discipline: a one-off order attempts at most ONE distinct execution date (its date
+     *    never advances), and once its single execution is confirmed the order must be COMPLETED
+     *    — the exact lifecycle the domain aggregate's `confirmExecution` guarantees and the
+     *    service layer regressed on in issue #12839 (a confirmed ONCE order left ACTIVE is
+     *    re-due forever). A failed-then-retried ONCE order stays within law 2 as long as the
+     *    retry replays the SAME date (idempotent) rather than minting a new one.
+     */
+    val standingOrderExecutionConservation = object : Invariant {
+        override val name = "standing-order-execution-conservation"
+        override fun check(world: World): Violation? {
+            world.standingOrderExecutions.all().forEach { order ->
+                val amount = BigDecimal(order.amountMinorUnits).movePointLeft(2)
+                val view = world.standingOrderExecutions.view(order.id)
+                val expected = amount.multiply(BigDecimal.valueOf(view.confirmedDates.size.toLong()))
+                if (view.postedAmount.compareTo(expected) != 0) {
+                    return Violation(
+                        name,
+                        "order ${order.id} posted=${view.postedAmount} but " +
+                            "${view.confirmedDates.size} confirmed executions of $amount",
+                    )
+                }
+                if (order.frequency == Frequency.ONCE) {
+                    if (view.attemptedDates.size > 1) {
+                        return Violation(
+                            name,
+                            "ONCE order ${order.id} attempted on more than one date: ${view.attemptedDates}",
+                        )
+                    }
+                    if (view.confirmedDates.isNotEmpty() && order.status != StandingOrderStatus.COMPLETED) {
+                        return Violation(
+                            name,
+                            "ONCE order ${order.id} confirmed its single execution but is ${order.status}, " +
+                                "expected COMPLETED",
+                        )
+                    }
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * The card-authorization hold conservation laws, per authorization, checked once a step has
+     * fully settled (the expiry task fires in the drain first — same "settled" semantics as
+     * [billingFeeConservation]):
+     *
+     * 1. no authorization may still [hold funds][com.openbank.cardprocessing.domain.model.AuthorizationStatus.holdsFunds]
+     *    — a hold that never reaches clearing, reversal or expiry is a permanent freeze the
+     *    customer cannot spend and cannot see released;
+     * 2. `cleared == posted` — every presentment the policy accepted landed exactly once as a
+     *    ledger journal: a dropped capture posting (money the scheme thinks it collected but
+     *    the ledger never received) and a replayed one (double-posted on a re-delivered
+     *    presentment) both break the equality, and conservation-of-money alone cannot see
+     *    either, because each journal still balances internally;
+     * 3. `cleared + released == authorized` — a hold is fully accounted for: what was not
+     *    captured must have been released back to available balance, no less (silently frozen
+     *    funds) and no more (money freed while the scheme can still present against it).
+     */
+    val cardAuthorizationConservation = object : Invariant {
+        override val name = "card-authorization-conservation"
+        override fun check(world: World): Violation? {
+            world.cardAuths.all().forEach { authorization ->
+                if (authorization.status.holdsFunds) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} still holds funds in ${authorization.status}",
+                    )
+                }
+                val cleared = authorization.clearedAmountMinorUnits
+                val posted = world.cardAuths.postedMinorUnits(authorization.id)
+                if (cleared != posted) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id} cleared=$cleared but posted=$posted",
+                    )
+                }
+                val released = world.cardAuths.releasedMinorUnits(authorization.id)
+                if (authorization.status == AuthorizationStatus.DECLINED && (cleared != 0L || released != 0L)) {
+                    return Violation(
+                        name,
+                        "declined authorization ${authorization.id}: cleared=$cleared, posted=$posted, " +
+                            "released=$released despite never holding funds",
+                    )
+                }
+                // A DECLINED authorization never held funds: the authorized amount is what the
+                // acquirer asked for, not what the bank reserved, so there is nothing to
+                // account for beyond the zero cleared, posted and released totals checked above.
+                if (authorization.status != AuthorizationStatus.DECLINED &&
+                    cleared + released != authorization.amountMinorUnits
+                ) {
+                    return Violation(
+                        name,
+                        "authorization ${authorization.id}: cleared=$cleared + released=$released " +
+                            "!= authorized=${authorization.amountMinorUnits}",
+                    )
                 }
             }
             return null
@@ -792,11 +1085,18 @@ object MoneyPathInvariants {
         domesticPaymentCompleteness,
         clearingCompleteness,
         sctInstPaymentCompleteness,
+        cardAuthorizationCompleteness,
+        cardClearingConservation,
+        pensionContractCompleteness,
+        pensionReturnTimeliness,
         fxConversionCompleteness,
         fxMoneyConservation,
         billingFeeConservation,
         interestCapitalizationConservation,
         statementCloseIntegrity,
+        standingOrderExecutionConservation,
+        screeningDispositionIntegrity,
+        cardAuthorizationConservation,
         standingOrderCompleteness,
         sddCollectionCompleteness,
         delegatedSpendCompleteness,
