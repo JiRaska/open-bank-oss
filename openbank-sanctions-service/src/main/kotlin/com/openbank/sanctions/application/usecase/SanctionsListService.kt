@@ -84,11 +84,15 @@ class SanctionsListService(
     }
 
     /**
+     * [waitForOwner] = false is the HTTP trigger's mode (#14780): if another refresh of the same
+     * list holds the fence, fail at once with [com.openbank.sanctions.domain.model.SanctionsRefreshInProgress]
+     * (409) instead of queueing a second full in-request import behind it. The scheduler waits.
+     *
      * [onDeferred] is invoked when the list did NOT actually refresh (FAILED_KEPT_EXISTING /
      * EMPTY_FEED / an inherited incomplete import). Such a refresh returns normally, so without
      * the callback a caller cannot tell it from success.
      */
-    suspend fun refresh(listType: String, onDeferred: () -> Unit = {}): SanctionsList {
+    suspend fun refresh(listType: String, waitForOwner: Boolean = true, onDeferred: () -> Unit = {}): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
         val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
@@ -120,7 +124,7 @@ class SanctionsListService(
         // The metadata write belongs to the same fenced refresh as import and publication.
         // Releasing the fence first lets an older pod overwrite a newer refresh's entry count.
         if (publicationFence != null) {
-            return publicationFence.duringRefresh(enumType) { permit ->
+            return publicationFence.duringRefresh(enumType, waitForOwner) { permit ->
                 // A queued refresh may wait for another pod to finish. Read the list only
                 // after ownership passes, so a failed import cannot restore an older count.
                 val currentList = repo.requireList(listType)

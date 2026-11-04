@@ -183,6 +183,18 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   the scheduler would never carry out. **Residual:** v1 still holds the request for the full
   import; the admin console moves to v2. Evidence: `SanctionsListRefreshDeferredIT`. Rollback:
   revert the PR; no migration.
+- **2026-11-04** — **v1 single-list refresh cannot stack concurrent imports (#14780).** **STRIDE-D:**
+  `POST /api/v1/sanctions/lists/{listType}/refresh` still imports in-request (contract unchanged),
+  and before this a second call for the same list waited on the fence's advisory lock (up to the 30 s
+  `lock_timeout`, holding a request thread), then ran another full import, so repeated calls on a
+  large feed (PEP_GLOBAL, ~700k entries) queued one full download each. The HTTP path now takes
+  the SAME advisory key with `pg_try_advisory_lock` and refuses at once with **409 + Retry-After**
+  (`SanctionsRefreshInProgress`, rendered by libs-runtime's `DomainExceptionMapper`) when the list is
+  already refreshing, whether the other refresh is a request or the scheduler. The scheduler keeps
+  its bounded wait. 409 is documented in `openapi.yaml` as an additive response. Evidence:
+  `SanctionsListRefreshDeferredIT` drives two concurrent v1 calls against a held import. The
+  second gets 409, and with the old waiting lock it hung until the client's read timeout. Rollback:
+  revert the PR.
 
 - **2026-10-29** — **Subject-bound, expiring whitelist retry (#11694).** A new screening attempt
   no longer needs to inherit an old `CLEAR`: after the fresh list search, an unexpired

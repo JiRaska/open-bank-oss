@@ -5,16 +5,27 @@
 package com.openbank.sanctions.it
 
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.sanctions.application.port.out.ListImportResult
+import com.openbank.sanctions.application.usecase.SanctionsImportService
+import com.openbank.sanctions.domain.model.SanctionsListType
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * #14780: the v2 single-list refresh is DEFERRED, the #9048 refresh-all mechanism. The trigger
@@ -66,6 +77,42 @@ class SanctionsListRefreshDeferredIT {
         } finally {
             setEnabled(id, true)
         }
+    }
+
+    /**
+     * #14780 hardening: v1 keeps its synchronous contract, but a SECOND call while the same list is
+     * already importing is refused with 409 at once instead of queueing another full import.
+     */
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `a concurrent v1 refresh of the same list is refused with 409, not stacked`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val importer = mockk<SanctionsImportService>()
+        coEvery { importer.importList(SanctionsListType.UN_CONSOLIDATED, any(), any()) } coAnswers {
+            entered.countDown()
+            // Hold the fence like a long feed download would, off the event loop.
+            withContext(Dispatchers.IO) { release.await(30, TimeUnit.SECONDS) }
+            ListImportResult.seedFallback("held for the concurrency test")
+        }
+        QuarkusMock.installMockForType(importer, SanctionsImportService::class.java)
+
+        val first = CompletableFuture.supplyAsync {
+            given().contentType("application/json").post("/api/v1/sanctions/lists/UN_CONSOLIDATED/refresh").statusCode
+        }
+        try {
+            assertThat(entered.await(30, TimeUnit.SECONDS)).describedAs("first refresh reached the import").isTrue()
+            val second = given().contentType("application/json").post("/api/v1/sanctions/lists/UN_CONSOLIDATED/refresh")
+            assertThat(second.statusCode).isEqualTo(409)
+            assertThat(second.header("Retry-After")).isNotNull()
+        } finally {
+            release.countDown()
+        }
+        // The first, synchronous call still completes with the unchanged v1 contract.
+        assertThat(first.get(60, TimeUnit.SECONDS)).isEqualTo(200)
+        // And once it has finished, the list is refreshable again.
+        given().contentType("application/json").post("/api/v1/sanctions/lists/UN_CONSOLIDATED/refresh")
+            .then().statusCode(200)
     }
 
     /** Contract half: the 202 body carries exactly what the committed openapi.yaml publishes. */
