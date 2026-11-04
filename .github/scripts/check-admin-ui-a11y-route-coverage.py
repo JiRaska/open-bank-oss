@@ -159,6 +159,7 @@ def main() -> None:
     pages, evidence = coverage(args.root / "openbank-admin-ui")
     assert pages, "no Next.js page routes found"
     covered = [route for route in pages if evidence[route]]
+    print(f"SUBJECTS={len(pages)}  # admin-ui page routes inventoried")
     print(f"Admin UI axe route inventory: {len(covered)}/{len(pages)} routes have literal "
           "navigation in an axe Playwright spec")
     print("This source inventory does not prove every state or WCAG criterion was checked.")
