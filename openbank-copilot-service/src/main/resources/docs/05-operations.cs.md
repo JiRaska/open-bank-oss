@@ -36,3 +36,5 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+`CopilotErrorBodySpecConformanceIT` ověřuje, že chybové odpovědi 501, 403, 404 a 422 odpovídají schématu chybového těla v `openapi.yaml` (#14525). Autentizované případy používají `@TestSecurity`, proto modul nese `quarkus-test-security` jen jako testovací závislost; dodávaná služba se nemění.
