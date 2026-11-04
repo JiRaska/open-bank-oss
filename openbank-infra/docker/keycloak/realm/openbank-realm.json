@@ -921,7 +921,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1144,7 +1145,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1161,7 +1163,8 @@
       "defaultClientScopes": [
         "openid",
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1281,6 +1284,24 @@
         "openid",
         "profile",
         "roles"
+      ],
+      "attributes": {}
+    },
+    {
+      "clientId": "openbank-card-issuance",
+      "name": "OpenBank Card Issuance Service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "CHANGE_ME_LOCAL_DEV_ONLY",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles",
+        "catalog:read"
       ],
       "attributes": {}
     },
@@ -1645,6 +1666,14 @@
       "username": "service-account-openbank-statement",
       "enabled": true,
       "serviceAccountClientId": "openbank-statement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-card-issuance",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-issuance",
       "realmRoles": [
         "ROLE_API"
       ]

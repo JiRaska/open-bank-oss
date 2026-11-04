@@ -142,3 +142,29 @@ test_catalog_staff_rejects_renamed_machine_and_unknown_markers if {
 		not decide(actor, "catalog.publish").allow
 	}
 }
+
+# --- service-named-catalog-read: the four named readers, never the shared client ---
+
+named_reader(name) := {"service_account": true, "client_id": trim_prefix(name, "service-account-"), "type": "HUMAN", "id": name, "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+
+test_named_readers_read_catalog if {
+	every name in ["service-account-openbank-card-issuance", "service-account-openbank-document", "service-account-openbank-billing", "service-account-openbank-lending"] {
+		"service-named-catalog-read" in rest.allowed_reasons with input as {"principal": named_reader(name), "action": "catalog.read"}
+	}
+}
+
+test_named_reader_without_scope_denied if {
+	p := object.union(named_reader("service-account-openbank-document"), {"roles": ["ROLE_API"]})
+	not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": p, "action": "catalog.read"}
+}
+
+test_named_reader_cannot_list_or_write if {
+	every a in ["catalog.list", "catalog.create", "catalog.update"] {
+		not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": named_reader("service-account-openbank-lending"), "action": a}
+	}
+}
+
+test_shared_services_client_still_denied if {
+	p := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": p, "action": "catalog.read"}
+}
