@@ -33,11 +33,11 @@ class UnifiedNotificationInboxTest {
     fun `merges person and company chronologically with their origin and exact unread count`() {
         val upstream = mockk<UpstreamClient>()
         every {
-            upstream.get("http://notifications/api/v1/notifications?partyId=$human&page=0&size=2", human.toString())
+            upstream.get("http://notifications/api/v1/notifications?partyId=$human&page=0&size=3", human.toString())
         } returns
             page(human, "2026-10-08T09:00:00Z", 1)
         every {
-            upstream.get("http://notifications/api/v1/notifications?partyId=$company&page=0&size=2", company.toString())
+            upstream.get("http://notifications/api/v1/notifications?partyId=$company&page=0&size=3", company.toString())
         } returns
             page(company, "2026-10-08T10:00:00Z", 2)
 
@@ -391,6 +391,92 @@ class UnifiedNotificationInboxTest {
             objectMapper = mapper
             notificationServiceUrl = "http://notifications"
         }
+    }
+
+    @Test
+    fun `a full page issues a cursor and the cursor page reads strictly older keyset rows`() {
+        val upstream = mockk<UpstreamClient>()
+        val newer = UUID.randomUUID()
+        val older = UUID.randomUUID()
+        every { upstream.get(match { !it.contains("before") }, human.toString()) } returns rows(
+            human,
+            listOf(newer to "2026-10-08T10:00:00Z", older to "2026-10-08T09:00:00Z"),
+        )
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val first = mapper.readTree(inbox.list(listOf(human), 1).entity as String)
+        assertThat(first.path("items").map { it.path("id").asText() }).containsExactly(newer.toString())
+        val cursor = first.path("nextCursor").asText()
+        assertThat(cursor).isNotBlank()
+
+        every {
+            upstream.get(
+                "http://notifications/api/v1/notifications?partyId=$human&page=0&size=2" +
+                    "&beforeCreatedAt=2026-10-08T10:00:00Z&beforeId=$newer",
+                human.toString(),
+            )
+        } returns rows(human, listOf(older to "2026-10-08T09:00:00Z"), keyset = true)
+        val second = mapper.readTree(inbox.list(listOf(human), 1, cursor).entity as String)
+        assertThat(second.path("items").map { it.path("id").asText() }).containsExactly(older.toString())
+        assertThat(second.path("nextCursor").isNull).isTrue()
+    }
+
+    @Test
+    fun `a cursor page from a provider that does not confirm keyset mode fails closed`() {
+        val upstream = mockk<UpstreamClient>()
+        val newer = UUID.randomUUID()
+        every { upstream.get(match { !it.contains("before") }, human.toString()) } returns rows(
+            human,
+            listOf(newer to "2026-10-08T10:00:00Z", UUID.randomUUID() to "2026-10-08T09:00:00Z"),
+        )
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val cursor = mapper.readTree(inbox.list(listOf(human), 1).entity as String).path("nextCursor").asText()
+        // An old provider ignores before* and returns the first offset page again.
+        every { upstream.get(match { it.contains("before") }, human.toString()) } returns rows(
+            human,
+            listOf(UUID.randomUUID() to "2026-10-08T09:00:00Z"),
+        )
+        assertThat(inbox.list(listOf(human), 1, cursor).status).isEqualTo(502)
+    }
+
+    @Test
+    fun `a keyset row not older than the cursor fails closed`() {
+        val upstream = mockk<UpstreamClient>()
+        val newer = UUID.randomUUID()
+        every { upstream.get(match { !it.contains("before") }, human.toString()) } returns rows(
+            human,
+            listOf(newer to "2026-10-08T10:00:00Z", UUID.randomUUID() to "2026-10-08T09:00:00Z"),
+        )
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val cursor = mapper.readTree(inbox.list(listOf(human), 1).entity as String).path("nextCursor").asText()
+        every { upstream.get(match { it.contains("before") }, human.toString()) } returns rows(
+            human,
+            listOf(newer to "2026-10-08T10:00:00Z"),
+            keyset = true,
+        )
+        assertThat(inbox.list(listOf(human), 1, cursor).status).isEqualTo(502)
+    }
+
+    @Test
+    fun `a malformed or foreign-profile cursor is a client error before any read`() {
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), human.toString()) } returns rows(
+            human,
+            listOf(UUID.randomUUID() to "2026-10-08T10:00:00Z", UUID.randomUUID() to "2026-10-08T09:00:00Z"),
+        )
+        val inbox = UnifiedNotificationInbox(upstream, mapper, "http://notifications")
+        val humanCursor = mapper.readTree(inbox.list(listOf(human), 1).entity as String).path("nextCursor").asText()
+
+        assertThatThrownBy { inbox.list(listOf(human), 1, "not-a-cursor") }
+            .isInstanceOf(jakarta.ws.rs.BadRequestException::class.java)
+        assertThatThrownBy { inbox.list(listOf(human, company), 1, humanCursor) }
+            .isInstanceOf(jakarta.ws.rs.BadRequestException::class.java)
+        verify(exactly = 0) { upstream.get(any(), company.toString()) }
+    }
+
+    private fun rows(party: UUID, items: List<Pair<UUID, String>>, keyset: Boolean = false): Response {
+        val nodes = items.joinToString(",") { (id, at) -> """{"id":"$id","partyId":"$party","createdAt":"$at"}""" }
+        val mode = if (keyset) ""","pageMode":"KEYSET"""" else ""
+        return Response.ok("""{"items":[$nodes],"total":${items.size},"unreadCount":0$mode}""").build()
     }
 
     private fun page(party: UUID, createdAt: String, unread: Int): Response = Response.ok(
