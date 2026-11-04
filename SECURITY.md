@@ -61,53 +61,30 @@ Machine-readable contact metadata is published per [RFC 9116](https://www.rfc-ed
 - Suggested remediation (optional)
 - Your contact details and any disclosure preferences (anonymity is respected)
 
-### Response SLA (best-effort, pre-alpha)
+### Disclosure policy: timelines, scope, safe harbour
 
-| Severity | Initial response | Triage | Fix target |
-|----------|------------------|--------|------------|
-| Critical (RCE, auth bypass, data leak) | 72 h   | 7 days | 30 days     |
-| High     | 7 days | 14 days | 60 days   |
-| Medium   | 14 days | 30 days | 120 days |
-| Low      | 30 days | 60 days | next release |
+The full **[Coordinated Vulnerability Disclosure Policy](docs/security/vulnerability-disclosure-policy.md)** is the binding document. It states:
 
-> SLAs are best-effort and reflect the beta, community-maintained nature of the project (single maintainer). Once OpenBank reaches a production-ready release and gains additional maintainers, SLAs will tighten significantly.
+- the **scope**: which components and surfaces are in and out;
+- the **timeframes we commit to**: acknowledgement within 72 h for Critical (7 / 14 / 30 days for High / Medium / Low), a triage decision, a fix-release target per severity, and an update at least every 14 days;
+- **how disclosure ends**: fix in the advisory's private fork, CVE requested through GitHub, advisory published on an agreed date (by default at fix release and no later than 90 days after the report), and **credit** to the reporter unless anonymity is requested;
+- **safe harbour** for good-faith research.
 
-### Coordinated Disclosure
-
-We follow [coordinated disclosure](https://en.wikipedia.org/wiki/Coordinated_vulnerability_disclosure): we will agree a public disclosure date with the reporter, typically after a fix is released or 90 days from the report, whichever is sooner.
-
-Reporters are credited in release notes and the security advisory unless anonymity is requested.
-
-### Safe harbour for good-faith research
-
-We will not pursue or support legal action against anyone who reports a vulnerability in good faith and stays within this policy. Good faith means that you:
-
-- test only against a deployment of OpenBank that you run yourself;
-- stop and report as soon as you can show the issue exists, without reading, changing or keeping data beyond what that proof needs;
-- do not use the finding for anything other than reporting it, and give us the coordinated-disclosure window above before publishing.
-
-This commitment covers the project's own code and the infrastructure its maintainers operate. It cannot bind third parties: a deployment run by someone else is theirs to authorise (see "Out of Scope"), and nothing here permits social engineering, physical access or volumetric denial of service. If you are unsure whether something is in bounds, ask first through the channels above.
+Every published `security.txt` links to that policy through its `Policy:` field.
 
 ## Cyber Resilience Act (EU) 2024/2847 Readiness
 
 OpenBank is open-source software in beta and is **not yet placed on the market** as a product with digital elements, so CRA manufacturer duties do not yet bind us. We nevertheless track readiness deliberately — see [ADR-0278](docs/adr/0278-cyber-resilience-act-readiness-secure-sdlc-sbom-and-vulnerability-reporting-duties.md) — and this policy already provides the CRA-shaped surface:
 
 - **Single point of contact for vulnerabilities** (Art. 11, Annex I): the channels above (GitHub Security Advisories, security@open-bank.tech, `security.txt`) are the single intake.
-- **Coordinated vulnerability disclosure** (Art. 11): the Coordinated Disclosure section above is the policy; we accept reports, remediate, and disclose on an agreed timeline.
+- **Coordinated vulnerability disclosure** (Art. 11): the [Coordinated Vulnerability Disclosure Policy](docs/security/vulnerability-disclosure-policy.md) is the policy: GitHub private Security Advisories as the intake, committed timeframes, scope, safe harbour, advisory publication and credit (Annex I Part II).
 - **Vulnerability handling across the SDLC** (Annex I Part I): dependency scanning, secret scanning, CodeQL, cosign-signed CycloneDX SBOM attached to every GitHub Release, and signed commits — see "What Security Controls Are in Place" below.
 - **Incident and actively-exploited-vulnerability reporting** (Art. 14): the operational procedure lives in [runbook 0017](docs/runbooks/0017-cra-article-14-reporting.md) (24 h early warning / 72 h notification to the designated CSIRT and ENISA once applicable), rehearsed per [runbook 0018](docs/runbooks/0018-cra-art14-tabletop-exercise.md).
 - **Support period** (Art. 13(8)): declared per component in "Support period and end-of-support" above — 12 months / 90-days-after-superseded during beta, extended to the CRA ≥ 5-year default from each component's first production-ready (1.x) release.
 
 ## Out of Scope
 
-The following are explicitly out of scope for this project:
-
-- Issues in third-party dependencies — please report to the upstream project first, then notify us with the upstream tracker link.
-- Vulnerabilities that require physical access to the infrastructure of a deployer.
-- Social engineering of contributors or maintainers.
-- Denial of Service via volumetric attacks against shared community infrastructure.
-- Issues that only manifest in unsupported configurations or modifications.
-- Findings against deployments operated by third parties — those are the responsibility of the deployer.
+See [section 2 of the disclosure policy](docs/security/vulnerability-disclosure-policy.md#2-scope). In short: upstream dependency bugs (report upstream first), third-party deployments, social engineering, physical and volumetric attacks, and unsupported versions or configurations.
 
 ## What Security Controls Are in Place
 
