@@ -37,7 +37,8 @@ PREFIX_FILTER = re.compile(r'startsWith\(\s*"openbank-"\s*\)')
 PINNED = re.compile(r'(?:File\(\s*"\.\./|Path\.of\(\s*"\.\.",\s*"|Paths\.get\(\s*"\.\.",\s*")(openbank-[a-z0-9-]+)')
 DIRECT_FILE = re.compile(r'File\(\s*"\.\./(openbank-[^"]+)"\s*\)')
 # Any string literal that names a repository path OUTSIDE the test's own module, however the
-# test joins it: `File("../openbank-infra/x.yaml")`, `File(repoRoot, "docs/adr/x.md")` after a
+# test joins it: `File("../openbank-infra/gitops/components/pension/pension-service.yaml")`,
+# `File(repoRoot(), "docs/adr/0039-ledger-as-golden-source-balance-as-projection.md")` after a
 # parentFile walk, `Path.of("..", "openbank-contracts", ...)` — all carry the path as a literal.
 # A bare top-level NON-module directory ("openbank-infra", "pacts", "docs") is a whole-tree read.
 # A bare MODULE name is a service identifier, not a path, and is ignored; module trees are
