@@ -85,3 +85,12 @@ Live rendering also refuses any previously published template containing `LEGAL-
 ## Outbox trace propagation
 
 The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.
+
+## Product-catalog reads use this service's own identity
+
+The product read (`ProductCatalogClient.getById`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-document` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
