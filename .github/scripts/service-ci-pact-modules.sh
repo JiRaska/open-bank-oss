@@ -16,6 +16,11 @@ is_inert_service_path() {
     docs/adr/0039-ledger-as-golden-source-balance-as-projection.md)
       # AdrTextScannerTest reads this exact repository fixture.
       return 1 ;;
+    openbank-infra/gitops/components/admin-ui/*)
+      # Admin UI deploy PRs only move this image pin; admin-ui builds in its own
+      # workflow. Relevant again the moment a JVM test reads this directory.
+      ! grep -rqE --include='*.kt' --include='*.java' 'components("[[:space:]]*,[[:space:]]*"|/)admin-ui' openbank-*/src/test 2>/dev/null
+      return ;;
     openbank-infra/aws/envs/sandbox-platform/*.tf)
       # This Terraform environment has its own Platform OpenTofu workflow.
       # GitOps manifests remain relevant: JVM tests read some ConfigMaps and policies.

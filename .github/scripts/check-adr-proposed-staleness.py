@@ -47,6 +47,8 @@ Usage:  check-adr-proposed-staleness.py --root . --today YYYY-MM-DD [--max-age-d
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import datetime
 import itertools
 import pathlib
@@ -227,9 +229,15 @@ def self_test() -> int:
                 fails.append(f"{name} flagged despite being fresh, reviewed, accepted, or the template")
         if undated != 1:
             fails.append(f"expected exactly 1 undated proposed ADR, got {undated}")
-        if run(root, today, MAX_AGE_DAYS_DEFAULT, enforce=True) == 0:
+        # run() prints GitHub workflow commands (`::error::`) for the fixtures. Printed
+        # raw, the runner turns them into REAL annotations on the PR, naming a file that
+        # exists nowhere in the repo. Capture them; only the exit codes are asserted.
+        with contextlib.redirect_stdout(io.StringIO()):
+            enforce_rc = run(root, today, MAX_AGE_DAYS_DEFAULT, enforce=True)
+            advisory_rc = run(root, today, MAX_AGE_DAYS_DEFAULT, enforce=False)
+        if enforce_rc == 0:
             fails.append("--enforce on a repo with a stale ADR exited 0")
-        if run(root, today, MAX_AGE_DAYS_DEFAULT, enforce=False) != 0:
+        if advisory_rc != 0:
             fails.append("advisory run (no --enforce) exited non-zero")
 
     if fails:
