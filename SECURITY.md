@@ -66,8 +66,8 @@ Machine-readable contact metadata is published per [RFC 9116](https://www.rfc-ed
 The full **[Coordinated Vulnerability Disclosure Policy](docs/security/vulnerability-disclosure-policy.md)** is the binding document. It states:
 
 - the **scope**: which components and surfaces are in and out;
-- the **timeframes we commit to**: acknowledgement within 72 h for Critical (7 / 14 / 30 days for High / Medium / Low), a triage decision, a fix-release target per severity, and an update at least every 14 days;
-- **how disclosure ends**: fix in the advisory's private fork, CVE requested through GitHub, advisory published on an agreed date (by default at fix release and no later than 90 days after the report), and **credit** to the reporter unless anonymity is requested;
+- the **timeframes we commit to**, sized for a single maintainer: acknowledgement within 5 business days, initial assessment within 10 business days, and status updates at least every 30 days. Fix targets per severity are targets, not guarantees;
+- **how disclosure ends**: fix in the advisory's private fork, CVE requested through GitHub, advisory published on an agreed date (default window 90 days, extendable by agreement), and **credit** to the reporter unless anonymity is requested;
 - **safe harbour** for good-faith research.
 
 Every published `security.txt` links to that policy through its `Policy:` field.
@@ -84,7 +84,7 @@ OpenBank is open-source software in beta and is **not yet placed on the market**
 
 ## Out of Scope
 
-See [section 2 of the disclosure policy](docs/security/vulnerability-disclosure-policy.md#2-scope). In short: upstream dependency bugs (report upstream first), third-party deployments, social engineering, physical and volumetric attacks, and unsupported versions or configurations.
+See [section 2 of the disclosure policy](docs/security/vulnerability-disclosure-policy.md#2-scope). In short: upstream dependency bugs (report upstream first), third-party deployments, social engineering, physical attacks, denial of service of any kind (forbidden), and unsupported versions or configurations.
 
 ## What Security Controls Are in Place
 
