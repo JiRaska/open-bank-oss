@@ -509,6 +509,19 @@ spec:
                           print(f"  WARN: pod lookup failed for {ns}/{svc}: {e}")
                           return None
 
+                  def image_in_sync(running, running_id, declared):
+                      """True iff the running container is the declared image. A tag ref
+                      compares by string; a digest-pinned ref (`repo:tag@sha256:X`) compares
+                      by repo digest against imageID, the identity both sides share.
+                      Held by openbank-infra/scripts/sbom_drift_scanner_test.py."""
+                      if not declared:
+                          return False
+                      if running == declared:
+                          return True
+                      if "@sha256:" in declared:
+                          return (running_id or "").endswith("@" + declared.split("@", 1)[1])
+                      return False
+
                   def declared_image(svc, manifest_path):
                       """The image this service's container currently declares in the
                       gitops manifest on origin/main (the checked-out clone)."""
@@ -537,11 +550,8 @@ spec:
                           continue
                       running, running_id = running_pair
                       declared = declared_image(svc, manifest_path)
-                      in_sync = bool(declared) and running == declared
-                      if declared and "@sha256:" in declared and not in_sync:
-                          # Digest-pinned: the repo digest is the identity both sides share.
-                          digest = declared.split("@", 1)[1]
-                          in_sync = running_id.endswith("@" + digest)
+                      in_sync = image_in_sync(running, running_id, declared)
+                      if declared and "@sha256:" in declared:
                           running = running_id or running
                       print(f"  running={running} declared={declared} inSync={in_sync}", flush=True)
                       results[svc] = {
