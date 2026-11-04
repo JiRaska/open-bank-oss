@@ -20,7 +20,7 @@
 # Mandrel builder image: native-image is already on its PATH, so no nested
 # Docker-in-Docker is needed inside a `docker build`. Functionally equivalent output;
 # simpler to reason about inside a multi-stage build.
-FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25@sha256:caf33122327ee2b5441eeb5ee7a80cfc19efd37b5c32422004c798e50979f373 AS build
+FROM quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25@sha256:4af907423955d43beb791ee247516e13128fc880b4e58f6a66171a90f850e1fb AS build
 WORKDIR /build
 
 # Same full-repo-root context rationale as the JVM Dockerfile: settings.gradle.kts
@@ -62,7 +62,7 @@ RUN chmod +x gradlew && \
 # "/lib64/libc.so.6: version `GLIBC_2.34' not found" (verified locally). ubi9/ubi-minimal
 # matches the builder's RHEL9 base; it is the "ubi-minimal" alternative ADR-0083 names
 # alongside quarkus-micro-image, so this stays within the ADR's own recipe.
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:2e8edce823a48e51858f1fad3ff4cbf6875ce8a3f86b9eecf298bc2050c8652a
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8@sha256:dfa0eb04abc59221544e74862432496add1f491f915c9b531880f91affc0e12c
 WORKDIR /work
 
 RUN chown 1001 /work \

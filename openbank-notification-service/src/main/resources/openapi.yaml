@@ -7,7 +7,8 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.13.0 -> 1.14.0 (#12165): additive governed notification templates and dispatch controls.
-  version: 1.14.0
+  # 1.14.0 -> 1.15.0 (#12216): additive keyset paging (beforeCreatedAt/beforeId, pageMode).
+  version: 1.15.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -217,7 +218,15 @@ paths:
             type: integer
             default: 20
             minimum: 1
-            maximum: 100
+            maximum: 101
+        - name: beforeCreatedAt
+          in: query
+          description: With beforeId, return rows strictly older than this key (partyId required).
+          schema: {type: string, format: date-time}
+        - name: beforeId
+          in: query
+          description: UUID tie-breaker for beforeCreatedAt (partyId required).
+          schema: {type: string, format: uuid}
       responses:
         '200':
           description: A page of notifications
@@ -655,6 +664,10 @@ components:
           type: integer
         size:
           type: integer
+        pageMode:
+          type: string
+          enum: [OFFSET, KEYSET]
+          description: KEYSET confirms the provider applied both beforeCreatedAt and beforeId.
 
     NotificationResponse:
       type: object
