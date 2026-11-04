@@ -16,9 +16,9 @@ A honeytoken fails in two silent ways, and this gate catches both.
    The design rests on the token being useless; nothing else would notice it stopped being.
 
 Checks:
-  - every ServiceAccount labelled openbank.io/deception=honeytoken has a CloudWatch metric
-    filter in the substrate root whose pattern names system:serviceaccount:<ns>:<name>, and
-    every such pattern names a declared honey SA;
+  - every honey ServiceAccount in HONEY_SERVICE_ACCOUNTS exists in gitops and has a CloudWatch
+    metric filter in the substrate root whose pattern names system:serviceaccount:<ns>:<name>,
+    and every such pattern names a declared honey SA;
   - no RoleBinding or ClusterRoleBinding anywhere in gitops has a subject that is a honey SA;
   - the canary IAM user has exactly one inline policy, it is an explicit Deny "*" on "*",
     and no policy attachment or group membership references it;
@@ -41,7 +41,10 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 TOFU = REPO / "openbank-infra" / "aws" / "envs" / "sandbox-substrate"
-LABEL = "openbank.io/deception"
+# The honeytoken inventory. Declared HERE, never as a label or annotation on the object: the
+# lure sits in the most exposed namespace, and a marker readable by anyone allowed to list it
+# tells an attacker exactly which credential to leave alone.
+HONEY_SERVICE_ACCOUNTS: frozenset[tuple[str, str]] = frozenset({("arc-runners", "deploy-prod")})
 
 FILTER_SA_RE = re.compile(r'system:serviceaccount:(?P<ns>[a-z0-9-]+):(?P<name>[a-z0-9-]+)')
 RESOURCE_RE = re.compile(r'^resource\s+"(?P<type>[\w]+)"\s+"(?P<name>[\w]+)"\s*\{', re.M)
@@ -80,9 +83,9 @@ def _candidates(gitops: Path, needle: str):
             continue
 
 
-def honey_sas(gitops: Path) -> set[tuple[str, str]]:
+def service_accounts(gitops: Path) -> set[tuple[str, str]]:
     found = set()
-    for path in _candidates(gitops, LABEL):
+    for path in _candidates(gitops, "ServiceAccount"):
         try:
             docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
         except yaml.YAMLError:
@@ -90,8 +93,7 @@ def honey_sas(gitops: Path) -> set[tuple[str, str]]:
         for d in docs:
             if isinstance(d, dict) and d.get("kind") == "ServiceAccount":
                 meta = d.get("metadata") or {}
-                if (meta.get("labels") or {}).get(LABEL) == "honeytoken":
-                    found.add((str(meta.get("namespace", "")), str(meta.get("name", ""))))
+                found.add((str(meta.get("namespace", "")), str(meta.get("name", ""))))
     return found
 
 
@@ -115,7 +117,9 @@ def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
     text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(tofu.glob("*.tf")))
     blocks = _blocks(text)
 
-    sas = honey_sas(gitops)
+    sas = set(HONEY_SERVICE_ACCOUNTS)
+    for ns, name in sorted(sas - service_accounts(gitops)):
+        findings.append(f"declared honey ServiceAccount {ns}/{name} does not exist in gitops — renamed or removed lure")
     wired = {
         (m.group("ns"), m.group("name"))
         for t, _, body in blocks if t == "aws_cloudwatch_log_metric_filter"
@@ -125,6 +129,8 @@ def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
         findings.append(f"honey ServiceAccount {ns}/{name} has no metric filter naming it — unwired lure")
     for ns, name in sorted(wired - sas):
         findings.append(f"metric filter names {ns}/{name}, which is not a declared honey ServiceAccount — tripwire on nothing")
+    for path in _candidates(gitops, "openbank.io/deception"):
+        findings.append(f"{path.relative_to(gitops)} carries an openbank.io/deception marker — it marks the lure for an attacker")
     for ns, name in sorted(sas & bound_subjects(gitops)):
         findings.append(f"honey ServiceAccount {ns}/{name} is a subject of a RoleBinding/ClusterRoleBinding — the lure is armed")
 
@@ -165,10 +171,18 @@ def selftest() -> int:
             print("   ", f)
         return 1
     cases = {
-        "unwired SA": (
+        "renamed SA": (
             "gitops", "components/platform/honey-serviceaccount.yaml",
             lambda s: s.replace("name: deploy-prod\n  namespace", "name: deploy-prod-renamed\n  namespace", 1),
+            "does not exist in gitops"),
+        "unwired SA": (
+            "tofu", "deception.tf",
+            lambda s: s.replace("system:serviceaccount:arc-runners:deploy-prod", "system:serviceaccount:arc-runners:other", 1),
             "no metric filter naming it"),
+        "marker label back on the lure": (
+            "gitops", "components/platform/honey-serviceaccount.yaml",
+            lambda s: s.replace("    app.kubernetes.io/part-of: openbank-ci\n", "    app.kubernetes.io/part-of: openbank-ci\n    openbank.io/deception: honeytoken\n", 1),
+            "marks the lure"),
         "armed SA": (
             "gitops", "components/platform/honey-serviceaccount.yaml",
             lambda s: s + "\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: x\n  namespace: arc-runners\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: view\nsubjects:\n  - kind: ServiceAccount\n    name: deploy-prod\n    namespace: arc-runners\n",
