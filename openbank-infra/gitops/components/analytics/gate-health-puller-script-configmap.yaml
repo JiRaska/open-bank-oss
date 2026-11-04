@@ -262,10 +262,14 @@ data:
     whose exhaustion it was trying to explain. This makes it a query instead.
 
     Quota-bounded by construction, not by hope:
-      - runs are listed by `created>=` over a short lookback, at most MAX_RUN_PAGES pages
+      - runs are listed by `created>=` over a 12 h lookback (longer than any workflow's
+        timeout, so a run that completes late is still inside the window), at most
+        MAX_RUN_PAGES pages
       - jobs are fetched only for (run, attempt) pairs ClickHouse does not already hold,
-        and never for a run whose conclusion is `skipped` (no job ever started)
-      - at most MAX_JOB_FETCHES job reads per tick. A backlog drains over later ticks.
+        and never for a conclusion that starts no job (NO_JOB_CONCLUSIONS)
+      - at most MAX_JOB_FETCHES job reads, and JOB_BUDGET_SECONDS of wall clock, per tick,
+        flushed every 25 runs. A backlog drains over later ticks instead of being lost to
+        the pod deadline.
     Every tick logs the token's remaining core quota, so the cost of this job is itself a
     number in its log rather than a claim in this comment.
 
@@ -278,6 +282,7 @@ data:
     import json
     import os
     import sys
+    import time
     import urllib.error
     import urllib.parse
     import urllib.request
@@ -285,9 +290,15 @@ data:
     REPO = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     TOKEN = os.environ.get("GITHUB_TOKEN", "")
     API = os.environ.get("GITHUB_API_URL", "https://api.github.com")
-    LOOKBACK_HOURS = int(os.environ.get("RUNS_LOOKBACK_HOURS", "3"))
+    LOOKBACK_HOURS = int(os.environ.get("RUNS_LOOKBACK_HOURS", "12"))
     MAX_RUN_PAGES = int(os.environ.get("RUNS_MAX_PAGES", "10"))
     MAX_JOB_FETCHES = int(os.environ.get("RUNS_MAX_JOB_FETCHES", "200"))
+    # Wall-clock budget for the job loop. activeDeadlineSeconds is POD-wide (both containers),
+    # so the loop stops early and flushes rather than being killed before its insert.
+    JOB_BUDGET_SECONDS = int(os.environ.get("RUNS_JOB_BUDGET_SECONDS", "240"))
+    # Conclusions that start no job: fetching them would return nothing, never become
+    # "known", and burn the per-tick cap on every tick of the lookback.
+    NO_JOB_CONCLUSIONS = {"skipped", "startup_failure"}
     CLICKHOUSE_URL = os.environ["CLICKHOUSE_URL"]
     CLICKHOUSE_USER = os.environ["CLICKHOUSE_USER"]
     CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
@@ -423,20 +434,27 @@ data:
         known = known_job_attempts()
         pending = [
             r for r in runs
-            if r.get("conclusion") != "skipped"
+            if r.get("conclusion") not in NO_JOB_CONCLUSIONS
             and (r["id"], r.get("run_attempt") or 1) not in known
         ]
         fetched, rows = 0, []
+        deadline = time.monotonic() + JOB_BUDGET_SECONDS
         for run in pending[:MAX_JOB_FETCHES]:
+            if time.monotonic() > deadline:
+                print(f"{LOG} job budget {JOB_BUDGET_SECONDS}s spent — rest drains next tick", file=sys.stderr)
+                break
             try:
                 jobs, remaining = jobs_for(run)
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, TimeoutError) as exc:
                 # One unreadable run must not discard the rest of the tick. It stays
                 # "not known" and is retried next tick.
                 print(f"{LOG} run {run['id']}: jobs read failed: {exc}", file=sys.stderr)
                 continue
             fetched += 1
             rows.extend(job_row(run, j) for j in jobs)
+            if fetched % 25 == 0:
+                insert("ci_workflow_jobs", rows)
+                rows = []
         print(
             f"{LOG} jobs fetched for {fetched}/{len(pending)} new run attempt(s) "
             f"(cap {MAX_JOB_FETCHES}); core quota remaining={remaining}"
