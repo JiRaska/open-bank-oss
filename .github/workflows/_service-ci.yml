@@ -103,7 +103,12 @@ jobs:
   build:
     name: ${{ inputs.service }} (build)
     # The main-only context pilot produces the exact native platform used by deployment.
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # Otherwise a service listed in the repo variable MINI_RUNNER_SERVICES (a JSON array)
+    # builds on the owner's Mac mini pool `openbank-mini` (ephemeral Linux arm64 runners,
+    # rules.yaml: ci_runners.static_hosts.mac_mini) to add slots beyond the hosted
+    # concurrency cap. Never for fork PRs. Unset or empty variable => every build is hosted,
+    # which is the kill switch when the Mac is down: a queued job has no hosted fallback.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
@@ -164,9 +169,9 @@ jobs:
           done
           bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"
 
-      # Resolve GRADLE_USER_HOME. This job is ALWAYS `runner.environment == 'github-hosted'`
-      # now (never self-hosted), so it always takes the default-home branch below — restoring
-      # the warm cache fleet-lint keeps on main via setup-gradle's cross-job cache restore.
+      # Resolve GRADLE_USER_HOME. Hosted, or an ephemeral `openbank-mini` container whose
+      # $HOME is discarded with the job, so ${HOME}/.gradle is never a human's cache — and
+      # setup-gradle's cross-job cache restore warms it the same way on both.
       # NOTE: env context is NOT available in job-level env: blocks of reusable workflows
       # (workflow_call) — GitHub rejects "Unrecognized named-value: 'env'" at parse time —
       # so this is resolved in a step where env IS available, same as the original single job.

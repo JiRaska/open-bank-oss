@@ -2702,13 +2702,18 @@ ci_runners:
       # Hetzner-specific workflow) was deleted in the same PR as this entry.
     mac_mini:
       arch: arm64
-      labels: [openbank-build, openbank-sandbox]
+      labels: [openbank-mini]             # ephemeral Linux runner containers (OrbStack), one JIT runner per job
       count: 1
       role: owner_managed_accelerator     # NOT a FinOps line item (owner's own hardware, no cloud billing);
-      # kept in the label pool at the owner's discretion, independent of this
-      # governance decision. Native arm64 is otherwise served free by
-      # ubuntu-24.04-arm, so this is a pure opt-in accelerator (ADR-0053), never
-      # something CI depends on being online.
+      # Adds build slots beyond the 20-job hosted concurrency cap, which is what
+      # PR CI queues on (2026-11-03: Services CI builds = 57 % of hosted minutes,
+      # median queue 10 min). Only `_service-ci.yml` build routes here, only for
+      # services in the repo variable MINI_RUNNER_SERVICES, never for fork PRs.
+      # Availability: a job routed here has no hosted fallback once queued, so the
+      # variable is the kill switch — empty it when the Mac is down.
+      routing_variable: MINI_RUNNER_SERVICES
+      fork_prs: never
+      ephemeral_per_job: true             # fresh runner + docker-in-docker container per job, removed after
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
@@ -2746,7 +2751,7 @@ ci_runners:
   availability:
     merge_required_scale_set: openbank-build
     failure_domain: eks-multi-az        # not a laptop, not a single EC2 host
-    no_developer_workstation_in_critical_path: true   # Macs are opt-in accelerators only
+    no_developer_workstation_in_critical_path: true   # Mac mini is opt-in per service (MINI_RUNNER_SERVICES) with a kill switch; never merge-blocking when emptied
     warm_min_runners_lever: engaged     # build minRunners=1 since 2026-06-01: a per-service build queued ~45 min behind a push/PR workflow burst (p95 SLO miss); batch+deploy stay at 0
   stuck_runner_reaper:                  # self-heal guard, arc-runner-reaper.tf; ARC has no built-in idle/registration timeout for a registered-but-jobless runner
     why: "ARC won't reap a phase=Running runner (assumes mid-job); a cancelled/superseded queued job leaves an orphan that never gets work and pins a spot node until noticed (observed 2026-06-02, ~10h)"

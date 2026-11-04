@@ -7116,6 +7116,20 @@ gates:
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
+  - id: admin-ui-a11y-route-coverage
+    name: "Admin UI routes are covered by axe accessibility specs (enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "Route coverage by axe specs is only visible as an inventory; the gate keeps the literal-navigation evidence from silently disappearing."
+    review_after: "2027-02-28"
+    min_subjects: 50  # 171 page routes inventoried on 2026-11-04
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-a11y-route-coverage.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-a11y-route-coverage.py
+
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
     group: supplychain
