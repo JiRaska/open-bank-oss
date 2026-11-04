@@ -315,7 +315,7 @@ select_modules() {
   fi
 
   # PRs must retain the same conservative unknown-path fallback as main.
-  # Content-based exemption (ADR-0362 item 5). A GitOps component manifest is build-relevant by
+  # Content-based exemption (the no-downgrade CI/CD invariant (#14702)). A GitOps component manifest is build-relevant by
   # PATH (JVM tests read ConfigMaps and policies), which is why every auto-deploy PR — a diff of
   # nothing but `image:` pin lines — fanned out to the full fleet: 52 runs/week at ~500 build-min,
   # 13 % of the hosted pool (measured 2026-11-03). The exemption is decided on the DIFF, never the

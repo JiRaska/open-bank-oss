@@ -10,7 +10,7 @@ allmods={p.name for p in root.glob('openbank-*') if (p/'build.gradle.kts').is_fi
 sample=['.github/gates/gates.yaml','.github/scripts/check-tofu-image-pull-through.py']+['openbank-infra/aws/envs/sandbox-platform/'+x+'.tf' for x in ['arc-runner-reaper','arc-runners','main','providers']]
 cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),('measured-infra',sample,'empty'),('mixed-account',sample+['openbank-account-service/src/main/kotlin/Sample.kt'],'account'),('admin-ui-deploy-pin',['openbank-infra/gitops/components/admin-ui/admin-ui.yaml'],'empty'),('gitops-reader',['openbank-infra/gitops/components/payments/transaction-service-msg-override.yaml'],'full'),('adr-reader',['docs/adr/0039-ledger-as-golden-source-balance-as-projection.md'],'full'),('unknown-helper',['.github/scripts/check-tofu-image-pull-through-test-helper.py'],'full')]
 cases += [('canonical-runtime-image', ['.github/workflows/Dockerfile.deploy'], 'full'), ('shared-benchmark-build', ['openbank-libs-benchmarks/build.gradle.kts'], 'full'), ('shared-detekt-source', ['openbank-libs-detekt-rules/src/main/kotlin/Sample.kt'], 'full')]
-# Content-based exemption (ADR-0362 item 5): a PR whose only change under openbank-infra/gitops is
+# Content-based exemption (the no-downgrade CI/CD invariant (#14702)): a PR whose only change under openbank-infra/gitops is
 # image-pin lines (the auto-deploy shape, 52 full-fleet runs/week measured 2026-11-03) builds no
 # service; anything else in such a diff — a config key, an env value, an empty diff — still fans
 # out to the full fleet. The 4th element is the unified diff the stubbed `git diff` returns.
