@@ -6,6 +6,7 @@ package com.openbank.treasury.nostro
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.treasury.application.port.`in`.NostroBreakSweep
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.usecase.NostroBreakService
@@ -168,6 +169,32 @@ class NostroBreakServiceTest {
         val r = service().sweep(today)
         assertThat(r.observed).isZero()
         assertThat(r.open).isZero()
+    }
+
+    @Test
+    fun `past the per-pass bound the out-of-window statements rotate so none is starved`() = runBlocking<Unit> {
+        // 51 open breaks, each on its own old statement. The statements are not stored, so every
+        // visit surfaces as a StatementNotFound failure naming the statement: that is the probe.
+        val template = run {
+            upload()
+            service().sweep(today)
+            breakRepo.rows.first()
+        }
+        breakRepo.rows.clear()
+        val statementIds = (1..51).map { UUID.randomUUID() }.sorted()
+        statementIds.forEach { breakRepo.rows += template.copy(id = UUID.randomUUID(), statementUuid = it) }
+        statements.rows.clear()
+        today = today.plusDays(60)
+        val svc = service() // one instance, like the @ApplicationScoped producer
+
+        fun visited(r: NostroBreakSweep) =
+            r.failures.map { f -> statementIds.single { f.message!!.contains(it.toString()) } }.toSet()
+
+        val first = visited(svc.sweep(today))
+        assertThat(first).hasSize(50).doesNotContain(statementIds.last())
+        val second = visited(svc.sweep(today))
+        assertThat(second).contains(statementIds.last())
+        assertThat(first + second).containsExactlyInAnyOrderElementsOf(statementIds)
     }
 
     @Test
