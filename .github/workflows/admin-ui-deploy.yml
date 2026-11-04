@@ -178,7 +178,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
-        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ steps.source.outputs.source_sha }}" "$EVENT_NAME"
+          ADMISSION_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "$ADMISSION_SOURCE_SHA" "$EVENT_NAME"
 
   build-push:
     name: Build + push admin-ui
@@ -255,7 +256,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
-        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ needs.deploy-source.outputs.source_sha }}" "$EVENT_NAME"
+          ADMISSION_SOURCE_SHA: ${{ needs.deploy-source.outputs.source_sha }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "$ADMISSION_SOURCE_SHA" "$EVENT_NAME"
 
       - name: Checkout mobile RUM capability metadata
         if: ${{ steps.build_admission.outputs.proceed == 'true' && env.APP_RO_TOKEN != '' }}

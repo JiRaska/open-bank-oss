@@ -365,8 +365,8 @@ jobs:
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             bash .github/scripts/validate-auto-deploy-reconcile-inputs.sh
-            if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
-              if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+            if [ "${INPUT_BOOTSTRAP_IMAGE_ONLY}" = "true" ]; then
+              if [ "${INPUT_RECONCILE}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
                 exit 1
               fi
@@ -392,7 +392,7 @@ jobs:
             fi
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
-            if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
+            if [ "${INPUT_RECONCILE}" = "true" ]; then
               SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
                 if [ -n "${INPUT_RECONCILE_SERVICES:-}" ]; then
@@ -419,6 +419,10 @@ jobs:
             CANDIDATES="$REQUESTED"
             DEPLOYABLE=()
             for svc in $CANDIDATES; do
+              if ! [[ "$svc" =~ ^openbank-[a-z0-9-]+$ ]] || ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}"; then
+                echo "::error::requested service is not a known fleet service"
+                exit 1
+              fi
               if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
                 DEPLOYABLE+=("$svc")
               else
@@ -716,6 +720,7 @@ jobs:
         # every event and writes none, so ClickHouse silently stays empty while the consumer
         # looks perfectly healthy. Harmless for the other services: only this module reads it.
         env:
+          NEEDS_CHANGES_SERVICES: ${{ needs.changes.outputs.services }}
           ANALYTICS_SINK_TYPE: clickhouse
           # agent-service selects its NonceStore binding with @IfBuildProperty (same trap as
           # analytics-sink above — resolved at AUGMENTATION time, so a runtime env var cannot
@@ -725,7 +730,7 @@ jobs:
           CONTEXT_BUILD_RESTORED: ${{ steps.context_build.outputs.restored }}
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
+          SERVICES="${NEEDS_CHANGES_SERVICES}"
           SHA="${SOURCE_COMMIT::8}"
           TAG="sandbox-${SHA}"
           FAILED=0
@@ -765,10 +770,13 @@ jobs:
 
       - name: Docker push (parallel)
         id: push
+        env:
+          NEEDS_CHANGES_SERVICES: ${{ needs.changes.outputs.services }}
+          STEP_BUILD_TAG: ${{ steps.build.outputs.tag }}
         run: |
           set -euo pipefail
-          SERVICES='${{ needs.changes.outputs.services }}'
-          TAG="${{ steps.build.outputs.tag }}"
+          SERVICES="${NEEDS_CHANGES_SERVICES}"
+          TAG="${STEP_BUILD_TAG}"
           FAILED=0
           PUSHED=(); FAILED_SVCS=()
 
@@ -929,9 +937,12 @@ jobs:
         with: *build-aws-credentials
 
       - name: Sign images (cosign v2 + KMS)
+        env:
+          STEP_PUSH_PUSHED: ${{ steps.push.outputs.pushed }}
+          STEP_PUSH_DIGESTS: ${{ steps.push.outputs.digests }}
         run: |
           set -uo pipefail
-          SERVICES='${{ steps.push.outputs.pushed }}'
+          SERVICES="${STEP_PUSH_PUSHED}"
           # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
           # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
           # gate runs between them, so this uses the resolver directly rather than
@@ -944,7 +955,7 @@ jobs:
           fi
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "${STEP_PUSH_DIGESTS}")"
             [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; rc=1; continue; }
             img="${ECR_REGISTRY}/${svc}@${digest}"
             # Refuse an OCI index before it is signed (#11573) — the helper's guard.
@@ -987,10 +998,13 @@ jobs:
       - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
         id: scan
         timeout-minutes: 15
+        env:
+          STEP_PUSH_PUSHED: ${{ steps.push.outputs.pushed }}
+          STEP_PUSH_DIGESTS: ${{ steps.push.outputs.digests }}
         run: |
           set -euo pipefail
-          SERVICES='${{ steps.push.outputs.pushed }}'
-          DIGESTS='${{ steps.push.outputs.digests }}'
+          SERVICES="${STEP_PUSH_PUSHED}"
+          DIGESTS="${STEP_PUSH_DIGESTS}"
           FAILED=0
           DEPLOYABLE=(); BLOCKED=()
 
@@ -1072,10 +1086,13 @@ jobs:
         # previous 15-minute cap stopped after successful image pushes, leaving
         # the remaining images unattested and preventing the GitOps rollout.
         timeout-minutes: 30
+        env:
+          STEP_SCAN_DEPLOYABLE: ${{ steps.scan.outputs.deployable }}
+          STEP_PUSH_DIGESTS: ${{ steps.push.outputs.digests }}
         run: |
           set -uo pipefail
-          SERVICES='${{ steps.scan.outputs.deployable }}'
-          DIGESTS='${{ steps.push.outputs.digests }}'
+          SERVICES="${STEP_SCAN_DEPLOYABLE}"
+          DIGESTS="${STEP_PUSH_DIGESTS}"
           # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
           # post-attest proof all live in the shared helper, which every build-push-*.sh
           # already uses. This step carried its own copy and so missed the hardening added
@@ -1157,13 +1174,17 @@ jobs:
 
       - name: Collect image tags
         id: collect
+        env:
+          STEP_SCAN_DEPLOYABLE: ${{ steps.scan.outputs.deployable }}
+          STEP_BUILD_TAG: ${{ steps.build.outputs.tag }}
+          STEP_PUSH_DIGESTS: ${{ steps.push.outputs.digests }}
         run: |
           set -euo pipefail
           # The CVE-gate survivors, NOT everything that pushed: this map is what repins the
           # gitops manifests, so a service blocked by a fixable CRITICAL must not appear in it
           # — otherwise the vulnerable tag deploys anyway and the gate was decorative (#9714).
-          SERVICES='${{ steps.scan.outputs.deployable }}'
-          TAG="${{ steps.build.outputs.tag }}"
+          SERVICES="${STEP_SCAN_DEPLOYABLE}"
+          TAG="${STEP_BUILD_TAG}"
 
           # Emit { "openbank-account-service": "sandbox-abc1234", … }
           # -c (compact) is required: a pretty-printed (multi-line) jq value breaks the
@@ -1173,7 +1194,7 @@ jobs:
           DIGEST_MAP="{}"
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             MAP="$(echo "$MAP" | jq -c --arg k "$svc" --arg v "$TAG" '. + {($k): $v}')"
-            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "${STEP_PUSH_DIGESTS}")"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::missing or invalid pushed digest for ${svc}"; exit 1; }
             DIGEST_MAP="$(echo "$DIGEST_MAP" | jq -c --arg k "$svc" --arg v "$digest" '. + {($k): $v}')"
           done
@@ -1406,6 +1427,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           INPUT_RECONCILE: ${{ github.event.inputs.reconcile }}
           RECONCILE_TARGETS: ${{ github.event.inputs.reconcile_services }}
+          BUILT_IMAGE_TAGS: ${{ needs.build-push.outputs.image_tags }}
+          BUILT_IMAGE_DIGESTS: ${{ needs.build-push.outputs.image_digests }}
         run: |
           set -euo pipefail
           # Strict reconcile may never interpret an absent or malformed verdict as no filter.
@@ -1436,8 +1459,8 @@ jobs:
           # trees differ only in GitOps image pins; manual rebuilds retain their intent.
           git fetch origin main
           git reset --hard origin/main
-          IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
-          IMAGE_DIGESTS='${{ needs.build-push.outputs.image_digests }}'
+          IMAGE_TAGS="${BUILT_IMAGE_TAGS}"
+          IMAGE_DIGESTS="${BUILT_IMAGE_DIGESTS}"
           # Read the hold from the newly fetched main, before assembling a bot PR.
           # Filter per service so a held sanctions image cannot strand unrelated
           # images in the same deploy batch. A malformed or unknown hold fails this
@@ -1660,9 +1683,10 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           DEPLOY_HOLD_PYTHON: ${{ runner.temp }}/deploy-hold-venv/bin/python
+          PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
-            'chore/gitops-auto-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
+            'chore/gitops-auto-deploy-' "${PR_NUMBER}"
       # deploy-window-flush.yml is the sole auto-merge writer. Its workflow_run trigger
       # admits this PR after this workflow completes; its schedule retries missed triggers.
 
@@ -1680,10 +1704,12 @@ jobs:
       - name: Verify the deploy commit is signed
         if: ${{ always() && steps.gitops_pr.outputs.pull-request-number != '' }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
         with:
           github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           script: |
-            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
+            const pull_number = Number(process.env.PR_NUMBER);
             const { data: commits } = await github.rest.pulls.listCommits({
               owner: context.repo.owner, repo: context.repo.repo, pull_number,
             });
