@@ -1,0 +1,1 @@
+#12350 - new service (ADR-0334 S1), deployed nowhere yet and moving no money in S1; dispositions are written against its own resolved runtime classpath once it is built, not copied from a sibling.
