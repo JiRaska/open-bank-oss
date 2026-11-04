@@ -56,7 +56,27 @@ data:
         ]
       },
       "annotations": {
-        "list": []
+        "list": [
+          {
+            "name": "Deploys",
+            "enable": true,
+            "iconColor": "blue",
+            "datasource": {
+              "type": "grafana-clickhouse-datasource",
+              "uid": "clickhouse"
+            },
+            "target": {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "Anno",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT deployed_at AS time, concat(app, ' @ ', substring(revision, 1, 10)) AS text FROM openbank_analytics.deploy_events FINAL WHERE $__timeFilter(deployed_at) ORDER BY time"
+            }
+          }
+        ]
       },
       "panels": [
         {
@@ -438,6 +458,47 @@ data:
             "defaults": {
               "color": {
                 "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Main commit → Argo sync latency, p50 / p95 per day (not full DORA lead time)",
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toStartOfDay(deployed_at) AS time, quantile(0.5)(latency) AS p50, quantile(0.95)(latency) AS p95 FROM (SELECT e.app AS app, e.revision AS revision, min(e.deployed_at) AS deployed_at, dateDiff('second', min(r.created_at), min(e.deployed_at)) AS latency FROM openbank_analytics.deploy_events AS e FINAL INNER JOIN (SELECT head_sha, min(created_at) AS created_at FROM openbank_analytics.ci_workflow_runs FINAL GROUP BY head_sha) AS r ON r.head_sha = e.revision WHERE $__timeFilter(e.deployed_at) GROUP BY app, revision) WHERE latency >= 0 GROUP BY time ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "s",
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
               }
             },
             "overrides": []

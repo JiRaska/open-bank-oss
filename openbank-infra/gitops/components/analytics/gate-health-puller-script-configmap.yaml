@@ -262,9 +262,9 @@ data:
     whose exhaustion it was trying to explain. This makes it a query instead.
 
     Quota-bounded by construction, not by hope:
-      - runs are listed by `created>=` over a 12 h lookback (longer than any workflow's
-        timeout, so a run that completes late is still inside the window), at most
-        MAX_RUN_PAGES pages
+      - runs are listed over a 12 h lookback (longer than any workflow's timeout, so a run
+        that completes late is still inside the window), in one-hour `created` slices so no
+        listing reaches GitHub's 1000-result ceiling, at most MAX_RUN_PAGES pages a slice
       - jobs are fetched only for (run, attempt) pairs ClickHouse does not already hold,
         and never for a conclusion that starts no job (NO_JOB_CONCLUSIONS)
       - at most MAX_JOB_FETCHES job reads, and JOB_BUDGET_SECONDS of wall clock, per tick,
@@ -353,20 +353,37 @@ data:
         return {tuple(int(x) for x in line.split("\t")) for line in out.splitlines() if line}
 
 
-    def list_runs(since):
-        runs, remaining = [], None
-        for page in range(1, MAX_RUN_PAGES + 1):
-            q = urllib.parse.urlencode(
-                {"status": "completed", "created": f">={since}", "per_page": 100, "page": page}
-            )
-            data, remaining = gh(f"/repos/{REPO}/actions/runs?{q}")
-            batch = data.get("workflow_runs", [])
-            runs.extend(batch)
-            if len(batch) < 100:
-                break
-        else:
-            print(f"{LOG} hit RUNS_MAX_PAGES={MAX_RUN_PAGES} — older runs in the window are skipped this tick", file=sys.stderr)
-        return runs, remaining
+    def iso(t):
+        return t.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+    def list_runs(start, end):
+        """Every completed run created in [start, end), one hour slice at a time.
+
+        GitHub answers at most 1000 results for one filtered listing, and this repo produces
+        about 100 runs an hour (measured 2026-11-04: 957 in 9 h). A single `created>=` query
+        over the lookback therefore truncated silently once the window passed ~10 h. An hour
+        slice stays far under that ceiling, and a slice that still reaches it is reported,
+        not trusted.
+        """
+        runs, remaining, t = [], None, start
+        while t < end:
+            nxt = min(t + dt.timedelta(hours=1), end)
+            for page in range(1, MAX_RUN_PAGES + 1):
+                q = urllib.parse.urlencode({
+                    "status": "completed", "created": f"{iso(t)}..{iso(nxt)}",
+                    "per_page": 100, "page": page,
+                })
+                data, remaining = gh(f"/repos/{REPO}/actions/runs?{q}")
+                batch = data.get("workflow_runs", [])
+                runs.extend(batch)
+                if len(batch) < 100:
+                    break
+            else:
+                print(f"{LOG} slice {iso(t)} hit RUNS_MAX_PAGES={MAX_RUN_PAGES} — runs beyond it are missed", file=sys.stderr)
+            t = nxt
+        # Adjacent slices share their boundary second, so a run can appear twice.
+        return list({(r["id"], r.get("run_attempt") or 1): r for r in runs}.values()), remaining
 
 
     def run_row(run):
@@ -426,9 +443,9 @@ data:
         if not TOKEN:
             raise SystemExit("GITHUB_TOKEN not set — refusing to report a silent no-op as success")
         now = dt.datetime.now(dt.timezone.utc)
-        since = (now - dt.timedelta(hours=LOOKBACK_HOURS)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        runs, remaining = list_runs(since)
-        print(f"{LOG} {len(runs)} completed run(s) created since {since}")
+        start = now - dt.timedelta(hours=LOOKBACK_HOURS)
+        runs, remaining = list_runs(start, now)
+        print(f"{LOG} {len(runs)} completed run(s) created since {iso(start)}")
         insert("ci_workflow_runs", [run_row(r) for r in runs])
 
         known = known_job_attempts()
@@ -437,7 +454,7 @@ data:
             if r.get("conclusion") not in NO_JOB_CONCLUSIONS
             and (r["id"], r.get("run_attempt") or 1) not in known
         ]
-        fetched, rows = 0, []
+        fetched, failed, rows = 0, 0, []
         deadline = time.monotonic() + JOB_BUDGET_SECONDS
         for run in pending[:MAX_JOB_FETCHES]:
             if time.monotonic() > deadline:
@@ -449,6 +466,7 @@ data:
                 # One unreadable run must not discard the rest of the tick. It stays
                 # "not known" and is retried next tick.
                 print(f"{LOG} run {run['id']}: jobs read failed: {exc}", file=sys.stderr)
+                failed += 1
                 continue
             fetched += 1
             rows.extend(job_row(run, j) for j in jobs)
@@ -460,7 +478,7 @@ data:
             f"(cap {MAX_JOB_FETCHES}); core quota remaining={remaining}"
         )
         insert("ci_workflow_jobs", rows)
-        if pending and fetched == 0:
+        if failed and fetched == 0:
             raise SystemExit("every job read failed — refusing to report this tick as success")
 
 
