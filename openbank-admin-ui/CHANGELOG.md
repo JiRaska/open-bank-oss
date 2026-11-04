@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.16.0...admin-ui-v3.17.0) (2026-11-03)
+
+
+### Features
+
+* **admin-ui:** bundle eight strict-lane CI and Test Intelligence fixes ([#14495](https://github.com/JiRaska/open-bank-oss/issues/14495)) ([5fee7a5](https://github.com/JiRaska/open-bank-oss/commit/5fee7a5772c4b9665f8dcf095930bb8c9604d530))
+
 ## [3.16.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.15.3...admin-ui-v3.16.0) (2026-11-01)
 
 

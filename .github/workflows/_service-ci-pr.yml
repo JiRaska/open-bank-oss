@@ -23,6 +23,11 @@ name: _service-ci-pr
         required: false
         default: ''
         type: string
+      historical_admin_ui_version:
+        description: Validated one-off admin-ui version for product-catalog; blank keeps normal selection.
+        required: false
+        default: ''
+        type: string
       require_provider_pact_test:
         description: Fail when this targeted verification has no providerPactTest.
         required: false

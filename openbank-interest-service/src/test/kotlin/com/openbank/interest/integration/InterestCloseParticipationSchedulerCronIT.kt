@@ -5,6 +5,7 @@ package com.openbank.interest.integration
 
 import com.openbank.interest.application.port.out.CloseJobRunPort
 import com.openbank.interest.infrastructure.scheduler.InterestCloseJobs
+import com.openbank.interest.infrastructure.scheduler.InterestCloseParticipationScheduler
 import com.openbank.libs.close.CloseJobRun
 import com.openbank.libs.close.CloseParticipationReport
 import com.openbank.libs.close.CloseParticipationSink
@@ -73,13 +74,21 @@ class InterestCloseParticipationSchedulerCronIT {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var scheduler: InterestCloseParticipationScheduler
+
     @Test
     fun `the cron itself reports a completed day to the sink`() {
         val yesterday = AccountingClock.bank(clock).today().minusDays(1)
-        VertxContextSupport.subscribeAndAwait<Unit> {
-            closeJobRuns.record(
-                CloseJobRun(yesterday, InterestCloseJobs.ACCRUAL, 3, 0, 0, null, clock.instant()),
-            )
+        // Record a run for EVERY job due yesterday, not just accrual: on the 1st of a month the
+        // capitalization cron is due too, and a day with a due job missing is (correctly) never
+        // reported - recording accrual alone made this test fail on every 2nd of the month.
+        val due = scheduler.dueJobs(yesterday)
+        assertThat(due).contains(InterestCloseJobs.ACCRUAL)
+        due.forEach { job ->
+            VertxContextSupport.subscribeAndAwait<Unit> {
+                closeJobRuns.record(CloseJobRun(yesterday, job, 3, 0, 0, null, clock.instant()))
+            }
         }
 
         val deadline = System.nanoTime() + WAIT_NANOS
