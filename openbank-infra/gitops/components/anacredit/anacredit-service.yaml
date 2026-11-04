@@ -124,7 +124,7 @@ spec:
             # every other service's rollout convention. Flip to true only after an observation
             # window with a clean advisory report.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             httpGet:
               path: /q/health/ready
