@@ -19,3 +19,7 @@ The consumer group id, offset reset and dead-letter topic for fraud-service chan
 ## Shared verdict type (ADR-0353)
 
 `FraudVerdict` is declared once in `openbank-libs-fincrime` and shared with the payment rails. Its `UNKNOWN` value is what a consumer reads when an answer cannot be parsed; this service never produces it. A `RuleHit` rejects it, and `POST /api/v1/fraud/score` answers 500 rather than emit it. The verdicts stored in `fraud_scores.verdict` and returned on the wire remain `ALLOW`, `CHALLENGE`, `REVIEW` and `DECLINE`.
+
+## Test profile: outbox channel disabled
+
+Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled next to the already-disabled `transaction-signal` consumer and `dispatch-enabled=false`, so integration tests boot without a broker. Production and dev configuration are unchanged: the dispatcher and channel stay enabled there.

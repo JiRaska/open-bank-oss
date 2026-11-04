@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.2...customer-edge-v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **customer-edge:** page the unified notification inbox by keyset cursor ([#14622](https://github.com/JiRaska/open-bank-oss/issues/14622)) ([fab74b5](https://github.com/JiRaska/open-bank-oss/commit/fab74b50dc95032b074bd1c8ecc387b47c889c46)), closes [#12260](https://github.com/JiRaska/open-bank-oss/issues/12260)
+
 ## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
 
 

@@ -4,18 +4,27 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.contract
 
+import com.openbank.copilot.domain.ProposalToken
+import com.openbank.copilot.infrastructure.persistence.RedisProposalTokenStore
+import io.mockk.every
+import io.mockk.mockk
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
+import java.time.Instant
+import java.util.UUID
 
 /**
  * #12078: an unauthenticated request is rejected by libs-runtime before the resource runs, so its
  * 401 body is the shared ApiError, not the resource's `{error}`. Verify the served HTTP body
- * against the referenced response schema, not just its YAML text. Runs on the default profile and
- * without test-security so the PR stays spec+test+docs (ADR-0048 correction class).
+ * against the referenced response schema, not just its YAML text. #14525 restores the authenticated
+ * 501/403/404/422 cases on the default profile: a second Quarkus profile exhausted the test heap, so
+ * the token store is replaced per test with QuarkusMock instead of a memory-store profile.
  */
 @QuarkusTest
 class CopilotErrorBodySpecConformanceIT {
@@ -62,6 +71,79 @@ class CopilotErrorBodySpecConformanceIT {
         assertThat(documentedSchemas("/copilot/chat", 401).map { violations(shared, it) })
             .anySatisfy { assertThat(it).isEmpty() }
     }
+
+    @Test
+    @TestSecurity(user = "copilot-audit-customer")
+    fun `disabled chat returns the documented error body`() {
+        val response = given().contentType(ContentType.JSON)
+            .body(mapOf("message" to "hello"))
+            .`when`().post("/api/v1/copilot/chat")
+            .then().statusCode(501).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/chat", 501)
+    }
+
+    @Test
+    @TestSecurity(user = "copilot-audit-customer")
+    fun `malformed confirmation token returns the documented error body`() {
+        val response = given().contentType(ContentType.JSON)
+            .`when`().post("/api/v1/copilot/actions/not-a-uuid/confirm")
+            .then().statusCode(404).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 404)
+        assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
+    }
+
+    @Test
+    @TestSecurity(user = "copilot-audit-customer")
+    fun `expired token evicted by the store returns 404 with the documented error body`() {
+        val token = token(customerId = "copilot-audit-customer", expiresAt = Instant.now().minusSeconds(60))
+        storeReturning(null)
+        val response = given().contentType(ContentType.JSON)
+            .`when`().post("/api/v1/copilot/actions/${token.id}/confirm")
+            .then().statusCode(404).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 404)
+        assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
+    }
+
+    @Test
+    @TestSecurity(user = "copilot-audit-customer")
+    fun `expired token still returned by the store answers 422 with the documented error body`() {
+        // The in-memory store evicts at lookup, so stand in for a store (Redis before its TTL
+        // fires) that hands back a token whose expiresAt has already passed.
+        val token = token(customerId = "copilot-audit-customer", expiresAt = Instant.now().minusSeconds(60))
+        storeReturning(token)
+        val response = given().contentType(ContentType.JSON)
+            .`when`().post("/api/v1/copilot/actions/${token.id}/confirm")
+            .then().statusCode(422).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 422)
+        assertThat(response["error"]).isEqualTo("PROPOSAL_EXPIRED")
+    }
+
+    @Test
+    @TestSecurity(user = "copilot-audit-customer")
+    fun `another customer's token returns 403 with the documented error body`() {
+        val token = token(customerId = "another-customer", expiresAt = Instant.now().plusSeconds(60))
+        storeReturning(token)
+        val response = given().contentType(ContentType.JSON)
+            .`when`().post("/api/v1/copilot/actions/${token.id}/confirm")
+            .then().statusCode(403).extract().jsonPath().getMap<String, Any?>("")
+        assertConforms(response, "/copilot/actions/{tokenId}/confirm", 403)
+        assertThat(response["error"]).isEqualTo("PROPOSAL_NOT_FOUND")
+    }
+
+    /** Per-test store stand-in (QuarkusMock resets after each test); no Redis is needed. */
+    private fun storeReturning(token: ProposalToken?) {
+        val store = mockk<RedisProposalTokenStore>(relaxUnitFun = true)
+        every { store.find(any()) } answers { token?.takeIf { it.id == firstArg() } }
+        QuarkusMock.installMockForType(store, RedisProposalTokenStore::class.java)
+    }
+
+    private fun token(customerId: String, expiresAt: Instant) = ProposalToken(
+        id = UUID.randomUUID(),
+        toolName = "propose_payment",
+        params = emptyMap(),
+        expiresAt = expiresAt,
+        customerId = customerId,
+    )
 
     @Suppress("UNCHECKED_CAST")
     private fun documentedSchemas(path: String, status: Int): List<Map<String, Any?>> {
