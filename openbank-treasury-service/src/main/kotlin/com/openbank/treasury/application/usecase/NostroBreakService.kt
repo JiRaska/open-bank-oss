@@ -55,7 +55,14 @@ class NostroBreakService(
 
     override suspend fun sweep(today: LocalDate): NostroBreakSweep {
         val failures = mutableListOf<Throwable>()
-        val ids = statements.statementIdsSince(today.minusDays(LOOKBACK_DAYS))
+        val recent = statements.statementIdsSince(today.minusDays(LOOKBACK_DAYS))
+        // An open break whose statement has left the lookback window is still re-reconciled, or a
+        // late ledger booking could never resolve it and its alert could never clear. Bounded, and
+        // idempotent: observe() applies only the difference between a reconciliation and the book.
+        val older = breakRepo.open().map { it.statementUuid }.distinct().sorted()
+            .filterNot { it in recent }
+            .take(MAX_OUT_OF_WINDOW_STATEMENTS)
+        val ids = recent + older
         ids.forEach { id ->
             try {
                 observe(id)
@@ -122,5 +129,11 @@ class NostroBreakService(
          * line booked late resolves the break it caused. Older open breaks keep ageing untouched.
          */
         const val LOOKBACK_DAYS = 31L
+
+        /**
+         * At most this many older statements re-reconciled per sweep for their open breaks, so a
+         * backlog of ancient breaks cannot turn one hourly pass into hundreds of ledger reads.
+         */
+        const val MAX_OUT_OF_WINDOW_STATEMENTS = 50
     }
 }

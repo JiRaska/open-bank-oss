@@ -139,6 +139,38 @@ class NostroBreakServiceTest {
     }
 
     @Test
+    fun `an open break on a statement past the lookback window still resolves on a late booking`() = runBlocking<Unit> {
+        NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
+        upload()
+        service().sweep(today)
+        ledger.lines += "1001" to NostroFixtures.line("5000.00", Side.DEBIT, description = "SYNTH-SVCR-0003")
+
+        today = today.plusDays(60) // the statement is long out of the 31-day window
+        val r = service().sweep(today)
+        assertThat(r.observed).isEqualTo(1)
+        assertThat(r.open).isEqualTo(1)
+        assertThat(service().breaks(NostroFixtures.IBAN, includeResolved = true).map { it.brk.resolvedOn })
+            .containsExactlyInAnyOrder(null, today)
+
+        // Idempotent: the same pass again changes nothing it already recorded.
+        val again = service().sweep(today)
+        assertThat(again.open).isEqualTo(1)
+        assertThat(breakRepo.rows).hasSize(2)
+    }
+
+    @Test
+    fun `a statement past the window whose breaks are all resolved is not re-reconciled`() = runBlocking<Unit> {
+        upload() // no ledger lines at all: every statement line is an open break
+        service().sweep(today)
+        breakRepo.rows.replaceAll { it.copy(resolvedOn = today) }
+
+        today = today.plusDays(60)
+        val r = service().sweep(today)
+        assertThat(r.observed).isZero()
+        assertThat(r.open).isZero()
+    }
+
+    @Test
     fun `one statement the ledger cannot answer for does not stop the sweep`() = runBlocking<Unit> {
         upload()
         ledger.unavailableAccounts += "1001"
