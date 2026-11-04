@@ -156,6 +156,27 @@ object CardClearingScenario {
         world.audit.append("card ${partiallyCleared.id} reversed: remainder released")
     }
 
+    /**
+     * Hold-expiry sweep — what the production expiry job does. Another scenario may advance the
+     * shared clock (StandingOrderExecutionScenario ticks one day per step), so a hold left
+     * standing by an earlier step can outlive its `expiresAt`; the REAL policy then releases it.
+     * Without this the completeness invariant would flag a hold nothing ever swept. The runner
+     * calls it after every clock-advancing scenario, before the invariant sweep.
+     */
+    fun sweepExpired(world: World) {
+        val now = world.context.clock.instant()
+        world.cardAuthorizations.indices.forEach { index ->
+            val held = world.cardAuthorizations[index]
+            if (held.status.holdsFunds && now.isAfter(held.expiresAt)) {
+                val outcome = AuthorizationLifecycle.expire(held, world.context.clock)
+                if (outcome is PresentmentOutcome.Accepted) {
+                    world.cardAuthorizations[index] = outcome.authorization
+                    world.audit.append("card ${held.id} expired by sweep: hold released")
+                }
+            }
+        }
+    }
+
     private fun expire(world: World, authorized: CardAuthorization) {
         val outcome = AuthorizationLifecycle.expire(authorized, world.context.clock)
         val expired = (outcome as PresentmentOutcome.Accepted).authorization
