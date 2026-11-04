@@ -75,7 +75,13 @@
     "lodash-es": "4.18.1",
     "postcss": "8.5.31",
     "sharp": "0.35.5",
-    "nanoid": "3.3.18"
+    "nanoid": "3.3.18",
+    "@sentry/bundler-plugins": {
+      "glob": "14.0.2"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.1"
+    }
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
