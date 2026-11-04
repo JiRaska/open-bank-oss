@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.0...customer-edge-v1.6.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+* **customer-edge:** answer a refused pension read as access denied, not a change refusal ([#14649](https://github.com/JiRaska/open-bank-oss/issues/14649)) ([4d94d31](https://github.com/JiRaska/open-bank-oss/commit/4d94d31f3530e5a5b79aef1b21777fe8a3b8b04d))
+
 ## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.2...customer-edge-v1.6.0) (2026-11-03)
 
 
