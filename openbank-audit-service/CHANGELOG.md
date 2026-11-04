@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.30.1...audit-service-v0.31.0) (2026-11-04)
+
+
+### Features
+
+* **audit:** record TPP register changes on the audit trail ([#14476](https://github.com/JiRaska/open-bank-oss/issues/14476)) ([76ba2bf](https://github.com/JiRaska/open-bank-oss/commit/76ba2bf1e930c9ba8d3719a8aaa98a4abf2c5661))
+
 ## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.30.0...audit-service-v0.30.1) (2026-11-03)
 
 
