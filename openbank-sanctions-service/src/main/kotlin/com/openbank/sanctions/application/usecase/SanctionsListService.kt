@@ -167,6 +167,24 @@ class SanctionsListService(
     }
 
     /**
+     * Single-list form of [requestRefreshAll], the same mechanism: flag the list and answer
+     * immediately; the scheduler runs the import on its next tick, through the same fenced
+     * [refresh]. The v1 operation used to run the import INSIDE the request, and one large feed
+     * (PEP_GLOBAL) outlived any client timeout — the same defect #9048 removed from refresh-all.
+     *
+     * A DISABLED list is refused (422): the scheduler only refreshes enabled lists, so flagging
+     * one would accept a request that nothing will ever carry out. Returns the list in its
+     * PRE-refresh state with the flag set.
+     */
+    suspend fun requestRefresh(listType: String): SanctionsList {
+        val list = repo.requireList(listType)
+        check(list.enabled) { "Sanctions list $listType is disabled; enable it before requesting a refresh" }
+        Log.info("Refresh requested for sanctions list $listType (deferred to scheduler)")
+        check(repo.requestRefresh(listType) == 1) { "Sanctions list $listType could not be flagged for refresh" }
+        return repo.requireList(listType)
+    }
+
+    /**
      * Legacy v1 variant of the same request: flags the lists exactly like [requestRefreshAll] but
      * returns the enabled lists (200 + array) so the v1 contract SHAPE survives the deprecation
      * window (docs/03-api: a breaking change moves to /api/v2 while v1 runs in parallel). The

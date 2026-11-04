@@ -171,6 +171,24 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-04** — **Single-list refresh is deferred to the scheduler (#14780).** `POST
+  /api/v1/sanctions/lists/{listType}/refresh` used to download and import the feed inside the
+  request; one large feed (PEP_GLOBAL) outlived the client timeout, and the import kept running
+  after the caller had given up (found by API fuzz). It now flags the list
+  (`refresh_requested_at`, the #9048 refresh-all mechanism) and returns it in its pre-refresh state
+  (200, deprecated v1 shape). The new `POST /api/v2/sanctions/lists/{listType}/refresh` answers
+  202 and requires `Idempotency-Key`. Both use the same OPA action `sanctions.trigger` and the same
+  roles (`ROLE_OPERATOR`, `ROLE_ADMIN`), so authorization is unchanged. The import itself still
+  runs through the fenced `refresh()` on the next scheduler tick, so publication fencing and the
+  change journal are unchanged. **STRIDE-D:** an HTTP trigger can no longer hold a request thread
+  for a whole feed download. **STRIDE-R:** a DISABLED list is refused (422) rather than accepted,
+  because the scheduler never refreshes a disabled list, and accepting it would report work that
+  never happens. **Residual:** a caller that relied on the v1 200 meaning "imported" now gets
+  "queued". Progress is read from `lastUpdatedAt`, as with refresh-all since #9048. Evidence:
+  `SanctionsListRefreshDeferredIT` (its v1 cases failed against the synchronous code) and
+  `SanctionsChangeJournalIT`, which now drives the flagged list through the scheduler's unit of
+  work. Rollback: revert the PR; no migration.
+
 - **2026-10-29** — **Subject-bound, expiring whitelist retry (#11694).** A new screening attempt
   no longer needs to inherit an old `CLEAR`: after the fresh list search, an unexpired
   `WHITELISTED` review may cover exactly the same explicit subject and reviewed match identities

@@ -48,7 +48,10 @@ class SanctionsListResource(private val service: SanctionsListService) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "sanctions.trigger", resource = "#listType")
     suspend fun refresh(@PathParam("listType") listType: String): Response =
-        Response.ok(service.refresh(listType)).build()
+        // Deprecated in favour of POST /api/v2/sanctions/lists/{listType}/refresh (202). Keeps the
+        // v1 shape (200 + the list) but, like refresh-all since #9048, no longer imports
+        // in-request: the list is flagged and returned in its pre-refresh state.
+        Response.ok(service.requestRefresh(listType)).build()
 
     @POST
     @Path("/refresh-all")
