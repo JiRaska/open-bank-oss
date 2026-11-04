@@ -477,6 +477,7 @@ class SourceIntentBoundaryTest(unittest.TestCase):
                      patch.object(train, "settle_view", return_value=(self.base, "", [], [], [member], {}, {}, {})), \
                      patch.object(train, "partition", return_value=([member], [])), \
                      patch.object(train, "train_turn", return_value=None), \
+                     patch.object(train, "fast_turn", return_value=None), \
                      patch.object(train, "api", return_value=(201, {})) as api:
                     train.mode_settle(real, Mock(), "owner/repo", False)
                     if armed:
