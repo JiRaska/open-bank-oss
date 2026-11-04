@@ -92,6 +92,10 @@ EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
 OWNER_APPROVAL_WORKFLOW = pathlib.Path(".github/workflows/merge-train-owner-approval.yml")
 CARRIER_LABEL = "merge-train"
+# Owner-applied ad-hoc priority: an armed PR carrying it is served first within its lane (after a
+# fix for a red main, which always goes first). Agents run under the owner's token, so this is a
+# policy, not an identity check: agents never apply it (CLAUDE.md, Multi-agent).
+EXPEDITE_LABEL = "merge-priority:expedite"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BUNDLE_FILE = "train.bundle"
@@ -773,8 +777,13 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     return out
 
 
+def is_expedited(p: dict) -> bool:
+    return any((lb.get("name") if isinstance(lb, dict) else lb) == EXPEDITE_LABEL for lb in p.get("labels") or [])
+
+
 def order_candidates(prs: list[dict]) -> list[dict]:
-    return sorted(prs, key=lambda p: (p.get("created_at") or "", p["number"]))
+    """Expedited first, then oldest first. Every later ordering is a stable sort over this one."""
+    return sorted(prs, key=lambda p: (not is_expedited(p), p.get("created_at") or "", p["number"]))
 
 
 def is_protected(path: str, fragments: list[str]) -> str | None:
@@ -3833,6 +3842,12 @@ def self_test() -> int:
               qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", desc)})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
         [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"}])] == [3, 9])
+    check("order: an expedited PR goes first, then oldest first", [p["number"] for p in order_candidates(
+        [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"},
+         {"number": 7, "created_at": "2026-03", "labels": [{"name": EXPEDITE_LABEL}]}])] == [7, 3, 9])
+    check("order: another label is not priority", [p["number"] for p in order_candidates(
+        [{"number": 9, "created_at": "2026-02", "labels": [{"name": "merge-priority:repair"}]},
+         {"number": 3, "created_at": "2026-01"}])] == [3, 9])
 
     # ---- paths / fast lane / batch ---------------------------------------------------------
     check("glob: `*` does not cross `/`", glob_match("a/*-opa-bundle.yaml", "a/x-opa-bundle.yaml")

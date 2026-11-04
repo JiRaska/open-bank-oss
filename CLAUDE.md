@@ -748,6 +748,10 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **`merge-priority:expedite` is the OWNER's lever — an agent never applies or removes it.** The merge
+  train serves a labelled, armed PR first in its lane (after a fix for a red main). Agents run under the
+  owner's token, so nothing technical stops an agent labelling its own PR; that is exactly why the rule
+  is absolute. To get a PR expedited, say so in the report and let the owner label it.
 - **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
   2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
   agents open roughly one PR every two minutes. What survives a drain is structural, not
