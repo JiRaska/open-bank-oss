@@ -179,6 +179,21 @@ class GenericExceptionMapperClassificationTest {
     }
 
     @Test
+    fun `a server-side IOException raised inside the multipart parser is still a 500`() {
+        val diskFull = IOException("No space left on device").apply {
+            stackTrace = arrayOf(
+                StackTraceElement(
+                    "org.jboss.resteasy.reactive.server.core.multipart.MultiPartParserDefinition",
+                    "createTempFile",
+                    "MultiPartParserDefinition.java",
+                    1,
+                ),
+            )
+        }
+        assertThat(GenericExceptionMapper().toResponse(diskFull).status).isEqualTo(500)
+    }
+
+    @Test
     fun `an IOException thrown outside the multipart parser is still a 500`() {
         assertThat(GenericExceptionMapper().toResponse(IOException("disk full")).status).isEqualTo(500)
     }
