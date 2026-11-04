@@ -169,8 +169,9 @@ class SanctionsListService(
     /**
      * Single-list form of [requestRefreshAll], the same mechanism: flag the list and answer
      * immediately; the scheduler runs the import on its next tick, through the same fenced
-     * [refresh]. The v1 operation used to run the import INSIDE the request, and one large feed
-     * (PEP_GLOBAL) outlived any client timeout — the same defect #9048 removed from refresh-all.
+     * [refresh]. Served by the v2 trigger only. The v1 operation still imports inside the request
+     * (its contract promises the refreshed list), and one large feed (PEP_GLOBAL) can outlive a
+     * client timeout there — callers that need a bounded request use v2 (#14780).
      *
      * A DISABLED list is refused (422): the scheduler only refreshes enabled lists, so flagging
      * one would accept a request that nothing will ever carry out. Returns the list in its

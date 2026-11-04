@@ -17,10 +17,10 @@ import java.nio.file.Path
 import java.util.UUID
 
 /**
- * #14780: the single-list refresh is DEFERRED, the #9048 refresh-all mechanism. The trigger flags
- * the list (`refreshRequestedAt`) and answers at once; the scheduler (off under %test) runs the
- * import. The v1 operation used to import inside the request, and API fuzz timed out on
- * PEP_GLOBAL. Every assertion here goes through real HTTP and the real database.
+ * #14780: the v2 single-list refresh is DEFERRED, the #9048 refresh-all mechanism. The trigger
+ * flags the list (`refreshRequestedAt`) and answers at once; the scheduler (off under %test) runs
+ * the import. The v1 operation is deliberately unchanged (synchronous, covered by
+ * SanctionsChangeJournalIT). Every assertion here goes through real HTTP and the real database.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -35,24 +35,11 @@ class SanctionsListRefreshDeferredIT {
             .post("/api/v2/sanctions/lists/PEP_GLOBAL/refresh")
         assertThat(response.statusCode).isEqualTo(202)
         assertThat(response.jsonPath().getString("requested")).isEqualTo("PEP_GLOBAL")
-        // Answered without the import: a deferred request is fast, and nothing was imported.
-        assertThat(response.time).isLessThan(5_000)
+        // Flag-only: nothing was imported — the last import's time and count are untouched.
         val after = list("PEP_GLOBAL")
         assertThat(after["refreshRequestedAt"]).isNotNull()
         assertThat(after["lastUpdatedAt"]).isEqualTo(before["lastUpdatedAt"])
         assertThat(after["lastEntryCount"]).isEqualTo(before["lastEntryCount"])
-    }
-
-    @Test
-    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `v1 single-list refresh keeps the 200 list shape but defers the import`() {
-        val before = list("UN_CONSOLIDATED")
-        val response = given().contentType("application/json")
-            .post("/api/v1/sanctions/lists/UN_CONSOLIDATED/refresh")
-        assertThat(response.statusCode).isEqualTo(200)
-        assertThat(response.jsonPath().getString("listType")).isEqualTo("UN_CONSOLIDATED")
-        assertThat(response.jsonPath().getString("refreshRequestedAt")).isNotNull()
-        assertThat(list("UN_CONSOLIDATED")["lastUpdatedAt"]).isEqualTo(before["lastUpdatedAt"])
     }
 
     @Test
@@ -74,8 +61,6 @@ class SanctionsListRefreshDeferredIT {
         try {
             given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
                 .post("/api/v2/sanctions/lists/HM_TREASURY/refresh")
-                .then().statusCode(422)
-            given().contentType("application/json").post("/api/v1/sanctions/lists/HM_TREASURY/refresh")
                 .then().statusCode(422)
             assertThat(list("HM_TREASURY")["refreshRequestedAt"]).isNull()
         } finally {

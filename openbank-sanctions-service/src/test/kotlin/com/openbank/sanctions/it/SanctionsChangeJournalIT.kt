@@ -13,7 +13,6 @@ import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
 import com.openbank.sanctions.application.usecase.SanctionsImportService
-import com.openbank.sanctions.application.usecase.SanctionsListService
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
@@ -27,18 +26,13 @@ import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
-import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.restassured.RestAssured.given
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
-import io.vertx.core.Vertx
-import io.vertx.core.impl.ContextInternal
 import io.vertx.mutiny.pgclient.PgPool
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -55,7 +49,6 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
@@ -84,46 +77,6 @@ class SanctionsChangeJournalIT {
 
     @Inject
     lateinit var mapper: ObjectMapper
-
-    @Inject
-    lateinit var listService: SanctionsListService
-
-    /**
-     * #14780: the HTTP trigger only FLAGS the list now; the import runs on the scheduler tick.
-     * Assert the flag over real HTTP, then run the tick's own unit of work — the fenced
-     * [SanctionsListService.refresh] — so the fence/CDI/PostgreSQL path below is still exercised.
-     */
-    private fun requestThenRunRefresh(listType: String) {
-        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/$listType/refresh")
-        assertThat(response.statusCode).isEqualTo(200)
-        assertThat(response.jsonPath().getString("listType")).isEqualTo(listType)
-        assertThat(response.jsonPath().getString("refreshRequestedAt")).isNotNull()
-        runOnVertxContext { listService.refresh(listType) }
-    }
-
-    @Inject
-    lateinit var vertx: Vertx
-
-    /**
-     * The scheduler runs [SanctionsListService.refresh] on a duplicated Vert.x context; a bare
-     * test thread has none ("No current Vertx context found"). Same bridge as
-     * aml-service's provider verification.
-     */
-    private fun runOnVertxContext(block: suspend () -> Unit) {
-        val future = CompletableFuture<Unit>()
-        val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
-        VertxContextSafetyToggle.setContextSafe(duplicated, true)
-        val dispatcher = Executor { command -> duplicated.runOnContext { command.run() } }.asCoroutineDispatcher()
-        CoroutineScope(dispatcher).launch {
-            try {
-                block()
-                future.complete(Unit)
-            } catch (t: Throwable) {
-                future.completeExceptionally(t)
-            }
-        }
-        future.get(30, TimeUnit.SECONDS)
-    }
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -175,7 +128,9 @@ class SanctionsChangeJournalIT {
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `refresh service resolves its JDBC fence through CDI`() {
-        requestThenRunRefresh(SanctionsListType.FATF_HIGH_RISK.name)
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/FATF_HIGH_RISK/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(response.jsonPath().getString("listType")).isEqualTo(SanctionsListType.FATF_HIGH_RISK.name)
         assertThat(refreshActive(SanctionsListType.FATF_HIGH_RISK)).isFalse()
     }
 
@@ -202,7 +157,8 @@ class SanctionsChangeJournalIT {
         // Exercise real HTTP, service, fence and PostgreSQL with a deterministic no-feed
         // import result; %test otherwise fetches the live EU feed.
         installSeedFallbackImporter()
-        requestThenRunRefresh(type.name)
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/EU_CONSOLIDATED/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
         assertThat(journalCount()).isEqualTo(1)
         assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
         assertThat(refreshActive(type)).isTrue()
@@ -213,7 +169,8 @@ class SanctionsChangeJournalIT {
     fun `ordinary seed fallback completes when no earlier refresh is incomplete`() {
         val type = SanctionsListType.EU_CONSOLIDATED
         installSeedFallbackImporter()
-        requestThenRunRefresh(type.name)
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/EU_CONSOLIDATED/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
         assertThat(refreshActive(type)).isFalse()
         assertThat(journalCount()).isZero()
     }
