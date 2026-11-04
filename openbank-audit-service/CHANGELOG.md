@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.30.0...audit-service-v0.30.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **audit:** prepare account status and withdrawal approval consumers ([#14606](https://github.com/JiRaska/open-bank-oss/issues/14606)) ([0f099f8](https://github.com/JiRaska/open-bank-oss/commit/0f099f8b98ec110cc48bf8735ddc6fb5c50c8e24))
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.2...audit-service-v0.30.0) (2026-10-30)
 
 
