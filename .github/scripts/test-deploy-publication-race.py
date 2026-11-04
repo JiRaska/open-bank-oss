@@ -67,7 +67,7 @@ class TemporaryDirectoryCleanupTests(unittest.TestCase):
 
 class PushPreservesNewerPinTest(unittest.TestCase):
     """A push-event deploy never moves a pin BACKWARD: if main already carries a descendant of this
-    run's source for a service, that pin is preserved (union of newer pins, ADR-0362 item 3).
+    run's source for a service, that pin is preserved (union of newer pins, the no-downgrade CI/CD invariant (#14702)).
 
     Measured on #14579: a deploy PR for an older source rewrote 22 newer pins. These cases were
     written before the rule and FAIL on the old `decision()`, which publishes every push."""

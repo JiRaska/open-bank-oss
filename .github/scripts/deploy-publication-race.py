@@ -63,7 +63,7 @@ def decision(event, reconcile, initial, current, candidate, source, *, root=None
     # now; if it already names a descendant of this run's source, a newer deploy landed for this
     # service while this build was running and rewriting it would roll the service back — the
     # #14579 shape (22 of 34 pins). Preserve main's value: the deploy PR then carries only the
-    # services this source genuinely advances (ADR-0362 item 3; gate deploy-pin-monotonic is the
+    # services this source genuinely advances (the no-downgrade CI/CD invariant (#14702); gate deploy-pin-monotonic is the
     # backstop). A diverged or unresolvable main pin fails closed: the rewrite is rejected and the
     # run is red, which is louder than a silent rewind.
     if current != initial and current != candidate:
