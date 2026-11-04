@@ -2033,6 +2033,23 @@ gates:
     run: |
       python3 .github/scripts/check-gradle-user-home-isolation.py
 
+  # ADR-0363: only a push to main may write the remote Gradle build cache. The real boundary is
+  # the `gradle-cache-writer` environment's branch policy plus the node rejecting writes from
+  # the read-only account; this keeps the workflow side from drifting onto those alone.
+  - id: remote-build-cache-write-scope
+    name: "remote Gradle build cache is written only from main (ADR-0363)"
+    group: supplychain
+    mode: enforced
+    rationale: "A cache entry written from pull-request code would be served to every later build on main, so the write path must stay main-only on the workflow side too."
+    review_after: "2027-05-03"
+    min_subjects: 80   # 97 workflow files observed 2026-11-03
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
+    selftest: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py --self-test
+    run: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py
+
   # The governance gates in this job (threat-model coverage + diff, network-policy
   # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
   # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
@@ -7141,6 +7158,20 @@ gates:
     min_subjects: 6   # 6 worker.enabled switches today (2026-09-03)
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
+
+  - id: admin-ui-a11y-route-coverage
+    name: "Admin UI routes are covered by axe accessibility specs (enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "Route coverage by axe specs is only visible as an inventory; the gate keeps the literal-navigation evidence from silently disappearing."
+    review_after: "2027-02-28"
+    min_subjects: 50  # 171 page routes inventoried on 2026-11-04
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-a11y-route-coverage.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-a11y-route-coverage.py
 
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
