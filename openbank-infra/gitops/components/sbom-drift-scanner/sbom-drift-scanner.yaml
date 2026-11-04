@@ -488,7 +488,12 @@ spec:
                       container NAME — not index 0, several money-path pods run an OPA
                       sidecar that isn't consistently container[0] (confirmed live)."""
                       try:
-                          jsonpath = f'{{.items[0].status.containerStatuses[?(@.name=="{svc}")].image}}'
+                          # `.image` AND `.imageID`. For a digest-pinned spec (`repo:tag@sha256:X`)
+                          # the runtime reports `.image` as the local config id (`sha256:Y`), which
+                          # can never equal the declared ref — balance-service failed every run
+                          # that way. Only `.imageID` (`repo@sha256:X`) carries the repo digest.
+                          cs = f'.items[0].status.containerStatuses[?(@.name=="{svc}")]'
+                          jsonpath = f'{{{cs}.image}} {{{cs}.imageID}}'
                           out = subprocess.run(
                               ["kubectl", "get", "pods", "-n", ns,
                                "-l", f"app.kubernetes.io/name={svc}",
@@ -496,8 +501,10 @@ spec:
                                "-o", f"jsonpath={jsonpath}"],
                               capture_output=True, text=True, timeout=15,
                           )
-                          image = out.stdout.strip()
-                          return image or None
+                          parts = out.stdout.split()
+                          if not parts:
+                              return None
+                          return parts[0], (parts[1] if len(parts) > 1 else "")
                       except Exception as e:
                           print(f"  WARN: pod lookup failed for {ns}/{svc}: {e}")
                           return None
@@ -523,13 +530,19 @@ spec:
                   results = {}
                   for svc, ns, manifest_path in COMPONENTS:
                       print(f"[{svc}] comparing running pod vs gitops...", flush=True)
-                      running = running_image(svc, ns)
-                      if not running:
+                      running_pair = running_image(svc, ns)
+                      if not running_pair:
                           print(f"  SKIP {svc}: no running pod found", flush=True)
                           results[svc] = {"status": "no-pod-found"}
                           continue
+                      running, running_id = running_pair
                       declared = declared_image(svc, manifest_path)
                       in_sync = bool(declared) and running == declared
+                      if declared and "@sha256:" in declared and not in_sync:
+                          # Digest-pinned: the repo digest is the identity both sides share.
+                          digest = declared.split("@", 1)[1]
+                          in_sync = running_id.endswith("@" + digest)
+                          running = running_id or running
                       print(f"  running={running} declared={declared} inSync={in_sync}", flush=True)
                       results[svc] = {
                           "status": "checked",
