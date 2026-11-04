@@ -101,4 +101,4 @@ Each conversion is a financial record (`fx_conversions`) pinning `rate_id`/`appl
 - ✅ Transport hardening: HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy (set in `application.yaml`); mTLS in-cluster.
 - ✅ Secrets: dev placeholders must be overridden in prod via Vault (ADR 0017).
 - ⚠️ Rate-source integrity is the dominant residual risk (threat model §5): a manipulated/stale rate is a silent financial-loss vector — mitigated by rate provenance/timestamp, validity (`isValid`) checks, and `rate_id` pinning; bounds/sanity limits tracked as a follow-up.
-- ⚠️ Domain-event Kafka publisher (`KafkaFxEventPublisher`) is currently a stub; the live event path is the outbox dispatcher — wiring is a tracked follow-up.
+- ✅ Conversion events go through the transactional outbox (`FxOutboxRepository` → `KafkaFxOutboxEventPublisher`, channel `fx-events-out`); the former stub publisher `KafkaFxEventPublisher` was removed (#1033).
