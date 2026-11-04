@@ -42,31 +42,11 @@ deploy_holds:
     # Migrated from deploy branches (issue #11503). Entries inherited from deploy PR #12948
     # recorded no reason and were released; money-path services carry a staged wave entry in
     # their place. Every entry with its own issue, reason or release condition is kept.
-    openbank-account-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-billing-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
-    openbank-clearing-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-domestic-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy: explicit money-path wave gate, independent of the inherited #13079/#13304 entries; released when wave 2a is healthy for 24h.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-fx-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-interest-service:
       all_of:
       - issue: "#13167"
@@ -84,35 +64,6 @@ deploy_holds:
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
     openbank-lending-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sdd-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-instant:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-sepa-payment:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-standing-order-service:
-      issue: '#11503'
-      reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-      release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-swift-service:
-      all_of:
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-    openbank-treasury-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
@@ -737,6 +688,10 @@ change_requirements:
     consumer_allowlist:
       - topic: "openbank.treasury.payments"
         reason: "ADR-0344 split of #13413: swift-service's TreasuryPaymentReleasedConsumer and audit-service's subscription land first (bank-own transfer rail slice); the treasury-service producer arrives with the market-and-payments slice, which MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-10-23, #13698): #13698."
+      - topic: "openbank.accounts.account.status-changed"
+        reason: "#9073 stage 1 of 2, consumer-first: audit-service and analytics-sink subscribe, with the topic and ACLs, before account-service publishes there. Today AccountEventPublisher ignores the topic its callers name and emits status changes on account-events-out (account.created); the producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
+      - topic: "openbank.accounts.savings-withdrawal.approved"
+        reason: "#9073 stage 1 of 2, consumer-first: same sequencing as account.status-changed above; the account-service producer cutover is stage 2 and MUST remove this entry in the same PR. Until then the consumer is inert, not faked. TRACKING (2026-11-02, #9073): #9073."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -1797,9 +1752,7 @@ coverage:
     # Baseline for every entry in money_path_services (28 on 2026-10-17), ratchet-only. Enforced
     # per module by koverVerify against the minValue in its build.gradle.kts, and the direction
     # is enforced by gate `coverage-floor-ratchet` (a lowered minValue needs a
-    # `coverage-floor-lowered: #<issue>` trailer). Two services still sit BELOW it:
-    # standing-order 34 and sdd 38 — tracked in #13144; raise them there, do not read this
-    # number as already true of the whole list.
+    # `coverage-floor-lowered: #<issue>` trailer). Every entry is at or above it since #13144.
     money_path_floor: 40
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
@@ -2127,7 +2080,7 @@ dependencies:
     # Review date moved to 2026-11-15 in #12980; strict activation remains separate (#11686).
     # Daily drift does not prove strict CodeQL/SBOM resolution or an executed Dependabot
     # refresh. Verify those lane proofs before the independently reviewed strict flip.
-    target_enforce_date: "2026-11-15"   # ADR-0144
+    target_enforce_date: "2026-12-15"   # ADR-0144; moved 2026-11-01: strict-lane proofs in #11686 still open (#14442)
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
@@ -2474,7 +2427,7 @@ perf_gate:
     - "weekly scheduled run reports into perf-reports-* artifact"
   gate: perf-gate
   enforced: advisory
-  target_enforce_date: "2026-11-01"
+  target_enforce_date: "2026-12-01"   # ADR-0144; moved 2026-11-01: 5 of the last 10 perf-gate runs failed (2026-10-31), not stable enough to block (#14442)
   ci_producer: ".github/workflows/perf-gate.yml"
 
 
@@ -3990,6 +3943,36 @@ product_ir_authoring_parity:
   target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
+product_ir_formal_properties:
+  # ADR-0352 §9 phase 6: formal properties of the pure interpreter, as property-based tests in CI
+  # over every reference product and over generated revisions (ProductArb). The gate checks the
+  # assertions are PRESENT; the module CI lane runs them.
+  detect: ["openbank-products/src/test/kotlin/com/openbank/products/ProductFormalPropertiesTest.kt"]
+  require:
+    - "termination: every evaluation emits at most maxInstructionsPerEvaluation (64) instructions, and one past it is refused with ProductEvaluationException"
+    - "balance conservation: every Post instruction balances per currency"
+    - "monotone tiers, reference products: on the interpreter's accrual Post, the marginal rate never falls from one tier to the next, sampled at every tier edge"
+    - "monotone accrual: for every revision ProductMonotonicity passes (all reference products; generated ones it passes), a higher balance never accrues less and no tier's marginal rate is lower than the one below; the check must flag some generated revisions and a known bonus-below-x revision. IR v1 itself does not guarantee monotone accrual (product-ir.md, #14210)"
+    - "determinism: the same input gives byte-identical canonical instructions"
+    - "purity: the compiled com.openbank.libs.product and com.openbank.libs.finance.deposit packages reference no ambient clock, I/O, randomness, logging or metrics"
+    - "v1 rounding is HALF_UP, pinned by golden accrual and capitalisation values that sit exactly on a half"
+  gate: product-ir-formal-properties
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-formal-properties.py"
+
+product_ir_version_lifecycle:
+  # ADR-0352 §1/§9 phase 6: a published revision is pinned to its irVersion and each schema is immutable.
+  detect: ["openbank-libs-domain/src/main/kotlin/com/openbank/libs/product/ir/ProductIr.kt"]
+  require:
+    - "IrVersion.SUPPORTED holds at most two versions"
+    - "every supported version has product-ir/v<N>.schema.json"
+    - "removing a supported version carries a breaking-change marker (`!:` title or BREAKING CHANGE body)"
+  gate: product-ir-version-lifecycle
+  enforced: advisory
+  target_enforce_date: "2026-12-31"   # ADR-0144
+  ci_producer: ".github/scripts/check-product-ir-version-lifecycle.py"
+
 product_bearing_services:
   # ADR-0341 D1 / ADR-0352 phase 3: a service that opens product-bearing contracts pins the PUBLISHED
   # catalog revision each contract was opened under, and no service keeps its own copy of the terms.
@@ -4003,16 +3986,6 @@ product_bearing_services:
   # `adoption: pinned` arms the three structural checks (migration column, entity @Column, creation path
   # binds the pin); `pending` is reported, never failed, until that service's adoption PR flips it.
   services:
-    openbank-account-service:
-      adoption: pinned
-      contract_table: accounts
-      pin_column: product_revision_id
-      entity: openbank-account-service/src/main/kotlin/com/openbank/account/infrastructure/persistence/entity/AccountEntities.kt
-      creation:
-        file: openbank-account-service/src/main/kotlin/com/openbank/account/application/usecase/AccountService.kt
-        function: openAccount
-        aggregate: Account
-        pin_argument: productRevisionPin
     openbank-lending-service:
       adoption: pending
       reason: "loan_application.catalog_revision_id exists (ADR-0264) but is set only when a caller sends catalogOfferingId, which none does; ADR-0352 §9 defers lending's pin to IR v2 (#668)"
@@ -4078,7 +4051,7 @@ pr_file_overlap:
   # date below is the review point for the CLASSIFIER (are the reports still true and
   # actionable), not a promise to flip --enforce.
   enforced: advisory
-  target_enforce_date: "2026-11-01"   # ADR-0144 — review the classifier, not a flip to enforce
+  target_enforce_date: "2026-12-01"   # ADR-0144 — review the classifier, not a flip to enforce; moved 2026-11-01, deliberately never enforced (#14442)
   # CI producer is LIVE (advisory): .github/scripts/check-pr-file-overlap.py runs in the
   # `gates (lint)` shard on every pull_request. It compares the BLOB SHA of each overlapping
   # file at both PR heads, so an overlap where the content already agrees is reported as

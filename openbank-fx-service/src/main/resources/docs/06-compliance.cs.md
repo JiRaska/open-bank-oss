@@ -101,4 +101,4 @@ Každá konverze je finanční záznam (`fx_conversions`) fixující `rate_id`/`
 - ✅ Tvrzení transportu: HSTS, CSP, X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy (v `application.yaml`); mTLS v clusteru.
 - ✅ Tajemství: dev placeholdery musí být v prod přepsány přes Vault (ADR 0017).
 - ⚠️ Integrita zdroje kurzu je dominantní zbytkové riziko (threat model §5): manipulovaný/zastaralý kurz je tichý vektor finanční ztráty — mitigováno provenancí/časovou značkou kurzu, kontrolami platnosti (`isValid`) a fixací `rate_id`; meze/sanity limity vedeny jako follow-up.
-- ⚠️ Kafka publisher doménových událostí (`KafkaFxEventPublisher`) je aktuálně stub; živá cesta událostí je outbox dispatcher — propojení je evidovaný follow-up.
+- ✅ Události konverzí jdou přes transakční outbox (`FxOutboxRepository` → `KafkaFxOutboxEventPublisher`, kanál `fx-events-out`); dřívější stub `KafkaFxEventPublisher` byl odstraněn (#1033).

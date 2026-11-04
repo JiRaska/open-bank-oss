@@ -4,6 +4,7 @@
 
 package com.openbank.pid.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -25,7 +26,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(PidNullIdDocumentElementIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.pid.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "operator@openbank.test", roles = ["ROLE_OPERATOR"])
 class PidNullIdDocumentElementIT {
 
