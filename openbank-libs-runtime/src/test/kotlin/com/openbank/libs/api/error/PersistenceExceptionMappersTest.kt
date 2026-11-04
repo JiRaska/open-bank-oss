@@ -10,6 +10,7 @@ import org.hibernate.exception.DataException
 import org.jboss.resteasy.reactive.server.core.multipart.MultipartParser
 import org.junit.jupiter.api.Test
 import java.io.CharConversionException
+import java.io.IOException
 import java.sql.SQLException
 
 /**
@@ -155,6 +156,31 @@ class GenericExceptionMapperClassificationTest {
 
         assertThat(response.status).isEqualTo(400)
         assertThat((response.entity as ApiError).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+    }
+
+    @Test
+    fun `a multipart body truncated before its closing boundary is classified 400`() {
+        // Fleet fuzzing (run 41631915107): RESTEasy's parser raises a PLAIN IOException for this.
+        val truncated = IOException("Connection terminated reading multipart data").apply {
+            stackTrace = arrayOf(
+                StackTraceElement(
+                    "org.jboss.resteasy.reactive.server.core.multipart." +
+                        "MultiPartParserDefinition\$MultiPartUploadHandler\$NonBlockingParseTask",
+                    "done",
+                    "MultiPartParserDefinition.java",
+                    466,
+                ),
+            )
+        }
+        val response = GenericExceptionMapper().toResponse(truncated)
+
+        assertThat(response.status).isEqualTo(400)
+        assertThat((response.entity as ApiError).code).isEqualTo(ErrorCode.VALIDATION_ERROR.code)
+    }
+
+    @Test
+    fun `an IOException thrown outside the multipart parser is still a 500`() {
+        assertThat(GenericExceptionMapper().toResponse(IOException("disk full")).status).isEqualTo(500)
     }
 
     @Test
