@@ -98,6 +98,15 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   communication:      'platform',    // communication-service (ADR-0285 Communication Studio)
   context:            'compliance',  // context-service (ADR-0303 investigation graph)
   pricing:            'platform',    // pricing-service and pricing-console
+  analytics:          'platform',    // analytics-sink
+  'authz-policy-auditor': 'platform',
+  'control-liveness-sentinel': 'platform',
+  'devops-agent':      'platform',
+  'docs-truth-agent':  'platform',
+  'finops-agent':      'platform',
+  'flaky-test-hunter': 'platform',
+  'governance-auditor': 'platform',
+  'release-steward':  'platform',
 }
 
 export function inCluster(): boolean {
@@ -114,7 +123,8 @@ export function inCluster(): boolean {
 const INFRA_WORKLOADS = new Set(['redis', 'valkey', 'memcached', 'rabbitmq'])
 function isBusinessService(name: string): boolean {
   if (INFRA_WORKLOADS.has(name)) return false
-  if (/-db($|-)/.test(name) || name.endsWith('-cache') || name.endsWith('-operator')) return false
+  if (/-db($|-)/.test(name) || /-(cache|operator|redis|valkey|console)$/.test(name)) return false
+  if (name === 'document-renderer' || name === 'developer-portal') return false
   return true
 }
 
@@ -302,6 +312,7 @@ export type InClusterServiceResolution =
   | { state: 'off_cluster'; coverage: 'static' }
 
 let _discoverySnapshotCache: { at: number; snapshot: ServiceDiscoverySnapshot } | null = null
+let _discoverySnapshotRefresh: Promise<ServiceDiscoverySnapshot> | null = null
 const BASEURL_TTL_MS = 30_000
 
 async function cachedDiscoverySnapshot(): Promise<ServiceDiscoverySnapshot> {
@@ -309,9 +320,12 @@ async function cachedDiscoverySnapshot(): Promise<ServiceDiscoverySnapshot> {
   if (_discoverySnapshotCache && now - _discoverySnapshotCache.at <= BASEURL_TTL_MS) {
     return _discoverySnapshotCache.snapshot
   }
-  const snapshot = await discoverServicesSnapshot()
-  _discoverySnapshotCache = { at: now, snapshot }
-  return snapshot
+  // Coalesce concurrent overview probes while preserving complete/partial/unknown coverage.
+  _discoverySnapshotRefresh ??= discoverServicesSnapshot().then((snapshot) => {
+    _discoverySnapshotCache = { at: Date.now(), snapshot }
+    return snapshot
+  }).finally(() => { _discoverySnapshotRefresh = null })
+  return _discoverySnapshotRefresh
 }
 
 /** Resolve a workload without turning an incomplete Kubernetes read into a negative.
