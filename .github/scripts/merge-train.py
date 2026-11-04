@@ -113,6 +113,8 @@ STALE_RED_WALK = 20    # first-parent commits searched for main's own CI verdict
 # trickling forever; it is measured from the head's committer time, which update-branch sets.
 RESERVATION_STALL_S = 15 * 60
 RESERVATION_CEILING_S = 4 * 3600
+# Hard cap for a GREEN holder (exempt from the ceiling above, #14624): measured from the same committer time.
+GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 # Lane fairness (ADR-0343): after a strict-lane merge the train gets the next turn — no strict-lane
 # update-branch while train candidates wait — for at most this long after that merge, so a train that
 # cannot be built never freezes the strict lane. Two ticks of the */10 cron at its measured p90 gap.
@@ -2528,14 +2530,21 @@ def reservation_expired(git, head: str, now: float, activity=None, green: bool =
     The idle clock starts at the committer time, so a CI that never starts after update-branch is
     a stall too. `activity(head)` = newest check-run started_at/completed_at (epoch) or None.
     The stall rule applies only while CI is PENDING: a `green` head is finished, not stalled, and
-    merges this tick (#13608 was released ~15 min after going green). A green head keeps the
-    future-stamp guard and the ceiling: a current green holder merges on the tick it goes green, so
-    it reaches the ceiling only if its merge is refused for hours, and then releasing is right."""
+    merges this tick (#13608 was released ~15 min after going green). The ceiling bounds a CI that
+    never finishes, so it too applies only while NOT green, with GREEN_HOLDER_CAP_S as the bound for a green one (#14624: starved ticks carried a green,
+    up-to-date holder past 240 min and it was released, discarding ~3h of finished CI). `green` is
+    strict_lane_state's verdict on THIS head and strict_reservation only asks for a head that contains
+    live main; the merge itself (strict_lane) re-checks main, source intent and pins the head. A green
+    head keeps the future-stamp guard."""
     ct = git("show", "-s", "--format=%ct", head, check=False).stdout.strip()
     if not ct.isdigit() or now < int(ct):
         return "head committed in the future"
-    if now - int(ct) > RESERVATION_CEILING_S:
+    if not green and now - int(ct) > RESERVATION_CEILING_S:
         return f"> {RESERVATION_CEILING_S // 60} min ceiling"
+    if green and now - int(ct) > GREEN_HOLDER_CAP_S:
+        # A green holder is exempt from the ceiling, not from a bound: one whose merge is refused every
+        # tick (ruleset, hook, auto-merge) must not hold main forever.
+        return f"green but unmerged > {GREEN_HOLDER_CAP_S // 60} min hard cap"
     last = int(ct)
     seen = activity(head) if activity else None
     if seen is not None:
@@ -5531,6 +5540,48 @@ def self_test() -> int:
             check("reservation: a GREEN holder idle past the stall window is merged, not released (#13608)",
                   gh.merged == [35] and not s.get("timed_out"), f"{s} merged={gh.merged}")
             gh.merged.clear()
+            reset()
+            # GREEN PAST THE CEILING (#14624, 2026-11-03): starved ticks carried a fully green, up-to-date
+            # holder past the ceiling and it was released instead of merged. Green is checked first.
+            # (e2) green on an up-to-date head, past the ceiling: merged, not released.
+            gh.merged.clear()
+            s = reservation_at(RESERVATION_CEILING_S + 60, 60, checks={})
+            check("reservation: a GREEN up-to-date holder past the ceiling is merged, not released",
+                  gh.merged == [35] and not s.get("timed_out"), f"{s} merged={gh.merged}")
+            gh.merged.clear()
+            reset()
+            # (e3) NOT green (pending) past the ceiling: still released.
+            s = reservation_at(RESERVATION_CEILING_S + 60, 60)
+            check("reservation: a PENDING holder past the ceiling is still released",
+                  s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
+            reset()
+            # (e4) green but BEHIND main, past the ceiling: never merged from there (it is updated instead).
+            open_only("pW", "pF")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {}
+            main_advance = pathlib.Path(origin, "svc", "advance.txt")
+            main_advance.parent.mkdir(parents=True, exist_ok=True)
+            main_advance.write_text("advance\n")
+            gh.g("checkout", "-q", "-f", "main")
+            gh.g("add", "svc/advance.txt")
+            gh.g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "advance main")
+            ct_b = int(gh.g("show", "-s", "--format=%ct", gh.prs[35]["head"]["sha"]).stdout.strip())
+            time.time = lambda: ct_b + RESERVATION_CEILING_S + 60
+            try:
+                s = settle_now()
+            finally:
+                time.time = real_time
+                gh.head_checks.clear()
+            check("reservation: a GREEN holder BEHIND main past the ceiling is not merged",
+                  35 not in gh.merged, f"{s} merged={gh.merged}")
+            gh.updates.clear()
+            reset()
+            # (d) green, merge refused every tick, past the hard cap: released (bounded escape).
+            open_only("pW", "pF")
+            gh.refuse_merge.add(35)
+            s = reservation_at(GREEN_HOLDER_CAP_S + 60, 60, checks={})
+            check("reservation: a GREEN holder whose merge is refused every tick is released past the hard cap",
+                  s.get("timed_out") == [35] and 35 not in gh.merged, f"{s} merged={gh.merged}")
+            gh.refuse_merge.clear()
             reset()
             # (f) pending, no activity for 20 min: still a stall.
             s = reservation_at(30 * 60, RESERVATION_STALL_S + 5 * 60)
