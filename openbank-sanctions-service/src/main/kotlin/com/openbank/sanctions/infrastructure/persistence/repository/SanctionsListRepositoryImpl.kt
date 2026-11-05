@@ -77,6 +77,18 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
         update("refreshRequestedAt = ?1, updatedAt = ?1 WHERE enabled = true", Instant.now(clock))
     }.awaitSuspending()
 
+    /**
+     * #14780: flag ONE enabled list for refresh — the single-list sibling of
+     * [requestRefreshAll]. Returns 1 when flagged, 0 when the list is absent or disabled.
+     */
+    suspend fun requestRefresh(listType: String): Int = Panache.withTransaction {
+        update(
+            "refreshRequestedAt = ?1, updatedAt = ?1 WHERE listType = ?2 AND enabled = true",
+            Instant.now(clock),
+            listType,
+        )
+    }.awaitSuspending()
+
     suspend fun listSanctionsLists(): List<SanctionsList> = listSanctionsListsUni().awaitSuspending()
 
     suspend fun findSanctionsListById(id: UUID): SanctionsList? =
