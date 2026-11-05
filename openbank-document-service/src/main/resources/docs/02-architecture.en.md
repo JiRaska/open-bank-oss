@@ -70,7 +70,7 @@ reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identit
 
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
-`HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
+the CI gate `hibernate-sequence-guard`); all other entities use application-assigned UUID/String ids.
 
 ## Seeded pension templates
 

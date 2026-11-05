@@ -1440,6 +1440,32 @@ gates:
     run: |
       python3 .github/scripts/check-edge-decoy-rule-parity.py
 
+  # ADR-0361 phase 1: a decoy credential fails silently two ways — unwired (renamed, tripwire
+  # still matching the old name) or armed (someone grants it permissions). ENFORCED.
+  - id: honeytoken-wiring
+    name: "every decoy credential is wired to a tripwire and holds no permission (ADR-0361, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
+    rationale: >-
+      Decoy credentials are only safe because they are powerless, and only useful because a
+      tripwire names them. Neither property is visible at runtime: an unwired one produces
+      exactly the silence a quiet week produces, and an armed one is a real credential. The
+      gate finds them by shape, pairs each ServiceAccount with a CloudWatch metric filter,
+      forbids any binding to it, pins the watched IAM user to a single explicit Deny "*", and
+      requires the EventBridge rules to opt in to read-only management events so the first call
+      an intruder makes alerts.
+    review_after: "2027-04-29"
+    min_subjects: 2   # one token-bearing ServiceAccount + one watched IAM user at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-honeytoken-wiring.py"
+      - "openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+    selftest: |
+      python3 .github/scripts/check-honeytoken-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-honeytoken-wiring.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -2006,6 +2032,23 @@ gates:
       python3 .github/scripts/check-gradle-user-home-isolation.py --self-test
     run: |
       python3 .github/scripts/check-gradle-user-home-isolation.py
+
+  # ADR-0363: only a push to main may write the remote Gradle build cache. The real boundary is
+  # the `gradle-cache-writer` environment's branch policy plus the node rejecting writes from
+  # the read-only account; this keeps the workflow side from drifting onto those alone.
+  - id: remote-build-cache-write-scope
+    name: "remote Gradle build cache is written only from main (ADR-0363)"
+    group: supplychain
+    mode: enforced
+    rationale: "A cache entry written from pull-request code would be served to every later build on main, so the write path must stay main-only on the workflow side too."
+    review_after: "2027-05-03"
+    min_subjects: 80   # 97 workflow files observed 2026-11-03
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
+    selftest: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py --self-test
+    run: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py
 
   # The governance gates in this job (threat-model coverage + diff, network-policy
   # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
@@ -5066,6 +5109,23 @@ gates:
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
+
+  - id: gitops-image-pin-only
+    name: "Services CI: image-pin-only GitOps diffs are inert, everything else relevant (enforced)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite"
+    rationale: "Deploy-pin PRs ran the full Services CI fleet (#14413). The comparator decides inertness structurally; this runs its end-to-end git cases and proves a comparator forced to 'equal' fails them."
+    review_after: "2027-04-30"
+    budget_seconds: 30
+    min_subjects: 21
+    run: |
+      python3 .github/scripts/gitops-image-pin-only.py --self-test
+      # Each guard disabled in turn must flip a named case, or the suite cannot see it.
+      out=$(python3 .github/scripts/gitops-image-pin-only.py --self-test --sabotage=comparator 2>&1) && exit 1
+      grep -q '^FAIL: repo swap:' <<< "$out" || { echo "comparator sabotage not detected" >&2; exit 1; }
+      out=$(python3 .github/scripts/gitops-image-pin-only.py --self-test --sabotage=filemeta 2>&1) && exit 1
+      grep -q '^FAIL: mode change:' <<< "$out" || { echo "raw/summary sabotage not detected" >&2; exit 1; }
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
