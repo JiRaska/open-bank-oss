@@ -875,7 +875,15 @@ def assert_train_branch(name: str) -> None:
 
 
 # --------------------------------------------------------------------------- git
+# Every git/python spawn this process makes goes through here; the self-test asserts a CEILING on
+# the count (SELF_TEST_SPAWN_CEILING) because spawn time IS its wall time — measured 2026-11-03:
+# 18,534 spawns, 95 % of a 721 s loaded-Mac run and all of the 77-109 s on ubuntu-latest, where a
+# raised budget_seconds (#14685) was exceeded twice. Bounding the count is what keeps the budget.
+SPAWNS = [0]
+
+
 def sh(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+    SPAWNS[0] += 1
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=check, env=env)
 
 
@@ -899,17 +907,70 @@ def generator_env() -> dict[str, str]:
 class Git:
     """Isolated git: no system/global config, no hooks, no fsmonitor; credentials only per call."""
 
+    # Read-only subcommands whose output, given FULL-sha arguments, is a pure function of the object
+    # store: content-addressed, so identical argv in the same clone answers identically until the
+    # store changes. Any other subcommand (fetch, checkout, merge, ...) may change the store or the
+    # worktree, so it clears the memo. A non-zero result is never memoised (a missing object becomes
+    # present after a fetch — which clears the memo anyway — and an error should be re-asked).
+    # Measured 2026-11-03: 7,125 of 18,291 git spawns in the self-test were exact (cwd, argv) repeats
+    # of such read-only commands; a ref name (`main`, `HEAD`, `origin/x`) is NEVER a memo key.
+    _MEMO_SUBCOMMANDS = frozenset({"rev-list", "rev-parse", "diff", "show", "merge-base", "log", "ls-tree",
+                                   "cat-file", "merge-tree", "diff-tree"})
+    _SHA_ARG = re.compile(r"^[0-9a-f]{40}(\^\{tree\}|\^\{commit\}|:[^\s]*|(\.\.|\.\.\.)[0-9a-f]{40})?$")
+
     def __init__(self, workdir: str, token: str | None = None):
         self.workdir, self.token = workdir, token
+        self._memo: dict[tuple, subprocess.CompletedProcess] = {}
+
+    # Subcommands that compare TWO revisions when given two, but read the WORKTREE or the INDEX when
+    # given one (`diff <sha>`), or when told to (`--cached`, `--staged`, `--no-index`, `--work-tree`).
+    # Neither is a function of the shas, so those shapes are never memoised (review on the first
+    # draft: a squash-merge or a generator run in the same workdir would otherwise be served a
+    # stale answer from a merge gate's own cache).
+    _TWO_REV_SUBCOMMANDS = frozenset({"diff", "diff-tree", "merge-base", "merge-tree"})
+    _NEVER_MEMO_FLAGS = frozenset({"--cached", "--staged", "--no-index", "--work-tree", "--index"})
+
+    def _memo_key(self, args: tuple[str, ...]) -> tuple | None:
+        """The argv if its output is a pure function of immutable shas, else None (never memoised).
+
+        Every positional must be a full 40-hex sha (optionally `^{tree}`, `^{commit}`, `:path`, or a
+        `..`/`...` range of two full shas); a `--` pathspec separator or anything after it, a symbolic
+        ref, an abbreviated sha, an index/worktree flag, or a single revision to a two-revision
+        subcommand all return None."""
+        sub = next((a for a in args if not a.startswith("-")), None)
+        if sub not in self._MEMO_SUBCOMMANDS:
+            return None
+        rest = args[args.index(sub) + 1:]
+        if "--" in rest or any(a.split("=", 1)[0] in self._NEVER_MEMO_FLAGS for a in rest):
+            return None
+        positional = [a for a in rest if not a.startswith("-")]
+        if not positional or not all(self._SHA_ARG.match(a) for a in positional):
+            return None
+        if sub in self._TWO_REV_SUBCOMMANDS:
+            revs = sum(2 if ".." in a else 1 for a in positional)
+            if revs < 2:
+                return None
+        return args
 
     def __call__(self, *args: str, check: bool = True, auth: bool = False) -> subprocess.CompletedProcess:
+        key = self._memo_key(args)
+        if key is None:
+            self._memo.clear()   # a write, or a read through a movable ref: nothing cached survives it
+        elif key in self._memo:
+            r = self._memo[key]
+            if check and r.returncode != 0:
+                raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
+            return r
         env = base_env()
         if auth and self.token:
             basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
             env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                         "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
-        return sh(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
-                  cwd=self.workdir, check=check, env=env)
+        r = sh(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
+               cwd=self.workdir, check=check, env=env)
+        if key is not None and r.returncode == 0:
+            self._memo[key] = r
+        return r
 
     def tree(self, rev: str) -> str:
         r = self("rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}", check=False)
@@ -3237,7 +3298,11 @@ class FakeGitHub:
         return ruleset_guard([{"type": "required_status_checks", "parameters": {
             "strict_required_status_checks_policy": self.rs_strict, "required_status_checks": self.rs_checks}}], self.app_id)
 
+    _READS = frozenset({"rev-parse", "log", "show", "cat-file", "rev-list", "ls-tree", "merge-base", "diff"})
+
     def g(self, *a, check=True):
+        if next((x for x in a if not x.startswith("-")), None) not in self._READS:
+            self._main = None   # anything that can move main (update-ref, merge, reset, commit, checkout) drops the cache
         return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=self.origin, check=check, env=base_env())
 
     def add_pr(self, n: int, branch: str, created: str):
@@ -3248,7 +3313,13 @@ class FakeGitHub:
 
     def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
     def required(self): return list(SYN_REQUIRED)
-    def main_sha(self): return self.g("rev-parse", "main").stdout.strip()
+    def main_sha(self):
+        # Semantically "live main NOW", re-read by production code before every merge; the fixture's
+        # main moves only through g() above, which drops the cache. 1,216 of the self-test's spawns
+        # were this one command (measured 2026-11-03).
+        if getattr(self, "_main", None) is None:
+            self._main = self.g("rev-parse", "main").stdout.strip()
+        return self._main
     def open_prs(self): return [p for p in list(self.prs.values()) + list(self.carriers.values()) if p["state"] == "open"]
     def pr(self, n): return self.prs[n]
 
@@ -3561,6 +3632,56 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
+def git_memo_self_test(check) -> None:
+    """The Git memo serves only answers that are pure functions of immutable shas.
+
+    Negative cases first: a worktree-reading `diff <sha>` must NOT be served from the memo after the
+    worktree changes, and index/worktree flags, pathspecs, symbolic refs and short shas never form a
+    key. Then the positive case, so a memo that quietly stopped caching is noticed too."""
+    with tempfile.TemporaryDirectory() as d:
+        git = Git(d)
+        git("init", "-q", "-b", "main")
+        pathlib.Path(d, "f.txt").write_text("one\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "one")
+        a = git("rev-parse", "HEAD").stdout.strip()
+        pathlib.Path(d, "f.txt").write_text("two\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "two")
+        b = git("rev-parse", "HEAD").stdout.strip()
+        # 1. diff <sha> reads the worktree: never memoised, so a worktree change is seen.
+        first = git("diff", a).stdout
+        pathlib.Path(d, "f.txt").write_text("three\n")
+        second = git("diff", a).stdout
+        check("git memo: `diff <sha>` (worktree) is re-read after the worktree changes", first != second,
+              "a worktree-reading diff was served from the memo")
+        check("git memo: `diff <sha>` forms no key", git._memo_key(("diff", a)) is None)
+        for shape in (("diff", "--cached", a, b), ("diff", "--staged", a, b), ("diff", "--no-index", a, b),
+                      ("diff", a, b, "--", "f.txt"), ("diff", a[:12], b), ("diff", "main", b), ("diff", a, "HEAD"),
+                      ("merge-base", a), ("diff-tree", a), ("rev-parse", "HEAD"), ("show", "main:f.txt"),
+                      ("log", "-1", "origin/main")):
+            check(f"git memo: {' '.join(shape)} forms no key", git._memo_key(shape) is None)
+        # 2. index-reading diff with two shas and --cached: still re-read after `git add`.
+        pathlib.Path(d, "f.txt").write_text("four\n")
+        before = git("diff", "--cached", a).stdout
+        git("add", "f.txt")
+        after = git("diff", "--cached", a).stdout
+        check("git memo: `diff --cached` is re-read after the index changes", before != after)
+        git("reset", "-q", "--hard", b)
+        # 3. pure shapes ARE memoised, and a write clears them.
+        for shape in (("diff", "--stat", a, b), ("diff", "--raw", "-z", f"{a}..{b}"), ("rev-list", f"{a}..{b}"),
+                      ("show", "-s", "--format=%H", b), ("rev-parse", f"{b}^{{tree}}"), ("merge-base", a, b),
+                      ("show", f"{b}:f.txt"), ("ls-tree", "-r", b), ("cat-file", "-e", f"{b}^{{commit}}")):
+            check(f"git memo: {' '.join(shape)} forms a key", git._memo_key(shape) is not None)
+        git("diff", "--stat", a, b)
+        n = SPAWNS[0]
+        git("diff", "--stat", a, b)
+        check("git memo: a pure two-sha diff is served from the memo (no spawn)", SPAWNS[0] == n)
+        git("checkout", "-q", "--detach", a)
+        git("diff", "--stat", a, b)
+        check("git memo: a write clears the memo (spawn again)", SPAWNS[0] == n + 2)
+        r = git("show", "-s", "--format=%H", "0" * 40, check=False)
+        check("git memo: a failing read is not cached", r.returncode != 0 and ("show", "-s", "--format=%H", "0" * 40) not in git._memo)
+
+
 def retry_planner_self_test(check) -> None:
     """Exercise the real GitHub adapter and HTTP transport scope, without live API access."""
     import copy
@@ -3687,6 +3808,13 @@ def retry_planner_self_test(check) -> None:
         _GET_MEMO.update(saved[4])
 
 
+# Measured 2026-11-03 with the Git memo and the fixture's main_sha cache: 12,792 spawns over 461 cases
+# (18,534 before). ~9 % headroom for the cases in flight (#14685 adds admission cases). A new case may
+# raise it, with its own `spawns=` measurement, in the same PR. The number is the control: it fails
+# before the shard's time budget does, and it fails the same way on a fast machine as on a slow one.
+SELF_TEST_SPAWN_CEILING = 14000
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -3698,6 +3826,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    git_memo_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -6734,8 +6863,13 @@ def self_test() -> int:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+    check(f"spawn budget: the self-test issued {SPAWNS[0]} subprocess spawns, ceiling {SELF_TEST_SPAWN_CEILING}",
+          SPAWNS[0] <= SELF_TEST_SPAWN_CEILING,
+          "spawn count is wall time on ubuntu-latest (~5 ms each); batch or memoise the new calls, or raise the "
+          "ceiling in the same PR with the measurement that justifies it")
     for f in fails:
         print(f"  [FAIL] {f}")
+    print(f"spawns={SPAWNS[0]}")
     print(f"SUBJECTS={len(ran)}")
     print(f"merge-train self-test: {len(ran)} cases, {len(fails)} failed")
     return 1 if fails else 0
