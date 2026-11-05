@@ -50,7 +50,9 @@ CONFIG = REPO / "release-please-config.json"
 #
 # `openbank-tax-reporting-service` left this map in #5760, when it was first deployed: it had never
 # produced a tag, so giving it a component changed no existing release identity.
-# `openbank-campaign-service` left it in #7597 on the same ground (no tag had ever been cut).
+# `openbank-campaign-service` left it in #7597, but NOT on the same ground: it had cut bare `v*`
+# tags (v0.40.0..v0.42.0). `campaign-service-v0.42.0` marks the same commit as `v0.42.0`, so the
+# component's release lookup continues from the current release; the bare tags are history only.
 #
 # `openbank-campaign-service` and `openbank-tax-reporting-service` are NOT a considered exception —
 # they are a defect this script surfaced. They carry `{"release-type": "simple"}` with no

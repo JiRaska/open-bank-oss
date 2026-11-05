@@ -74,8 +74,9 @@ CONFIG = ROOT / "release-please-config.json"
 # this list belongs next to the code that reads it, not in a file that restamps ~40 unrelated
 # artifacts when it changes.
 KNOWN_UNCOVERED: dict[str, str] = {
-    # openbank-campaign-service is OFF this list as of #7597, on the same ground: it had never
-    # produced a tag, so `component: campaign-service` changed no existing release identity.
+    # openbank-campaign-service is OFF this list as of #7597. Unlike tax-reporting it HAD tags:
+    # bare `v0.40.0`..`v0.42.0`. The tag name changes to `campaign-service-v*`; continuity is the
+    # tag `campaign-service-v0.42.0`, which marks the same commit as `v0.42.0`.
     # openbank-tax-reporting-service is OFF this list as of #5760: it gained `component:
     # tax-reporting-service` when it was first deployed (it had never produced a tag).
 }

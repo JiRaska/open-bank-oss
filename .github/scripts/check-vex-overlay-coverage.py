@@ -63,8 +63,10 @@ CONFIG = Path("release-please-config.json")
 # call, not a gate author's. Declared so the two known cases are visible and any NEW one is red.
 # Each entry names the overlay it strands, and a stale declaration fails in either direction.
 NO_RELEASE_COMPONENT: dict[str, str] = {
-    # openbank-campaign-service left this map in #7597: it had never produced a tag, so giving it
-    # `component: campaign-service` changed no existing release identity.
+    # openbank-campaign-service left this map in #7597. It HAD tags (componentless releases were
+    # cut as bare `v0.40.0`..`v0.42.0`); the continuity tag `campaign-service-v0.42.0` sits on the
+    # same commit as `v0.42.0`, so release-please's last-release lookup for the new component
+    # starts from the current release. The bare tags stay as history and are no longer produced.
 }
 
 # component -> issue that tracks writing its overlay. Reason required; stale either direction.
