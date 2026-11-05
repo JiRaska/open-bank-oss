@@ -247,7 +247,7 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
             page = int(parse_qs(urlsplit(request.full_url).query)["page"][0])
             following = f'https://api.github.test/jobs?per_page=20&page={page + 1}'
             return FixtureResponse({"jobs": [{"id": page}]}, {"Link": f'<{following}>; rel="next"'})
-        with patch.object(MODULE, "urlopen", respond) as request:
+        with patch.object(MODULE, "urlopen", respond):
             with self.assertRaisesRegex(MODULE.VerificationError, "exceeded 100 pages"):
                 MODULE._json_pages("https://api.github.test/jobs?per_page=20&page=1", "fixture-token")
 
