@@ -102,6 +102,7 @@ class CaseThreadPactConsumerTest {
 
     @Pact(consumer = "openbank-admin-ui", provider = "openbank-case-coordinator-agent")
     fun killSwitchStatusPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no kill-switch scope is active")
         .uponReceiving("fetch the active kill-switch status")
         .path("/api/v1/case-coordinator/kill-switch")
         .method("GET")

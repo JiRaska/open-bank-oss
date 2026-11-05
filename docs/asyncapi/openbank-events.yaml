@@ -4,7 +4,8 @@ asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
   # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
-  version: 2.5.0
+  # 2.5.0 -> 2.6.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
+  version: 2.6.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -1099,7 +1100,7 @@ components:
           enum: [SanctionsList]
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, PEP_GLOBAL, FATF_HIGH_RISK, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, PEP_GLOBAL, FATF_HIGH_RISK, CNB_DOMESTIC, CZ_TERRORISTS]
         changedExternalIds:
           type: array
           maxItems: 64
@@ -2337,7 +2338,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         reviewedBy:
           type: [string, 'null']
           description: Populated only on `SanctionReviewed`.
@@ -2363,7 +2364,7 @@ components:
       properties:
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         matchType:
           type: string
           enum: [EXACT, FUZZY, PHONETIC, ALIAS]

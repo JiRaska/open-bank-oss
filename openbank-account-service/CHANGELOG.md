@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.36.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.36.0...account-service-v0.36.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **account:** preserve cursor order across account types ([#14233](https://github.com/JiRaska/open-bank-oss/issues/14233)) ([ce83d41](https://github.com/JiRaska/open-bank-oss/commit/ce83d41d60edf8991e2f88318738aee2c1e44e7f))
+
+
+### Security
+
+* **account:** enforce bearer while preserving public metadata ([#14262](https://github.com/JiRaska/open-bank-oss/issues/14262)) ([3a3a2ce](https://github.com/JiRaska/open-bank-oss/commit/3a3a2ced5b4aaf19ca84430f6c5481b4ba7e378c))
+
 ## [0.36.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.35.1...account-service-v0.36.0) (2026-10-29)
 
 

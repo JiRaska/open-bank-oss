@@ -51,9 +51,11 @@ auto_ccs: []
 ```dockerfile
 FROM gcr.io/oss-fuzz-base/base-builder-jvm
 # libs-domain targets JVM 25; the base image's JDK may lag — install Temurin 25.
-RUN curl -fsSL https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse \
-      -o /tmp/jdk25.tar.gz && mkdir -p /opt/jdk25 \
-      && tar -xzf /tmp/jdk25.tar.gz -C /opt/jdk25 --strip-components=1
+RUN curl -fsSL 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz' \
+      -o /tmp/jdk25.tar.gz \
+      && echo '68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb  /tmp/jdk25.tar.gz' | sha256sum -c - \
+      && mkdir -p /opt/jdk25 \
+      && tar -xzf /tmp/jdk25.tar.gz -C /opt/jdk25 --strip-components=1 && rm /tmp/jdk25.tar.gz
 ENV JAVA_HOME=/opt/jdk25 PATH=/opt/jdk25/bin:$PATH
 RUN git clone --depth 1 https://github.com/JiRaska/open-bank-oss.git $SRC/open-bank-oss
 COPY build.sh $SRC/

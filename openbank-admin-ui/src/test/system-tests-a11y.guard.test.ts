@@ -41,7 +41,7 @@ describe('system code quality accessibility', () => {
     expect(source).toContain("case 'passed': return 'success'")
     expect(source).toContain("case 'failed': return 'danger'")
     expect(source).toContain("case 'blocked': return 'accent'")
-    expect(source).toContain('<SharedStatusBadge status={state} tone={evidenceTone(state)} label={state} withDot />')
+    expect(source).toContain('<SharedStatusBadge status={state} tone={evidenceTone(state)} label={stateLabel(state, language)} withDot />')
     expect(source).not.toContain('STATE_COLOR')
   })
 

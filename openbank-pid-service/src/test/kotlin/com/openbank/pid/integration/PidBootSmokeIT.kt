@@ -4,6 +4,7 @@
 
 package com.openbank.pid.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -33,7 +34,7 @@ import org.junit.jupiter.api.Test
  */
 @QuarkusTest
 @QuarkusTestResource(PidBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.pid.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class PidBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

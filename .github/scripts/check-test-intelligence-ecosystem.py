@@ -277,6 +277,28 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
         # This pinned checkout only materializes the already-authorized source SHA;
         # no repository code executes until the admission step allows later steps.
         allowed_admission_index = 1
+    # A read-only installation token is an admission dependency, never build work.
+    # Match the entire step, not an extensible allowlist: no repository/enterprise
+    # broadening, injected environment, arbitrary code or disabled revocation.
+    expected_read_mint = {
+        "name": "Mint repository read token",
+        "id": "read_token",
+        "if": "env.GITOPS_APP_ID != ''",
+        "uses": "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
+        "with": {
+            "app-id": "${{ secrets.GITOPS_APP_ID }}",
+            "private-key": "${{ secrets.GITOPS_APP_PRIVATE_KEY }}",
+            "permission-actions": "read",
+            "permission-contents": "read",
+            "permission-pull-requests": "read",
+        },
+    }
+    if (isinstance(build_steps, list) and len(build_steps) > allowed_admission_index
+            and build_steps[allowed_admission_index] == expected_read_mint):
+        allowed_admission_index += 1
+    for job in (deploy_source, build_push):
+        if "read_token" in json.dumps(job.get("outputs", {})):
+            errors.append("repository read token must not escape through job outputs")
     if admission_index != allowed_admission_index:
         errors.append("serialized build-entry admission does not precede all build-push work")
     elif isinstance(build_steps, list):
@@ -822,7 +844,10 @@ chmod 600 "$helper_dir/"*.sh
 echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"'''
             def recipe_lines(body: str) -> list[str]:
                 return [line.strip() for line in body.splitlines() if line.strip()]
-            if recipe_lines(stage.get('run', '')) != recipe_lines(recipe):
+            with_diagnostics = recipe.replace(
+                'echo "SERVICE_CI_HELPERS=',
+                'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"\necho "SERVICE_CI_HELPERS=')
+            if recipe_lines(stage.get('run', '')) not in (recipe_lines(recipe), recipe_lines(with_diagnostics)):
                 return ''
             checkouts = [(i, step) for i, step in enumerate(steps[:stage_index])
                          if step.get('uses', '').startswith('actions/checkout@')]
@@ -898,13 +923,73 @@ def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
         if (not helper.is_file() or any(root.joinpath(*relative.parts[:i]).is_symlink()
                                        for i in range(1, len(relative.parts) + 1))):
             return False
-        # Closed, independently reviewed body: shell text inside heredocs or after an exit
-        # cannot attest execution. Intentional helper changes require renewed body review.
-        return hashlib.sha256(helper.read_bytes()).hexdigest() == (
-            '2186b9c579e58fef1eb0874d7de97598b8d6fdbf145d8b3f02eedb15e369424d'
-        )
+        # Closed helper bodies: shell text inside heredocs or after an exit cannot attest
+        # execution. The sibling is staged with the report, never loaded from historical code.
+        # Intentional helper changes require renewed body review.
+        shared = helper.with_name('coverage-evidence.sh')
+        if not shared.is_file() or shared.is_symlink():
+            return False
+        return (hashlib.sha256(helper.read_bytes()).hexdigest() ==
+                '15a5349221070810f671a4558bdac2c083dd474898ce9cd972644d75774b5b73'
+                and hashlib.sha256(shared.read_bytes()).hexdigest() ==
+                '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
     except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
         return False
+
+
+def service_ci_evidence_source(root: Path, workflow: str) -> str:
+    """Resolve only the reviewed, active coverage composite and its trusted snapshot."""
+    try:
+        document = yaml.load(workflow, Loader=CapabilityLoader)
+        build = document['jobs']['build']
+        steps = build['steps']
+        calls = [step for step in steps if step.get('uses') == './.github/actions/service-ci-coverage-evidence']
+        if not calls:
+            return workflow  # The original inline producer remains supported.
+        if (len(calls) != 1 or document.get('defaults') or build.get('defaults')
+                or not service_ci_observer_source(root, workflow)):
+            return ''
+        call = calls[0]
+        if (call.get('if') != 'always()' or call.get('continue-on-error') is not True
+                or call.get('env') != {'SERVICE': '${{ inputs.service }}',
+                                      'SERVICE_CI_JOB_STATUS': '${{ job.status }}',
+                                      'SERVICE_CI_REPORT_OUTCOME': '${{ steps.coverage_report.outcome }}'}):
+            return ''
+        stage = next(step for step in steps if step.get('name') == 'Stage trusted service CI step helpers')
+        if set(stage) != {'name', 'run'}:
+            return ''
+        historical = [step for step in steps if step.get('name') == 'Check out historical service source with trusted helpers']
+        report = next(step for step in steps if step.get('id') == 'coverage_report')
+        if (len(historical) != 1 or historical[0].get('if') != "inputs.ref != ''"
+                or set(historical[0]) != {'name', 'if', 'env', 'run'}
+                or historical[0].get('env') != {'REF': '${{ inputs.ref }}'}
+                or not steps.index(stage) < steps.index(historical[0]) < steps.index(report) < steps.index(call)):
+            return ''
+        stage_line = 'bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"'
+        restore_line = 'bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"'
+        historical_body = historical[0].get('run', '')
+        # Presence alone would accept exit/heredoc branches that never restore the snapshot.
+        # Bind the entire reviewed fetch, ancestry, checkout and restore recipe.
+        if hashlib.sha256(historical_body.encode()).hexdigest() != '0477626f8f1f88fb9453379e6fd7d189f72a6f003bca91a840d47c04c1f54831':
+            return ''
+        historical_lines = [line.strip() for line in historical_body.splitlines() if line.strip()]
+        if (stage_line not in stage.get('run', '').splitlines()
+                or not historical_lines or historical_lines[-1] != restore_line
+                or 'git checkout --detach --quiet "$resolved_ref"' not in historical_lines):
+            return ''
+        paths = {
+            '.github/actions/service-ci-coverage-evidence/action.yml': '10e8de61f2a7e3541926b4857d2f1a10f4c2dee53c5eb933cb9090d439f3b313',
+            '.github/scripts/service-ci-steps/diagnostic-actions.sh': '860f5df9ff1cc9f7a3d829e437d0dfb903189d4a9cb5984c8d834444e2048a79',
+        }
+        for relative, expected_hash in paths.items():
+            path = root / relative
+            if (not path.is_file() or any(root.joinpath(*Path(relative).parts[:i]).is_symlink()
+                                           for i in range(1, len(Path(relative).parts) + 1))
+                    or hashlib.sha256(path.read_bytes()).hexdigest() != expected_hash):
+                return ''
+        return text(root / '.github/actions/service-ci-coverage-evidence/action.yml')
+    except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
+        return ''
 
 
 def admin_collector_source(root: Path) -> str:
@@ -980,12 +1065,13 @@ def check(root: Path) -> list[str]:
         errors.append(f"run schema unavailable: {exc}")
 
     workflow = text(root / ".github/workflows/_service-ci.yml")
+    evidence_source = service_ci_evidence_source(root, workflow)
     for needle in (
         "collect-test-run-evidence.py",
         "build/test-intelligence/run.json",
         "if: always()",
     ):
-        if needle not in workflow:
+        if needle not in evidence_source:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     observer = service_ci_observer_source(root, workflow)
     for needle in ('docker events', '--filter type=container', '--filter event=start', '--filter event=die'):
@@ -993,7 +1079,7 @@ def check(root: Path) -> list[str]:
             errors.append(f"service CI does not carry required run-envelope wiring: {needle}")
     if not bounded_kover_report(workflow, root):
         errors.append("Kover evidence is not bounded with the money-path-safe timeout")
-    immutable_envelope_artifact = workflow.partition("Retain immutable Test Intelligence run envelope")[2].partition(
+    immutable_envelope_artifact = evidence_source.partition("Retain immutable Test Intelligence run envelope")[2].partition(
         "Upload coverage to Codecov"
     )[0]
     if "build/test-intelligence/run.json" not in immutable_envelope_artifact or "runtime/" in immutable_envelope_artifact:
@@ -1429,6 +1515,45 @@ def self_test() -> int:
             return 1
 
         original_deploy = deploy_workflow.read_text()
+        read_mint = (
+            "      - name: Mint repository read token\n"
+            "        id: read_token\n"
+            "        if: env.GITOPS_APP_ID != ''\n"
+            "        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510\n"
+            "        with:\n"
+            "          app-id: ${{ secrets.GITOPS_APP_ID }}\n"
+            "          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}\n"
+            "          permission-actions: read\n"
+            "          permission-contents: read\n"
+            "          permission-pull-requests: read\n"
+        )
+        bounded_deploy = original_deploy.replace("      - id: build_admission\n", read_mint + "      - id: build_admission\n")
+        deploy_workflow.write_text(bounded_deploy)
+        if admin_ui_deploy_liveness_errors(root):
+            print("self-test failed: bounded repository read mint prerequisite was rejected")
+            return 1
+        mutations = {
+            "owner": bounded_deploy.replace("          permission-actions: read", "          owner: other\n          permission-actions: read"),
+            "repositories": bounded_deploy.replace("          permission-actions: read", "          repositories: other\n          permission-actions: read"),
+            "enterprise": bounded_deploy.replace("          permission-actions: read", "          enterprise: other\n          permission-actions: read"),
+            "write": bounded_deploy.replace("permission-actions: read", "permission-actions: write"),
+            "extra-env": bounded_deploy.replace("        id: read_token", "        env: {INJECTED: value}\n        id: read_token"),
+            "revoke": bounded_deploy.replace("          permission-actions: read", "          skip-token-revoke: true\n          permission-actions: read"),
+            "token-output": bounded_deploy.replace("  build-push:\n", "  build-push:\n    outputs: {credential: '${{ steps.read_token.outputs.token }}'}\n"),
+            "reordered": bounded_deploy.replace(read_mint, "").replace("      - id: build\n", read_mint + "      - id: build\n"),
+            "setup": bounded_deploy.replace(read_mint, read_mint + "      - uses: actions/setup-node@untrusted\n"),
+            "oidc": bounded_deploy.replace(read_mint, read_mint + "      - uses: aws-actions/configure-aws-credentials@untrusted\n"),
+            "ecr": bounded_deploy.replace(read_mint, read_mint + "      - uses: aws-actions/amazon-ecr-login@untrusted\n"),
+            "run": bounded_deploy.replace(read_mint, read_mint + "      - run: echo unsafe\n"),
+            "source-token-output": bounded_deploy.replace("  deploy-source:\n", "  deploy-source:\n    outputs: {credential: '${{ steps.read_token.outputs.token }}'}\n"),
+        }
+        for label, mutated in mutations.items():
+            deploy_workflow.write_text(mutated)
+            if not admin_ui_deploy_liveness_errors(root):
+                print(f"self-test failed: unsafe read mint mutation accepted: {label}")
+                return 1
+        deploy_workflow.write_text(original_deploy)
+
         deploy_workflow.write_text(original_deploy.replace(
             "branches: [main]\n    workflows:", "branches: [main, '!main']\n    workflows:"))
         if not any("workflow_run is not restricted to main evidence" in error
