@@ -70,7 +70,7 @@ reaktivní a JDBC čtení z migrované databáze a HTTP 401 při chybějící M2
 
 Vlastní databáze `openbank_documents`, `generation: none`, Flyway V1..V3. Pouze outbox entita rozšiřuje
 `PanacheOutboxEntity` (Hibernate sekvence `document_outbox_seq`, vytvořená ve V3 — hlídá
-`HibernateSequenceGuardTest`); ostatní entity používají aplikačně přidělená UUID/String id.
+CI gate `hibernate-sequence-guard`); ostatní entity používají aplikačně přidělená UUID/String id.
 
 ## Seedované penzijní šablony
 

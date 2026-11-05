@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.1...notification-service-v0.40.0) (2026-11-05)
+
+
+### Features
+
+* **notification:** keyset-page party history with exact unread counts ([#14621](https://github.com/JiRaska/open-bank-oss/issues/14621)) ([f2ba664](https://github.com/JiRaska/open-bank-oss/commit/f2ba664b02f8d51529787dd65d2c24b083154b97)), closes [#12216](https://github.com/JiRaska/open-bank-oss/issues/12216)
+
 ## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.0...notification-service-v0.39.1) (2026-10-18)
 
 
