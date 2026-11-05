@@ -114,6 +114,15 @@ def list_tags(repo: str) -> dict[str, str]:
     return {t: i["imageDigest"] for i in imgs for t in i.get("imageTags", [])}
 
 
+def collect_tags(existing, lister) -> dict[str, dict[str, str]]:
+    """Tags for EVERY existing repository, referenced or not.
+
+    live- tags in a repository nothing references any more must still be seen to be removed, so
+    an unreferenced repository is listed like any other, never given an empty tag map.
+    """
+    return {repo: lister(repo) for repo in sorted(existing)}
+
+
 def resolve(refs, tags_by_repo: dict[str, dict[str, str]]):
     """repo -> digests. A tag that no longer exists (expired, or never pushed) is reported."""
     out: dict[str, set[str]] = {}
@@ -163,10 +172,7 @@ def main() -> int:
     existing = {r["repositoryName"] for r in aws("describe-repositories")["repositories"]
                 if r["repositoryName"].startswith("openbank-")}
     head_r, window_r = head_refs(), refs_in_window()
-    tags_by_repo = {repo: list_tags(repo) for repo in sorted(existing & {r[0] for r in head_r | window_r})}
-    # live- tags in repositories nothing references any more must still be found to be removed
-    for repo in sorted(existing - set(tags_by_repo)):
-        tags_by_repo[repo] = {}
+    tags_by_repo = collect_tags(existing, list_tags)
 
     head, head_unresolved = resolve(head_r, tags_by_repo)
     protected, _ = resolve(window_r, tags_by_repo)  # history refs may legitimately be gone
@@ -218,7 +224,13 @@ def selftest() -> int:
     assert plan({"r": set()}, {"r": {"live-bbbbbbbbbbbb": d2}}, {"r": {"live-bbbbbbbbbbbb": d2}}) == ([], [])
     # Known negative: already tagged and protected -> nothing to do.
     assert plan({"r": {d1}}, {"r": {live_tag(d1): d1}}) == ([], [])
-    print("SUBJECTS=5")
+    # Unreferenced repository: its stale live- tag must be listed and then removed, not hidden.
+    fake = {"gone": {"live-bbbbbbbbbbbb": d2, "sandbox-x": d2}, "used": {}}
+    tags = collect_tags({"gone", "used"}, lambda r: fake[r])
+    assert tags["gone"] == fake["gone"], tags
+    _, rm = plan({"used": {d1}}, live_tags(tags), tags)
+    assert rm == [("gone", "live-bbbbbbbbbbbb")], rm
+    print("SUBJECTS=6")
     print("ecr-live-tags selftest: OK")
     return 0
 
