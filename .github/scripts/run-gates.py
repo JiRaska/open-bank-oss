@@ -62,6 +62,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,7 @@ CI_ONLY_ENV = (
     "GITHUB_WORKSPACE",
     "PR_BODY",
     "PR_NUMBER",
+    "PR_TITLE",
 )
 
 
@@ -383,6 +385,12 @@ class Result:
         # none of the gate's declared inputs changed. Distinct from `selftest_declared`
         # being false: the falsification EXISTS and simply did not need re-proving here.
         self.selftest_skipped = False
+        # User+system CPU of the gate's process tree (self-test + run:), from wait4. With
+        # `seconds` (wall) it decides a budget overrun: see the budget block in execute().
+        self.cpu_seconds = 0.0
+        # Wall time over budget while CPU was not: the runner was loaded, or the gate waited
+        # on I/O. Reported (annotation + JSON), never a failure.
+        self.wall_over_budget = False
 
     @property
     def id(self):
@@ -410,6 +418,17 @@ def git_index_path(root: pathlib.Path):
     return idx if idx.is_file() else None
 
 
+def _read_streams(*files) -> str:
+    # Each stream decoded INDEPENDENTLY, with replacement: a gate (or a timeout cutting one
+    # off mid-character) can emit bytes that are not UTF-8, and that must never turn a
+    # verdict into a stack trace that takes the whole shard down.
+    parts = []
+    for f in files:
+        f.seek(0)
+        parts.append(f.read().decode("utf-8", "replace"))
+    return "".join(parts)
+
+
 def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: pathlib.Path = None):
     env = dict(os.environ)
     for k, v in (extra_env or {}).items():
@@ -427,33 +446,42 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
         scratch.close()
         shutil.copyfile(index, scratch.name)
         env["GIT_INDEX_FILE"] = scratch.name
+    # Popen + os.wait4 rather than subprocess.run, for ONE reason: wait4 hands back the
+    # rusage of the reaped child, which includes every descendant it waited for. That is the
+    # gate's CPU time, measured per gate even though gates run concurrently in threads
+    # (RUSAGE_CHILDREN is process-wide and would mix them). Output goes to temp files, not
+    # pipes, so a chatty gate cannot block on a full pipe while nobody reads it.
+    out_f = tempfile.TemporaryFile()
+    err_f = tempfile.TemporaryFile()
     try:
-        p = subprocess.run(
+        proc = subprocess.Popen(
             ["bash", "-euo", "pipefail", "-c", cmd],
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+            cwd=cwd, env=env, stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL,
+            start_new_session=True,  # own process group, so a timeout kills the whole tree
         )
-        return p.returncode, p.stdout + p.stderr
-    except subprocess.TimeoutExpired as exc:
-        # Decode each stream INDEPENDENTLY, before concatenating. Even with text=True,
-        # TimeoutExpired can carry one stream as str and the other as bytes, so the obvious
-        # `(exc.stdout or "") + (exc.stderr or "")` raises `TypeError: can't concat str to
-        # bytes` — swallowing the real output and turning a timeout into a stack trace that
-        # takes the whole shard down. Reached only on an actual timeout with output on both
-        # streams, which is why the `slow` self-test case below now writes to both.
-        def _text(stream):
-            if not stream:
-                return ""
-            if isinstance(stream, (bytes, bytearray)):
-                return stream.decode("utf-8", "replace")
-            return stream
-
-        got = _text(exc.stdout) + _text(exc.stderr)
-        return 124, got + f"\n[run-gates] TIMEOUT after {timeout}s\n"
+        deadline = time.monotonic() + timeout
+        status = ru = None
+        while True:
+            pid, status, ru = os.wait4(proc.pid, os.WNOHANG)
+            if pid:
+                break
+            if time.monotonic() >= deadline:
+                # The HARD bound, independent of any budget: a hung gate is killed and fails.
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                _, status, ru = os.wait4(proc.pid, 0)
+                proc.returncode = -9
+                return 124, _read_streams(out_f, err_f) + f"\n[run-gates] TIMEOUT after {timeout}s\n", \
+                    ru.ru_utime + ru.ru_stime
+            time.sleep(0.02)
+        proc.returncode = os.waitstatus_to_exitcode(status)
+        rc = proc.returncode if proc.returncode >= 0 else 128 - proc.returncode
+        return rc, _read_streams(out_f, err_f), ru.ru_utime + ru.ru_stime
     finally:
+        out_f.close()
+        err_f.close()
         if scratch is not None:
             try:
                 os.unlink(scratch.name)
@@ -604,7 +632,8 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
-        rc, out = _run(selftest, root, gate.get("env"), timeout, index)
+        rc, out, cpu = _run(selftest, root, gate.get("env"), timeout, index)
+        r.cpu_seconds += cpu
         r.selftest_seconds = time.monotonic() - st0
         buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
         if (rc == 0) != want_pass:
@@ -626,7 +655,8 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             r.seconds = time.monotonic() - t0
             return r
 
-    rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
+    rc, out, cpu = _run(gate["run"], root, gate.get("env"), timeout, index)
+    r.cpu_seconds += cpu
     buf.append("--- gate ---\n" + out)
     # NOT EVALUATED is only ever a non-zero exit: a gate that could not read its subject must never
     # read as PASS (#13400), and it must not be mistaken for a finding either.
@@ -667,14 +697,27 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
 
     r.seconds = time.monotonic() - t0
 
-    # Wall-time budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s
-    # required check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap,
-    # the total unbounded, and no single change big enough to argue with.
+    # Budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s required
+    # check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap, the total
+    # unbounded, and no single change big enough to argue with (ADR-0255).
     #
-    # ENFORCED ONLY UNDER CI, deliberately. A developer laptop running eight gates across four
-    # cores is not a measurement: this repo's own audit read check-adr-registry.sh at 60.4s
-    # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
-    # nothing fails.
+    # The budget FAILS only when BOTH wall time and CPU time exceed it. Wall time alone measures
+    # the shared 20-slot hosted pool, not the gate: measured 2026-11-02/03, service-ci-explicit-jobs
+    # went red at 10.0-10.4s against 10s, merge-train-declaration at 134.8s/182.5s against
+    # 120/180s (77-109s on main), and msg-channel-image-parity at 172.9s ON MAIN — which turned
+    # main red and stalled the whole strict merge-train lane on a timing artifact. Contention
+    # stretches wall time and leaves CPU time nearly untouched; a genuine regression (more work)
+    # raises both. CPU alone is not the test either: a gate fanning out to parallel workers can
+    # burn more CPU than wall, so a min() of the two is the measure that is inflated by neither
+    # load nor parallelism.
+    #
+    # Wall over budget with CPU under it is REPORTED — a ::warning annotation and
+    # `wall_over_budget` in --json — not failed. That includes a regression that only waits
+    # (a new network call): such a gate is still bounded by the per-gate hard --timeout, which
+    # kills it and FAILS regardless of any budget, so a hang cannot pass.
+    #
+    # ENFORCED ONLY UNDER CI. A developer laptop running eight gates across four cores is not a
+    # measurement; off the runner the overrun is printed and nothing fails.
     budget = gate.get("budget_seconds")
     content_rc = rc
     over_budget = False
@@ -684,19 +727,26 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # timing worth profiling).
         buf.append("\n[run-gates] this gate is NOT EVALUATED on this run: it could not read its "
                    "subject. Not a pass and not a finding — re-run the job.\n")
-    elif budget is not None and r.seconds > budget:
+    elif budget is not None and content_rc != 124 and r.seconds > budget:
         on_ci = os.environ.get("CI") == "true"
-        note = (
-            f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
-            f"Budgets are set well above the observed CI time, so this is a regression rather "
-            f"than noise — profile it, or raise the number in gates.yaml deliberately.\n"
-        )
-        buf.append(note)
-        if on_ci:
-            over_budget = content_rc == 0
-            rc = rc or 1
+        if r.cpu_seconds > budget:
+            buf.append(
+                f"\n[run-gates] this gate took {r.seconds:.1f}s wall and {r.cpu_seconds:.1f}s CPU "
+                f"against a budget of {budget}s. CPU over budget is work, not runner load — "
+                f"profile it, or raise the number in gates.yaml deliberately.\n"
+            )
+            if on_ci:
+                over_budget = content_rc == 0
+                rc = rc or 1
+            else:
+                buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
         else:
-            buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
+            r.wall_over_budget = True
+            buf.append(
+                f"\n[run-gates] wall time {r.seconds:.1f}s exceeded the budget of {budget}s but CPU "
+                f"time was {r.cpu_seconds:.1f}s: the runner was loaded or the gate waited on I/O. "
+                f"Reported, not failed (the hard --timeout still bounds a hang).\n"
+            )
 
     r.output = "".join(buf)
     if rc != 0:
@@ -769,6 +819,10 @@ def report(results, jobs):
               f"  {r.seconds:6.1f}s  [{r.gate.get('group')}]"
               + (f"  ({r.failure_kind.replace('_', ' ')})" if r.failure_kind in ("budget", "not_evaluated") else ""))
 
+    for r in results:
+        if r.wall_over_budget:
+            print(f"::warning title={r.gate['id']}::wall {r.seconds:.1f}s over budget "
+                  f"{r.gate.get('budget_seconds')}s, CPU {r.cpu_seconds:.1f}s under it — runner load, not failed")
     for r in warned:
         print(f"::warning title={r.gate['id']}::advisory gate failed: {r.gate['name']}")
     for r in failed:
@@ -821,6 +875,10 @@ def json_records(results) -> list[dict]:
             # keep the three apart or the estate's coverage reads higher than it is.
             "selftest_skipped": r.selftest_skipped,
             "budget_seconds": g.get("budget_seconds"),
+            # CPU time of the gate's process tree, and whether wall alone overran the budget
+            # (a load artifact, warned not failed). Additive fields.
+            "cpu_seconds": round(r.cpu_seconds, 3),
+            "wall_over_budget": r.wall_over_budget,
             "min_subjects": g.get("min_subjects"),
         })
     return out
@@ -1035,10 +1093,15 @@ gates:
     min_subjects: 5
     run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
   - id: over-budget
-    name: "a gate slower than its declared budget"
+    name: "a gate whose CPU (and wall) time exceed its budget: real work, FAILS"
     group: t
     budget_seconds: 0.2
-    run: "sleep 0.5"
+    run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
+  - id: wall-over-budget
+    name: "a gate long in wall time but idle on CPU (a loaded runner): reported, PASSES"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.6"
   - id: not-evaluated
     name: "a gate that could not read its subject (#13400): red, never PASS, never a budget overrun"
     group: t
@@ -1052,7 +1115,7 @@ gates:
     name: "a gate that found something AND was slow is a finding, not a budget overrun"
     group: t
     budget_seconds: 0.2
-    run: "sleep 0.5; exit 1"
+    run: "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'; exit 1"
   - id: within-budget
     name: "a gate inside its budget"
     group: t
@@ -1067,6 +1130,8 @@ gates:
     run: "echo on-stdout; echo on-stderr >&2; sleep 30"
 """
 
+BUSY_LOOP = "python3 -c 'import time; t=time.process_time(); any(time.process_time()-t>0.6 for _ in iter(int, 1))'"
+
 EXPECTED = {
     "passing": "ok",
     "floor-met": "ok",
@@ -1075,6 +1140,7 @@ EXPECTED = {
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
+    "wall-over-budget": "ok",
     "not-evaluated": "failed",
     "not-evaluated-exit-zero": "ok",
     "over-budget-and-finding": "failed",
@@ -1129,6 +1195,11 @@ def self_test():
             # timeout path that raises instead of reporting.
             if r.id == "over-budget" and "against a budget of" not in r.output:
                 bad.append("over-budget: failed, but not for the budget reason")
+            if r.id == "over-budget" and r.cpu_seconds < 0.4:
+                bad.append(f"over-budget: CPU not measured ({r.cpu_seconds:.2f}s for a 0.6s busy loop)")
+            if r.id == "wall-over-budget" and not (r.wall_over_budget and r.cpu_seconds < 0.2
+                                                    and json_records([r])[0]["wall_over_budget"]):
+                bad.append("wall-over-budget: wall-only overrun not reported as such")
             # failure_kind is the machine-readable WHY that merge-train settle reads (#13400).
             want_kind = {"over-budget": "budget", "not-evaluated": "not_evaluated",
                          "over-budget-and-finding": "content", "failing": "content", "slow": "timeout",
@@ -1197,6 +1268,10 @@ def self_test():
                         bad.append(f"slow: timeout output dropped {stream}")
                 if "TIMEOUT after" not in r.output:
                     bad.append("slow: timeout not reported in the output")
+                # The hard bound must actually KILL the tree: a timeout that waits for the hung
+                # gate to finish on its own is no bound at all (the fixture sleeps 30s).
+                if r.seconds > 10:
+                    bad.append(f"slow: hung gate not killed at the timeout (took {r.seconds:.1f}s)")
 
         # The report() contract too: a failed gate must make the runner exit non-zero, and
         # an advisory-only failure must NOT. Checking the statuses alone would miss a
@@ -1207,7 +1282,7 @@ def self_test():
         expected_errors = {
             r.id for r in results if r.status in ("failed", "unfalsified")
         }
-        expected_warnings = {r.id for r in results if r.status == "warned"}
+        expected_warnings = {r.id for r in results if r.status == "warned" or r.wall_over_budget}
         if annotation_ids(report_output, "error") != expected_errors:
             bad.append("report() did not emit the expected fixture error annotations")
         if annotation_ids(report_output, "warning") != expected_warnings:
@@ -1261,7 +1336,7 @@ def self_test():
         os.environ["CI"] = "false"
         (tmp / ".github" / "gates" / "gates.yaml").write_text(
             "gates:\n  - id: x\n    name: x\n    group: t\n    budget_seconds: 0.2\n"
-            '    run: "sleep 0.5"\n'
+            f'    run: "{BUSY_LOOP}"\n'
         )
         g = load(tmp)[0]
         r = execute(g, tmp, is_pr=False, timeout=5)

@@ -4,8 +4,9 @@
 
 package com.openbank.loyalty.integration
 
-import com.openbank.loyalty.it.LoyaltyPostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -32,7 +33,7 @@ import javax.sql.DataSource
  * fleet before and is invisible to every mocked test.
  */
 @QuarkusTest
-@QuarkusTestResource(LoyaltyPostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class, initArgs = [ResourceArg(name = "db", value = "openbank_loyalty_it")])
 @TestSecurity(user = "operator@openbank.test", roles = ["ROLE_OPERATOR"])
 class LoyaltyLedgerOutboxIT {
 

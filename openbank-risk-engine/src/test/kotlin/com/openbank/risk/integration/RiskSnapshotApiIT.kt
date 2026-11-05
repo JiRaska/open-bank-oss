@@ -4,10 +4,10 @@
 
 package com.openbank.risk.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.sl
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest

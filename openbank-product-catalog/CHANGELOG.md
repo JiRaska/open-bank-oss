@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.2...product-catalog-v1.5.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* **product-catalog:** register pack approval policy for native reflection ([#14587](https://github.com/JiRaska/open-bank-oss/issues/14587)) ([e0d8600](https://github.com/JiRaska/open-bank-oss/commit/e0d8600e7e3bba6a02bd883467ef5a79d90bd092))
+
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.1...product-catalog-v1.5.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **product-catalog:** describe v1 disabled-route errors ([#14488](https://github.com/JiRaska/open-bank-oss/issues/14488)) ([f83dff3](https://github.com/JiRaska/open-bank-oss/commit/f83dff3d56eee9e0e10b28d90605a83330390654))
+
 ## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.0...product-catalog-v1.5.1) (2026-10-30)
 
 

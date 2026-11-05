@@ -7,7 +7,7 @@ package com.openbank.anacredit.infrastructure.persistence
 import com.openbank.anacredit.domain.model.CounterpartyType
 import com.openbank.anacredit.domain.model.CreditExposure
 import com.openbank.anacredit.domain.model.InstrumentType
-import com.openbank.anacredit.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport

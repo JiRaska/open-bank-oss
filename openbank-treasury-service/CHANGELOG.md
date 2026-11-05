@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.1...treasury-service-v0.20.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **treasury-service:** document validation 400s as ProblemDetail ([#14490](https://github.com/JiRaska/open-bank-oss/issues/14490)) ([3be4283](https://github.com/JiRaska/open-bank-oss/commit/3be4283991e6d78b91b42f925a0e7c35bc4f1d3b))
+* **treasury:** bind the day-close Idempotency-Key to the request ([#14388](https://github.com/JiRaska/open-bank-oss/issues/14388)) ([d117fcd](https://github.com/JiRaska/open-bank-oss/commit/d117fcd608816ccc6f2a66b2bbd43ae9162020b9))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.0...treasury-service-v0.20.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **treasury:** alias SettlementRail to the iso20022 library enum ([#14381](https://github.com/JiRaska/open-bank-oss/issues/14381)) ([b2d7745](https://github.com/JiRaska/open-bank-oss/commit/b2d774577f4fb02619ef3483ad7f7d52d4f0f5f7))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.1...treasury-service-v0.20.0) (2026-10-30)
 
 
