@@ -143,6 +143,32 @@ test_catalog_staff_rejects_renamed_machine_and_unknown_markers if {
 	}
 }
 
+# --- service-named-catalog-read: the four named readers, never the shared client ---
+
+named_reader(name) := {"service_account": true, "client_id": trim_prefix(name, "service-account-"), "type": "HUMAN", "id": name, "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+
+test_named_readers_read_catalog if {
+	every name in ["service-account-openbank-card-issuance", "service-account-openbank-document", "service-account-openbank-billing", "service-account-openbank-lending"] {
+		"service-named-catalog-read" in rest.allowed_reasons with input as {"principal": named_reader(name), "action": "catalog.read"}
+	}
+}
+
+test_named_reader_without_scope_denied if {
+	p := object.union(named_reader("service-account-openbank-document"), {"roles": ["ROLE_API"]})
+	not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": p, "action": "catalog.read"}
+}
+
+test_named_reader_cannot_list_or_write if {
+	every a in ["catalog.list", "catalog.create", "catalog.update"] {
+		not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": named_reader("service-account-openbank-lending"), "action": a}
+	}
+}
+
+test_shared_services_client_still_denied if {
+	p := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+	not "service-named-catalog-read" in rest.allowed_reasons with input as {"principal": p, "action": "catalog.read"}
+}
+
 # ADR-0341: this client reads revisions at product-catalog, not at account-service.
 pension_fund_catalog := machine("service-account-openbank-pension-fund", ["CATALOG_SCOPE_READ"])
 
@@ -182,7 +208,14 @@ test_pension_fund_catalog_grant_is_only_read if {
 }
 
 test_pension_fund_scope_does_not_grant_other_clients if {
-	every caller in ["service-account-openbank-services", "service-account-openbank-lending", "service-account-other"] {
+	every caller in ["service-account-openbank-services", "service-account-other"] {
 		not decide(machine(caller, ["ROLE_API", "CATALOG_SCOPE_READ"]), "catalog.read").allow
+	}
+	# lending is a named catalog reader in its own right (service-named-catalog-read), so it may
+	# read; what this test pins is that it never does so through the pension-fund grant.
+	not "service-pension-fund-catalog-read" in rest.allowed_reasons with input as {
+		"principal": machine("service-account-openbank-lending", ["ROLE_API", "CATALOG_SCOPE_READ"]),
+		"action": "catalog.read",
+		"resource": {"id": "p1"},
 	}
 }
