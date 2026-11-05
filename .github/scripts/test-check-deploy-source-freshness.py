@@ -67,13 +67,19 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str) -> str:
-        # Hermetic: a CI runner has no user.name/user.email, so a bare `git commit` exits 1.
-        env = {**os.environ,
-               "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
-               "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
-               "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
-        return subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=self.root,
-                              check=True, capture_output=True, text=True, env=env).stdout.strip()
+        # A CI runner has no user.name/user.email, so a bare `git commit` exits 1, and the gate
+        # runner exports GIT_INDEX_FILE (a private copy of the CHECKOUT's index) which must not
+        # reach a fixture repository. Supply an identity and drop every repository-selecting
+        # variable; keep the runner's own config so safe.directory and friends still apply.
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_OBJECT_DIRECTORY")}
+        env.update({"GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+                    "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"})
+        done = subprocess.run(["git", "-c", "commit.gpgsign=false", *args], cwd=self.root,
+                              capture_output=True, text=True, env=env)
+        if done.returncode:
+            raise AssertionError(f"git {' '.join(args)} failed ({done.returncode}): {done.stderr.strip()}")
+        return done.stdout.strip()
 
     def write(self, relative: str, content: str) -> None:
         path = self.root / relative
