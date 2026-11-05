@@ -167,12 +167,13 @@ p99 of 0.048 ms per golden-set op, inside the 2 ms per-`evaluate` budget. The op
 
 ### Replay findings
 
-The first replay of the reference products found three behaviours. Each was decided as follows:
+The first replay of the reference products found four behaviours. Each was decided as follows:
 
 | Finding | Decision |
 |---|---|
 | `term-deposit` had no balance rule in `prePosting`, so a withdrawal larger than the balance overdrew it | Defect, fixed in `openbank-products`: a `PROJECTED_BALANCE LT 0.00` reject (`INSUFFICIENT_FUNDS`), ordered before the early-withdrawal penalty so a refused withdrawal is never charged one |
 | The savings monthly fee can take a dormant account below zero | Accepted in IR v1. `prePosting` guards customer postings; a scheduled `CHARGE_FEE` is a contractual charge and posts in full. Bounding it needs a new IR construct, and the v1 schema is immutable (ADR-0352 §1); tracked as #14207, folded into the IR v2 issue #14210 |
+| The `PROJECTED_BALANCE` reject leaves the early-withdrawal penalty out (`balance + signed`), so a full withdrawal before maturity passed it and the 1 % penalty overdrew the deposit to -penalty | v1 interpreter defect fix, not a product change: published v1 revisions keep their `revisionHash`, and outcomes change only where the old outcome broke the no-negative-deposit invariant, i.e. `balance - amount - penalty < 0` on a `RATE` penalty. There `EARLY_WITHDRAWAL_PENALTY` of kind `RATE` now rejects with `INSUFFICIENT_FUNDS` when `balance - amount - penalty < 0`. Capping the penalty at the balance left was rejected, because a full withdrawal would then pay no penalty at all. IR v1 cannot express balance-minus-penalty, so the check lives in the action, not in a product rule. `FORFEITED_INTEREST_FRACTION` debits accrued interest, not the deposit, and needs no check. `EarlyWithdrawalPenaltyFixInvarianceTest` replays every golden scenario against outputs captured from the pre-fix interpreter: every step outside the condition is byte-identical |
 | Capitalisation rounds accrued interest HALF_UP to the cent, so `accruedInterest` can carry a sub-cent negative remainder into the next period | Unchanged in this IR version. Capitalisation rounding is part of every published revision's behaviour, so changing it (to DOWN, or to sweeping the residue at maturity or close) is an IR-version decision, not a shared-arithmetic edit (#14210). Each HALF_UP capitalisation leaves `|r| <= 0.005`, carried rather than accumulated, and negative when the cent was rounded up; an `AT_MATURITY` revision keeps its last `r` on `ACCRUED_INTEREST_PAYABLE`. The replay reports this as the named limitation `v1-capitalisation-residue` and asserts the bound |
 
 ## Testing
@@ -190,3 +191,23 @@ generators and `assertMoneyConserved`. Golden scenarios live under
 | `product-ir-run-limits` | enforced | a committed IR or scenario over the schema maxima |
 | `product-ir-authoring-parity` | advisory until 2027-03-31 | a committed `ir/<name>.json` with no DSL product, or canonical DSL output that differs from the committed file |
 | `product-ir-purity` | enforced | an I/O, clock, logging or metrics import under the package, or the detekt rule not active |
+
+## Known v1 language limitation: accrual is not guaranteed monotone
+
+IR v1 does not guarantee that a higher balance accrues at least as much
+interest. Three constructs are legal in v1 and can each make accrual *fall*
+as the balance rises:
+
+- a tier whose rate is lower than the rate of the tier below it;
+- a bonus gated by a balance-reading predicate that can turn false as the
+  balance rises, such as `BALANCE LT x`, `not (BALANCE GTE x)`, an `EQ`/`NEQ`
+  comparison, or `balanceMin(window) LT x`;
+- an accrue rule whose `when` gate has the same shape.
+
+v1 semantics are frozen, so none of these is rejected. Instead,
+`ProductMonotonicity.findings(revision)` in `com.openbank.libs.product.ir`
+flags each one statically. The check is conservative: under `or` or `not` it
+flags any leaf that could fall. `ProductFormalPropertiesTest` holds the
+monotone-accrual property for every revision the check passes. `obp lint` and
+the MCP lint tool should report the same findings once the shared toolkit
+lands (#14205). Whether IR v2 forbids these constructs is tracked in #14210.

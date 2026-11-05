@@ -1192,6 +1192,15 @@ main {
     linear-gradient(125deg, #ffffff 0%, #f8faff 100%);
   box-shadow: 0 12px 28px rgba(30, 41, 59, .055);
 }
+/* The light gradient above is literal white; without this the dark theme kept a white card
+   under dark-theme text, so every page title read white-on-white (found by ADR-0359's lane). */
+.dark .page-header {
+  border-color: var(--border);
+  background:
+    radial-gradient(circle at 96% 0%, rgba(129, 140, 248, .16), transparent 15rem),
+    linear-gradient(125deg, var(--surface) 0%, var(--surface-2) 100%);
+  box-shadow: none;
+}
 .page-title { font-size: clamp(24px, 2.4vw, 31px); line-height: 1.15; letter-spacing: -.045em; }
 .page-subtitle { max-width: 760px; margin-top: 8px; line-height: 1.55; }
 .breadcrumb { margin-bottom: 12px; }
@@ -1243,6 +1252,10 @@ main {
 .btn { min-height: 36px; border-radius: 9px; font-weight: 700; }
 .btn-primary { box-shadow: 0 5px 12px rgba(79, 70, 229, .20), inset 0 1px 0 rgba(255,255,255,.16); }
 .btn-secondary { border-color: #cbd5e1; }
+/* Same literal-white defect as .page-header: dark text on a white button in the dark theme. */
+.dark .btn-secondary { background: var(--surface-2); border-color: var(--border-strong); box-shadow: none; }
+.dark .btn-secondary:hover:not(:disabled) { background: var(--surface-3); border-color: var(--border-strong); }
+.dark .btn-secondary:active:not(:disabled) { background: var(--surface-3); }
 .badge,
 .pill { font-weight: 750; }
 
