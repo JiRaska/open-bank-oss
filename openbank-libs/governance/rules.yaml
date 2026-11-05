@@ -4006,7 +4006,6 @@ product_bearing_services:
     openbank-lending-service:
       adoption: pending
       reason: "loan_application.catalog_revision_id exists (ADR-0264) but is set only when a caller sends catalogOfferingId, which none does; ADR-0352 §9 defers lending's pin to IR v2 (#668)"
-      approved_image: 'openbank-lending-service:sandbox-7f966f31@sha256:9c0a06e63cccbf2c13c4dd77e908cb4bbc06145cf212f22951e34e228524cb4a'
     openbank-card-issuance-service:
       adoption: pending
       reason: "cards.product_code names a catalog card product (CardProductCatalogPort) with no revision pinned; not yet in ADR-0341's D5 adoption order"
