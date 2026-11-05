@@ -576,16 +576,28 @@ and judges it exactly like one strict PR:
   tree as well). A member that conflicts with main (told once, as in the strict lane) or with the members
   ahead of it (dropped from this carrier without a notice; the next one takes it). A main-red fix (served
   alone). The cap is `STRICT_BATCH_CAP` (default 8).
-- **A judge member rides alone.** Everything CI or gate configuration READS to decide a verdict —
-  every file under `.github/workflows/` and `.github/actions/` (a member editing `ci.yml` or a reusable
-  workflow can neuter a required check), `.github/gates/gates.yaml`, `openbank-libs/governance/rules.yaml`,
-  `.github/CODEOWNERS`, the privileged gate code and the train's own script, workflow and carrier
-  library — is a JUDGE path. A member touching one is a strict carrier of ONE, verified exactly as
-  today's update-branch head is, so it can never turn a co-member green; only non-judge strict members
-  (a plain `.github/scripts/*.py` no workflow runs by name, for instance) are batched. Oldest first: a
-  judge member that is the oldest eligible one is the whole carrier, otherwise it waits. Re-measured
-  2026-11-05 after this rule, same query: 28 armed PRs, 12 strict-lane, **8 batchable** (non-judge, no
-  regeneration), 4 judge-alone. And when a member touches `gates.yaml`, the merged file's `- id:` set (a
+- **A judge member rides alone — the inverse rule, fail closed.** A strict member may be batched only
+  when EVERY file it touches is under `.github/scripts/` AND is named by no workflow, action or
+  `gates.yaml` entry on main — by full path or by bare basename (a script run as `"$DIR/name.sh"`),
+  derived by two execution-free `git grep`s over main (`referenced_scripts`, memoised per base sha; a
+  grep error is a sentinel that batches nothing). Everything else is a JUDGE path and rides ALONE: a
+  strict carrier of one, verified exactly as today's update-branch head is, so it can never turn a
+  co-member green — every workflow and action (editing `ci.yml` or a reusable workflow can neuter a
+  required check), `gates.yaml`, `rules.yaml`, `CODEOWNERS`, the privileged and train code, and every
+  script anything invokes (`run-gates.py`, which runs every gate, `agent-admission.py`, a dependency
+  provisioner). Oldest first: a judge member that is the oldest eligible one is the whole carrier,
+  otherwise it waits. **Measured honestly 2026-11-05 on `origin/main`:** 540 script paths and 780 bare
+  basenames are referenced; **96 of 637** files under `.github/scripts/` are unreferenced and so
+  batchable; of the live queue (33 armed, 12 strict-lane) **0 are batchable** — every queued strict PR
+  touches a workflow, a gate declaration or an invoked script and rides alone. Under this rule the
+  carrier's gain on today's queue is therefore nil; what it buys is the mechanism (and a one-member
+  carrier judged over live main instead of an update-branch commit) and the batching of the
+  unreferenced-script tail when it queues. Widening the batchable set is a separate decision, to be
+  taken against this measurement, not assumed.
+- **Residual, documented.** `gates.yaml` entries whose `selftest:` is a `unittest discover`-style
+  glob run every matching test on the COMBINED head, including a batched unreferenced test: the same
+  trust as a batched `check-*.py` (ADR amendment 2026-10-24) — judged with the code it judges, and
+  able only to make a verdict redder. And when a member touches `gates.yaml`, the merged file's `- id:` set (a
   line scan, no YAML parse under `python3 -I -S`) must equal the union of main's and every member's; a
   gate id lost in the merge would retire a gate for the members riding with it, so that member is
   skipped (it takes today's update-branch path, where main's own gates judge it) and the rest ride.

@@ -981,9 +981,40 @@ def gate_ids(text: str) -> set[str]:
     return {m.group(1) for ln in text.splitlines() for m in [GATE_ID_RE.match(ln)] if m}
 
 
-def judge_path(path: str) -> bool:
-    """A path whose change alters what JUDGES a strict carrier: it rides alone (JUDGE_PREFIXES, JUDGE_PATHS)."""
-    return path.startswith(JUDGE_PREFIXES) or path in JUDGE_PATHS
+def judge_path(path: str, refs=None) -> bool:
+    """A path whose change may alter what JUDGES a strict carrier: it rides alone. The INVERSE rule, fail
+    closed (re-review of #14891): a path may be batched only if it is under `.github/scripts/` AND no
+    workflow, action or gates.yaml entry on main names it — by full path, or by bare basename (a script
+    run as `"$DIR/name.sh"`). Everything else (a workflow, an action, gates.yaml, rules.yaml, CODEOWNERS,
+    the privileged and train code, run-gates.py, any invoked script) rides alone. `refs` is
+    referenced_scripts(); None (or its error sentinel) batches nothing."""
+    if path.startswith(JUDGE_PREFIXES) or path in JUDGE_PATHS or not path.startswith(".github/scripts/"):
+        return True
+    if refs is None or "*" in refs[0]:
+        return True
+    return path in refs[0] or path.rsplit("/", 1)[-1] in refs[1]
+
+
+SCRIPT_REF_RE = r"\.github/scripts/[^] \"'`)}]+"
+SCRIPT_NAME_RE = r"[A-Za-z0-9_.-]+\.(py|sh|bash|mjs|cjs|js|ts)"
+_REFERENCED_SCRIPTS: dict[str, tuple[set[str], set[str]]] = {}
+
+
+def referenced_scripts(git, base: str) -> tuple[set[str], set[str]]:
+    """(full paths, bare basenames) of every script that main's workflows, actions or gates.yaml name —
+    one execution-free `git grep` over `base`, memoised per base sha. A grep error returns the sentinel
+    ({"*"}, set()): nothing batches."""
+    if base not in _REFERENCED_SCRIPTS:
+        r = git("grep", "-h", "-o", "-I", "-E", "-e", SCRIPT_REF_RE, "-e", SCRIPT_NAME_RE, base,
+                "--", ".github/workflows", ".github/actions", GATES_YAML, check=False)   # ONE spawn per base
+        if r.returncode not in (0, 1):
+            _REFERENCED_SCRIPTS[base] = ({"*"}, set())
+        else:
+            toks = r.stdout.split()
+            _REFERENCED_SCRIPTS[base] = ({x for x in toks if x.startswith(".github/scripts/")},
+                                         {x.rsplit("/", 1)[-1] for x in toks})
+    paths, names = _REFERENCED_SCRIPTS[base]
+    return set(paths), set(names)
 
 
 # --------------------------------------------------------------------------- git
@@ -2626,7 +2657,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         fixes = strict_fixes(gh, git, base, strict, main_red, main_cache)
         views = strict_batch_views(gh, git, base, strict, fixes, summary)
         if views:
-            built = build_strict_carrier(git, base, views, strict_cap, judge_path,
+            refs = referenced_scripts(git, base)
+            built = build_strict_carrier(git, base, views, strict_cap, lambda f: judge_path(f, refs),
                                          regen_inventory_fragments(regen_text), derived_output_patterns(regen_text))
             if built:
                 carrier = publish_strict_carrier(gh, git, base, built[0], built[1], run_id, attempt)
@@ -4021,6 +4053,10 @@ def _synthetic_origin(root: str) -> None:
     w(SYN_BASELINE, "base\n")
     w(SYN_MAIN_GATE_CODE, "main\n")
     w(GATES_YAML, SYN_GATES_YAML)
+    w(".github/workflows/ci.yml", 'on: push\njobs:\n  g:\n    steps:\n      - run: python3 .github/scripts/run-gates.py\n'
+                                  '      - run: bash "$DIR/foo.sh"\n')
+    w(".github/scripts/run-gates.py", "print('gates')\n")
+    w(".github/scripts/lib/foo.sh", "echo foo\n")
     w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
@@ -4093,6 +4129,9 @@ def _synthetic_origin(root: str) -> None:
     pr("pPR", {".github/scripts/p4.py": "print(4)\n", "docs/w3.md": "w3\n"})          # docs/ is a regen input
     pr("pPx", {".github/scripts/q\nr.py": "print(0)\n"})                              # control character
     pr("pPbad", {".github/scripts/bad.py": "print('bad')\n"})                         # red in CI (ci.py)
+    # Referenced scripts ride alone: named by path in a workflow, or by bare basename only.
+    pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
+    pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
 
 
 def git_memo_self_test(check) -> None:
@@ -4278,8 +4317,9 @@ def retry_planner_self_test(check) -> None:
 # 2026-11-05 (#14888): the eleven strict-carrier cases drive ~35 more settle ticks over the fixture
 # (a carrier is built, judged and rebuilt per tick): spawns=14,920 over 568 cases, measured on this
 # PR's full run; the ceiling moves to 15,500 (~4 % headroom), still well under the 18,534 that first
-# overran the shard budget.
-SELF_TEST_SPAWN_CEILING = 15500
+# overran the shard budget. Re-review of #14891 (judge-alone sequences, the inverse-rule ticks, the
+# post-merge tree check): spawns=15,550 at 594 cases before trimming two no-op ticks; ceiling 15,800.
+SELF_TEST_SPAWN_CEILING = 15800
 
 
 def self_test() -> int:
@@ -4326,6 +4366,12 @@ def self_test() -> int:
     check("referenced tests: at least one referenced test is strict by derivation alone",
           bool(derived_only) and all(U(r) for r in derived_only)
           and not any(Untrainable(real_regen)(r) for r in derived_only[:3]), str(derived_only[:3]))
+    real_srefs = referenced_scripts(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else ({"*"}, set())
+    check("referenced scripts: derived from the real tree (never the sentinel); run-gates.py and agent-admission.py ride alone",
+          "*" not in real_srefs[0] and judge_path(".github/scripts/run-gates.py", real_srefs)
+          and judge_path(".github/scripts/agent-admission.py", real_srefs)
+          and judge_path(".github/scripts/ensure-admin-ui-deps.sh", real_srefs)
+          and judge_path(".github/scripts/provision-gradle-distribution.sh", real_srefs), str(sorted(real_srefs[0]))[:200])
     check("referenced tests: an unreadable tree fails closed (every test-shaped path strict)",
           Untrainable(real_regen, {"*"})(".github/scripts/test-foo.py") and not Untrainable(real_regen, {"*"})(".github/scripts/check-foo.py"))
     check("untrainable: main's find enumeration is parsed", (U.find_root, U.find_name) ==
@@ -4818,7 +4864,7 @@ def self_test() -> int:
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
-                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90}
+                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -6001,19 +6047,30 @@ def self_test() -> int:
             # rides ALONE: never with another member, oldest first.
             open_only("pW2", "pP1", "pJ1", "pJ2")
             advance_main()
-            batches = []
-            for _ in range(4):
-                s = settle_strict(cap=8)
-                batches.append(s.get("strict_batch"))
+            batches = [settle_strict(cap=8).get("strict_batch") for _ in range(3)]
             check("strict carrier (2): judge members never share a carrier — non-judge pair first, then each judge member alone",
-                  batches == [[36, 88], [81], [82], None] and gh.merged == [36, 88, 81, 82] and gh.updates == [],
+                  batches == [[36, 88], [81], [82]] and gh.merged == [36, 88, 81] and gh.updates == [],
                   f"batches={batches} merged={gh.merged} updates={gh.updates}")
+            syn_refs = referenced_scripts(Git(origin), gh.main_sha())
             for f in (".github/workflows/ci.yml", ".github/workflows/_service-ci.yml", ".github/actions/x/action.yml",
                       ".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS",
-                      ".github/scripts/merge-train.py", ".github/scripts/check-adr-registry.sh", ".github/workflows/security.yml"):
-                check(f"judge_path: {f} rides alone", judge_path(f))
-            for f in (".github/scripts/two.py", ".github/scripts/check-unrelated.py", ".github/scripts/lib/x.sh", "docs/x.md"):
-                check(f"judge_path: {f} may be batched", not judge_path(f))
+                      ".github/scripts/merge-train.py", ".github/scripts/check-adr-registry.sh", ".github/workflows/security.yml",
+                      "docs/x.md", "openbank-libs/x.kt",                       # inverse rule: not under .github/scripts
+                      ".github/scripts/run-gates.py", ".github/scripts/lib/foo.sh"):   # named by path / bare basename
+                check(f"judge_path: {f} rides alone", judge_path(f, syn_refs))
+            for f in (".github/scripts/two.py", ".github/scripts/check-unrelated.py", ".github/scripts/lib/x.sh"):
+                check(f"judge_path: {f} may be batched (unreferenced, under .github/scripts)", not judge_path(f, syn_refs))
+            check("judge_path: no reference set (or the error sentinel) batches nothing — fail closed",
+                  judge_path(".github/scripts/two.py", None) and judge_path(".github/scripts/two.py", ({"*"}, set())))
+            # Live ticks: run-gates.py (named by path) and lib/foo.sh (named only by bare basename) each ride
+            # alone; the unreferenced pP1 batches with pW2.
+            reset()
+            open_only("pW2", "pP1", "pRG", "pFoo")
+            advance_main()
+            batches2 = [settle_strict(cap=8).get("strict_batch") for _ in range(3)]
+            check("strict carrier (2): a script a workflow names by path or bare basename rides alone; unreferenced scripts batch",
+                  batches2 == [[36, 88], [91], [92]] and gh.merged == [36, 88, 91],
+                  f"batches={batches2} merged={gh.merged}")
             reset()
 
             # (3) conflicts: a member conflicting with the members ahead of it is dropped from this carrier
