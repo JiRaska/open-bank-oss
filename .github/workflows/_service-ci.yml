@@ -767,7 +767,16 @@ jobs:
               echo '::error::Consumer must be an openbank-* module name.'
               exit 1
             }
-            consumer_args=("-Dpactbroker.consumers=${PACT_CONSUMER}")
+            if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
+              echo '::error::A consumer scope cannot be combined with a historical admin-ui proof.'
+              exit 1
+            fi
+            # pact-jvm's real consumer filter. build-logic forwards only an allowlist of system
+            # properties to the test JVM, and pact.filter.consumers is on it. A scoped run
+            # publishes verification results only for the pacts it actually verified (pact-jvm
+            # publishes per verified consumer pact), so the broker never records a result for a
+            # consumer that was not replayed; other consumers stay unverified for this version.
+            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}")
           fi
           pact_url_arg=()
           if [ -n "${HISTORICAL_PACT_URL:-}" ]; then

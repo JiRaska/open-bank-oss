@@ -412,14 +412,10 @@ selftest() {
     echo 'selftest FAIL: workflow does not preserve a trusted proof runner outside the P checkout' >&2
     fail=1
   fi
-  local verify_workflow="$repo_root/.github/workflows/verify-provider.yml"
-  if ! grep -Fq 'PACT_CONSUMER: ${{ inputs.consumer }}' "$workflow" \
-     || ! grep -Fq 'consumer_args=("-Dpactbroker.consumers=${PACT_CONSUMER}")' "$workflow" \
-     || ! grep -Fq '"${consumer_args[@]}"' "$workflow" \
-     || ! grep -Fq 'consumer: ${{ inputs.consumer }}' "$verify_workflow"; then
-    echo 'selftest FAIL: targeted consumer is not wired through provider verification' >&2
-    fail=1
-  fi
+  # Behavioural: run the real provider step with a stub gradlew and require the consumer
+  # filter to reach the forwarded-property allowlist (grep-only wiring checks passed while inert).
+  (cd "$repo_root" && python3 -m unittest discover -s .github/scripts/tests -p test_service_ci_provider_task_discovery.py -k test_scoped_consumer_filter_reaches_test_jvm) \
+    >/dev/null 2>&1 || { echo 'selftest FAIL: targeted consumer filter does not reach the pact test JVM' >&2; fail=1; }
   [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Named Ledger, Balance, Account, Transaction, Party, Clearing and SEPA Instant fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P; optional consumer filter reaches pact-jvm.'
   return "$fail"
 }

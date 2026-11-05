@@ -215,8 +215,27 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertIn("-Dpactbroker.auth.password=", provider_call)
             self.assertIn("-Dpact.verifier.publishResults=true", provider_call)
             self.assertIn("-Dpact.provider.version=fixture-provider-version", provider_call)
-            self.assertNotIn("-Dpactbroker.consumers=", provider_call)
+            self.assertNotIn("-Dpact.filter.consumers=", provider_call)
             self.assertNotIn(":test", provider_call)
+
+    def test_scoped_consumer_filter_reaches_test_jvm(self):
+        import re
+        gradle = (ROOT / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts").read_text()
+        forwarded = set(re.findall(r'^\s+"((?:pact|pactbroker)[\w.]*)",$', gradle, re.M))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            trusted, _, historical, calls, env = self.make_workspaces(root)
+            (root / "github-output").write_text("")
+            self.run_workflow_helper_sequence(root, root / "runner-temp", historical, env)
+            env["PACT_PROVIDER_VERSION"] = "fixture-provider-version"
+            env["PACT_CONSUMER"] = "openbank-agent-service"
+            self.run_shell(self.provider_run.replace("${{ inputs.service }}", SERVICE), historical, env)
+            call = calls.read_text().splitlines()[-1]
+            self.assertIn("-Dpact.filter.consumers=openbank-agent-service", call)
+            self.assertNotIn("pactbroker.consumers", call)
+            keys = re.findall(r"-D((?:pact|pactbroker)[\w.]*)=", call)
+            self.assertTrue(keys)
+            self.assertEqual(sorted(set(keys) - forwarded), [], "passed but never forwarded to the test JVM")
 
     def test_consumer_only_discovery_never_invokes_provider_task(self):
         with tempfile.TemporaryDirectory() as tmp:
