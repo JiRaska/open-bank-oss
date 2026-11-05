@@ -350,7 +350,7 @@ filtered out in silence, so a log with no line for it could not say whether it w
 ### What the train is NOT
 
 It is not a replacement for a PR's own CI: a PR that is red on its own head never qualifies. It is
-not a scheduler for CI capacity: one train per 10 minutes, at most 8 members, bounds its cost to
+not a scheduler for CI capacity: one train per 10 minutes, at most 16 members (raised from 8, #14302), bounds its cost to
 one CI run per batch plus one per halving for a culprit. And it is not four-eyes: `agent-pr-guard`,
 the money-path approval rules and the security checklist gate are evaluated on the member PR
 exactly as today, and a refusal there removes the PR from the candidate set.
@@ -606,7 +606,7 @@ undo in git.
 ## Consequences
 
 **Positive**
-- Throughput bound rises from `1/CI_latency` to `batch/CI_latency` (8× at the default), with the
+- Throughput bound rises from `1/CI_latency` to `batch/CI_latency` (16× at the default), with the
   same "tested in the combination it lands in" guarantee that strict provides for one PR.
 - The derived-file class — the measured majority of green-PR breaks — is regenerated once per
   batch, on the exact tree that lands, instead of once per PR on a tree that will not.
@@ -626,7 +626,7 @@ undo in git.
 - One more bot with the App token that can merge PRs. Its blast radius is bounded by the same
   ruleset as any other merger (`agent-pr-guard`, signatures) — it only ever squashes PRs that
   were already armed — and by the invariant above: the token never shares a runner with PR data.
-- Bisection spans ticks: a red batch of 8 costs up to three more carrier CI runs (halves of 4, 2,
+- Bisection spans ticks: a red batch of 16 costs up to four more carrier CI runs (halves of 8, 4, 2,
   1) to isolate one culprit, each a tick or more apart. That is slower than bisecting within one
   run, and is the price of `settle` never consuming state a build produced.
 - PRs that touch a generator path (`.github/scripts/**` in particular, which gate work does
