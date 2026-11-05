@@ -1,6 +1,5 @@
 V9.1 openbank-infra/gitops/components/openbao/openbao-agent-identity.yaml:177: plaintext http:// env value http://openbao.vault.svc:8200
 V9.1 openbank-infra/gitops/components/openbao/db-rotation-job.yaml:84: plaintext http:// env value http://openbao.vault.svc:8200
-V9.1 openbank-infra/gitops/components/openbao/secret-rotator-cronjob.yaml:235: plaintext http:// env value http://openbao.vault.svc:8200
 V9.1 openbank-infra/gitops/components/openbao/openbao-document-signing-pki.yaml:172: plaintext http:// env value http://openbao.vault.svc:8200
 V9.1 openbank-infra/gitops/components/finrep/finrep-service.yaml:57: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/psd2-service/psd2-service.yaml:108: plaintext http:// env value http://tpp-registry-service.tpp-registry.svc:8108
