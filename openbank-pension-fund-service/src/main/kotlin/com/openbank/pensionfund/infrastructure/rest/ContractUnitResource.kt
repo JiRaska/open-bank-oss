@@ -31,7 +31,7 @@ import java.util.UUID
  * FundAdministrationPort) and operators; participants never reach this service directly.
  */
 @Tag(name = "Unit register", description = "Forward-priced unit orders and holdings per contract (ADR-0334)")
-@Path("/api/v1/contracts/{contractId}")
+@Path("/api/v2/contracts/{contractId}")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 class ContractUnitResource {
