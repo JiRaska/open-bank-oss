@@ -338,7 +338,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -748,7 +748,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -1140,7 +1140,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -1486,7 +1486,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -1806,7 +1806,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -3033,7 +3033,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -3474,7 +3474,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
@@ -3760,7 +3760,7 @@ spec:
                 fieldPath: metadata.namespace
           - name: canary-hash
             valueFrom:
-              podTemplateHashValue: Canary
+              podTemplateHashValue: Latest
       steps:
         - setWeight: 10
         - pause:
