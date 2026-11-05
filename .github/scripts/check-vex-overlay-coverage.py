@@ -30,7 +30,7 @@ a released component (CLAUDE.md rule 2) -- and requires each to resolve to an ov
 SAME two-candidate rule both consumers use (`<component>` then `<component>` minus the `openbank-`
 prefix). Fails in both directions: a component with no overlay, and an overlay no component claims.
 
-Known gaps live in NO_OVERLAY_YET, need an issue reference, and go stale in BOTH directions -- an
+Known gaps live one-per-component in NO_OVERLAY_DIR (#14686), need an issue reference, and go stale in BOTH directions -- an
 entry for a component that now has an overlay fails, and an entry for a component that is no longer
 released fails. A new gap is red by default; only a human writing down why can make it green.
 
@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -66,25 +67,34 @@ NO_RELEASE_COMPONENT: dict[str, str] = {
     "openbank-campaign-service": "campaign-service",
 }
 
-# component -> issue that tracks writing its overlay. Reason required; stale either direction.
-NO_OVERLAY_YET: dict[str, str] = {
-    # case-coordinator-agent, incentive-service and referral-service were removed here when
-    # #7981 wrote their overlays. Their entries went stale the moment that PR merged, and this
-    # gate reported it in the direction that matters -- a declaration outliving its subject --
-    # which turned main red for every PR until this landed. That is the check working, not a
-    # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
-    "communication-service": "#9148 - new service (ADR-0285 phase 2), no VEX overlay written yet. "
-                              "Its dependency set is the ordinary reactive Quarkus stack shared with "
-                              "services that already have overlays, but writing dispositions from "
-                              "that assumption rather than the resolved runtimeClasspath artifacts "
-                              "is exactly the fabrication this gate's own header refuses.",
-    "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
-                "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
-                "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
-                "No VEX overlay is written yet: dispositions must come from this module's own resolved "
-                "runtime classpath (it depends on openbank-libs-testing for the golden runner), not be "
-                "copied from a service. Delete this entry in the PR that writes the overlay.",
-}
+# Known gaps are DERIVED, not listed here: one file per component,
+# `openbank-libs/governance/vex-no-overlay/<component>.txt`, whose text is the reason and must cite
+# an issue (`#<n>`). The file name is the release-please component. This used to be a dict in this
+# script that every new-service and overlay PR edited, which collided ~1.5x/day (#14686: #14588,
+# #14521, #14517). Per-component files make unrelated PRs touch disjoint paths, while the rules
+# are unchanged: a gap with no file is red, a file for a component that now HAS an overlay fails,
+# a file for a non-released component fails, and an empty or issue-less reason fails.
+# The stale check is what makes deleting the file part of the PR that writes the overlay.
+NO_OVERLAY_DIR = Path("openbank-libs/governance/vex-no-overlay")
+_ISSUE_REF = re.compile(r"#\d+")
+
+
+def load_no_overlay_yet() -> tuple[dict[str, str], list[str]]:
+    """(component -> reason, errors) read from NO_OVERLAY_DIR. Only `*.txt` is a declaration; any
+    other file in the directory is an error, so a misnamed declaration cannot silently not count."""
+    out: dict[str, str] = {}
+    errors: list[str] = []
+    d = REPO / NO_OVERLAY_DIR
+    if not d.is_dir():
+        return out, errors
+    for p in sorted(d.iterdir()):
+        if p.name.startswith(".") or p.is_dir():
+            continue
+        if p.suffix != ".txt":
+            errors.append(f"{NO_OVERLAY_DIR}/{p.name} is not a `<component>.txt` declaration -- rename or remove it.")
+            continue
+        out[p.stem] = gatelib.read_text(p).strip()
+    return out, errors
 
 
 def released_components() -> tuple[list[str], list[str]]:
@@ -129,8 +139,11 @@ def resolve(component: str, overlays: set[str]) -> str | None:
     return None
 
 
-def build() -> tuple[list[str], list[str]]:
+def build(declared: dict[str, str] | None = None) -> tuple[list[str], list[str]]:
     components, errors = released_components()
+    if declared is None:
+        declared, derr = load_no_overlay_yet()
+        errors += derr
     overlays = {p.name[: -len(".openvex.json")] for p in gatelib.glob(REPO / VEX_DIR, "*.openvex.json")}
 
     claimed: set[str] = set()
@@ -138,17 +151,17 @@ def build() -> tuple[list[str], list[str]]:
         hit = resolve(c, overlays)
         if hit:
             claimed.add(hit)
-            if c in NO_OVERLAY_YET:
+            if c in declared:
                 errors.append(
-                    f"NO_OVERLAY_YET declares {c}, which HAS an overlay now "
-                    f"({VEX_DIR}/{hit}.openvex.json) -- remove the entry."
+                    f"a no-overlay declaration exists for {c}, which HAS an overlay now "
+                    f"({VEX_DIR}/{hit}.openvex.json) -- delete {NO_OVERLAY_DIR}/{c}.txt."
                 )
-        elif c not in NO_OVERLAY_YET:
+        elif c not in declared:
             errors.append(
                 f"{c} is a released component with NO VEX overlay. Every shared-artifact CVE "
                 f"fan-out silently skips it and no gate can see that, because the only VEX gate "
                 f"globs the files that exist. Add {VEX_DIR}/{c.removeprefix('openbank-')}"
-                f".openvex.json, or declare it in NO_OVERLAY_YET with an issue reference."
+                f".openvex.json, or declare the gap in {NO_OVERLAY_DIR}/{c}.txt (reason + issue reference)."
             )
 
     stranded = set(NO_RELEASE_COMPONENT.values())
@@ -173,11 +186,13 @@ def build() -> tuple[list[str], list[str]]:
             f"it, so its verdicts reach no artifact. Remove it, or register the component."
         )
 
-    for c, reason in NO_OVERLAY_YET.items():
+    for c, reason in sorted(declared.items()):
         if c not in components:
-            errors.append(f"NO_OVERLAY_YET declares {c}, which is not a released component -- stale.")
+            errors.append(f"{NO_OVERLAY_DIR}/{c}.txt declares {c}, which is not a released component -- stale.")
         elif not str(reason).strip():
-            errors.append(f"NO_OVERLAY_YET entry {c} has no reason.")
+            errors.append(f"{NO_OVERLAY_DIR}/{c}.txt has no reason.")
+        elif not _ISSUE_REF.search(reason):
+            errors.append(f"{NO_OVERLAY_DIR}/{c}.txt cites no issue (`#<n>`) -- a gap needs a tracker.")
 
     return components, errors
 
@@ -220,18 +235,48 @@ def self_test() -> int:
         print(f"SELF-TEST FAIL: only {len(components)} components found -- derivation is broken")
         ok = False
 
-    # 4. a stale NO_OVERLAY_YET entry fails in BOTH directions
-    for key, needle in (
-        ("ledger-service", "HAS an overlay now"),
-        ("not-a-component", "not a released component"),
-    ):
-        NO_OVERLAY_YET[key] = "self-test"
+    # 4. the per-component declaration form. Each case injects a declaration set and must
+    #    produce the named finding; the first is the positive control (a legit gap is clean).
+    real, _ = load_no_overlay_yet()
+    gap = next(iter(real), None)
+    if gap is None:
+        print("SELF-TEST FAIL: no live declaration to use as a control"); ok = False
+    else:
+        cases = (
+            # (label, declared set, needle or None for "must be clean of declaration findings")
+            ("live gaps stay green", dict(real), None),
+            ("undeclared gap is red", {k: v for k, v in real.items() if k != gap},
+             f"{gap} is a released component with NO VEX overlay"),
+            ("stale: component HAS overlay", {**real, "ledger-service": "#1 self-test"}, "HAS an overlay now"),
+            ("stale: not a component", {**real, "not-a-component": "#1 self-test"}, "not a released component"),
+            ("empty reason", {**real, gap: "  "}, "has no reason"),
+            ("reason without issue", {**real, gap: "later"}, "cites no issue"),
+        )
+        for label, decl, needle in cases:
+            gatelib.clear()
+            _, errs = build(decl)
+            if needle is None:
+                if errs:
+                    print(f"SELF-TEST FAIL: {label}: unexpected {errs}"); ok = False
+            elif not any(needle in e for e in errs):
+                print(f"SELF-TEST FAIL: {label}: not reported ({needle})"); ok = False
+        # the loader itself: a misnamed file must be an error, and a file must map to its stem
+        import tempfile
+        global REPO
+        saved_repo = REPO
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / NO_OVERLAY_DIR
+            d.mkdir(parents=True)
+            (d / "a-service.txt").write_text("#1 because\n")
+            (d / "b-service.md").write_text("#2 wrong suffix\n")
+            REPO = Path(tmp)
+            try:
+                got, lerrs = load_no_overlay_yet()
+            finally:
+                REPO = saved_repo
+        if got != {"a-service": "#1 because"} or not any("not a `<component>.txt`" in e for e in lerrs):
+            print(f"SELF-TEST FAIL: loader mis-derived {got} {lerrs}"); ok = False
         gatelib.clear()
-        _, errs = build()
-        if not any(needle in e for e in errs):
-            print(f"SELF-TEST FAIL: stale entry {key} not reported ({needle})"); ok = False
-        del NO_OVERLAY_YET[key]
-    gatelib.clear()
 
     # 5. a stale NO_RELEASE_COMPONENT entry fails in both directions too. Without this the
     #    baseline could quietly outlive the condition it records, which is how a declared
