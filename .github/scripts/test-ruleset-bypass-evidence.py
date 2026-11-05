@@ -21,6 +21,12 @@ class EvidenceCollectorTest(unittest.TestCase):
         self.assertEqual(workflow.get('on', workflow.get(True)), {
             'workflow_run': {'workflows': ['CI'], 'types': ['in_progress']}})
         self.assertEqual(workflow['permissions'], {})
+        # Deliveries collapse per CI attempt and are never cancelled mid-run, so every
+        # attempt (each main commit, each rerun) keeps exactly the evidence it waits for.
+        self.assertEqual(workflow['concurrency'], {
+            'group': 'ruleset-bypass-evidence-${{ github.event.workflow_run.id }}'
+                     '-a${{ github.event.workflow_run.run_attempt }}',
+            'cancel-in-progress': False})
         job, = workflow['jobs'].values()
         self.assertEqual(job['runs-on'], 'ubuntu-latest')
         self.assertEqual(job['environment'], 'ruleset-evidence')
