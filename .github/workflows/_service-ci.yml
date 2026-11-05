@@ -108,8 +108,18 @@ jobs:
   build:
     name: ${{ inputs.service }} (build)
     # The main-only context pilot produces the exact native platform used by deployment.
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # Otherwise a service listed in the repo variable MINI_RUNNER_SERVICES (a JSON array)
+    # builds on the owner's Mac mini pool `openbank-mini` (ephemeral Linux arm64 runners,
+    # rules.yaml: ci_runners.static_hosts.mac_mini) to add slots beyond the hosted
+    # concurrency cap. Never for fork PRs. Unset or empty variable => every build is hosted,
+    # which is the kill switch when the Mac is down: a queued job has no hosted fallback.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
+    # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
+    # holder of the cache write secret; every other event runs without an environment. The secret
+    # is deliberately NOT declared under on.workflow_call.secrets: a declared-but-unpassed secret
+    # resolves to '' and shadows the environment one (2026-11-04: main builds wrote 0 entries).
+    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
@@ -169,23 +179,20 @@ jobs:
           done
           bash "$SERVICE_CI_HELPERS/diagnostic-actions.sh" restore "$SERVICE_CI_HELPERS"
 
-      # Resolve GRADLE_USER_HOME. This job is ALWAYS `runner.environment == 'github-hosted'`
-      # now (never self-hosted), so it always takes the default-home branch below — restoring
-      # the warm cache fleet-lint keeps on main via setup-gradle's cross-job cache restore.
+      # Resolve GRADLE_USER_HOME. Hosted, or an ephemeral `openbank-mini` container whose
+      # $HOME is discarded with the job, so ${HOME}/.gradle is never a human's cache — and
+      # setup-gradle's cross-job cache restore warms it the same way on both.
       # NOTE: env context is NOT available in job-level env: blocks of reusable workflows
       # (workflow_call) — GitHub rejects "Unrecognized named-value: 'env'" at parse time —
       # so this is resolved in a step where env IS available, same as the original single job.
       - name: Resolve GRADLE_USER_HOME
         run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
+      - name: Remote build cache
+        env: {W: "${{ secrets.GRADLE_CACHE_WRITE_PASSWORD }}", R: "${{ vars.GRADLE_CACHE_READ_PASSWORD }}", U: "${{ vars.GRADLE_CACHE_URL }}", H: "${{ inputs.ref }}"}
+        run: bash -e "$SERVICE_CI_HELPERS/remote-build-cache.sh"
 
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
-        run: |
-          if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
-            echo "DOCKER_HOST=unix:///var/run/docker.sock" >> "$GITHUB_ENV"
-            echo "normalized DOCKER_HOST -> unix:///var/run/docker.sock"
-          else
-            echo "DOCKER_HOST left as: ${DOCKER_HOST}"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/normalize-docker-host.sh"
 
       # Raise fs.aio-max-nr so parallel Testcontainers don't exhaust the kernel's default
       # 65536 AIO pool (Redpanda/Seastar + Quarkus reactive). Advisory, best-effort; a
@@ -193,17 +200,7 @@ jobs:
       - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
         continue-on-error: true
         timeout-minutes: 1
-        run: |
-          cur=$(cat /proc/sys/fs/aio-max-nr 2>/dev/null || echo 0)
-          if [ "${cur:-0}" -lt 1048576 ]; then
-            if sudo -n sysctl -w fs.aio-max-nr=1048576 >/dev/null 2>&1; then
-              echo "raised fs.aio-max-nr: ${cur} -> 1048576"
-            else
-              echo "::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO pool on this runner (no passwordless sudo?)"
-            fi
-          else
-            echo "fs.aio-max-nr already ${cur} (>= 1048576)"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
 
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
@@ -251,11 +248,7 @@ jobs:
         continue-on-error: true  # history is optional; a failed fetch keeps the full default suite
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 .github/scripts/prepare-test-priority.py \
-            --repo "$GITHUB_REPOSITORY" --component openbank-context-service \
-            --out "$RUNNER_TEMP/context-test-priority.json"
-          echo "OPENBANK_TEST_PRIORITY_FILE=$RUNNER_TEMP/context-test-priority.json" >> "$GITHUB_ENV"
+        run: bash -e "$SERVICE_CI_HELPERS/prepare-context-test-ordering.sh"
 
       - name: Build + test (:${{ inputs.service }})
         env:
@@ -281,11 +274,7 @@ jobs:
         env:
           ANALYTICS_SINK_TYPE: clickhouse
           AGENT_SVID_NONCE_STORE: redis
-        run: |
-          python3 .github/scripts/service-build-artifact.py pack \
-            --service openbank-context-service --sha "$GITHUB_SHA" \
-            --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
-            --out "$RUNNER_TEMP/deploy-build"
+        run: bash -e "$SERVICE_CI_HELPERS/package-context-deployment.sh"
 
       - name: Retain verified context deployment build
         if: steps.deploy_bundle.outcome == 'success'
@@ -425,18 +414,7 @@ jobs:
         env:
           SERVICE: ${{ inputs.service }}
           EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
-        run: |
-          if python3 .github/scripts/check-test-intelligence-compatibility.py \
-            "${SERVICE}/build/test-intelligence/run.json" \
-            --component "${SERVICE}" \
-            --commit "${GITHUB_SHA}" \
-            --branch "${EXPECTED_BRANCH}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --attempt "${GITHUB_RUN_ATTEMPT}"; then
-            echo "ready=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "::warning::Skipping incomplete Test Intelligence compatibility artifact"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/check-test-intelligence-compat.sh"
 
       - name: Upload Test Intelligence evidence
         if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
@@ -632,43 +610,15 @@ jobs:
       # this isolation exists to prevent); Gradle's own cleanup runs under its cache locks, so
       # it is the only safe deleter. Written atomically: a sibling job may be reading init.d.
       - name: Configure Gradle cache retention
-        run: |
-          set -euo pipefail
-          mkdir -p "${GRADLE_USER_HOME}/init.d"
-          tmp="$(mktemp "${GRADLE_USER_HOME}/init.d/.cache-retention.XXXXXX")"
-          cat > "$tmp" <<'GRADLE_INIT'
-          beforeSettings { settings ->
-              settings.caches {
-                  releasedWrappers.removeUnusedEntriesAfterDays = 1
-                  snapshotWrappers.removeUnusedEntriesAfterDays = 1
-              }
-          }
-          GRADLE_INIT
-          mv -f "$tmp" "${GRADLE_USER_HOME}/init.d/cache-retention.gradle"
+        run: bash -e "$SERVICE_CI_HELPERS/configure-gradle-cache-retention.sh"
 
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
-        run: |
-          if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
-            echo "DOCKER_HOST=unix:///var/run/docker.sock" >> "$GITHUB_ENV"
-            echo "normalized DOCKER_HOST -> unix:///var/run/docker.sock"
-          else
-            echo "DOCKER_HOST left as: ${DOCKER_HOST}"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/normalize-docker-host.sh"
 
       - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
         continue-on-error: true
         timeout-minutes: 1
-        run: |
-          cur=$(cat /proc/sys/fs/aio-max-nr 2>/dev/null || echo 0)
-          if [ "${cur:-0}" -lt 1048576 ]; then
-            if sudo -n sysctl -w fs.aio-max-nr=1048576 >/dev/null 2>&1; then
-              echo "raised fs.aio-max-nr: ${cur} -> 1048576"
-            else
-              echo "::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO pool on this runner (no passwordless sudo?)"
-            fi
-          else
-            echo "fs.aio-max-nr already ${cur} (>= 1048576)"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
 
       # FinOps: pre-warm Testcontainers images from ECR pull-through cache (PR #1393).
       - name: Authenticate to ECR via OIDC
@@ -698,16 +648,7 @@ jobs:
             25
 
       - name: Probe Reposilite in-cluster Maven mirror
-        run: |
-          if curl -sf --connect-timeout 2 \
-              http://reposilite.reposilite.svc.cluster.local:8080/api/status \
-              > /dev/null 2>&1; then
-            echo "REPOSILITE_MIRROR_URL=http://reposilite.reposilite.svc.cluster.local:8080" \
-              >> "$GITHUB_ENV"
-            echo "::notice title=Reposilite active::in-cluster Maven mirror responding — deps resolved from cluster (zero NAT)"
-          else
-            echo "::notice title=Reposilite unavailable::falling back to GCS mirror + CodeArtifact"
-          fi
+        run: bash -e "$SERVICE_CI_HELPERS/probe-reposilite-mirror.sh"
 
       - name: Configure CodeArtifact Maven mirror
         continue-on-error: true
@@ -763,20 +704,7 @@ jobs:
           path: pact-handoff
 
       - name: Stage handed-off consumer pacts into pacts/
-        run: |
-          set -euo pipefail
-          if [ ! -f pact-handoff/manifest.txt ]; then
-            echo "::error::pact hand-off artifact from the build job has no manifest.txt — treating this as a failed hand-off, not an empty consumer-pact set (the build job always writes one)."
-            exit 1
-          fi
-          cat pact-handoff/manifest.txt
-          mkdir -p pacts
-          shopt -s nullglob
-          files=(pact-handoff/*.json)
-          # bash 3.2 (macOS runners) treats an EMPTY array as unbound under `set -u`; the
-          # ${files[@]+...} form expands to nothing instead of aborting (consumer-less services).
-          for f in ${files[@]+"${files[@]}"}; do cp "$f" pacts/; done
-          echo "Staged ${#files[@]} consumer pact file(s) from the build job's hand-off."
+        run: bash -e "$SERVICE_CI_HELPERS/stage-handed-off-pacts.sh"
 
       # Publish this service's CONSUMER pacts to the broker (ADR-0092). Reads the files staged
       # from the build job's hand-off above (regenerated there, not here — re-running `test`
