@@ -36,8 +36,6 @@ name: _service-ci-pr
       PACT_BROKER_PASSWORD:
         description: "Pact Broker password (ADR-0092) \u2014 publishing pacts + verification results."
         required: false
-      GRADLE_CACHE_WRITE_PASSWORD:
-        required: false
 permissions:
   contents: read
 jobs:
