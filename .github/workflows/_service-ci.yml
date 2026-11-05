@@ -120,7 +120,7 @@ jobs:
     # secrets to '' unless its caller uses `secrets: inherit` (actions/runner issue 4453;
     # 2026-11-05 a main push still logged an empty W). services-ci.yml's build_other_* callers
     # therefore inherit; its build_pr_* callers keep an explicit map and never enter this env.
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
