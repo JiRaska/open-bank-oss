@@ -19,6 +19,9 @@ WHAT IT CHECKS, in every .github/workflows/*.yml job:
        requires `github.event_name == 'push'` and `refs/heads/main`.
     3. PASSED-WRITE-SECRET: no caller passes `GRADLE_CACHE_WRITE_PASSWORD` to a reusable
        workflow (`jobs.<id>.secrets`); it must only ever come from the environment.
+    4. PR-INHERIT: no caller of `_service-ci-pr.yml` (the pull_request lane) uses
+       `secrets: inherit`. The main lane inherits so the environment secret resolves
+       (actions/runner issue 4453); PR code must keep receiving only its explicit map.
 
 EXIT CODES
     0 clean, 1 could not answer (no workflows read), 2 findings.
@@ -61,7 +64,9 @@ def scan(root: pathlib.Path) -> tuple[int, list[str]]:
             push = (job.get("env") or {}).get(PUSH_VAR)
             if push is not None and str(push).strip().lower() != "false" and not main_push_guarded(str(push)):
                 findings.append(f"PUSH-SCOPE {where}: {PUSH_VAR}={push!r} is not gated on a push to main")
-            if WRITE_SECRET in (job.get("secrets") or {}):
+            if str(job.get("uses", "")).endswith("_service-ci-pr.yml") and job.get("secrets") == "inherit":
+                findings.append(f"PR-INHERIT {where}: pull_request-lane caller uses `secrets: inherit`")
+            if isinstance(job.get("secrets"), dict) and WRITE_SECRET in job["secrets"]:
                 findings.append(f"PASSED-WRITE-SECRET {where}: passes {WRITE_SECRET} to a reusable workflow")
     return len(files), findings
 
@@ -77,6 +82,9 @@ def self_test() -> int:
         ("write secret passed to callee", {"uses": "./x.yml", "secrets": {WRITE_SECRET: "${{ secrets.Y }}"}},
          "PASSED-WRITE-SECRET"),
         ("literal false", {"env": {PUSH_VAR: "false"}}, None),
+        ("PR lane inherits secrets", {"uses": "./.github/workflows/_service-ci-pr.yml", "secrets": "inherit"},
+         "PR-INHERIT"),
+        ("main lane inherits secrets", {"uses": "./.github/workflows/_service-ci.yml", "secrets": "inherit"}, None),
     ]
     bad = 0
     for name, job, want in cases:
