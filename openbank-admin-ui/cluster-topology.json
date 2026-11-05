@@ -1,12 +1,12 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-08-04T08:06:31.000Z",
+  "generatedAt": "2026-10-30T07:40:38.000Z",
   "counts": {
-    "namespaces": 68,
-    "networkPolicies": 108,
-    "externalSecrets": 144,
-    "clusterPolicies": 5
+    "namespaces": 85,
+    "networkPolicies": 143,
+    "externalSecrets": 236,
+    "clusterPolicies": 0
   },
   "groups": [
     {
@@ -15,7 +15,10 @@
       "labelEn": "Business domains",
       "color": "#326CE5",
       "icon": "bank",
-      "blurb": "Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy."
+      "blurb": {
+        "cs": "Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy.",
+        "en": "Every banking domain runs in its own sealed namespace — like a separate floor of the building."
+      }
     },
     {
       "id": "identity",
@@ -23,7 +26,10 @@
       "labelEn": "Identity & secrets",
       "color": "#8b5cf6",
       "icon": "lock",
-      "blurb": "Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty."
+      "blurb": {
+        "cs": "Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.",
+        "en": "Who signs in and where the keys live: Keycloak, OpenBao, secrets, certificates."
+      }
     },
     {
       "id": "backbone",
@@ -31,7 +37,10 @@
       "labelEn": "Backbone",
       "color": "#0ea5e9",
       "icon": "network",
-      "blurb": "Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps."
+      "blurb": {
+        "cs": "Co spojuje vše dohromady: fronta zpráv, vstupní brána, observabilita, GitOps.",
+        "en": "What ties it all together: message bus, ingress gateway, observability, GitOps."
+      }
     },
     {
       "id": "platform",
@@ -39,427 +48,796 @@
       "labelEn": "Platform & CI",
       "color": "#10b981",
       "icon": "cpu",
-      "blurb": "Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery."
+      "blurb": {
+        "cs": "Provozní mozek a továrna: AI agent, runnery, autoscaling, admission policy, skenery.",
+        "en": "The operating brain and factory: AI agent, runners, autoscaling, admission policy, scanners."
+      }
     }
   ],
   "namespaces": [
     {
       "name": "accounts",
       "group": "domain",
-      "role": "Účty zákazníků",
+      "role": {
+        "cs": "Účty zákazníků",
+        "en": "Customer accounts"
+      },
       "declared": true
     },
     {
       "name": "admin-ui",
       "group": "platform",
-      "role": "Admin portál (tato aplikace)",
+      "role": {
+        "cs": "Admin portál (tato aplikace)",
+        "en": "Admin portal (this app)"
+      },
       "declared": true
     },
     {
       "name": "ai-platform",
       "group": "domain",
-      "role": "ai-platform",
+      "role": {
+        "cs": "ai-platform",
+        "en": "ai-platform"
+      },
       "declared": true
     },
     {
       "name": "aml",
       "group": "domain",
-      "role": "AML — praní špinavých peněz",
+      "role": {
+        "cs": "AML — praní špinavých peněz",
+        "en": "AML — anti-money laundering"
+      },
       "declared": true
     },
     {
       "name": "anacredit",
       "group": "domain",
-      "role": "anacredit",
+      "role": {
+        "cs": "anacredit",
+        "en": "anacredit"
+      },
       "declared": true
     },
     {
       "name": "analytics",
       "group": "domain",
-      "role": "analytics",
+      "role": {
+        "cs": "analytics",
+        "en": "analytics"
+      },
       "declared": true
     },
     {
       "name": "arc-runners",
       "group": "platform",
-      "role": "CI runnery (GitHub Actions)",
+      "role": {
+        "cs": "CI runnery (GitHub Actions)",
+        "en": "CI runners (GitHub Actions)"
+      },
       "declared": false
     },
     {
       "name": "arc-systems",
       "group": "platform",
-      "role": "CI runner controller",
+      "role": {
+        "cs": "CI runner controller",
+        "en": "CI runner controller"
+      },
       "declared": false
     },
     {
       "name": "argo-rollouts",
       "group": "domain",
-      "role": "argo-rollouts",
+      "role": {
+        "cs": "argo-rollouts",
+        "en": "argo-rollouts"
+      },
       "declared": true
     },
     {
       "name": "audit",
       "group": "domain",
-      "role": "Auditní záznamy",
+      "role": {
+        "cs": "Auditní záznamy",
+        "en": "Audit records"
+      },
       "declared": true
     },
     {
       "name": "authz-policy-auditor",
       "group": "domain",
-      "role": "authz-policy-auditor",
+      "role": {
+        "cs": "authz-policy-auditor",
+        "en": "authz-policy-auditor"
+      },
       "declared": true
     },
     {
       "name": "balances",
       "group": "domain",
-      "role": "Zůstatky (projekce ledgeru)",
+      "role": {
+        "cs": "Zůstatky (projekce ledgeru)",
+        "en": "Balances (ledger projection)"
+      },
       "declared": true
     },
     {
       "name": "billing",
       "group": "domain",
-      "role": "billing",
+      "role": {
+        "cs": "billing",
+        "en": "billing"
+      },
       "declared": true
     },
     {
       "name": "campaign",
       "group": "domain",
-      "role": "campaign",
+      "role": {
+        "cs": "campaign",
+        "en": "campaign"
+      },
       "declared": true
     },
     {
       "name": "cert-manager",
       "group": "identity",
-      "role": "cert-manager — TLS certifikáty",
+      "role": {
+        "cs": "cert-manager — TLS certifikáty",
+        "en": "cert-manager — TLS certificates"
+      },
       "declared": true
     },
     {
       "name": "cnpg-system",
       "group": "platform",
-      "role": "CloudNativePG operátor",
+      "role": {
+        "cs": "CloudNativePG operátor",
+        "en": "CloudNativePG operator"
+      },
       "declared": false
+    },
+    {
+      "name": "communication",
+      "group": "domain",
+      "role": {
+        "cs": "communication",
+        "en": "communication"
+      },
+      "declared": true
     },
     {
       "name": "consent",
       "group": "domain",
-      "role": "Souhlasy (PSD2)",
+      "role": {
+        "cs": "Souhlasy (PSD2)",
+        "en": "Consents (PSD2)"
+      },
+      "declared": true
+    },
+    {
+      "name": "context",
+      "group": "domain",
+      "role": {
+        "cs": "context",
+        "en": "context"
+      },
       "declared": true
     },
     {
       "name": "control-liveness-sentinel",
       "group": "domain",
-      "role": "control-liveness-sentinel",
+      "role": {
+        "cs": "control-liveness-sentinel",
+        "en": "control-liveness-sentinel"
+      },
       "declared": true
     },
     {
       "name": "customer-edge",
       "group": "domain",
-      "role": "Edge pro mobilní app",
+      "role": {
+        "cs": "Edge pro mobilní app",
+        "en": "Edge for the mobile app"
+      },
       "declared": true
     },
     {
       "name": "delegation",
       "group": "domain",
-      "role": "delegation",
+      "role": {
+        "cs": "delegation",
+        "en": "delegation"
+      },
       "declared": true
     },
     {
       "name": "developer-portal",
       "group": "domain",
-      "role": "developer-portal",
+      "role": {
+        "cs": "developer-portal",
+        "en": "developer-portal"
+      },
       "declared": true
     },
     {
       "name": "devops-agent",
       "group": "domain",
-      "role": "devops-agent",
+      "role": {
+        "cs": "devops-agent",
+        "en": "devops-agent"
+      },
       "declared": true
     },
     {
       "name": "dispute",
       "group": "domain",
-      "role": "Spory a chargebacky",
+      "role": {
+        "cs": "Spory a chargebacky",
+        "en": "Disputes and chargebacks"
+      },
       "declared": true
     },
     {
       "name": "docs-truth-agent",
       "group": "domain",
-      "role": "docs-truth-agent",
+      "role": {
+        "cs": "docs-truth-agent",
+        "en": "docs-truth-agent"
+      },
       "declared": true
     },
     {
       "name": "documents",
       "group": "domain",
-      "role": "documents",
+      "role": {
+        "cs": "documents",
+        "en": "documents"
+      },
+      "declared": true
+    },
+    {
+      "name": "engagement",
+      "group": "domain",
+      "role": {
+        "cs": "engagement",
+        "en": "engagement"
+      },
+      "declared": true
+    },
+    {
+      "name": "envoy-gateway-system",
+      "group": "domain",
+      "role": {
+        "cs": "envoy-gateway-system",
+        "en": "envoy-gateway-system"
+      },
       "declared": true
     },
     {
       "name": "external-dns",
       "group": "backbone",
-      "role": "External DNS",
+      "role": {
+        "cs": "External DNS",
+        "en": "External DNS"
+      },
       "declared": true
     },
     {
       "name": "external-secrets",
       "group": "identity",
-      "role": "External Secrets Operator (OpenBao→k8s)",
+      "role": {
+        "cs": "External Secrets Operator (OpenBao→k8s)",
+        "en": "External Secrets Operator (OpenBao→k8s)"
+      },
       "declared": true
     },
     {
       "name": "falco",
       "group": "domain",
-      "role": "falco",
+      "role": {
+        "cs": "falco",
+        "en": "falco"
+      },
       "declared": true
     },
     {
       "name": "finops-agent",
       "group": "domain",
-      "role": "finops-agent",
+      "role": {
+        "cs": "finops-agent",
+        "en": "finops-agent"
+      },
       "declared": true
     },
     {
       "name": "finops-scaledown",
       "group": "domain",
-      "role": "finops-scaledown",
+      "role": {
+        "cs": "finops-scaledown",
+        "en": "finops-scaledown"
+      },
       "declared": true
     },
     {
       "name": "finrep",
       "group": "domain",
-      "role": "finrep",
+      "role": {
+        "cs": "finrep",
+        "en": "finrep"
+      },
       "declared": true
     },
     {
       "name": "flaky-test-hunter",
       "group": "domain",
-      "role": "flaky-test-hunter",
+      "role": {
+        "cs": "flaky-test-hunter",
+        "en": "flaky-test-hunter"
+      },
       "declared": true
     },
     {
       "name": "fraud",
       "group": "domain",
-      "role": "fraud",
+      "role": {
+        "cs": "fraud",
+        "en": "fraud"
+      },
       "declared": true
     },
     {
       "name": "fx",
       "group": "domain",
-      "role": "Směnárna / FX kurzy",
+      "role": {
+        "cs": "Směnárna / FX kurzy",
+        "en": "Exchange / FX rates"
+      },
       "declared": true
     },
     {
       "name": "governance-auditor",
       "group": "domain",
-      "role": "governance-auditor",
+      "role": {
+        "cs": "governance-auditor",
+        "en": "governance-auditor"
+      },
       "declared": true
     },
     {
       "name": "gradle-build-cache",
       "group": "platform",
-      "role": "Gradle build cache",
+      "role": {
+        "cs": "Gradle build cache",
+        "en": "Gradle build cache"
+      },
       "declared": true
     },
     {
       "name": "iam",
       "group": "identity",
-      "role": "Keycloak — IAM / OIDC",
+      "role": {
+        "cs": "Keycloak — IAM / OIDC",
+        "en": "Keycloak — IAM / OIDC"
+      },
       "declared": true
     },
     {
       "name": "identity",
       "group": "identity",
-      "role": "Identita",
+      "role": {
+        "cs": "Identita",
+        "en": "Identity"
+      },
       "declared": false
+    },
+    {
+      "name": "incentive",
+      "group": "domain",
+      "role": {
+        "cs": "incentive",
+        "en": "incentive"
+      },
+      "declared": true
     },
     {
       "name": "ingress-nginx",
       "group": "backbone",
-      "role": "Vstupní brána (ingress)",
+      "role": {
+        "cs": "Vstupní brána (ingress)",
+        "en": "Ingress gateway"
+      },
       "declared": true
     },
     {
       "name": "interest",
       "group": "domain",
-      "role": "Úroky a kapitalizace",
+      "role": {
+        "cs": "Úroky a kapitalizace",
+        "en": "Interest and capitalisation"
+      },
       "declared": true
     },
     {
       "name": "keda",
       "group": "platform",
-      "role": "KEDA — autoscaling",
+      "role": {
+        "cs": "KEDA — autoscaling",
+        "en": "KEDA — autoscaling"
+      },
       "declared": false
+    },
+    {
+      "name": "kyb",
+      "group": "domain",
+      "role": {
+        "cs": "kyb",
+        "en": "kyb"
+      },
+      "declared": true
     },
     {
       "name": "kyc",
       "group": "domain",
-      "role": "KYC — poznej svého klienta",
+      "role": {
+        "cs": "KYC — poznej svého klienta",
+        "en": "KYC — know your customer"
+      },
       "declared": true
     },
     {
       "name": "kyverno",
       "group": "platform",
-      "role": "Kyverno — admission policy & podpisy",
+      "role": {
+        "cs": "Kyverno — admission policy & podpisy",
+        "en": "Kyverno — admission policy & signatures"
+      },
       "declared": true
     },
     {
       "name": "ledger",
       "group": "domain",
-      "role": "Hlavní kniha (double-entry GL)",
+      "role": {
+        "cs": "Hlavní kniha (double-entry GL)",
+        "en": "General ledger (double-entry GL)"
+      },
+      "declared": true
+    },
+    {
+      "name": "ledger-pension-co",
+      "group": "domain",
+      "role": {
+        "cs": "ledger-pension-co",
+        "en": "ledger-pension-co"
+      },
       "declared": true
     },
     {
       "name": "lending",
       "group": "domain",
-      "role": "lending",
+      "role": {
+        "cs": "lending",
+        "en": "lending"
+      },
+      "declared": true
+    },
+    {
+      "name": "loyalty",
+      "group": "domain",
+      "role": {
+        "cs": "loyalty",
+        "en": "loyalty"
+      },
       "declared": true
     },
     {
       "name": "messaging",
       "group": "backbone",
-      "role": "Apache Kafka — sběrnice událostí",
+      "role": {
+        "cs": "Apache Kafka — sběrnice událostí",
+        "en": "Apache Kafka — event bus"
+      },
       "declared": true
     },
     {
       "name": "notifications",
       "group": "domain",
-      "role": "Notifikace",
+      "role": {
+        "cs": "Notifikace",
+        "en": "Notifications"
+      },
       "declared": true
     },
     {
       "name": "observability",
       "group": "backbone",
-      "role": "Prometheus / Grafana / Loki / Tempo",
+      "role": {
+        "cs": "Prometheus / Grafana / Loki / Tempo",
+        "en": "Prometheus / Grafana / Loki / Tempo"
+      },
       "declared": true
     },
     {
       "name": "onboarding",
       "group": "domain",
-      "role": "Onboarding zákazníků",
+      "role": {
+        "cs": "Onboarding zákazníků",
+        "en": "Customer onboarding"
+      },
       "declared": true
     },
     {
       "name": "open-banking",
       "group": "domain",
-      "role": "Open Banking / TPP",
+      "role": {
+        "cs": "Open Banking / TPP",
+        "en": "Open Banking / TPP"
+      },
       "declared": false
     },
     {
       "name": "pact-broker",
       "group": "domain",
-      "role": "pact-broker",
+      "role": {
+        "cs": "pact-broker",
+        "en": "pact-broker"
+      },
       "declared": true
     },
     {
       "name": "party",
       "group": "domain",
-      "role": "Strany / klientská identita",
+      "role": {
+        "cs": "Strany / klientská identita",
+        "en": "Parties / customer identity"
+      },
       "declared": true
     },
     {
       "name": "payments",
       "group": "domain",
-      "role": "Platby (SEPA/domácí/SCT Inst)",
+      "role": {
+        "cs": "Platby (SEPA/domácí/SCT Inst)",
+        "en": "Payments (SEPA/domestic/SCT Inst)"
+      },
+      "declared": true
+    },
+    {
+      "name": "pension",
+      "group": "domain",
+      "role": {
+        "cs": "pension",
+        "en": "pension"
+      },
+      "declared": true
+    },
+    {
+      "name": "pension-fund",
+      "group": "domain",
+      "role": {
+        "cs": "pension-fund",
+        "en": "pension-fund"
+      },
       "declared": true
     },
     {
       "name": "pid",
       "group": "domain",
-      "role": "pid",
+      "role": {
+        "cs": "pid",
+        "en": "pid"
+      },
       "declared": true
     },
     {
       "name": "platform",
       "group": "platform",
-      "role": "AI agent + řídicí plocha",
+      "role": {
+        "cs": "AI agent + řídicí plocha",
+        "en": "AI agent + control plane"
+      },
+      "declared": true
+    },
+    {
+      "name": "pricing",
+      "group": "domain",
+      "role": {
+        "cs": "pricing",
+        "en": "pricing"
+      },
       "declared": true
     },
     {
       "name": "psd2",
       "group": "domain",
-      "role": "psd2",
+      "role": {
+        "cs": "psd2",
+        "en": "psd2"
+      },
+      "declared": true
+    },
+    {
+      "name": "referral",
+      "group": "domain",
+      "role": {
+        "cs": "referral",
+        "en": "referral"
+      },
       "declared": true
     },
     {
       "name": "registry-cache",
       "group": "platform",
-      "role": "Cache image registru",
+      "role": {
+        "cs": "Cache image registru",
+        "en": "Image registry cache"
+      },
       "declared": true
     },
     {
       "name": "release-steward",
       "group": "domain",
-      "role": "release-steward",
+      "role": {
+        "cs": "release-steward",
+        "en": "release-steward"
+      },
       "declared": true
     },
     {
       "name": "reposilite",
       "group": "domain",
-      "role": "reposilite",
+      "role": {
+        "cs": "reposilite",
+        "en": "reposilite"
+      },
+      "declared": true
+    },
+    {
+      "name": "risk",
+      "group": "domain",
+      "role": {
+        "cs": "risk",
+        "en": "risk"
+      },
       "declared": true
     },
     {
       "name": "sanctions",
       "group": "domain",
-      "role": "Sankční screening",
+      "role": {
+        "cs": "Sankční screening",
+        "en": "Sanctions screening"
+      },
       "declared": true
     },
     {
       "name": "sca",
       "group": "domain",
-      "role": "Silné ověření (SCA)",
+      "role": {
+        "cs": "Silné ověření (SCA)",
+        "en": "Strong customer authentication (SCA)"
+      },
       "declared": true
     },
     {
       "name": "sdd",
       "group": "domain",
-      "role": "sdd",
+      "role": {
+        "cs": "sdd",
+        "en": "sdd"
+      },
       "declared": true
     },
     {
       "name": "security-scanner",
       "group": "platform",
-      "role": "Bezpečnostní skener",
+      "role": {
+        "cs": "Bezpečnostní skener",
+        "en": "Security scanner"
+      },
       "declared": true
     },
     {
       "name": "statements",
       "group": "domain",
-      "role": "Výpisy",
+      "role": {
+        "cs": "Výpisy",
+        "en": "Statements"
+      },
+      "declared": true
+    },
+    {
+      "name": "tax-reporting",
+      "group": "domain",
+      "role": {
+        "cs": "tax-reporting",
+        "en": "tax-reporting"
+      },
       "declared": true
     },
     {
       "name": "temporal",
       "group": "domain",
-      "role": "temporal",
+      "role": {
+        "cs": "temporal",
+        "en": "temporal"
+      },
       "declared": true
     },
     {
       "name": "tpp-registry",
       "group": "domain",
-      "role": "tpp-registry",
+      "role": {
+        "cs": "tpp-registry",
+        "en": "tpp-registry"
+      },
+      "declared": true
+    },
+    {
+      "name": "treasury",
+      "group": "domain",
+      "role": {
+        "cs": "treasury",
+        "en": "treasury"
+      },
       "declared": true
     },
     {
       "name": "vault",
       "group": "identity",
-      "role": "OpenBao — trezor tajemství",
+      "role": {
+        "cs": "OpenBao — trezor tajemství",
+        "en": "OpenBao — secrets vault"
+      },
+      "declared": true
+    },
+    {
+      "name": "volumeattachment-reaper",
+      "group": "domain",
+      "role": {
+        "cs": "volumeattachment-reaper",
+        "en": "volumeattachment-reaper"
+      },
       "declared": true
     },
     {
       "name": "vpa",
       "group": "domain",
-      "role": "vpa",
+      "role": {
+        "cs": "vpa",
+        "en": "vpa"
+      },
+      "declared": true
+    },
+    {
+      "name": "wealth",
+      "group": "domain",
+      "role": {
+        "cs": "wealth",
+        "en": "wealth"
+      },
       "declared": true
     }
   ],
   "securityLayers": [
     {
       "id": "edge",
-      "label": "Edge",
+      "label": {
+        "cs": "Edge",
+        "en": "Edge"
+      },
       "icon": "globe",
       "status": "partial",
-      "analogy": "Ostraha a turniket u vchodu do banky.",
-      "summary": "CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.",
+      "analogy": {
+        "cs": "Ostraha a turniket u vchodu do banky.",
+        "en": "Security guard and turnstile at the bank entrance."
+      },
+      "summary": {
+        "cs": "CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.",
+        "en": "CloudFront + WAF + TLS at the perimeter, before traffic ever reaches the cluster."
+      },
       "controls": [
         "CloudFront/WAF",
         "TLS (ACM/cert-manager)",
@@ -472,14 +850,23 @@
     },
     {
       "id": "network",
-      "label": "Síť (segmentace)",
+      "label": {
+        "cs": "Síť (segmentace)",
+        "en": "Network (segmentation)"
+      },
       "icon": "network",
       "status": "planned",
-      "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 108 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "analogy": {
+        "cs": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
+        "en": "Locked doors between floors — without a pass you cannot move between departments."
+      },
+      "summary": {
+        "cs": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 143 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+        "en": "The zero-trust ideal is deny-by-default between namespaces. Reality: only 143 NetworkPolicies declared → traffic between namespaces is largely open."
+      },
       "controls": [
-        "NetworkPolicy (108 / 68)",
-        "per-namespace deny-by-default (cíl)"
+        "NetworkPolicy (143 / 85)",
+        "per-namespace deny-by-default (target)"
       ],
       "adr": [
         "0081"
@@ -487,11 +874,20 @@
     },
     {
       "id": "identity",
-      "label": "Identita & autorizace",
+      "label": {
+        "cs": "Identita & autorizace",
+        "en": "Identity & authorization"
+      },
       "icon": "lock",
       "status": "live",
-      "analogy": "Občanka a oprávnění — každý ukáže, kdo je a co smí.",
-      "summary": "Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.",
+      "analogy": {
+        "cs": "Občanka a oprávnění — každý ukáže, kdo je a co smí.",
+        "en": "ID card and permissions — everyone shows who they are and what they may do."
+      },
+      "summary": {
+        "cs": "Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.",
+        "en": "Keycloak OIDC for people and services; OPA policy gate for the AI agent and (target) REST."
+      },
       "controls": [
         "Keycloak OIDC",
         "OPA policy gate",
@@ -505,11 +901,20 @@
     },
     {
       "id": "pod",
-      "label": "Pod hardening",
+      "label": {
+        "cs": "Pod hardening",
+        "en": "Pod hardening"
+      },
       "icon": "shield",
       "status": "partial",
-      "analogy": "Každý zaměstnanec pracuje v rukavicích a bez klíčů od trezoru.",
-      "summary": "runAsNonRoot ✓, seccomp RuntimeDefault ✓, read-only FS ✓.",
+      "analogy": {
+        "cs": "Každý zaměstnanec pracuje v rukavicích a bez klíčů od trezoru.",
+        "en": "Every employee works in gloves and without the vault keys."
+      },
+      "summary": {
+        "cs": "runAsNonRoot ✓, seccomp RuntimeDefault ✓, read-only FS ✓.",
+        "en": "runAsNonRoot ✓, seccomp RuntimeDefault ✓, read-only FS ✓."
+      },
       "controls": [
         "runAsNonRoot",
         "seccomp RuntimeDefault",
@@ -522,16 +927,25 @@
     },
     {
       "id": "image",
-      "label": "Image (dodavatelský řetězec)",
+      "label": {
+        "cs": "Image (dodavatelský řetězec)",
+        "en": "Image (supply chain)"
+      },
       "icon": "box",
       "status": "partial",
-      "analogy": "Zapečetěná, zarentgenovaná a podepsaná zásilka — víš, co je uvnitř a že s ní nikdo nehnul.",
-      "summary": "Multi-stage non-root image + CycloneDX SBOM + Cosign podpis (KMS). Kyverno ověřuje, zatím v režimu Audit (ne Enforce).",
+      "analogy": {
+        "cs": "Zapečetěná, zarentgenovaná a podepsaná zásilka — víš, co je uvnitř a že s ní nikdo nehnul.",
+        "en": "A sealed, X-rayed and signed shipment — you know what is inside and that nobody tampered with it."
+      },
+      "summary": {
+        "cs": "Multi-stage non-root image + CycloneDX SBOM + Cosign podpis (KMS). Kyverno ověřuje, zatím v režimu Audit (ne Enforce).",
+        "en": "Multi-stage non-root image + CycloneDX SBOM + Cosign signature (KMS). Kyverno verifies, for now in Audit mode (not Enforce)."
+      },
       "controls": [
         "multi-stage JRE-only",
         "non-root",
         "CycloneDX SBOM",
-        "Cosign podpis",
+        "Cosign signature",
         "kyverno verify (Audit)"
       ],
       "adr": [
@@ -542,14 +956,23 @@
     },
     {
       "id": "secrets",
-      "label": "Tajemství",
+      "label": {
+        "cs": "Tajemství",
+        "en": "Secrets"
+      },
       "icon": "key",
       "status": "live",
-      "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 144 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "analogy": {
+        "cs": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
+        "en": "A time-locked vault — passwords never sit in the code."
+      },
+      "summary": {
+        "cs": "OpenBao drží tajemství; 236 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 236 ExternalSecrets feed them into k8s. No secret in git."
+      },
       "controls": [
         "OpenBao",
-        "External Secrets (144)",
+        "External Secrets (236)",
         "KMS unseal"
       ],
       "adr": [
@@ -560,113 +983,215 @@
   ],
   "imageAnatomy": {
     "multiStage": false,
-    "buildBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
-    "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
+    "buildBase": "eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f",
+    "runtimeBase": "eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f",
     "steps": [
       {
         "id": "build",
-        "label": "Build stage (JDK)",
+        "label": {
+          "cs": "Build stage (JDK)",
+          "en": "Build stage (JDK)"
+        },
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": {
+          "cs": "Plný JDK (eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí.",
+          "en": "The full JDK (eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f) compiles and assembles the application. This stage is NOT DISTRIBUTED — only the tooling stays in it."
+        }
       },
       {
         "id": "runtime",
-        "label": "Runtime stage (JRE-only)",
+        "label": {
+          "cs": "Runtime stage (JRE-only)",
+          "en": "Runtime stage (JRE-only)"
+        },
         "status": "live",
         "adr": [],
-        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+        "detail": {
+          "cs": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc.",
+          "en": "Only a slim JRE (eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165b95112372ad0d67e87f) + the application are distributed. Smaller image = smaller attack surface, no extra compiler/shell tooling."
+        }
       },
       {
         "id": "nonroot",
-        "label": "Non-root uživatel",
+        "label": {
+          "cs": "Non-root uživatel",
+          "en": "Non-root user"
+        },
         "status": "live",
         "adr": [
           "0081"
         ],
-        "detail": "Proces běží jako `openbank` (ne root). I kdyby útočník unikl z aplikace, nemá v kontejneru práva roota."
+        "detail": {
+          "cs": "Proces běží jako `openbank` (ne root). I kdyby útočník unikl z aplikace, nemá v kontejneru práva roota.",
+          "en": "The process runs as `openbank` (not root). Even if an attacker escaped the application, they have no root rights in the container."
+        }
       },
       {
         "id": "fastjar",
-        "label": "Quarkus fast-jar vrstvy",
+        "label": {
+          "cs": "Quarkus fast-jar vrstvy",
+          "en": "Quarkus fast-jar layers"
+        },
         "status": "live",
         "adr": [],
-        "detail": "Závislosti (lib/) jsou ve vlastní vrstvě oddělené od kódu aplikace — rychlejší rebuild, lepší cache, čitelný obsah."
+        "detail": {
+          "cs": "Závislosti (lib/) jsou ve vlastní vrstvě oddělené od kódu aplikace — rychlejší rebuild, lepší cache, čitelný obsah.",
+          "en": "Dependencies (lib/) sit in their own layer separate from application code — faster rebuilds, better caching, readable contents."
+        }
       },
       {
         "id": "podsec",
-        "label": "Pod securityContext",
+        "label": {
+          "cs": "Pod securityContext",
+          "en": "Pod securityContext"
+        },
         "status": "live",
         "adr": [
           "0081"
         ],
-        "detail": "Kubernetes navíc vynucuje: runAsNonRoot ✓, seccomp RuntimeDefault ✓, fsGroup ✓. Read-only root FS a drop-ALL-caps jsou cíl."
+        "detail": {
+          "cs": "Kubernetes navíc vynucuje: runAsNonRoot ✓, seccomp RuntimeDefault ✓, fsGroup ✓. Read-only root FS a drop-ALL-caps jsou cíl.",
+          "en": "Kubernetes additionally enforces: runAsNonRoot ✓, seccomp RuntimeDefault ✓, fsGroup ✓. Read-only root FS and drop-ALL-caps are the target."
+        }
       },
       {
         "id": "sbom",
-        "label": "CycloneDX SBOM",
+        "label": {
+          "cs": "CycloneDX SBOM",
+          "en": "CycloneDX SBOM"
+        },
         "status": "live",
         "adr": [
           "0029"
         ],
-        "detail": "Ke každému image se generuje seznam materiálu (Software Bill of Materials) — přesně víme, jaké knihovny a verze jsou uvnitř, pro skenování zranitelností."
+        "detail": {
+          "cs": "Ke každému image se generuje seznam materiálu (Software Bill of Materials) — přesně víme, jaké knihovny a verze jsou uvnitř, pro skenování zranitelností.",
+          "en": "Every image gets a Software Bill of Materials — we know exactly which libraries and versions are inside, for vulnerability scanning."
+        }
       },
       {
         "id": "sign",
-        "label": "Cosign podpis (KMS)",
+        "label": {
+          "cs": "Cosign podpis (KMS)",
+          "en": "Cosign signature (KMS)"
+        },
         "status": "live",
         "adr": [
           "0029",
           "0030"
         ],
-        "detail": "Build pipeline podepíše každý image klíčem v AWS KMS. Ověřitelné: `cosign verify`. Tamper-evidence — podepsaný digest nelze podvrhnout."
+        "detail": {
+          "cs": "Build pipeline podepíše každý image klíčem v AWS KMS. Ověřitelné: `cosign verify`. Tamper-evidence — podepsaný digest nelze podvrhnout.",
+          "en": "The build pipeline signs every image with a key in AWS KMS. Verifiable: `cosign verify`. Tamper evidence — a signed digest cannot be forged."
+        }
       },
       {
         "id": "verify",
-        "label": "Kyverno admission verify",
+        "label": {
+          "cs": "Kyverno admission verify",
+          "en": "Kyverno admission verify"
+        },
         "status": "partial",
         "adr": [
           "0030"
         ],
-        "detail": "Kyverno při nasazení ověřuje podpis proti veřejnému klíči. Zatím v režimu Audit (reportuje); flip na Enforce (blokovat nepodepsané) až po pokrytí celé flotily."
+        "detail": {
+          "cs": "Kyverno při nasazení ověřuje podpis proti veřejnému klíči. Zatím v režimu Audit (reportuje); flip na Enforce (blokovat nepodepsané) až po pokrytí celé flotily.",
+          "en": "At deploy time Kyverno verifies the signature against the public key. For now in Audit mode (reports); the flip to Enforce (block unsigned) comes once the whole fleet is covered."
+        }
       }
     ]
   },
   "planVsReality": [
     {
-      "item": "Namespace segmentace",
-      "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "68 namespaců",
+      "item": {
+        "cs": "Namespace segmentace",
+        "en": "Namespace segmentation"
+      },
+      "plan": {
+        "cs": "Doménová izolace, 1 ns / doména",
+        "en": "Domain isolation, 1 ns / domain"
+      },
+      "reality": {
+        "cs": "85 namespaců",
+        "en": "85 namespaces"
+      },
       "status": "live"
     },
     {
-      "item": "NetworkPolicy (east-west)",
-      "plan": "deny-by-default v každém ns",
-      "reality": "108 / 68 ns má NetworkPolicy → většina provozu otevřená",
+      "item": {
+        "cs": "NetworkPolicy (east-west)",
+        "en": "NetworkPolicy (east-west)"
+      },
+      "plan": {
+        "cs": "deny-by-default v každém ns",
+        "en": "deny-by-default in every ns"
+      },
+      "reality": {
+        "cs": "143 / 85 ns má NetworkPolicy → většina provozu otevřená",
+        "en": "143 / 85 ns have a NetworkPolicy → most traffic open"
+      },
       "status": "planned"
     },
     {
-      "item": "Podpis image",
-      "plan": "Enforce — blokovat nepodepsané",
-      "reality": "Cosign podpis zapojen, kyverno zatím Audit",
+      "item": {
+        "cs": "Podpis image",
+        "en": "Image signing"
+      },
+      "plan": {
+        "cs": "Enforce — blokovat nepodepsané",
+        "en": "Enforce — block unsigned"
+      },
+      "reality": {
+        "cs": "Cosign podpis zapojen, kyverno zatím Audit",
+        "en": "Cosign signing wired, kyverno still Audit"
+      },
       "status": "partial"
     },
     {
-      "item": "Tajemství",
-      "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "144 ExternalSecret",
+      "item": {
+        "cs": "Tajemství",
+        "en": "Secrets"
+      },
+      "plan": {
+        "cs": "OpenBao + ESO, nic v gitu",
+        "en": "OpenBao + ESO, nothing in git"
+      },
+      "reality": {
+        "cs": "236 ExternalSecret",
+        "en": "236 ExternalSecrets"
+      },
       "status": "live"
     },
     {
-      "item": "Pod hardening",
-      "plan": "non-root + seccomp + read-only FS + drop caps",
-      "reality": "non-root ✓, seccomp ✓, read-only/caps jen místy",
+      "item": {
+        "cs": "Pod hardening",
+        "en": "Pod hardening"
+      },
+      "plan": {
+        "cs": "non-root + seccomp + read-only FS + drop caps",
+        "en": "non-root + seccomp + read-only FS + drop caps"
+      },
+      "reality": {
+        "cs": "non-root ✓, seccomp ✓, read-only/caps jen místy",
+        "en": "non-root ✓, seccomp ✓, read-only/caps only in places"
+      },
       "status": "partial"
     },
     {
-      "item": "Admission policy",
-      "plan": "sada kyverno policies",
-      "reality": "5 ClusterPolicy (image-verify)",
+      "item": {
+        "cs": "Admission policy",
+        "en": "Admission policy"
+      },
+      "plan": {
+        "cs": "sada kyverno policies",
+        "en": "a set of kyverno policies"
+      },
+      "reality": {
+        "cs": "0 ClusterPolicy (image-verify)",
+        "en": "0 ClusterPolicy (image-verify)"
+      },
       "status": "partial"
     }
   ]

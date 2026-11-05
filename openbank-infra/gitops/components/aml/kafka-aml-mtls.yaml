@@ -36,6 +36,13 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Oversight wake-up: HIGH/CRITICAL outbox events fan out a minimal, non-PII trigger (ADR-0031 D9)
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0267 §2)
       - resource:
           type: topic

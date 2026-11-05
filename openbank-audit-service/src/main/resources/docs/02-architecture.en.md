@@ -33,7 +33,7 @@ The service follows the hexagonal (ports & adapters) layout mandated by [ADR-000
 
 ## Ingest flow (consume)
 
-1. A producer (account, transaction, balance, party, kyc, consent service) emits a domain event to its Kafka topic.
+1. A producer emits a domain event to its Kafka topic. The subscribed topics include `openbank.oversight-triggers`, which carries independent oversight requests from both aml-service and sanctions-service.
 2. `AuditConsumer` receives it on the shared `audit-events-in` channel (consumer group `audit-service`, `auto.offset.reset=earliest`).
 3. The payload is parsed; aggregate identity is inferred; a new `AuditEntry` with a fresh `entry_id` UUID and `recordedAt = now` is built.
 4. `AuditRepository.save` persists it transactionally. The DB trigger stamps `retention_until = occurred_at + 10 years`; immutability rules block any later mutation.

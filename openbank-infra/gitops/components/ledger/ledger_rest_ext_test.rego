@@ -139,6 +139,34 @@ test_operator_may_create_close_draft if {
 		with data.rules as rules_mock
 }
 
+# #12906: the four-eyes workbench is staff-only. Without these grants both actions deny
+# every caller; without the prohibition base operator-read-any still admits an M2M reader.
+test_operator_may_read_and_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		decision := rest.allow with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+		decision.allow == true
+		"operator-journal-approval" in rest.allowed_reasons with input as {"principal": operator, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
+test_service_accounts_may_not_read_or_decide_journal_approvals if {
+	every p in [edge, services_m2m] {
+		every action in {"ledger.approval.read", "ledger.approval.decide"} {
+			rest.allow == false with input as {"principal": p, "action": action, "resource": "approval-1"}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_wrong_role_may_not_read_or_decide_journal_approvals if {
+	every action in {"ledger.approval.read", "ledger.approval.decide"} {
+		rest.allow == false with input as {"principal": no_role, "action": action, "resource": "approval-1"}
+			with data.rules as rules_mock
+	}
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-ledger-write is the EXTENSION's reason, so its presence
 # proves the ext; the matrix-mock wiring is proven by the edge denials flipping red under
@@ -289,7 +317,7 @@ test_a_participant_account_may_not_report_for_another_participant if {
 # Nobody else reaches the action: not the shared client, not another ROLE_API account, not staff.
 test_no_other_principal_may_participate if {
 	every p in [services_m2m, other_role_api_sa, clearing_m2m, operator, edge] {
-		every participant in {"interest", "lending", "billing"} {
+		every participant in {"interest", "lending", "billing", "treasury"} {
 			not rest.allow.allow with input as participate(p, participant) with data.rules as rules_mock
 		}
 	}
@@ -306,7 +334,7 @@ test_billing_may_report_its_own_participant if {
 }
 
 test_billing_may_not_report_for_another_participant if {
-	every participant in {"interest", "lending"} {
+	every participant in {"interest", "lending", "treasury"} {
 		not rest.allow.allow with input as participate(billing_m2m, participant) with data.rules as rules_mock
 	}
 }
@@ -411,6 +439,28 @@ test_treasury_identity_rule_admits_no_other_role_api_account if {
 	every p in [other_role_api_sa, lending_m2m, clearing_m2m, interest_m2m, services_m2m] {
 		not "service-treasury-ledger-post" in rest.allowed_reasons with input as {"principal": p, "action": "ledger.create"}
 			with data.rules as rules_mock
+	}
+}
+
+# --- #13167: treasury-service reports day-close participation for ITS participant only ---
+
+test_treasury_may_report_its_own_participant if {
+	rest.allow.allow with input as participate(treasury_m2m, "treasury") with data.rules as rules_mock
+	"service-close-participation" in rest.allowed_reasons with input as participate(treasury_m2m, "treasury")
+		with data.rules as rules_mock
+}
+
+# Remove the `input.resource == participant` binding and this goes red.
+test_treasury_may_not_report_for_another_participant if {
+	every participant in {"interest", "lending", "billing"} {
+		not rest.allow.allow with input as participate(treasury_m2m, participant) with data.rules as rules_mock
+	}
+}
+
+# Nobody else reports for treasury: no other participant's account, no shared client, no staff.
+test_no_other_principal_may_report_for_treasury if {
+	every p in [interest_m2m, lending_m2m, billing_m2m, services_m2m, other_role_api_sa, clearing_m2m, operator, edge] {
+		not rest.allow.allow with input as participate(p, "treasury") with data.rules as rules_mock
 	}
 }
 

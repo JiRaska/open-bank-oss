@@ -12,17 +12,23 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.openbank.aml.infrastructure.client.AccountDto
 import com.openbank.aml.infrastructure.client.AccountServiceClient
 import com.openbank.aml.infrastructure.client.AccountServiceRestClient
-import io.restassured.RestAssured.given
 import io.smallrye.mutiny.Uni
-import jakarta.ws.rs.WebApplicationException
+import jakarta.ws.rs.client.ClientBuilder
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.MultivaluedMap
+import jakarta.ws.rs.ext.MessageBodyReader
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.io.InputStream
+import java.lang.reflect.Proxy
+import java.lang.reflect.Type
 import java.util.UUID
 
 /**
@@ -33,7 +39,9 @@ import java.util.UUID
  * branches on: a 200 carrying `partyId`, and a 404 meaning "unknown owner, resolve later".
  *
  * The wrapper swallows every non-2xx into `null`; the tests assert that behaviour, not
- * just the wire. Provider verification lives in account-service's
+ * just the wire. Since #13169 the wire call is the GENERATED `getAccount` (`openbank-client-account`)
+ * classified by its `AccountClient` facade; the test drives both over a real JAX-RS client, so the
+ * path below must stay a LITERAL — the asymmetry is the test. Provider verification lives in account-service's
  * AccountPactFolderProviderVerificationTest (the 200 leg reuses its seeded
  * `an account owned by a known party exists` state; the 404 leg sends a UUID the seed
  * never creates, so the provider's real not-found path answers).
@@ -52,7 +60,7 @@ class AmlAccountOwnershipPactConsumerTest {
         .status(200)
         .headers(mapOf("Content-Type" to "application/json"))
         .body(
-            // Only what AccountDto consumes (id + partyId, @JsonIgnoreProperties) — the pact
+            // Only what the sweep consumes (id + partyId) — the pact
             // must not pin the other fifteen AccountResponse fields against a consumer that
             // never reads them.
             newJsonBody { o ->
@@ -90,22 +98,46 @@ class AmlAccountOwnershipPactConsumerTest {
         assertThat(owner).isNull()
     }
 
-    /** The real [AccountServiceClient] wrapper around a rest client bound to the pact mock. */
-    private fun clientFor(mockServer: MockServer): AccountServiceClient = AccountServiceClient(
-        object : AccountServiceRestClient {
-            override fun getById(accountId: String): Uni<AccountDto> = Uni.createFrom().item {
-                val response = given()
-                    .baseUri(mockServer.getUrl())
-                    .contentType("application/json")
-                    .get("/api/v1/accounts/$accountId")
-                if (response.statusCode !in 200..299) throw WebApplicationException(response.statusCode)
-                mapper.readValue(response.asString(), AccountDto::class.java)
+    /**
+     * The real [AccountServiceClient] wrapper around the generated interface, bound to the pact mock by a
+     * real JAX-RS client. Only `getAccount` is answered: any other generated operation the wrapper might
+     * start calling fails the test loudly instead of passing against a route the pact does not record.
+     */
+    private fun clientFor(mockServer: MockServer): AccountServiceClient {
+        val http = ClientBuilder.newBuilder().register(JsonReader(mapper)).build()
+        val rest = Proxy.newProxyInstance(
+            AccountServiceRestClient::class.java.classLoader,
+            arrayOf(AccountServiceRestClient::class.java),
+        ) { _, method, args ->
+            check(method.name == "getAccount") { "unexpected account-service operation ${method.name}" }
+            Uni.createFrom().item {
+                http.target(mockServer.getUrl()).path("/api/v1/accounts/${args!![0]}")
+                    .request(MediaType.APPLICATION_JSON).get()
             }
-        },
-    )
+        } as AccountServiceRestClient
+        return AccountServiceClient(rest)
+    }
+
+    private class JsonReader(private val mapper: ObjectMapper) : MessageBodyReader<Any> {
+        override fun isReadable(
+            type: Class<*>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+        ) = !InputStream::class.java.isAssignableFrom(type)
+
+        override fun readFrom(
+            type: Class<Any>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+            httpHeaders: MultivaluedMap<String, String>?,
+            entityStream: InputStream,
+        ): Any = mapper.readValue(entityStream, type)
+    }
 
     private companion object {
-        val mapper = jacksonObjectMapper()
+        val mapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
         /** Must match AccountPactFolderProviderVerificationTest's ACCOUNT_ID / OWNER_PARTY_ID. */
         const val ACCOUNT_ID = "11111111-2222-4333-8444-555555555555"

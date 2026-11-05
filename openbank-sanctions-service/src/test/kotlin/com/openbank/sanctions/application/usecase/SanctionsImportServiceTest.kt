@@ -372,6 +372,58 @@ class SanctionsImportServiceTest {
         assertThat(entriesSlot.captured.single().primaryName).isEqualTo("""Doe, John "The Rock"""")
     }
 
+    @Test
+    fun `a damaged Czech legal snapshot never upserts or deactivates entries`(): Unit = runBlocking {
+        val csv = "designation,fragment,text\n" +
+            "https://example.test/cast_1/bod_1,https://example.test/fragment/123," +
+            "\"<var>1.</var> DOE, Jane, narozena dne 1.2.1980 v Praze\"\n" +
+            "https://example.test/cast_1/bod_2,https://example.test/fragment/123," +
+            "\"<var>2.</var> DOE, John, narozen dne 2.3.1981 v Praze\"\n"
+        val url = serveOnce(csv, "text/csv")
+        val listType = SanctionsListType.valueOf("CZ_TERRORISTS")
+
+        val result = service.importList(listType, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
+        coVerify(exactly = 0) { entryRepo.upsertAll(any()) }
+        coVerify(exactly = 0) { entryRepo.deactivateMissing(any(), any()) }
+    }
+
+    @Test
+    fun `importList imports every official Czech anti-terrorism designation`(): Unit = runBlocking {
+        // Legal snapshot: official e-Sbírka SPARQL result for Regulation 210/2008 Coll.,
+        // version 2009-04-01. SHA-256: 1cad3832ba971fc629b0b88a98564509b7dbf858546145083a8d4f852fe668fd.
+        val csv = requireNotNull(
+            javaClass.getResourceAsStream("/cz/cz-terrorists-2009-04-01.csv"),
+        ).bufferedReader().use { it.readText() }
+        val url = serveOnce(csv, "text/csv")
+        val listType = SanctionsListType.valueOf("CZ_TERRORISTS")
+        val entriesSlot = slot<List<SanctionsEntry>>()
+        coEvery { entryRepo.upsertAll(capture(entriesSlot)) } returns 49
+        coEvery { entryRepo.deactivateMissing(listType, any()) } returns 0
+
+        val result = service.importList(listType, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.IMPORTED)
+        assertThat(result.entriesImported).isEqualTo(49)
+        val entries = entriesSlot.captured
+        assertThat(entries).hasSize(49)
+        assertThat(entries.count { it.entityType == EntityType.INDIVIDUAL }).isEqualTo(31)
+        assertThat(entries.count { it.entityType == EntityType.ORGANIZATION }).isEqualTo(18)
+        assertThat(entries.map { it.externalId }).doesNotHaveDuplicates()
+        assertThat(entries).allMatch { it.programs == listOf("CZ-TERR") }
+
+        val person = entries.single { it.primaryName == "Itziar ALBERDI URANGA" }
+        assertThat(person.aliases).contains("ALBERDI URANGA, Itziar")
+        assertThat(person.dateOfBirth).isEqualTo("1963-10-07")
+        val eta = entries.single { it.primaryName == "Euskadi Ta Askatasuna" }
+        assertThat(eta.aliases).contains("ETA", "Kas", "Xaki", "Ekin", "Batasuna")
+        coVerifyOrder {
+            entryRepo.upsertAll(any())
+            entryRepo.deactivateMissing(listType, any())
+        }
+    }
+
     // ──── deactivateMissing — the mark-and-sweep reconciliation contract ─────
 
     @Test

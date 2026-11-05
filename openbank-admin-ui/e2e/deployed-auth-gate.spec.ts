@@ -7,9 +7,9 @@
 // Run by playwright.deployed.config.ts against the sandbox Admin UI, never against the stubbed
 // localhost server. It proves one thing per money-path screen: an UNAUTHENTICATED request is
 // redirected to /auth/login with the screen's own callbackUrl and the redirect carries no page
-// data. It does not sign in and does not claim an operator journey works — the admin UI
-// authenticates through Keycloak authorization-code + Auth.js, so no credential path exists for a
-// headless lane (owner decision tracked in the issue linked from #13171).
+// data. It does not sign in and does not claim an operator journey works: the signed-in smoke is
+// deployed-session.spec.ts, which logs in through the real Keycloak form as a least-privilege e2e
+// operator whose password lives only in an Actions secret (#13171).
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { expect, test } from '@playwright/test'

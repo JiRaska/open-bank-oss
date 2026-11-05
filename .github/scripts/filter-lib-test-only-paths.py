@@ -17,9 +17,8 @@ edit to libs-runtime's OutboxDeadLetterAlertNamingTest cost a full-fleet run on 
               probe broke (exit 1). Used as the gate's run.
   --self-test known-positive + known-negative fixtures, including a consumed testFixtures.
 
-`src/testFixtures/` is dropped too, but ONLY for a library no build script consumes via
-`testFixtures(project(":<lib>"))` — a consumed fixture is another module's test input and
-stays code-global. Anything unrecognised stays in the output (over-build is the safe side).
+`src/testFixtures/` remains code-global for every shared library, as required by #11560.
+Anything unrecognised stays in the output (over-build is the safe side).
 """
 from __future__ import annotations
 
@@ -32,7 +31,7 @@ LIB_TEST = re.compile(r"^(openbank-libs[^/]*)/src/(test|testFixtures)/")
 CONSUMER = re.compile(r'testFixtures\(\s*project\(\s*"(:[^"]+)"')
 # Mirrors the code-global regex in services-ci.yml; used by --self-test only.
 CODE_GLOBAL = re.compile(
-    r"^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/"
+    r"^(openbank-libs[^/]*/"
     r"|gradle/|settings\.gradle\.kts"
     r"|build\.gradle\.kts|gradle\.properties|build-logic/)"
 )
@@ -54,7 +53,7 @@ def keep(paths: list[str], consumed: set[str]) -> list[str]:
     kept = []
     for p in paths:
         m = LIB_TEST.match(p)
-        if m and (m.group(2) == "test" or m.group(1) not in consumed):
+        if m and m.group(2) == "test":
             continue
         kept.append(p)
     return kept
@@ -69,14 +68,18 @@ def decide(paths: list[str], modules: list[str], consumed: set[str]) -> list[str
 
 def self_test() -> int:
     mods = ["openbank-libs", "openbank-libs-runtime", "openbank-libs-testing",
-            "openbank-card-processing-service", "openbank-ledger-service"]
+            "openbank-card-processing-service", "openbank-ledger-service", "openbank-libs-future"]
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
         (root / "openbank-ledger-service").mkdir()
         (root / "openbank-ledger-service/build.gradle.kts").write_text(
-            'dependencies { testImplementation(testFixtures(project(":openbank-libs-testing"))) }\n')
+            'dependencies { testImplementation(testFixtures(project(":openbank-libs-testing"))); testImplementation(testFixtures(project(":openbank-libs-future"))) }\n')
         consumed = consumed_fixtures(root)
     cases = [
+        (["openbank-libs-future/src/main/x/Foo.kt"], mods),
+        (["openbank-libs-future/build.gradle.kts"], mods),
+        (["openbank-libs-future/src/testFixtures/x/Kit.kt"], mods),
+        (["openbank-libs-future/src/test/x/FooTest.kt"], ["openbank-libs-future"]),
         (["openbank-libs-runtime/src/test/x/FooTest.kt"], ["openbank-libs-runtime"]),
         (["openbank-libs-runtime/src/main/x/Foo.kt"], mods),
         (["build.gradle.kts"], mods),
@@ -84,7 +87,7 @@ def self_test() -> int:
           "openbank-card-processing-service/src/main/x/A.kt"],
          ["openbank-card-processing-service", "openbank-libs-runtime"]),
         (["openbank-libs-testing/src/testFixtures/x/Kit.kt"], mods),        # consumed
-        (["openbank-libs-runtime/src/testFixtures/x/Kit.kt"], ["openbank-libs-runtime"]),
+        (["openbank-libs-runtime/src/testFixtures/x/Kit.kt"], mods),
         (["openbank-libs-runtime/build.gradle.kts"], mods),
         (["openbank-libs-runtime/src/test/x/T.kt", "gradle/libs.versions.toml"], mods),
     ]
@@ -94,7 +97,7 @@ def self_test() -> int:
         ok = got == sorted(want)
         bad += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {paths} -> {got}")
-    if consumed != {"openbank-libs-testing"}:
+    if consumed != {"openbank-libs-testing", "openbank-libs-future"}:
         print(f"FAIL consumer detection: {consumed}")
         bad += 1
     print("self-test:", "FAIL" if bad else "pass")
@@ -107,10 +110,9 @@ def main(argv: list[str]) -> int:
     root = Path(__file__).resolve().parents[2]
     if "--census" in argv:
         libs = sorted(d.name for d in root.glob("openbank-libs*") if (d / "src/test").is_dir())
-        consumed = consumed_fixtures(root)
         print(f"SUBJECTS={len(libs)}")
         for lib in libs:
-            fx = "code-global (consumed)" if lib in consumed else "per-module"
+            fx = "code-global"
             print(f"  {lib}: src/test per-module; testFixtures {fx}")
         return 0 if libs else 1
     paths = [ln.strip() for ln in sys.stdin if ln.strip()]

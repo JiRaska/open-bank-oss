@@ -35,6 +35,9 @@ openApiGenerate {
             "models" to listOf(
                 "EligibilityRule",
                 "IrSignature",
+                "LintProductIrRequest",
+                "LintProductIrResponse",
+                "ProductIrProblem",
                 "EligibilityOperator",
                 "ApiError",
                 "CatalogEvent",

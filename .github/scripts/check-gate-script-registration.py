@@ -67,7 +67,12 @@ MANIFEST = REPO / ".github/gates/gates.yaml"
 # Scripts that are legitimately not gates and not invoked as one. Each needs a reason: an entry
 # here is a claim a human made, and the check fails on a STALE one (a helper that has since been
 # registered, or one that no longer exists) so this list cannot quietly become permanent.
-HELPERS: dict[str, str] = {}
+HELPERS: dict[str, str] = {
+    "check-recorded-source-manifests.py": (
+        "invoked via the quoted `helper` variable in resolve-record-deployment-version.sh; "
+        "that resolver's self-test also runs its --self-test"
+    ),
+}
 
 # `python3 foo.py`, `bash foo.sh`, `sh foo.sh`, `./foo.py` — the shapes that actually run a file.
 #

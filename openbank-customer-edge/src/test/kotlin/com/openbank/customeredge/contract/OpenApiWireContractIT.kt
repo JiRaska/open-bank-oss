@@ -46,17 +46,21 @@ class OpenApiWireContractIT {
 
     /** upstream path (no query) -> JSON body; anything unrouted answers 404 like a real service would. */
     private val routes = mutableMapOf<String, String>()
+    private val requests = mutableListOf<Pair<java.net.URI, String>>()
 
     @BeforeEach
     fun installUpstreamStub() {
         routes.clear()
+        requests.clear()
         routes["/api/v1/accounts/$WIRE_ACCOUNT_ID"] =
             """{"id":"$WIRE_ACCOUNT_ID","accountNumber":"CZ6508000000192000145399","accountType":"CURRENT",
                 "partyId":"$WIRE_PARTY_ID","productId":"$WIRE_PRODUCT_ID","currencyCode":"CZK","status":"ACTIVE",
                 "openedAt":"2024-01-01T00:00:00Z","closedAt":null,"goalName":null,"nickname":null}"""
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(any<String>(), any<String>()) } answers {
-            val body = routes[java.net.URI(firstArg<String>()).path]
+            val uri = java.net.URI(firstArg<String>())
+            requests += uri to secondArg<String>()
+            val body = routes[uri.path]
             if (body == null) {
                 Response.status(404).entity("""{"error":"not found"}""").build()
             } else {
@@ -137,6 +141,32 @@ class OpenApiWireContractIT {
         assertThat(tree.path("data")[1].path("id").asText()).isEqualTo(shared)
         assertThat(tree.path("data")[1].path("sharedWithMe").asBoolean()).isTrue()
         assertThat(tree.path("pagination").path("totalCount").asInt()).isEqualTo(2)
+    }
+
+    @Test
+    fun `personal notification page matches its schema and keeps token party and exact counts`() {
+        routes["/api/v1/notifications"] =
+            """{"items":[{"id":"$WIRE_ACCOUNT_ID","partyId":"$WIRE_PARTY_ID","channel":"INBOX",
+                "template":"LOW_BALANCE_ALERT","templateRevision":null,"recipient":"$WIRE_PARTY_ID",
+                "subject":"Notice","status":"VISIBLE","sentAt":null,"visibleAt":"2026-10-17T10:00:00Z",
+                "readAt":null,"createdAt":"2026-10-17T10:00:00Z"}],"total":55,"unreadCount":37,"page":2,"size":1}"""
+        val body = RestAssured.given().queryParam("page", 2).queryParam("limit", 1)
+            .queryParam("partyId", WIRE_PRODUCT_ID).get("/customer/v1/notifications")
+            .then().statusCode(200).extract().asString()
+        assertConforms(body, "/notifications")
+        val tree = mapper.readTree(body)
+        assertThat(tree.path("items").size()).isEqualTo(1)
+        assertThat(tree.path("total").asInt()).isEqualTo(55)
+        assertThat(tree.path("unreadCount").asInt()).isEqualTo(37)
+        val (uri, party) = requests.single { it.first.path == "/api/v1/notifications" }
+        assertThat(uri.query).isEqualTo("partyId=$WIRE_PARTY_ID&page=2&size=1")
+        assertThat(party).isEqualTo(WIRE_PARTY_ID)
+        for (field in listOf("items", "total", "unreadCount", "page", "size")) {
+            val malformed = mapper.readTree(body) as com.fasterxml.jackson.databind.node.ObjectNode
+            malformed.remove(field)
+            assertThat(validate(malformed.toString(), "/notifications"))
+                .describedAs("missing required %s", field).isNotEmpty()
+        }
     }
 
     @Test

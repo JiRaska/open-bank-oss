@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure.client
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.out.AccountingDayClosedException
 import com.openbank.treasury.domain.LedgerMapGolden
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LedgerRole
@@ -16,6 +17,7 @@ import io.mockk.mockk
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -63,6 +65,27 @@ class LedgerPostingAdapterTest {
         line("INTERBANK_PLACEMENT", LedgerRole.PRINCIPAL, Side.DEBIT),
         line("NOSTRO_ACCOUNT", LedgerRole.PRINCIPAL, Side.CREDIT),
     )
+
+    // #13882 review item 2: a back-valued post is booked in the OPEN day and counted late.
+    @Test
+    fun `a post valued on an ended day is booked in today's open day with its value date`() {
+        val client = mockk<LedgerRestClient>()
+        var sent: PostJournalRequest? = null
+        every { client.postJournal(any()) } answers {
+            sent = firstArg()
+            Uni.createFrom().item(JournalResponse(UUID.randomUUID(), dealId, "POSTED", emptyList()))
+        }
+        // 2026-03-17 23:30 UTC is already 2026-03-18 in Prague.
+        val clock = java.time.Clock.fixed(java.time.Instant.parse("2026-03-17T23:30:00Z"), java.time.ZoneOffset.UTC)
+        val adapter = LedgerPostingAdapter(client, false, clock)
+        runBlocking { adapter.post(placement, LocalDate.parse("2026-03-16"), "t") }
+        assertThat(sent!!.entryDate).isEqualTo("2026-03-18")
+        assertThat(sent!!.valueDate).isEqualTo("2026-03-16")
+
+        runBlocking { adapter.post(placement, LocalDate.parse("2026-03-18"), "t") }
+        assertThat(sent!!.entryDate).isEqualTo("2026-03-18")
+        assertThat(sent!!.valueDate).isEqualTo("2026-03-18")
+    }
 
     @Test
     fun `flag off sends exactly the explicit-account payload an old ledger understands`() {
@@ -121,5 +144,31 @@ class LedgerPostingAdapterTest {
     @Test
     fun `the rollout shim holds exactly the treasury rows of the ledger map`() {
         assertThat(LegacyGlChart.entries).isEqualTo(LedgerMapGolden.treasury)
+    }
+
+    private fun refusing(status: Int, body: String): LedgerPostingAdapter {
+        val client = mockk<LedgerRestClient>()
+        every { client.postJournal(any()) } returns Uni.createFrom().failure(
+            jakarta.ws.rs.WebApplicationException(
+                jakarta.ws.rs.core.Response.status(status).entity(body).type("application/json").build(),
+            ),
+        )
+        return LedgerPostingAdapter(client, true)
+    }
+
+    @Test
+    fun `a 409 ACCOUNTING_DAY_CLOSED is a closed-day refusal, any other 409 stays an error`() {
+        assertThatThrownBy {
+            runBlocking {
+                refusing(409, """{"code":"ACCOUNTING_DAY_CLOSED","error":"day closed"}""")
+                    .post(placement, LocalDate.parse("2026-03-16"), "t")
+            }
+        }.isInstanceOf(AccountingDayClosedException::class.java).hasMessageContaining("2026-03-16")
+        assertThatThrownBy {
+            runBlocking {
+                refusing(409, """{"code":"IDEMPOTENCY_CONFLICT"}""").post(placement, LocalDate.parse("2026-03-16"), "t")
+            }
+        }.isInstanceOf(jakarta.ws.rs.WebApplicationException::class.java)
+            .isNotInstanceOf(AccountingDayClosedException::class.java)
     }
 }

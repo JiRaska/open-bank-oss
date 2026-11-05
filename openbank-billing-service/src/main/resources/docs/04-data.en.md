@@ -35,3 +35,5 @@ have no fallback. A legacy local copy can gain identity metadata once only when 
 ID/hash/IR/signature bytes match the independently verified response; V13 still forbids every
 content change, identity overwrite and deletion. Rollback deploys the earlier application while
 preserving the additive columns and evidence; V11 and V12 remain unchanged.
+
+Each scheduler run, even with the comparator disabled, erases all nine frozen facts on a bounded batch of eligible rows older than `openbank.billing.product-shadow.fact-retention` (`BILLING_PRODUCT_SHADOW_FACT_RETENTION`, default `P30D`). A run processes at most `max-batches-per-run × batch-size` rows. Locked rows and rows under a live claim are skipped; backlog, live claims, scheduler downtime or failures can delay physical erasure beyond the configured age and one scheduler interval. A DONE row keeps its outcome; an eligible non-DONE row is closed as `FACTS_EXPIRED`, so it is not claimed again without facts. No automatic re-drive exists; retained facts alone do not re-queue a completed row.

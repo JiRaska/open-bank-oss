@@ -43,6 +43,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 `openbank-libs-domain` maps `openbank.fx.cnb-policy-rate.published` to `fx-service` in `TopicProducers`. This records the producing service for shared analytics and governance checks; it does not publish or consume the event. The producer is the FX ingestion pipeline, while risk-engine and audit-service consume its facts and audit trail. Keep the mapping in step with a topic rename or ownership change.
 
+`TopicProducers` maps the shared `openbank.oversight-triggers` topic to `multiple-producers`, because both aml-service and sanctions-service publish independent oversight requests to it. Audit-service subscribes to the same topic so those requests become part of the audit trail. The shared mapping attributes ownership; it neither publishes nor consumes events.
+
 ## Build-time producers
 
 `RedisApprovalStoreProducer` (four-eyes `ApprovalStore`, opt-in `openbank.approval.store: redis`) and `OpaPolicyDecisionPointProducer` (OPA sidecar PDP, opt-in `openbank.authz.opa-pdp-producer.enabled: true`) are gated with `@IfBuildProperty`, off when the property is missing. Neither is `@DefaultBean`: a service that opts in and also keeps its own producer fails `quarkusBuild` as an ambiguous dependency. Bean presence matters because `AuthorizeInterceptor` switches four-eyes on when an `ApprovalStore` exists.
@@ -60,6 +62,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
+The same table attributes `openbank.tpp.registry.event` to tpp-registry-service, so audit-service can label the TPP register changes (registered, blacklisted) it records on the audit trail.
+
 ### Temporal worker pilot
 
 The version catalog exposes Temporal SDK/testing 1.40.0 for transaction-service's
@@ -67,3 +71,5 @@ versioned worker pilot (ADR-0355). `openbank-libs-temporal` retains its compile-
 1.25.1 contract, and other services retain their existing SDK version. This is not
 a fleet-wide runtime upgrade. Original histories gate forward replay; new histories
 must not be assumed readable by the old SDK.
+
+`TopicProducers` attributes `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` to account-service (#9073); audit-service and analytics-sink subscribe to both before the producer switches.

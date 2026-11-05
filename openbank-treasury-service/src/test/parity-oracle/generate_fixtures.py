@@ -320,7 +320,11 @@ def build():
 # fixture (the replay test runs every committed one). CASES stays complete so the oracle is still
 # exercised on every product; a later phase adds its products here together with their ledger.
 # Mirrors REQUIRED_PRODUCTS in .github/scripts/check-treasury-parity-fixtures.py.
-DELIVERED_PRODUCTS = ("MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA")
+DELIVERED_PRODUCTS = (
+    "MM_PLACEMENT", "MM_BORROWING", "CNB_DEPOSIT_FACILITY", "CNB_LOMBARD", "FX_SPOT", "IRS", "FRA",
+    # Phase 2 (posting-rule matrix + CreditExposure): every remaining ADR-0344 product.
+    "CASH", "TREASURY_BILL", "BILL_OF_EXCHANGE", "BOND", "LOAN", "FX_FORWARD", "FX_SWAP", "REPO", "REVERSE_REPO",
+)
 
 
 def committed():

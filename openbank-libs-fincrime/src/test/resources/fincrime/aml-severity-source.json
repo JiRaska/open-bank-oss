@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "aml.case-severity",
+  "revision": 1,
+  "domain": "aml",
+  "purpose": "synthetic",
+  "provenance": "fixture-v1",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2027-01-01T00:00:00Z",
+  "entries": [
+    {
+      "code": "EXPEDITED",
+      "label": "Synthetic",
+      "meaning": "Synthetic observation only",
+      "rank": 7
+    }
+  ]
+}

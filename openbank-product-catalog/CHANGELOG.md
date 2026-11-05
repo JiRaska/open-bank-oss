@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.5.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.2...product-catalog-v1.5.3) (2026-11-03)
+
+
+### Bug Fixes
+
+* **product-catalog:** register pack approval policy for native reflection ([#14587](https://github.com/JiRaska/open-bank-oss/issues/14587)) ([e0d8600](https://github.com/JiRaska/open-bank-oss/commit/e0d8600e7e3bba6a02bd883467ef5a79d90bd092))
+
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.1...product-catalog-v1.5.2) (2026-11-02)
+
+
+### Bug Fixes
+
+* **product-catalog:** describe v1 disabled-route errors ([#14488](https://github.com/JiRaska/open-bank-oss/issues/14488)) ([f83dff3](https://github.com/JiRaska/open-bank-oss/commit/f83dff3d56eee9e0e10b28d90605a83330390654))
+
+## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.0...product-catalog-v1.5.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **product-catalog,admin-ui:** refuse duplicate JSON keys; keep unsaved Expert edits on IR save ([#14287](https://github.com/JiRaska/open-bank-oss/issues/14287)) ([e8c3978](https://github.com/JiRaska/open-bank-oss/commit/e8c3978adaf81c64394827733a0642914f368631))
+
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.4.1...product-catalog-v1.5.0) (2026-10-30)
+
+
+### Features
+
+* **product-catalog,admin-ui:** Studio product IR editor with server-side lint (ADR-0352 5b, part 1) ([#14253](https://github.com/JiRaska/open-bank-oss/issues/14253)) ([40c80c7](https://github.com/JiRaska/open-bank-oss/commit/40c80c700aba881f05069999c34647b9c2912bf5))
+
 ## [1.4.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.4.0...product-catalog-v1.4.1) (2026-10-26)
 
 

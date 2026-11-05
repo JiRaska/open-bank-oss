@@ -10,26 +10,50 @@ rule_files:
 
 tests:
   # ExpectedWorkloadAbsent ---------------------------------------------------------------
-  # ledger-service/ledger has NO series of any kind -> fires. sepa-payment is a Rollout and
-  # account-service a Deployment scaled to ZERO: both keep their series, so both stay quiet.
+  # Rollout series are exported by the argo-rollouts controller, so `namespace` is the CONTROLLER's
+  # (argo-rollouts) and the Rollout's own namespace is `exported_namespace` -- the series below
+  # copy that live shape. ledger-service has NO series -> fires. fx-service is a Rollout with
+  # desired=2 and 0 available -> fires. Quiet: healthy Rollout (sepa-payment), healthy Deployment
+  # (balance-service), Deployment scaled to zero (account-service), Rollout scaled to zero (kyc-service).
   - interval: 1m
     input_series:
-      - series: 'rollout_info_replicas_desired{namespace="payments", name="sepa-payment"}'
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="payments", name="sepa-payment"}'
         values: "2x60"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="payments", name="sepa-payment"}'
+        values: "2x60"
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="fx", name="fx-service"}'
+        values: "2x60"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="fx", name="fx-service"}'
+        values: "0x60"
+      - series: 'rollout_info_replicas_desired{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service"}'
+        values: "0x60"
+      - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service"}'
+        values: "0x60"
       - series: 'kube_deployment_spec_replicas{namespace="accounts", deployment="account-service"}'
         values: "0x60"
+      - series: 'kube_deployment_spec_replicas{namespace="balances", deployment="balance-service"}'
+        values: "2x60"
     promql_expr_test:
       - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", namespace="ledger", workload="ledger-service"}'
         eval_time: 40m
         exp_samples:
           - labels: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", namespace="ledger", workload="ledger-service", severity="warning"}'
             value: 1
-      # negative: present as Rollout
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="fx-service"}'
+        eval_time: 40m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", namespace="fx", workload="fx-service", severity="warning"}'
+            value: 1
       - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="sepa-payment"}'
         eval_time: 40m
         exp_samples: []
-      # negative: scaled to zero, object still exists
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="balance-service"}'
+        eval_time: 40m
+        exp_samples: []
       - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="account-service"}'
+        eval_time: 40m
+        exp_samples: []
+      - expr: 'ALERTS{alertname="ExpectedWorkloadAbsent", alertstate="firing", workload="kyc-service"}'
         eval_time: 40m
         exp_samples: []
 

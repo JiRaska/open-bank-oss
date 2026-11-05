@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.1...fraud-service-v0.18.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.0...fraud-service-v0.18.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **fraud:** bound score rail metric labels ([#14146](https://github.com/JiRaska/open-bank-oss/issues/14146)) ([c73484f](https://github.com/JiRaska/open-bank-oss/commit/c73484ff92472c406db485154ffd2c135070e355))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.17.2...fraud-service-v0.18.0) (2026-10-26)
 
 

@@ -126,3 +126,42 @@ V případě divergence je **balance-service pravda** — `account_balance` se m
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Pin revize produktu (V33, ADR-0341 D1)
+
+Každý účet otevřený od V33 si na řádku `accounts` zaznamenává PUBLIKOVANOU revizi z produktového
+katalogu, pod kterou byl otevřen:
+
+| Sloupec | Význam |
+|---|---|
+| `product_revision_id`, `product_revision_number` | Revize katalogu a její číslo |
+| `product_offering_id` | Nabídka (offering), ke které revize patří |
+| `product_revision_product_code` | Kód v1 produktu, proti kterému byl účet otevřen |
+| `product_revision_content_hash` | `contentHash` revize, pokud jej katalog vyplnil |
+| `product_revision_ir_hash`, `product_revision_ir_version` | Podepsaný `revisionHash` produktového IR a `irVersion` (ADR-0352 §4); u revize bez IR oba null |
+| `product_revision_pinned_at` | Okamžik otevření (rovná se `opened_at`, z injektovaných hodin) |
+
+- **Celý, nebo žádný** (`chk_accounts_product_revision_pin_whole`) a **po nastavení neměnný**: trigger
+  `trg_accounts_product_revision_pin_immutable` odmítne každý UPDATE, který pin změní nebo smaže. Změna
+  podmínek je nová revize a explicitní re-pin, nikdy editace.
+- Pin nese událost `AccountCreated` (`productRevision`, aditivně) i REST čtení účtu, takže billing a
+  interest jej mohou číst místo vlastního dohledávání.
+- `AccountCreated` se zapisuje do `account_outbox` v transakci otevření (dříve přímé odeslání do Kafky
+  po commitu).
+
+### Účty otevřené před V33 — plán backfillu (NEPROVEDEN)
+
+Účty existující před V33 pin nemají a **nebyly** potichu doplněny. Jejich počet ukazuje gauge
+`openbank.account.product_revision.unpinned` (neuzavřené účty bez pinu; `-1` do prvního změření).
+Backfill je samostatná, revidovaná změna:
+
+1. Pro každý účet bez pinu se katalogu zeptat na revizi jeho `product_id` **platnou v jeho `opened_at`**
+   — `GET /api/v2/legacy-products/{productId}/published-revision?effectiveAt=<opened_at>` — nikdy na
+   revizi publikovanou v okamžiku backfillu, aby zavedení nepřecenilo živou smlouvu (ADR-0341 D1).
+2. Účty, jejichž produkt neměl k `opened_at` publikovanou revizi, se NEpinují na pozdější. Předají se
+   vlastníkům produktu, kteří pod maker-checkerem vytvoří grandfathering revizi (ADR-0341, Důsledky),
+   a pinují se na ni.
+3. Zápis nastavuje sloupce pinu jen tam, kde `product_revision_id IS NULL` (trigger nastavení chybějícího
+   pinu dovolí, změnu odmítne), po dávkách, idempotentně, s `product_revision_pinned_at` = okamžik běhu
+   backfillu a s auditní událostí na účet, která odliší backfillovaný pin od pinu z otevření.
+4. Hotovo, když gauge ukazuje `0` a každý zbývající účet bez pinu je pokryt bodem 2.

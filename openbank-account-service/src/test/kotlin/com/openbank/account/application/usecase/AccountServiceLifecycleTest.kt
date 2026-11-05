@@ -89,7 +89,7 @@ class AccountServiceLifecycleTest {
                 ibanGenerator,
                 pocketRepository,
                 sanctionsScreening,
-                productCatalog,
+                ProductRevisionPinning(productCatalog) {},
                 metrics,
                 Clock.fixed(fixedInstant, ZoneOffset.UTC),
                 notificationRequestPort,

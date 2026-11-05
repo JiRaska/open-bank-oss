@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Retain coverage and Test Intelligence evidence
+description: Retain separate raw diagnostics and bounded, validated coverage/run evidence.
+runs:
+  using: composite
+  steps:
+    # failure() inside a composite describes the action, not the earlier build job.
+    # The caller snapshots that job state and the renderer outcome explicitly.
+    - name: Preserve incomplete coverage evidence
+      if: always() && (env.SERVICE_CI_JOB_STATUS == 'failure' || env.SERVICE_CI_REPORT_OUTCOME == 'failure')
+      continue-on-error: true
+      shell: bash
+      run: bash -e "$SERVICE_CI_HELPERS/coverage-evidence.sh" preserve-incomplete
+    - name: Retain invalid raw coverage evidence
+      if: always() && (env.SERVICE_CI_JOB_STATUS == 'failure' || env.SERVICE_CI_REPORT_OUTCOME == 'failure' || hashFiles(format('{0}/build/coverage-diagnostics/**/invalid.json', env.SERVICE)) != '')
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: invalid-coverage-${{ env.SERVICE }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ env.SERVICE }}/build/coverage-diagnostics/
+        if-no-files-found: error
+        retention-days: 3
+    - name: Build Test Intelligence run envelope
+      if: always()
+      # Evidence collection observes the build; it must never gate it (#6614).
+      continue-on-error: true
+      env:
+        OPENBANK_COVERAGE_REPORT_OUTCOME: ${{ env.SERVICE_CI_REPORT_OUTCOME }}
+      shell: bash
+      run: |
+        python3 .github/scripts/collect-test-run-evidence.py \
+          --service "$SERVICE" \
+          --out "$SERVICE/build/test-intelligence/run.json"
+
+    - name: Retain immutable Test Intelligence run envelope
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: test-intelligence-run-${{ env.SERVICE }}-${{ github.run_id }}-a${{ github.run_attempt }}
+        path: ${{ env.SERVICE }}/build/test-intelligence/run.json
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: Upload coverage to Codecov
+      if: always() && job.status == 'success' && env.SERVICE_CI_REPORT_OUTCOME == 'success'
+      continue-on-error: true
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      with:
+        files: ${{ env.SERVICE }}/build/reports/kover/report.xml
+        flags: ${{ env.SERVICE }}
+        fail_ci_if_error: false

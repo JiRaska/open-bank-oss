@@ -688,6 +688,11 @@ def check_contract(path: pathlib.Path) -> list[str]:
         declared.setdefault(literal, info)
     doc_names: set[str] = set()
     envelope_messages: dict[str, dict] = {}
+    payload_messages: dict[str, dict] = {}
+    source_text = "\n".join(
+        kt.read_text(encoding="utf-8", errors="replace")
+        for kt in sorted((service_dir / "src/main/kotlin").rglob("*.kt"))
+    ) if (service_dir / "src/main/kotlin").is_dir() else ""
     for key, msg in messages.items():
         if not isinstance(msg, dict):
             continue
@@ -709,7 +714,45 @@ def check_contract(path: pathlib.Path) -> list[str]:
                 )
                 continue
             envelope_messages[name] = info
-    ordinary_doc_names = doc_names - set(envelope_messages)
+
+        # Some outbox producers keep ce-type in a constant and serialise a plain data class; the
+        # type is deliberately absent from the body, so the literal-based class detector cannot
+        # associate them. Explicit evidence must name BOTH the wire literal and the payload class.
+        payload_class = msg.get("x-openbank-payload-class")
+        hand_built = msg.get("x-openbank-hand-built", False)
+        if payload_class is None and not hand_built:
+            continue
+        if envelope_class is not None or (payload_class is not None and hand_built):
+            errors.append(f"{rel}: message `{name}` has conflicting payload evidence markers.")
+            continue
+        if f'"{name}"' not in source_text and f"'{name}'" not in source_text:
+            errors.append(f"{rel}: message `{name}` has no source literal in {service}/src/main.")
+            continue
+        if hand_built is True and payload_class is None:
+            payload_messages[name] = {
+                "class": None,
+                "props": None,
+                "domain_event": False,
+                "path": f"{service}/src/main",
+            }
+            continue
+        if not isinstance(payload_class, str):
+            errors.append(f"{rel}: message `{name}` has invalid explicit payload evidence.")
+            continue
+        info = parse_named_data_class(service_dir, payload_class)
+        if info is None:
+            errors.append(
+                f"{rel}: message `{name}` names `{payload_class}`, but no matching data class "
+                f"exists in {service}/src/main."
+            )
+            continue
+        extra = msg.get("x-openbank-extra-properties", [])
+        if not isinstance(extra, list) or not all(isinstance(p, str) and p for p in extra):
+            errors.append(f"{rel}: message `{name}` has invalid x-openbank-extra-properties.")
+            continue
+        info["props"] = set(info["props"]) | set(extra)
+        payload_messages[name] = info
+    ordinary_doc_names = doc_names - set(envelope_messages) - set(payload_messages)
     for name in sorted(ordinary_doc_names - set(declared)):
         errors.append(
             f"{rel}: message `{name}` is declared in the contract but no class in {service}/src/main "
@@ -756,7 +799,14 @@ def check_contract(path: pathlib.Path) -> list[str]:
         if not isinstance(msg, dict):
             continue
         name = msg.get("name") or key
-        info = envelope_messages.get(name) or declared.get(name)
+        if msg.get("x-openbank-payload-class") is not None or msg.get("x-openbank-hand-built", False):
+            info = payload_messages.get(name)
+        elif msg.get("x-openbank-envelope-class") is not None:
+            info = envelope_messages.get(name)
+        else:
+            # A derivative message can share ce-type with its source event while carrying a smaller
+            # payload (the oversight trigger). Never apply the source event's class to that body.
+            info = declared.get(name)
         if info is None:
             continue  # already reported by B; do not double-report
         if info["props"] is None:
@@ -1058,6 +1108,47 @@ def self_test() -> int:
             '"eventType" to "DIFFERENT_WIRE_EVENT",',
         ),
         "no class",
+    )
+
+    case(
+        "explicit payload class must exist",
+        "openbank-aml-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-aml-service" / "asyncapi.yaml",
+            "x-openbank-payload-class: AmlCaseCreatedEvent",
+            "x-openbank-payload-class: AmlCaseCreatedMissing",
+        ),
+        "no matching data class",
+    )
+    case(
+        "explicit payload class checks all documented fields",
+        "openbank-aml-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-aml-service" / "asyncapi.yaml",
+            "        customerReference:\n          type: string",
+            "        customerRef:\n          type: string",
+        ),
+        "does not carry",
+    )
+    case(
+        "producer-added fields must be declared explicitly",
+        "openbank-sanctions-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-sanctions-service" / "asyncapi.yaml",
+            "      x-openbank-extra-properties: [occurredAt]\n",
+            "",
+        ),
+        "does not carry",
+    )
+    case(
+        "hand-built event type must have a source literal",
+        "openbank-sanctions-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-sanctions-service" / "asyncapi.yaml",
+            "      name: SANCTIONS_LIST_CHANGED\n      x-openbank-hand-built: true",
+            "      name: SANCTIONS_LIST_CHANGED_MISSING\n      x-openbank-hand-built: true",
+        ),
+        "has no source literal",
     )
 
     failures = 0

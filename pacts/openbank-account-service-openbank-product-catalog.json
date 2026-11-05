@@ -59,6 +59,68 @@
       }
     },
     {
+      "description": "GET the published revision of a v1 product to pin at account opening",
+      "providerStates": [
+        {
+          "name": "a published v1-projected deposit revision exists for billing"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/legacy-products/3f20a53e-5ea4-307a-8a0f-9605728381ba/published-revision",
+        "query": {
+          "effectiveAt": [
+            "2099-01-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "id": "0191c0de-0000-7000-8000-00000000b111",
+          "number": 1,
+          "offeringId": "0191c0de-0000-7000-8000-00000000a111",
+          "state": "PUBLISHED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.number": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.offeringId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
       "description": "GET product by an unknown id",
       "providerStates": [
         {
@@ -91,6 +153,29 @@
             }
           }
         },
+        "status": 404
+      }
+    },
+    {
+      "description": "GET the published revision of an unknown v1 product to pin at account opening",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000fff"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/legacy-products/00000000-0000-0000-0000-000000000fff/published-revision",
+        "query": {
+          "effectiveAt": [
+            "2099-01-01T00:00:00Z"
+          ]
+        }
+      },
+      "response": {
         "status": 404
       }
     }

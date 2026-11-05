@@ -33,6 +33,7 @@ data class SanctionsScreenRequest(
     val entityType: String,
     val name: String,
     val aliases: List<String> = emptyList(),
+    val subjectId: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

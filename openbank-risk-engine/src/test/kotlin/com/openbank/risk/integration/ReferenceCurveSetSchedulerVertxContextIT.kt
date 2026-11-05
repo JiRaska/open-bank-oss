@@ -4,9 +4,9 @@
 
 package com.openbank.risk.integration
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.curve.ReferenceCurveSet
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

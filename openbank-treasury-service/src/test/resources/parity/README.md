@@ -28,10 +28,10 @@ format, requires at least one fixture per DELIVERED product type, and re-runs th
 
 ADR-0344 delivers products in phases. Only the products whose cash-flow ledger is on main have
 committed fixtures here (`DELIVERED_PRODUCTS` in `generate_fixtures.py`, `REQUIRED_PRODUCTS` in the
-gate; phase 0 = MM placement and borrowing, CNB deposit facility, CNB lombard, FX spot). The
-oracle and `generate_fixtures.py` already describe every ADR-0344 product, and `test_oracle.py`
-checks them, so a later phase widens both lists and commits its fixtures in the same PR. The
-format and conventions below cover all of them.
+gate; phase 0 = MM placement and borrowing, CNB deposit facility, CNB lombard, FX spot; phase 1a
+added IRS and FRA; phase 2 — the posting-rule matrix with its credit measure — adds every remaining
+product, so all sixteen have committed fixtures). A new product joins both lists and commits its
+fixtures in the same PR that delivers it. The format and conventions below cover all of them.
 
 ## Format
 
