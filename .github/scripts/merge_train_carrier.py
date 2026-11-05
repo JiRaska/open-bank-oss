@@ -11,7 +11,7 @@ is a carrier. It never copies member text onto the carrier: that would turn a hu
 into bot text.
 
 TRUST. A PR is a carrier only when ALL hold, judged from the LIVE PR object (never the event):
-  * head branch matches `^train/[0-9]+-[0-9]+$` and lives in this repository (not a fork);
+  * head branch matches `^train/(strict-)?[0-9]+-[0-9]+$` and lives in this repository (not a fork);
   * author login is exactly the gitops App bot, `openbank-gitops-bot[bot]`, with type `Bot`
     (a user cannot register a login containing `[bot]`, so a human cannot be that author);
   * it carries the `merge-train` label.
@@ -33,7 +33,10 @@ BOT_ID = 305_862_397   # the App bot's numeric user id (read off carrier #13817'
 RECORD_CONTEXT = "merge-train/record"          # publish's record of the tree it pushed (merge-train.py)
 RECORD_RE = re.compile(r"^tree=([0-9a-f]{40})$")
 CARRIER_LABEL = "merge-train"
-TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
+# A train carrier (`train/<run>-<attempt>`, built by build/publish) or a strict carrier
+# (`train/strict-<run>-<attempt>`, built execution-free by settle, ADR-0343 amendment 2026-11-05): both
+# carry the same chain of the train's own member commits, so a body gate reads the members of either.
+TRAIN_BRANCH_RE = re.compile(r"^train/(?:strict-)?[0-9]+-[0-9]+$")
 OWN_MEMBER_RE = re.compile(r"^merge-train: member #([0-9]+)\n\nPR-Number: #\1\nPR-Head: ([0-9a-f]{40})\n$")
 OWN_REGEN_MSG = "merge-train: regenerate derived files\n"
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")

@@ -533,6 +533,90 @@ The code carried one exception to "a verified green carrier merges first" that t
 
 The exception now applies only to a holder that did NOT defer to the carrier — no `merge-train/strict-deferral` on its head. A holder that deferred keeps the promise the deferral amendment makes: the one carrier built under its CI may merge past it. The holder is then behind main, is update-branched at once (the pre-empted-head rule above), and inherits the record through the first parent, so no further carrier is built under it and it merges within two of its own CI cycles — the bound this ADR already states. The holder-first exception stays for the case it was measured on: a green holder that a green carrier did not ride, where the carrier's rebuild costs it nothing it had been promised.
 
+### Amendment (2026-11-05) — the strict carrier: green strict-lane PRs ride one execution-free batch
+
+**Context.** The strict lane serialises on main by construction: one update-branch, one full CI on the
+combined head, one merge, then the next PR — a slot of about 2.4 h measured from reservation start to
+merge (update-branch, CI restarted from zero, the stall and ceiling bounds). A strict PR's OWN CI, by
+contrast, takes 3-25 min (a workflow or gate-script change does not rebuild the fleet). Measured over
+the design window: 0.41 strict merges/h with 37 strict-lane PRs queued, so the queue was growing by
+construction, and the train and fast lanes, which do not serialise, were starved of their turns by the
+reservations in between (ADR-0360). Re-measured 2026-11-04T14:52Z..2026-11-05T14:52Z with the query
+under *Measurement*: 32 merges to main, 14 of them strict (0.58/h), 9 train, 9 fast; 36 armed PRs open,
+16 of them touching an executable `.github/` path.
+
+**Decision.** Settle batches green, behind-main strict-lane PRs into ONE strict carrier over live main
+and judges it exactly like one strict PR:
+
+- **Built execution-free, by settle, with git only.** Each member's verified head is applied with
+  `git merge-tree --write-tree` onto settle's own chain over live main and committed with
+  `git commit-tree` and the train's member message (`merge-train: member #N`, `PR-Number`, `PR-Head`),
+  so `parse_own_chain` and `merge_train_carrier` read it as they read a train. There is no build job, no
+  generator run, no regeneration commit and no checkout of anything from a PR. The chain is pushed to
+  `train/strict-<run_id>-<attempt>`, its tree recorded as the App's `merge-train/record` status, and a
+  draft carrier PR labelled `merge-train` opened, so the ordinary PR CI runs on the combined head.
+- **Judged like one strict PR.** On a later tick, the carrier's exact head must carry the record, be a
+  chain of settle's own member commits only, and start at live main. Every required context and every
+  declared extra gate green: the members merge individually, in order, each pinned to its verified head
+  (`--match-head-commit`), with the `merge-train` status `strict lane: verified on strict carrier #N over
+  main <sha>`; source intent and head are re-read before each merge, and a foreign merge stops the run.
+  Red of N > 1: `bisect size N/2` on every member, nobody blamed; red of one (a member mid-bisect may
+  ride alone): the culprit, with the fixed comment. Inconclusive (cancelled, a gate over budget or not
+  evaluated): re-run once, then closed with no verdict. Red only on a context main is red on: no verdict.
+  Main moved: rejected and rebuilt in the same tick. Pending holds the strict reservation (no
+  update-branch, no fast merge, no train build) until the carrier head's CI stalls or passes the ceiling
+  (`reservation_expired` on the head settle committed); then it closes with no verdict, nobody is blamed,
+  and each member head leaves the carrier lane (`merge-train/strict-released`) for the update-branch
+  path — so a member that removed the producer of a required context pends forever on the carrier and
+  then meets the existing stall/ceiling/cooldown bounds, never a merge.
+- **What never rides a strict carrier.** A member that needs regeneration — it touches a regen-inventory
+  input or a declared derived output — because two members each regenerated for their own change are
+  jointly stale: red together, green alone, forever. A member whose tree adds a symlink or gitlink, or
+  whose path carries a control character (neither enters the strict list, and the builder refuses the
+  tree as well). A member that conflicts with main (told once, as in the strict lane) or with the members
+  ahead of it (dropped from this carrier without a notice; the next one takes it). A main-red fix (served
+  alone). The cap is `STRICT_BATCH_CAP` (default 8).
+- **Two guards on what judges the carrier.** At most ONE member per carrier changes JUDGE_CODE — the
+  privileged gate code, `merge-train.py`, `merge-train.yml`, `merge_train_carrier.py` and every pinned
+  extra-gate workflow — so a red verdict is never the product of two judge changes at once. And when a
+  member touches `.github/gates/gates.yaml`, the merged file's `- id:` set (a line scan, no YAML parse
+  under `python3 -I -S`) must equal the union of main's and every member's; a gate id lost in the merge
+  would retire a gate for the members riding with it, so the whole batch is refused and today's path
+  serves the oldest.
+- **Lane semantics unchanged.** The member status starts with `strict lane:`, so `last_merge_was_strict`
+  still opens the train's and the fast lane's turns after it (TRAIN_TURN_S, FAST_TURN_S). No carrier of
+  either kind is built while a strict carrier is open; the strict carrier is not built while a holder,
+  a train carrier, a main-red context, an owed turn or a green current strict PR exists. Settle and
+  publish keep running `origin/main`'s script. `--check-declaration` now requires settle to carry the
+  cap and to name the carrier from its own run id and attempt.
+
+**Security.** The invariant is unchanged: the App token never shares a runner with PR data being
+processed by code, and the privileged job acts only on trees it derived with execution-free git. A
+strict carrier is derived by exactly the operations publish already uses to re-derive a train
+(merge-tree, commit-tree) and, having no regeneration commit, needs none of the generator argument. The
+members are judged on the combined head by the same CI, pinned by the same chain and record, and merged
+by the same pinned merge as before. What changes is only the observation window between merges: before,
+each strict PR was observed alone on a head that contained main; now up to `STRICT_BATCH_CAP` are
+observed together, and a member's effect on another member's verdict is bounded by the judge cap (one
+judge changer per carrier) and the gates.yaml id-union guard, and resolved by bisect where it is
+content, not judgement. A member that could not be judged in isolation before (symlink, control
+character, a code path in the generator runner) still cannot ride.
+
+**Rollback.** `MERGE_TRAIN_STRICT_BATCH_CAP: "1"` in `merge-train.yml` (or `--strict-batch-cap 1`): no
+strict carrier is built and the strict lane behaves exactly as before this amendment; an open strict
+carrier is still judged and closed by the next settle.
+
+**Measurement.** Strict merges per hour, pinned:
+`gh pr list -R JiRaska/open-bank-oss --state merged --search "merged:>=<ISO-Z> base:main" --limit 200
+--json number,headRefOid` and, per head, `gh api repos/JiRaska/open-bank-oss/commits/<head>/statuses
+--jq '[.[]|select(.context=="merge-train")][0].description'` counted by prefix (`strict lane:`,
+`verified on train`, `fast lane`), divided by the window in hours (24 h above). Queue: `gh pr list
+--state open --base main --json number,autoMergeRequest,isDraft,files`, armed and non-draft, with a file
+under `.github/{workflows,actions,scripts,gates}/` (the `files` field caps at 100 per PR, so this is a
+lower bound). Success is strict merges/h rising above the 0.41-0.58/h baseline with the queue falling,
+and `strict_batch` sizes in the settle logs above 1; a strict carrier closed `expired` or `rejected`
+more often than merged is the signal to read the logs before touching the cap.
+
 ### Amendment (2026-10-24) — reviewed gate code rides a train, never with a regeneration commit (#13400)
 
 `.github/scripts/check-*.py` and `.github/scripts/check-*.sh` leave the strict lane (allow-list `GATE_CODE_GLOBS`; any other `.github/` path stays strict). `.github/gates/gates.yaml` was in that list and left it again (#13837): it declares every gate's `run`, `selftest`, `mode`, `when` and `budget_seconds`, so a PR could retire a privileged gate by editing its declaration rather than its script. Separating a privileged entry's edit from an ordinary one needs a YAML parse, which the privileged jobs cannot do under `python3 -I -S` without a hand-rolled parser, so every `gates.yaml` change takes the strict lane. A carrier's CI runs the combined head, so a gate change is judged with the code it judges, as in the strict lane, and bisect isolates a culprit. The one strict-lane property a train lacked is that main's gates prove the regeneration commit, so a train carrying gate code carries no regeneration commit: build keeps the oldest member's class and defers the other without a notice, and publish rejects the mix. Check scripts that prove a derived output, run in the pinned extra gate's workflow, or judge a carrier or the merge contract stay strict (`PRIVILEGED_GATE_CODE`, re-derived from the tree by the self-test). Gate code next to a symlink or gitlink never rides; generators see main's copy of gate code during regeneration; and scanner suppression files (`.gitleaksignore`, `.gitleaks.toml`, `.trivyignore`, `.semgrep*`) take the strict lane.

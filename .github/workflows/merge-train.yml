@@ -76,6 +76,9 @@ env:
   # Shadow mode is the default (ADR-0343 phase 0). Flip to "false" only after the ruleset
   # requires `merge-train` and strict is off.
   MERGE_TRAIN_SHADOW: "false"
+  # Strict carrier (ADR-0343 amendment 2026-11-05): members per execution-free strict carrier built by
+  # settle over live main. "1" is the rollback: no strict carrier, one update-branch per 2.4 h slot as before.
+  MERGE_TRAIN_STRICT_BATCH_CAP: "8"
 
 jobs:
   settle:
@@ -107,6 +110,9 @@ jobs:
           GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}  # an id, not a credential; the guard pins the ruleset to it
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}
+          # Strict carrier: settle builds it with execution-free git (merge-tree, commit-tree) and pushes its
+          # own commits to train/strict-<run_id>-<attempt>; the cap is the rollback switch (1 = off).
+          STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}
           # Isolated git config for THIS step only. At job level it also reached actions/checkout,
           # whose safe.directory write then failed: "could not lock config file /dev/null".
           GIT_CONFIG_NOSYSTEM: "1"
@@ -115,7 +121,8 @@ jobs:
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
           # shellcheck disable=SC2086  # SHADOW is empty or a single flag
-          python3 -I -S "$RUNNER_TEMP/merge-train.py" settle --repo "${GITHUB_REPOSITORY}" --branch main ${SHADOW}
+          python3 -I -S "$RUNNER_TEMP/merge-train.py" settle --repo "${GITHUB_REPOSITORY}" --branch main ${SHADOW} \
+            --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
 
   build:
     name: build one train (no secrets)
