@@ -191,14 +191,16 @@ openbank:
 
 "%prod":
   quarkus:
-    # East-west mTLS (ASVS V9.1): the pension company's ledger-service (ADR-0337) is called on its
-    # private-CA listener, 8443, which REQUIRES a client certificate (ledger's %prod
+    # East-west mTLS (ASVS V9.1): tax-reporting reads the pension company's ledger-service and
+    # treasury-service (ADR-0337), and pension-service / pension-fund-service, on their private-CA
+    # listeners (8443), which REQUIRE a client certificate (each provider's %prod
     # quarkus.http.ssl.client-auth). One client identity, tax-reporting-internal-tls, mounted at
-    # /mnt/internal-tls; its ca.crt is openbank-ca, which verifies the server. Hostname
-    # verification stays at Quarkus' default (HTTPS): the ledger certificate's dnsNames carry
-    # ledger-service.ledger-pension-co.svc. Under %prod only — the certificate exists only in the
-    # cluster, and local/test fixtures speak plain HTTP. ONE `tls:` map and ONE `rest-client:` map
-    # (SnakeYAML keeps only the last of a repeated key): add further upstreams to these maps.
+    # /mnt/internal-tls in the cluster only; its ca.crt is openbank-ca, which verifies the servers
+    # with Quarkus' default hostname verification (HTTPS — never NONE; the ledger certificate's
+    # dnsNames carry ledger-service.ledger-pension-co.svc). %prod only: the files exist only in the
+    # cluster, and the TLS registry loads them at boot (local/test fixtures speak plain HTTP). ONE
+    # `tls:` map and ONE `rest-client:` map (SnakeYAML keeps only the last of a repeated key): add
+    # further upstreams to these maps.
     tls:
       internal-authority:
         key-store:
@@ -211,6 +213,10 @@ openbank:
             certs: /mnt/internal-tls/ca.crt
         protocols: TLSv1.3
     rest-client:
+      pension-service:
+        tls-configuration-name: internal-authority
+      pension-fund-service:
+        tls-configuration-name: internal-authority
       ledger-service:
         tls-configuration-name: internal-authority
       # The pension company's own treasury-service instance (PSP 34-12 PS, ADR-0337): 8443, client
