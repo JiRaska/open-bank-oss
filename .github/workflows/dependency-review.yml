@@ -6,6 +6,33 @@ name: Dependency Review
 on:
   pull_request:
     branches: [main]
+    # The review diffs dependency manifests and submitted snapshots between base and head;
+    # a PR that changes no manifest, lockfile, workflow (actions are dependencies too) or
+    # snapshot input has nothing to review. Mirrors the `deps` step's own input list plus
+    # the manifests GitHub's dependency graph parses natively. Measured 2026-11-04: this ran
+    # on every one of 29 PR pushes against a 40-slot hosted cap.
+    paths:
+      - "**/build.gradle.kts"
+      - "build-logic/**"
+      - "openbank-libs/gradle/libs.versions.toml"
+      - "settings.gradle.kts"
+      - "gradle/wrapper/**"
+      - "**/gradle.lockfile"
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - "**/go.mod"
+      - "**/go.sum"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/scripts/dependency_snapshot.py"
+      - ".github/scripts/dependency-resolution-strict.init.gradle"
+      - ".github/scripts/tests/test_dependency_*.py"
 
 permissions:
   contents: read
