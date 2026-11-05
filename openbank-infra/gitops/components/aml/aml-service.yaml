@@ -157,7 +157,7 @@ spec:
             # DENY" without blocking) until the live decision log confirms the deny population is
             # empty, then a separate deliberate flip sets it true (rules.yaml AUTHZ_ENFORCE guardrail).
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             # #686 / #2945: load the party-events-in group.id override (aml-service-msg-override
             # ConfigMap, mounted below) as an external Quarkus config source, so the dotted YAML
             # key's declared value actually reaches the Kafka connector instead of silently
