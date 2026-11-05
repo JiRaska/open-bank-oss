@@ -5,10 +5,10 @@
 package com.openbank.pensionfund.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pensionfund.application.port.FundTermsPort
 import com.openbank.pensionfund.application.port.PinnedFundTerms
 import com.openbank.pensionfund.infrastructure.catalog.FundRevisionTerms
-import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile

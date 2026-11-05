@@ -5,8 +5,8 @@
 package com.openbank.pensionfund.integration
 
 import com.openbank.libs.idempotency.IdempotencyScope
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.util.Hex
-import com.openbank.pensionfund.it.PostgresTestResource
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

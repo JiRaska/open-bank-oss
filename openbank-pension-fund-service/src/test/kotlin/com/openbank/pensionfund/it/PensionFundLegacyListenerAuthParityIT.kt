@@ -4,6 +4,7 @@
 
 package com.openbank.pensionfund.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.mtls.ListenerAuthParityConformance
 import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
