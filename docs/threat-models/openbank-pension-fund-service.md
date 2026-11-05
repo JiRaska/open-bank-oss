@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Threat model — openbank-pension-fund-service
 
-- **Status:** integration (ADR-0334 slices S4/S8), sandbox only — pension-service machine caller
-- **Last reviewed:** 2026-10-11 (#12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
+- **Status:** integration (ADR-0334 slices S4/S8; ADR-0341 pinned fee, API v2 and durable write replay), sandbox only — pension-service machine caller
+- **Last reviewed:** 2026-11-05 (#13207 pinned fee, API v2, durable write replay; earlier: #12425 reporting read model, #12435 integration, #12442 conflict metric on the REST mappers)
 - **Owner:** pension-fund-service CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0315, ADR-0334
 
@@ -57,7 +57,7 @@ contact data.
    `compliance-read-any` lets the shared service-account reach it. Proven by `opa test` (must-ALLOW/must-DENY) and by `opa eval`
    on the materialised bundle, including the sabotage run with the exclusion removed (the shared
    account is then admitted by `operator-read-any`).
-5. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
+6. The REST exception mappers (#12442 observability) now count optimistic-lock conflicts on the
    unit holding (`optimisticLockConflict("unit_holding")`) before answering 409. The boundary
    itself is unchanged: same status, same body, no new route or caller; the metric carries a
    fixed aggregate label only, never a contract id or a request value.
@@ -145,13 +145,13 @@ Keycloak client, then deploy (the env ref is `optional: true`, so an unseeded se
 closed rather than the pod).
 
 
-### Versioned compatibility boundary (draft API v2 transition)
+### Versioned compatibility boundary (API v2 transition)
 
-Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor and four-eyes boundaries directly, rather than relying on resource inheritance. Their existing idempotency behavior is preserved; nine v2 writes additionally require durable response replay as described below. New reflection parity and real HTTP/OIDC/OPA/four-eyes regressions must pass native CI; source correspondence is not runtime proof. The owner approved only the draft exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
+Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor and four-eyes boundaries directly, rather than relying on resource inheritance. Their existing idempotency behavior is preserved; nine v2 writes additionally require durable response replay as described below. Reflection parity (`PensionFundVersionAuthorizationParityTest`) and real HTTP/OIDC/OPA/four-eyes regressions (`PensionFundHoldingEnforcedAuthzIT`, `PensionFundApiIT`) cover this boundary. The owner approved only the exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
 
-The first source phase moves the Admin UI to v2 while pension-service and tax-reporting retain their v1 clients and contracts over the five unchanged operations. Their explicit migration, both tracked Pact contracts and related mTLS/reporting fixtures remain pending together in the preserved second phase under #13173; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; draft and blocked controls remain. No merge, provisioning, credentials, policy activation or deployment is approved here. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
+The first source phase moves the Admin UI to v2 while pension-service and tax-reporting retain their v1 clients and contracts over the five unchanged operations. Their explicit migration, both tracked Pact contracts and related mTLS/reporting fixtures remain pending together in the preserved second phase under #13173; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; these controls take effect only on rollout. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
 
-### Durable v2 write replay (draft implementation)
+### Durable v2 write replay
 
 Nine v2 POST operations for fund creation, NAV calculation/decisions and strategy creation/change
 now require a validated `Idempotency-Key`. A SHA-256 caller/service-scoped key indexes V7 receipts;
@@ -162,8 +162,7 @@ even after later changes. A different path or body under the same caller key ret
 
 The operation and receipt must commit in the same context-bound reactive transaction. HTTP/JDBC
 regressions include an injected failure at receipt insertion, after the domain write, to distinguish
-atomic rollback from a separately committed mutation. These new tests require native CI; source
-review and standalone formatting are not execution evidence. Legacy v1 handlers do not gain this
+atomic rollback from a separately committed mutation. `PensionFundWriteReplayIT` and `FundPinnedFeePrecisionIT` execute this. Legacy v1 handlers do not gain this
 new requirement. Roles and four-eyes checks execute before replay, so a cached result grants no
 new permission. No new Redis infrastructure or in-memory production fallback is introduced.
 
@@ -171,5 +170,17 @@ Receipts contain response snapshots, including possible audit personal data. Has
 pseudonymization, not anonymization. V7 has no automatic expiry: deleting receipts can re-enable
 duplicate writes. Application rollback retains the table and history; schema removal/retention
 requires separate review. A 64-bit advisory hash collision can cause a transient busy response,
-but the full SHA-256 receipt key still distinguishes stored results. No deployment, migration
-activation or live replay is authorized by this draft.
+but the full SHA-256 receipt key still distinguishes stored results. 
+**Residual risk - catalog call inside the replay transaction.** `createFund` resolves the revision
+from product-catalog (5 s read timeout) inside the open `PostgresWriteReplay` transaction, which holds
+a database connection and the advisory lock for the key. A slow or hung catalog therefore pins one
+connection and blocks retries of that key (409) for up to the timeout. Resolving before the
+transaction was rejected: replay must answer a previously committed result without depending on
+catalog availability, and the lookup sits behind the replay decision by design. Exposure is bounded:
+only operator/admin fund creation (rare), the timeout is short, and the pool serves other paths.
+Accepted; revisit if creation volume grows.
+
+**Residual risk - receipt retention.** V7 replay receipts hold response snapshots that can include
+audit personal data and have no TTL. Retention owner: the pension-fund-service owner. Review date:
+2027-02-05 (decide expiry or pseudonymised snapshots, keeping a window long enough that deleting a
+receipt cannot re-enable a duplicate write).

@@ -65,4 +65,13 @@ class FundPinnedFeeTest {
         assertThat(FundRevisionTerms.parse(id, revision(fee = "100")).managementFeeRate).isEqualByComparingTo("1")
         assertThat(FundRevisionTerms.parse(id, revision(fee = "0")).managementFeeRate).isEqualByComparingTo("0")
     }
+
+    @Test
+    fun `a fee percent with more than six decimals fails closed and six are accepted`() {
+        assertThatThrownBy { FundRevisionTerms.parse(id, revision(fee = "0.1234567")) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("decimal places")
+        assertThat(FundRevisionTerms.parse(id, revision(fee = "0.123456")).managementFeeRate)
+            .isEqualByComparingTo("0.00123456")
+    }
 }

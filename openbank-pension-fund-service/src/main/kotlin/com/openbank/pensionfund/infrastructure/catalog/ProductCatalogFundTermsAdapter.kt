@@ -56,6 +56,7 @@ class ProductCatalogFundTermsAdapter(@RestClient private val client: FundRevisio
 object FundRevisionTerms {
     private const val RETIREMENT_SCHEMA = "org.openbank.retirement.pension-savings"
     private const val MIN_SCHEMA_VERSION = 2
+    private const val MAX_PERCENT_SCALE = 6
     private val PERCENT = BigDecimal.TEN.pow(2)
 
     fun parse(requested: UUID, revision: JsonNode): PinnedFundTerms {
@@ -72,6 +73,9 @@ object FundRevisionTerms {
             .path("managementFeeAnnualPercent").takeIf(JsonNode::isTextual)?.textValue()
         requireNotNull(percent) { "revision $requested has no feeSchedule.managementFeeAnnualPercent" }
         val pct = BigDecimal(percent)
+        require(pct.scale() <= MAX_PERCENT_SCALE) {
+            "revision $requested managementFeeAnnualPercent $percent has more than $MAX_PERCENT_SCALE decimal places"
+        }
         require(pct.signum() >= 0 && pct.compareTo(PERCENT) <= 0) {
             "revision $requested managementFeeAnnualPercent $percent is outside 0..100"
         }
