@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.17.0...admin-ui-v3.18.0) (2026-11-05)
+
+
+### Features
+
+* **admin-ui:** show statutory return status read only ([#14614](https://github.com/JiRaska/open-bank-oss/issues/14614)) ([08bb761](https://github.com/JiRaska/open-bank-oss/commit/08bb7612ba1d966ac9856bcd303344cd605bf4ba))
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+* **developer-portal:** audit developer portal accessibility in CI ([#14605](https://github.com/JiRaska/open-bank-oss/issues/14605)) ([654a9be](https://github.com/JiRaska/open-bank-oss/commit/654a9bec450ac43222cd68231bbf233174a192ed))
+
 ## [3.17.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.16.0...admin-ui-v3.17.0) (2026-11-03)
 
 
