@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+from http.client import IncompleteRead
 import json
 import os
 import re
@@ -30,6 +31,8 @@ from urllib.request import Request, urlopen
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_API_PAGES = 20
+JOBS_PER_PAGE = 20
+API_READ_ATTEMPTS = 3
 RECONCILE_RESOLUTION_SECONDS = 420
 CANDIDATE_WORKERS = 8
 
@@ -50,6 +53,69 @@ class VerificationError(Exception):
     pass
 
 
+def _read_backoff(attempt: int, deadline: float | None) -> None:
+    delay = 2 ** attempt
+    if deadline is not None and time.monotonic() + delay >= deadline:
+        raise VerificationError("reconcile source resolution exceeded its time budget")
+    time.sleep(delay)
+
+
+def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str]:
+    """Retry only transient GET failures; never consume a partial response as evidence."""
+    for attempt in range(API_READ_ATTEMPTS):
+        try:
+            timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
+            if timeout <= 0:
+                raise VerificationError(
+                    "reconcile source resolution exceeded its time budget"
+                )
+            with urlopen(request, timeout=timeout) as response:
+                body = json.loads(response.read())
+                link_header = response.headers.get("Link", "")
+            return body, link_header
+        except HTTPError as exc:
+            if (
+                request.get_method() == "GET"
+                and exc.code in {500, 502, 503, 504}
+                and (not exc.headers or exc.headers.get("X-RateLimit-Remaining") != "0")
+                and attempt + 1 < API_READ_ATTEMPTS
+            ):
+                exc.close()
+                _read_backoff(attempt, deadline)
+                continue
+            # Request headers and response bodies may contain credentials or untrusted
+            # text. Report only the endpoint path, status and numeric quota hints.
+            endpoint = urlsplit(request.full_url).path
+            details = [f"HTTP {exc.code}"]
+            for header, label in (
+                ("X-RateLimit-Remaining", "rate-limit-remaining"),
+                ("X-RateLimit-Reset", "rate-limit-reset"),
+                ("Retry-After", "retry-after"),
+            ):
+                value = exc.headers.get(header) if exc.headers else None
+                if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
+                    details.append(f"{label}={value}")
+            raise VerificationError(
+                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
+            ) from None
+        except IncompleteRead:
+            if request.get_method() != "GET" or attempt + 1 == API_READ_ATTEMPTS:
+                raise VerificationError(
+                    "GitHub Actions API request failed: IncompleteRead"
+                ) from None
+            _read_backoff(attempt, deadline)
+            continue
+        except (
+            URLError,
+            TimeoutError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise VerificationError(
+                f"GitHub Actions API request failed: {type(exc).__name__}"
+            ) from exc
+
+
 def _iter_json_pages(
     url: str, token: str, *, deadline: float | None = None
 ) -> Iterator[list[dict]]:
@@ -57,12 +123,18 @@ def _iter_json_pages(
     next_url: str | None = url
     origin = urlsplit(url)[:2]
     visited: set[str] = set()
+    # Preserve the existing 2,000-row ceiling for jobs with smaller responses.
+    max_pages = (
+        MAX_API_PAGES * (100 // JOBS_PER_PAGE)
+        if urlsplit(url).path.endswith("/jobs")
+        else MAX_API_PAGES
+    )
     while next_url:
         if next_url in visited:
             raise VerificationError("GitHub Actions API pagination repeated a page URL")
-        if len(visited) >= MAX_API_PAGES:
+        if len(visited) >= max_pages:
             raise VerificationError(
-                f"GitHub Actions API pagination exceeded {MAX_API_PAGES} pages"
+                f"GitHub Actions API pagination exceeded {max_pages} pages"
             )
         visited.add(next_url)
         _require_time_remaining(deadline)
@@ -76,40 +148,7 @@ def _iter_json_pages(
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        try:
-            timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
-            if timeout <= 0:
-                raise VerificationError(
-                    "reconcile source resolution exceeded its time budget"
-                )
-            with urlopen(request, timeout=timeout) as response:
-                body = json.loads(response.read())
-                link_header = response.headers.get("Link", "")
-        except HTTPError as exc:
-            # Request headers and response bodies may contain credentials or untrusted
-            # text. Report only the endpoint path, status and numeric quota hints.
-            endpoint = urlsplit(next_url).path
-            details = [f"HTTP {exc.code}"]
-            for header, label in (
-                ("X-RateLimit-Remaining", "rate-limit-remaining"),
-                ("X-RateLimit-Reset", "rate-limit-reset"),
-                ("Retry-After", "retry-after"),
-            ):
-                value = exc.headers.get(header) if exc.headers else None
-                if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
-                    details.append(f"{label}={value}")
-            raise VerificationError(
-                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
-            ) from None
-        except (
-            URLError,
-            TimeoutError,
-            OSError,
-            json.JSONDecodeError,
-        ) as exc:
-            raise VerificationError(
-                f"GitHub Actions API request failed: {type(exc).__name__}"
-            ) from exc
+        body, link_header = _read_json_page(request, deadline)
         if not isinstance(body, dict):
             raise VerificationError("GitHub Actions API returned a non-object response")
         # Run endpoints wrap results in workflow_runs; job endpoints use jobs.
@@ -181,7 +220,7 @@ def verify_successful_service_ci(
     for run in candidates:
         run_id = run["id"]
         attempt = run["run_attempt"]
-        jobs_query = urlencode({"per_page": 100})
+        jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
         jobs_url = urljoin(
             base,
             f"repos/{encoded_repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",
@@ -216,7 +255,7 @@ def _jobs_prove_services(
     if not isinstance(run_id, int) or not isinstance(attempt, int) or attempt < 1:
         return set()
     base = api_url.rstrip("/") + "/"
-    jobs_query = urlencode({"per_page": 100})
+    jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
     jobs_url = urljoin(
         base,
         f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",

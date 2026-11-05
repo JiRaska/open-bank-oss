@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+from http.client import IncompleteRead
 import json
 import subprocess
 import unittest
@@ -193,6 +194,72 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
                 for secret in ("query-secret", "reason-secret", "header-secret", "body-secret", "fixture-token"):
                     self.assertNotIn(secret, message)
                 self.assertEqual(request.call_count, 1)
+
+    def test_retries_same_second_page_without_duplicate_evidence(self):
+        first = "https://api.github.test/jobs?per_page=20&page=1"
+        second = "https://api.github.test/jobs?per_page=20&page=2"
+        calls = []
+        def respond(request, timeout):
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                return FixtureResponse({"jobs": [{"id": 1}]}, {"Link": f'<{second}>; rel="next"'})
+            if len(calls) == 2:
+                raise HTTPError(second, 502, "untrusted", {}, None)
+            return FixtureResponse({"jobs": [{"id": 2}]})
+        with patch.object(MODULE, "urlopen", respond), patch.object(MODULE.time, "sleep"):
+            self.assertEqual(MODULE._json_pages(first, "fixture-token"), [{"id": 1}, {"id": 2}])
+        self.assertEqual(calls, [first, second, second])
+
+    def test_incomplete_body_retries_whole_page_and_exhausts_closed(self):
+        class Truncated(FixtureResponse):
+            def read(self):
+                raise IncompleteRead(b'{"jobs": [', 100)
+        with patch.object(MODULE, "urlopen", side_effect=lambda *a, **k: Truncated({})) as request, patch.object(MODULE.time, "sleep"):
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+        self.assertEqual(request.call_count, 3)
+
+    def test_transient_http_exhaustion_is_bounded_and_safe(self):
+        error = HTTPError("https://api.github.test/jobs?secret=hidden", 502, "hidden", {}, None)
+        with patch.object(MODULE, "urlopen", side_effect=error) as request, patch.object(MODULE.time, "sleep"):
+            with self.assertRaisesRegex(MODULE.VerificationError, r"/jobs failed .*HTTP 502") as caught:
+                MODULE._json_pages(error.url, "fixture-token")
+        self.assertEqual(request.call_count, 3)
+        self.assertNotIn("hidden", str(caught.exception))
+
+    def test_retry_respects_resolution_deadline(self):
+        error = HTTPError("https://api.github.test/jobs", 502, "reason", {}, None)
+        with patch.object(MODULE, "urlopen", side_effect=error) as request, patch.object(MODULE.time, "monotonic", side_effect=[0, 0, 2]), patch.object(MODULE.time, "sleep") as sleep:
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages(error.url, "fixture-token", deadline=1)
+        self.assertEqual(request.call_count, 1)
+        sleep.assert_not_called()
+
+    def test_incomplete_response_can_recover_without_using_partial_bytes(self):
+        class Truncated(FixtureResponse):
+            def read(self):
+                raise IncompleteRead(b'{"jobs": [{"id": 999}]}', 100)
+        with patch.object(MODULE, "urlopen", side_effect=[Truncated({}), FixtureResponse({"jobs": [{"id": 1}]})]), patch.object(MODULE.time, "sleep"):
+            self.assertEqual(MODULE._json_pages("https://api.github.test/jobs", "fixture-token"), [{"id": 1}])
+
+    def test_smaller_jobs_pages_keep_existing_row_capacity_and_fail_closed_at_limit(self):
+        def respond(request, timeout):
+            page = int(parse_qs(urlsplit(request.full_url).query)["page"][0])
+            following = f'https://api.github.test/jobs?per_page=20&page={page + 1}'
+            return FixtureResponse({"jobs": [{"id": page}]}, {"Link": f'<{following}>; rel="next"'})
+        with patch.object(MODULE, "urlopen", respond) as request:
+            with self.assertRaisesRegex(MODULE.VerificationError, "exceeded 100 pages"):
+                MODULE._json_pages("https://api.github.test/jobs?per_page=20&page=1", "fixture-token")
+
+    def test_malformed_page_is_not_retried(self):
+        with patch.object(MODULE, "urlopen", return_value=FixtureResponse({"jobs": "invalid"})) as request:
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE._json_pages("https://api.github.test/jobs", "fixture-token")
+        self.assertEqual(request.call_count, 1)
+
+    def test_jobs_use_smaller_pages(self):
+        _, requested = self.verify()
+        self.assertEqual(parse_qs(urlsplit(requested[1]).query)["per_page"], ["20"])
 
     def test_http_failure_omits_untrusted_quota_headers(self):
         error = HTTPError("https://api.github.test/jobs", 403, "reason", {
