@@ -17,6 +17,8 @@ import { expect, test, type Page } from '@playwright/test'
 import { pathAllowedByRoles } from '../src/lib/auth/roles'
 
 const E2E_ROLES = ['ROLE_VIEWER', 'ROLE_AUDITOR']
+// Same default as playwright.deployed-session.config.ts `baseURL`.
+const APP_ORIGIN = new URL(process.env.ADMIN_UI_DEPLOYED_URL ?? 'https://admin.open-bank.tech').origin
 
 const MONEY_PATH_SCREENS = [
   '/payments', '/sepa-instant', '/ledger', '/accounts', '/transactions', '/fx', '/clearing', '/swift',
@@ -28,8 +30,12 @@ function guardWrites(page: Page): string[] {
   const attempted: string[] = []
   void page.route('**/api/**', async (route) => {
     const req = route.request()
-    const path = new URL(req.url()).pathname
-    if (req.method() !== 'GET' && req.method() !== 'HEAD' && !path.startsWith('/api/auth/')) {
+    const url = new URL(req.url())
+    const path = url.pathname
+    // Only the app's own origin can carry a write to a bank backend. The cross-origin
+    // GlitchTip beacon (`POST /api/2/envelope/`) also matches `**/api/**`, and is telemetry.
+    const sameOrigin = url.origin === APP_ORIGIN
+    if (sameOrigin && req.method() !== 'GET' && req.method() !== 'HEAD' && !path.startsWith('/api/auth/')) {
       attempted.push(`${req.method()} ${path}`)
       await route.abort()
       return

@@ -10,6 +10,7 @@ import com.openbank.domestic.application.port.out.CustomerNotificationPort
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.port.out.FraudEnforcementMetricsPort
 import com.openbank.domestic.application.port.out.FraudScoreCommand
 import com.openbank.domestic.application.port.out.FraudScoringPort
 import com.openbank.domestic.application.port.out.OpenAmlCaseCommand
@@ -48,6 +49,7 @@ import java.util.UUID
 private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
 private const val ALERT_SANCTIONS_HIT = "SANCTIONS_HIT"
 private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
+private const val ALERT_FRAUD_REVIEW = "FRAUD_REVIEW"
 
 // TooManyFunctions: one over detekt's threshold since #8432 added the private notification helper.
 // The activities are a Temporal contract — one method per workflow step — so splitting the class to
@@ -69,6 +71,11 @@ open class DomesticPaymentActivitiesImpl(
     private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.domestic.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
+    private val fraudEnforcementMetrics: FraudEnforcementMetricsPort,
+    // #4403: read HERE, by the activity, so a workflow replay never depends on config. Off by
+    // default; turning it on is a risk-team decision after shadow calibration (ADR-0084 §4.2).
+    @ConfigProperty(name = "openbank.domestic.fraud.enforcement-enabled", defaultValue = "false")
+    private val fraudEnforcementEnabled: Boolean,
 ) : DomesticPaymentActivities {
 
     private val log = Logger.getLogger(DomesticPaymentActivitiesImpl::class.java)
@@ -263,6 +270,72 @@ open class DomesticPaymentActivitiesImpl(
                 paymentId,
             )
         }
+        Unit
+    }
+
+    override fun fraudGate(paymentId: UUID): FraudGateAction = vtx {
+        val payment = paymentRepository.findById(paymentId)
+            ?: error("Payment $paymentId not found during fraud gate activity")
+        val outcome = fraudScoringPort.score(
+            FraudScoreCommand(
+                amount = payment.amount.amount,
+                currency = payment.currency,
+                rail = "DOMESTIC",
+                accountId = payment.debtorAccountId,
+                counterpartyId = null,
+            ),
+        )
+        val wouldDo = FraudGatePolicy.wouldDo(outcome)
+        val action = FraudGatePolicy.effective(outcome, fraudEnforcementEnabled)
+        fraudEnforcementMetrics.recordDecision(wouldDo, enforced = fraudEnforcementEnabled)
+        if (wouldDo != FraudGateAction.PROCEED) {
+            log.infof(
+                "Fraud gate %s for payment %s (verdict=%s, score=%d, rules=%s, synthetic=%s, mode=%s)",
+                wouldDo,
+                paymentId,
+                outcome.verdict,
+                outcome.score,
+                outcome.ruleVersion,
+                outcome.synthetic,
+                if (fraudEnforcementEnabled) "enforced" else "shadow",
+            )
+        }
+        if (action == FraudGateAction.HOLD) {
+            // The review case an analyst works from (the existing case store, as ADR-0084 §4.2
+            // used before #4221). A failure to open it is swallowed: the hold then times out into
+            // REJECT, so a missing case can delay a payment but never pass one.
+            openCaseQuietly(
+                payment = payment,
+                riskLevel = AmlCaseSeverity.HIGH,
+                alertCode = ALERT_FRAUD_REVIEW,
+                detail = "fraud verdict ${outcome.verdict} score=${outcome.score} synthetic=${outcome.synthetic}",
+                matchedEntity = null,
+            )
+        }
+        action
+    }
+
+    override fun rejectForFraud(paymentId: UUID, cause: FraudRejectCause): Unit = vtx {
+        val payment = paymentRepository.findById(paymentId)
+            ?: error("Payment $paymentId not found during fraud reject activity")
+        if (payment.status == DomesticPaymentStatus.REJECTED) return@vtx
+        val updated = payment.transitionTo(
+            targetStatus = DomesticPaymentStatus.REJECTED,
+            reason = DomesticRejectReason.FRAUD_SUSPECTED,
+            clock = clock,
+        )
+        paymentRepository.update(
+            payment = updated,
+            outboxMessage = OutboxMessage(
+                aggregateId = updated.id,
+                eventType = PAYMENT_STATUS_CHANGED_EVENT,
+                payload = eventPublisher.statusChangedPayload(payment, updated),
+            ),
+        )
+        // Deliberately no notifyPaymentFailed and no rejectDetail: the cause stays internal (log +
+        // metric) because telling the customer why is tipping-off, as on the sanctions path.
+        log.infof("Payment %s REJECTED by the fraud gate (cause=%s)", paymentId, cause)
+        fraudEnforcementMetrics.recordRejection(cause)
         Unit
     }
 

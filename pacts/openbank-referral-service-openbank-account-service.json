@@ -1,0 +1,76 @@
+{
+  "consumer": {
+    "name": "openbank-referral-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "eventId": "string",
+        "eventType": "AccountCreated",
+        "occurredAt": "2026-01-01T00:00:00Z",
+        "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+      },
+      "description": "an AccountCreated event eligible for referral qualification",
+      "generators": {
+        "body": {
+          "$.eventId": {
+            "size": 20,
+            "type": "RandomString"
+          },
+          "$.partyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.eventId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "format": "yyyy-MM-dd'T'HH:mm:ssXXX",
+                "match": "timestamp"
+              }
+            ]
+          },
+          "$.partyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "an account has been created"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

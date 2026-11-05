@@ -34,6 +34,10 @@ class FakeLedger : LedgerPostingPort {
     @Volatile
     var loseNextResponse = false
 
+    /** As [loseNextResponse], for this idempotency key only (other deals in a shared pass post normally). */
+    @Volatile
+    var loseResponseFor: String? = null
+
     /** Scripted outage: every post fails BEFORE the ledger commits anything. */
     @Volatile
     var down = false
@@ -42,18 +46,26 @@ class FakeLedger : LedgerPostingPort {
     @Volatile
     var afterCommit: (suspend () -> Unit)? = null
 
+    /** When set, [afterCommit] fires only for this idempotency key (a shared pass posts other deals too). */
+    @Volatile
+    var afterCommitKey: String? = null
+
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): PostedJournal {
         if (down) throw jakarta.ws.rs.ProcessingException("simulated: ledger unreachable")
         calls += spec.idempotencyKey
         val (id, _) = journals.computeIfAbsent(spec.idempotencyKey) { UUID.randomUUID() to spec }
-        if (loseNextResponse) {
+        if (loseNextResponse || loseResponseFor == spec.idempotencyKey) {
             loseNextResponse = false
+            loseResponseFor = null
             throw jakarta.ws.rs.ProcessingException(
                 "simulated: ledger committed ${spec.idempotencyKey} but the response was lost",
             )
         }
-        val callback = afterCommit
-        afterCommit = null
+        val callback = afterCommit?.takeIf { afterCommitKey == null || afterCommitKey == spec.idempotencyKey }
+        if (callback != null) {
+            afterCommit = null
+            afterCommitKey = null
+        }
         callback?.invoke()
         return PostedJournal(
             id,
@@ -74,6 +86,8 @@ class FakeLedger : LedgerPostingPort {
         journals.clear()
         calls.clear()
         loseNextResponse = false
+        loseResponseFor = null
         afterCommit = null
+        afterCommitKey = null
     }
 }

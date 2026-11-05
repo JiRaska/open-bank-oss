@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: case-coordinator-agent
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "f54f5c2b30413f6d"
+    openbank.tech/policy-checksum: "4f7bb507979ab6cd"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -448,6 +448,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
