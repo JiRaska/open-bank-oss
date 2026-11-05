@@ -88,8 +88,10 @@ pressure. Runbooks live under `docs/runbooks/key-ceremonies/`:
   `openbank/openbao/break-glass`), never in-cluster. See `openbank-infra` operator notes for the
   unseal procedure; this is genuine break-glass material, not for routine secret provisioning.
 - **Cosign KMS signing key rotation** — quarterly, `alias/openbank-cosign-signing`.
-- **Keycloak realm signing-key renewal** — coordinated with the OIDC client secret rotation
-  cadence (ADR-0099 Tier 2).
+- **Keycloak realm signing-key renewal**: manual. The ADR-0099 Tier 2 OIDC rotator was
+  withdrawn by ADR-0177 and removed, so there is no automated cadence to coordinate with.
+  Static OIDC client secrets are rotated by hand, by each ExternalSecret's
+  `openbank.io/rotation-deadline`.
 - **cert-manager PKI rotation** — automatic; this runbook covers the manual-intervention path if
   automatic renewal fails.
 
