@@ -194,12 +194,16 @@ class ReferenceResource {
     suspend fun import(
         @PathParam("kind") kind: String,
         @HeaderParam("Idempotency-Key") key: String?,
-        request: List<ReferenceProposalRequest>?,
+        // Element type is NULLABLE on purpose: Jackson puts a JSON `null` element into the list
+        // regardless of the Kotlin type, so a non-null element type only moved the failure to the
+        // first dereference — an NPE and a 500 (#14760). Declared nullable, it is a 400 below.
+        request: List<ReferenceProposalRequest?>?,
     ): Response {
         val k = ReferenceKind.fromWire(kind)
         val items = requireNotNull(request) { "a JSON array of proposals is required" }
-        val commands = items.mapIndexed { i, r ->
+        val commands = items.mapIndexed { i, item ->
             try {
+                val r = requireNotNull(item) { "a proposal must be an object, not null" }
                 ProposeReferenceCommand(
                     kind = k,
                     key = requireNotNull(r.key) { "key is required" },
