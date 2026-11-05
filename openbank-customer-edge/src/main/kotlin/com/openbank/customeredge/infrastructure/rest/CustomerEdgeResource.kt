@@ -3691,6 +3691,7 @@ class CustomerEdgeResource(
     fun listUnifiedNotifications(
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("partyId") filterPartyId: UUID?,
+        @QueryParam("cursor") cursor: String? = null,
     ): Response {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(UNIFIED_NOTIFICATION_TIMEOUT_SECONDS)
         val identity = customer()
@@ -3702,7 +3703,7 @@ class CustomerEdgeResource(
         val parties = (filterPartyId?.let(::listOf) ?: allowed).distinct()
         val remaining = deadline - System.nanoTime()
         return UnifiedNotificationInbox(upstream, objectMapper, notificationServiceUrl, remaining)
-            .list(parties, limit.coerceIn(1, 100))
+            .list(parties, limit.coerceIn(1, 100), cursor)
     }
 
     /** Mark one notification read. partyId injected from the JWT — the service scopes by it (IDOR). */
@@ -3724,11 +3725,13 @@ class CustomerEdgeResource(
     @Path("/notifications/read-all")
     @Authorize(action = "customer.notifications.mark-read")
     @Blocking
-    fun markAllNotificationsRead(): Response {
-        val customer = customer()
+    fun markAllNotificationsRead(@QueryParam("partyId") originPartyId: UUID? = null): Response {
+        // The unified inbox spans profiles, so "read all" names the origin profile explicitly;
+        // omitted, it stays the selected profile (#12260).
+        val partyId = authorizedNotificationParty(customer(), originPartyId)
         return upstream.patch(
-            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=${customer.partyId}",
-            customer.partyId.toString(),
+            "$notificationServiceUrl/api/v1/notifications/read-all?partyId=$partyId",
+            partyId.toString(),
         )
     }
 

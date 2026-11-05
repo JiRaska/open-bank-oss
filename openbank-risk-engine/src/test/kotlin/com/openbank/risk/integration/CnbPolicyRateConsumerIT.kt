@@ -4,7 +4,7 @@
 
 package com.openbank.risk.integration
 
-import com.openbank.risk.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
