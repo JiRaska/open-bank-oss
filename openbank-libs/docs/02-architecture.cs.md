@@ -63,3 +63,5 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.
 
 `TopicProducers` přiřazuje `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` službě account-service (#9073); audit-service a analytics-sink je odebírají dřív, než producent přepne.
+
+`TopicProducers` také přiřazuje topik `openbank.tpp.registry.event` službě tpp-registry-service, takže audit-service může označit změny registru TPP (registrace, zařazení na blacklist), které zapisuje do auditní stopy.
