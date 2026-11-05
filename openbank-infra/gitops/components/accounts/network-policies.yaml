@@ -162,6 +162,9 @@ spec:
               kubernetes.io/metadata.name: pension
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: pension-fund
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
