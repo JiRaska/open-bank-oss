@@ -145,7 +145,20 @@ quarkus:
         tls-configuration-name: referral-service
 
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (BUILD-time switch). The pod
+  # already runs the OPA sidecar with campaign-opa-bundle, but without this bean every @Authorize
+  # call took the interceptor's `no PolicyDecisionPoint bean` branch, so the sidecar was never
+  # asked and the advisory log could never show a would-DENY. Enforcement stays as deployed
+  # (AUTHZ_ENFORCE=false in gitops) until that log is clean.
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
   # RedisApprovalStoreProducer, which replaced this service's own RedisApprovalStoreProducer. Removing it
   # removes the ApprovalStore bean, and with it four-eyes.
