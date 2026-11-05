@@ -348,6 +348,23 @@ confirmation) moves to the agent's identity with **no** upstream grant, so it st
 If a charter later gains that capability, add the upstream read rule in the same change;
 `AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
 
+### Catalog readers (product-catalog would-DENY triage)
+
+The published catalog no longer admits the shared `openbank-services` principal. Four readers move
+to their own identity with the `catalog:read` scope, granted by name in
+`product_catalog_rest_ext.rego` (`service-named-catalog-read`).
+
+| Keycloak client | Live change | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|---|
+| `openbank-card-issuance` | **new client** + service-account user (ROLE_API) | `keycloak/card-issuance-service` | `card-issuance-service-m2m-oidc` (payments) | `CARD_ISSUANCE_CLIENT_SECRET` |
+| `openbank-document` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+| `openbank-billing` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+| `openbank-lending` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+
+Order: create the card-issuance client and seed its KV entry BEFORE the gitops change syncs (its env
+ref is `optional: false`); add the three scopes BEFORE the service images that select the named
+client deploy, or their catalog reads lose `CATALOG_SCOPE_READ` and stay denied once enforced.
+
 ### Tax reporting — pension read models (#12425)
 
 Same recipe, same script, one client. tax-reporting-service is not yet deployed by gitops, so no

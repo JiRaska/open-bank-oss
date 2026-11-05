@@ -2237,6 +2237,16 @@ spec:
                 secretKeyRef:
                   name: card-issuance-db-app
                   key: password
+            # card-issuance-service's OWN Keycloak client (openbank-card-issuance, ROLE_API + catalog:read)
+            # for the product-configuration read (ProductCatalogClient, named oidc-client `m2m`), granted
+            # by identity in product_catalog_rest_ext.rego. optional: false so an unseeded Vault entry is a
+            # loud CreateContainerConfigError. Create the client and seed Vault BEFORE this syncs (runbook 0009).
+            - name: OIDC_M2M_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: card-issuance-service-m2m-oidc
+                  key: OIDC_M2M_CLIENT_SECRET
+                  optional: false
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
             - name: QUARKUS_SMALLRYE_REACTIVE_MESSAGING_KAFKA_BOOTSTRAP_SERVERS

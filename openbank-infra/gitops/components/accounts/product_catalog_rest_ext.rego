@@ -85,3 +85,30 @@ catalog_staff if {
 	not principal_is_machine
 	not startswith(input.principal.id, "agent:")
 }
+
+# Named service readers of the published catalog (would-DENY triage, 2026-11-04). These four
+# services read product configuration or published revisions and used to ride the shared
+# openbank-services principal, which ROLE_API alone deliberately does not admit (see
+# catalog-read-staff-viewer above). Each now authenticates as its OWN Keycloak client carrying the
+# catalog:read scope; only that named identity, holding both ROLE_API and CATALOG_SCOPE_READ, is
+# admitted, and only on catalog.read. catalog.list and every write stay closed to them.
+#   card-issuance: ProductCatalogClient.getByCode   (GET /api/v1/products/by-code/{code})
+#   document:      ProductCatalogClient.getById     (GET /api/v1/products/{id})
+#   billing:       published revision               (GET /api/v2/legacy-products/{productId}/published-revision)
+#   lending:       published loan revision          (GET /api/v2/products/{offeringId})
+catalog_named_service_readers := {
+	"service-account-openbank-card-issuance",
+	"service-account-openbank-document",
+	"service-account-openbank-billing",
+	"service-account-openbank-lending",
+}
+
+allowed_reasons contains "service-named-catalog-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == true
+	some name in catalog_named_service_readers
+	machine_named(name)
+	"ROLE_API" in input.principal.roles
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
