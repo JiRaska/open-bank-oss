@@ -6,7 +6,7 @@ export type SecurityKpis = {
   netpol: Unavailable | { available: true; covered: number; total: number; coveragePct: number; gateGreen: boolean }
   freshness: Unavailable | { available: true; fleetScore: number; scoredModules: number; unknownModules: number }
   credentials: Unavailable | { available: true; totalSecrets: number; staticSecrets: number; withDeadline: number; overdue: number; undeclared: number; overdueFound: boolean }
-  fuzz: Unavailable | { available: true; inScope: number; tested: number; coveragePct: number; totalExercised: number; excludedCount: number; runDate: string }
+  fuzz: Unavailable | { available: true; inScope: number; tested: number; coveragePct: number; totalExercised: number; excludedCount: number; runDate: string; totalNotRun: number | null; authBlockedServices: number | null }
   threatModels: Unavailable | { available: true; moneyPathTotal: number; withModel: number; staleCount: number; oldestDays: number }
   mttr: Unavailable | { available: true; fixedCount: number; medianFixDays: number | null; openCount: number; oldestOpenDays: number }
 }
@@ -70,7 +70,12 @@ export function parseSecurityKpis(value: unknown): SecurityKpis {
     const inScope = integer(fuzzRaw.inScope); const tested = integer(fuzzRaw.tested); const coveragePct = percent(fuzzRaw.coveragePct)
     if (tested > inScope || coveragePct !== ratio(tested, inScope)) throw new Error('Contradictory fuzz coverage')
     if (typeof fuzzRaw.runDate !== 'string' || (fuzzRaw.runDate !== '' && !DATE.test(fuzzRaw.runDate))) throw new Error('Invalid fuzz date')
-    return { available: true as const, inScope, tested, coveragePct, totalExercised: integer(fuzzRaw.totalExercised), excludedCount: integer(fuzzRaw.excludedCount), runDate: fuzzRaw.runDate }
+    // Operations that answered only 401/403 in every fuzz pass are NOT RUN, never passed. null =
+    // the snapshot predates the field (not reported), which must not render as zero.
+    const totalNotRun = fuzzRaw.totalNotRun == null ? null : integer(fuzzRaw.totalNotRun)
+    const authBlockedServices = fuzzRaw.authBlockedServices == null ? null : integer(fuzzRaw.authBlockedServices)
+    if (authBlockedServices !== null && authBlockedServices + tested > inScope) throw new Error('Contradictory fuzz auth-blocked count')
+    return { available: true as const, inScope, tested, coveragePct, totalExercised: integer(fuzzRaw.totalExercised), excludedCount: integer(fuzzRaw.excludedCount), runDate: fuzzRaw.runDate, totalNotRun, authBlockedServices }
   })()
 
   const threatRaw = object(raw.threatModels); const threatUnavailable = unavailable(threatRaw)

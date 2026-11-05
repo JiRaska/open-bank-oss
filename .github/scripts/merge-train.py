@@ -130,7 +130,9 @@ GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 TRAIN_TURN_S = 30 * 60
 # Green carrier first (#13400): a VERIFIED green carrier merges before any strict-lane PR is served in
 # the same tick — it is not voided by a strict merge. ONE exception, bounded to one tick per holder
-# head: a reservation holder that is itself GREEN on an up-to-date head merges first. Trade-off: the
+# head: a reservation holder that is itself GREEN on an up-to-date head AND did not defer to this
+# carrier (no DEFER_CONTEXT on its head) merges first; a holder that deferred keeps its promise, the
+# carrier built under its CI merges past it (2026-11-05: 9 carriers, 0 train merges). Trade-off: the
 # holder carries the oldest reservation and a full fleet CI (~1.5 h, restarted from zero if main moves),
 # while the carrier is cheap to rebuild from green heads; deploy/release PRs riding a carrier lose one
 # tick, not an hour (#14191/#14338, #14183/#14327). Original rule, measured 2026-10-24 08:00Z to
@@ -2372,7 +2374,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
             if (hstate == "green" and not shadow
                     and git("merge-base", "--is-ancestor", live_main, hview["head_sha"], check=False).returncode == 0
-                    and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"):
+                    and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"
+                    and gh.app_statuses(hview["head_sha"]).get(DEFER_CONTEXT, ("", ""))[0] != "success"):
                 # Green holder first, ONE tick per holder head: the holder is green on a head that contains
                 # live main (re-checked against live main, since an earlier carrier of this tick may have
                 # moved it), so it merges in THIS tick's strict_lane. A carrier merging first would push it
@@ -2381,6 +2384,16 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                 # holder head so the wait is bounded: if the holder is still green and unmerged next tick
                 # (merge refused, source intent changed, a train in flight, main-red deferral) the carrier
                 # takes the green-carrier-first path below instead of stalling behind it.
+                # NOT for a holder that DEFERRED to this carrier (DEFER_CONTEXT on its head, recorded by
+                # publish under the bounded deferral): that record is the promise that the carrier built
+                # under its CI may merge past it. Honouring the holder first instead voided every such
+                # carrier — the holder's CI always starts before the carrier's (the carrier is built
+                # during it), so it goes green first, merges, and the carrier is rejected next tick as
+                # "main moved since publish"; the rebuilt carrier is then built under the NEXT reservation
+                # and loses again. Measured 2026-11-05 00:00-10:50Z: 9 carriers, 0 train merges, 22 strict
+                # PRs queued (#14860 lost to #14831 at 07:47Z, #14871 to #14562 at 10:35Z). The deferring
+                # holder keeps the ADR-0343 bound: pre-empted at most once, its update-branch inherits the
+                # record through the first parent and no further carrier is built under it.
                 gh.post_status(hview["head_sha"], "success", f"green carrier #{carrier} waited one tick for this head",
                                context=CARRIER_YIELD_CONTEXT)
                 log(f"carrier #{carrier}: green, but strict-lane #{holder} is green and up to date — it merges "
@@ -2727,9 +2740,10 @@ def deferral_state(gh, git, strict: list, holder: int) -> str | None:
     """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
     RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
     published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
-    held. A VERIFIED green carrier is held only for a GREEN, up-to-date holder, and only one tick per
-    holder head (CARRIER_YIELD_CONTEXT): that holder merges first. Past a running holder, or a green
-    one that already had its tick, it merges before strict_lane runs (green carrier first, #13400). Its merge puts the head behind main and its
+    held. A VERIFIED green carrier is held only for a GREEN, up-to-date holder that did NOT defer to
+    it (no DEFER_CONTEXT on that head), and only one tick per holder head (CARRIER_YIELD_CONTEXT):
+    that holder merges first. Past a running holder, a "granted" one, or a green one that already had
+    its tick, it merges before strict_lane runs (green carrier first, #13400). Its merge puts the head behind main and its
     update-branch inherits the record through the first parent: after that one yield no further
     carrier is built under it, so the strict PR has priority until it merges or fails."""
     view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -5452,11 +5466,16 @@ def self_test() -> int:
             gh.head_checks.clear()
             reset()
 
-            # (3) GREEN HOLDER FIRST (#14191/#14338, #14183/#14327): the strict head and the carrier
-            # built under its CI are BOTH green in one tick. The holder is up to date, so it merges
-            # first; the carrier merging first would push it behind main and restart its full CI.
-            # The carrier merges nothing this tick (it is rebuilt over the new main later). This is
-            # the must-FAIL case: on code where the green carrier goes first, gh.merged == [1].
+            # (3) GRANTED DEFERRAL IS HONOURED (2026-11-05): the strict head and the carrier built under
+            # its CI are BOTH green in one tick. The holder yielded to THIS carrier at publish
+            # (DEFER_CONTEXT on its head), so the carrier merges first and the holder is not merged on
+            # this tick; it is update-branched and inherits the record, so no further carrier is built
+            # under it. This is the must-FAIL case: on code where a green holder pre-empts the carrier
+            # it deferred to, gh.merged == [35] and the carrier is voided by "main moved since publish".
+            # Measured 2026-11-05 00:00-10:50Z: 9 carriers published, 0 train merges; each green carrier
+            # (#14860 for #14831, #14871 for #14562, ...) waited one tick, lost main to the holder it had
+            # been built under, and was rejected on the next tick — with 22 strict PRs queued, every
+            # rebuilt carrier was built under the next reservation and lost again.
             gh.updates.clear()
             running_reservation_and_green_candidate()
             tick()
@@ -5465,12 +5484,33 @@ def self_test() -> int:
             s = settle_now()
             def yielded(sha):
                 return gh.app_statuses(sha).get(CARRIER_YIELD_CONTEXT, ("", ""))[0]
-            check("green holder first: green strict holder + green carrier -> the holder merges, the carrier does not",
+            check("granted deferral: green holder that yielded to this carrier + green carrier -> the carrier merges, the holder does not",
+                  gh.merged == [1] and 35 not in gh.merged and not s["rejected"] and deferral(pw_head) == "success",
+                  f"{s} merged={gh.merged} updates={gh.updates} defer={deferral(pw_head)!r}")
+            check("granted deferral: no one-tick yield is recorded on the holder head (it already yielded at publish)",
+                  yielded(pw_head) != "success", f"yielded={yielded(pw_head)!r}")
+            gh.updates.clear()
+            reset()
+
+            # (3-nd) GREEN HOLDER FIRST, only for a holder that did NOT defer (#14191/#14338, #14183/#14327):
+            # the same two green heads, but the holder's head carries no DEFER_CONTEXT (the carrier was not
+            # built under its reservation). The holder is up to date, so it merges first; the carrier
+            # merging first would push it behind main and restart its full CI. The carrier merges nothing
+            # this tick (it is rebuilt over the new main later). Must-FAIL case: on code where the green
+            # carrier goes first unconditionally, gh.merged == [1].
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.statuses[pw_head] = [r for r in gh.statuses.get(pw_head, []) if r[0] != DEFER_CONTEXT]
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            s = settle_now()
+            check("green holder first (no deferral): green strict holder + green carrier -> the holder merges, the carrier does not",
                   gh.merged == [35] and 1 not in gh.merged and gh.updates == [],
                   f"{s} merged={gh.merged} updates={gh.updates}")
-            check("green holder first: the holder was merged on its own, un-updated head",
+            check("green holder first (no deferral): the holder was merged on its own, un-updated head",
                   gh.prs[35]["head"]["sha"] == pw_head, "head moved")
-            check("green holder first: the carrier is left open and NOT in flight; the yield is recorded on the holder head",
+            check("green holder first (no deferral): the carrier is left open and NOT in flight; the yield is recorded on the holder head",
                   not s["in_flight"] and any(c["state"] == "open" for c in gh.carriers.values()) and yielded(pw_head) == "success",
                   f"{s} yielded={yielded(pw_head)!r}")
             gh.updates.clear()
@@ -5484,6 +5524,7 @@ def self_test() -> int:
             running_reservation_and_green_candidate()
             tick()
             pw_head = gh.prs[35]["head"]["sha"]
+            gh.statuses[pw_head] = [r for r in gh.statuses.get(pw_head, []) if r[0] != DEFER_CONTEXT]  # a holder that did not defer
             gh.post_status(pw_head, "success", "strict lane: left by a refused merge")   # a stale success
             gh.head_checks.clear()
             gh.refuse_merge = {35}
@@ -5497,6 +5538,21 @@ def self_test() -> int:
                   gh.app_statuses(pw_head).get(STATUS_CONTEXT, ("", ""))[0] != "success",
                   f"{gh.app_statuses(pw_head).get(STATUS_CONTEXT)}")
             gh.refuse_merge = set()
+            gh.updates.clear()
+            reset()
+
+            # (3b) THE ONE-YIELD BOUND under the granted deferral: the carrier merged past the holder that
+            # deferred to it (case 3). The holder is behind main, is update-branched once, its new head
+            # inherits the deferral record through the first parent, so no second carrier is built while
+            # its CI runs, and it merges after that one more CI cycle — the ADR-0343 bound.
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            settle_now()                               # the carrier merges first (granted deferral)
+            check("one-yield bound: the carrier merged, the deferring holder was update-branched once",
+                  gh.merged == [1] and gh.updates == [35], f"merged={gh.merged} updates={gh.updates}")
             b_head = gh.prs[35]["head"]["sha"]
             if b_head == pw_head:
                 settle_now()
@@ -5506,7 +5562,7 @@ def self_test() -> int:
             _s2, st2 = tick()                          # its CI runs: no second carrier (deferral inherited)
             gh.head_checks.clear()
             s3 = settle_now()
-            check("green carrier first: strict PR is served next - updated once, merges after one more CI cycle",
+            check("one-yield bound: strict PR is served next - updated once, merges after one more CI cycle",
                   gh.updates == [35] and st2 == "in-flight" and 35 in s3["merged"] and 2 not in gh.merged,
                   f"st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
             gh.updates.clear()
@@ -6827,7 +6883,7 @@ def main() -> int:
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
-    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "8")))
+    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "16")))
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
     ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
     ap.add_argument("--run-id", default="")
