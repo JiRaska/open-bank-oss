@@ -145,7 +145,7 @@ def caller_block(modules):
         if lane == 'pr':
             predecessors = pr_predecessors(modules, width, PR_BUILD_SECONDS)
         else:
-            predecessors = dict(zip(modules[width:], modules))
+            predecessors = dict(zip(modules[width:], modules, strict=False))
         for module in modules:
             event = "github.event_name == 'pull_request'" if lane == 'pr' else "github.event_name != 'pull_request'"
             selected = f"({event}) && contains(fromJSON(needs.changes.outputs.services || '[]'), '{module}')"
