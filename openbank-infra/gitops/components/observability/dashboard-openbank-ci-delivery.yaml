@@ -1,0 +1,447 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CI/CD delivery dashboard over the ADR-0255 Tier 2 ClickHouse store: every workflow's runs
+# and jobs (ci_workflow_runs, ci_workflow_jobs) and Argo CD deploy events (deploy_events,
+# ADR-0061 Phase 2). Sibling of dashboard-openbank-ci-gates.yaml, which stays the gate view.
+# Same datasource pairing (uid `clickhouse`). Every query reads FINAL: the tables are
+# ReplacingMergeTree and the pullers re-insert overlapping windows by design. Run panels read
+# the latest attempt per run_id only, so a re-run is not counted twice.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-ci-delivery
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-ci-delivery.json: |
+    {
+      "id": null,
+      "uid": "openbank-cid",
+      "title": "OpenBank — CI/CD Delivery",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "5m",
+      "tags": [
+        "ci",
+        "dora",
+        "openbank"
+      ],
+      "time": {
+        "from": "now-14d",
+        "to": "now"
+      },
+      "timepicker": {},
+      "timezone": "browser",
+      "templating": {
+        "list": [
+          {
+            "current": {
+              "selected": false,
+              "text": "clickhouse",
+              "value": "clickhouse"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "multi": false,
+            "name": "ds_clickhouse",
+            "options": [],
+            "query": "grafana-clickhouse-datasource",
+            "refresh": 1,
+            "type": "datasource",
+            "label": "ClickHouse"
+          }
+        ]
+      },
+      "annotations": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "text",
+          "title": "",
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 24,
+            "h": 2
+          },
+          "options": {
+            "mode": "markdown",
+            "content": "Every workflow, not only ci.yml: `ci_workflow_runs` / `ci_workflow_jobs` (gate-health-puller, every 30 min) and `deploy_events` (deploy-event-puller, Argo CD sync history, every 15 min). ADR-0255 Tier 2 extension, ADR-0061 Phase 2 deploy-event log. A deploy is a distinct (Application, revision): a self-heal re-sync of the same revision is a sync, not a deploy. Runs count the latest attempt only. Rows start on the day this deployed: no backfill."
+          }
+        },
+        {
+          "id": 2,
+          "type": "stat",
+          "title": "Completed runs (range)",
+          "gridPos": {
+            "x": 0,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT count() AS value FROM (SELECT * FROM openbank_analytics.ci_workflow_runs FINAL ORDER BY run_attempt DESC LIMIT 1 BY run_id) WHERE $__timeFilter(created_at)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Cancelled share (range)",
+          "gridPos": {
+            "x": 6,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT countIf(conclusion = 'cancelled') / count() AS value FROM (SELECT * FROM openbank_analytics.ci_workflow_runs FINAL ORDER BY run_attempt DESC LIMIT 1 BY run_id) WHERE $__timeFilter(created_at)"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "type": "stat",
+          "title": "Failure share, push to main",
+          "gridPos": {
+            "x": 12,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT countIf(conclusion = 'failure') / count() AS value FROM (SELECT * FROM openbank_analytics.ci_workflow_runs FINAL ORDER BY run_attempt DESC LIMIT 1 BY run_id) WHERE $__timeFilter(created_at) AND event = 'push' AND head_branch = 'main'"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "type": "stat",
+          "title": "Job queue p95 (range)",
+          "gridPos": {
+            "x": 18,
+            "y": 2,
+            "w": 6,
+            "h": 4
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT quantile(0.95)(dateDiff('second', created_at, started_at)) AS value FROM openbank_analytics.ci_workflow_jobs FINAL WHERE $__timeFilter(created_at) AND started_at IS NOT NULL AND conclusion != 'skipped'"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Runs per hour by conclusion",
+          "gridPos": {
+            "x": 0,
+            "y": 6,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toStartOfHour(created_at) AS time, conclusion, count() AS runs FROM (SELECT * FROM openbank_analytics.ci_workflow_runs FINAL ORDER BY run_attempt DESC LIMIT 1 BY run_id) WHERE $__timeFilter(created_at) GROUP BY time, conclusion ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "type": "table",
+          "title": "Workflows by wasted runs (failed + cancelled)",
+          "gridPos": {
+            "x": 0,
+            "y": 14,
+            "w": 12,
+            "h": 10
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT workflow, count() AS runs, countIf(conclusion = 'failure') AS failed, countIf(conclusion = 'cancelled') AS cancelled, round((failed + cancelled) / runs, 3) AS waste_share FROM (SELECT * FROM openbank_analytics.ci_workflow_runs FINAL ORDER BY run_attempt DESC LIMIT 1 BY run_id) WHERE $__timeFilter(created_at) GROUP BY workflow ORDER BY failed + cancelled DESC LIMIT 25"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "type": "table",
+          "title": "Top failing steps",
+          "gridPos": {
+            "x": 12,
+            "y": 14,
+            "w": 12,
+            "h": 10
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT workflow, job_name, failed_step, count() AS failures, max(completed_at) AS last_seen FROM openbank_analytics.ci_workflow_jobs FINAL WHERE $__timeFilter(created_at) AND conclusion = 'failure' GROUP BY workflow, job_name, failed_step ORDER BY failures DESC LIMIT 25"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Job queue time p95 by runner label",
+          "gridPos": {
+            "x": 0,
+            "y": 24,
+            "w": 24,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toStartOfHour(created_at) AS time, arrayStringConcat(runner_labels, ',') AS label, quantile(0.95)(dateDiff('second', created_at, started_at)) AS p95 FROM openbank_analytics.ci_workflow_jobs FINAL WHERE $__timeFilter(created_at) AND started_at IS NOT NULL AND conclusion != 'skipped' GROUP BY time, label ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "unit": "s",
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Deploys per day (DORA deployment frequency)",
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 1,
+              "rawSql": "SELECT toStartOfDay(deployed_at) AS time, uniqExact(app, revision) AS deploys FROM openbank_analytics.deploy_events FINAL WHERE $__timeFilter(deployed_at) GROUP BY time ORDER BY time"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "lineWidth": 1,
+                "fillOpacity": 10,
+                "spanNulls": false
+              }
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 11,
+          "type": "table",
+          "title": "Deploys per Application",
+          "gridPos": {
+            "x": 12,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "grafana-clickhouse-datasource",
+                "uid": "clickhouse"
+              },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT app, uniqExact(revision) AS deploys, count() AS syncs, max(deployed_at) AS last_deploy, quantile(0.5)(dateDiff('second', deploy_started_at, deployed_at)) AS median_sync_seconds FROM openbank_analytics.deploy_events FINAL WHERE $__timeFilter(deployed_at) GROUP BY app ORDER BY deploys DESC LIMIT 40"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }

@@ -234,6 +234,11 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 # new edge, the same one three other callers already have.
 V9.1 openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml:56: plaintext http:// env value http://clickhouse.analytics.svc:8123
 V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:82: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# Two more callers of the same no-TLS-listener ClickHouse edge, same pod and same namespace:
+# gate-health-puller's `runs` container (pull_runs.py) and deploy-event-puller (Argo CD sync
+# history). Not a new edge -- removing these is the same mesh-mTLS work as the lines above.
+V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:137: plaintext http:// env value http://clickhouse.analytics.svc:8123
+V9.1 openbank-infra/gitops/components/analytics/cronjob-deploy-event-puller.yaml:208: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # cloud-finops-collector (ADR-0316) -> ClickHouse: the same no-TLS-listener edge as the two lines above
 # and admin-ui's own BFF (same namespace, same Secret). Not a new edge class.
 V9.1 openbank-infra/gitops/components/admin-ui/cloud-finops-collector.yaml:104: plaintext http:// env value http://clickhouse.analytics.svc:8123
