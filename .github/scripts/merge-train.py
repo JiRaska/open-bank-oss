@@ -101,7 +101,6 @@ TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 # against a 2.4 h reservation slot (update-branch, full CI restart, one PR per slot).
 STRICT_TRAIN_BRANCH_RE = re.compile(r"^train/strict-[0-9]+-[0-9]+$")
 STRICT_BATCH_CAP_DEFAULT = 8      # members per strict carrier; 1 = today's behaviour (update-branch, one PR per slot)
-STRICT_JUDGE_CAP = 1              # members per strict carrier that change what JUDGES the carrier (JUDGE_CODE)
 STRICT_CARRIER_DESC = "strict lane: verified on strict carrier #{carrier} over main {base}"
 GATES_YAML = ".github/gates/gates.yaml"
 GATE_ID_RE = re.compile(r"^\s*-\s+id:\s*([^\s#]+)")
@@ -301,16 +300,25 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/test-service-build-artifact.py",
     ".github/scripts/test-slsa-source-identity.py",
     ".github/scripts/tests/test_select_admin_ui_rbac_tests.py",
+    # Tests run by name from OTHER workflows (review of #14891: executed with that workflow's permissions).
+    ".github/scripts/test-rerun-flake-artifact.py",         # auto-retry-cancelled.yml
+    ".github/scripts/test-admin-ui-request-trace.py",       # admin-ui-deploy.yml
+    ".github/scripts/test-agent-admission.py",              # agent-issue-worker.yml, agent-pr-steward.yml
 )
-# JUDGE CODE (strict carrier): paths whose change alters what judges the carrier — the privileged gate
-# code above, the train's own script, workflow and carrier library, and every pinned extra-gate workflow
-# (added at run time from `merge_train.extra_gates`). At most STRICT_JUDGE_CAP such members ride one
-# strict carrier, so a red verdict on a carrier is never the product of two judge changes at once.
+# JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
+# workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
+# gate declarations, the governance rules, CODEOWNERS, the privileged gate code above and the train's own
+# script, workflow and carrier library. A member touching any of these RIDES ALONE: a strict carrier of
+# one, verified exactly as today's update-branch head is, so it can never turn a co-member green. Only
+# non-judge strict members (a plain `.github/scripts/*.py` no privileged workflow runs, for instance) are
+# batched together (review of #14891).
 JUDGE_CODE = PRIVILEGED_GATE_CODE + (
     ".github/scripts/merge-train.py",
     ".github/scripts/merge_train_carrier.py",
     ".github/workflows/merge-train.yml",
 )
+JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")
+JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
 SECURITY_SUPPRESSION_PATHS = (".gitleaksignore", ".gitleaks.toml", ".trivyignore", ".semgrep.yml", ".semgrep.yaml")
@@ -405,12 +413,15 @@ class Untrainable:
     its GENERATORS inventory and REGEN_COMMANDS invoke, the libraries gen-index.sh sources, and
     everything under `.github/` except prose and gate-input data (see GITHUB_TRAINABLE_SUFFIXES). If main's script cannot be parsed, it fails CLOSED: any `gen-*` file anywhere."""
 
-    def __init__(self, regen_text: str):
+    def __init__(self, regen_text: str, referenced_tests=()):
         m = re.search(r"find\s+(\S+)\s+-name\s+'([^']+)'", regen_text or "")
         self.find_root = m.group(1).rstrip("/") if m else None
         self.find_name = m.group(2) if m else None
         commands = [c for c in generator_commands(regen_text or "") if c != "__BUNDLES__"] + list(REGEN_COMMANDS)
         self.programs = {tok for c in commands for tok in shlex.split(c) if "/" in tok and tok.endswith((".py", ".sh"))}
+        # Test code a workflow or gates.yaml on main runs BY NAME (referenced_tests, derived by one `git grep`
+        # over main): executed with that workflow's or gate's permissions, so it stays strict (#14891 review).
+        self.referenced_tests = frozenset(referenced_tests or ())
 
     def __call__(self, path: str) -> bool:
         if any(path.startswith(p) for p in UNTRAINABLE_PREFIXES) or path in self.programs:
@@ -421,6 +432,8 @@ class Untrainable:
             return True
         name = path.rsplit("/", 1)[-1]
         if path.startswith(GITHUB_DIR):
+            if path in self.referenced_tests or ("*" in self.referenced_tests and test_code(path)):
+                return True
             if gate_code(path):
                 return False
             return (not name.endswith(GITHUB_TRAINABLE_SUFFIXES)
@@ -428,6 +441,23 @@ class Untrainable:
         if self.find_root is None:
             return name.startswith("gen-")
         return path.startswith(self.find_root + "/") and fnmatch.fnmatch(name, self.find_name)
+
+
+# POSIX ERE (git grep -E): no `(?:`; -o prints the whole match.
+TEST_REF_RE = r"\.github/scripts/([A-Za-z0-9_.-]+/)*(test[-_][A-Za-z0-9_.-]*\.py|[A-Za-z0-9_.-]+_test\.py)"
+
+
+_REFERENCED_TESTS: dict[str, set[str]] = {}   # base sha -> referenced set (content-addressed: never stale)
+
+
+def referenced_tests(git, base: str) -> set[str]:
+    """Every test-shaped script path that main's workflows or gates.yaml name (one execution-free
+    `git grep` over `base`, memoised per base sha — the answer is a function of that commit alone).
+    Unreadable = every test-shaped path stays strict (fail closed: a sentinel `test_code` matches)."""
+    if base not in _REFERENCED_TESTS:
+        r = git("grep", "-h", "-o", "-I", "-E", TEST_REF_RE, base, "--", ".github/workflows", GATES_YAML, check=False)
+        _REFERENCED_TESTS[base] = {"*"} if r.returncode not in (0, 1) else set(r.stdout.split())
+    return set(_REFERENCED_TESTS[base])
 
 
 def gate_code(path: str) -> bool:
@@ -951,9 +981,9 @@ def gate_ids(text: str) -> set[str]:
     return {m.group(1) for ln in text.splitlines() for m in [GATE_ID_RE.match(ln)] if m}
 
 
-def judge_code(path: str, extra_workflows=()) -> bool:
-    """A path whose change alters what JUDGES a strict carrier (JUDGE_CODE plus the pinned extra-gate workflows)."""
-    return path in JUDGE_CODE or path in tuple(extra_workflows or ())
+def judge_path(path: str) -> bool:
+    """A path whose change alters what JUDGES a strict carrier: it rides alone (JUDGE_PREFIXES, JUDGE_PATHS)."""
+    return path.startswith(JUDGE_PREFIXES) or path in JUDGE_PATHS
 
 
 # --------------------------------------------------------------------------- git
@@ -2110,7 +2140,7 @@ def plan_train(gh, git, repo: str, base: str) -> tuple[list[Member], list[Member
     """(fast lane, every train candidate in order, bisect sizes) from live data."""
     required = gh.required()
     regen_text = main_regen_text(git, base)
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text))
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text, referenced_tests(git, base)))
     fragments = regen_inventory_fragments(regen_text)
     fast, train = partition(git, base, cands, fragments)
     main_red = main_red_contexts(gh, git, required, base)
@@ -2177,7 +2207,7 @@ def mode_build(gh, git, builder: TrainBuilder, repo: str, out_dir: str, batch_si
     if capped:
         log(f"build: bisect size(s) {capped} on candidates — the cap counts only members that apply")
     regen_text = main_regen_text(git, base)
-    builder.untrainable = Untrainable(regen_text)
+    builder.untrainable = Untrainable(regen_text, referenced_tests(git, base))
     builder.declared_inputs = regen_inventory_fragments(regen_text)
     os.makedirs(out_dir, exist_ok=True)
     if not batch:
@@ -2590,13 +2620,13 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     # 1 (or no run id) keeps today's behaviour exactly.
     if (not strict_carrier_open and not shadow and strict_cap >= 2 and run_id and attempt and holder is None
             and not main_red and not yield_why and not carrier_in_flight and not any_carrier_open(gh, repo)
+            and not summary.get("strict_tree_mismatch")
             and not any(st == "green" and git("merge-base", "--is-ancestor", base, v["head_sha"], check=False).returncode == 0
                         for st, v in strict)):
         fixes = strict_fixes(gh, git, base, strict, main_red, main_cache)
         views = strict_batch_views(gh, git, base, strict, fixes, summary)
         if views:
-            extra_wfs = tuple((train_extra_gates(git, base) or {}).values())
-            built = build_strict_carrier(git, base, views, strict_cap, lambda f: judge_code(f, extra_wfs),
+            built = build_strict_carrier(git, base, views, strict_cap, judge_path,
                                          regen_inventory_fragments(regen_text), derived_output_patterns(regen_text))
             if built:
                 carrier = publish_strict_carrier(gh, git, base, built[0], built[1], run_id, attempt)
@@ -2692,7 +2722,8 @@ def _settle_view(gh, git, repo: str, required: list[str]):
     main_red = main_red_contexts(gh, git, required, base, main_cache)
     if main_red:
         log(f"::notice::main {base[:12]} is red on {', '.join(sorted(main_red))}: no update-branch except onto a fix")
-    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text), strict=strict, red=red,
+    cands, apps = live_candidates(gh, git, repo, required, base, Untrainable(regen_text, referenced_tests(git, base)),
+                                  strict=strict, red=red,
                                   main_red=main_red)
     cands = promote_fixes(gh, git, repo, base, cands, strict, main_red, main_cache)
     return base, regen_text, strict, red, cands, apps, main_red, main_cache
@@ -3236,26 +3267,29 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     nothing from a PR is checked out. Returns (tip, [(number, head)]) with at least two members, or None:
     fewer than two apply (today's update-branch path), or the batch is REFUSED — a gates.yaml whose
     `- id:` set after the merge is not the union of main's and every member's (an id lost in the merge
-    would retire a gate for the members riding with it), or merge-tree could not decide."""
+    would retire a gate for the members riding with it) is skipped — it rides alone or takes today's
+    lane; merge-tree failing to decide refuses the batch. A JUDGE member (judge_is) rides ALONE: when
+    it is the oldest eligible member it is the whole carrier, otherwise it waits for the next one."""
     own, own_tree = base, git.tree(base)
     base_special = git.special_entries(base)
     gates_union = gate_ids(git("show", f"{base}:{GATES_YAML}", check=False).stdout)
     applied: list[tuple[int, str]] = []
     members: list[Member] = []
     sizes: dict[int, int | None] = {}
-    judge_used = 0
+    alone = False
     for view in views:
         n, head, files = view["number"], view["head_sha"], view.get("files") or []
-        if len(applied) >= cap:
-            log(f"#{n:>6} strict    waits: strict carrier full ({cap})")
+        if alone or len(applied) >= cap:
+            log(f"#{n:>6} strict    waits: strict carrier full ({'a judge member rides alone' if alone else cap})")
             continue
         why = needs_regeneration(files, fragments, outputs)
         if why:
             log(f"#{n:>6} strict    not batched: needs regeneration — {why}; today's lane serves it")
             continue
         is_judge = any(judge_is(f) for f in files)
-        if is_judge and judge_used >= STRICT_JUDGE_CAP:
-            log(f"#{n:>6} strict    waits: a judge-code member already rides this strict carrier (cap {STRICT_JUDGE_CAP})")
+        if is_judge and applied:
+            log(f"#{n:>6} strict    waits: changes what judges the carrier (a workflow, action, gate or rule "
+                f"declaration, privileged code) — it rides alone, after the members ahead of it")
             continue
         r = git("merge-tree", "--write-tree", own, head, check=False)
         if r.returncode == 1:
@@ -3282,18 +3316,21 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
             merged = gate_ids(git("show", f"{tree}:{GATES_YAML}", check=False).stdout)
             if merged != gates_union:
                 lost = sorted(gates_union - merged)
-                log(f"::warning::strict carrier refused: {GATES_YAML} after merging #{n} lacks gate id(s) "
-                    f"{lost[:5]} present in main or a member — a gate retired in the merge; today's lane")
-                return None
+                log(f"#{n:>6} strict    not batched: {GATES_YAML} after merging it lacks gate id(s) {lost[:5]} "
+                    f"present in main or a member — a gate retired in the merge; today's lane serves it")
+                gates_union -= gate_ids(git("show", f"{head}:{GATES_YAML}", check=False).stdout) - merged
+                continue
         own = git("commit-tree", tree, "-p", own, "-m", own_member_message(n, head)).stdout.strip()
         own_tree = tree
         applied.append((n, head))
         members.append(m)
-        judge_used += int(is_judge)
-    # One member alone rides only mid-bisect (it carries a `bisect size`): the carrier over main is then
-    # the verdict that names a culprit or clears it, exactly as a one-member train. Otherwise one green
-    # strict PR takes today's update-branch path, where its own CI already answers the question.
-    if len(applied) < 2 and not (applied and sizes.get(applied[0][0])):
+        if is_judge:
+            alone = True
+    # One member alone rides only as a JUDGE member or mid-bisect (it carries a `bisect size`): the
+    # carrier over main is then the verdict that names a culprit or clears it, exactly as a one-member
+    # train. Otherwise one green strict PR takes today's update-branch path, where its own CI already
+    # answers the question.
+    if len(applied) < 2 and not (applied and (alone or sizes.get(applied[0][0]))):
         return None
     return own, applied
 
@@ -3467,6 +3504,19 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
             expected = merged
             summary["merged"].append(n)
             summary.setdefault("strict", []).append(n)
+        else:
+            # Every member merged: main's tree must now BE the carrier's tree. The members merged
+            # sequentially as squashes pinned to their heads, and the carrier was built with merge-tree
+            # over the same heads; the two agree unless GitHub's squash resolved something differently
+            # (a rename, a mode). A mismatch is not a verdict about any member (each merged verified),
+            # but it says the next carrier's base assumption does not hold: told, and no further strict
+            # carrier is built this tick (the next tick reads main afresh).
+            got = git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/strict-after", check=False).returncode == 0
+            after = git("rev-parse", "refs/merge-train/strict-after", check=False).stdout.strip() if got else ""
+            if after != expected or git.tree(after) != git.tree(sha):
+                log(f"::warning::strict carrier #{carrier}: main {after[:12]} after the last merge does not carry the "
+                    f"carrier's tree — no further strict carrier this tick")
+                summary["strict_tree_mismatch"] = carrier
         close("merged")
     return open_after, acted
 
@@ -3974,7 +4024,7 @@ def _synthetic_origin(root: str) -> None:
     w("ci.py", "import os,sys\nfail=[]\n"
                "if int(open('count.txt').read()) != len(os.listdir('services')): fail.append('gates (data)')\n"
                "if os.path.exists('bad.txt'): fail.append('Validate manifests')\n"
-               "if os.path.exists('.github/workflows/bad.yml'): fail.append('gates (data)')\n"
+               "if os.path.exists('.github/scripts/bad.py'): fail.append('gates (data)')\n"
                "want='\\n'.join(sorted(os.listdir('services')))+'\\n'\n"
                "if not os.path.exists('derived/index.txt') or open('derived/index.txt').read()!=want: fail.append('derived')\n"
                "print(','.join(fail)); sys.exit(1 if fail else 0)\n")
@@ -4031,15 +4081,18 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
     # Strict carrier (ADR-0343 amendment 2026-11-05): every one of these is strict-lane (an executable
     # `.github/` path). pJ1 edits the train's own script and leaves a marker if it is ever EXECUTED.
+    # Judge members (ride alone): the train's own script (leaves a marker if EXECUTED), a workflow, gates.yaml.
     pr("pJ1", {".github/scripts/merge-train.py": f"open({os.path.join(os.path.dirname(root), 'strict-member-ran')!r}, 'w').write('ran')\n"})
     pr("pJ2", {".github/workflows/merge-train.yml": "name: train\n"})
     pr("pGY", {GATES_YAML: "gates:\n  - id: g-one\n    run: true\n"})                  # retires g-two
     pr("pGA", {GATES_YAML: SYN_GATES_YAML + "  - id: g-three\n    run: true\n"})      # adds g-three
-    pr("pWc", {".github/workflows/w.yml": "on: pull_request\n"})                     # conflicts with pW
-    pr("pWR", {".github/workflows/w3.yml": "on: push\n", "docs/w3.md": "w3\n"})      # docs/ is a regen input
-    pr("pWx", {".github/workflows/q\nr.yml": "on: push\n"})                          # control character
-    pr("pW5", {".github/workflows/w5.yml": "on: push\n"})
-    pr("pWbad", {".github/workflows/bad.yml": "on: push\n"})                         # red in CI (ci.py)
+    # Non-judge strict members (plain scripts under .github/scripts): batched together.
+    pr("pP1", {".github/scripts/p1.py": "print(1)\n"})
+    pr("pP2", {".github/scripts/p2.py": "print(2)\n"})
+    pr("pPc", {".github/scripts/two.py": "print('conflict')\n"})                      # conflicts with pW2
+    pr("pPR", {".github/scripts/p4.py": "print(4)\n", "docs/w3.md": "w3\n"})          # docs/ is a regen input
+    pr("pPx", {".github/scripts/q\nr.py": "print(0)\n"})                              # control character
+    pr("pPbad", {".github/scripts/bad.py": "print('bad')\n"})                         # red in CI (ci.py)
 
 
 def git_memo_self_test(check) -> None:
@@ -4263,7 +4316,18 @@ def self_test() -> int:
         check(f"qualifies: {label} refused", not qualifies({**base_pr, **over}, req, checks)[0])
     check("qualifies: no required set refused", not qualifies(base_pr, [], green)[0])
     real_regen = pathlib.Path(REGEN_INVENTORY).read_text() if pathlib.Path(REGEN_INVENTORY).exists() else ""
-    U = Untrainable(real_regen)
+    real_refs = referenced_tests(Git(os.getcwd()), "HEAD") if pathlib.Path(".git").exists() else {"*"}
+    U = Untrainable(real_regen, real_refs)
+    check("referenced tests: derived from the real tree by one git grep (never the fail-closed sentinel)",
+          "*" not in real_refs and len(real_refs) > 20, str(sorted(real_refs))[:200])
+    # Must-fail control for the DERIVED mechanism: a test a workflow or gates.yaml names, that the static
+    # PRIVILEGED list does not carry, is strict only because of the derived set — without it, it would ride.
+    derived_only = sorted(r for r in real_refs if r not in PRIVILEGED_GATE_CODE and test_code(r))
+    check("referenced tests: at least one referenced test is strict by derivation alone",
+          bool(derived_only) and all(U(r) for r in derived_only)
+          and not any(Untrainable(real_regen)(r) for r in derived_only[:3]), str(derived_only[:3]))
+    check("referenced tests: an unreadable tree fails closed (every test-shaped path strict)",
+          Untrainable(real_regen, {"*"})(".github/scripts/test-foo.py") and not Untrainable(real_regen, {"*"})(".github/scripts/check-foo.py"))
     check("untrainable: main's find enumeration is parsed", (U.find_root, U.find_name) ==
           ("openbank-infra/gitops/components", "gen-*opa-bundle*.sh"), f"{U.find_root} {U.find_name}")
     for f in (".github/scripts/regen-derived.sh", ".github/workflows/ci.yml", "docs/adr/gen-index.sh", "docs/adr/lib-frontmatter.sh",
@@ -4336,6 +4400,9 @@ def self_test() -> int:
               ".github/scripts/tests/baz.py", ".github/scripts/e2e/tests/deep.sh", ".github/scripts/test-foo.sh",
               ".github/scripts/test-issue-hygiene.mjs", ".github/scripts/tests/test_codeql_scope_classifier.py",
               ".github/scripts/test-agent-pr-review.py", ".github/scripts/test-merge-authorization-proof.py",
+              # review of #14891: tests other workflows run by name stay strict
+              ".github/scripts/test-rerun-flake-artifact.py", ".github/scripts/test-admin-ui-request-trace.py",
+              ".github/scripts/test-agent-admission.py",
               ".github/scripts/test-merge-train-carrier-lock.py", ".github/scripts/test-merge-train-owner-approval.py",
               ".github/scripts/test-merge-train-main-red-freshness.py", ".github/scripts/e2e/merge-train-gates-yaml.test.py"):
         ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
@@ -4372,10 +4439,18 @@ def self_test() -> int:
     # workflow: the check scripts they run decide a train's own verdict.
     extra_wfs = {pathlib.Path(w) for w in (parse_extra_gates(pathlib.Path(RULES_FILE).read_text()) or {}).values()} \
         if pathlib.Path(RULES_FILE).exists() else set()
+    test_ref = r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]*\.py|[A-Za-z0-9_.-]+_test\.py)"
     for wf in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")) if scripts.is_dir() else []:
         text = wf.read_text(errors="replace")
         if wf in extra_wfs or re.search(r"merge_train_carrier|merge-train", text):
-            must |= set(re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:check-|test[-_]|[A-Za-z0-9_.-]+_test\.py)[A-Za-z0-9_.-]*", text))
+            must |= set(re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*check-[A-Za-z0-9_.-]+", text))
+        # Any test a WORKFLOW runs by name is executed with that workflow's permissions (review of #14891:
+        # auto-retry-cancelled.yml, admin-ui-deploy.yml, agent-*.yml): it stays strict, whatever the workflow.
+        must |= set(re.findall(test_ref, text))
+    # ...and any test gates.yaml names in a `selftest:` or `run:` field: part of a gate's own verdict.
+    gates_decl = pathlib.Path(GATES_YAML)
+    if gates_decl.is_file():
+        must |= set(re.findall(test_ref, gates_decl.read_text(errors="replace")))
     for c in sorted([*scripts.glob("check-*"), *scripts.glob("test-*"), *scripts.glob("test_*")]) if scripts.is_dir() else []:
         if c.is_file() and re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
                                      c.read_text(errors="replace")):
@@ -4388,7 +4463,7 @@ def self_test() -> int:
                                            pp.read_text(errors="replace"))}
             must |= {f".github/scripts/{m}" for m in re.findall(r"with_name\('((?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test)\.py)'\)",
                                                                    pp.read_text(errors="replace"))}
-    missing = sorted(m for m in must if gate_code(m))
+    missing = sorted(m for m in must if gate_code(m) and not U(m))
     check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
           scripts.is_dir() and not missing, str(missing))
     for f in ("docs/a\nb.md", "svc/tab\there.txt", "svc/esc\x1b.txt", "svc/del\x7f.txt"):
@@ -4743,7 +4818,7 @@ def self_test() -> int:
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
-                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pWc": 85, "pWR": 86, "pWx": 87, "pW5": 88, "pWbad": 89}
+                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -5860,6 +5935,7 @@ def self_test() -> int:
             # Green strict-lane PRs BEHIND main ride one execution-free carrier built by settle; each
             # case names what a missing control would let through. The fixture CI (ci.py) judges the
             # carrier head exactly as it judges a train carrier; PR heads report green on their own.
+            # Non-judge members: pW2 (36), pP1 (88), pP2 (90); judge members ride alone: pJ1/pJ2/pGY/pGA.
             def settle_strict(cap=8):
                 counter[0] += 1
                 return mode_settle(gh, Git(clone("settle")), "o/r", False, run_id=str(counter[0]), attempt="1",
@@ -5887,22 +5963,20 @@ def self_test() -> int:
             # (1) batching on/off: two green strict PRs behind main and ONE slot. Cap 1 = today's behaviour
             # (update-branch of the oldest, no carrier); cap 8 = one strict carrier carrying both, no
             # update-branch, main reserved; the next tick merges both pinned with the carrier status.
-            gh.updates.clear()
-            open_only("pW", "pW2", "pF")
+            open_only("pW2", "pP1", "pF")
             advance_main()
             s = settle_strict(cap=1)
             check("strict carrier (1): cap 1 keeps today's behaviour — update-branch of the oldest, no strict carrier",
-                  gh.updates == [35] and not strict_open() and gh.merged == [] and "strict_carrier" not in s,
+                  gh.updates == [36] and not strict_open() and gh.merged == [] and "strict_carrier" not in s,
                   f"updates={gh.updates} open={len(strict_open())} {s}")
-            gh.updates.clear()
             reset()
-            open_only("pW", "pW2", "pF")
+            open_only("pW2", "pP1", "pF")
             advance_main()
             s = settle_strict(cap=8)
             c1 = strict_open()
             check("strict carrier (1): cap 8 batches both behind-main strict PRs into one carrier, no update-branch, main reserved",
-                  len(c1) == 1 and carrier_members(c1[0]) == [35, 36] and gh.updates == [] and gh.merged == []
-                  and s["in_flight"] and s.get("strict_batch") == [35, 36] and s["fast"] == [],
+                  len(c1) == 1 and carrier_members(c1[0]) == [36, 88] and gh.updates == [] and gh.merged == []
+                  and s["in_flight"] and s.get("strict_batch") == [36, 88] and s["fast"] == [],
                   f"open={len(c1)} members={[carrier_members(c) for c in c1]} updates={gh.updates} {s}")
             check("strict carrier (1): the carrier branch is train/strict-<run>-<attempt>, built by settle with its own commits only",
                   bool(c1) and STRICT_TRAIN_BRANCH_RE.fullmatch(c1[0]["head"]["ref"]) is not None
@@ -5910,11 +5984,12 @@ def self_test() -> int:
                   and gh.app_statuses(c1[0]["head"]["sha"]).get(RECORD_CONTEXT, ("",))[0] == "success",
                   f"{[c['head']['ref'] for c in c1]}")
             s = settle_strict(cap=8)
-            check("strict carrier (1): green carrier — both members merge individually, pinned, with the strict-carrier status",
-                  gh.merged == [35, 36] and not strict_open()
+            check("strict carrier (1): green carrier — both members merge individually, pinned, with the strict-carrier status; "
+                  "main's tree after the last merge is the carrier's tree",
+                  gh.merged == [36, 88] and not strict_open() and "strict_tree_mismatch" not in s
                   and all(sc_desc(n)[0] == "success" and sc_desc(n)[1].startswith("strict lane: verified on strict carrier #")
-                          for n in (35, 36)) and gh.updates == [],
-                  f"merged={gh.merged} {sc_desc(35)} {sc_desc(36)} {s}")
+                          for n in (36, 88)) and gh.updates == [],
+                  f"merged={gh.merged} {sc_desc(36)} {sc_desc(88)} {s}")
             check("strict carrier (1): main's head is a strict merge (TRAIN_TURN / FAST_TURN semantics kept)",
                   last_merge_was_strict(gh, Git(origin), gh.main_sha()))
             s = settle_strict(cap=8)
@@ -5922,45 +5997,54 @@ def self_test() -> int:
                   s["fast"] == [34], str(s))
             reset()
 
-            # (2) judge-changer cap: two members changing JUDGE_CODE never share a strict carrier.
-            open_only("pW", "pJ1", "pJ2")
+            # (2) a JUDGE member (workflow, action, gates.yaml, rules.yaml, CODEOWNERS, privileged or train code)
+            # rides ALONE: never with another member, oldest first.
+            open_only("pW2", "pP1", "pJ1", "pJ2")
             advance_main()
-            s = settle_strict(cap=8)
-            c = strict_open()
-            check("strict carrier (2): at most one JUDGE_CODE member per carrier — the second judge changer waits",
-                  len(c) == 1 and carrier_members(c[0]) == [35, 81] and 82 not in (s.get("strict_batch") or []),
-                  f"members={[carrier_members(x) for x in c]} {s}")
+            batches = []
+            for _ in range(4):
+                s = settle_strict(cap=8)
+                batches.append(s.get("strict_batch"))
+            check("strict carrier (2): judge members never share a carrier — non-judge pair first, then each judge member alone",
+                  batches == [[36, 88], [81], [82], None] and gh.merged == [36, 88, 81, 82] and gh.updates == [],
+                  f"batches={batches} merged={gh.merged} updates={gh.updates}")
+            for f in (".github/workflows/ci.yml", ".github/workflows/_service-ci.yml", ".github/actions/x/action.yml",
+                      ".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS",
+                      ".github/scripts/merge-train.py", ".github/scripts/check-adr-registry.sh", ".github/workflows/security.yml"):
+                check(f"judge_path: {f} rides alone", judge_path(f))
+            for f in (".github/scripts/two.py", ".github/scripts/check-unrelated.py", ".github/scripts/lib/x.sh", "docs/x.md"):
+                check(f"judge_path: {f} may be batched", not judge_path(f))
             reset()
 
             # (3) conflicts: a member conflicting with the members ahead of it is dropped from this carrier
             # (no notice: it is not the author's fault); one conflicting with MAIN is told once and never rides.
-            open_only("pW", "pWc", "pW2")
+            open_only("pW2", "pPc", "pP1")
             advance_main()
             s = settle_strict(cap=8)
             c = strict_open()
             check("strict carrier (3): a member conflicting with the members ahead of it is dropped, the rest ride",
-                  len(c) == 1 and carrier_members(c[0]) == [35, 36] and 85 not in (s.get("strict_batch") or [])
+                  len(c) == 1 and carrier_members(c[0]) == [36, 88] and 85 not in (s.get("strict_batch") or [])
                   and not any(n == 85 for n, _ in gh.comments),
                   f"members={[carrier_members(x) for x in c]} comments={[n for n, _ in gh.comments]}")
             reset()
-            open_only("pW", "pW2")
+            open_only("pW2", "pP1")
             gh.g("checkout", "-q", "-f", "main")
-            pathlib.Path(origin, ".github/workflows/w.yml").parent.mkdir(parents=True, exist_ok=True)
-            pathlib.Path(origin, ".github/workflows/w.yml").write_text("on: release\n")
+            pathlib.Path(origin, ".github/scripts/two.py").parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(origin, ".github/scripts/two.py").write_text("print('main')\n")
             gh.g("add", "-A")
-            gh.g("commit", "-q", "-m", "main edits the workflow pW edits: pW conflicts with main")
+            gh.g("commit", "-q", "-m", "main edits the script pW2 edits: pW2 conflicts with main")
             s = settle_strict(cap=8)
             c = strict_open()
             check("strict carrier (3): a member conflicting with main is told once (notice) and never rides",
-                  35 not in (s.get("strict_batch") or []) and NOTICE_CONTEXT in gh.app_statuses(gh.prs[35]["head"]["sha"])
-                  and any(n == 35 for n, _ in gh.comments) and not any(35 in (carrier_members(x) or []) for x in c),
-                  f"{s} notice={gh.app_statuses(gh.prs[35]['head']['sha']).get(NOTICE_CONTEXT)}")
+                  36 not in (s.get("strict_batch") or []) and NOTICE_CONTEXT in gh.app_statuses(gh.prs[36]["head"]["sha"])
+                  and any(n == 36 for n, _ in gh.comments) and not any(36 in (carrier_members(x) or []) for x in c),
+                  f"{s} notice={gh.app_statuses(gh.prs[36]['head']['sha']).get(NOTICE_CONTEXT)}")
             reset()
 
             # (4) a member removed the producer of a required context: the carrier never reports it, so it
             # never merges — pending holds the lane until the ceiling, then no verdict, nobody blamed, and
             # the members leave the carrier lane on these heads (update-branch lane).
-            open_only("pW", "pW2")
+            open_only("pW2", "pP1")
             advance_main()
             settle_strict(cap=8)
             gh.carrier_override = {"derived": "absent"}           # the context is never reported on any carrier
@@ -5971,7 +6055,7 @@ def self_test() -> int:
                   len(c) == 1 and s1["in_flight"] and s2["in_flight"] and gh.merged == [] and s2["culprits"] == []
                   and gh.updates == [], f"{s1} {s2} merged={gh.merged} updates={gh.updates}")
             ct4 = int(gh.g("show", "-s", "--format=%ct", c[0]["head"]["sha"]).stdout.strip()) if c else 0
-            heads4 = {n: gh.prs[n]["head"]["sha"] for n in (35, 36)}   # the heads that rode; 35's is updated below
+            heads4 = {n: gh.prs[n]["head"]["sha"] for n in (36, 88)}   # the heads that rode; 36's is updated below
             real_time_sc = time.time
             time.time = lambda: ct4 + RESERVATION_CEILING_S + 60
             try:
@@ -5981,28 +6065,31 @@ def self_test() -> int:
             check("strict carrier (4): past the ceiling the carrier closes with no verdict; members fall back to update-branch",
                   not strict_open() and gh.merged == [] and s3["culprits"] == [] and s3["bisected"] == []
                   and all(RELEASED_CONTEXT in gh.app_statuses(h) for h in heads4.values())
-                  and gh.updates == [35], f"{s3} merged={gh.merged} updates={gh.updates}")
+                  and gh.updates == [36], f"{s3} merged={gh.merged} updates={gh.updates}")
             gh.carrier_override = {}
             gh.updates.clear()
             reset()
 
-            # (5) gates.yaml id-union guard: a member whose merge retires a gate id refuses the BATCH (today's
-            # path serves the oldest); a member that only ADDS an id rides (control, must pass).
-            open_only("pW", "pGY", "pW2")
+            # (5) gates.yaml id-union guard: a member whose merge retires a gate id is skipped (it is a judge
+            # member, so alone it falls to today's update-branch path); a member that only ADDS an id rides
+            # alone as a judge carrier (control, must pass).
+            open_only("pGY", "pW2", "pP1")
             advance_main()
-            s = settle_strict(cap=8)
-            check("strict carrier (5): a gates.yaml member retiring a `- id:` refuses the batch — no carrier, update-branch as today",
-                  not strict_open() and "strict_carrier" not in s and gh.updates == [35],
-                  f"open={len(strict_open())} updates={gh.updates} {s}")
+            s1 = settle_strict(cap=8)                       # [36, 88]; pGY (judge) waits
+            s2 = settle_strict(cap=8)                       # merged; pGY alone: id loss -> skipped -> update-branch
+            check("strict carrier (5): a gates.yaml member retiring a `- id:` never rides — skipped, update-branch as today",
+                  s1.get("strict_batch") == [36, 88] and gh.merged == [36, 88] and not strict_open()
+                  and "strict_carrier" not in s2 and gh.updates == [83],
+                  f"{s1.get('strict_batch')} merged={gh.merged} open={len(strict_open())} updates={gh.updates} {s2}")
             gh.updates.clear()
             reset()
-            open_only("pW", "pGA")
+            open_only("pGA")
             advance_main()
             s = settle_strict(cap=8)
             c = strict_open()
             merged_ids = gate_ids(gh.g("show", f"{c[0]['head']['sha']}:{GATES_YAML}").stdout) if c else set()
-            check("strict carrier (5): a gates.yaml member that only adds an id rides (control); the merged id set is the union",
-                  len(c) == 1 and carrier_members(c[0]) == [35, 84] and merged_ids == {"g-one", "g-two", "g-three"},
+            check("strict carrier (5): a gates.yaml member that only adds an id rides alone (control); the merged id set is the union",
+                  len(c) == 1 and carrier_members(c[0]) == [84] and merged_ids == {"g-one", "g-two", "g-three"} and gh.updates == [],
                   f"members={[carrier_members(x) for x in c]} ids={merged_ids}")
             check("gate_ids: line scan reads `- id:` entries only",
                   gate_ids(SYN_GATES_YAML + "    # - id: commented\n  - id: g-x # trailing\n") == {"g-one", "g-two", "g-x"})
@@ -6010,22 +6097,22 @@ def self_test() -> int:
 
             # (6) a member whose change needs regeneration (touches a regen-inventory input or a derived
             # output) never rides a strict carrier — it keeps today's lane, where main's gates prove it.
-            open_only("pW", "pWR", "pW2")
+            open_only("pW2", "pPR", "pP1")
             advance_main()
             s = settle_strict(cap=8)
             c = strict_open()
             check("strict carrier (6): a member needing regeneration is refused from the carrier; the others ride",
-                  len(c) == 1 and carrier_members(c[0]) == [35, 36] and 86 not in (s.get("strict_batch") or []),
+                  len(c) == 1 and carrier_members(c[0]) == [36, 88] and 86 not in (s.get("strict_batch") or []),
                   f"members={[carrier_members(x) for x in c]} {s}")
-            check("needs_regeneration: inventory input and derived output are both refused, a workflow is not",
+            check("needs_regeneration: inventory input and derived output are both refused, a plain script is not",
                   needs_regeneration(["docs/w3.md"], ["docs/"], []) is not None
                   and needs_regeneration(["derived/index.txt"], [], ["derived/*"]) is not None
-                  and needs_regeneration([".github/workflows/w.yml"], ["docs/"], ["derived/*"]) is None)
+                  and needs_regeneration([".github/scripts/p1.py"], ["docs/"], ["derived/*"]) is None)
             reset()
 
             # (7) main moved under an open strict carrier: rejected (no merge, nobody blamed) and rebuilt
             # over the new main in the same tick.
-            open_only("pW", "pW2")
+            open_only("pW2", "pP1")
             advance_main()
             settle_strict(cap=8)
             old = strict_open()[0]["number"] if strict_open() else None
@@ -6038,28 +6125,28 @@ def self_test() -> int:
             ch = parse_own_chain(Git(origin), c[0]["head"]["sha"]) if c else None
             check("strict carrier (7): main moved since publish — carrier rejected, nobody blamed, rebuilt over live main",
                   old in s["rejected"] and gh.merged == [] and s["culprits"] == [] and len(c) == 1
-                  and c[0]["number"] != old and ch is not None and ch[0] == gh.main_sha() and ch[1] and [n for n, _ in ch[1]] == [35, 36],
+                  and c[0]["number"] != old and ch is not None and ch[0] == gh.main_sha() and ch[1] and [n for n, _ in ch[1]] == [36, 88],
                   f"{s} open={[x['number'] for x in c]}")
             reset()
 
             # (8) red carrier of four: halved across ticks; the innocents are rebatched and merge; the one
             # red member is isolated as the culprit on a one-member strict carrier.
-            open_only("pW", "pW2", "pW5", "pWbad")
+            open_only("pW2", "pP1", "pPbad", "pP2")
             advance_main()
-            s1 = settle_strict(cap=8)                       # carrier [35, 36, 88, 89], red
-            s2 = settle_strict(cap=8)                       # judged red: bisect size 2; carrier [35, 36]
+            s1 = settle_strict(cap=8)                       # carrier [36, 88, 89, 90], red
+            s2 = settle_strict(cap=8)                       # judged red: bisect size 2; carrier [36, 88]
             check("strict carrier (8): a red four-member carrier halves — bisect size 2 on every member, nobody blamed",
-                  s1.get("strict_batch") == [35, 36, 88, 89] and s2["bisected"] == [[35, 36, 88, 89]] and s2["culprits"] == []
-                  and s2.get("strict_batch") == [35, 36] and gh.merged == [],
+                  s1.get("strict_batch") == [36, 88, 89, 90] and s2["bisected"] == [[36, 88, 89, 90]] and s2["culprits"] == []
+                  and s2.get("strict_batch") == [36, 88] and gh.merged == [],
                   f"{s1.get('strict_batch')} {s2}")
-            s3 = settle_strict(cap=8)                       # [35, 36] green: merged; carrier [88, 89]
-            s4 = settle_strict(cap=8)                       # [88, 89] red: bisect 1; carrier [88]
-            s5 = settle_strict(cap=8)                       # [88] green: merged; carrier [89]
-            s6 = settle_strict(cap=8)                       # [89] red alone: culprit
+            s3 = settle_strict(cap=8)                       # [36, 88] green: merged; carrier [89, 90]
+            s4 = settle_strict(cap=8)                       # [89, 90] red: bisect 1; carrier [89]
+            s5 = settle_strict(cap=8)                       # [89] red alone: culprit; carrier [90]
+            s6 = settle_strict(cap=8)                       # [90] green: merged
             check("strict carrier (8): innocents rebatched and merged, the red member isolated as the culprit",
-                  gh.merged == [35, 36, 88] and s6["culprits"] == [89] and sc_desc(89)[0] == "failure"
+                  gh.merged == [36, 88, 90] and s5["culprits"] == [89] and sc_desc(89)[0] == "failure"
                   and sc_desc(89)[1].startswith(CULPRIT_PREFIX) and (89, CULPRIT_MESSAGE) in gh.comments
-                  and s3.get("strict_batch") == [88, 89] and s4.get("strict_batch") == [88] and s5.get("strict_batch") == [89],
+                  and s3.get("strict_batch") == [89, 90] and s4.get("strict_batch") == [89] and s5.get("strict_batch") == [90],
                   f"merged={gh.merged} s3={s3.get('strict_batch')} s4={s4.get('strict_batch')} s5={s5.get('strict_batch')} s6={s6}")
             s7 = settle_strict(cap=8)
             check("strict carrier (8): the culprit waits for a push — no further carrier, no update-branch",
@@ -6067,34 +6154,35 @@ def self_test() -> int:
             reset()
 
             # (9) a member's head or source intent changed while the carrier ran: not merged.
-            open_only("pW", "pW2")
+            open_only("pW2", "pP1")
             advance_main()
             settle_strict(cap=8)
-            gh.g("checkout", "-q", "-f", "-B", "pW-pushed", "pW")
-            pathlib.Path(origin, ".github/workflows/w.yml").write_text("on: push\n# pushed\n")
+            gh.g("checkout", "-q", "-f", "-B", "pW2-pushed", "pW2")
+            pathlib.Path(origin, ".github/scripts/two.py").write_text("print(2)\n# pushed\n")
             gh.g("add", "-A")
             gh.g("commit", "-q", "-m", "pushed")
             gh.g("checkout", "-q", "-f", "main")
-            pushed = gh.g("rev-parse", "pW-pushed").stdout.strip()
-            gh.prs[35]["head"].update(ref="pW-pushed", sha=pushed)
+            pushed = gh.g("rev-parse", "pW2-pushed").stdout.strip()
+            gh.prs[36]["head"].update(ref="pW2-pushed", sha=pushed)
             s = settle_strict(cap=8)
             c = strict_open()
             ch = parse_own_chain(Git(origin), c[0]["head"]["sha"]) if c else None
             check("strict carrier (9): a member pushed since the carrier was built is not merged (its carrier verdict is void); "
                   "the carrier is rebuilt from the NEW head",
-                  gh.merged == [] and len(c) == 1 and ch is not None and ch[1] and ch[1][0] == (35, pushed),
+                  gh.merged == [] and len(c) == 1 and ch is not None and ch[1] and ch[1][0] == (36, pushed),
                   f"merged={gh.merged} {s} chain={ch and ch[1]}")
             reset()
-            open_only("pW", "pW2")
+            open_only("pW2", "pP1")
             advance_main()
             settle_strict(cap=8)
-            gh.prs[36]["auto_merge"] = None                 # intent changed: disarmed
+            gh.prs[88]["auto_merge"] = None                 # intent changed: disarmed
             s = settle_strict(cap=8)
-            check("strict carrier (9): a member disarmed since the carrier was built is not merged; the one ahead of it is",
-                  gh.merged == [35] and 36 not in gh.merged, f"merged={gh.merged} {s}")
+            check("strict carrier (9): a member disarmed since the carrier was built is not merged; the one ahead of it is "
+                  "(a stop mid-loop lands a verified prefix)",
+                  gh.merged == [36] and 88 not in gh.merged, f"merged={gh.merged} {s}")
             reset()
 
-            # (10) the train's own script as a member: it rides a strict carrier (one judge changer) and is
+            # (10) the train's own script as a member: a judge member, it rides a strict carrier ALONE and is
             # NEVER executed by settle — the carrier is built with merge-tree/commit-tree only. Control
             # first: the member's file does leave the marker when something runs it.
             marker = os.path.join(root, "strict-member-ran")
@@ -6106,35 +6194,62 @@ def self_test() -> int:
                   os.path.exists(marker))
             if os.path.exists(marker):
                 os.unlink(marker)
-            open_only("pW", "pJ1")
+            open_only("pJ1")
             advance_main()
             s1 = settle_strict(cap=8)
             c = strict_open()
             head_in_carrier = gh.g("show", f"{c[0]['head']['sha']}:.github/scripts/merge-train.py").stdout if c else ""
             s2 = settle_strict(cap=8)
-            check("strict carrier (10): a merge-train.py member rides a strict carrier, merges, and was never executed by settle",
-                  s1.get("strict_batch") == [35, 81] and "strict-member-ran" in head_in_carrier and gh.merged == [35, 81]
+            check("strict carrier (10): a merge-train.py member rides a strict carrier alone, merges, and was never executed by settle",
+                  s1.get("strict_batch") == [81] and "strict-member-ran" in head_in_carrier and gh.merged == [81]
                   and not os.path.exists(marker), f"{s1} {s2} merged={gh.merged} ran={os.path.exists(marker)}")
             reset()
 
             # (11) a symlink/gitlink or a control-character path never rides a strict carrier: neither enters
             # the strict list, and the builder refuses a tree that gains a special entry even when handed one.
-            open_only("pW", "pS", "pWx", "pW2")
+            open_only("pW2", "pS", "pPx", "pP1")
             advance_main()
             s = settle_strict(cap=8)
             c = strict_open()
             check("strict carrier (11): a symlink member and a control-character member are never batched, updated or merged",
-                  len(c) == 1 and carrier_members(c[0]) == [35, 36] and gh.updates == [] and gh.merged == []
+                  len(c) == 1 and carrier_members(c[0]) == [36, 88] and gh.updates == [] and gh.merged == []
                   and not any(n in (37, 87) for n in (s.get("strict_batch") or [])),
                   f"members={[carrier_members(x) for x in c]} {s}")
             g11 = Git(origin)
             b11 = g11("rev-parse", "main").stdout.strip()
-            views11 = [{"number": 35, "head_sha": g11("rev-parse", "pW").stdout.strip(), "files": [".github/workflows/w.yml"], "app": {}},
+            views11 = [{"number": 36, "head_sha": g11("rev-parse", "pW2").stdout.strip(), "files": [".github/scripts/two.py"], "app": {}},
                        {"number": 37, "head_sha": g11("rev-parse", "pS").stdout.strip(), "files": [".github/scripts/check-s.py", "docs-s-link"], "app": {}},
-                       {"number": 36, "head_sha": g11("rev-parse", "pW2").stdout.strip(), "files": [".github/workflows/w2.yml"], "app": {}}]
+                       {"number": 88, "head_sha": g11("rev-parse", "pP1").stdout.strip(), "files": [".github/scripts/p1.py"], "app": {}}]
             built = build_strict_carrier(g11, b11, views11, 8, lambda _f: False, [], [])
             check("strict carrier (11): the builder itself drops a member whose tree adds a symlink (defence in depth)",
-                  built is not None and [n for n, _ in built[1]] == [35, 36], str(built and built[1]))
+                  built is not None and [n for n, _ in built[1]] == [36, 88], str(built and built[1]))
+            reset()
+
+            # (12) after the last member merged, main's tree must be the carrier's tree. A squash that resolves
+            # differently from merge-tree (simulated: each merge lands with an extra file) is told, and no further
+            # strict carrier is built that tick; every member still merged verified, nobody is blamed.
+            open_only("pW2", "pP1", "pP2")
+            advance_main()
+            settle_strict(cap=2)                            # carrier [36, 88]; pP2 waits
+            real_merge = gh.merge
+
+            def merge_with_extra(n, head):
+                sha = real_merge(n, head)
+                if sha is None:
+                    return None
+                pathlib.Path(origin, "docs", f"extra-{n}.md").write_text("x\n")
+                gh.g("add", "-A")
+                gh.g("commit", "-q", "--amend", "--no-edit")
+                return gh.main_sha()
+            gh.merge = merge_with_extra
+            try:
+                s = settle_strict(cap=2)
+            finally:
+                gh.merge = real_merge
+            check("strict carrier (12): a post-merge tree mismatch is told and stops further batching this tick; members merged, nobody blamed",
+                  gh.merged == [36, 88] and s.get("strict_tree_mismatch") is not None and not strict_open()
+                  and s["culprits"] == [] and 90 not in (s.get("strict_batch") or []),
+                  f"merged={gh.merged} {s} open={len(strict_open())}")
             reset()
 
             # GREEN CARRIER FIRST (#13400): a train whose CI went green while a strict-lane reservation
