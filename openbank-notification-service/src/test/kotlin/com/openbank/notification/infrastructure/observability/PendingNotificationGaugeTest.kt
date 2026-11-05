@@ -37,9 +37,13 @@ class PendingNotificationGaugeTest {
         .tag("service", "notification")
         .gauge()?.value()
 
+    private fun channelCount(channel: String): Double? = registry.find("openbank.notification.pending.stale.by.channel")
+        .tag("channel", channel)
+        .gauge()?.value()
+
     @Test
     fun `successful zero count records liveness`(): Unit = runBlocking {
-        every { repository.countStalePending(any()) } returns Uni.createFrom().item(0L)
+        every { repository.countStalePendingByChannel(any()) } returns Uni.createFrom().item(emptyMap())
         val gauge = PendingNotificationGauge(repository, registry, Clock.systemUTC(), domainMetrics())
         gauge.register()
 
@@ -52,7 +56,7 @@ class PendingNotificationGaugeTest {
 
     @Test
     fun `failed count is unknown and does not record liveness`(): Unit = runBlocking {
-        every { repository.countStalePending(any()) } returns
+        every { repository.countStalePendingByChannel(any()) } returns
             Uni.createFrom().failure(IllegalStateException("database unavailable"))
         val gauge = PendingNotificationGauge(repository, registry, Clock.systemUTC(), domainMetrics())
         gauge.register()
@@ -60,6 +64,22 @@ class PendingNotificationGaugeTest {
         gauge.refresh()
 
         assertThat(staleCount()).isEqualTo(-1.0)
+        assertThat(channelCount("EMAIL")).isEqualTo(-1.0)
         assertThat(successRecorded()).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `stale rows are attributed to the channel that left them pending`(): Unit = runBlocking {
+        every { repository.countStalePendingByChannel(any()) } returns
+            Uni.createFrom().item(mapOf("EMAIL" to 4L, "PUSH" to 2L))
+        val gauge = PendingNotificationGauge(repository, registry, Clock.systemUTC(), domainMetrics())
+        gauge.register()
+
+        gauge.refresh()
+
+        assertThat(staleCount()).isEqualTo(6.0)
+        assertThat(channelCount("EMAIL")).isEqualTo(4.0)
+        assertThat(channelCount("PUSH")).isEqualTo(2.0)
+        assertThat(channelCount("INBOX")).isEqualTo(0.0)
     }
 }
