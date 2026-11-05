@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import tempfile
@@ -68,8 +69,15 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, check=True,
-                              capture_output=True, text=True).stdout.strip()
+        # Hermetic: the gate shard runs many gates at once on one runner. Name git's own
+        # reason on failure, because CalledProcessError's message drops stderr.
+        result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.root,
+                                env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull,
+                                     "GIT_CONFIG_NOSYSTEM": "1"},
+                                capture_output=True, text=True)
+        if result.returncode:
+            self.fail(f"git {args} rc={result.returncode}: {result.stdout}{result.stderr}")
+        return result.stdout.strip()
 
     def write(self, relative: str, content: str) -> None:
         path = self.root / relative
