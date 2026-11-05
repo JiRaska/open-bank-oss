@@ -83,5 +83,3 @@ numeric openbank-risk-engine TimeBucket Y1_TO_2Y  # #13440
 numeric openbank-risk-engine TimeBucket Y2_TO_3Y  # #13440
 numeric openbank-risk-engine TimeBucket Y3_TO_5Y  # #13440
 numeric openbank-risk-engine TimeBucket Y5_TO_10Y  # #13440
-duplicate openbank-sepa-payment Outcome  # #13669
-duplicate openbank-swift-service Outcome  # #13669

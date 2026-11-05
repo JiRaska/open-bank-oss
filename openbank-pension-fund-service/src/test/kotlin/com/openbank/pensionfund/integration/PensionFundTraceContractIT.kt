@@ -7,6 +7,7 @@ package com.openbank.pensionfund.integration
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -42,7 +43,10 @@ import java.util.UUID
  * point, so it is the right first contract here.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.pensionfund.it.PostgresTestResource::class)
+@QuarkusTestResource(
+    com.openbank.libs.testing.containers.PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 @TestProfile(PensionFundTraceContractIT.PensionFundTraceProfile::class)
 @TestSecurity(user = "trace-it-operator", roles = ["ROLE_OPERATOR", "ROLE_API"])
 class PensionFundTraceContractIT {

@@ -8,13 +8,21 @@ import com.openbank.simulation.engine.FaultProfile
 import com.openbank.simulation.engine.SimulationContext
 import com.openbank.simulation.invariants.Invariant
 import com.openbank.simulation.invariants.MoneyPathInvariants
+import com.openbank.simulation.scenario.CardAuthorizationScenario
+import com.openbank.simulation.scenario.CardClearingScenario
+import com.openbank.simulation.scenario.ClearingCycleScenario
 import com.openbank.simulation.scenario.DelegatedSpendScenario
 import com.openbank.simulation.scenario.DomesticClearingScenario
 import com.openbank.simulation.scenario.FeeBillingScenario
+import com.openbank.simulation.scenario.FxConversionScenario
+import com.openbank.simulation.scenario.FxScreeningScenario
 import com.openbank.simulation.scenario.InterestAccrualScenario
 import com.openbank.simulation.scenario.PaymentScenario
+import com.openbank.simulation.scenario.PensionLifecycleScenario
+import com.openbank.simulation.scenario.SctInstSettlementScenario
 import com.openbank.simulation.scenario.SddCollectionScenario
 import com.openbank.simulation.scenario.SepaSettlementScenario
+import com.openbank.simulation.scenario.StandingOrderExecutionScenario
 import com.openbank.simulation.scenario.StandingOrderScenario
 import com.openbank.simulation.scenario.StatementCloseScenario
 import com.openbank.simulation.scenario.SwiftScenario
@@ -63,6 +71,32 @@ class SimulationRunner(
             // Czech domestic clearing domain-class binding into the same seeded run so it
             // shares the fault profile and is checked by the same invariant sweep every step.
             DomesticClearingScenario.step(world)
+            // clearing-cycle domain-class binding into the same seeded run so it shares the
+            // fault profile and is checked by the same invariant sweep every step.
+            ClearingCycleScenario.step(world)
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // pension lifecycle path — REAL PensionContract lifecycle, append-only Contribution
+            // credits and statutory StateContributionReturn obligations — so it shares the fault
+            // profile and is checked by the pensionContractCompleteness /
+            // pensionReturnTimeliness invariants.
+            PensionLifecycleScenario.step(world)
+            context.scheduler.drain()
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the SEPA
+            // INSTANT + settlement domain-class binding into the same seeded run so it shares
+            // the fault profile and is checked by the same invariant sweep every step.
+            SctInstSettlementScenario.step(world)
+            context.scheduler.drain()
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the
+            // card-presentment path — REAL CardAuthorization lifecycle through the REAL
+            // AuthorizationLifecycle policy (clear/reverse/expire, refusals as values) — so it
+            // shares the fault profile and is checked by the cardAuthorizationCompleteness /
+            // cardClearingConservation invariants.
+            CardClearingScenario.step(world)
+            // Issue #14366 (Test Intelligence simulation gap, money path): interleave the FX
+            // conversion path — REAL FxRate fixing with its ČNB-origin inverted() side-swap and
+            // REAL FxConversionMath margin/target arithmetic — so it shares the fault profile
+            // and is checked by the fxConversionCompleteness / fxMoneyConservation invariants.
+            FxConversionScenario.step(world)
             context.scheduler.drain()
             // ADR-0143 phase 2d/2e: interleave the billing fee-charge (+ seeded reversal) path
             // so MoneyPathInvariants.billingFeeConservation is actually exercised every step,
@@ -102,6 +136,26 @@ class SimulationRunner(
             // swiftMoneyConservation invariants.
             SwiftScenario.step(world)
             context.scheduler.drain()
+            // Issue #12839 follow-up (Refs #12830): one simulated DAY of the standing-order
+            // sweep + execution path (the scenario advances the virtual clock itself), checked
+            // by the same invariant sweep every step.
+            StandingOrderExecutionScenario.step(world)
+            context.scheduler.drain()
+            // ADR-0032 §B: the FX conversion sanctions-screening path, decided by the REAL
+            // ScreeningPolicy — reads/writes world.screening only, posts nothing to the ledger,
+            // so this drain is a no-op today but kept for the same "settled before the invariant
+            // sweep" convention as every other scenario above.
+            FxScreeningScenario.step(world)
+            context.scheduler.drain()
+            // The card authorization hold lifecycle (card-processing CardAuthorization +
+            // AuthorizationLifecycle): authorize → clear / reverse / expire. The scenario
+            // schedules the hold's expiry as a virtual-time task, so this drain is what fires
+            // it — every authorization must be terminal before the invariant sweep below.
+            CardAuthorizationScenario.step(world)
+            context.scheduler.drain()
+            // Release card holds the (now final) virtual clock has carried past their expiry — the
+            // expiry job's job; see CardClearingScenario.sweepExpired.
+            CardClearingScenario.sweepExpired(world)
             invariants.forEach { invariant ->
                 val violation = invariant.check(world)
                 if (violation != null) return SeedResult(seed, violation, step)

@@ -4,16 +4,22 @@
 
 package com.openbank.pensionfund.it
 
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.mtls.ListenerAuthParityConformance
 import com.openbank.libs.testing.mtls.ProductionListenerProfile
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 
 /** Real listener and OIDC bearer parity for the production pension-fund API policy (#12511). */
 @QuarkusTest
 @TestProfile(PensionFundListenerAuthParityIT.ProductionProfile::class)
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_pension_fund_it")],
+)
 class PensionFundListenerAuthParityIT : ListenerAuthParityConformance() {
     class ProductionProfile : ProductionListenerProfile()
 

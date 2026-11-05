@@ -13,6 +13,7 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
@@ -118,7 +119,11 @@ class AccountEventPactProviderVerificationTest {
         private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
-    private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+    // Must match the folder twin's mapper config: a drift between the two lets one lane pass and
+    // the other publish a failure for the same contract.
+    private val objectMapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -251,6 +256,11 @@ class AccountEventPactProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    /** Mirror of the folder twin's referral-qualification producer — the broker replay must offer
+     *  the same description or referral-service's pact fails here with MissingAnnotatedMethod. */
+    @PactVerifyProvider("an AccountCreated event eligible for referral qualification")
+    fun produceAccountCreatedEventForReferralQualification(): String = produceAccountCreatedEvent()
 
     @State("account-service has posted an incoming credit")
     fun accountHasPostedIncomingCredit() {
