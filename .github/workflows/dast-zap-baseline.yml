@@ -6,7 +6,7 @@
 # 4xx, and reported no operation count — so it only ever saw the auth wall, and a pentest
 # attestation resting on it was resting on nothing. Now:
 #
-#   1. AUTHENTICATED. Same mechanism the former api-fuzz-authenticated.yml used (deleted in #14762, when it was folded into api-fuzz.yml), not a new one: a throwaway
+#   1. AUTHENTICATED. Same mechanism as api-fuzz-authenticated.yml, not a new one: a throwaway
 #      Keycloak importing the CI realm (.github/workflows/keycloak/), a client_credentials token
 #      for the confidential `openbank-services` client, the service booted with OIDC on against
 #      it. No repository secret is involved. The token reaches ZAP through ZAP's own
@@ -26,7 +26,7 @@
 #      zero spec operations requested, or >= 95 % of responses were 401/403. Alerts stay advisory
 #      (rules.yaml: dast.enforced) and feed the ADR-0030 D1 triage lifecycle.
 #
-# Boot: quarkusDev on the runner, as api-fuzz.yml does, rather than the compose
+# Boot: quarkusDev on the runner, as api-fuzz-authenticated.yml does, rather than the compose
 # image — the token's issuer must be the URL the service validates against, and on the runner
 # both sides see the same `localhost:8543`. Scheduled weekly (ledger-service) + dispatch.
 name: DAST baseline (ZAP)
@@ -58,7 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Eligibility (inherited from the former api-fuzz-authenticated.yml): OIDC must be the only gate (authz.enforce
+      # Same eligibility as api-fuzz-authenticated.yml: OIDC must be the only gate (authz.enforce
       # defaults false — no OPA sidecar here), and a port + database must be derivable. An
       # ineligible service is excluded OUT LOUD; an empty scope fails rather than scanning nothing.
       - name: Derive service list
@@ -125,7 +125,7 @@ jobs:
       - name: Start Keycloak (throwaway CI realm)
         run: |
           set -euo pipefail
-          # Same Keycloak image/digest as openbank-infra/docker/keycloak/Dockerfile; realm from .github/workflows/keycloak/.
+          # Same image/digest and realm as api-fuzz-authenticated.yml.
           docker run -d --name dast-keycloak -p 8543:8080 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
@@ -164,7 +164,7 @@ jobs:
           docker run -d --name dast-redis -p 6379:6379 redis:7.2-alpine >/dev/null
           for _ in $(seq 1 30); do docker exec dast-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && break; sleep 2; done
 
-          # Services that register a Temporal worker at boot need a server (see fuzz-services.sh).
+          # Services that register a Temporal worker at boot need a server (see api-fuzz-authenticated.yml).
           TEMPORAL_NS="$(resolve_expr "$(grep -m1 -A6 '^  temporal:' "$APP_YAML" | grep -m1 'namespace:' | sed -E 's/^[^:]*:[[:space:]]*//')")"
           TEMPORAL_ARGS=""
           if [ -n "${TEMPORAL_NS:-}" ]; then

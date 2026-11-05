@@ -12,11 +12,10 @@
 #
 # Two passes per service (fuzz-services.sh): authz ON proves every protected endpoint
 # answers 401/403 to anonymous traffic; authz OFF (dev-mode auth disabled) drives the
-# handlers behind that gate. This is the ONLY fuzz lane: the separate Keycloak-token lane
-# (api-fuzz-authenticated.yml) was folded in and deleted — pass 2 reaches the same handlers
-# without a realm, and the dispatch-only copy had not run since 2026-08-16. Operations that
-# answer only 401/403 in BOTH passes are recorded as auth-blocked (not run) in
-# fuzz-coverage.json, never as tested.
+# handlers behind that gate. Operations that answer only 401/403 in BOTH passes are
+# recorded as auth-blocked (not run) in fuzz-coverage.json, never as tested.
+# The separate Keycloak-token lane (api-fuzz-authenticated.yml) is KEPT: it is the only
+# lane that fuzzes with a real bearer token, so it covers what neither pass here can.
 #
 # SCOPE (2026-08-01, #2365): the money-path services are now in. Before this, the default list
 # was five services of which only consent-service was money-path — so eighteen of the twenty

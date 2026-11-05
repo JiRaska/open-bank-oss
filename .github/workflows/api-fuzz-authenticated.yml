@@ -1,0 +1,393 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Authenticated API fuzzing (schemathesis + Keycloak) — the #852 follow-up to
+# api-fuzz.yml, which only fuzzes the UNAUTHENTICATED surface.
+# ─────────────────────────────────────────────────────────────────────────────
+# The unauthenticated lane can only reach endpoints that answer without a token;
+# everything behind @Authorize answers 401 and is never actually exercised. This
+# lane obtains a real bearer token from a throwaway Keycloak (client_credentials)
+# and fuzzes the AUTHENTICATED surface with the same property: no input — however
+# malformed — produces a 5xx. That is where the interesting money-path bugs live
+# (authz-bypass, IDOR-shaped inputs, parameter coercion behind auth).
+#
+# Target selection: a service whose OIDC authN is the only gate — i.e.
+# authz.enforce=false (no OPA sidecar needed). Measured 2026-08-01: 17 of the 20
+# money-path services qualify; sdd, sanctions and vop default AUTHZ_ENFORCE=true and
+# additionally need the OPA sidecar + rest.rego bundle (a later step, tracked with #266).
+# The list is DERIVED from rules.yaml money_path_services and each service's own config,
+# so a service that flips either way is picked up without editing this file.
+#
+# WHY THE REALM FILE IS NAMED openbank-realm.json (#2365): Keycloak's directory import
+# derives the REALM NAME from the filename, `<realm>-realm.json`. It was called
+# openbank-fuzz-realm.json, so Keycloak looked for a realm "openbank-fuzz" while the JSON
+# declares "openbank" — it imported openbank, then died with "Session not bound to a
+# realm". That is why this lane had 0 successful runs, ever. Renaming the file IS the fix;
+# its contents were always correct. Do not rename it back to something descriptive.
+#
+# DISPATCH-ONLY on purpose: this lane boots Keycloak + Postgres + Redis + the
+# service and depends on OIDC issuer/audience alignment that must be confirmed by
+# its first manual run before it is trusted on a schedule. Promote to a weekly
+# `schedule:` trigger once it has run green manually (keeps main free of unvetted
+# weekly red). Batch-lane semantics otherwise identical to api-fuzz.yml (ADR-0053).
+name: API fuzz (authenticated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated modules to fuzz (blank = derived money-path set with authz.enforce=false)"
+        required: false
+        default: ""
+      max_examples:
+        description: "Hypothesis examples per endpoint"
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-fuzz-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: derive fuzz scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.derive.outputs.services }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Eligibility is a PROPERTY of each service's config, not a list someone maintains:
+      # authz.enforce must default false (OIDC is then the only gate), and the harness must be
+      # able to derive a port and provision a database. Ineligible services are excluded OUT
+      # LOUD with the reason — a silently shortened list reads as "covered".
+      - name: Derive service list
+        id: derive
+        env:
+          OVERRIDE: ${{ github.event.inputs.services }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, re, yaml
+
+          override = (os.environ.get("OVERRIDE") or "").split()
+          money = yaml.safe_load(open("openbank-libs/governance/rules.yaml"))["money_path_services"]
+          candidates = override or money
+
+          keep, skipped = [], []
+          for svc in candidates:
+              app = pathlib.Path(svc) / "src/main/resources/application.yaml"
+              spec = pathlib.Path(svc) / "src/main/resources/openapi.yaml"
+              if not app.is_file() or not spec.is_file():
+                  skipped.append((svc, "no application.yaml or openapi.yaml")); continue
+              raw = app.read_text()
+              enforce = re.findall(r"AUTHZ_ENFORCE[^\n]*", raw)
+              if any(re.search(r":\s*true", e) for e in enforce):
+                  skipped.append((svc, "authz.enforce defaults true — needs the OPA sidecar (#266)")); continue
+              if not re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M):
+                  skipped.append((svc, "no derivable quarkus.http.port")); continue
+              if not re.search(r"jdbc:postgresql://[^/]+/([A-Za-z0-9_]+)", raw):
+                  skipped.append((svc, "no jdbc:postgresql URL — the harness cannot provision its DB")); continue
+              keep.append(svc)
+
+          for svc, why in skipped:
+              print(f"::warning::api-fuzz-authenticated: {svc} EXCLUDED — {why}")
+          print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
+
+          # A run's CONCLUSION is not a coverage statement, and this lane proved it: run
+          # 31688625829 (2026-08-13) is the first green this workflow ever produced, and it
+          # fuzzed ONE service — a `services:` override narrowed the matrix and nothing in the
+          # run name, conclusion or log said so. "API fuzz (authenticated): success" read
+          # identically to a full 18-service pass (#3039). So the scope is stated as a fraction
+          # of the money path, in the step summary where a reader lands, and an override is
+          # labelled as one instead of silently replacing the derived set.
+          denom = len(money)
+          summary = [
+              "## Authenticated fuzz scope",
+              "",
+              f"**{len(keep)} of {denom} money-path services actually fuzzed.**",
+              "",
+          ]
+          if override:
+              summary += [
+                  f"> ⚠️ **Scope was OVERRIDDEN by dispatch input** to {len(override)} requested "
+                  f"service(s) — this run does NOT measure the money path. "
+                  f"Requested: `{' '.join(override)}`",
+                  "",
+              ]
+              print(
+                  "::warning::api-fuzz-authenticated: scope OVERRIDDEN by dispatch input "
+                  f"({len(keep)} of {denom} money-path services) — this run is not a coverage measurement"
+              )
+          if skipped:
+              summary += ["| Excluded | Why |", "|---|---|"]
+              summary += [f"| `{svc}` | {why} |" for svc, why in skipped]
+              summary += [""]
+          summary += [f"Fuzzed: {', '.join(f'`{s}`' for s in keep) or '_none_'}"]
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a") as fh:
+              fh.write("\n".join(summary) + "\n")
+
+          # An empty scope must never read as a pass. Every candidate being excluded is the one
+          # state where this lane fuzzes nothing at all, and a zero-length matrix is precisely
+          # the shape that produces a green run about no subject — the failure mode this repo
+          # keeps rediscovering. Fail here, where the reason is still in hand.
+          if not keep:
+              print("::error::api-fuzz-authenticated: derived scope is EMPTY — nothing would be fuzzed")
+              raise SystemExit(1)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("services=" + json.dumps(keep) + "\n")
+          PY
+
+  fuzz-authenticated:
+    name: "schemathesis auth (${{ matrix.service }})"
+    needs: prepare
+    runs-on: ubuntu-latest  # public repo => hosted runners free (FinOps: hosted-first)
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      POSTGRES_PASSWORD: "fuzz-ci-throwaway"
+      OIDC_CLIENT_SECRET: "fuzz-ci-throwaway-secret"   # matches the realm import client secret
+      SERVICE: ${{ matrix.service }}
+      MAX_EXAMPLES: ${{ github.event.inputs.max_examples || '50' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+
+      - name: Warm Gradle wrapper
+        run: ./gradlew --version
+
+      - name: Install schemathesis
+        run: |
+          set -euo pipefail
+          # Same pinned, hash-locked lockfile as api-fuzz.yml (v4 CLI flags below).
+          python3 -m pip install --user --quiet --require-hashes \
+            -r .github/workflows/requirements/schemathesis.txt
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Start Keycloak (throwaway realm)
+        run: |
+          set -euo pipefail
+          # Same version and digest as openbank-infra/docker/keycloak/Dockerfile, so the fuzzer
+          # authenticates against the Keycloak the fleet runs, not a 26.0 that predates its CVE fixes.
+          docker run -d --name fuzz-keycloak -p 8543:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/.github/workflows/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.8.0@sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc \
+            start-dev --import-realm --http-enabled=true
+          # Realm ready = the token endpoint answers.
+          KC_UP=0
+          for i in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              http://localhost:8543/realms/openbank/.well-known/openid-configuration || true)"
+            if [ "$code" = "200" ]; then KC_UP=1; break; fi
+            sleep 3
+          done
+          if [ "$KC_UP" != "1" ]; then
+            echo "::error::Keycloak/realm never became ready"; docker logs fuzz-keycloak | tail -40; exit 1
+          fi
+
+      - name: Fuzz authenticated surface
+        run: |
+          set -uo pipefail
+          svc="$SERVICE"
+          mkdir -p fuzz-reports
+          APP_YAML="${svc}/src/main/resources/application.yaml"
+          SPEC="${svc}/src/main/resources/openapi.yaml"
+          PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
+          DB="$(grep -m1 'jdbc:postgresql://\|postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
+          # `${VAR:default}` is a MicroProfile config EXPRESSION, not a literal. The harness sets
+          # no env, so the DEFAULT is what the service will actually use, and the raw string must
+          # never be handed to docker. settlement-service writes its username that way; the literal
+          # reached `docker run -e POSTGRES_USER=${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}`,
+          # initdb rejected it, the container exited, and the boot log then blamed Flyway
+          # ("Connection to localhost:5432 refused") — never the container that was already gone.
+          # Credentials are then passed EXPLICITLY below rather than left to whichever env var
+          # the service happens to read: the fleet mostly reads ${POSTGRES_PASSWORD}, which this
+          # job sets, while settlement-service reads ${QUARKUS_DATASOURCE_PASSWORD}, which it does
+          # not — so settlement met "password authentication failed" once its container did start.
+          resolve_expr() {
+            printf '%s' "$1" | sed -E 's/^"//; s/"$//; s/^\$\{[A-Za-z0-9_]+:([^}]*)\}$/\1/'
+          }
+          DBUSER="$(resolve_expr "$(grep -m1 '^    username:' "$APP_YAML" | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          DBUSER="${DBUSER:-openbank}"
+          case "$DBUSER" in
+            *[!A-Za-z0-9_]*)
+              echo "::error::[${svc}] datasource username did not resolve to a plain identifier: ${DBUSER}"
+              exit 1 ;;
+          esac
+          echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
+
+          docker run -d --name fuzz-pg -p 5432:5432 \
+            -e POSTGRES_USER="${DBUSER}" -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e POSTGRES_DB="${DB}" postgres:18.6-alpine >/dev/null
+          # consent-service uses Redis for idempotency — in the request path, so it
+          # must be up (unlike Kafka, which is lazy behind the outbox).
+          docker run -d --name fuzz-redis -p 6379:6379 redis:7.2-alpine >/dev/null
+          for i in $(seq 1 30); do
+            docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && break; sleep 2
+          done
+
+          # Four money-path services register a Temporal worker AT BOOT and the harness provided no
+          # Temporal server: dev mode retried gRPC to :7233 (or to the cluster DNS name, which does
+          # not resolve on a runner) until the readiness window expired, so they never reached the
+          # fuzz step. 4 of the 5 boot failures in run 30804842325 — sepa-payment, transaction,
+          # domestic-payment, lending (#3039). The CLI image's `server start-dev` is IN-MEMORY, so
+          # this costs no extra database, and it creates the namespaces it is given — a worker
+          # registering against a namespace that does not exist fails the same way.
+          # The namespace is READ FROM THE SERVICE's own config, never a list kept here.
+          TEMPORAL_NS="$(resolve_expr "$(grep -m1 -A6 '^  temporal:' "$APP_YAML" \
+            | grep -m1 'namespace:' | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          TEMPORAL_ARGS=""
+          if [ -n "${TEMPORAL_NS:-}" ]; then
+            echo "==> [${svc}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker run -d --name fuzz-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for i in $(seq 1 30); do
+              if docker exec fuzz-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${svc}] Temporal dev server never became ready"
+              docker logs fuzz-temporal 2>&1 | tail -20; exit 1
+            fi
+            # domestic-payment and lending default to the in-cluster frontend DNS name; the
+            # override points every target at the throwaway server regardless of its default.
+            TEMPORAL_ARGS="-Dopenbank.temporal.server-url=localhost:7233"
+          fi
+
+          # Boot with OIDC ENABLED (override the %dev oidc.enabled=false) pointed at
+          # the throwaway Keycloak. authz.enforce stays false for this target, so no
+          # OPA sidecar is needed — OIDC authN is the only gate being exercised.
+          #
+          # DEV SERVICES OFF (#3039). Dev mode starts containers for anything it thinks is
+          # unconfigured, and on a cold hosted runner the PULL is what blows the readiness
+          # window: run 31746030097 left account-service mid-`Extracting 250.7MB/638.7MB` of
+          # docker.io/grafana/otel-lgtm at the exact second the loop gave up, and pulled
+          # apache/kafka-native alongside it. Neither is reachable from the fuzzed surface.
+          # The backing services this lane actually needs are provisioned explicitly above
+          # (Postgres, Redis, Keycloak, Temporal) and are already suppressing their own dev
+          # service by explicit config — the log says so per component ("Not starting Dev
+          # Services for default datasource as it has explicit configuration"). Kafka is lazy
+          # behind the outbox, so no broker is needed to serve a request. What was left was an
+          # observability stack and a Kafka image, pulled on every one of 18 jobs, for nothing.
+          #
+          # REDIS HOST IS PASSED EXPLICITLY, not left to each service's own application.yaml
+          # (#3039). 24 of the 25 services that inject a ReactiveRedisDataSource hardcode
+          # `quarkus.redis.hosts: redis://localhost:6379` in their own application.yaml, which
+          # happens to already match this harness's fuzz-redis container — so passing nothing
+          # here looked equivalent to passing the right value. fraud-service is the one
+          # exception: it has no redis config at all (relies on `QUARKUS_REDIS_HOSTS` being
+          # injected in every real environment), and with Dev Services off it has nothing to
+          # fall back to — `FeatureStoreConfig.onlineFeatureStore` needs a
+          # ReactiveRedisDataSource CDI bean that never activates, and boot fails with
+          # `InactiveBeanException: Bean is not active`. Same shape as the datasource/OIDC args
+          # above: state what the harness actually provisions, don't depend on it happening to
+          # agree with whatever each service's own config says.
+          echo "==> [${svc}] starting quarkusDev with OIDC on"
+          ./gradlew ":${svc}:quarkusDev" \
+            -Dquarkus.console.basic=true --console=plain --quiet \
+            -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username="${DBUSER}" \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
+            -Dquarkus.oidc.enabled=true \
+            -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
+            -Dquarkus.oidc.client-id=openbank-services \
+            -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            -Dquarkus.redis.hosts=redis://localhost:6379 \
+            -Dquarkus.devservices.enabled=false \
+            ${TEMPORAL_ARGS} \
+            > "fuzz-reports/${svc}-boot.log" 2>&1 &
+          DEV_PID=$!
+          UP=0
+          # 90x2s=180s had to cover a cold Gradle build AND the boot; with dev-service pulls
+          # gone the boot is short, but the build is not, so keep real margin.
+          READY_ITERS=180; READY_TIMEOUT_S=$((READY_ITERS * 2))
+          for i in $(seq 1 "$READY_ITERS"); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
+            if [ "$code" != "000" ]; then UP=1; break; fi
+            kill -0 "$DEV_PID" 2>/dev/null || break
+            sleep 2
+          done
+          if [ "$UP" != "1" ]; then
+            # "failed to boot" is two different states and they need different fixes. A CRASH
+            # leaves a dead process and an error chain; a TIMEOUT leaves the JVM alive and
+            # still working, and its ERROR grep prints NOTHING — which is exactly how six
+            # triage passes on #3039 recorded "cause not determined" for a service that had
+            # not failed at all. Say which one happened.
+            if kill -0 "$DEV_PID" 2>/dev/null; then
+              echo "::error::[${svc}] did not become ready within ${READY_TIMEOUT_S}s — the process is STILL ALIVE (timeout, not a crash: look at what the log is doing at its end, not for an ERROR)"
+            else
+              echo "::error::[${svc}] failed to boot — the dev-mode process exited"
+            fi
+            # A blind `tail` puts the root cause above the window — every ERROR and every
+            # `Caused by:` is what actually identifies it (issue #3039: six of seven services
+            # were "not determined" purely because of this).
+            echo "--- boot failure: ERROR lines and cause chain ---"
+            sed -E 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot.log" \
+              | grep -E ' ERROR |Caused by:|Failed to start|Port already bound' \
+              | grep -v 'ht.wire' | tail -40
+            echo "--- last 40 lines ---"
+            tail -40 "fuzz-reports/${svc}-boot.log"
+            echo "(full log in the api-fuzz-auth-reports-${svc} artifact)"
+            exit 1
+          fi
+
+          # client_credentials token for the confidential service client.
+          TOKEN="$(curl -s -X POST \
+            http://localhost:8543/realms/openbank/protocol/openid-connect/token \
+            -d grant_type=client_credentials \
+            -d client_id=openbank-services \
+            -d client_secret="${OIDC_CLIENT_SECRET}" | jq -r '.access_token')"
+          if [ -z "${TOKEN:-}" ] || [ "$TOKEN" = "None" ]; then
+            echo "::error::could not obtain a bearer token from Keycloak"; exit 1
+          fi
+          echo "==> got bearer token (len ${#TOKEN})"
+
+          echo "==> [${svc}] fuzzing authenticated surface on :${PORT}"
+          schemathesis run "$SPEC" \
+            --url "http://localhost:${PORT}" \
+            --header "Authorization: Bearer ${TOKEN}" \
+            --checks not_a_server_error \
+            --max-examples "${MAX_EXAMPLES}" \
+            --request-timeout 5 \
+            --report junit --report-junit-path "fuzz-reports/${svc}-auth-junit.xml" \
+            | tee "fuzz-reports/${svc}-auth-fuzz.log"
+          RC=${PIPESTATUS[0]}
+
+          kill "$DEV_PID" 2>/dev/null || true
+          pkill -f "quarkusDev" 2>/dev/null || true
+          docker rm -f fuzz-pg fuzz-redis fuzz-keycloak fuzz-temporal >/dev/null 2>&1 || true
+          exit "$RC"
+
+      - name: Upload fuzz reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: api-fuzz-auth-reports-${{ matrix.service }}
+          path: fuzz-reports/
+          retention-days: 30

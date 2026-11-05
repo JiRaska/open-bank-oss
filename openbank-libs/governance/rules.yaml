@@ -1829,7 +1829,7 @@ coverage:
     # documented unauthenticated public paths (QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS).
     # Scheduled weekly, not per-PR (cost + expected finding volume on a fresh banking-API scan).
     # #12097 replaced that cut: the service boots with OIDC on against the CI Keycloak realm
-    # (the former api-fuzz-authenticated.yml's mechanism, folded into api-fuzz.yml by #14762), ZAP imports its committed openapi.yaml with a
+    # (api-fuzz-authenticated.yml's mechanism), ZAP imports its committed openapi.yaml with a
     # client_credentials bearer token, and dast-zap-coverage.py counts operations from the
     # service's own access log into zap-reports/<svc>-ops.json (`exercised` = attestation `ops:`).
     blocked_on: "findings not yet triaged through the D1 lifecycle; scope is ledger-service on schedule (dispatch widens it to any authz.enforce=false service); customer-edge still needs the real cluster"

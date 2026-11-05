@@ -157,9 +157,13 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Library ABI, coverage and recovery proofs consume fleet-lint's Gradle home. "
         "The dedicated library job must never publish another cache entry or become a writer.",
     ),
+    "api-fuzz-authenticated.yml::fuzz-authenticated": (
+        "read-only",
+        "Consumer; restores fleet-lint's home.",
+    ),
     "dast-zap-baseline.yml::zap-api-scan": (
         "read-only",
-        "Consumer; boots one service via quarkusDev like api-fuzz (#12097).",
+        "Consumer; boots one service via quarkusDev like api-fuzz-authenticated (#12097).",
     ),
     "swift-boot-it-probe.yml::probe": (
         "disabled",
