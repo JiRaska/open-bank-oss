@@ -250,6 +250,18 @@ GITHUB_UNTRAINABLE_NAME_GLOBS = ("*requirements*",)
 # hand-rolled parse of a document with anchors and duplicate-key hazards is a grep in disguise.
 # So every gates.yaml change takes the strict lane, judged by main's own gates.
 GATE_CODE_GLOBS = (".github/scripts/check-*.py", ".github/scripts/check-*.sh")
+# TEST CODE rides a train the same way (#14888): under `.github/` (never workflows/actions/prompts) a
+# Python file whose BASENAME is test-shaped — `test-*.py`, `test_*.py` or `*_test.py`. The shape is the
+# whole rule: no directory-wide rule, because a non-test helper under a `tests/` directory (conftest.py,
+# __init__.py, a helper module) can be imported by a privileged gate script or run by the extra-gate
+# workflow and must stay strict (security review of #14888). A test is run by a gate's `selftest:` on
+# the combined head exactly as a check script is, can only make a verdict redder, and is held to every
+# gate-code rule: never next to a regeneration commit or a symlink; a test that exercises the train, a
+# carrier, the merge policy or the ruleset, or that a privileged script or the extra-gate workflow
+# names, stays strict (PRIVILEGED_GATE_CODE, drift-guarded by the self-test).
+TEST_CODE_PREFIXES = ("test-", "test_")
+TEST_CODE_SUFFIXES = (".py",)
+TEST_CODE_SUFFIX_SHAPES = ("_test.py",)
 # Check scripts that prove a DERIVED_OUTPUTS entry (ADR-0343 §Security): defence in depth on top of
 # the separation above.
 FRESHNESS_GATE_CODE = (".github/scripts/check-adr-registry.sh", ".github/scripts/check-eu-ai-act.sh")
@@ -269,6 +281,26 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/test-merge-train-carrier-lock.py",     # exercises the carrier library
+    ".github/scripts/test-merge-train-main-red-freshness.py",  # exercises settle / the strict lane
+    ".github/scripts/test-merge-train-owner-approval.py",   # exercises the owner-approval writer
+    ".github/scripts/test-merge-pr-policy.py",              # exercises the merge policy / ruleset reads
+    ".github/scripts/test-ruleset-bypass-evidence.py",      # exercises the ruleset bypass evidence
+    ".github/scripts/test-ruleset-bypass-verdict.py",       # exercises the ruleset bypass verdict
+    ".github/scripts/test-merge-authorization-proof.py",    # imported by test-merge-pr-policy.py
+    ".github/scripts/test-agent-pr-review.py",              # named by check-agent-pr-guard.py
+    ".github/scripts/tests/test_codeql_scope_classifier.py",   # run by security.yml (extra gate's workflow)
+    ".github/scripts/tests/test_codeql_compile_coverage.py",   # run by security.yml (extra gate's workflow)
+    # Tests a workflow that mentions the train (ci.yml) runs by name: part of the carrier's own verdict.
+    ".github/scripts/test-can-i-deploy-source.py",
+    ".github/scripts/test-ci-latency-report.py",
+    ".github/scripts/test-ci-ui-verdict.py",
+    ".github/scripts/test-context-deploy-handoff.py",
+    ".github/scripts/test-packaged-library-sbom.py",
+    ".github/scripts/test-prepare-test-priority.py",
+    ".github/scripts/test-service-build-artifact.py",
+    ".github/scripts/test-slsa-source-identity.py",
+    ".github/scripts/tests/test_select_admin_ui_rbac_tests.py",
 )
 # JUDGE CODE (strict carrier): paths whose change alters what judges the carrier — the privileged gate
 # code above, the train's own script, workflow and carrier library, and every pinned extra-gate workflow
@@ -399,8 +431,21 @@ class Untrainable:
 
 
 def gate_code(path: str) -> bool:
-    """Reviewed gate code that may ride a train (GATE_CODE_GLOBS), never a PRIVILEGED_GATE_CODE path."""
-    return path not in PRIVILEGED_GATE_CODE and any(glob_match(g, path) for g in GATE_CODE_GLOBS)
+    """Reviewed gate or test code that may ride a train (GATE_CODE_GLOBS, test_code), never a
+    PRIVILEGED_GATE_CODE path."""
+    return path not in PRIVILEGED_GATE_CODE and (any(glob_match(g, path) for g in GATE_CODE_GLOBS) or test_code(path))
+
+
+def test_code(path: str) -> bool:
+    """Test code under `.github/` (#14888): a `.py` whose basename is `test-*`, `test_*` or `*_test.py` —
+    never under the untrainable prefixes (workflows, actions, agent prompts). Only the basename decides:
+    conftest.py, __init__.py or a helper module under `tests/` is NOT test code."""
+    if not path.startswith(GITHUB_DIR) or any(path.startswith(p) for p in UNTRAINABLE_PREFIXES):
+        return False
+    name = path.rsplit("/", 1)[-1]
+    if not name.endswith(TEST_CODE_SUFFIXES):
+        return False
+    return name.startswith(TEST_CODE_PREFIXES) or name.endswith(TEST_CODE_SUFFIX_SHAPES)
 
 
 def generator_commands(script_text: str) -> list[str]:
@@ -4276,6 +4321,25 @@ def self_test() -> int:
     # ...while an unrelated (non-privileged) gate's CODE change still rides a train.
     ok, why = qualifies({**base_pr, "files": [".github/scripts/check-unrelated.py"]}, req, green, None, U)
     check("qualifies: an unrelated gate's check script still rides a train (#13837 control)", ok, why)
+    # #14888: test code under .github/ rides a train as gate code; a near-miss name, a test under an
+    # untrainable prefix, a requirements pin and a test that exercises the train itself stay strict.
+    for f in (".github/scripts/test-foo.py", ".github/scripts/test_bar.py", ".github/scripts/tests/test_x.py",
+              ".github/scripts/e2e/tests/test-deep.py", ".github/scripts/lib/thing_test.py", ".github/tests/test_y.py"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: test code {f} rides a train (#14888)", ok and gate_code(f) and test_code(f) and not U(f), why)
+        check(f"strict lane: test code {f} is NOT in the strict lane (#14888)",
+              strict_lane_state({**base_pr, "files": [f]}, req, green, None, U, [], None, None)[0] is None)
+    for f in (".github/scripts/testing.py", ".github/scripts/contest-x.py", ".github/workflows/tests/w.yml",
+              ".github/actions/tests/test_a.py", ".github/scripts/test-requirements.txt",
+              # security review: a non-test file under tests/ (importable by a privileged script) stays strict
+              ".github/scripts/tests/conftest.py", ".github/scripts/tests/helpers.py", ".github/scripts/tests/__init__.py",
+              ".github/scripts/tests/baz.py", ".github/scripts/e2e/tests/deep.sh", ".github/scripts/test-foo.sh",
+              ".github/scripts/test-issue-hygiene.mjs", ".github/scripts/tests/test_codeql_scope_classifier.py",
+              ".github/scripts/test-agent-pr-review.py", ".github/scripts/test-merge-authorization-proof.py",
+              ".github/scripts/test-merge-train-carrier-lock.py", ".github/scripts/test-merge-train-owner-approval.py",
+              ".github/scripts/test-merge-train-main-red-freshness.py", ".github/scripts/e2e/merge-train-gates-yaml.test.py"):
+        ok, why = qualifies({**base_pr, "files": [f]}, req, green, None, U)
+        check(f"qualifies: {f} is NOT test code that rides a train (#14888 control)", not ok and "manual lane" in why, why)
     for mix in ([".github/scripts/check-x.py", ".github/workflows/ci.yml"],
                 [".github/gates/gates.yaml", ".github/scripts/merge-train.py"],
                 [".github/scripts/check-x.py", ".github/unknown.json"]):
@@ -4311,11 +4375,19 @@ def self_test() -> int:
     for wf in sorted(pathlib.Path(".github/workflows").glob("*.y*ml")) if scripts.is_dir() else []:
         text = wf.read_text(errors="replace")
         if wf in extra_wfs or re.search(r"merge_train_carrier|merge-train", text):
-            must |= set(re.findall(r"\.github/scripts/check-[A-Za-z0-9_.-]+", text))
-    for c in sorted(scripts.glob("check-*")) if scripts.is_dir() else []:
-        if re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
-                     c.read_text(errors="replace")):
+            must |= set(re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:check-|test[-_]|[A-Za-z0-9_.-]+_test\.py)[A-Za-z0-9_.-]*", text))
+    for c in sorted([*scripts.glob("check-*"), *scripts.glob("test-*"), *scripts.glob("test_*")]) if scripts.is_dir() else []:
+        if c.is_file() and re.search(r"merge_train_carrier|merge-train|bypass_actors|branches/[^/\s]*/protection|/rulesets",
+                                     c.read_text(errors="replace")):
             must.add(c.as_posix())
+    # A test a PRIVILEGED script names or imports is part of that script's verdict: it stays strict too.
+    for priv in PRIVILEGED_GATE_CODE:
+        pp = pathlib.Path(priv)
+        if pp.is_file():
+            must |= {m for m in re.findall(r"\.github/scripts/(?:[A-Za-z0-9_.-]+/)*(?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test\.py)",
+                                           pp.read_text(errors="replace"))}
+            must |= {f".github/scripts/{m}" for m in re.findall(r"with_name\('((?:test[-_][A-Za-z0-9_.-]+|[A-Za-z0-9_.-]+_test)\.py)'\)",
+                                                                   pp.read_text(errors="replace"))}
     missing = sorted(m for m in must if gate_code(m))
     check("privileged gate code: every check script the train, its extra gate or a carrier/ruleset verdict depends on stays strict",
           scripts.is_dir() and not missing, str(missing))
