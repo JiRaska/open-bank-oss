@@ -80,8 +80,9 @@ unset creds
 FIRED_key=$(now)
 FIRED_delivery=$FIRED_key
 env -u AWS_PROFILE AWS_ACCESS_KEY_ID="$AKID" AWS_SECRET_ACCESS_KEY="$SECRET" AWS_REGION="$REGION" \
-  AWS_EXECUTION_ENV="$UA" aws sts get-caller-identity --region "$REGION" --query Arn --output text \
-  | sed 's/^/watched key: called as /'
+  AWS_EXECUTION_ENV="$UA" aws sts get-caller-identity --region "$REGION" --query Arn --output text >/dev/null
+# The identity is not printed: this output is posted to a public issue on failure.
+say "watched key: called"
 unset SECRET
 
 # --- 3. watched ServiceAccount token -------------------------------------------------------
@@ -133,8 +134,18 @@ while (( $(now) < deadline )); do
   sleep "$POLL"
 done
 
+# Exactly one matched event per run. A second one in the window is someone else using the key,
+# and must not be absorbed into the drill's PASS.
+extra=$(matched || true)
+if [[ -n "$extra" && "$extra" != "None" ]] && python3 -c 'import sys;sys.exit(0 if float(sys.argv[1])>1 else 1)' "$extra" 2>/dev/null; then
+  EXTRA="$extra"
+else
+  EXTRA=""
+fi
+
 echo
 echo "run=${RUN}"
+echo "fired_at=$(iso "$FIRED_key")  # the key alert is this drill only if its <time> is this minute AND matched=1"
 printf '%-10s %-10s %s\n' tripwire result "seconds-to-signal"
 rc=0
 for k in decoy key delivery sa; do
@@ -144,5 +155,9 @@ for k in decoy key delivery sa; do
   elif [[ "$k" == sa && "$SCOPE" == aws ]]; then printf '%-10s %-10s %s\n' "$k" SKIPPED "(--scope aws: monthly manual drill)"
   else printf '%-10s %-10s %s\n' "$k" FAIL ">${TIMEOUT}"; rc=1; fi
 done
+if [[ -n "$EXTRA" ]]; then
+  printf '%-10s %-10s %s\n' extra FAIL "matched=${EXTRA} (expected 1): treat the other event as a compromise"
+  rc=1
+fi
 echo "Seconds measure signal-in-AWS/Loki. delivery = the SNS topic handed the key alert to its subscribers (email)."
 exit $rc

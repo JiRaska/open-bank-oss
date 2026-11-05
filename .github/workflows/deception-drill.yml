@@ -89,7 +89,10 @@ jobs:
           script: |
             const fs = require('fs')
             const p = `${process.env.RUNNER_TEMP}/drill.txt`
-            const report = fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '(the drill did not get far enough to report)'
+            // Only the verdict table goes to the (public) issue, never the transcript above it.
+            const full = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''
+            const i = full.indexOf('run=')
+            const report = i >= 0 ? full.slice(i).trim() : '(the drill did not get far enough to report)'
             const MARKER = '<!-- deception-drill -->'
             const issue_number = 14163
             const body = [

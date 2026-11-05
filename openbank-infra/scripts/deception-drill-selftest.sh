@@ -34,4 +34,11 @@ rc=$(run 1.0 || true)
 if [[ "$rc" != 0 ]] || ! grep -q '^key  *PASS' "$tmp/out" || ! grep -q '^sa  *SKIPPED' "$tmp/out"; then
   echo "SELFTEST FAIL: a signal must exit 0 with key PASS and sa SKIPPED (rc=$rc)"; cat "$tmp/out"; exit 1
 fi
-echo "deception-drill selftest: OK — silence fails loudly (exit 1), a signal passes, scope=aws never claims the ServiceAccount"
+rc=$(run 2.0 || true)
+if [[ "$rc" != 1 ]] || ! grep -q '^extra  *FAIL' "$tmp/out"; then
+  echo "SELFTEST FAIL: two matched events must exit 1 with an extra FAIL row (rc=$rc)"; cat "$tmp/out"; exit 1
+fi
+if grep -q 'arn:aws' "$tmp/out"; then
+  echo "SELFTEST FAIL: the drill printed an ARN, and its output is posted to a public issue"; cat "$tmp/out"; exit 1
+fi
+echo "deception-drill selftest: OK — silence fails loudly (exit 1), a signal passes, a second event fails, no ARN printed, scope=aws never claims the ServiceAccount"
