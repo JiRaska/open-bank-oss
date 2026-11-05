@@ -181,6 +181,39 @@ jobs:
       - name: Execute the full renderer suite without external network
         run: docker run --rm --network none renderer-tests:local
 
+  deploy-source-freshness:
+    name: Verify exact-head GitOps image source
+    if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Run the verifier from the trusted event base, never from the deploy PR.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable candidate image pins
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$HEAD_SHA"
+          python3 .github/scripts/check-deploy-source-freshness.py \
+            --base "$BASE_SHA" --head "$HEAD_SHA"
+          git rev-list "$BASE_SHA..$HEAD_SHA" > "$RUNNER_TEMP/deploy-head-commits"
+          while IFS= read -r commit; do
+            verified=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${commit}" --jq '.commit.verification.verified')
+            if [ "$verified" != 'true' ]; then
+              echo "::error::Deploy head contains a commit without a verified signature: $commit"
+              exit 1
+            fi
+          done < "$RUNNER_TEMP/deploy-head-commits"
+
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
     # Only a hosted runner waits. The broker is private, so the published job's
@@ -430,9 +463,23 @@ jobs:
     secrets:
       PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
 
+  build_pr_openbank_client_account:
+    name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') && 'build (openbank-client-account)' || 'Not selected (pr, openbank-client-account)' }}
+    needs: [changes, publication-ready, build_pr_openbank_analytics_sink]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci-pr.yml
+    with:
+      service: openbank-client-account
+    secrets:
+      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+
   build_pr_openbank_client_product_catalog:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') && 'build (openbank-client-product-catalog)' || 'Not selected (pr, openbank-client-product-catalog)' }}
-    needs: [changes, publication-ready, build_pr_openbank_analytics_sink]
+    needs: [changes, publication-ready, build_pr_openbank_ap2_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') }}
     permissions:
       contents: read
@@ -446,7 +493,7 @@ jobs:
 
   build_pr_openbank_client_transaction:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') && 'build (openbank-client-transaction)' || 'Not selected (pr, openbank-client-transaction)' }}
-    needs: [changes, publication-ready, build_pr_openbank_ap2_service]
+    needs: [changes, publication-ready, build_pr_openbank_audit_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') }}
     permissions:
       contents: read
@@ -460,7 +507,7 @@ jobs:
 
   build_pr_openbank_communication_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') && 'build (openbank-communication-service)' || 'Not selected (pr, openbank-communication-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_audit_service]
+    needs: [changes, publication-ready, build_pr_openbank_authz_policy_auditor]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') }}
     permissions:
       contents: read
@@ -474,7 +521,7 @@ jobs:
 
   build_pr_openbank_consent_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') && 'build (openbank-consent-service)' || 'Not selected (pr, openbank-consent-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_authz_policy_auditor]
+    needs: [changes, publication-ready, build_pr_openbank_balance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') }}
     permissions:
       contents: read
@@ -488,7 +535,7 @@ jobs:
 
   build_pr_openbank_context_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') && 'build (openbank-context-service)' || 'Not selected (pr, openbank-context-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_balance_service]
+    needs: [changes, publication-ready, build_pr_openbank_billing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') }}
     permissions:
       contents: read
@@ -502,7 +549,7 @@ jobs:
 
   build_pr_openbank_control_liveness_sentinel:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') && 'build (openbank-control-liveness-sentinel)' || 'Not selected (pr, openbank-control-liveness-sentinel)' }}
-    needs: [changes, publication-ready, build_pr_openbank_billing_service]
+    needs: [changes, publication-ready, build_pr_openbank_campaign_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') }}
     permissions:
       contents: read
@@ -516,7 +563,7 @@ jobs:
 
   build_pr_openbank_copilot_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') && 'build (openbank-copilot-service)' || 'Not selected (pr, openbank-copilot-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_campaign_service]
+    needs: [changes, publication-ready, build_pr_openbank_card_issuance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') }}
     permissions:
       contents: read
@@ -530,7 +577,7 @@ jobs:
 
   build_pr_openbank_customer_edge:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') && 'build (openbank-customer-edge)' || 'Not selected (pr, openbank-customer-edge)' }}
-    needs: [changes, publication-ready, build_pr_openbank_card_issuance_service]
+    needs: [changes, publication-ready, build_pr_openbank_card_processing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') }}
     permissions:
       contents: read
@@ -544,7 +591,7 @@ jobs:
 
   build_pr_openbank_delegation_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-delegation-service') && 'build (openbank-delegation-service)' || 'Not selected (pr, openbank-delegation-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_card_processing_service]
+    needs: [changes, publication-ready, build_pr_openbank_case_coordinator_agent]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-delegation-service') }}
     permissions:
       contents: read
@@ -558,7 +605,7 @@ jobs:
 
   build_pr_openbank_devops_agent:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-devops-agent') && 'build (openbank-devops-agent)' || 'Not selected (pr, openbank-devops-agent)' }}
-    needs: [changes, publication-ready, build_pr_openbank_case_coordinator_agent]
+    needs: [changes, publication-ready, build_pr_openbank_clearing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-devops-agent') }}
     permissions:
       contents: read
@@ -572,7 +619,7 @@ jobs:
 
   build_pr_openbank_dispute_service:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-dispute-service') && 'build (openbank-dispute-service)' || 'Not selected (pr, openbank-dispute-service)' }}
-    needs: [changes, publication-ready, build_pr_openbank_clearing_service]
+    needs: [changes, publication-ready, build_pr_openbank_clearing_simulator]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-dispute-service') }}
     permissions:
       contents: read
@@ -586,7 +633,7 @@ jobs:
 
   build_pr_openbank_docs_truth_agent:
     name: ${{ (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-docs-truth-agent') && 'build (openbank-docs-truth-agent)' || 'Not selected (pr, openbank-docs-truth-agent)' }}
-    needs: [changes, publication-ready, build_pr_openbank_clearing_simulator]
+    needs: [changes, publication-ready, build_pr_openbank_client_account]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name == 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-docs-truth-agent') }}
     permissions:
       contents: read
@@ -1407,8 +1454,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-account-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_agent_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-agent-service') && 'build (openbank-agent-service)' || 'Not selected (other, openbank-agent-service)' }}
@@ -1421,8 +1467,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-agent-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_aml_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-aml-service') && 'build (openbank-aml-service)' || 'Not selected (other, openbank-aml-service)' }}
@@ -1435,8 +1480,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-aml-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_anacredit_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-anacredit-service') && 'build (openbank-anacredit-service)' || 'Not selected (other, openbank-anacredit-service)' }}
@@ -1449,8 +1493,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-anacredit-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_analytics_sink:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-analytics-sink') && 'build (openbank-analytics-sink)' || 'Not selected (other, openbank-analytics-sink)' }}
@@ -1463,8 +1506,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-analytics-sink
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_ap2_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-ap2-service') && 'build (openbank-ap2-service)' || 'Not selected (other, openbank-ap2-service)' }}
@@ -1477,8 +1519,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-ap2-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_audit_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-audit-service') && 'build (openbank-audit-service)' || 'Not selected (other, openbank-audit-service)' }}
@@ -1491,8 +1532,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-audit-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_authz_policy_auditor:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-authz-policy-auditor') && 'build (openbank-authz-policy-auditor)' || 'Not selected (other, openbank-authz-policy-auditor)' }}
@@ -1505,8 +1545,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-authz-policy-auditor
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_balance_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-balance-service') && 'build (openbank-balance-service)' || 'Not selected (other, openbank-balance-service)' }}
@@ -1519,8 +1558,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-balance-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_billing_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-billing-service') && 'build (openbank-billing-service)' || 'Not selected (other, openbank-billing-service)' }}
@@ -1533,8 +1571,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-billing-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_campaign_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-campaign-service') && 'build (openbank-campaign-service)' || 'Not selected (other, openbank-campaign-service)' }}
@@ -1547,8 +1584,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-campaign-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_card_issuance_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-card-issuance-service') && 'build (openbank-card-issuance-service)' || 'Not selected (other, openbank-card-issuance-service)' }}
@@ -1561,8 +1597,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-card-issuance-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_card_processing_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-card-processing-service') && 'build (openbank-card-processing-service)' || 'Not selected (other, openbank-card-processing-service)' }}
@@ -1575,8 +1610,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-card-processing-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_case_coordinator_agent:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-case-coordinator-agent') && 'build (openbank-case-coordinator-agent)' || 'Not selected (other, openbank-case-coordinator-agent)' }}
@@ -1589,8 +1623,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-case-coordinator-agent
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_clearing_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-clearing-service') && 'build (openbank-clearing-service)' || 'Not selected (other, openbank-clearing-service)' }}
@@ -1603,8 +1636,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-clearing-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_clearing_simulator:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-clearing-simulator') && 'build (openbank-clearing-simulator)' || 'Not selected (other, openbank-clearing-simulator)' }}
@@ -1617,12 +1649,24 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-clearing-simulator
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
+
+  build_other_openbank_client_account:
+    name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') && 'build (openbank-client-account)' || 'Not selected (other, openbank-client-account)' }}
+    needs: [changes, publication-ready, build_other_openbank_balance_service]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-account') }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: openbank-client-account
+    secrets: inherit
 
   build_other_openbank_client_product_catalog:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') && 'build (openbank-client-product-catalog)' || 'Not selected (other, openbank-client-product-catalog)' }}
-    needs: [changes, publication-ready, build_other_openbank_balance_service]
+    needs: [changes, publication-ready, build_other_openbank_billing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-product-catalog') }}
     permissions:
       contents: read
@@ -1631,12 +1675,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-client-product-catalog
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_client_transaction:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') && 'build (openbank-client-transaction)' || 'Not selected (other, openbank-client-transaction)' }}
-    needs: [changes, publication-ready, build_other_openbank_billing_service]
+    needs: [changes, publication-ready, build_other_openbank_campaign_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-client-transaction') }}
     permissions:
       contents: read
@@ -1645,12 +1688,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-client-transaction
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_communication_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') && 'build (openbank-communication-service)' || 'Not selected (other, openbank-communication-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_campaign_service]
+    needs: [changes, publication-ready, build_other_openbank_card_issuance_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-communication-service') }}
     permissions:
       contents: read
@@ -1659,12 +1701,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-communication-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_consent_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') && 'build (openbank-consent-service)' || 'Not selected (other, openbank-consent-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_card_issuance_service]
+    needs: [changes, publication-ready, build_other_openbank_card_processing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-consent-service') }}
     permissions:
       contents: read
@@ -1673,12 +1714,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-consent-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_context_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') && 'build (openbank-context-service)' || 'Not selected (other, openbank-context-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_card_processing_service]
+    needs: [changes, publication-ready, build_other_openbank_case_coordinator_agent]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-context-service') }}
     permissions:
       contents: read
@@ -1687,12 +1727,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-context-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_control_liveness_sentinel:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') && 'build (openbank-control-liveness-sentinel)' || 'Not selected (other, openbank-control-liveness-sentinel)' }}
-    needs: [changes, publication-ready, build_other_openbank_case_coordinator_agent]
+    needs: [changes, publication-ready, build_other_openbank_clearing_service]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-control-liveness-sentinel') }}
     permissions:
       contents: read
@@ -1701,12 +1740,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-control-liveness-sentinel
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_copilot_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') && 'build (openbank-copilot-service)' || 'Not selected (other, openbank-copilot-service)' }}
-    needs: [changes, publication-ready, build_other_openbank_clearing_service]
+    needs: [changes, publication-ready, build_other_openbank_clearing_simulator]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-copilot-service') }}
     permissions:
       contents: read
@@ -1715,12 +1753,11 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-copilot-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_customer_edge:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') && 'build (openbank-customer-edge)' || 'Not selected (other, openbank-customer-edge)' }}
-    needs: [changes, publication-ready, build_other_openbank_clearing_simulator]
+    needs: [changes, publication-ready, build_other_openbank_client_account]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-customer-edge') }}
     permissions:
       contents: read
@@ -1729,8 +1766,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-customer-edge
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_delegation_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-delegation-service') && 'build (openbank-delegation-service)' || 'Not selected (other, openbank-delegation-service)' }}
@@ -1743,8 +1779,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-delegation-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_devops_agent:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-devops-agent') && 'build (openbank-devops-agent)' || 'Not selected (other, openbank-devops-agent)' }}
@@ -1757,8 +1792,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-devops-agent
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_dispute_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-dispute-service') && 'build (openbank-dispute-service)' || 'Not selected (other, openbank-dispute-service)' }}
@@ -1771,8 +1805,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-dispute-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_docs_truth_agent:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-docs-truth-agent') && 'build (openbank-docs-truth-agent)' || 'Not selected (other, openbank-docs-truth-agent)' }}
@@ -1785,8 +1818,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-docs-truth-agent
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_document_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-document-service') && 'build (openbank-document-service)' || 'Not selected (other, openbank-document-service)' }}
@@ -1799,8 +1831,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-document-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_domestic_payment:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-domestic-payment') && 'build (openbank-domestic-payment)' || 'Not selected (other, openbank-domestic-payment)' }}
@@ -1813,8 +1844,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-domestic-payment
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_engagement_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-engagement-service') && 'build (openbank-engagement-service)' || 'Not selected (other, openbank-engagement-service)' }}
@@ -1827,8 +1857,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-engagement-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_finops_agent:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-finops-agent') && 'build (openbank-finops-agent)' || 'Not selected (other, openbank-finops-agent)' }}
@@ -1841,8 +1870,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-finops-agent
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_finrep_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-finrep-service') && 'build (openbank-finrep-service)' || 'Not selected (other, openbank-finrep-service)' }}
@@ -1855,8 +1883,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-finrep-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_flaky_test_hunter:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-flaky-test-hunter') && 'build (openbank-flaky-test-hunter)' || 'Not selected (other, openbank-flaky-test-hunter)' }}
@@ -1869,8 +1896,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-flaky-test-hunter
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_fraud_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-fraud-service') && 'build (openbank-fraud-service)' || 'Not selected (other, openbank-fraud-service)' }}
@@ -1883,8 +1909,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-fraud-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_fx_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-fx-service') && 'build (openbank-fx-service)' || 'Not selected (other, openbank-fx-service)' }}
@@ -1897,8 +1922,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-fx-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_governance_auditor:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-governance-auditor') && 'build (openbank-governance-auditor)' || 'Not selected (other, openbank-governance-auditor)' }}
@@ -1911,8 +1935,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-governance-auditor
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_incentive_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-incentive-service') && 'build (openbank-incentive-service)' || 'Not selected (other, openbank-incentive-service)' }}
@@ -1925,8 +1948,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-incentive-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_interest_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-interest-service') && 'build (openbank-interest-service)' || 'Not selected (other, openbank-interest-service)' }}
@@ -1939,8 +1961,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-interest-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_kyb_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-kyb-service') && 'build (openbank-kyb-service)' || 'Not selected (other, openbank-kyb-service)' }}
@@ -1953,8 +1974,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-kyb-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_kyc_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-kyc-service') && 'build (openbank-kyc-service)' || 'Not selected (other, openbank-kyc-service)' }}
@@ -1967,8 +1987,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-kyc-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_ledger_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-ledger-service') && 'build (openbank-ledger-service)' || 'Not selected (other, openbank-ledger-service)' }}
@@ -1981,8 +2000,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-ledger-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_lending_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-lending-service') && 'build (openbank-lending-service)' || 'Not selected (other, openbank-lending-service)' }}
@@ -1995,8 +2013,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-lending-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs') && 'build (openbank-libs)' || 'Not selected (other, openbank-libs)' }}
@@ -2009,8 +2026,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_benchmarks:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-benchmarks') && 'build (openbank-libs-benchmarks)' || 'Not selected (other, openbank-libs-benchmarks)' }}
@@ -2023,8 +2039,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-benchmarks
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_detekt_rules:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-detekt-rules') && 'build (openbank-libs-detekt-rules)' || 'Not selected (other, openbank-libs-detekt-rules)' }}
@@ -2037,8 +2052,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-detekt-rules
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_domain:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-domain') && 'build (openbank-libs-domain)' || 'Not selected (other, openbank-libs-domain)' }}
@@ -2051,8 +2065,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-domain
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_finance:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-finance') && 'build (openbank-libs-finance)' || 'Not selected (other, openbank-libs-finance)' }}
@@ -2065,8 +2078,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-finance
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_fincrime:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-fincrime') && 'build (openbank-libs-fincrime)' || 'Not selected (other, openbank-libs-fincrime)' }}
@@ -2079,8 +2091,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-fincrime
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_iso20022:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-iso20022') && 'build (openbank-libs-iso20022)' || 'Not selected (other, openbank-libs-iso20022)' }}
@@ -2093,8 +2104,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-iso20022
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_lending:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-lending') && 'build (openbank-libs-lending)' || 'Not selected (other, openbank-libs-lending)' }}
@@ -2107,8 +2117,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-lending
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_runtime:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-runtime') && 'build (openbank-libs-runtime)' || 'Not selected (other, openbank-libs-runtime)' }}
@@ -2121,8 +2130,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-runtime
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_temporal:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-temporal') && 'build (openbank-libs-temporal)' || 'Not selected (other, openbank-libs-temporal)' }}
@@ -2135,8 +2143,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-temporal
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_libs_testing:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-libs-testing') && 'build (openbank-libs-testing)' || 'Not selected (other, openbank-libs-testing)' }}
@@ -2149,8 +2156,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-libs-testing
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_loyalty_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-loyalty-service') && 'build (openbank-loyalty-service)' || 'Not selected (other, openbank-loyalty-service)' }}
@@ -2163,8 +2169,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-loyalty-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_mcp_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-mcp-service') && 'build (openbank-mcp-service)' || 'Not selected (other, openbank-mcp-service)' }}
@@ -2177,8 +2182,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-mcp-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_notification_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-notification-service') && 'build (openbank-notification-service)' || 'Not selected (other, openbank-notification-service)' }}
@@ -2191,8 +2195,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-notification-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_onboarding_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-onboarding-service') && 'build (openbank-onboarding-service)' || 'Not selected (other, openbank-onboarding-service)' }}
@@ -2205,8 +2208,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-onboarding-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_party_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-party-service') && 'build (openbank-party-service)' || 'Not selected (other, openbank-party-service)' }}
@@ -2219,8 +2221,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-party-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_pension_fund_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-pension-fund-service') && 'build (openbank-pension-fund-service)' || 'Not selected (other, openbank-pension-fund-service)' }}
@@ -2233,8 +2234,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-pension-fund-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_pension_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-pension-service') && 'build (openbank-pension-service)' || 'Not selected (other, openbank-pension-service)' }}
@@ -2247,8 +2247,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-pension-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_pid_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-pid-service') && 'build (openbank-pid-service)' || 'Not selected (other, openbank-pid-service)' }}
@@ -2261,8 +2260,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-pid-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_product_catalog:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-product-catalog') && 'build (openbank-product-catalog)' || 'Not selected (other, openbank-product-catalog)' }}
@@ -2275,8 +2273,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-product-catalog
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_products:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-products') && 'build (openbank-products)' || 'Not selected (other, openbank-products)' }}
@@ -2289,8 +2286,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-products
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_psd2_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-psd2-service') && 'build (openbank-psd2-service)' || 'Not selected (other, openbank-psd2-service)' }}
@@ -2303,8 +2299,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-psd2-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_referral_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-referral-service') && 'build (openbank-referral-service)' || 'Not selected (other, openbank-referral-service)' }}
@@ -2317,8 +2312,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-referral-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_release_steward:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-release-steward') && 'build (openbank-release-steward)' || 'Not selected (other, openbank-release-steward)' }}
@@ -2331,8 +2325,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-release-steward
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_risk_engine:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-risk-engine') && 'build (openbank-risk-engine)' || 'Not selected (other, openbank-risk-engine)' }}
@@ -2345,8 +2338,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-risk-engine
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_sanctions_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sanctions-service') && 'build (openbank-sanctions-service)' || 'Not selected (other, openbank-sanctions-service)' }}
@@ -2359,8 +2351,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-sanctions-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_sca_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sca-service') && 'build (openbank-sca-service)' || 'Not selected (other, openbank-sca-service)' }}
@@ -2373,8 +2364,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-sca-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_sdd_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sdd-service') && 'build (openbank-sdd-service)' || 'Not selected (other, openbank-sdd-service)' }}
@@ -2387,8 +2377,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-sdd-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_security_scanner:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-security-scanner') && 'build (openbank-security-scanner)' || 'Not selected (other, openbank-security-scanner)' }}
@@ -2401,8 +2390,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-security-scanner
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_sepa_instant:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-instant') && 'build (openbank-sepa-instant)' || 'Not selected (other, openbank-sepa-instant)' }}
@@ -2415,8 +2403,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-sepa-instant
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_sepa_payment:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-sepa-payment') && 'build (openbank-sepa-payment)' || 'Not selected (other, openbank-sepa-payment)' }}
@@ -2429,8 +2416,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-sepa-payment
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_settlement_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-settlement-service') && 'build (openbank-settlement-service)' || 'Not selected (other, openbank-settlement-service)' }}
@@ -2443,8 +2429,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-settlement-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_simulation:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-simulation') && 'build (openbank-simulation)' || 'Not selected (other, openbank-simulation)' }}
@@ -2457,8 +2442,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-simulation
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_standing_order_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-standing-order-service') && 'build (openbank-standing-order-service)' || 'Not selected (other, openbank-standing-order-service)' }}
@@ -2471,8 +2455,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-standing-order-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_statement_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-statement-service') && 'build (openbank-statement-service)' || 'Not selected (other, openbank-statement-service)' }}
@@ -2485,8 +2468,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-statement-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_swift_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-swift-service') && 'build (openbank-swift-service)' || 'Not selected (other, openbank-swift-service)' }}
@@ -2499,8 +2481,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-swift-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_tax_reporting_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-tax-reporting-service') && 'build (openbank-tax-reporting-service)' || 'Not selected (other, openbank-tax-reporting-service)' }}
@@ -2513,8 +2494,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-tax-reporting-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_tpp_registry_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-tpp-registry-service') && 'build (openbank-tpp-registry-service)' || 'Not selected (other, openbank-tpp-registry-service)' }}
@@ -2527,8 +2507,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-tpp-registry-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_transaction_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-transaction-service') && 'build (openbank-transaction-service)' || 'Not selected (other, openbank-transaction-service)' }}
@@ -2541,8 +2520,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-transaction-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_treasury_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-treasury-service') && 'build (openbank-treasury-service)' || 'Not selected (other, openbank-treasury-service)' }}
@@ -2555,8 +2533,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-treasury-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_vop_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-vop-service') && 'build (openbank-vop-service)' || 'Not selected (other, openbank-vop-service)' }}
@@ -2569,8 +2546,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-vop-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
 
   build_other_openbank_wealth_service:
     name: ${{ (github.event_name != 'pull_request') && contains(fromJSON(needs.changes.outputs.services || '[]'), 'openbank-wealth-service') && 'build (openbank-wealth-service)' || 'Not selected (other, openbank-wealth-service)' }}
@@ -2583,8 +2559,7 @@ jobs:
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: openbank-wealth-service
-    secrets:
-      PACT_BROKER_PASSWORD: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || '' }}
+    secrets: inherit
   # END GENERATED SERVICE CI CALLERS
 
   # Single required status check that aggregates the matrix, so branch protection
@@ -2663,6 +2638,7 @@ jobs:
       - publication-ready
       - verification-metadata
       - renderer-tests
+      - deploy-source-freshness
       - build_pr_openbank_account_service
       - build_pr_openbank_agent_service
       - build_pr_openbank_aml_service
@@ -2679,6 +2655,7 @@ jobs:
       - build_pr_openbank_case_coordinator_agent
       - build_pr_openbank_clearing_service
       - build_pr_openbank_clearing_simulator
+      - build_pr_openbank_client_account
       - build_pr_openbank_client_product_catalog
       - build_pr_openbank_client_transaction
       - build_pr_openbank_communication_service
@@ -2764,6 +2741,7 @@ jobs:
       - build_other_openbank_case_coordinator_agent
       - build_other_openbank_clearing_service
       - build_other_openbank_clearing_simulator
+      - build_other_openbank_client_account
       - build_other_openbank_client_product_catalog
       - build_other_openbank_client_transaction
       - build_other_openbank_communication_service
@@ -2859,6 +2837,15 @@ jobs:
 
       - name: Verify individual build-result offline fixtures
         run: python3 .github/scripts/test-check-service-build-results.py ResultsTest RendererSelectionTest
+      - name: Require exact-head GitOps source freshness
+        if: github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'chore/gitops-auto-deploy-')
+        env:
+          SOURCE_RESULT: ${{ needs.deploy-source-freshness.result }}
+        run: |
+          if [ "$SOURCE_RESULT" != 'success' ]; then
+            echo "::error::GitOps image source freshness was not proven for this PR head."
+            exit 1
+          fi
       - name: Verify no service failed
         run: |
           if [ "${{ needs.changes.result }}" != 'success' ] || [ "${{ needs.changes.outputs.admission }}" != 'true' ]; then

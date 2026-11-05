@@ -4,6 +4,8 @@
 
 Tuto dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-as-Service, ADR 0019).
 
+[Kapitola architektury](./02-architecture.cs.md) sleduje obchod přes schválení, účtování do ledgeru a párování výpisu. Generovaná kapitola **API surface** se při každém buildu image obnovuje z `openapi.yaml`; úplná schémata zůstávají na `/q/openapi`.
+
 ## TL;DR
 
 - **Technologie:** Kotlin / Quarkus 3.x / PostgreSQL (migrace Flyway)
@@ -32,7 +34,7 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 
 ## Kontrakt
 
-Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
+Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity byly aditivní ve verzi 1.18.0, s odpovědí 422 u `submit` a `approve`. Verze 1.25.0 opravuje popis validační odpovědi HTTP 400 na sdílený `ProblemDetail`; obchodní zamítnutí si ponechávají tělo `Error`.
 
 
 ## Custodian výpisy portfolia

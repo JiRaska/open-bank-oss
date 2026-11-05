@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.40.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.1...ledger-service-v1.40.0) (2026-10-29)
+
+
+### Features
+
+* **treasury:** day-close participant - report the hourly accrual and the day's deal journals (ADR-0342) ([#13882](https://github.com/JiRaska/open-bank-oss/issues/13882)) ([8408b38](https://github.com/JiRaska/open-bank-oss/commit/8408b38cd8954afb0a55c623b18d933bc836eae8))
+
 ## [1.39.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.0...ledger-service-v1.39.1) (2026-10-28)
 
 

@@ -5,6 +5,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
@@ -36,7 +37,7 @@ import java.util.function.Supplier
 @QuarkusTest
 @TestProfile(PushFallbackDefaultOffIT.DefaultOffProfile::class)
 @QuarkusTestResource(PushFallbackDefaultOffIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class PushFallbackDefaultOffIT {
 
     /** Profile overrides outrank ambient shell variables, preserving the production default-off contract. */

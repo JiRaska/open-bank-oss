@@ -370,6 +370,12 @@ public final class com/openbank/libs/fincrime/vocabulary/FincrimeVocabulary$Comp
 	public final fun compile (Lcom/openbank/libs/fincrime/vocabulary/VocabularySource;)Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;
 }
 
+public final class com/openbank/libs/fincrime/vocabulary/FincrimeVocabularyJson {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabularyJson;
+	public static final field MAX_SOURCE_BYTES I
+	public final fun compile (Ljava/lang/String;)Lcom/openbank/libs/fincrime/vocabulary/FincrimeVocabulary;
+}
+
 public final class com/openbank/libs/fincrime/vocabulary/VocabularyCode {
 	public fun <init> (Ljava/lang/String;)V
 	public final fun component1 ()Ljava/lang/String;

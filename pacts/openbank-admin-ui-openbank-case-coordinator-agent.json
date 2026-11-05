@@ -104,6 +104,11 @@
     },
     {
       "description": "fetch the active kill-switch status",
+      "providerStates": [
+        {
+          "name": "no kill-switch scope is active"
+        }
+      ],
       "request": {
         "method": "GET",
         "path": "/api/v1/case-coordinator/kill-switch"

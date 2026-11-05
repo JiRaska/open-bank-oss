@@ -15,7 +15,7 @@ SCRIPT = Path(__file__).with_name("deploy-window-inputs.sh")
 def pull_request(number, head, labels=(), draft=False):
     return {
         "number": number, "state": "open", "head": {
-            "ref": head, "repo": {"full_name": "example/open-bank"}},
+            "ref": head, "sha": "a" * 40, "repo": {"full_name": "example/open-bank"}},
         "base": {"repo": {"full_name": "example/open-bank"}},
         "created_at": "2026-01-01T00:00:00Z", "draft": draft,
         "labels": [{"name": label} for label in labels], "auto_merge": None,
@@ -23,7 +23,7 @@ def pull_request(number, head, labels=(), draft=False):
 
 
 class DeployWindowInputsTest(unittest.TestCase):
-    def run_inventory(self, pages, fail_api=False, fail_after_page=False):
+    def run_inventory(self, pages, fail_api=False, fail_after_page=False, main_sha="b" * 40):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             fake_gh = root / "gh"
@@ -36,8 +36,11 @@ class DeployWindowInputsTest(unittest.TestCase):
                 "    if os.environ['FAIL_API'] == 'yes': sys.exit(1)\n"
                 "    print(os.environ['PAGES'])\n"
                 "    if os.environ['FAIL_AFTER_PAGE'] == 'yes': sys.exit(1)\n"
+                "elif '/git/ref/heads/main' in sys.argv[2]:\n"
+                "    print(os.environ['MAIN_SHA'])\n"
                 "else:\n"
                 "    assert sys.argv[1] == 'api'\n"
+                "    assert ('sha=' + os.environ['MAIN_SHA'] + '&') in sys.argv[2]\n"
                 "    print('[]')\n",
                 encoding="utf-8",
             )
@@ -47,7 +50,7 @@ class DeployWindowInputsTest(unittest.TestCase):
                 "PATH": str(root) + os.pathsep + os.environ.get("PATH", os.defpath),
                 "GITHUB_REPOSITORY": "example/open-bank",
                 "PAGES": json.dumps(pages), "FAIL_API": "yes" if fail_api else "no",
-                "FAIL_AFTER_PAGE": "yes" if fail_after_page else "no",
+                "FAIL_AFTER_PAGE": "yes" if fail_after_page else "no", "MAIN_SHA": main_sha,
             }
             output = root / "output"
             result = subprocess.run(
@@ -65,8 +68,32 @@ class DeployWindowInputsTest(unittest.TestCase):
         code, inventory = self.run_inventory([[deploy], [repair, feature, held_deploy]])
         self.assertEqual(code, 0)
         self.assertEqual([pr["number"] for pr in inventory], [1, 2])
+        self.assertEqual(inventory[0]["head_sha"], "a" * 40)
         self.assertTrue(inventory[1]["repair_priority"])
         self.assertFalse(inventory[0]["repair_priority"])
+
+    def test_missing_head_sha_fails_closed(self):
+        deploy = pull_request(1, "chore/gitops-auto-deploy-a")
+        del deploy["head"]["sha"]
+        code, inventory = self.run_inventory([[deploy]])
+        self.assertNotEqual(code, 0)
+        self.assertIsNone(inventory)
+
+    def test_non_sha_main_fails_closed(self):
+        for value in ("", "null", "main", "b" * 39, "b" * 41):
+            with self.subTest(value=value):
+                code, inventory = self.run_inventory([[]], main_sha=value)
+                self.assertNotEqual(code, 0)
+                self.assertIsNone(inventory)
+
+    def test_invalid_head_sha_fails_closed(self):
+        for value in ("", "main", "a" * 39, "a" * 41, None):
+            with self.subTest(value=value):
+                deploy = pull_request(1, "chore/gitops-auto-deploy-a")
+                deploy["head"]["sha"] = value
+                code, inventory = self.run_inventory([[deploy]])
+                self.assertNotEqual(code, 0)
+                self.assertIsNone(inventory)
 
     def test_api_error_fails_closed(self):
         code, inventory = self.run_inventory([[]], fail_api=True)

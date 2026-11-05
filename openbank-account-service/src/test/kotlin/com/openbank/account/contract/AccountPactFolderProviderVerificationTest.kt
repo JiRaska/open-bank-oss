@@ -14,6 +14,7 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
@@ -123,7 +124,12 @@ class AccountPactFolderProviderVerificationTest {
         private val TAX_PROFILE_PARTY_ID = UUID.fromString("61000000-0000-0000-0000-000000000061")
     }
 
-    private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
+    // Quarkus' runtime ObjectMapper renders dates as ISO-8601 strings; a stock jacksonObjectMapper()
+    // would emit Instant as a numeric epoch and any datetime-matcher contract (referral-service's
+    // AccountCreated pact) would verify a wire shape the real producer never sends.
+    private val objectMapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -259,6 +265,16 @@ class AccountPactFolderProviderVerificationTest {
         )
         return objectMapper.writeValueAsString(event)
     }
+
+    /**
+     * Referral-service's consumer pact (`AccountCreatedMessagePactConsumerTest`, ADR-0310 D1)
+     * declares its own interaction description, so it needs its own producer — pact-jvm matches
+     * @PactVerifyProvider by the description string, not by the event type. The message is the
+     * SAME AccountCreatedEvent as above; only the consumer's contract (eventId as opaque text,
+     * partyId, occurredAt as the qualification inputs) differs.
+     */
+    @PactVerifyProvider("an AccountCreated event eligible for referral qualification")
+    fun produceAccountCreatedEventForReferralQualification(): String = produceAccountCreatedEvent()
 
     @State("account-service has posted an incoming credit")
     fun accountHasPostedIncomingCredit() {

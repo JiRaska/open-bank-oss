@@ -43,6 +43,8 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 
 `openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
 
+`TopicProducers` mapuje sdílený topik `openbank.oversight-triggers` na `multiple-producers`, protože do něj aml-service i sanctions-service publikují nezávislé požadavky na kontrolu. Audit-service odebírá stejný topik, aby se tyto požadavky staly součástí auditní stopy. Sdílené mapování eviduje vlastnictví; samo události nepublikuje ani neodebírá.
+
 ## Producenti zapínaní při buildu
 
 `RedisApprovalStoreProducer` (`ApprovalStore` pro čtyři oči, zapíná `openbank.approval.store: redis`) a `OpaPolicyDecisionPointProducer` (PDP pro OPA sidecar, zapíná `openbank.authz.opa-pdp-producer.enabled: true`) jsou podmíněné `@IfBuildProperty` a bez vlastnosti vypnuté. Ani jeden není `@DefaultBean`: služba, která je zapne a zároveň si ponechá vlastního producenta, neprojde `quarkusBuild` kvůli nejednoznačné závislosti. Na přítomnosti beanu záleží, protože `AuthorizeInterceptor` zapíná čtyři oči, jakmile `ApprovalStore` existuje.
@@ -59,3 +61,7 @@ Sdílené knihovny a služby používají Quarkus **3.40.1.1 LTS** ze stejného 
 - Builder a reader pro pacs.009 validují proti přiloženému XSD `pacs.009.001.08`.
 
 Sdílená tabulka `TopicProducers` v `openbank-libs-domain` přiřazuje topik `openbank.swift.institution-transfers` službě swift-service. Podle ní audit-service označuje záznamy, které z tohoto topiku čte.
+
+`TopicProducers` přiřazuje `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` službě account-service (#9073); audit-service a analytics-sink je odebírají dřív, než producent přepne.
+
+`TopicProducers` také přiřazuje topik `openbank.tpp.registry.event` službě tpp-registry-service, takže audit-service může označit změny registru TPP (registrace, zařazení na blacklist), které zapisuje do auditní stopy.

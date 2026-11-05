@@ -178,14 +178,43 @@ contract, including AML/fraud effect separation. Executed schema-agreement fixtu
 both domains and structural negatives. Compilation remains authoritative for semantic
 checks (exact vocabulary pins/codes, validity, Long range, rule identity and feature
 consistency), source size and duplicate-key rejection. JSON Schema alone is not a trust
-check. Vocabulary authoring remains typed; this slice does not introduce a vocabulary
-JSON parser or a registry.
+check. At that stage vocabulary authoring remained typed; the next section records its
+JSON boundary. No registry was introduced.
 
 Still required under #13775: authentic source/snapshot adapters, CLI/HTTP/MCP integration,
 DecisionRecord integration, evidence-bound independent approval/signature, SHADOW epochs,
 replica consistency, real HTTP/DB/outbox/concurrency tests and the full enforced
 fincrime-pack-conformance gate. No approval, signature, activation, production caller,
 threshold writer or payment enforcement is enabled by decoding a source.
+
+## K0 vocabulary source boundary
+
+`FincrimeVocabularyJson.compile` decodes closed versioned JSON into the existing typed
+vocabulary compiler. Reason catalogues and explicitly ranked scales can now accompany
+AML/fraud count sources as data, without adding business codes to production Kotlin.
+Synthetic JSON fixtures compile against the existing pack pins, execute one rule in each
+domain and preserve the fraud golden hash. A changed meaning rejects the old reference;
+rebinding the pack makes that change visible in same-input replay.
+
+The adapter requires every field, including explicit null for unordered entry ranks or
+open-ended validity. It rejects unknown/duplicate keys, ambiguous or out-of-range integer
+values, unsupported schemas, malformed instants, mixed/duplicate ranks and duplicate codes.
+It reuses `IrJson` and `FincrimeVocabulary.compile`, including immutable snapshots and the
+existing canonical codec. Entry order and JSON formatting do not change identity.
+
+The independent wire budget is 1,048,576 UTF-8 bytes checked before parsing; typed vocabularies
+remain limited to 512 entries. Some large valid typed vocabularies may exceed the wire
+budget and are deliberately rejected rather than truncated. Callers must bound transport
+reads too. The bundled `fincrime/vocabulary-source-v1.schema.json` checks structure offline;
+compilation additionally enforces text/Unicode, exact numeric, validity and uniqueness
+invariants. Schema lengths count code points, while typed text bounds count UTF-16 units.
+Authored provenance is not authenticated evidence, and a digest does not confer authority.
+
+This closes only vocabulary JSON authoring in #13775. Authentic source/snapshot adapters,
+CLI/HTTP/MCP parity, generated catalogues, independent evidence-bound approvals/signatures,
+DecisionRecord integration, SHADOW epochs/rollback/replica consistency, real HTTP/DB/outbox
+and concurrency proof, and the full fincrime-pack-conformance gate remain open. No production
+caller, registry, activation path, threshold writer or payment enforcement is added.
 
 ## Evidence required before claiming completion
 

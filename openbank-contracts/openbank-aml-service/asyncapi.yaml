@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# ADR-0006: producer-owned AsyncAPI contract for AML domain and oversight events.
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank AML Service — events
+  version: 1.0.0
+  description: |
+    AML case lifecycle events on openbank.aml.events and minimal, non-PII oversight wake-ups
+    for HIGH or CRITICAL case creation (ADR-0031 D9). Both are relayed from the durable outbox.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster openbank-cluster. The aml-service KafkaUser has Write and Describe;
+      downstream consumers have their own Read grants.
+
+channels:
+  amlEvents:
+    address: openbank.aml.events
+    title: AML case lifecycle
+    description: |
+      Producer: openbank-aml-service, channel aml-events-out. Consumers include party-service
+      for the KYC+AML activation gate, context-service for case evidence, and audit-service.
+      The KafkaTopic in components/aml/kafka-topics.yaml has one partition, cleanup.policy=delete
+      and retention.ms=604800000 (seven days). The partition key is the source outbox aggregate
+      id, preserving per-AML-case ordering. ce-type discriminates the two payload schemas.
+    messages:
+      amlCaseCreated:
+        $ref: '#/components/messages/amlCaseCreated'
+      amlCaseStatusChanged:
+        $ref: '#/components/messages/amlCaseStatusChanged'
+
+  oversightTriggers:
+    address: openbank.oversight-triggers
+    title: Immediate compliance oversight wake-up
+    description: |
+      Producer: openbank-aml-service, channel oversight-events-out. Consumers: agent-service
+      starts an oversight sweep and audit-service appends the trigger to its audit trail. The
+      KafkaTopic in components/agent/kafka-topic.yaml has one sandbox partition,
+      cleanup.policy=delete and retention.ms=604800000 (seven days). The partition key and
+      ce-id/ce-type headers are copied from the source AML case-created event. This shared topic
+      also accepts sanctions-service triggers; consumers must use sourceService, not the topic,
+      to identify the producer.
+    messages:
+      oversightCaseCreated:
+        $ref: '#/components/messages/oversightCaseCreated'
+
+operations:
+  publishAmlCaseCreated:
+    action: send
+    channel:
+      $ref: '#/channels/amlEvents'
+    summary: Publish an AML case-created domain event.
+    messages:
+      - $ref: '#/channels/amlEvents/messages/amlCaseCreated'
+
+  publishAmlCaseStatusChanged:
+    action: send
+    channel:
+      $ref: '#/channels/amlEvents'
+    summary: Publish an AML analyst-decision event.
+    messages:
+      - $ref: '#/channels/amlEvents/messages/amlCaseStatusChanged'
+
+  publishOversightCaseCreated:
+    action: send
+    channel:
+      $ref: '#/channels/oversightTriggers'
+    summary: Wake the compliance sweep after a HIGH or CRITICAL AML case is created.
+    description: |
+      KafkaAmlOutboxEventPublisher first sends the original domain event, then emits this trigger
+      only for aml.case.created.v1 with riskLevel HIGH or CRITICAL. A failed send leaves the
+      outbox row unpublished so both sends retry with the same ce-id and partition key.
+    messages:
+      - $ref: '#/channels/oversightTriggers/messages/oversightCaseCreated'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id:
+            type: string
+            format: uuid
+            description: Stable outbox event id; consumers deduplicate at-least-once delivery on it.
+          ce-type:
+            type: string
+            description: The OutboxMessage eventType; there is no discriminator in these bodies.
+          idempotency-key:
+            type: string
+            format: uuid
+
+  messages:
+    amlCaseCreated:
+      name: aml.case.created.v1
+      x-openbank-payload-class: AmlCaseCreatedEvent
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/AmlCaseCreatedPayload'
+
+    amlCaseStatusChanged:
+      name: aml.case.status_changed.v1
+      x-openbank-payload-class: AmlCaseStatusChangedEvent
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
+
+    oversightCaseCreated:
+      name: aml.case.created.v1
+      contentType: application/json
+      description: |
+        Minimal sourceService + occurredAt wake-up. It deliberately contains no party id,
+        customer reference, account id, alert detail or matched entity.
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        $ref: '#/components/schemas/OversightTriggerPayload'
+
+  schemas:
+    AmlCaseCreatedPayload:
+      type: object
+      additionalProperties: false
+      required: [caseId, idempotencyKey, partyId, customerReference, screeningType, riskLevel, status, alertCode, occurredAt]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        accountId:
+          type: [string, 'null']
+          format: uuid
+        transactionId:
+          type: [string, 'null']
+          format: uuid
+        customerReference:
+          type: string
+        screeningType:
+          type: string
+          enum: [CUSTOMER_ONBOARDING, TRANSACTION_MONITORING, PERIODIC_REVIEW, MANUAL_INVESTIGATION]
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        status:
+          type: string
+          enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]
+        alertCode:
+          type: string
+        matchedEntity:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    AmlCaseStatusChangedPayload:
+      type: object
+      additionalProperties: false
+      required: [caseId, partyId, previousStatus, newStatus, occurredAt]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        previousStatus:
+          type: string
+          enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]
+        newStatus:
+          type: string
+          enum: [OPEN, UNDER_REVIEW, ESCALATED, CLEARED, BLOCKED]
+        decisionReason:
+          type: [string, 'null']
+        assignedAnalyst:
+          type: [string, 'null']
+        decidedBy:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    OversightTriggerPayload:
+      type: object
+      additionalProperties: false
+      required: [sourceService, occurredAt]
+      properties:
+        sourceService:
+          type: string
+          const: aml-service
+        occurredAt:
+          type: string
+          format: date-time
+          description: Business time copied from the source AML case-created event, not dispatch time.

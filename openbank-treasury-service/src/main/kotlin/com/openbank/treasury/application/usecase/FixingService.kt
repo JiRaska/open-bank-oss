@@ -86,6 +86,8 @@ class FixingService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val newId: () -> UUID = { Ids.newId() },
+    /** ADR-0344 D7: each run records the FIXINGS step of its bank day; null only in unit tests. */
+    private val dayCompletion: com.openbank.treasury.application.port.out.DayCompletionRepository? = null,
 ) {
     /** The fixings of [date]: what is due, what was fixed, what is blocked. [status] narrows it. */
     suspend fun fixings(date: LocalDate, status: FixingStatus?): List<FixingView> {
@@ -138,6 +140,22 @@ class FixingService(
                 failures += it
             }
         }
+        // A blocked fixing holds the day as a failure would: the close must not pass with an
+        // unfixed coupon (ADR-0342), so the FIXINGS step is not DONE until the case is resolved.
+        val record = com.openbank.treasury.domain.model.DayStepRecord.of(
+            date,
+            com.openbank.treasury.domain.model.DayStep.FIXINGS,
+            fixedFlows,
+            failures.size + blocked.size,
+            clock.instant(),
+        )
+        dayCompletion?.record(
+            if (blocked.isNotEmpty() && failures.isEmpty()) {
+                record.copy(detail = "${blocked.size} index fixing(s) BLOCKED by the quality gate")
+            } else {
+                record
+            },
+        )
         return FixingRunResult(date, fixedFlows, fixedIndices, blocked, failures)
     }
 

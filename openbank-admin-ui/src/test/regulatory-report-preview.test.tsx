@@ -28,7 +28,7 @@ describe('Regulatory report preview', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('unavailable', { status: 502 })))
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const finrepCard = screen.getByText('CNB — Financial statements (FINREP)').closest('.card')
     const trigger = within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' })
     fireEvent.click(trigger)
 
@@ -54,7 +54,7 @@ describe('Regulatory report preview', () => {
 
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const paymentsCard = screen.getByText('SDAT — Platební statistika').closest('.card')
+    const paymentsCard = screen.getByText('SDAT — Payment statistics').closest('.card')
     expect(paymentsCard).not.toBeNull()
     fireEvent.click(within(paymentsCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
@@ -86,7 +86,7 @@ describe('Regulatory report preview', () => {
     expect(screen.getByText('Connected submission')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Submit SDAT' })).not.toBeInTheDocument()
 
-    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const finrepCard = screen.getByText('CNB — Financial statements (FINREP)').closest('.card')
     expect(finrepCard).not.toBeNull()
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
@@ -118,11 +118,13 @@ describe('Regulatory report preview', () => {
 
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    expect(screen.getByText('Implemented preview')).toBeInTheDocument()
+    // Summary tile plus one data-source badge per implemented report — all English on the EN switch.
+    expect(screen.getAllByText('Implemented preview').length).toBeGreaterThan(1)
+    expect(screen.queryByText('Implementovaný náhled')).not.toBeInTheDocument()
     expect(screen.queryByText('Live preview')).not.toBeInTheDocument()
     expect(screen.getByText('Implemented preview coverage')).toBeInTheDocument()
 
-    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const finrepCard = screen.getByText('CNB — Financial statements (FINREP)').closest('.card')
     expect(finrepCard).not.toBeNull()
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
@@ -141,7 +143,7 @@ describe('Regulatory report preview', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    const finrepCard = screen.getByText('CNB — Financial statements (FINREP)').closest('.card')
     fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
     expect(await screen.findByText(/Working preview of actual values/i)).toBeInTheDocument()
@@ -164,7 +166,7 @@ describe('Regulatory report preview', () => {
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    const corepCard = screen.getByText('CNB — Capital adequacy (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
     await waitFor(() => expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Export blocked.*incomplete data/i))
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
@@ -200,7 +202,7 @@ describe('Regulatory report preview', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    const corepCard = screen.getByText('CNB — Capital adequacy (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
@@ -218,7 +220,7 @@ describe('Regulatory report preview', () => {
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    const corepCard = screen.getByText('CNB — Capital adequacy (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
     const gapCell = await screen.findByText(/DATOVÁ MEZERA/)
@@ -236,7 +238,7 @@ describe('Regulatory report preview', () => {
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    const corepCard = screen.getByText('CNB — Capital adequacy (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
     expect(await screen.findByText(/TOTAL RISK EXPOSURE AMOUNT \[row code UNVERIFIED\]/)).toBeInTheDocument()
@@ -259,7 +261,7 @@ describe('Regulatory report preview', () => {
     vi.stubGlobal('fetch', fetchMock)
     render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
 
-    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    const corepCard = screen.getByText('CNB — Capital adequacy (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
 
     expect(await screen.findByText(/risk-engine/i)).toBeInTheDocument()

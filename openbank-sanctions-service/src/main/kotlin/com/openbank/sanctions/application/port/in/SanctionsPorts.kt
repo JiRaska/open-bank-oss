@@ -25,6 +25,8 @@ data class ScreenEntityCommand(
      * turned exactly that into an NPE-driven 500.
      */
     val listTypes: List<String?>? = null,
+    /** Explicit stable subject identity used to bind analyst clearance across fresh attempts. */
+    val subjectId: String? = null,
 )
 
 data class ReviewCommand(

@@ -7,7 +7,9 @@ package com.openbank.productcatalog.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.product.ir.ProductIrCanonical
 import com.openbank.libs.product.ir.ProductIrParser
+import com.openbank.libs.product.ir.ProductIrValidationException
 import com.openbank.libs.product.ir.ProductRevisionIr
 import com.openbank.libs.productrevision.IrSignerPort
 import com.openbank.libs.productrevision.IrSigningException
@@ -15,6 +17,7 @@ import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.productcatalog.application.port.out.GenericCatalogRepository
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
+import com.openbank.productcatalog.domain.catalog.CatalogValue
 import com.openbank.productcatalog.domain.catalog.MarketContext
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
@@ -259,8 +262,21 @@ class GenericCatalogService(
      * `ProductIrValidationException` (an `IllegalArgumentException`, mapped to 400) for an invalid
      * document — a draft that cannot be published is refused at the write, never at publication.
      */
-    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? =
-        content.behaviour?.let { ProductIrParser.fromTree(it.toPlainTree()) }
+    fun parseBehaviour(content: RevisionContent): ProductRevisionIr? = content.behaviour?.let(::parseIr)
+
+    /**
+     * ADR-0352 phase 5b: the Studio IR editor's dry run. The same [parseIr] a revision write runs, so
+     * the editor cannot accept an IR the write would refuse, nor refuse one it would accept. Stores,
+     * signs and publishes nothing.
+     */
+    fun lintIr(behaviour: CatalogValue): IrLintResult = try {
+        val ir = parseIr(behaviour)
+        IrLintResult(ir, ProductIrCanonical.canonicalJson(ir), emptyList())
+    } catch (e: ProductIrValidationException) {
+        IrLintResult(null, null, e.problems)
+    }
+
+    private fun parseIr(behaviour: CatalogValue): ProductRevisionIr = ProductIrParser.fromTree(behaviour.toPlainTree())
 
     @Suppress("ThrowsCount")
     suspend fun approveRevision(
@@ -428,3 +444,10 @@ class GenericCatalogService(
         }
     }
 }
+
+/** Outcome of [GenericCatalogService.lintIr]: either a parsed IR with its canonical bytes, or problems. */
+data class IrLintResult(
+    val ir: ProductRevisionIr?,
+    val canonicalJson: String?,
+    val problems: List<ProductIrValidationException.Problem>,
+)

@@ -33,6 +33,14 @@ interface ProductShadowQueuePort {
 
     /** Transient failure: offered again after a back-off. */
     suspend fun retryLater(id: UUID, outcome: String)
+
+    /**
+     * Retention bound on the frozen account facts: erases them on up to [limit] rows captured more than
+     * [maxAge] ago that still hold any, whatever their outcome. A row not yet DONE is closed as
+     * `FACTS_EXPIRED`; a DONE row keeps its outcome. A row under a live claim is left for the next run.
+     * Returns how many rows were erased.
+     */
+    suspend fun eraseExpiredFacts(maxAge: java.time.Duration, limit: Int): Int
 }
 
 /**

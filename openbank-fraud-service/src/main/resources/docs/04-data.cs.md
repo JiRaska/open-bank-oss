@@ -19,3 +19,7 @@ Consumer group id, offset reset a dead-letter topic pro kanály fraud-service z�
 ## Sdílený typ verdiktu (ADR-0353)
 
 `FraudVerdict` je deklarován jednou v `openbank-libs-fincrime` a sdílen s platebními kanály. Hodnota `UNKNOWN` je to, co čte konzument, když odpověď nelze přečíst; tato služba ji nikdy nevytváří. `RuleHit` ji odmítne a `POST /api/v1/fraud/score` raději vrátí 500, než aby ji vydal. Verdikty ukládané do `fraud_scores.verdict` a vracené na drátě zůstávají `ALLOW`, `CHALLENGE`, `REVIEW` a `DECLINE`.
+
+## Testovací profil: odchozí kanál outboxu vypnut
+
+V profilu `%test` je odchozí kanál `fraud-outbox-out` vypnutý vedle již vypnutého konzumenta `transaction-signal` a `dispatch-enabled=false`, takže integrační testy startují bez brokeru. Produkční a vývojová konfigurace se nemění.

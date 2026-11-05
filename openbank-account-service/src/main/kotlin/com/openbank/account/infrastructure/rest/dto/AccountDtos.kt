@@ -55,6 +55,21 @@ data class AccountResponse(
     val termsVersion: String? = null,
     val termsUrl: String? = null,
     val termsEffectiveFrom: LocalDate? = null,
+    /** Published catalog revision the account was opened under (ADR-0341 D1). Absent = opened before V33. */
+    val productRevision: ProductRevisionPinResponse? = null,
+)
+
+/** The pinned revision; `irRevisionHash`/`irVersion` are absent for a revision that carries no product IR. */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class ProductRevisionPinResponse(
+    val offeringId: UUID,
+    val productCode: String,
+    val revisionId: UUID,
+    val revisionNumber: Long,
+    val contentHash: String? = null,
+    val irRevisionHash: String? = null,
+    val irVersion: Int? = null,
+    val pinnedAt: Instant,
 )
 
 data class AddPocketRequest(val currencyCode: String)

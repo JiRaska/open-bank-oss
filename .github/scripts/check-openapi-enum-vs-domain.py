@@ -264,6 +264,11 @@ BASELINE: dict[str, str] = {
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
         "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
+    # NOT drift — the frozen v1 response/request vocabulary. CZ_TERRORISTS is deliberately served
+    # only by the parallel v3 operations; the complete eight-value enum pairs exactly and needs no
+    # exception. The v1 resource independently enforces the same seven-value allow-list (#10760).
+    "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,PEP_GLOBAL,UN_CONSOLIDATED":
+        "#10760 — v1 SanctionsListType: deliberate compatibility subset; CZ_TERRORISTS is v3-only.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")

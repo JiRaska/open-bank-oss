@@ -191,14 +191,14 @@ print(json.dumps(value))
         self.assertEqual(download['with']['run-id'], '${{ steps.locate.outputs.run-id }}')
         harness = r'''
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
-const outputs = {};
-let clock = 0;
-const calls = [];
-const sleeps = [];
+let fixture, outputs, clock, calls, sleeps;
+const context = {repo: {owner: 'fixture', repo: 'bank'}};
 const read = (key, value, args) => {
-  calls.push({key, clock, timeout: args.request?.timeout});
-  clock += (input.responseDelay || {})[key] || 0;
-  const failures = (input.failures || {})[key] || [];
+  calls.push({key, clock, timeout: args.request?.timeout,
+    headers: args.headers || {}, query: {owner: args.owner, repo: args.repo,
+      name: args.name, per_page: args.per_page, page: args.page}});
+  clock += (fixture.responseDelay || {})[key] || 0;
+  const failures = (fixture.failures || {})[key] || [];
   if (failures.length) {
     const failure = failures.shift();
     const error = new Error('Fixture API failure');
@@ -206,29 +206,59 @@ const read = (key, value, args) => {
     error.response = {headers: failure.headers || {}};
     throw error;
   }
-  return {data: value};
+  const replies = (fixture.responses || {})[key] || [];
+  if (key === 'artifacts' && fixture.repoAfterFirstArtifact &&
+      calls.filter(call => call.key === key).length === 1) {
+    context.repo = fixture.repoAfterFirstArtifact;
+  }
+  if (replies.length) {
+    const reply = replies.shift();
+    clock += reply.delay || 0;
+    if (reply.throws) {
+      const error = new Error('Fixture API response');
+      error.status = reply.status;
+      error.response = {headers: reply.headers || {}};
+      throw error;
+    }
+    return {status: reply.status, data: reply.data, headers: reply.headers || {}};
+  }
+  return {status: 200, data: value, headers: {}};
 };
 const github = {rest: {actions: {
   getWorkflow: async args => read('workflow', {id: 10}, args),
   listArtifactsForRepo: async args => read('artifacts', {
-    artifacts: clock < (input.artifactAfter || 0) ? [] : [input.artifact]}, args),
-  getWorkflowRun: async args => read('producer', input.run, args)
+    artifacts: clock < (fixture.artifactAfter || 0) ? [] : [fixture.artifact]}, args),
+  getWorkflowRun: async args => read('producer', fixture.run, args)
 }}};
-const context = {repo: {owner: 'fixture', repo: 'bank'}};
 const mockRequire = name => {
   if (name !== 'fs') throw new Error('Unexpected import');
-  return {statSync: () => ({size: input.size || 100}), readFileSync: () => JSON.stringify(input.snapshot)};
+  return {statSync: () => ({size: fixture.size || 100}), readFileSync: () => JSON.stringify(fixture.snapshot)};
 };
 const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-(async () => {
+const script = new AsyncFunction('github', 'context', 'core', 'require', 'Date', 'setTimeout', input.script);
+const execute = async override => {
+  fixture = {...input, ...override};
+  outputs = {};
+  clock = 0;
+  calls = [];
+  sleeps = [];
+  context.repo = fixture.repo || {owner: 'fixture', repo: 'bank'};
+  process.env.GITHUB_RUN_ID = fixture.runId || '123';
+  process.env.GITHUB_RUN_ATTEMPT = fixture.attempt || '2';
+  process.env.SOURCE_RUN_ATTEMPT = fixture.sourceAttempt || '1';
   let error = null;
   try {
-    await new AsyncFunction('github', 'context', 'core', 'require', 'Date', 'setTimeout', input.script)(
-      github, context, {setOutput: (key, value) => {outputs[key] = value;}}, mockRequire,
+    await script(github, context, {setOutput: (key, value) => {outputs[key] = value;}}, mockRequire,
       {now: () => clock}, (cb, ms) => {sleeps.push(ms); clock += ms; cb();});
   } catch (e) {error = e.message;}
-  console.log(JSON.stringify({error, outputs, calls, sleeps, clock}));
+  return {error, outputs, calls, sleeps, clock};
+};
+(async () => {
+  const result = await execute({});
+  if (input.nextInvocation) result.next = await execute(input.nextInvocation);
+  console.log(JSON.stringify(result));
 })();
+
 '''
         artifact = {'id': 20, 'name': 'ruleset-bypass-123-a2', 'expired': False, 'workflow_run': {'id': 900}}
         run = {'id': 900, 'run_attempt': 1, 'workflow_id': 10,
@@ -251,13 +281,18 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
              'expect': {'min_clock': 22 * 60 * 1000, 'max_reads': 40}}, False),
             ('collector-after-deadline', locate, {'artifactAfter': 30 * 60 * 1000 + 1,
              'expect': {'clock': 30 * 60 * 1000, 'max_reads': 40}}, True),
+            # A proven quota exhaustion waits for the hourly reset past the 30-minute
+            # evidence window, up to the 62-minute hard cap (40851745901 failed 14 min short).
             ('quota-reset-after-deadline', locate, {'failures': {'workflow': [
              {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1900'}}]},
-             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 1}}, True),
-            ('response-at-deadline', locate, {'failures': {'workflow': [
-             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '1784'}}]},
+             'expect': {'clock': 1901000, 'workflow_reads': 2}}, False),
+            ('quota-reset-beyond-hard-cap', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '3720'}}]},
+             'expect': {'clock': 0, 'workflow_reads': 1}}, True),
+            ('response-at-hard-cap', locate, {'failures': {'workflow': [
+             {**quota, 'headers': {**quota['headers'], 'x-ratelimit-reset': '3704'}}]},
              'responseDelay': {'producer': 15000},
-             'expect': {'clock': 30 * 60 * 1000, 'workflow_reads': 2}}, True),
+             'expect': {'clock': 62 * 60 * 1000, 'workflow_reads': 2}}, True),
             ('permission-denied', locate, {'failures': {'workflow': [{'status': 403}]},
              'expect': {'clock': 0, 'workflow_reads': 1}}, True),
             ('403-with-budget', locate, {'failures': {'workflow': [
@@ -269,7 +304,89 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
             ('quota-retries-bounded', locate, {'failures': {'workflow': [quota] * 4},
              'expect': {'clock': 123000, 'workflow_reads': 4}}, True),
         ]
+        # Execute the receiver's actual script; 304 is an Octokit error in the real protocol.
+        empty_v1 = {'status': 200, 'headers': {'etag': '"v1"'}, 'data': {'artifacts': []}}
+        cached_v1 = {**empty_v1, 'data': {'artifacts': [artifact]}}
+        not_modified = {'status': 304, 'throws': True}
+        producer_pending = {'status': 200, 'data': {**run, 'status': 'in_progress'}}
+        producer_ready = {'status': 200, 'data': run}
+        cases += [
+            ('conditional-empty-304-then-changed-200', locate, {'responses': {'artifacts': [
+                empty_v1, not_modified, {**cached_v1, 'headers': {'etag': '"v2"'}}]},
+                'expect': {'artifact_headers': [None, '"v1"', '"v1"'], 'artifact_reads': 3}}, False),
+            ('conditional-producer-remains-fresh', locate, {'responses': {
+                'artifacts': [cached_v1, not_modified],
+                'producer': [producer_pending, producer_ready]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'producer_reads': 2}}, False),
+            ('conditional-304-returned-response', locate, {'responses': {
+                'artifacts': [cached_v1, {'status': 304}],
+                'producer': [producer_pending, producer_ready]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'producer_reads': 2}}, False),
+            ('conditional-changed-200-refreshes-body-and-etag', locate, {'responses': {
+                'artifacts': [empty_v1, {'status': 200, 'headers': {'etag': '"v2"'},
+                                      'data': {'artifacts': [artifact]}}, not_modified],
+                'producer': [producer_pending, producer_ready]},
+                'expect': {'artifact_headers': [None, '"v1"', '"v2"'], 'producer_reads': 2}}, False),
+            ('conditional-first-304-has-no-body', locate, {'responses': {'artifacts': [not_modified]},
+                'expect': {'artifact_reads': 1}}, True),
+            ('conditional-no-etag-is-unconditional', locate, {'responses': {'artifacts': [
+                {'status': 200, 'data': {'artifacts': []}}, cached_v1]},
+                'expect': {'artifact_headers': [None, None]}}, False),
+            ('conditional-no-etag-cannot-authorize-304', locate, {'responses': {'artifacts': [
+                {'status': 200, 'data': {'artifacts': []}}, not_modified]},
+                'expect': {'artifact_headers': [None, None]}}, True),
+            ('conditional-lost-etag-discards-previous-body', locate, {'responses': {'artifacts': [
+                empty_v1, {'status': 200, 'data': {'artifacts': []}}, not_modified]},
+                'expect': {'artifact_headers': [None, '"v1"', None]}}, True),
+            ('conditional-unexpected-status-cannot-reuse-cache', locate, {'responses': {'artifacts': [
+                empty_v1, {'status': 206, 'headers': {'etag': '"v2"'},
+                           'data': {'artifacts': [artifact]}}]},
+                'expect': {'artifact_headers': [None, '"v1"']}}, True),
+            ('conditional-304-at-deadline-is-not-evidence', locate, {'responses': {'artifacts': [
+                cached_v1, {**not_modified, 'delay': 30 * 60 * 1000 - 5000}],
+                'producer': [producer_pending]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'producer_reads': 1,
+                           'clock': 30 * 60 * 1000}}, True),
+            ('conditional-producer-attempt-remains-fresh', locate, {'responses': {
+                'artifacts': [cached_v1, not_modified], 'producer': [producer_pending,
+                    {**producer_ready, 'data': {**run, 'run_attempt': 2}}]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'producer_reads': 2,
+                           'outputs': {'artifact-id': '20', 'run-id': '900', 'run-attempt': '2'}}}, False),
+            ('conditional-malformed-200-cannot-reuse-cache', locate, {'responses': {'artifacts': [
+                empty_v1, {'status': 200, 'headers': {'etag': '"v2"'}, 'data': {'artifacts': None}}]},
+                'expect': {'artifact_headers': [None, '"v1"']}}, True),
+            ('conditional-permission-error-cannot-reuse-cache', locate, {'responses': {'artifacts': [
+                empty_v1, {'status': 403, 'throws': True}]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'artifact_reads': 2}}, True),
+            ('conditional-quota-recovery-still-revalidates-producer', locate, {'responses': {
+                'artifacts': [cached_v1, {**quota, 'throws': True}, not_modified],
+                'producer': [producer_pending, producer_ready]},
+                'expect': {'artifact_headers': [None, '"v1"', '"v1"'], 'producer_reads': 2,
+                           'clock': 121000}}, False),
+            ('conditional-quota-after-deadline-no-success', locate, {'responses': {
+                'artifacts': [empty_v1, {**quota, 'throws': True,
+                              'headers': {**quota['headers'], 'x-ratelimit-reset': '3720'}}]},
+                'expect': {'artifact_headers': [None, '"v1"'], 'clock': 5000}}, True),
+            ('conditional-exact-repository-key', locate, {'responses': {'artifacts': [
+                empty_v1, not_modified]}, 'repoAfterFirstArtifact': {'owner': 'other', 'repo': 'bank'},
+                'expect': {'artifact_headers': [None, None], 'artifact_reads': 2}}, True),
+            # The current receiver deliberately reads only the exact-name first page (100).
+            # An unrelated next Link must neither change that scope nor become the cache key.
+            ('conditional-first-page-scope-preserved', locate, {'responses': {'artifacts': [
+                {**empty_v1, 'headers': {**empty_v1['headers'], 'link': '<other>; rel="next"'}},
+                not_modified, cached_v1]},
+                'expect': {'artifact_headers': [None, '"v1"', '"v1"'], 'artifact_reads': 3}}, False),
+        ]
+        for key, following in [('same-query-new-invocation', {}), ('different-attempt', {'attempt': '3'}),
+                               ('different-run', {'runId': '124'}),
+                               ('different-repository', {'repo': {'owner': 'fixture', 'repo': 'other'}})]:
+            cases.append((f'conditional-cache-is-local-{key}', locate, {'responses': {
+                'artifacts': [cached_v1, not_modified],
+                'producer': [producer_pending, producer_ready]},
+                'nextInvocation': {**following, 'responses': {'artifacts': [not_modified]}},
+                'expect': {'artifact_headers': [None, '"v1"'], 'next_empty_cache': True}}, False))
         cases.append(('bound', read, {}, False))
+        cases.append(('bound-rerun-rejects-previous-producer-attempt', read, {'sourceAttempt': '2'}, True))
         for key in ('repository', 'run_id', 'run_attempt', 'source_run_id', 'source_run_attempt', 'version'):
             cases.append((f'wrong-binding-{key}', read, {'snapshot': {**snapshot, key: 'wrong'}}, True))
         cases.append(('oversized', read, {'size': 256 * 1024 + 1}, True))
@@ -298,14 +415,36 @@ const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
                     reads = [c for c in output['calls'] if c['key'] == expected['retry']]
                     self.assertEqual(len(reads), 2, output)
                     self.assertEqual(reads[1]['clock'], 121000, output)
-                self.assertTrue(all(c['clock'] < 30 * 60 * 1000 for c in output['calls']), output)
+                if 'artifact_headers' in expected:
+                    self.assertEqual([c['headers'].get('if-none-match') for c in artifact_reads],
+                                     expected['artifact_headers'], output)
+                if 'artifact_reads' in expected:
+                    self.assertEqual(len(artifact_reads), expected['artifact_reads'], output)
+                if 'producer_reads' in expected:
+                    self.assertEqual(sum(c['key'] == 'producer' for c in output['calls']),
+                                     expected['producer_reads'], output)
+                for call in artifact_reads:
+                    self.assertEqual(call['query']['per_page'], 100, output)
+                    self.assertEqual(call['query']['name'], 'ruleset-bypass-123-a2', output)
+                    self.assertNotIn('page', call['query'], output)
+                if expected.get('next_empty_cache'):
+                    following = output['next']
+                    self.assertIsNotNone(following['error'], output)
+                    self.assertEqual(following['outputs'], {}, output)
+                    next_read, = [c for c in following['calls'] if c['key'] == 'artifacts']
+                    self.assertNotIn('if-none-match', next_read['headers'], output)
+                    self.assertEqual(next_read['query']['name'],
+                                     f"ruleset-bypass-{override['nextInvocation'].get('runId', '123')}-"
+                                     f"a{override['nextInvocation'].get('attempt', '2')}", output)
+                self.assertTrue(all(c['clock'] < 62 * 60 * 1000 for c in output['calls']), output)
                 if fails:
                     self.assertEqual(output['outputs'], {})
                 elif step is locate:
-                    self.assertEqual(output['outputs'], {'artifact-id': '20', 'run-id': '900', 'run-attempt': '1'})
+                    self.assertEqual(output['outputs'], expected.get('outputs', {
+                        'artifact-id': '20', 'run-id': '900', 'run-attempt': '1'}))
                 else:
                     self.assertEqual(json.loads(output['outputs']['snapshot']), snapshot)
-        self.assertEqual(job['timeout-minutes'], 35)
+        self.assertEqual(job['timeout-minutes'], 65)
         guard = next(s['run'] for s in workflow['jobs']['validate']['steps']
                      if s['name'] == 'Verify ruleset evidence was collected')
         for status in ('success', 'failure', 'skipped', 'cancelled', ''):

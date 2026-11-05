@@ -55,6 +55,12 @@ data class Account(
     /** Snapshot of the terms document reference at opening (URL + effective-from date). */
     val termsUrl: String? = null,
     val termsEffectiveFrom: LocalDate? = null,
+    /**
+     * The published catalog revision this account was opened under (ADR-0341 D1, V33). Non-null for
+     * every account opened since V33; null means an account opened before it, which has no truthful
+     * pin and is not backfilled silently (see the service docs for the backfill plan).
+     */
+    val productRevisionPin: ProductRevisionPin? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }

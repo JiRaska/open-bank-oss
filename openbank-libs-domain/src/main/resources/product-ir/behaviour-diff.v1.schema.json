@@ -1,0 +1,166 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:schema:product-behaviour-diff:1",
+  "title": "OpenBank product behavioural diff v1",
+  "description": "ADR-0352 phase 4: output of com.openbank.libs.product.replay.ProductBehaviourDiff, the revision-vs-revision backtest behind `obp diff --behavioural` and the Studio approval panel. ADR-0258 trusted profile: additionalProperties false everywhere, closed enums, local $ref only, no scripts, no defaults. Canonical JSON: keys sorted, no whitespace; every amount is a fixed-scale decimal string (scale 12). Rows list only buckets whose two sides differ; accounts lists only accounts with a differing row.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "revisionA", "revisionB", "range", "portfolio", "materialityThreshold", "valid", "identical", "changedAccounts", "aggregate", "signChanged", "thresholdCrossed", "accounts", "conservation"],
+  "if": { "properties": { "valid": { "const": false } } },
+  "then": { "properties": { "identical": { "const": false } } },
+  "properties": {
+    "schema": { "const": "openbank.product-behaviour-diff.v1" },
+    "revisionA": { "$ref": "#/$defs/revision" },
+    "revisionB": { "$ref": "#/$defs/revision" },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "zone", "days"],
+      "properties": {
+        "from": { "$ref": "#/$defs/date" },
+        "to": { "$ref": "#/$defs/date" },
+        "zone": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "days": { "type": "integer", "minimum": 1, "maximum": 36525 }
+      }
+    },
+    "portfolio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accounts", "seed"],
+      "properties": {
+        "accounts": { "type": "integer", "minimum": 0 },
+        "seed": { "description": "Generator seed of a synthetic portfolio, as a decimal string; null for a recorded one.", "type": ["string", "null"], "pattern": "^-?[0-9]+$" }
+      }
+    },
+    "materialityThreshold": { "$ref": "#/$defs/amount" },
+    "valid": { "description": "Both revisions conserved money. false is an interpreter defect: a consumer (obp, Studio) must treat the whole diff as an error.", "type": "boolean" },
+    "identical": { "description": "valid and no row differs; never true when valid is false.", "type": "boolean" },
+    "changedAccounts": { "type": "integer", "minimum": 0 },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["outcome", "posted", "instructionCounts"],
+      "properties": {
+        "outcome": { "$ref": "#/$defs/pair" },
+        "posted": { "type": "array", "items": { "$ref": "#/$defs/postedRow" } },
+        "instructionCounts": { "type": "array", "items": { "$ref": "#/$defs/countRow" } }
+      }
+    },
+    "signChanged": { "type": "array", "items": { "$ref": "#/$defs/accountId" } },
+    "thresholdCrossed": { "type": "array", "items": { "$ref": "#/$defs/accountId" } },
+    "accounts": { "type": "array", "items": { "$ref": "#/$defs/account" } },
+    "conservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b"],
+      "properties": {
+        "a": { "$ref": "#/$defs/conservation" },
+        "b": { "$ref": "#/$defs/conservation" }
+      }
+    }
+  },
+  "$defs": {
+    "amount": { "type": "string", "pattern": "^-?[0-9]+\\.[0-9]{12}$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "accountId": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "ruleId": { "type": "string", "pattern": "^[a-z][a-z0-9-]*(\\.[a-z0-9-]+)*$", "maxLength": 64 },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["productCode", "revisionHash", "irVersion"],
+      "properties": {
+        "productCode": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "revisionHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "irVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["a", "b", "delta"],
+      "properties": {
+        "a": { "$ref": "#/$defs/amount" },
+        "b": { "$ref": "#/$defs/amount" },
+        "delta": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "movement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["debit", "credit", "net"],
+      "properties": {
+        "debit": { "$ref": "#/$defs/amount" },
+        "credit": { "$ref": "#/$defs/amount" },
+        "net": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "postedRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "accountingClass", "a", "b", "deltaNet"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "accountingClass": { "enum": ["CUSTOMER_DEPOSIT", "ACCRUED_INTEREST_PAYABLE", "INTEREST_EXPENSE", "FEE_INCOME", "PENALTY_INCOME", "SETTLEMENT"] },
+        "a": { "$ref": "#/$defs/movement" },
+        "b": { "$ref": "#/$defs/movement" },
+        "deltaNet": { "$ref": "#/$defs/amount" }
+      }
+    },
+    "countRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleId", "kind", "a", "b", "delta"],
+      "properties": {
+        "ruleId": { "$ref": "#/$defs/ruleId" },
+        "kind": { "enum": ["POST", "REJECT", "SCHEDULE", "NOTIFY", "REPRICE"] },
+        "a": { "type": "integer", "minimum": 0 },
+        "b": { "type": "integer", "minimum": 0 },
+        "delta": { "type": "integer" }
+      }
+    },
+    "account": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["account", "outcome", "finalBalance", "rejectedPostings", "signChanged", "thresholdCrossed", "posted", "instructionCounts"],
+      "properties": {
+        "account": { "$ref": "#/$defs/accountId" },
+        "outcome": { "$ref": "#/$defs/pair" },
+        "finalBalance": { "$ref": "#/$defs/pair" },
+        "rejectedPostings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["a", "b"],
+          "properties": {
+            "a": { "type": "integer", "minimum": 0 },
+            "b": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "signChanged": { "type": "boolean" },
+        "thresholdCrossed": { "type": "boolean" },
+        "posted": { "type": "array", "items": { "$ref": "#/$defs/postedRow" } },
+        "instructionCounts": { "type": "array", "items": { "$ref": "#/$defs/countRow" } }
+      }
+    },
+    "conservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conserved", "currencies"],
+      "properties": {
+        "conserved": { "type": "boolean" },
+        "currencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["currency", "debit", "credit"],
+            "properties": {
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "debit": { "$ref": "#/$defs/amount" },
+              "credit": { "$ref": "#/$defs/amount" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

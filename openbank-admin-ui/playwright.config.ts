@@ -18,8 +18,9 @@ const buildProductionServer = useProductionServer && Boolean(process.env.CI) &&
 export default defineConfig({
   testDir: './e2e',
   // @deployed specs target the live sandbox via playwright.deployed.config.ts, not this stubbed server.
-  grepInvert: /@deployed/,
-  testIgnore: 'image-delivery.spec.ts',
+  // deployed-session.* sign in to the sandbox through Keycloak (playwright.deployed-session.config.ts).
+  grepInvert: /@deployed|@sandbox-session/,
+  testIgnore: ['image-delivery.spec.ts', 'deployed-session.*'],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   // Fail fast in CI — one retry on flake
@@ -62,7 +63,7 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
+  webServer: [{
     // CI builds before serving production, avoiding on-demand compilation and HMR races
     // across the browser suite. Local production runs can reuse a prior build; CI callers
     // that already built can opt out of the duplicate build with OPENBANK_E2E_PREBUILT.
@@ -88,5 +89,12 @@ export default defineConfig({
         ALLOW_INSECURE_STUDIO_URLS: 'true',
       } : {}),
     },
-  },
+  }, {
+    // The public developer portal is shipped as static HTML by nginx. Serve exactly its
+    // source tree for the same browser suite so both pages get an axe run in CI.
+    command: 'python3 -m http.server 8098 --bind 127.0.0.1 --directory ../openbank-developer-portal/site',
+    url: 'http://127.0.0.1:8098/',
+    reuseExistingServer: !process.env.CI,
+    timeout: 30_000,
+  }],
 })

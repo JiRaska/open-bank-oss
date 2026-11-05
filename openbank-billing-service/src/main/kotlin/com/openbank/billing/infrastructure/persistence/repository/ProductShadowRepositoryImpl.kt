@@ -159,6 +159,18 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
         row.nextAttemptAt = clock.instant().plus(backoff.multipliedBy(row.attempts.toLong()))
     }
 
+    override suspend fun eraseExpiredFacts(maxAge: Duration, limit: Int): Int {
+        val now = clock.instant()
+        return sf.withTransaction { s ->
+            s.createNativeQuery<Int>(ERASE_EXPIRED_FACTS)
+                .setParameter("cutoff", now.minus(maxAge))
+                .setParameter("stale", now.minus(lease))
+                .setParameter("now", now)
+                .setParameter("limit", limit)
+                .executeUpdate()
+        }.awaitSuspending()
+    }
+
     private suspend fun update(id: UUID, change: (ProductShadowInputEntity) -> Unit) {
         sf.withTransaction { s ->
             s.find(ProductShadowInputEntity::class.java, id).map { row -> row?.let(change) }
@@ -168,6 +180,30 @@ class ProductShadowQueueRepositoryImpl(private val sf: Mutiny.SessionFactory, pr
     companion object {
         private const val LEASE_MINUTES = 15L
         private const val BACKOFF_MINUTES = 10L
+        const val OUTCOME_FACTS_EXPIRED = "FACTS_EXPIRED"
+
+        // SKIP LOCKED so the purge never waits on, or races, a comparator holding the same rows.
+        private val ERASE_EXPIRED_FACTS = """
+            UPDATE billing_product_shadow_input SET
+                balance = NULL, monthly_turnover = NULL, aggregate_pocket_balance = NULL, segment = NULL,
+                evaluated_at = NULL, evaluation_zone = NULL, opened_at = NULL,
+                scheduled_cadence = NULL, scheduled_trigger = NULL,
+                outcome = CASE WHEN status = 'DONE' THEN outcome ELSE '$OUTCOME_FACTS_EXPIRED' END,
+                completed_at = COALESCE(completed_at, :now),
+                claimed_at = NULL,
+                status = 'DONE'
+            WHERE id IN (
+                SELECT id FROM billing_product_shadow_input
+                WHERE created_at < :cutoff
+                  AND NOT (status = 'CLAIMED' AND claimed_at >= :stale)
+                  AND (balance IS NOT NULL OR monthly_turnover IS NOT NULL OR aggregate_pocket_balance IS NOT NULL
+                       OR segment IS NOT NULL OR evaluated_at IS NOT NULL OR evaluation_zone IS NOT NULL
+                       OR opened_at IS NOT NULL OR scheduled_cadence IS NOT NULL OR scheduled_trigger IS NOT NULL)
+                ORDER BY created_at
+                LIMIT :limit
+                FOR UPDATE SKIP LOCKED
+            )
+        """.trimIndent()
     }
 }
 

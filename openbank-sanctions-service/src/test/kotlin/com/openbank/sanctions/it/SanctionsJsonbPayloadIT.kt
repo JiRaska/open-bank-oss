@@ -5,6 +5,7 @@ package com.openbank.sanctions.it
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsRepositoryImpl
@@ -50,7 +51,7 @@ class SanctionsJsonbPayloadIT {
     @Alternative
     class LegacySchemaTarget : FlywayConfigurationCustomizer {
         override fun customize(configuration: FluentConfiguration) {
-            configuration.target("16")
+            configuration.target("17")
         }
     }
 
@@ -80,7 +81,7 @@ class SanctionsJsonbPayloadIT {
             c.createStatement().use { s ->
                 s.executeQuery("SELECT max(version::integer) FROM flyway_schema_history WHERE success").use {
                     assertThat(it.next()).isTrue()
-                    assertThat(it.getInt(1)).isEqualTo(16)
+                    assertThat(it.getInt(1)).isEqualTo(17)
                 }
                 s.executeUpdate("DELETE FROM sanctions_checks")
             }
