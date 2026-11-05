@@ -5,6 +5,8 @@
 package com.openbank.standingorder.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.clients.account.AccountClient
+import com.openbank.clients.account.AccountLookup
 import com.openbank.clients.transaction.TransactionCallOutcome
 import com.openbank.clients.transaction.TransactionClient
 import com.openbank.clients.transaction.TransactionHttpException
@@ -26,6 +28,7 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Orchestrates the actual execution of a due standing order (#889).
@@ -245,9 +248,19 @@ class StandingOrderDueConsumer(
         node: com.fasterxml.jackson.databind.JsonNode,
         creditorIban: String,
     ): UUID? {
-        val lookup = runCatching { accountClient.getByIban(creditorIban).awaitSuspending() }
-        val response = lookup.getOrNull()
-        if (response == null || response.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
+        val lookup = try {
+            AccountClient(accountClient).getAccountByIban(creditorIban).awaitSuspending()
+        } catch (e: CancellationException) {
+            // A cancelled consumer is not "IBAN does not resolve": never swallow it into a failure record.
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            log.debugf(e, "[standing-order-exec] order %s creditor IBAN lookup failed", orderId)
+            null
+        }
+        val account = (lookup as? AccountLookup.Found)?.account
+        if (account == null) {
             log.infof(
                 "[standing-order-exec] order %s creditor IBAN does not resolve to an internal account " +
                     "— external CZ clearing rail is not wired yet (#889 follow-up), recording failure",
@@ -255,16 +268,14 @@ class StandingOrderDueConsumer(
             )
             return null
         }
-        val lookupJson = runCatching { objectMapper.readTree(response.readEntity(String::class.java)) }.getOrNull()
-        val targetAccountId = lookupJson?.path("id")?.asText(null)?.let {
-            runCatching { UUID.fromString(it) }.getOrNull()
-        }
-        val creditorPartyId = lookupJson?.path("partyId")?.asText(null)
+        val targetAccountId = account.id
+        val creditorPartyId = account.partyId
         if (targetAccountId == null || creditorPartyId == null) {
             log.warnf("[standing-order-exec] order %s: could not parse account lookup response", orderId)
             return null
         }
-        val orderPartyId = node.path("partyId").asText(null)
+        // Compared as UUIDs, not strings: the event may spell the same id in upper case.
+        val orderPartyId = runCatching { UUID.fromString(node.path("partyId").asText(null)) }.getOrNull()
         if (orderPartyId == null || creditorPartyId != orderPartyId) {
             log.infof(
                 "[standing-order-exec] order %s pays a different party's account — that needs " +

@@ -30,7 +30,11 @@ dependencies {
     // (PolicyDecisionPoint / OpaSidecarPolicyDecisionPoint) lives here.
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     testImplementation(project(":openbank-libs-testing"))
+    // Stubs the generated account-service client (#13169): it returns raw JAX-RS Responses.
+    testImplementation(libs.mockk)
     // Consumer-driven contract tests (ADR-0063, issue #2255 dimension C3). mcp's read ports became
     // real HTTP clients in #2262 and are not wired as the default yet — pinning the routes now is
     // what keeps the ADR-0195 cutover from shipping a call to a path that does not exist (#2269).

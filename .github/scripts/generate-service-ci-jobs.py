@@ -48,13 +48,26 @@ def caller_block(modules):
                      '    if: ' + expression(condition),
                      '    permissions:', '      contents: read', '      actions: read', '      id-token: write',
                      f'    uses: ./{CALLEES[lane]}',
-                     '    with:', f'      service: {module}', '    secrets:',
-                     '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']
+                     '    with:', f'      service: {module}']
+            # `secrets: inherit` on the non-PR lane ONLY. In a called reusable workflow an
+            # ENVIRONMENT secret (GRADLE_CACHE_WRITE_PASSWORD of `gradle-cache-writer`, ADR-0363)
+            # resolves to '' unless the caller inherits (actions/runner issue 4453): measured
+            # 2026-11-05, main pushes ran with an empty write password and never wrote the cache.
+            # Inherit adds nothing for non-main events: _service-ci.yml reads the write secret
+            # only inside the main-push environment and PACT_BROKER_PASSWORD only in its
+            # `contract` job, whose `if:` is the same main-only expression this map used.
+            # The PR lane keeps the explicit map, which yields '' on pull_request: PR code must
+            # never receive more secrets than it does today.
+            if lane == 'other':
+                rows += ['    secrets: inherit', '']
+            else:
+                rows += ['    secrets:',
+                         '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']
     return '\n'.join(rows).rstrip()
 
 
 def needs_block(modules):
-    ids = ['changes', 'publication-ready', 'verification-metadata', 'renderer-tests']
+    ids = ['changes', 'publication-ready', 'verification-metadata', 'renderer-tests', 'deploy-source-freshness']
     ids += [job_id(module, lane) for lane in LANES for module in modules]
     return '    needs:\n' + '\n'.join('      - ' + name for name in ids)
 
@@ -127,6 +140,9 @@ def self_test():
             (root / name / 'build.gradle.kts').touch()
         modules = inventory(root)
         first = generated(template, modules)
+        # The exact-head deploy verifier must remain in the aggregate DAG after
+        # regeneration; an explicit step cannot read a job omitted from needs.
+        assert '      - deploy-source-freshness' in needs_block(modules)
         assert first != template and generated(first, modules) == first
         (root / 'openbank-c').mkdir()
         (root / 'openbank-c/build.gradle.kts').touch()

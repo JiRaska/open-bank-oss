@@ -1,0 +1,90 @@
+# Edge deception alerting (ADR-0357).
+#
+# THE GAP THIS CLOSES. loki-rules-security-signals.yaml alerts on the HoneytokenFilter's log
+# line — and that filter is configured in no service, so HoneyEndpointHit has had nothing to
+# read since the day it shipped (0 hits in the 7 days before 2026-10-29; the metric series it
+# names does not exist). The decoys in httproute-edge-decoys.yaml are answered by Envoy, and
+# Envoy's access log already carries the ROUTE NAME on every line, so the reader here is the
+# access log itself: no service, no filter, nothing to opt into.
+#
+# WHY THE ROUTE NAME AND NOT THE PATH. Envoy Gateway names a route
+# `httproute/<namespace>/<name>/rule/<i>/match/<j>/<host>`. Selecting on the route-name
+# prefix means this file never repeats the path list — the manifest owns the paths, this
+# file owns the tiers, and check-edge-decoy-rule-parity.py fails the build when a decoy
+# route has no selector here or a selector names a route no manifest declares. That pairing
+# is what the ADR-0279 slice lacked.
+#
+# SELF-MATCH SAFETY (loki-rule-self-match gate). Both selectors pin
+# `namespace="envoy-gateway-system"`, where Loki does not run, so the ruler's own query log
+# cannot satisfy them.
+#
+# SEVERITY. `warning` -> slack-alerts, per the estate's new-rule convention (a rule that
+# pages before a known-positive has been shown to reach a human is a regression even when it
+# is correct — loki-rules-falco-runtime.yaml). PROMOTION CRITERION: flip EdgeDecoyTargetedHit
+# to `critical` the day a manual request against a targeted decoy in the sandbox has been
+# seen in Slack end to end. That proof is a runbook-0018 tabletop step.
+#
+# NO `for:`. A probe is a point event; `for` on a bursty log signal can drop the
+# notification entirely (see the Falco rule for the measurement).
+#
+# Loki retention is 30d; every window below is inside it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-edge-deception
+  namespace: observability
+  labels:
+    loki_rule: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  edge-deception.yaml: |
+    groups:
+      - name: openbank.logs.edge-deception
+        interval: 1m
+        rules:
+          # Commodity tier: telemetry only. Hits per path over 5m, for the SOC dashboard and
+          # for the question "what is the internet trying on us this week". Never an alert —
+          # the 2026-10-29 sample shows these arrive every day from rotating sources, and an
+          # alert that fires daily is muted within a week and then hides the targeted one.
+          - record: openbank:edge_decoy_commodity_hits:rate5m
+            expr: |
+              sum by (path) (
+                rate(
+                  {namespace="envoy-gateway-system", container="envoy"}
+                    | json
+                    | route_name=~"httproute/observability/edge-decoys-commodity/.*"
+                  [5m]
+                )
+              )
+
+          # Targeted tier: any hit. The three paths exist nowhere but the decoy route — no
+          # doc, no link, no client — so a caller has either read this repository and chosen
+          # to probe, or is enumerating API shapes. Either is worth a human's minute.
+          - alert: EdgeDecoyTargetedHit
+            expr: |
+              sum by (path) (
+                count_over_time(
+                  {namespace="envoy-gateway-system", container="envoy"}
+                    | json
+                    | route_name=~"httproute/observability/edge-decoys-targeted/.*"
+                  [10m]
+                )
+              ) > 0
+            labels:
+              severity: warning
+              team: security
+            annotations:
+              summary: "Targeted edge decoy hit: {{ $labels.path }} ({{ $value | printf \"%.0f\" }}x in 10m)"
+              description: >-
+                A request reached an OpenBank-shaped decoy path that no legitimate client can
+                know (ADR-0357). Envoy answered 401 and nothing reached a backend. Read the
+                lines in Loki:
+                {namespace="envoy-gateway-system", container="envoy"} | json
+                | route_name=~"httproute/observability/edge-decoys-targeted/.*"
+                — each carries the client address, user agent and the full path. Then look at
+                what the SAME client did on the real routes in the surrounding hour, and at
+                openbank:edge_decoy_commodity_hits:rate5m for whether it is a scanner that
+                happened to guess or a caller that knew. A targeted hit plus a Falco or
+                GuardDuty runtime finding in the same window is an incident, not an alert.
+                Tuning: never silence; if our own fuzz or synthetic tooling trips it, give that
+                tooling a distinct user agent and exclude it by that, not by source address.

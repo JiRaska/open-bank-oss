@@ -10,7 +10,7 @@ ADR-0032 documents the synchronous AML/sanctions screening gate. Reviewed in PR.
 
 - **Status:** Draft (first pass, written alongside the real-feed-registration wiring; §6 added
   with the review-path persistence fix)
-- **Last reviewed:** 2026-08-02
+- **Last reviewed:** 2026-10-29
 - **Owner:** sanctions/AML CODEOWNERS
 - **Related ADRs:** ADR-0002 (hexagonal), ADR-0032 (synchronous AML/sanctions screening gate),
   ADR-0100 (injected Clock, Layer 1 determinism), ADR-0116 (KYC engine — `SANCTIONS_SCREENING`
@@ -84,8 +84,8 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 ## 4. Key invariants (must never regress)
 
 - **Every registered `SanctionsList.sourceUrl` is a real, authoritative, publicly-documented feed**
-  (OFAC Treasury XML, OpenSanctions `targets.simple.csv` bulk exports, or the CNB migration-seeded
-  exception) — never a placeholder or invented URL. Changing a `source_url` is an operator action
+  (OFAC Treasury XML, OpenSanctions `targets.simple.csv` bulk exports, or official e-Sbírka SPARQL
+  open data) — never a placeholder or invented URL. Changing a `source_url` is an operator action
   gated by `ROLE_OPERATOR`/`ROLE_ADMIN`.
 - **The scheduled refresh path must actually invoke the real importer** for every due, enabled
   list — a stub or no-op here silently blinds the fleet's screening data with no error surfaced
@@ -100,6 +100,14 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 - The Czech national list (`CNB_DOMESTIC`, kept by MZV under Act No. 1/2023 Coll.) is imported
   from the OpenSanctions `cz_national_sanctions` mirror like the other CSV feeds (#10757); the V6
   demo rows are retired by the first import's reconciliation sweep.
+- `CZ_TERRORISTS` is a separate legal regime under Regulation No. 210/2008 Coll. Its only source
+  is official e-Sbírka SPARQL open data, not the commercially licensed OpenSanctions mirror. The
+  parser validates every designated fragment before the first upsert; a malformed or duplicate
+  target resolves to `FAILED_KEPT_EXISTING` and cannot trigger reconciliation deletion.
+- High-risk screening events may fan out to `openbank.oversight-triggers` only through the durable
+  outbox and only as a minimal `sourceService` + `occurredAt` wake-up. Screened names, identifiers,
+  match details and list data must never be copied to that topic; original ce-id/ce-type headers
+  retain correlation and retry identity (ADR-0031 D9, #13179).
 
 ## 5. Open items / follow-ups
 
@@ -146,6 +154,7 @@ six `SanctionsServiceClient` interfaces declare only `/screen`). Externally rout
 | C4 | **Tampering via lost update** — a review silently overwrites a concurrent one | Single-statement `merge` inside one transaction | **No optimistic locking**: the entity has no `@Version`, so two concurrent reviewers last-write-wins with no conflict surfaced. Low likelihood while the queue is worked by hand; revisit if #3334 makes review routine |
 | C5 | **Denial of the control itself** — the review path does not work at all | Covered by `SanctionsReviewUpdateIT` against a real Postgres | Was live until this change: `review()` called the insert path on an application-assigned `@Id`, so **every** review died at flush on `sanctions_checks_pkey` (ADR-0126 D3). Nothing alerted — see below |
 | C6 | **Information disclosure via the checker queue** — `GET /api/v1/sanctions/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sanctions.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never the screened subject, their identifiers or the match detail, all of which stay behind `sanctions.read` | The queue is deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth. `limit` is clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification |
+| C7 | **Clearance replay / over-broad whitelist** — a stale `CLEAR`, another subject's review, or an old whitelist permits a newly sanctioned party | Every new idempotency key performs a fresh screen before clearance is considered. `WHITELISTED` lasts 90 days and requires exact equality of `subjectId`, entity type, name, aliases, birth date, nationality and identifiers. It covers only reviewed `(listType, externalId)` identities, falling back to `(listType, matchedName)` only when external id is absent. New uncovered hits and expired or changed-subject clearances stay blocking. Legacy rows without `subjectId` cannot newly become `WHITELISTED`; they require a fresh screen and review | The 90-day validity is a compliance risk decision, not proof that a party remains low risk. Exact attributes mean a legitimate party-data correction requires a new review. Reviews still have the C4 last-write-wins limitation |
 
 **Invariant (must never regress).** The review path performs an **UPDATE**. The insert path
 (`saveWithEvent`) and the update path (`updateWithEvent`) stay separate: `merge` cannot raise a
@@ -162,6 +171,15 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-10-29** — **Subject-bound, expiring whitelist retry (#11694).** A new screening attempt
+  no longer needs to inherit an old `CLEAR`: after the fresh list search, an unexpired
+  `WHITELISTED` review may cover exactly the same explicit subject and reviewed match identities
+  for 90 days. New uncovered hits, changed subject attributes and expired decisions remain
+  blocking. `subject_id`, `clearance_expires_at` and their lookup index are additive in Flyway V17;
+  legacy rows have no subject and cannot newly be whitelisted, so their transition is a fresh
+  screen plus review. Covered by `SanctionsClearanceTest` and real-Postgres
+  `SanctionsReviewUpdateIT`. Rollback: stop clearance lookups and roll back both account and
+  sanctions writers/readers before dropping V17's index and columns as documented in the migration.
 - **2026-10-24** — **Check status and block threshold shared with the rails (ADR-0353, #13439).**
   `SanctionsCheckStatus` is now a typealias of `openbank-libs-fincrime`'s `ScreeningMatchStatus`,
   and `isHighRisk` reads the same `POTENTIAL_HIT_BLOCK_THRESHOLD` (0.85) the rails' `ScreeningPolicy`

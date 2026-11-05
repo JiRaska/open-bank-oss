@@ -60,4 +60,10 @@ class TopicProducersTest {
             assertTrue(!svc.isNullOrBlank(), "blank producer for $t")
         }
     }
+
+    @Test
+    fun `a shared topic never guesses which producer emitted an event`() {
+        assertTrue(TopicProducers.mappedTopics.contains("openbank.oversight-triggers"))
+        assertEquals("multiple-producers", TopicProducers.sourceService("openbank.oversight-triggers"))
+    }
 }

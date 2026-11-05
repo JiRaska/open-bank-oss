@@ -36,6 +36,8 @@ dependencies {
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
+    // #13169: the account-service operations and DTOs are generated from its openapi.yaml (ADR-0319).
+    implementation(project(":openbank-client-account"))
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
 

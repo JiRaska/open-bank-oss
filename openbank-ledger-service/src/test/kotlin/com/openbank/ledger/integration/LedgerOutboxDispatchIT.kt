@@ -7,6 +7,7 @@ import com.openbank.ledger.infrastructure.outbox.LedgerOutboxDispatcher
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
@@ -28,7 +29,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(LedgerOutboxDispatchIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.ledger.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class LedgerOutboxDispatchIT : OutboxDispatchConformanceIT() {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "ca24c6bd9d93dab3"
+    openbank.tech/policy-checksum: "a9e7b6b5aac5ac6b"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -482,6 +482,16 @@ data:
     	input.action == "catalog.read"
     }
 
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
     allowed_reasons contains "pension-catalog-m2m-read-approval" if {
         input.principal.type == "HUMAN"
         input.principal.id == "service-account-openbank-pension"
@@ -941,6 +951,22 @@ data:
         input.action == "ledger.close.draft"
     }
 
+    # #12906: journal-approval queue reads and checker decisions are human-only. The
+    # explicit machine veto is required for reads because base operator-read-any would
+    # otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
+    allowed_reasons contains "operator-journal-approval" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
+    prohibited if {
+        principal_is_machine
+        input.action in {"ledger.approval.read", "ledger.approval.decide"}
+    }
+
     # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
     # operator-ledger-write above: it is a statutory close event (ADR-0078 D5), not a routine
     # posting, and unlike create/reverse it must NEVER be reachable by any SERVICE principal —
@@ -1020,6 +1046,9 @@ data:
     	# billing holds NO ledger.create on its own identity: its journals ride the shared
     	# openbank-services principal. This is its only ledger grant (#13709 review).
     	"service-account-openbank-billing": "billing",
+    	# treasury reports on the same identity it posts journals with (service-treasury-ledger-post);
+    	# this entry adds only the report for its own participant (#13167).
+    	"service-account-openbank-treasury": "treasury",
     }
 
     allowed_reasons contains "service-close-participation" if {
@@ -1618,6 +1647,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
@@ -2461,9 +2491,10 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
-        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+        # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+        # deliberately ONE read action rather than the role's full duty set. What is missing is
+        # missing on purpose:
         #
         #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -2482,10 +2513,10 @@ data:
         #   already, so this entry is a provable subset of today's effective grant and changes no
         #   decision — the same seeding property the matrix was built on.
         #
-        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-        # editor duty has no action name for the matrix to key on. Declaring the editor role here
-        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+        # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+        # name for the matrix to key on. A future single-source migration needs governed action
+        # names and must preserve the action-specific human-only write policy.
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read

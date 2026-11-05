@@ -115,6 +115,15 @@ mp:
         topic: openbank.sanctions.screening.event
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Durable fan-out for high-risk screening hits (ADR-0031 D9). The trigger body carries only
+      # sourceService + occurredAt; ce-id/ce-type headers retain correlation to the outbox event.
+      oversight-events-out:
+        connector: smallrye-kafka
+        client:
+          id: sanctions-oversight-${quarkus.uuid}
+        topic: openbank.oversight-triggers
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -131,6 +140,9 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  api:
+    version: "3"
+    sunset-date: "Sat, 01 May 2027 00:00:00 GMT"
   # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
   # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
   # removes the ApprovalStore bean, and with it four-eyes.

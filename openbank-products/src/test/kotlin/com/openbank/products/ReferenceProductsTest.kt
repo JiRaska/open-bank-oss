@@ -40,12 +40,12 @@ class ReferenceProductsTest {
     }
 
     @Test
-    fun `the library carries the three ADR-0352 reference deposit products with distinct hashes`() {
+    fun `the library carries the ADR-0352 reference deposit products with distinct hashes`() {
         assertThat(
             ReferenceProducts.all.map {
                 it.name
             },
-        ).containsExactly("savings-fixed", "current-account", "term-deposit")
+        ).containsExactly("savings-fixed", "current-account", "term-deposit", "savings-czk")
         assertThat(ReferenceProducts.all.map { it.compile().revisionHash }).doesNotHaveDuplicates()
         assertThat(ReferenceProducts.byName("nope")).isNull()
     }

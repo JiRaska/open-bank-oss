@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Financial-crime vocabulary source v1",
+  "description": "Structure only. Compilation additionally checks the 1048576-byte wire limit, duplicate keys, valid Unicode and nonblank bounded text, valid ordered instants, unique codes and ranks, and fully ranked or fully unordered entries. Schema string lengths count Unicode code points; the typed compiler bounds UTF-16 code units. Validity does not establish authenticity, approval or activation. Provenance is authored data, not authenticated evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "domain",
+    "purpose",
+    "provenance",
+    "effectiveFrom",
+    "effectiveUntil",
+    "entries"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+    },
+    "purpose": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+    },
+    "provenance": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "effectiveFrom": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "effectiveUntil": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "label",
+          "meaning",
+          "rank"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "meaning": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

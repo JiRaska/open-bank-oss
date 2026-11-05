@@ -72,7 +72,7 @@ com.openbank.productcatalog/
         └── FeesResource             /api/v1/fees
 ```
 
-`ProductRepository` je odchozí perzistenční port. Registrace reflexe pro native image žije v infrastruktuře, takže doména nemá frameworkové importy (ADR-0002).
+`ProductRepository` je odchozí perzistenční port. Registrace reflexe pro native image žije v infrastruktuře, takže doména nemá frameworkové importy (ADR-0002). Pokrývá i typy manifestu katalogového balíčku (`RevisionApprovalPolicy`, `ApprovalRoleSpec`), které `CatalogPackSeeder` deserializuje při startu; bez nich native image nenastartuje.
 
 ## Doménový model
 

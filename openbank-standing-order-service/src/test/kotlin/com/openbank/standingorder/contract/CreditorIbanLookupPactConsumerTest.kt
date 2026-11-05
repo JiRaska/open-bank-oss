@@ -12,13 +12,24 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.clients.account.AccountClient
+import com.openbank.clients.account.AccountLookup
 import com.openbank.standingorder.infrastructure.client.AccountServiceClient
-import io.restassured.RestAssured.given
+import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.client.ClientBuilder
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.MultivaluedMap
+import jakarta.ws.rs.ext.MessageBodyReader
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.io.InputStream
+import java.lang.reflect.Proxy
+import java.lang.reflect.Type
 import java.util.UUID
 
 /**
@@ -40,7 +51,7 @@ import java.util.UUID
 @PactTestFor(providerName = "openbank-account-service", pactVersion = PactSpecVersion.V3)
 class CreditorIbanLookupPactConsumerTest {
 
-    private val mapper = jacksonObjectMapper()
+    private val mapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun internalCreditorPact(builder: PactDslWithProvider): RequestResponsePact = builder
@@ -74,27 +85,59 @@ class CreditorIbanLookupPactConsumerTest {
     fun `an internal creditor IBAN resolves to a target account id and its owning party`(mockServer: MockServer) {
         assertClientPathMatchesContract()
 
-        val raw = given()
-            .baseUri(mockServer.getUrl())
-            .get(clientDerivedIbanPath(KNOWN_IBAN))
-            .then()
-            .statusCode(200)
-            .extract().asString()
+        val lookup = facadeFor(mockServer).getAccountByIban(KNOWN_IBAN).await().indefinitely()
 
-        // Read exactly as StandingOrderDueConsumer reads it: a JsonNode path, then UUID.fromString.
-        val json = mapper.readTree(raw)
-        assertThat(UUID.fromString(json.path("id").asText(null))).isEqualTo(UUID.fromString(ACCOUNT_ID))
-        assertThat(json.path("partyId").asText(null)).isEqualTo(OWNER_PARTY_ID)
+        // Read exactly as StandingOrderDueConsumer reads it: the generated account's id and partyId.
+        val account = (lookup as AccountLookup.Found).account
+        assertThat(account.id).isEqualTo(UUID.fromString(ACCOUNT_ID))
+        assertThat(account.partyId).isEqualTo(UUID.fromString(OWNER_PARTY_ID))
     }
 
     @Test
     @PactTestFor(pactMethod = "externalCreditorPact")
     fun `an IBAN the bank does not hold answers 404, not an empty account`(mockServer: MockServer) {
-        given()
-            .baseUri(mockServer.getUrl())
-            .get(clientDerivedIbanPath(UNKNOWN_IBAN))
-            .then()
-            .statusCode(404)
+        assertClientPathMatchesContract()
+
+        val lookup = facadeFor(mockServer).getAccountByIban(UNKNOWN_IBAN).await().indefinitely()
+
+        assertThat(lookup).isEqualTo(AccountLookup.NotFound)
+    }
+
+    /**
+     * The real facade over the generated interface, bound to the pact mock by a real JAX-RS client. The
+     * outgoing path is reflected off the generated `@Path` annotations while the pact pins the literal.
+     */
+    private fun facadeFor(mockServer: MockServer): AccountClient {
+        val http = ClientBuilder.newBuilder().register(JsonReader(mapper)).build()
+        val rest = Proxy.newProxyInstance(
+            AccountServiceClient::class.java.classLoader,
+            arrayOf(AccountServiceClient::class.java),
+        ) { _, method, args ->
+            check(method.name == "getAccountByIban") { "unexpected account-service operation ${method.name}" }
+            Uni.createFrom().item {
+                http.target(mockServer.getUrl()).path(clientDerivedIbanPath(args!![0] as String))
+                    .request(MediaType.APPLICATION_JSON).get()
+            }
+        } as AccountServiceClient
+        return AccountClient(rest)
+    }
+
+    private class JsonReader(private val mapper: ObjectMapper) : MessageBodyReader<Any> {
+        override fun isReadable(
+            type: Class<*>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+        ) = !InputStream::class.java.isAssignableFrom(type)
+
+        override fun readFrom(
+            type: Class<Any>,
+            genericType: Type?,
+            annotations: Array<out Annotation>?,
+            mediaType: MediaType?,
+            httpHeaders: MultivaluedMap<String, String>?,
+            entityStream: InputStream,
+        ): Any = mapper.readValue(entityStream, type)
     }
 
     private fun assertClientPathMatchesContract() {
@@ -122,11 +165,10 @@ class CreditorIbanLookupPactConsumerTest {
         const val EXPECTED_IBAN_PATH_PREFIX = "/api/v1/accounts/iban/"
 
         fun clientDerivedIbanPath(iban: String): String {
-            val base = AccountServiceClient::class.java.getAnnotation(Path::class.java).value
-            val method = AccountServiceClient::class.java.methods
-                .single { it.name == "getByIban" }
-                .getAnnotation(Path::class.java).value
-            return base + method.replace("{iban}", iban)
+            val operation = AccountServiceClient::class.java.methods.single { it.name == "getAccountByIban" }
+            val base = operation.declaringClass.getAnnotation(Path::class.java).value
+            val method = operation.getAnnotation(Path::class.java).value
+            return (base + method).replace("{iban}", iban)
         }
     }
 }

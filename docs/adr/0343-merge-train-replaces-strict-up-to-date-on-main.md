@@ -698,3 +698,37 @@ make other gates green. If strict lane updates the PR, inspect the combined head
 submit a new decision for the new SHA. The workflow exists only after this governance change
 lands through the existing owner-authorized non-agent-prefix strict lane; it cannot authorize
 its own installation from an untrusted branch.
+
+### Amendment (2026-10-29) — an approval survives an update that brought in only main (#13400)
+
+Measured 2026-10-29: #13613 was approved on `cac63b1b`, the strict lane update-branched it to
+`71899487`, and it waited on "needs owner approval" again. Every update the train makes is a merge
+of `main` into the PR, so with about ten `codex/` PRs queued the owner re-approved after every
+tick and the lane could never drain them. The approval now binds to the delta the owner reviewed,
+not to the head SHA.
+
+An owner decision on head H covers a later head H' exactly when H is reached from H' by walking
+first parents through **pure main-update merges**: each commit on the walk has two parents, its
+second parent is reachable from live `main`, and its tree equals the tree that
+`git merge-tree --write-tree <first> <second>` computes from those parents with no conflict. The
+walk stops at the first commit that is anything else, and H must be on it. So:
+
+- a push after the update (a non-merge commit), a merge of any branch that is not `main`, a
+  hand-resolved conflict (merge-tree reports a conflict) and a merge commit carrying an extra edit
+  (its tree differs from the computed one) all void the approval;
+- a force-push that drops H from the ancestry voids it, since H is no longer on the walk;
+- author and committer identity are not consulted. The tree comparison is the guard: everything in
+  H' is either the reviewed delta at H or content of `main`, combined the one way git combines it.
+
+Revocation keeps its meaning: the decision that counts is the NEWEST App-authored
+`merge-train/owner-approval` status across every head on the walk (status ids order globally), so
+a revoke on H posted after the update still revokes H'. The walk is local git in the train's own
+checkout, capped at 16 merges (a longer run needs a fresh approval), and it is a property of
+immutable commits; the decisions on it are read live, and the final re-check before a merge or a
+`merge-train` success (`live_source_intent`, inside `deciding()`) re-reads them. A process that
+has not derived the walk falls back to the exact head, which fails closed. An unchanged head still
+costs one statuses read; an updated head costs one more per merge on the walk. Plain git and the
+standard library only, so the privileged `python3 -I -S` job is unchanged.
+
+The CI result on H' is unaffected by this: every required and extra gate must still be green on
+H' itself. The owner reviews the PR's delta once; CI proves the combination with current `main`.

@@ -23,7 +23,7 @@ This documentation is published directly by the service at the management endpoi
 - **Outbox:** `sanctions_outbox` → Kafka topic `openbank.sanctions.screening.event`
 - **Idempotency:** `idempotencyKey` field in request body → Redis (deduplication)
 - **Auth:** Keycloak OIDC, role `ROLE_OPERATOR` required for mutations
-- **Lists:** OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC
+- **Lists:** OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC, CZ_TERRORISTS (official e-Sbírka)
 
 ## Build-time wiring
 

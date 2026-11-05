@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
@@ -29,6 +30,7 @@ from urllib.request import Request, urlopen
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_API_PAGES = 20
 RECONCILE_RESOLUTION_SECONDS = 420
+CANDIDATE_WORKERS = 8
 
 
 def _require_time_remaining(deadline: float | None) -> None:
@@ -544,6 +546,37 @@ def _exact_pact_exists(
     return result.returncode == 0 and result.stdout.strip() == "yes"
 
 
+def _candidate_service(
+    service: str, sha: str, tip_sha: str, is_push: bool, deadline: float | None
+) -> bool:
+    if is_push and not _push_might_build_service(service, sha, deadline=deadline):
+        return False
+    return _tree_equivalent(service, sha, tip_sha, deadline=deadline)
+
+
+def _candidate_services(
+    services: list[str],
+    sha: str,
+    tip_sha: str,
+    is_push: bool,
+    deadline: float | None,
+) -> set[str]:
+    """Run the per-service git comparators for one run concurrently.
+
+    Each comparator is an independent read-only git subprocess costing seconds, and a
+    reconcile batch evaluates a dozen services per candidate run; done serially that
+    exceeded RECONCILE_RESOLUTION_SECONDS (#13587). The verdict per service is unchanged.
+    """
+    with ThreadPoolExecutor(max_workers=CANDIDATE_WORKERS) as pool:
+        verdicts = pool.map(
+            lambda service: _candidate_service(
+                service, sha, tip_sha, is_push, deadline
+            ),
+            services,
+        )
+        return {service for service, ok in zip(services, verdicts, strict=True) if ok}
+
+
 def resolve_reconcile_service_source(
     service: str, tip_sha: str, repository: str, token: str, api_url: str
 ) -> tuple[str, str, int]:
@@ -620,15 +653,10 @@ def resolve_reconcile_service_sources(
                 ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
             if not ancestor_cache[sha]:
                 continue
-            candidates: set[str] = set()
-            for service in pending:
-                _require_time_remaining(deadline)
-                if run.get("event") == "push" and not _push_might_build_service(
-                    service, sha, deadline=deadline
-                ):
-                    continue
-                if _tree_equivalent(service, sha, tip_sha, deadline=deadline):
-                    candidates.add(service)
+            _require_time_remaining(deadline)
+            candidates = _candidate_services(
+                sorted(pending), sha, tip_sha, run.get("event") == "push", deadline
+            )
             if not candidates:
                 continue
             successful = _jobs_prove_services(

@@ -98,7 +98,7 @@ com.openbank.party/
 | `PartyRepository` | `PartyRepositoryImpl` | persist/find/search/anonymize parties |
 | `PartyDocumentRepository` | (Panache) | persist/list party documents |
 | `PartyOutboxRepository` | `PartyOutboxRepositoryImpl` | outbox row lifecycle |
-| `PartyOutboxEventPublisher` | `KafkaPartyOutboxEventPublisher` | emit a stored outbox payload |
+| `OutboxEventPublisher` | `KafkaPartyOutboxEventPublisher` | emit a stored outbox payload |
 
 | Port (in) | Adapter |
 |---|---|

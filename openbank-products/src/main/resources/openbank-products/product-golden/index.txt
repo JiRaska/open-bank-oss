@@ -2,3 +2,4 @@
 savings-fixed-reference.json
 current-account-reference.json
 term-deposit-reference.json
+savings-czk-reference.json

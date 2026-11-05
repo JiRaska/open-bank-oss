@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package com.openbank.flakytest.infrastructure.rest
 
-import com.openbank.flakytest.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity

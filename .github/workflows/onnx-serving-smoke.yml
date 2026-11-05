@@ -81,7 +81,7 @@ jobs:
         run: |
           ./gradlew :${{ env.SERVICE }}:quarkusBuild \
             -Dquarkus.package.jar.type=fast-jar \
-            --console=plain
+            --console=plain --configure-on-demand
 
       # Pre-pull the base Dockerfile.deploy pins, so a build error is attributable to the image
       # rather than to a registry timeout. Read from the file — never hardcoded here.
