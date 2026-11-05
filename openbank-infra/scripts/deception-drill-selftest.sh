@@ -24,7 +24,7 @@ esac
 STUB
 chmod +x "$tmp/bin/"*
 
-run() { DRILL_DECOY_URL=https://decoy.invalid/x DRILL_SSM_PARAM=/stub PATH="$tmp/bin:$PATH" TIMEOUT=2 POLL=1 STUB_METRIC="$1" bash "$HERE/deception-drill.sh" --scope aws >"$tmp/out" 2>&1; echo $?; }
+run() { DRILL_DECOY_URL=https://decoy.invalid/x DRILL_SSM_PARAM=/stub PATH="$tmp/bin:$PATH" TIMEOUT=2 POLL=1 SETTLE=0 DRILL_VERDICT="$tmp/verdict" STUB_METRIC="$1" bash "$HERE/deception-drill.sh" --scope aws >"$tmp/out" 2>&1; echo $?; }
 
 rc=$(run None || true)
 if [[ "$rc" != 1 ]] || ! grep -q '^key  *FAIL' "$tmp/out" || ! grep -q '^delivery  *FAIL' "$tmp/out"; then
@@ -35,8 +35,11 @@ if [[ "$rc" != 0 ]] || ! grep -q '^key  *PASS' "$tmp/out" || ! grep -q '^sa  *SK
   echo "SELFTEST FAIL: a signal must exit 0 with key PASS and sa SKIPPED (rc=$rc)"; cat "$tmp/out"; exit 1
 fi
 rc=$(run 2.0 || true)
-if [[ "$rc" != 1 ]] || ! grep -q '^extra  *FAIL' "$tmp/out"; then
-  echo "SELFTEST FAIL: two matched events must exit 1 with an extra FAIL row (rc=$rc)"; cat "$tmp/out"; exit 1
+if [[ "$rc" != 1 ]] || ! grep -q '^count  *FAIL' "$tmp/out"; then
+  echo "SELFTEST FAIL: two matched events must exit 1 with a count FAIL row (rc=$rc)"; cat "$tmp/out"; exit 1
+fi
+if ! grep -q '^run=' "$tmp/verdict" || grep -q 'watched key: called' "$tmp/verdict"; then
+  echo "SELFTEST FAIL: the verdict file must hold the verdict and nothing printed before it"; cat "$tmp/verdict"; exit 1
 fi
 if grep -q 'arn:aws' "$tmp/out"; then
   echo "SELFTEST FAIL: the drill printed an ARN, and its output is posted to a public issue"; cat "$tmp/out"; exit 1

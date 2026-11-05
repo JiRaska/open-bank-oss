@@ -135,29 +135,42 @@ while (( $(now) < deadline )); do
 done
 
 # Exactly one matched event per run. A second one in the window is someone else using the key,
-# and must not be absorbed into the drill's PASS.
-extra=$(matched || true)
-if [[ -n "$extra" && "$extra" != "None" ]] && python3 -c 'import sys;sys.exit(0 if float(sys.argv[1])>1 else 1)' "$extra" 2>/dev/null; then
-  EXTRA="$extra"
-else
-  EXTRA=""
+# and must not be absorbed into the drill's PASS. Count only after SETTLE seconds, so a late
+# CloudTrail delivery is inside the count, and treat an unreadable count as a failure.
+COUNT=""
+if [[ -n "${SEEN_key:-}" ]]; then
+  sleep "${SETTLE:-180}"
+  COUNT=$(matched || true)
 fi
 
+# The verdict alone is also written to DRILL_VERDICT (the workflow posts that file, and only that
+# file, to a public issue), so nothing printed above it can reach the issue.
+VERDICT="${DRILL_VERDICT:-/dev/null}"
+: > "$VERDICT"
+# shellcheck disable=SC2059  # every caller passes a literal format as $1
+out() { printf "$@" | tee -a "$VERDICT"; }
 echo
-echo "run=${RUN}"
-echo "fired_at=$(iso "$FIRED_key")  # the key alert is this drill only if its <time> is this minute AND matched=1"
-printf '%-10s %-10s %s\n' tripwire result "seconds-to-signal"
+out '%s\n' "run=${RUN}"
+out '%s\n' "fired_at=$(iso "$FIRED_key")  # the key alert is this drill only if its <time> is this minute AND matched=1"
+out '%-10s %-10s %s\n' tripwire result "seconds-to-signal"
 rc=0
 for k in decoy key delivery sa; do
   seen_var="SEEN_$k"; fired_var="FIRED_$k"; seen="${!seen_var}"; fired="${!fired_var}"
-  if [[ -n "$seen" ]]; then printf '%-10s %-10s %s\n' "$k" PASS "$(( seen - fired ))"
-  elif [[ "$k" == decoy && -z "$LOKI" ]]; then printf '%-10s %-10s %s\n' "$k" SKIPPED "(no --loki; 401 asserted above)"
-  elif [[ "$k" == sa && "$SCOPE" == aws ]]; then printf '%-10s %-10s %s\n' "$k" SKIPPED "(--scope aws: monthly manual drill)"
-  else printf '%-10s %-10s %s\n' "$k" FAIL ">${TIMEOUT}"; rc=1; fi
+  if [[ -n "$seen" ]]; then out '%-10s %-10s %s\n' "$k" PASS "$(( seen - fired ))"
+  elif [[ "$k" == decoy && -z "$LOKI" ]]; then out '%-10s %-10s %s\n' "$k" SKIPPED "(no --loki; 401 asserted above)"
+  elif [[ "$k" == sa && "$SCOPE" == aws ]]; then out '%-10s %-10s %s\n' "$k" SKIPPED "(--scope aws: monthly manual drill)"
+  else out '%-10s %-10s %s\n' "$k" FAIL ">${TIMEOUT}"; rc=1; fi
 done
-if [[ -n "$EXTRA" ]]; then
-  printf '%-10s %-10s %s\n' extra FAIL "matched=${EXTRA} (expected 1): treat the other event as a compromise"
-  rc=1
+if [[ -n "${SEEN_key:-}" ]]; then
+  if [[ -z "$COUNT" || "$COUNT" == "None" ]] || ! python3 -c 'import sys;float(sys.argv[1])' "$COUNT" 2>/dev/null; then
+    out '%-10s %-10s %s\n' count FAIL "matched=unreadable after settle: cannot rule out a second event"
+    rc=1
+  elif python3 -c 'import sys;sys.exit(0 if float(sys.argv[1])>1 else 1)' "$COUNT"; then
+    out '%-10s %-10s %s\n' count FAIL "matched=${COUNT} (expected 1): treat the other event as a compromise"
+    rc=1
+  else
+    out '%-10s %-10s %s\n' count PASS "matched=${COUNT}"
+  fi
 fi
 echo "Seconds measure signal-in-AWS/Loki. delivery = the SNS topic handed the key alert to its subscribers (email)."
 exit $rc

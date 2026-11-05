@@ -80,7 +80,8 @@ jobs:
         env:
           DRILL_DECOY_URL: ${{ vars.DRILL_DECOY_URL }}
           DRILL_SSM_PARAM: ${{ vars.DRILL_SSM_PARAM }}
-        run: bash openbank-infra/scripts/deception-drill.sh --scope aws | tee "$RUNNER_TEMP/drill.txt"
+          DRILL_VERDICT: ${{ runner.temp }}/verdict.txt
+        run: bash openbank-infra/scripts/deception-drill.sh --scope aws
 
       - name: Escalate a failed drill on #14163
         if: ${{ failure() }}
@@ -88,11 +89,10 @@ jobs:
         with:
           script: |
             const fs = require('fs')
-            const p = `${process.env.RUNNER_TEMP}/drill.txt`
-            // Only the verdict table goes to the (public) issue, never the transcript above it.
-            const full = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : ''
-            const i = full.indexOf('run=')
-            const report = i >= 0 ? full.slice(i).trim() : '(the drill did not get far enough to report)'
+            // Only the verdict file goes to the (public) issue; the drill writes nothing else to it.
+            const p = `${process.env.RUNNER_TEMP}/verdict.txt`
+            const v = fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : ''
+            const report = v || '(the drill did not get far enough to report)'
             const MARKER = '<!-- deception-drill -->'
             const issue_number = 14163
             const body = [
