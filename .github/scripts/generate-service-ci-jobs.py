@@ -3,6 +3,7 @@
 """Generate explicit Services CI callers; no matrix result represents multiple modules."""
 import argparse
 import re
+import statistics
 import sys
 import tempfile
 from pathlib import Path
@@ -13,6 +14,98 @@ CALLERS = ('  # BEGIN GENERATED SERVICE CI CALLERS', '  # END GENERATED SERVICE 
 NEEDS = ('    # BEGIN GENERATED SERVICE CI NEEDS', '    # END GENERATED SERVICE CI NEEDS')
 LANES = {'pr': 12, 'other': 8}
 CALLEES = {'pr': '.github/workflows/_service-ci-pr.yml', 'other': '.github/workflows/_service-ci.yml'}
+
+
+# Median PR build seconds from nine full-fleet carrier runs, Nov 2–3, 2026.
+# Refresh offline on older runs and replay on later runs before changing these weights.
+PR_BUILD_SECONDS = {
+    "openbank-account-service": 639,
+    "openbank-agent-service": 434,
+    "openbank-aml-service": 423,
+    "openbank-anacredit-service": 303,
+    "openbank-analytics-sink": 286,
+    "openbank-ap2-service": 271,
+    "openbank-audit-service": 468,
+    "openbank-authz-policy-auditor": 297,
+    "openbank-balance-service": 496,
+    "openbank-billing-service": 469,
+    "openbank-campaign-service": 374,
+    "openbank-card-issuance-service": 348,
+    "openbank-card-processing-service": 494,
+    "openbank-case-coordinator-agent": 369,
+    "openbank-clearing-service": 413,
+    "openbank-clearing-simulator": 252,
+    "openbank-client-account": 161,
+    "openbank-client-product-catalog": 149,
+    "openbank-client-transaction": 196,
+    "openbank-communication-service": 298,
+    "openbank-consent-service": 432,
+    "openbank-context-service": 496,
+    "openbank-control-liveness-sentinel": 277,
+    "openbank-copilot-service": 349,
+    "openbank-customer-edge": 482,
+    "openbank-delegation-service": 591,
+    "openbank-devops-agent": 256,
+    "openbank-dispute-service": 432,
+    "openbank-docs-truth-agent": 293,
+    "openbank-document-service": 607,
+    "openbank-domestic-payment": 497,
+    "openbank-engagement-service": 371,
+    "openbank-finops-agent": 267,
+    "openbank-finrep-service": 255,
+    "openbank-flaky-test-hunter": 297,
+    "openbank-fraud-service": 543,
+    "openbank-fx-service": 465,
+    "openbank-governance-auditor": 296,
+    "openbank-incentive-service": 279,
+    "openbank-interest-service": 421,
+    "openbank-kyb-service": 345,
+    "openbank-kyc-service": 542,
+    "openbank-ledger-service": 683,
+    "openbank-lending-service": 692,
+    "openbank-libs": 126,
+    "openbank-libs-benchmarks": 91,
+    "openbank-libs-detekt-rules": 142,
+    "openbank-libs-domain": 196,
+    "openbank-libs-finance": 165,
+    "openbank-libs-fincrime": 160,
+    "openbank-libs-iso20022": 168,
+    "openbank-libs-lending": 171,
+    "openbank-libs-runtime": 273,
+    "openbank-libs-temporal": 135,
+    "openbank-libs-testing": 200,
+    "openbank-loyalty-service": 319,
+    "openbank-mcp-service": 289,
+    "openbank-notification-service": 449,
+    "openbank-onboarding-service": 303,
+    "openbank-party-service": 533,
+    "openbank-pension-fund-service": 338,
+    "openbank-pension-service": 791,
+    "openbank-pid-service": 398,
+    "openbank-product-catalog": 583,
+    "openbank-products": 195,
+    "openbank-psd2-service": 437,
+    "openbank-referral-service": 353,
+    "openbank-release-steward": 292,
+    "openbank-risk-engine": 416,
+    "openbank-sanctions-service": 347,
+    "openbank-sca-service": 642,
+    "openbank-sdd-service": 438,
+    "openbank-security-scanner": 276,
+    "openbank-sepa-instant": 471,
+    "openbank-sepa-payment": 486,
+    "openbank-settlement-service": 474,
+    "openbank-simulation": 416,
+    "openbank-standing-order-service": 392,
+    "openbank-statement-service": 415,
+    "openbank-swift-service": 607,
+    "openbank-tax-reporting-service": 496,
+    "openbank-tpp-registry-service": 369,
+    "openbank-transaction-service": 422,
+    "openbank-treasury-service": 713,
+    "openbank-vop-service": 280,
+    "openbank-wealth-service": 364
+}
 
 
 def inventory(root):
@@ -30,15 +123,35 @@ def expression(text):
     return '${{ ' + text + ' }}'
 
 
+def pr_predecessors(modules, width, weights):
+    # Longest estimated builds first, with stable tie-breaking and a neutral
+    # estimate for new modules. The inventory, not the timing sample, selects jobs.
+    default = statistics.median(weights.values())
+    seconds = {module: weights.get(module, default) for module in modules}
+    loads = [0] * width
+    tails = [None] * width
+    predecessors = {}
+    for module in sorted(modules, key=lambda name: (-seconds[name], name)):
+        slot = min(range(width), key=loads.__getitem__)
+        predecessors[module] = tails[slot]
+        tails[slot] = module
+        loads[slot] += seconds[module]
+    return predecessors
+
+
 def caller_block(modules):
     rows = []
     for lane, width in LANES.items():
-        for i, module in enumerate(modules):
+        if lane == 'pr':
+            predecessors = pr_predecessors(modules, width, PR_BUILD_SECONDS)
+        else:
+            predecessors = dict(zip(modules[width:], modules))
+        for module in modules:
             event = "github.event_name == 'pull_request'" if lane == 'pr' else "github.event_name != 'pull_request'"
             selected = f"({event}) && contains(fromJSON(needs.changes.outputs.services || '[]'), '{module}')"
             dependencies = ['changes', 'publication-ready']
-            if i >= width:
-                dependencies.append(job_id(modules[i - width], lane))
+            if predecessors.get(module):
+                dependencies.append(job_id(predecessors[module], lane))
             condition = ("!cancelled() && needs.changes.result == 'success' && "
                          "needs.changes.outputs.any == 'true' && "
                          "(needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped') && " + selected)

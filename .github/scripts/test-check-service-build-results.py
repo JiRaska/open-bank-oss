@@ -406,16 +406,43 @@ class GraphTest(unittest.TestCase):
                 self.assertIn('!cancelled()', job['if'])
                 self.assertEqual(job['with']['service'], module)
                 self.assertEqual(job['uses'], './' + graph.CALLEES[branch])
-                wanted = ['changes', 'publication-ready'] + ([graph.job_id(modules[i-width], branch)] if i >= width else [])
-                self.assertEqual(job['needs'], wanted)
+                self.assertEqual(job['needs'][:2], ['changes', 'publication-ready'])
+                self.assertLessEqual(len(job['needs']), 3)
+                if branch == 'other':
+                    expected = [graph.job_id(modules[i-width], branch)] if i >= width else []
+                    self.assertEqual(job['needs'][2:], expected)
                 self.assertIn("|| 'Not selected (", job['name'])
                 self.assertNotIn('strategy', job)
-            # Every edge is exactly one earlier whole caller in its lane: even sparse
-            # selections and failed/skipped predecessors cannot create a second slot.
-            chains = [[modules[i] for i in range(start, len(modules), width)] for start in range(width)]
-            self.assertEqual(sorted(m for chain in chains for m in chain), modules)
-            for selected in [set(modules), set(modules[::2]), {modules[-1]}, set()]:
-                self.assertLessEqual(sum(any(m in selected for m in chain) for chain in chains), width)
+            # Reconstruct the actual emitted paths. No fork, cycle, orphan or
+            # cross-lane dependency may slip through regardless of timing weights.
+            ids = {graph.job_id(module, branch) for module in modules}
+            roots = []
+            successor = {}
+            for caller in ids:
+                deps = jobs[caller]['needs'][2:]
+                if deps:
+                    self.assertIn(deps[0], ids)
+                    self.assertNotIn(deps[0], successor)
+                    successor[deps[0]] = caller
+                else:
+                    roots.append(caller)
+            self.assertEqual(len(roots), min(width, len(modules)))
+            visited = set()
+            for caller in roots:
+                while caller is not None:
+                    self.assertNotIn(caller, visited)
+                    visited.add(caller)
+                    caller = successor.get(caller)
+            self.assertEqual(visited, ids)
+
+    def test_pr_assigns_long_builds_first_and_new_modules_by_median(self):
+        weights = {'a': 10, 'b': 6, 'c': 4, 'd': 2}
+        expected = {'a': None, 'b': None, 'new': 'b', 'c': 'a', 'd': 'new'}
+        for modules in (list(expected), list(reversed(expected))):
+            self.assertEqual(graph.pr_predecessors(modules, 2, weights), expected)
+        self.assertEqual(graph.pr_predecessors(['c', 'b', 'a'], 2, {'old': 1}),
+                         {'a': None, 'b': None, 'c': 'a'})
+
 
 
 @contextmanager
