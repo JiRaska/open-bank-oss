@@ -20,19 +20,14 @@ sandbox wired to alerts, and shipped `HoneytokenFilter` plus the `HoneyEndpointH
 This ADR is needed because that control is write-only as built, and because the first draft of
 this ADR would have repeated the mistake one layer up.
 
-Measured 2026-10-29 against `main` and the sandbox:
+Assessed against `main` and the sandbox:
 
-- `openbank.security.honey.paths` is configured in no service and no manifest, the
-  `openbank_security_honeytoken_hits_total` series does not exist, and `HoneyEndpointHit`
-  fired 0 times in 7 days. It could not have fired.
-- A one-day sample of the edge access log shows only commodity reconnaissance (`.env`,
-  `.git/HEAD`, WordPress and PHP artefacts, `actuator/heapdump`) from rotating sources. No
-  targeted activity.
-- GuardDuty raised 50 findings in 30 days. The only runtime findings (docker socket access, a
-  new binary, a suspicious tool) all came from pods in `arc-runners`, which executes code from
-  pull requests to a public repository.
-- Falco, the in-cluster runtime sensor (ADR-0081), was crash-looping on 15 of 17 nodes after
-  the 2026-10-12 node image moved to a kernel its driver cannot initialise on.
+- `openbank.security.honey.paths` is configured in no service and no manifest, so the
+  `HoneyEndpointHit` rule had no series to fire on. It could not have fired.
+- Edge access logs show only commodity reconnaissance from rotating sources, nothing targeted.
+- The CI runner namespace executes code from pull requests to a public repository, which makes
+  it the most exposed place in the cluster after the edge.
+- The in-cluster runtime sensor (ADR-0081) is degraded, so detection must not depend on it alone.
 
 **Why an edge-only answer is not enough.** Decoy paths on a public host catch scanners, and
 scanners are what every public host already sees. They do not distinguish a nuisance from an
@@ -58,8 +53,8 @@ failure modes, and proven by a timed drill. The programme is only as good as its
 |---|---|---|---|---|---|
 | 0 Edge | targeted decoy paths on the shared Gateway, answered by Envoy `directResponse` | T1595.003, T1190 | Envoy access log, Loki ruler | Alertmanager, Slack | shipped (#14164) |
 | 0 Edge | commodity decoy paths (`/.env`, `/.git/HEAD`, `/actuator/*`) | T1595.003 | Envoy access log, recording rule | dashboard only | shipped (#14164) |
-| 1 Cloud | canary IAM access key: explicit deny-all user, placed in an SSM lure | T1552.001, T1078.004 | CloudTrail via EventBridge, read-only events opted in | SNS email | this change |
-| 1 Cluster | honey ServiceAccount token in `arc-runners`, zero RBAC | T1528, T1552.007 | EKS audit log, CloudWatch metric filter on ingest | SNS email | this change |
+| 1 Cloud | watched IAM access key: explicit deny-all user, stored where a credential search would look | T1552.001, T1078.004 | CloudTrail via EventBridge, read-only events opted in | SNS email | this change |
+| 1 Cluster | standing ServiceAccount token in the CI runner namespace, zero RBAC | T1528, T1552.007 | EKS audit log, CloudWatch metric filter on ingest | SNS email | this change |
 | 2 Data | honey party and IBAN rows; a payment or notification to them trips the outbox | T1530, T1005 | outbox and notification events | Alertmanager critical | planned |
 | 2 Identity | honey Keycloak user; any login attempt | T1110, T1078 | Keycloak events in Loki | Alertmanager critical | planned |
 | 2 Secrets | honey OpenBao path; honey object in the backup bucket | T1552, T1530 | OpenBao audit device, S3 data events | Alertmanager critical | planned |
@@ -69,23 +64,25 @@ incident.
 
 ### Rules every lure follows
 
-1. **Powerless by construction.** The canary IAM user carries one explicit `Deny "*"` and nothing
-   else. The honey ServiceAccount has no binding anywhere and does not automount. A lure that
-   could do anything would be a credential, not a lure.
-2. **Wired to a tripwire on the lure's use, never on its being read.** The ARC controller reads
-   Secrets in `arc-runners` about 41,000 times a day (measured in the EKS audit log), so an
-   alarm on reads would be noise. The token's *use* has no legitimate source.
+1. **Powerless by construction.** The watched IAM user carries one explicit `Deny "*"` and nothing
+   else. The watched ServiceAccount has no binding anywhere and does not automount. A decoy that
+   could do anything would be a credential, not a decoy.
+2. **Wired to a tripwire on the lure's use, never on its being read.** Legitimate
+   controllers read Secrets in the same namespace continuously, so an alarm on reads would be
+   noise. The token's *use* has no legitimate source.
 3. **Delivered outside the blast radius.** Layer 1 alerts go through SNS email, not through the
    cluster, because when the lure fires the cluster is the suspect. Alertmanager has no
    internet-facing receiver and gets none for this. Wiring the same topics into GoAlert is a
    follow-up.
-4. **Values never in git.** The canary key exists in tofu state (encrypted) and in the SSM lure.
+4. **Values never in git.** The watched key exists in tofu state (encrypted) and in the parameter store.
    The SA token is minted by the token controller in the cluster. A key committed to a public
    repository would be quarantined by AWS within minutes, which would silently disarm the lure.
-5. **Gated.** `honeytoken-wiring` (enforced) fails when a honey SA has no metric filter naming
-   it, when a filter names no honey SA, when any RoleBinding or ClusterRoleBinding has a honey
-   SA as subject, when the canary user gains any attachment or loses its deny, or when the
-   canary EventBridge rules stop opting in to read-only events. `edge-decoy-rule-parity`
+5. **Gated, by shape.** `honeytoken-wiring` (enforced) finds the decoys by what they are (a
+   ServiceAccount with a standing token Secret; the IAM user owning a key an EventBridge rule
+   matches) rather than from a name list, and fails when one has no tripwire, when a tripwire
+   names nothing, when a RoleBinding or ClusterRoleBinding has the ServiceAccount as subject,
+   when the IAM user gains any attachment or loses its deny, or when the EventBridge rules
+   stop opting in to read-only events. `edge-decoy-rule-parity`
    (enforced) does the same pairing for layer 0.
 
 ### Detection validation
@@ -125,15 +122,15 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
   match this estate exactly. Rejected on cost and data-processing grounds, not on merit.
 - **Free hosted canary-token service.** Zero cost and quick, but alerts are processed
   by a third party, and the AWS token type is generated in that party's account, not ours.
-  Rejected; the self-hosted canary key gives the same signal with full control.
+  Rejected; the self-hosted watched key gives the same signal with full control.
 - **Interactive honeypot distribution on its own instance.** Rich protocol emulation that
-  reports what GuardDuty and the edge log already show, for a recurring instance, patching, and a
+  reports what existing telemetry already shows, for a recurring instance, patching, and a
   new exposed host outside GitOps and admission policy. Rejected.
 - **Blocking WAF on every host.** AWS WAF does not attach to an NLB, and an ALB in front would break
   the client-address model the per-client rate limits rely on (ADR-0324). Coraza in detection-only
   mode remains a candidate telemetry source for the real routes, tracked in #14163.
-- **Alarm on Secret reads instead of token use.** Measured noise: ~41,000 reads a day by the ARC
-  controller. Rejected in favour of keying on use.
+- **Alarm on Secret reads instead of token use.** Legitimate controllers generate constant read
+  traffic, so it would be noise. Rejected in favour of keying on use.
 
 ## Consequences
 
@@ -145,21 +142,23 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 - About 0.10 USD a month.
 
 **Negative**
-- EventBridge is regional. The canary rules cover eu-north-1 and us-east-1, which includes the
+- EventBridge is regional. The EventBridge rules cover eu-north-1 and us-east-1, which includes the
   global STS endpoint and IAM. A call through another region's regional STS endpoint is in the
   trail but alerts nothing until per-region rules land (free, tracked in #14163). Stated here so
   it is not mistaken for full coverage.
-- Lure placement is public. A reader of this repository knows the SSM path and the SA name.
-  They are tripwires either way: using them is the alert. Placements that rely on secrecy belong
-  in OpenBao, not in git.
+- The repository is public, so the manifests and infrastructure code that create the decoys are
+  readable, and the gate finds them by shape rather than by a list. This ADR and the docs
+  deliberately do not enumerate identifiers, but secrecy of placement is not what the control
+  relies on: using a decoy is the alert either way. Placements that do rely on secrecy belong in
+  a secret store, not in git.
 - The drill sends two real alert emails per run. That is intended.
-- Runtime sensing is degraded until Falco runs on the current kernel. Honeytokens do not replace
+- Runtime sensing is degraded until it is restored. Honeytokens do not replace
   a runtime sensor; they bound how long an intrusion stays quiet.
 
 **Neutral**
 - Gates: `honeytoken-wiring` and `edge-decoy-rule-parity`, both group `gitops`, mode `enforced`.
 - Applying layer 1 is an owner step (`tofu apply` in `aws/envs/sandbox-substrate`, targeted to
-  `deception.tf`'s resources; the plan is 16 to add, 0 to change, 0 to destroy) plus confirming
+  `deception.tf`'s resources; additive resources only) plus confirming
   the two SNS email subscriptions.
 
 ### Delivery check
@@ -168,10 +167,10 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 # both gates green, i.e. every lure is wired and powerless
 python3 .github/scripts/check-honeytoken-wiring.py
 python3 .github/scripts/check-edge-decoy-rule-parity.py
-# the honey SA and its token exist and carry no binding
-kubectl -n arc-runners get sa deploy-prod && kubectl -n arc-runners get secret deploy-prod-token
-kubectl auth can-i --list --as=system:serviceaccount:arc-runners:deploy-prod -n arc-runners   # only self-review rules
-# end-to-end known-positive with timings; every row PASS
+# the watched ServiceAccount and its token exist and carry no binding: get both from the gitops
+# manifest, then `kubectl auth can-i --list --as=system:serviceaccount:<ns>:<name> -n <ns>`
+# should show only the self-review rules
+# end-to-end known-positive with timings; every row PASS (inputs: see the script header)
 AWS_PROFILE=openbank openbank-infra/scripts/deception-drill.sh --loki http://localhost:3100
 ```
 
@@ -194,6 +193,6 @@ delivered, whatever the status field says.
 - ADR-0324: Envoy Gateway as the shared edge
 - ADR-0081: runtime sensor baseline (Falco)
 - `openbank-infra/aws/envs/sandbox-substrate/deception.tf`
-- `openbank-infra/gitops/components/platform/honey-serviceaccount.yaml`
+- `openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml`
 - `openbank-infra/scripts/deception-drill.sh`
 - `.github/scripts/check-honeytoken-wiring.py`, `.github/scripts/check-edge-decoy-rule-parity.py`

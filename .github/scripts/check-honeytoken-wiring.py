@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Honeytokens must stay wired to a tripwire, and must stay powerless (ADR-0361, phase 1).
+Decoy credentials must stay wired to a tripwire, and must stay powerless (ADR-0361, phase 1).
 
-A honeytoken fails in two silent ways, and this gate catches both.
+A decoy credential fails in two silent ways, and this gate catches both.
 
-1. UNWIRED. The lure exists but nothing listens: rename the ServiceAccount and the metric
-   filter keeps matching the old name, so the token works as a credential and alerts
-   nobody. That is the ADR-0279 failure shape (HoneyEndpointHit over a filter no service
-   configured, 0 hits in 7 days, unable to fire), and it is invisible from every angle
-   because "no alert" is also what a quiet week looks like.
+1. UNWIRED. The decoy exists but nothing listens: rename it and the metric filter keeps
+   matching the old name, so the credential works and alerts nobody. That is the ADR-0279
+   failure shape (a rule over a filter no service configured), invisible because "no alert"
+   is also what a quiet week looks like.
 
-2. ARMED. Someone binds the honey SA to a Role, or attaches a policy or group to the canary
-   IAM user, and the lure becomes a real credential sitting in the most exposed namespace.
-   The design rests on the token being useless; nothing else would notice it stopped being.
+2. ARMED. Someone binds the decoy ServiceAccount to a Role, or attaches a policy or group to
+   the decoy IAM user, and it becomes a real credential. The design rests on it being useless.
+
+The decoys are found by SHAPE, not by a name list kept in this file:
+  - a decoy ServiceAccount is a ServiceAccount that has a long-lived token Secret
+    (type kubernetes.io/service-account-token) declared next to it in gitops;
+  - a decoy IAM user is the user that owns an access key matched by an EventBridge rule's
+    event pattern in the substrate root.
 
 Checks:
-  - every honey ServiceAccount in HONEY_SERVICE_ACCOUNTS exists in gitops and has a CloudWatch
-    metric filter in the substrate root whose pattern names system:serviceaccount:<ns>:<name>,
-    and every such pattern names a declared honey SA;
-  - no RoleBinding or ClusterRoleBinding anywhere in gitops has a subject that is a honey SA;
-  - the canary IAM user has exactly one inline policy, it is an explicit Deny "*" on "*",
-    and no policy attachment or group membership references it;
-  - the canary EventBridge rules opt in to read-only management events (without that, the
-    attacker's first call, sts:GetCallerIdentity, never reaches the rule).
+  - every decoy ServiceAccount has a CloudWatch metric filter in the substrate root whose
+    pattern names it, and every ServiceAccount a filter names exists in gitops with that shape;
+  - no RoleBinding or ClusterRoleBinding anywhere in gitops has a decoy ServiceAccount as subject;
+  - the decoy IAM user has exactly one inline policy, it is an explicit Deny "*", and no policy
+    attachment or group membership references it;
+  - the EventBridge rules opt in to read-only management events (without that, the attacker's
+    first call, sts:GetCallerIdentity, never reaches the rule).
 
 Usage:
     check-honeytoken-wiring.py             # scan
@@ -41,11 +44,6 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 TOFU = REPO / "openbank-infra" / "aws" / "envs" / "sandbox-substrate"
-# The honeytoken inventory. Declared HERE, never as a label or annotation on the object: the
-# lure sits in the most exposed namespace, and a marker readable by anyone allowed to list it
-# tells an attacker exactly which credential to leave alone.
-HONEY_SERVICE_ACCOUNTS: frozenset[tuple[str, str]] = frozenset({("arc-runners", "deploy-prod")})
-
 FILTER_SA_RE = re.compile(r'system:serviceaccount:(?P<ns>[a-z0-9-]+):(?P<name>[a-z0-9-]+)')
 RESOURCE_RE = re.compile(r'^resource\s+"(?P<type>[\w]+)"\s+"(?P<name>[\w]+)"\s*\{', re.M)
 
@@ -71,7 +69,7 @@ def _candidates(gitops: Path, needle: str):
     """Files that can possibly matter, by a byte search before any YAML parse.
 
     Parsing every manifest in gitops twice per scan, six scans per self-test, cost 44s on a
-    hosted runner (budget 30s). A file that does not contain the needle cannot declare a honey
+    hosted runner (budget 30s). A file that does not contain the needle cannot declare a decoy
     SA or a binding, so skipping it changes no verdict, only the time.
     """
     raw = needle.encode()
@@ -97,6 +95,27 @@ def service_accounts(gitops: Path) -> set[tuple[str, str]]:
     return found
 
 
+def token_shaped_service_accounts(gitops: Path) -> set[tuple[str, str]]:
+    """ServiceAccounts that have a long-lived token Secret declared in gitops.
+
+    Nothing in the fleet needs one: workloads use projected, expiring tokens. A token Secret
+    is therefore the shape of a standing credential left to be found.
+    """
+    found = set()
+    for path in _candidates(gitops, "service-account-token"):
+        try:
+            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+        except yaml.YAMLError:
+            continue
+        for d in docs:
+            if isinstance(d, dict) and d.get("kind") == "Secret" and d.get("type") == "kubernetes.io/service-account-token":
+                meta = d.get("metadata") or {}
+                sa = (meta.get("annotations") or {}).get("kubernetes.io/service-account.name")
+                if sa:
+                    found.add((str(meta.get("namespace", "")), str(sa)))
+    return found
+
+
 def bound_subjects(gitops: Path) -> set[tuple[str, str]]:
     found = set()
     for path in _candidates(gitops, "Binding"):
@@ -117,43 +136,62 @@ def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
     text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(tofu.glob("*.tf")))
     blocks = _blocks(text)
 
-    sas = set(HONEY_SERVICE_ACCOUNTS)
-    for ns, name in sorted(sas - service_accounts(gitops)):
-        findings.append(f"declared honey ServiceAccount {ns}/{name} does not exist in gitops — renamed or removed lure")
+    existing = service_accounts(gitops)
+    sas = token_shaped_service_accounts(gitops) & existing
     wired = {
         (m.group("ns"), m.group("name"))
         for t, _, body in blocks if t == "aws_cloudwatch_log_metric_filter"
         for m in FILTER_SA_RE.finditer(body)
     }
+    for ns, name in sorted(wired - existing):
+        findings.append(f"metric filter names ServiceAccount {ns}/{name}, which does not exist in gitops — renamed or removed")
+    for ns, name in sorted((wired & existing) - sas):
+        findings.append(f"metric filter names ServiceAccount {ns}/{name}, which has no token Secret — tripwire on nothing")
     for ns, name in sorted(sas - wired):
-        findings.append(f"honey ServiceAccount {ns}/{name} has no metric filter naming it — unwired lure")
-    for ns, name in sorted(wired - sas):
-        findings.append(f"metric filter names {ns}/{name}, which is not a declared honey ServiceAccount — tripwire on nothing")
+        findings.append(f"token-bearing ServiceAccount {ns}/{name} has no metric filter naming it — unwired")
+    if not wired:
+        findings.append("no metric filter names a ServiceAccount — the cluster tripwire is gone")
     for path in _candidates(gitops, "openbank.io/deception"):
-        findings.append(f"{path.relative_to(gitops)} carries an openbank.io/deception marker — it marks the lure for an attacker")
+        findings.append(f"{path.relative_to(gitops)} carries an openbank.io/deception marker — it marks the object for an attacker")
     for ns, name in sorted(sas & bound_subjects(gitops)):
-        findings.append(f"honey ServiceAccount {ns}/{name} is a subject of a RoleBinding/ClusterRoleBinding — the lure is armed")
+        findings.append(f"ServiceAccount {ns}/{name} is a subject of a RoleBinding/ClusterRoleBinding — armed")
 
-    users = [n for t, n, _ in blocks if t == "aws_iam_user"]
-    if "canary" not in users:
-        findings.append("aws_iam_user.canary not found in the substrate root")
-    else:
-        ref = "aws_iam_user.canary."
+    text_all = text
+    rule_locals = set()
+    for t, _, body in blocks:
+        if t != "aws_cloudwatch_event_rule":
+            continue
+        m = re.search(r'event_pattern\s*=\s*local\.(\w+)', body)
+        if m:
+            pos = re.search(r'\b' + m.group(1) + r'\s*=', text_all)
+            if pos and "accessKeyId" in text_all[pos.end():pos.end() + 400]:
+                rule_locals.add(m.group(1))
+    key_names = set(re.findall(r'accessKeyId\s*=\s*\[aws_iam_access_key\.(\w+)\.id\]', text_all))
+    users: set[str] = set()
+    for t, n, b in blocks:
+        if t == "aws_iam_access_key" and n in key_names:
+            m = re.search(r'user\s*=\s*aws_iam_user\.(\w+)\.name', b)
+            if m:
+                users.add(m.group(1))
+    if not users:
+        findings.append("no IAM user owns an access key matched by an EventBridge rule — the cloud tripwire is gone")
+    if not rule_locals:
+        findings.append("no EventBridge rule matches on an access key id")
+    for u in sorted(users):
+        ref = f"aws_iam_user.{u}."
         inline = [b for t, _, b in blocks if t == "aws_iam_user_policy" and ref in b]
         if len(inline) != 1:
-            findings.append(f"canary user must carry exactly one inline policy, found {len(inline)}")
+            findings.append(f"watched IAM user must carry exactly one inline policy, found {len(inline)}")
         elif not re.search(r'Effect\s*=\s*"Deny"', inline[0]) or not re.search(r'Action\s*=\s*"\*"', inline[0]):
-            findings.append("canary user's inline policy is not an explicit Deny on Action \"*\"")
+            findings.append("watched IAM user's inline policy is not an explicit Deny on Action \"*\"")
         for t, n, b in blocks:
             if t in ("aws_iam_user_policy_attachment", "aws_iam_user_group_membership",
                      "aws_iam_group_membership", "aws_iam_policy_attachment") and ref in b:
-                findings.append(f"{t}.{n} grants the canary user something — the lure is armed")
-        rules = [b for t, _, b in blocks if t == "aws_cloudwatch_event_rule" and "canary_event_pattern" in b]
-        if not rules:
-            findings.append("no EventBridge rule uses the canary event pattern")
-        for b in rules:
+                findings.append(f"{t}.{n} grants the watched IAM user something — armed")
+    for t, _, b in blocks:
+        if t == "aws_cloudwatch_event_rule" and any(f"local.{l}" in b for l in rule_locals):
             if "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS" not in b:
-                findings.append("a canary EventBridge rule does not opt in to read-only management events — sts:GetCallerIdentity would never alert")
+                findings.append("an access-key EventBridge rule does not opt in to read-only management events — sts:GetCallerIdentity would never alert")
     return findings, len(sas) + len(users)
 
 
@@ -170,27 +208,38 @@ def selftest() -> int:
         for f in clean:
             print("   ", f)
         return 1
+    sa_file = next(iter(_candidates(GITOPS, "service-account-token")))
+    rel_sa = sa_file.relative_to(GITOPS).as_posix()
+    ns, name = sorted(token_shaped_service_accounts(GITOPS) & service_accounts(GITOPS))[0]
+    tf_text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(TOFU.glob("*.tf")))
+    user = re.search(r'accessKeyId\s*=\s*\[aws_iam_access_key\.(\w+)\.id\]', tf_text).group(1)
+    iam_user = re.search(r'resource\s+"aws_iam_access_key"\s+"' + user + r'"\s*\{[^}]*?user\s*=\s*aws_iam_user\.(\w+)\.name', tf_text).group(1)
+    pattern = f"system:serviceaccount:{ns}:{name}"
     cases = {
         "renamed SA": (
-            "gitops", "components/platform/honey-serviceaccount.yaml",
-            lambda s: s.replace("name: deploy-prod\n  namespace", "name: deploy-prod-renamed\n  namespace", 1),
+            "gitops", rel_sa,
+            lambda s: s.replace(f"name: {name}\n", f"name: {name}-renamed\n", 1).replace(f"service-account.name: {name}\n", f"service-account.name: {name}-renamed\n"),
             "does not exist in gitops"),
         "unwired SA": (
             "tofu", "deception.tf",
-            lambda s: s.replace("system:serviceaccount:arc-runners:deploy-prod", "system:serviceaccount:arc-runners:other", 1),
-            "no metric filter naming it"),
-        "marker label back on the lure": (
-            "gitops", "components/platform/honey-serviceaccount.yaml",
-            lambda s: s.replace("    app.kubernetes.io/part-of: openbank-ci\n", "    app.kubernetes.io/part-of: openbank-ci\n    openbank.io/deception: honeytoken\n", 1),
-            "marks the lure"),
+            lambda s: s.replace(pattern, f"system:serviceaccount:{ns}:other", 1),
+            "does not exist in gitops"),
+        "tripwire removed": (
+            "tofu", "deception.tf",
+            lambda s: s.replace(pattern, "x", 1),
+            "no metric filter names a ServiceAccount"),
+        "marker label back on the object": (
+            "gitops", rel_sa,
+            lambda s: s.replace("    app.kubernetes.io/part-of: openbank-ci\n", "    app.kubernetes.io/part-of: openbank-ci\n    openbank.io/deception: marker\n", 1),
+            "marks the object"),
         "armed SA": (
-            "gitops", "components/platform/honey-serviceaccount.yaml",
-            lambda s: s + "\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: x\n  namespace: arc-runners\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: view\nsubjects:\n  - kind: ServiceAccount\n    name: deploy-prod\n    namespace: arc-runners\n",
-            "the lure is armed"),
+            "gitops", rel_sa,
+            lambda s: s + f"\n---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata:\n  name: x\n  namespace: {ns}\nroleRef:\n  apiGroup: rbac.authorization.k8s.io\n  kind: ClusterRole\n  name: view\nsubjects:\n  - kind: ServiceAccount\n    name: {name}\n    namespace: {ns}\n",
+            "armed"),
         "armed IAM user": (
             "tofu", "deception.tf",
-            lambda s: s + '\nresource "aws_iam_user_policy_attachment" "oops" {\n  user       = aws_iam_user.canary.name\n  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"\n}\n',
-            "grants the canary user"),
+            lambda s: s + f'\nresource "aws_iam_user_policy_attachment" "oops" {{\n  user       = aws_iam_user.{iam_user}.name\n  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"\n}}\n',
+            "grants the watched IAM user"),
         "deny weakened": (
             "tofu", "deception.tf",
             lambda s: s.replace('Effect   = "Deny"', 'Effect   = "Allow"', 1),
@@ -221,12 +270,12 @@ def main() -> int:
     if ap.parse_args().selftest:
         return selftest()
     findings, subjects = scan(GITOPS, TOFU)
-    print(f"SUBJECTS={subjects}  # honey ServiceAccounts + IAM users in the substrate root")
+    print(f"SUBJECTS={subjects}  # token-bearing ServiceAccounts + watched IAM users in the substrate root")
     for f in findings:
         print(f"::error::{f}")
     if findings:
         return 1
-    print("check-honeytoken-wiring: OK — every honeytoken is wired to a tripwire and holds no permission")
+    print("check-honeytoken-wiring: OK — every decoy credential is wired to a tripwire and holds no permission")
     return 0
 
 

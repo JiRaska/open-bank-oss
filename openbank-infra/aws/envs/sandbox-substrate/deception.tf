@@ -1,15 +1,15 @@
-# Deception programme, phase 1: cloud and cluster honeytokens (ADR-0361).
+# Deception programme, phase 1: cloud and cluster tripwires (ADR-0361).
 #
 # WHY. Edge decoys (gitops observability/httproute-edge-decoys.yaml) see scanners, which every
 # public host sees. What separates a nuisance from an incident is what happens AFTER initial
-# access: credential theft, token reuse, discovery. A honeytoken is a credential that nothing
+# access: credential theft, token reuse, discovery. A decoy credential is one that nothing
 # legitimate ever uses, so any use is a true positive by construction and needs no tuning. This
-# file builds the two cloud-side tripwires and their delivery; the cluster-side lure (a
-# zero-RBAC ServiceAccount token) lives in gitops/components/arc-runners/honey-serviceaccount.yaml.
+# file builds the two cloud-side tripwires and their delivery; the cluster-side counterpart (a
+# zero-RBAC ServiceAccount token) lives in gitops/components/platform/runner-token-serviceaccount.yaml.
 #
 #   Tripwire                     ATT&CK                         Signal source             Fires on
-#   canary IAM access key        T1552.001, T1078.004           CloudTrail -> EventBridge any API call signed by the key
-#   honey SA token used          T1528, T1552.007               EKS audit log -> metric   any request authenticated as the SA
+#   watched IAM access key       T1552.001, T1078.004           CloudTrail -> EventBridge any API call signed by the key
+#   SA token used                T1528, T1552.007               EKS audit log -> metric   any request authenticated as the SA
 #
 # FINOPS. IAM user, access key, SSM Standard parameter, EventBridge rules and SNS email are
 # free; one CloudWatch metric filter is free; one standard alarm is 0.10 USD/month. Total
@@ -30,23 +30,20 @@
 # provider aliases); tracked in #14163, not hidden.
 #
 # THE KEY NEVER ENTERS GIT. It exists in tofu state (encrypted S3, see versions.tf) and in the
-# SSM parameter below, which is the first lure: a plausible "legacy backup replication"
-# credential where an attacker with read on SSM would look. Further placements (a runner
-# Secret via OpenBao, a decoy object in a backup bucket) are follow-ups in #14163.
+# SSM parameter below. Further placements are follow-ups in #14163.
 
 data "aws_caller_identity" "current" {}
 
 locals {
-  # Plausible, boring, and distinct from every real principal in the account.
-  canary_user_name = "svc-backup-replication"
+  watched_user_name = "svc-backup-replication"
   deception_tags = {
-    Purpose = "deception-honeytoken"
+    Purpose = "deception"
     Adr     = "0361"
   }
 }
 
-resource "aws_iam_user" "canary" {
-  name          = local.canary_user_name
+resource "aws_iam_user" "watched" {
+  name          = local.watched_user_name
   path          = "/service/"
   force_destroy = true
   tags          = local.deception_tags
@@ -55,13 +52,13 @@ resource "aws_iam_user" "canary" {
 # Explicit deny of everything, so the key can never become useful even if a future policy
 # attachment or group membership is added by mistake. sts:GetCallerIdentity cannot be denied
 # by IAM and still lands in CloudTrail, which is exactly the call this tripwire wants.
-resource "aws_iam_user_policy" "canary_deny_all" {
+resource "aws_iam_user_policy" "deny_all" {
   name = "deny-all"
-  user = aws_iam_user.canary.name
+  user = aws_iam_user.watched.name
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid      = "HoneytokenDenyAll"
+      Sid      = "DenyAll"
       Effect   = "Deny"
       Action   = "*"
       Resource = "*"
@@ -69,18 +66,18 @@ resource "aws_iam_user_policy" "canary_deny_all" {
   })
 }
 
-resource "aws_iam_access_key" "canary" {
-  user = aws_iam_user.canary.name
+resource "aws_iam_access_key" "watched" {
+  user = aws_iam_user.watched.name
 }
 
-resource "aws_ssm_parameter" "canary_lure" {
+resource "aws_ssm_parameter" "stored_credential" {
   name        = "/openbank/sandbox/backup/replication-credentials"
   description = "Legacy backup replication credentials (S3 cross-region)."
   type        = "SecureString"
   tier        = "Standard"
   value = jsonencode({
-    aws_access_key_id     = aws_iam_access_key.canary.id
-    aws_secret_access_key = aws_iam_access_key.canary.secret
+    aws_access_key_id     = aws_iam_access_key.watched.id
+    aws_secret_access_key = aws_iam_access_key.watched.secret
     region                = "eu-north-1"
     bucket                = "openbank-backup-replica"
   })
@@ -88,20 +85,20 @@ resource "aws_ssm_parameter" "canary_lure" {
 }
 
 # ---------------------------------------------------------------------------------------------
-# Delivery. One SNS topic per region for the honeytoken signals, email to the same owner
+# Delivery. One SNS topic per region for the tripwire signals, email to the same owner
 # address finops-budget.tf already uses. Alertmanager has no internet-facing receiver, and
 # adding one would be a new attack surface for a detection control; email reaches a human
 # outside the cluster, which is the property that matters when the cluster is the thing
 # compromised. Wiring the same topic into GoAlert is a follow-up.
 # ---------------------------------------------------------------------------------------------
 
-data "aws_iam_policy_document" "honeytoken_topic" {
+data "aws_iam_policy_document" "tripwire_topic" {
   for_each = toset(["eu-north-1", "us-east-1"])
 
   statement {
     sid       = "EventBridgeAndCloudWatchPublish"
     actions   = ["sns:Publish"]
-    resources = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:openbank-honeytoken-alerts"]
+    resources = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:openbank-tripwire-alerts"]
     principals {
       type        = "Service"
       identifiers = ["events.amazonaws.com", "cloudwatch.amazonaws.com"]
@@ -114,59 +111,59 @@ data "aws_iam_policy_document" "honeytoken_topic" {
   }
 }
 
-resource "aws_sns_topic" "honeytoken" {
-  name = "openbank-honeytoken-alerts"
+resource "aws_sns_topic" "tripwire" {
+  name = "openbank-tripwire-alerts"
   tags = local.deception_tags
 }
 
-resource "aws_sns_topic_policy" "honeytoken" {
-  arn    = aws_sns_topic.honeytoken.arn
-  policy = data.aws_iam_policy_document.honeytoken_topic["eu-north-1"].json
+resource "aws_sns_topic_policy" "tripwire" {
+  arn    = aws_sns_topic.tripwire.arn
+  policy = data.aws_iam_policy_document.tripwire_topic["eu-north-1"].json
 }
 
-resource "aws_sns_topic_subscription" "honeytoken_email" {
-  topic_arn = aws_sns_topic.honeytoken.arn
+resource "aws_sns_topic_subscription" "tripwire_email" {
+  topic_arn = aws_sns_topic.tripwire.arn
   protocol  = "email"
   endpoint  = var.finops_alert_email
 }
 
-resource "aws_sns_topic" "honeytoken_us_east_1" {
+resource "aws_sns_topic" "tripwire_us_east_1" {
   provider = aws.us_east_1
-  name     = "openbank-honeytoken-alerts"
+  name     = "openbank-tripwire-alerts"
   tags     = local.deception_tags
 }
 
-resource "aws_sns_topic_policy" "honeytoken_us_east_1" {
+resource "aws_sns_topic_policy" "tripwire_us_east_1" {
   provider = aws.us_east_1
-  arn      = aws_sns_topic.honeytoken_us_east_1.arn
-  policy   = data.aws_iam_policy_document.honeytoken_topic["us-east-1"].json
+  arn      = aws_sns_topic.tripwire_us_east_1.arn
+  policy   = data.aws_iam_policy_document.tripwire_topic["us-east-1"].json
 }
 
-resource "aws_sns_topic_subscription" "honeytoken_email_us_east_1" {
+resource "aws_sns_topic_subscription" "tripwire_email_us_east_1" {
   provider  = aws.us_east_1
-  topic_arn = aws_sns_topic.honeytoken_us_east_1.arn
+  topic_arn = aws_sns_topic.tripwire_us_east_1.arn
   protocol  = "email"
   endpoint  = var.finops_alert_email
 }
 
 # ---------------------------------------------------------------------------------------------
-# Tripwire 1: any API call signed by the canary key. Matching on the access key id, not the
+# Tripwire 1: any API call signed by the watched key. Matching on the access key id, not the
 # user name, so a call that fails authorization (errorCode AccessDenied) still matches.
 # ---------------------------------------------------------------------------------------------
 
 locals {
-  canary_event_pattern = jsonencode({
+  key_event_pattern = jsonencode({
     "detail-type" = ["AWS API Call via CloudTrail"]
     detail = {
       userIdentity = {
-        accessKeyId = [aws_iam_access_key.canary.id]
+        accessKeyId = [aws_iam_access_key.watched.id]
       }
     }
   })
-  canary_input_template = <<-EOT
-    "HONEYTOKEN USED (ADR-0361): the canary AWS key <key> (user ${local.canary_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
+  key_input_template = <<-EOT
+    "TRIPWIRE (ADR-0361): the watched AWS key <key> (user ${local.watched_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
   EOT
-  canary_input_paths = {
+  key_input_paths = {
     key    = "$.detail.userIdentity.accessKeyId"
     source = "$.detail.eventSource"
     event  = "$.detail.eventName"
@@ -177,83 +174,81 @@ locals {
   }
 }
 
-resource "aws_cloudwatch_event_rule" "canary_key_used" {
-  name          = "openbank-honeytoken-canary-key-used"
-  description   = "ADR-0361: any API call signed by the canary access key."
-  event_pattern = local.canary_event_pattern
+resource "aws_cloudwatch_event_rule" "key_used" {
+  name          = "openbank-tripwire-key-used"
+  description   = "ADR-0361: any API call signed by the watched access key."
+  event_pattern = local.key_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
   tags          = local.deception_tags
 }
 
-resource "aws_cloudwatch_event_target" "canary_key_used" {
-  rule = aws_cloudwatch_event_rule.canary_key_used.name
-  arn  = aws_sns_topic.honeytoken.arn
+resource "aws_cloudwatch_event_target" "key_used" {
+  rule = aws_cloudwatch_event_rule.key_used.name
+  arn  = aws_sns_topic.tripwire.arn
   input_transformer {
-    input_paths    = local.canary_input_paths
-    input_template = local.canary_input_template
+    input_paths    = local.key_input_paths
+    input_template = local.key_input_template
   }
 }
 
-resource "aws_cloudwatch_event_rule" "canary_key_used_us_east_1" {
+resource "aws_cloudwatch_event_rule" "key_used_us_east_1" {
   provider      = aws.us_east_1
-  name          = "openbank-honeytoken-canary-key-used"
-  description   = "ADR-0361: any API call signed by the canary access key (global endpoints)."
-  event_pattern = local.canary_event_pattern
+  name          = "openbank-tripwire-key-used"
+  description   = "ADR-0361: any API call signed by the watched access key (global endpoints)."
+  event_pattern = local.key_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
   tags          = local.deception_tags
 }
 
-resource "aws_cloudwatch_event_target" "canary_key_used_us_east_1" {
+resource "aws_cloudwatch_event_target" "key_used_us_east_1" {
   provider = aws.us_east_1
-  rule     = aws_cloudwatch_event_rule.canary_key_used_us_east_1.name
-  arn      = aws_sns_topic.honeytoken_us_east_1.arn
+  rule     = aws_cloudwatch_event_rule.key_used_us_east_1.name
+  arn      = aws_sns_topic.tripwire_us_east_1.arn
   input_transformer {
-    input_paths    = local.canary_input_paths
-    input_template = local.canary_input_template
+    input_paths    = local.key_input_paths
+    input_template = local.key_input_template
   }
 }
 
 # ---------------------------------------------------------------------------------------------
-# Tripwire 2: any request authenticated as the honey ServiceAccount. The SA has no RBAC
+# Tripwire 2: any request authenticated as the watched ServiceAccount. The SA has no RBAC
 # binding, so every use is a 403 that does nothing, and is still recorded by the audit log.
 # A metric filter is evaluated on ingest, so this costs no query and no extra ingestion.
-# Measured 2026-10-29: the only principal that reads Secrets in arc-runners is the ARC
-# controller (41,581 gets/24h), which is why the tripwire keys on the token's USE, not on the
-# Secret being read — a read alarm would drown in controller traffic.
+# The tripwire keys on the token's USE, not on the Secret being read, because legitimate
+# controllers read Secrets in that namespace all day.
 # ---------------------------------------------------------------------------------------------
 
-resource "aws_cloudwatch_log_metric_filter" "honey_sa_used" {
-  name           = "openbank-honeytoken-sa-used"
+resource "aws_cloudwatch_log_metric_filter" "sa_used" {
+  name           = "openbank-tripwire-sa-used"
   log_group_name = "/aws/eks/${var.cluster_name}/cluster"
   pattern        = "{ $.user.username = \"system:serviceaccount:arc-runners:deploy-prod\" }"
 
   metric_transformation {
-    name          = "HoneytokenServiceAccountUsed"
+    name          = "WatchedServiceAccountUsed"
     namespace     = "OpenBank/Deception"
     value         = "1"
     default_value = "0"
   }
   # No depends_on module.eks: the log group already exists, and a module-level dependency
-  # drags every pending EKS add-on update into a `-target` apply of this file (measured in
-  # the plan, 2026-10-29). Apply this file without touching the control plane.
+  # drags unrelated EKS changes into a `-target` apply of this file.
 }
 
-resource "aws_cloudwatch_metric_alarm" "honey_sa_used" {
-  alarm_name          = "openbank-honeytoken-sa-used"
-  alarm_description   = "HONEYTOKEN USED (ADR-0361): a request authenticated as system:serviceaccount:arc-runners:deploy-prod reached the EKS API. Nothing legitimate holds this token. Query the EKS audit log for user.username = that SA to get sourceIPs, userAgent and the attempted verbs, then treat the pod or host it came from as compromised."
+resource "aws_cloudwatch_metric_alarm" "sa_used" {
+  alarm_name          = "openbank-tripwire-sa-used"
+  alarm_description   = "TRIPWIRE (ADR-0361): a request authenticated as the watched ServiceAccount reached the EKS API. Nothing legitimate holds this token. Query the EKS audit log for that user.username to get sourceIPs, userAgent and the attempted verbs, then treat the pod or host it came from as compromised."
   namespace           = "OpenBank/Deception"
-  metric_name         = "HoneytokenServiceAccountUsed"
+  metric_name         = "WatchedServiceAccountUsed"
   statistic           = "Sum"
   period              = 60
   evaluation_periods  = 1
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
   treat_missing_data  = "notBreaching"
-  alarm_actions       = [aws_sns_topic.honeytoken.arn]
+  alarm_actions       = [aws_sns_topic.tripwire.arn]
   tags                = local.deception_tags
 }
 
-output "honeytoken_canary_access_key_id" {
-  description = "Access key id of the canary user (not secret: it identifies the tripwire in CloudTrail)."
-  value       = aws_iam_access_key.canary.id
+output "watched_access_key_id" {
+  description = "Access key id of the watched user (not secret: it identifies the tripwire in CloudTrail)."
+  value       = aws_iam_access_key.watched.id
 }
