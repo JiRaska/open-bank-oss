@@ -244,6 +244,31 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
             MODULE._json_pages(first, "fixture-token")
         self.assertEqual(calls, [first, second])
 
+    def test_candidate_services_run_concurrently_with_unchanged_verdicts(self):
+        import threading
+        import time as _time
+
+        services = [f"openbank-svc-{i}" for i in range(8)]
+        barrier = threading.Barrier(len(services), timeout=5)
+
+        def push_might(service, _sha, *, deadline=None):
+            barrier.wait()  # deadlocks (BrokenBarrierError) if the probes run serially
+            return service != "openbank-svc-1"
+
+        def tree_equivalent(service, _a, _b, *, deadline=None):
+            return service != "openbank-svc-2"
+
+        with (
+            patch.object(MODULE, "_push_might_build_service", push_might),
+            patch.object(MODULE, "_tree_equivalent", tree_equivalent),
+        ):
+            got = MODULE._candidate_services(
+                services, SHA, "b" * 40, True, _time.monotonic() + 60
+            )
+        self.assertEqual(
+            got, set(services) - {"openbank-svc-1", "openbank-svc-2"}
+        )
+
     def test_expired_resolver_budget_fails_before_api_call(self):
         with (
             patch.object(MODULE, "urlopen") as request,
