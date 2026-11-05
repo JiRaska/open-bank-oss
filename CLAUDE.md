@@ -631,9 +631,10 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
   action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
   (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
-  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
-  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
-  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  of the audits was untrue until 2026-08-07, because `data.rules.shared_m2m_write_prohibition` was
+  nested under `change_requirements:`, so `gen-rules-opa-data.py` could not select it and the veto
+  never fired (it is now a top-level key, emitted into `rules-opa-data.yaml` and every bundle that
+  embeds it — the lesson is to check the derived subset, not `rules.yaml`); and `ledger.approve`, documented as
   "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
   live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
   it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
