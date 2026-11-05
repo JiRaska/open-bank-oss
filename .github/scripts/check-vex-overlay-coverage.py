@@ -73,11 +73,6 @@ NO_OVERLAY_YET: dict[str, str] = {
     # gate reported it in the direction that matters -- a declaration outliving its subject --
     # which turned main red for every PR until this landed. That is the check working, not a
     # defect in it: the failure was leaving the baseline out of the PR that made it obsolete.
-    "communication-service": "#9148 - new service (ADR-0285 phase 2), no VEX overlay written yet. "
-                              "Its dependency set is the ordinary reactive Quarkus stack shared with "
-                              "services that already have overlays, but writing dispositions from "
-                              "that assumption rather than the resolved runtimeClasspath artifacts "
-                              "is exactly the fabrication this gate's own header refuses.",
     "products": "#668 - openbank-products (ADR-0352 phase 2) is a released content module: a "
                 "build-time Kotlin DSL, reference product IR JSON, golden scenarios and the obp CLI. "
                 "It is deployed nowhere and serves nothing; its only consumers are developers and CI. "
