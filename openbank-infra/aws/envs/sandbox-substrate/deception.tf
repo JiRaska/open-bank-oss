@@ -98,7 +98,7 @@ data "aws_iam_policy_document" "tripwire_topic" {
   statement {
     sid       = "EventBridgeAndCloudWatchPublish"
     actions   = ["sns:Publish"]
-    resources = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:openbank-tripwire-alerts"]
+    resources = ["arn:${data.aws_partition.current.partition}:sns:${each.key}:${data.aws_caller_identity.current.account_id}:openbank-honeytoken-alerts"]
     principals {
       type        = "Service"
       identifiers = ["events.amazonaws.com", "cloudwatch.amazonaws.com"]
@@ -112,7 +112,7 @@ data "aws_iam_policy_document" "tripwire_topic" {
 }
 
 resource "aws_sns_topic" "tripwire" {
-  name = "openbank-tripwire-alerts"
+  name = "openbank-honeytoken-alerts"
   tags = local.deception_tags
 }
 
@@ -129,7 +129,7 @@ resource "aws_sns_topic_subscription" "tripwire_email" {
 
 resource "aws_sns_topic" "tripwire_us_east_1" {
   provider = aws.us_east_1
-  name     = "openbank-tripwire-alerts"
+  name     = "openbank-honeytoken-alerts"
   tags     = local.deception_tags
 }
 
@@ -175,7 +175,7 @@ locals {
 }
 
 resource "aws_cloudwatch_event_rule" "key_used" {
-  name          = "openbank-tripwire-key-used"
+  name          = "openbank-honeytoken-canary-key-used"
   description   = "ADR-0361: any API call signed by the watched access key."
   event_pattern = local.key_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
@@ -193,7 +193,7 @@ resource "aws_cloudwatch_event_target" "key_used" {
 
 resource "aws_cloudwatch_event_rule" "key_used_us_east_1" {
   provider      = aws.us_east_1
-  name          = "openbank-tripwire-key-used"
+  name          = "openbank-honeytoken-canary-key-used"
   description   = "ADR-0361: any API call signed by the watched access key (global endpoints)."
   event_pattern = local.key_event_pattern
   state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"
@@ -219,12 +219,12 @@ resource "aws_cloudwatch_event_target" "key_used_us_east_1" {
 # ---------------------------------------------------------------------------------------------
 
 resource "aws_cloudwatch_log_metric_filter" "sa_used" {
-  name           = "openbank-tripwire-sa-used"
+  name           = "openbank-honeytoken-sa-used"
   log_group_name = "/aws/eks/${var.cluster_name}/cluster"
   pattern        = "{ $.user.username = \"system:serviceaccount:arc-runners:deploy-prod\" }"
 
   metric_transformation {
-    name          = "WatchedServiceAccountUsed"
+    name          = "HoneytokenServiceAccountUsed"
     namespace     = "OpenBank/Deception"
     value         = "1"
     default_value = "0"
@@ -234,10 +234,10 @@ resource "aws_cloudwatch_log_metric_filter" "sa_used" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "sa_used" {
-  alarm_name          = "openbank-tripwire-sa-used"
+  alarm_name          = "openbank-honeytoken-sa-used"
   alarm_description   = "TRIPWIRE (ADR-0361): a request authenticated as the watched ServiceAccount reached the EKS API. Nothing legitimate holds this token. Query the EKS audit log for that user.username to get sourceIPs, userAgent and the attempted verbs, then treat the pod or host it came from as compromised."
   namespace           = "OpenBank/Deception"
-  metric_name         = "WatchedServiceAccountUsed"
+  metric_name         = "HoneytokenServiceAccountUsed"
   statistic           = "Sum"
   period              = 60
   evaluation_periods  = 1
@@ -251,4 +251,84 @@ resource "aws_cloudwatch_metric_alarm" "sa_used" {
 output "watched_access_key_id" {
   description = "Access key id of the watched user (not secret: it identifies the tripwire in CloudTrail)."
   value       = aws_iam_access_key.watched.id
+}
+
+moved {
+  from = aws_iam_user.canary
+  to   = aws_iam_user.watched
+}
+
+moved {
+  from = aws_iam_user_policy.canary_deny_all
+  to   = aws_iam_user_policy.deny_all
+}
+
+moved {
+  from = aws_iam_access_key.canary
+  to   = aws_iam_access_key.watched
+}
+
+moved {
+  from = aws_ssm_parameter.canary_lure
+  to   = aws_ssm_parameter.stored_credential
+}
+
+moved {
+  from = aws_sns_topic.honeytoken
+  to   = aws_sns_topic.tripwire
+}
+
+moved {
+  from = aws_sns_topic_policy.honeytoken
+  to   = aws_sns_topic_policy.tripwire
+}
+
+moved {
+  from = aws_sns_topic_subscription.honeytoken_email
+  to   = aws_sns_topic_subscription.tripwire_email
+}
+
+moved {
+  from = aws_sns_topic.honeytoken_us_east_1
+  to   = aws_sns_topic.tripwire_us_east_1
+}
+
+moved {
+  from = aws_sns_topic_policy.honeytoken_us_east_1
+  to   = aws_sns_topic_policy.tripwire_us_east_1
+}
+
+moved {
+  from = aws_sns_topic_subscription.honeytoken_email_us_east_1
+  to   = aws_sns_topic_subscription.tripwire_email_us_east_1
+}
+
+moved {
+  from = aws_cloudwatch_event_rule.canary_key_used
+  to   = aws_cloudwatch_event_rule.key_used
+}
+
+moved {
+  from = aws_cloudwatch_event_target.canary_key_used
+  to   = aws_cloudwatch_event_target.key_used
+}
+
+moved {
+  from = aws_cloudwatch_event_rule.canary_key_used_us_east_1
+  to   = aws_cloudwatch_event_rule.key_used_us_east_1
+}
+
+moved {
+  from = aws_cloudwatch_event_target.canary_key_used_us_east_1
+  to   = aws_cloudwatch_event_target.key_used_us_east_1
+}
+
+moved {
+  from = aws_cloudwatch_log_metric_filter.honey_sa_used
+  to   = aws_cloudwatch_log_metric_filter.sa_used
+}
+
+moved {
+  from = aws_cloudwatch_metric_alarm.honey_sa_used
+  to   = aws_cloudwatch_metric_alarm.sa_used
 }
