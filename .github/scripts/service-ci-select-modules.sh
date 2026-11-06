@@ -31,6 +31,17 @@ is_root_prose_path() {
   esac
 }
 
+# Preserve line boundaries without spawning grep once for every canonical module.
+# Unusual names keep the original ERE semantics rather than changing their interpretation.
+module_path_changed() {
+  local module="$1" files="$2"
+  if ! shopt -q nocasematch && [[ "$module" =~ ^openbank-[a-z0-9-]+$ ]]; then
+    [[ $'\n'"$files" == *$'\n'"$module/"* ]]
+  else
+    grep -qE "^${module}/" <<< "$files"
+  fi
+}
+
 select_modules() {
   # Canonical Gradle module list — DISCOVERED from the tree exactly like
   # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
@@ -245,7 +256,7 @@ select_modules() {
       echo "Decision: per-module fan-out (no code-global change)."
       CHANGED=""
       for m in $ALL; do
-        if grep -qE "^${m}/" <<< "$FILES_CODE"; then
+        if module_path_changed "$m" "$FILES_CODE"; then
           CHANGED="$CHANGED $m"
         fi
       done
@@ -365,6 +376,29 @@ select_modules() {
 
 self_test() {
   local root repo out rc=0
+  # The common path must not call grep, and must match a whole module at a line start.
+  if ! (
+    grep() { return 99; }
+    module_path_changed openbank-a-service $'other/file\nopenbank-a-service/src/A.kt' &&
+      module_path_changed openbank-a-service 'openbank-a-service/src/A.kt' &&
+      ! module_path_changed openbank-a-service 'other/openbank-a-service/src/A.kt' &&
+      ! module_path_changed openbank-a-service 'openbank-a-service-other/src/A.kt' &&
+      ! module_path_changed openbank-a-service ''
+  ); then
+    echo 'SELF-TEST FAIL: canonical module matching changed or spawned grep'
+    return 1
+  fi
+  if ! module_path_changed 'openbank-a.service' 'openbank-aXservice/src/A.kt'; then
+    echo 'SELF-TEST FAIL: noncanonical module lost its existing ERE semantics'
+    return 1
+  fi
+  if ! (
+    shopt -s nocasematch
+    ! module_path_changed openbank-a-service 'OPENBANK-A-SERVICE/src/A.kt'
+  ); then
+    echo 'SELF-TEST FAIL: inherited nocasematch changed grep case semantics'
+    return 1
+  fi
   root=$(git rev-parse --show-toplevel)
   repo=$(mktemp -d)
   out=$(mktemp -d)

@@ -60,7 +60,11 @@ MAIN_TREE_WALK = re.compile(r'File\(\s*module\s*,\s*"src/main/kotlin"\s*\)\.walk
 TEST_SOURCE = re.compile(r"^openbank-[^/]+/src/test/")
 
 
-def is_module(root: Path, name: str) -> bool:
+def is_module(root: Path, name: str, cache: dict[str, bool] | None = None) -> bool:
+    if cache is not None:
+        if name not in cache:
+            cache[name] = is_module(root, name)
+        return cache[name]
     return (root / name / "build.gradle.kts").is_file() or (root / name / "build.gradle").is_file()
 
 
@@ -71,8 +75,14 @@ def external_tops(root: Path) -> tuple[set[str], set[str]]:
     return dirs, files
 
 
-def external_paths(text: str, module: str, tops: set[str], root_files: set[str], root: Path) -> set[str]:
+def external_paths(text: str, module: str, tops: set[str], root_files: set[str], root: Path,
+                   module_cache: dict[str, bool] | None = None, root_literal: re.Pattern[str] | None = None) -> set[str]:
     """Repository paths a source file references by literal, excluding its own module."""
+    # Only reject ASCII text without a possible literal root or any path constructor.
+    # Constructors retain the complete parser, including unusual/empty path segments.
+    if (root_literal is not None and text.isascii() and not root_literal.search(text.lower())
+            and not any(call in text for call in ("File(", "Path.of(", "Paths.get("))):
+        return set()
     found: set[str] = set()
     literals: list[str] = []
     for m in SEGMENTED_PATH.finditer(text):
@@ -82,13 +92,18 @@ def external_paths(text: str, module: str, tops: set[str], root_files: set[str],
     tree_reads = set(TREE_READ.findall(rest))
     literals += REPO_PATH_LITERAL.findall(rest)
     for lit in literals:
-        rel = re.sub(r"^(\.\./)+", "", lit).rstrip("/")
+        if "/" not in lit and lit not in root_files and lit not in tops:
+            continue
+        rel = lit
+        while rel.startswith("../"):
+            rel = rel[3:]
+        rel = rel.rstrip("/")
         top = rel.split("/", 1)[0]
         if top == module:
             continue
         if rel in root_files or (top in tops and ("/" in rel or rel in tree_reads)):
             found.add(rel)
-        elif "/" in rel and is_module(root, top):
+        elif "/" in rel and is_module(root, top, module_cache):
             found.add(rel)          # a file or directory inside another module
     return found
 
@@ -99,12 +114,22 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str
     direct: set[tuple[str, str]] = set()
     main_tree_only = True
     tops, root_files = external_tops(root)
-    for mod in sorted(p for p in root.iterdir() if p.is_dir() and is_module(root, p.name)):
+    # Cache only within this scan, including negative lookups; the next scan re-reads the tree.
+    module_cache: dict[str, bool] = {}
+    module_dirs = sorted(p for p in root.iterdir() if p.is_dir() and is_module(root, p.name, module_cache))
+    modules = {p.name for p in module_dirs}
+    # Literal-only reads need a known root or dot segment; constructors bypass this filter.
+    # Lowercasing ASCII candidates also preserves aliases on case-insensitive filesystems.
+    names = modules | tops | root_files
+    root_literal = (re.compile(r'"(?:\.\.?(?=["/])|(?:' +
+                              "|".join(re.escape(name.lower()) for name in sorted(names)) +
+                              r')(?=["/]))') if all(name.isascii() for name in names) else None)
+    for mod in module_dirs:
         # Gradle copies external files into a module's resources (prompts, shared fixtures).
         for build in (mod / "build.gradle.kts", mod / "build.gradle"):
             if build.is_file():
                 btext = build.read_text(encoding="utf-8", errors="replace")
-                for path in external_paths(btext, mod.name, tops, root_files, root):
+                for path in external_paths(btext, mod.name, tops, root_files, root, module_cache, root_literal):
                     direct.add((mod.name, path))
         test_dir = mod / "src" / "test"
         if not test_dir.is_dir():
@@ -119,11 +144,11 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str
                 main_tree_only &= bool(MAIN_TREE_WALK.search(text)) and len(ROOT_READ.findall(text)) == 1
             for target in PINNED.findall(text):
                 target = target.rstrip("-")
-                if target != mod.name and is_module(root, target):
+                if target != mod.name and is_module(root, target, module_cache):
                     edges.add((mod.name, target))
             for path in DIRECT_FILE.findall(text):
                 direct.add((mod.name, path))
-            for path in external_paths(text, mod.name, tops, root_files, root):
+            for path in external_paths(text, mod.name, tops, root_files, root, module_cache, root_literal):
                 direct.add((mod.name, path))
     return fleet, edges, direct, main_tree_only
 
@@ -236,6 +261,38 @@ def self_test() -> int:
             ok = False
         if not has_module_input(r, ["openbank-target/src/test/kotlin/XTest.kt"], False):
             print("FAIL: unknown scanner shape did not fail closed")
+            ok = False
+        # A scan-local cache must observe a module being introduced, then removed.
+        (r / "openbank-late").mkdir()
+        write("openbank-pinner", "b/Late.kt", 'val x = File("../openbank-late/src/main/X.kt")')
+        edge = ("openbank-pinner", "openbank-late")
+        before = edge in scan(r)[1]
+        (r / "openbank-late" / "build.gradle").write_text("")
+        introduced = edge in scan(r)[1]
+        (r / "openbank-late" / "build.gradle").unlink()
+        removed = edge in scan(r)[1]
+        if (before, introduced, removed) != (False, True, False):
+            print("FAIL: module existence leaked between scans")
+            ok = False
+        # Root prefixes are escaped, while dot segments and filesystem case semantics survive.
+        (r / "odd+[root]").mkdir()
+        (r / "build.gradle.kts").write_text("")
+        write("openbank-pinner", "b/Paths.kt",
+              'val x = Path.of("odd+[root]", "guard.txt"); val y = File("./build.gradle.kts"); '
+              'val z = File(root, "OPENBANK-TARGET/src/main/X.kt")')
+        # Separate files: another recognized path must not mask a broken constructor bypass.
+        for name, expression in [("Absolute", 'Path.of("/tmp", "guard.txt")'),
+                                 ("Empty", 'Path.of("", "guard.txt")'),
+                                 ("Comma", 'Path.of("docs,foo", "guard.txt")')]:
+            write("openbank-pinner", f"b/{name}.kt", f"val x = {expression}")
+        paths = scan(r)[2]
+        expected = {("openbank-pinner", "odd+[root]/guard.txt"),
+                    ("openbank-pinner", "./build.gradle.kts"),
+                    ("openbank-pinner", "/tmp/guard.txt"), ("openbank-pinner", "/guard.txt"),
+                    ("openbank-pinner", "docs/foo/guard.txt")}
+        alias = ("openbank-pinner", "OPENBANK-TARGET/src/main/X.kt")
+        if not expected <= paths or (alias in paths) != is_module(r, "OPENBANK-TARGET"):
+            print("FAIL: root-prefix filter changed relative, escaped or case-alias paths")
             ok = False
     print("self-test:", "PASS" if ok else "FAIL")
     return 0 if ok else 1
