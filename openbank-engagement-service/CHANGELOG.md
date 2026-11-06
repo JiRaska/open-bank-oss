@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.5...engagement-service-v0.15.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.4...engagement-service-v0.14.5) (2026-10-14)
 
 

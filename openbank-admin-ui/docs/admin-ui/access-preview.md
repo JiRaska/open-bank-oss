@@ -2,7 +2,11 @@
 
 Settings shows a read-only role × permission matrix generated directly from
 `openbank-admin-ui/src/lib/auth/roles.ts` (`ROLES` and `PERMISSIONS`). It includes
-roles without UI grants. Search filters permission identifiers; the role filter
+roles without UI grants. Names and short descriptions in Czech and English come from the typed
+`src/lib/auth/access-descriptions.ts` display dictionary. The selected interface
+language controls the visible copy, while search matches identifiers, names and
+descriptions in both languages, ignoring case and Czech diacritics. Technical
+identifiers stay visible. Search filters permission rows; the role filter
 reduces columns without hiding unlisted grants.
 
 This is an incomplete UI policy catalog bundled with the application, not a live
@@ -17,3 +21,7 @@ this view. Do not use the matrix to authorize requests. Claiming complete or
 effective access would require independently verified identity and enforcement
 sources, including their provenance and freshness. The browser regression test
 is `openbank-admin-ui/e2e/settings-access-preview.spec.ts`.
+
+When adding a role or permission, add both translations and descriptions to the
+display dictionary. Type checking and catalog-coverage tests reject missing copy.
+Descriptions explain the UI rule only; they must not promise unconditional access.
