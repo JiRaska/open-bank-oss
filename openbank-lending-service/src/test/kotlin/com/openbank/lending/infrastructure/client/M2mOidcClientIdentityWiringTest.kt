@@ -25,5 +25,6 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
         AccountServiceRestClient::class.java,
         // #10486 batch 6: the credit-offer gate's credit-profile read (analytics-sink).
         CreditProfileClient::class.java,
+        ProductCatalogLoanClient::class.java,
     )
 }

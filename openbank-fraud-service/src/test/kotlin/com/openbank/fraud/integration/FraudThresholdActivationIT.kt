@@ -199,6 +199,16 @@ class FraudThresholdActivationIT {
         assertThat(latestPersistedThresholdVersion()).isNull()
     }
 
+    @Test
+    @Order(99)
+    @TestSecurity(user = "risk-maker", roles = ["ROLE_RISK"])
+    fun `a rule whose amounts are null is a 400, not a 500`() {
+        Given {
+            contentType("application/json")
+            body("""{"version": 3, "thresholds": {"large-single-transaction": {"CZK": "1"}, "x-extra": null}}""")
+        } When { post("/api/v1/fraud/thresholds/proposals") } Then { statusCode(400) }
+    }
+
     private fun score(amount: String, currency: String): Map<String, Any?> = Given {
         contentType("application/json")
         body("""{"amount": "$amount", "currency": "$currency", "rail": "SEPA_INSTANT"}""")
