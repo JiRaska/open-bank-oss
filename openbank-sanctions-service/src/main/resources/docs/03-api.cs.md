@@ -151,6 +151,21 @@ Content-Type: application/json
 POST /api/v1/sanctions/lists/{listType}/refresh
 ```
 
+v1 importuje listinu přímo v požadavku a vrátí 200 s obnovenou listinou. Pokud už obnova stejné
+listiny běží (jiný požadavek nebo plánovač), druhý import nezařadí do fronty a hned odpoví **409**
+s `Retry-After: 30`.
+
+```http
+POST /api/v2/sanctions/lists/{listType}/refresh
+Idempotency-Key: <uuid>
+```
+
+v2 listinu jen označí a odpoví **202** `{"requested": "<listType>"}`, aniž by cokoli stahovala;
+import proběhne při příštím běhu plánovače stejnou chráněnou obnovou. Průběh je vidět na
+`lastUpdatedAt` listiny v `GET /api/v1/sanctions/lists`. Chybějící `Idempotency-Key` vrací 400,
+neznámá listina 404 a vypnutá listina 422. Role (`ROLE_OPERATOR`, `ROLE_ADMIN`) i OPA akce
+(`sanctions.trigger`) jsou stejné jako u v1. Pro velké zdroje, např. `PEP_GLOBAL`, používejte v2.
+
 ### Obnovit všechny povolené listiny
 
 ```http

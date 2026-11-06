@@ -19,8 +19,8 @@
 #    Why a whole subtree and not a file list: new @State handlers routinely arrive with new
 #    seed helpers in sibling files (#11071, #11113), so a one-file allowlist cannot compile.
 # 2. NAMED-FIXTURE OVERLAY. When mode 1 is refused, Ledger, Balance, Account and Party may
-#    replace one broker-state fixture; Transaction, Clearing and SEPA Instant also take their
-#    named seed helper from F — the narrower overlay imports only the fixed reviewed paths below;
+#    replace one broker-state fixture; Transaction, Clearing, SEPA Instant and Sanctions also take
+#    their named seed helper from F — the narrower overlay imports only the fixed reviewed paths below;
 #    runtime stays P. Clearing and SEPA Instant may import their whole named bundle when it did
 #    not yet exist in P; every other provider still requires its verification class in P. It is
 #    kept because mode 1 does not subsume it: mode 1 refuses whenever ANY production input moved,
@@ -51,6 +51,9 @@ CLEARING_SEED='openbank-clearing-service/src/test/kotlin/com/openbank/clearing/c
 SEPA_INSTANT_SERVICE='openbank-sepa-instant'
 SEPA_INSTANT_FIXTURE='openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/contract/SepaInstantPactBrokerProviderVerificationTest.kt'
 SEPA_INSTANT_SEED='openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/contract/AgentSepaInstantPactSeed.kt'
+SANCTIONS_SERVICE='openbank-sanctions-service'
+SANCTIONS_FIXTURE='openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/SanctionsPactBrokerProviderVerificationTest.kt'
+SANCTIONS_SEED='openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt'
 
 refuse() { printf 'REFUSE\t%s\n' "$1" >&2; exit 1; }
 commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
@@ -111,6 +114,7 @@ prepare_overlay() {
     "$PARTY_SERVICE") approved_fixtures=("$PARTY_FIXTURE") ;;
     "$CLEARING_SERVICE") approved_fixtures=("$CLEARING_FIXTURE" "$CLEARING_SEED"); allow_missing_bundle=true ;;
     "$SEPA_INSTANT_SERVICE") approved_fixtures=("$SEPA_INSTANT_FIXTURE" "$SEPA_INSTANT_SEED"); allow_missing_bundle=true ;;
+    "$SANCTIONS_SERVICE") approved_fixtures=("$SANCTIONS_FIXTURE" "$SANCTIONS_SEED") ;;
   esac
   [ "$provider" = "$(canonical_commit "$provider")" ] \
     || refuse "provider version must be a canonical 40-character SHA"
@@ -169,18 +173,22 @@ selftest() {
     mkdir -p "$(dirname "$LEDGER_FIXTURE")" "$(dirname "$BALANCE_FIXTURE")" "$(dirname "$ACCOUNT_FIXTURE")" "$(dirname "$TRANSACTION_FIXTURE")" "$(dirname "$PARTY_FIXTURE")" \
       openbank-clearing-service/src/test/kotlin/com/openbank/clearing/contract \
       openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/contract \
+      openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract \
       openbank-balance-service/src/main openbank-ledger-service/src/main/resources \
-      openbank-clearing-service/src/main openbank-sepa-instant/src/main \
+      openbank-clearing-service/src/main openbank-sepa-instant/src/main openbank-sanctions-service/src/main \
       openbank-libs-domain/src/main pacts .github/workflows config
     printf 'old fixture\n' > "$LEDGER_FIXTURE"
     printf 'old balance fixture\n' > "$BALANCE_FIXTURE"
     printf 'old account fixture\n' > "$ACCOUNT_FIXTURE"
     printf 'old transaction fixture\n' > "$TRANSACTION_FIXTURE"
     printf 'old party fixture\n' > "$PARTY_FIXTURE"
+    printf 'old sanctions fixture\n' > openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/SanctionsPactBrokerProviderVerificationTest.kt
+    printf 'old sanctions seed\n' > openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt
     printf 'provider runtime P\n' > openbank-ledger-service/src/main/Ledger.kt
     printf 'balance runtime P\n' > openbank-balance-service/src/main/Balance.kt
     printf 'clearing runtime P\n' > openbank-clearing-service/src/main/Clearing.kt
     printf 'sepa runtime P\n' > openbank-sepa-instant/src/main/SepaInstant.kt
+    printf 'sanctions runtime P\n' > openbank-sanctions-service/src/main/Sanctions.kt
     printf 'provider config P\n' > openbank-ledger-service/src/main/resources/application.yaml
     printf 'libs P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'pact P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
@@ -189,7 +197,7 @@ selftest() {
       > .github/workflows/auto-deploy.yml
     printf 'config P\n' > config/detekt.yml
     printf 'plugins {}\n' > openbank-ledger-service/build.gradle.kts
-    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-clearing-service openbank-sepa-instant openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-clearing-service openbank-sepa-instant openbank-sanctions-service openbank-libs-domain pacts .github config
     git commit -qm provider
   ) || { echo 'selftest FAIL: fixture setup failed' >&2; return 1; }
   provider="$(git -C "$tmp" rev-parse HEAD)"
@@ -210,15 +218,18 @@ selftest() {
     printf 'new clearing seed F\n' > openbank-clearing-service/src/test/kotlin/com/openbank/clearing/contract/AgentClearingPactSeed.kt
     printf 'new sepa fixture F\n' > openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/contract/SepaInstantPactBrokerProviderVerificationTest.kt
     printf 'new sepa seed F\n' > openbank-sepa-instant/src/test/kotlin/com/openbank/sepainstant/contract/AgentSepaInstantPactSeed.kt
+    printf 'approved sanctions fixture F\n' > openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/SanctionsPactBrokerProviderVerificationTest.kt
+    printf 'approved sanctions seed F\n' > openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt
     printf 'runtime F must not enter P\n' > openbank-ledger-service/src/main/Ledger.kt
     printf 'balance runtime F must not enter P\n' > openbank-balance-service/src/main/Balance.kt
     printf 'clearing runtime F must not enter P\n' > openbank-clearing-service/src/main/Clearing.kt
     printf 'sepa runtime F must not enter P\n' > openbank-sepa-instant/src/main/SepaInstant.kt
+    printf 'sanctions runtime F must not enter P\n' > openbank-sanctions-service/src/main/Sanctions.kt
     printf 'pact F must not enter P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
     printf 'libs F must not enter P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'workflow F must not enter P\n' > .github/workflows/provider.yml
     printf 'config F must not enter P\n' > config/detekt.yml
-    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-clearing-service openbank-sepa-instant openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-party-service openbank-clearing-service openbank-sepa-instant openbank-sanctions-service openbank-libs-domain pacts .github config
     git commit -qm fixture
   )
   fixture="$(git -C "$tmp" rev-parse HEAD)"
@@ -243,12 +254,15 @@ selftest() {
   ln -s /tmp/not-a-fixture "$tmp/$TRANSACTION_SEED"
   rm "$tmp/$PARTY_FIXTURE"
   ln -s /tmp/not-a-fixture "$tmp/$PARTY_FIXTURE"
-  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE"
+  rm "$tmp/openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt"
+  ln -s /tmp/not-a-fixture "$tmp/openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt"
+  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE" openbank-sanctions-service
   git -C "$tmp" commit -qm bad-seed
   bad_seed="$(git -C "$tmp" rev-parse HEAD)"
   rm "$tmp/$TRANSACTION_SEED"
   rm "$tmp/$PARTY_FIXTURE"
-  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE"
+  rm "$tmp/openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt"
+  git -C "$tmp" add "$TRANSACTION_SEED" "$PARTY_FIXTURE" openbank-sanctions-service
   git -C "$tmp" commit -qm missing-seed
   missing_seed="$(git -C "$tmp" rev-parse HEAD)"
   git -C "$tmp" checkout -q "$provider"
@@ -326,6 +340,18 @@ selftest() {
     || { echo 'selftest FAIL: SEPA Instant overlay changed tracked provider paths' >&2; fail=1; }
   git -C "$tmp" checkout -f -q "$provider"
   git -C "$tmp" clean -fdq openbank-sepa-instant/src/test
+  expect 'approved Sanctions fixture and seed bundle' pass --prepare-overlay openbank-sanctions-service "$provider" "$fixture" main
+  [ "$(<"$tmp/openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/SanctionsPactBrokerProviderVerificationTest.kt")" = 'approved sanctions fixture F' ] \
+    || { echo 'selftest FAIL: Sanctions fixture not overlaid' >&2; fail=1; }
+  [ "$(<"$tmp/openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt")" = 'approved sanctions seed F' ] \
+    || { echo 'selftest FAIL: Sanctions seed not overlaid' >&2; fail=1; }
+  [ "$(<"$tmp/openbank-sanctions-service/src/main/Sanctions.kt")" = 'sanctions runtime P' ] \
+    || { echo 'selftest FAIL: Sanctions runtime from F entered P' >&2; fail=1; }
+  [ "$(git -C "$tmp" diff --name-only)" = $'openbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/AgentSanctionsPactSeed.kt\nopenbank-sanctions-service/src/test/kotlin/com/openbank/sanctions/contract/SanctionsPactBrokerProviderVerificationTest.kt' ] \
+    || { echo 'selftest FAIL: Sanctions overlay changed paths outside its named bundle' >&2; fail=1; }
+  [ "$(git -C "$tmp" rev-parse HEAD)" = "$provider" ] \
+    || { echo 'selftest FAIL: Sanctions overlay moved provider HEAD' >&2; fail=1; }
+  git -C "$tmp" checkout -f -q "$provider"
   expect 'approved Transaction bundle' pass --prepare-overlay "$TRANSACTION_SERVICE" "$provider" "$fixture" main
   [ "$(git -C "$tmp" diff --name-only)" = "$TRANSACTION_FIXTURE" ] \
     || { echo 'selftest FAIL: Transaction overlay changed tracked paths outside its fixture' >&2; fail=1; }
@@ -341,6 +367,10 @@ selftest() {
   expect 'missing Transaction seed is denied before any import' fail --prepare-overlay "$TRANSACTION_SERVICE" "$provider" "$missing_seed" main
   [ -z "$(git -C "$tmp" diff --name-only)$(git -C "$tmp" ls-files --others --exclude-standard)" ] \
     || { echo 'selftest FAIL: refused Transaction bundle imported a partial fixture' >&2; fail=1; }
+  expect 'symlink Sanctions seed is denied before any import' fail --prepare-overlay openbank-sanctions-service "$provider" "$bad_seed" main
+  expect 'missing Sanctions seed is denied before any import' fail --prepare-overlay openbank-sanctions-service "$provider" "$missing_seed" main
+  [ -z "$(git -C "$tmp" diff --name-only)$(git -C "$tmp" ls-files --others --exclude-standard)" ] \
+    || { echo 'selftest FAIL: refused Sanctions bundle imported a partial fixture' >&2; fail=1; }
   expect 'other provider is denied' fail --prepare-overlay openbank-swift-service "$provider" "$fixture" main
   expect 'fixture off main is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$provider" "$side" main
   expect 'reversed ancestry is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$fixture" "$provider" main
@@ -416,7 +446,7 @@ selftest() {
   # filter to reach the forwarded-property allowlist (grep-only wiring checks passed while inert).
   (cd "$repo_root" && python3 -m unittest discover -s .github/scripts/tests -p test_service_ci_provider_task_discovery.py -k test_scoped_consumer_filter_reaches_test_jvm) \
     >/dev/null 2>&1 || { echo 'selftest FAIL: targeted consumer filter does not reach the pact test JVM' >&2; fail=1; }
-  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Named Ledger, Balance, Account, Transaction, Party, Clearing and SEPA Instant fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P; optional consumer filter reaches pact-jvm.'
+  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Named Ledger, Balance, Account, Transaction, Party, Clearing, SEPA Instant and Sanctions fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P; optional consumer filter reaches pact-jvm.'
   return "$fail"
 }
 

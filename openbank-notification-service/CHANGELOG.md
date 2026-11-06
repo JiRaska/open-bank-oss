@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.0...notification-service-v0.40.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **notification:** attribute stale PENDING notifications to their channel ([#14767](https://github.com/JiRaska/open-bank-oss/issues/14767)) ([d2b9562](https://github.com/JiRaska/open-bank-oss/commit/d2b9562d0dd34b928370c3512d3e2dce914d4f5d))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.1...notification-service-v0.40.0) (2026-11-05)
 
 
