@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.1.0...admin-ui-v4.2.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** preview role and permission catalog in settings ([#14980](https://github.com/JiRaska/open-bank-oss/issues/14980)) ([e1530f5](https://github.com/JiRaska/open-bank-oss/commit/e1530f5b31a0bde3b73064c42c6f45d08bcc8b7f))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
 ## [4.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.0.0...admin-ui-v4.1.0) (2026-11-06)
 
 
