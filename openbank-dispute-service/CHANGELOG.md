@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.3...dispute-service-v0.11.4) (2026-11-05)
+
+
+### Bug Fixes
+
+* **dispute:** admit ROLE_AUDITOR on dispute list and read endpoints ([#14823](https://github.com/JiRaska/open-bank-oss/issues/14823)) ([681a626](https://github.com/JiRaska/open-bank-oss/commit/681a6266f962c476767b99185ac7c1c032fdbc47))
+
 ## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.2...dispute-service-v0.11.3) (2026-10-14)
 
 

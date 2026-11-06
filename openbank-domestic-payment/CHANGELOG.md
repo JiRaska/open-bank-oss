@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.0...domestic-payment-v1.3.1) (2026-11-05)
+
+
+### Security
+
+* **domestic-payment:** authenticate the API by bearer only on the mTLS listener ([#14759](https://github.com/JiRaska/open-bank-oss/issues/14759)) ([670a7b4](https://github.com/JiRaska/open-bank-oss/commit/670a7b44bcd000a29075dc99588942398a875b4c))
+
 ## [1.3.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.2.3...domestic-payment-v1.3.0) (2026-10-30)
 
 

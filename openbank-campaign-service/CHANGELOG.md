@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.1](https://github.com/JiRaska/open-bank-oss/compare/v0.42.0...v0.42.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **campaign:** opt in to the OPA sidecar PolicyDecisionPoint producer ([#14819](https://github.com/JiRaska/open-bank-oss/issues/14819)) ([5a66690](https://github.com/JiRaska/open-bank-oss/commit/5a666908d1277d7b4c6cb7ad739fefe52a882b2c))
+
 ## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/v0.41.0...v0.42.0) (2026-10-17)
 
 

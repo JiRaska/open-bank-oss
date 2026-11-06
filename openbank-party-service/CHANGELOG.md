@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.1...party-service-v0.29.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **party:** create FlagdProducer at boot so party list and search stop 500ing ([#14788](https://github.com/JiRaska/open-bank-oss/issues/14788)) ([d0be0f9](https://github.com/JiRaska/open-bank-oss/commit/d0be0f9e1454400a82cf8f0418ca6ca23b95e9aa))
+
 ## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.0...party-service-v0.29.1) (2026-10-24)
 
 

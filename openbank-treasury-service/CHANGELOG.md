@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.2...treasury-service-v0.20.3) (2026-11-05)
+
+
+### Bug Fixes
+
+* **treasury:** answer 400, not 500, for a null element in a reference import ([#14776](https://github.com/JiRaska/open-bank-oss/issues/14776)) ([cbb05c3](https://github.com/JiRaska/open-bank-oss/commit/cbb05c3be053bf5f0dc9e966175f877f55af2098))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.1...treasury-service-v0.20.2) (2026-11-03)
 
 
