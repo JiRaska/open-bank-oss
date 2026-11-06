@@ -1651,7 +1651,7 @@ jobs:
           git fetch --depth=100 origin main
           git reset --hard origin/main
           gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            | python3 .github/scripts/deploy-window.py verify --root .
+            | python3 .github/scripts/deploy-window.py verify --root . --require-digest
 
       # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
       # to the newest build, so two are never additive and both edit the same manifest line — left
