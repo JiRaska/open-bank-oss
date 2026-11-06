@@ -97,7 +97,7 @@ Symptom: `FlywayValidateException`. Příčina: aplikovaná migrace byla upraven
 
 ### Chybějící `swift_outbox_seq`
 
-Symptom: outbox INSERT selže s `relation "swift_outbox_seq" does not exist`. Příčina: `V3` neaplikováno. Fix: zajisti spuštění migrace V3; pokryto `HibernateSequenceGuardTest`.
+Symptom: outbox INSERT selže s `relation "swift_outbox_seq" does not exist`. Příčina: `V3` neaplikováno. Fix: zajisti spuštění migrace V3; pokryto CI gate `hibernate-sequence-guard`.
 
 ### Konflikt idempotency key
 
@@ -105,7 +105,7 @@ Opakovaný submit se stejným `idempotencyKey` vrátí stávající zprávu. `40
 
 ## Testy & pokrytí
 
-- Testy: `SwiftServiceTest`, `SwiftMessageTest`, `HibernateSequenceGuardTest` (Quarkus JUnit5, AssertJ, MockK).
+- Testy: `SwiftServiceTest`, `SwiftMessageTest` (Quarkus JUnit5, AssertJ, MockK).
 - Pokrytí: Kover line floor **40 %** (money-path baseline, ratchet-only, dle `rules.yaml`); zvyšuj s přibývajícími testy směrem k cíli 70 % pro money-path.
 
 ## Deploy / release
