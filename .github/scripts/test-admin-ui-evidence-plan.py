@@ -70,7 +70,7 @@ class EvidencePolicyScopeTest(unittest.TestCase):
         cls.role = (REPO_ROOT / "openbank-infra/aws/envs/sandbox-platform/admin-ui-evidence.tf").read_text(encoding="utf-8")
         cls.bucket = (REPO_ROOT / "openbank-infra/aws/envs/sandbox-platform/test-evidence-store.tf").read_text(encoding="utf-8")
 
-    def test_role_policy_is_limited_to_the_five_named_datasets_and_exact_prefixes(self):
+    def test_role_policy_is_limited_to_five_datasets_and_the_versioned_content_prefix(self):
         locals_block = hcl_block(self.role, "locals")
         datasets = re.search(r"admin_ui_evidence_datasets\s*=\s*\[(.*?)\]", locals_block, re.DOTALL)
         self.assertIsNotNone(datasets)
@@ -78,11 +78,14 @@ class EvidencePolicyScopeTest(unittest.TestCase):
             "gate-health", "readiness", "test-intelligence", "security-kpis", "content",
         ])
 
+        self.assertRegex(locals_block, r'admin_ui_evidence_prefixes\s*=\s*concat\(local\.admin_ui_evidence_datasets,\s*\["content/domains-v1"\]\)')
+        self.assertRegex(locals_block, r'admin_ui_evidence_selectors\s*=\s*\[for prefix in local\.admin_ui_evidence_prefixes : "\$\{aws_s3_bucket\.test_evidence\.arn\}/admin-ui/\$\{prefix\}/current\.json"\]')
+
         policy = hcl_block(self.role, 'data "aws_iam_policy_document" "admin_ui_evidence"')
         self.assertRegex(policy, r'actions\s*=\s*\["s3:GetObject",\s*"s3:PutObject"\]')
-        self.assertRegex(policy, r'resources\s*=\s*concat\(local\.admin_ui_evidence_selectors,\s*\[for dataset in local\.admin_ui_evidence_datasets : "\$\{aws_s3_bucket\.test_evidence\.arn\}/admin-ui/\$\{dataset\}/snapshots/\*"\]\)')
+        self.assertRegex(policy, r'resources\s*=\s*concat\(local\.admin_ui_evidence_selectors,\s*\[for prefix in local\.admin_ui_evidence_prefixes : "\$\{aws_s3_bucket\.test_evidence\.arn\}/admin-ui/\$\{prefix\}/snapshots/\*"\]\)')
         self.assertRegex(policy, r'actions\s*=\s*\["s3:ListBucket"\]')
-        self.assertRegex(policy, r'values\s*=\s*\[for dataset in local\.admin_ui_evidence_datasets : "admin-ui/\$\{dataset\}/current\.json"\]')
+        self.assertRegex(policy, r'values\s*=\s*\[for prefix in local\.admin_ui_evidence_prefixes : "admin-ui/\$\{prefix\}/current\.json"\]')
         self.assertNotRegex(policy, r'actions\s*=\s*\[[^\]]*"s3:DeleteObject"')
 
     def test_bucket_policy_keeps_snapshots_immutable_and_selectors_conditional(self):

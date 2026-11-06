@@ -93,6 +93,16 @@ jobs:
       pull-requests: read
 
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - name: Fetch Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
@@ -124,3 +134,14 @@ jobs:
           ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
         run: |
           echo "::notice title=Human review required::${PR_TITLE} (${ECOSYSTEM}, ${UPDATE_TYPE}) is outside the auto-merge policy (patch-only, gradle/npm) — skipping auto-merge."
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true

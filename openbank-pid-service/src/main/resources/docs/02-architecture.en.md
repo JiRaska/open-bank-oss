@@ -76,8 +76,7 @@ com.openbank.pid/
 ├── application/                ◄── use-case orchestration
 │   ├── port/in/                CreatePartyUseCase, GetPartyUseCase, UpdatePartyUseCase,
 │   │                           ManageRelationshipUseCase + command/query records
-│   ├── port/out/               PartyRepositoryPort, PidOutboxPort, PartyEventPublisher,
-│   │                           PidOutboxEventPublisher
+│   ├── port/out/               PartyRepositoryPort, PidOutboxPort, PartyEventPublisher
 │   └── usecase/                PartyService (implements all four inbound ports)
 │
 └── infrastructure/             ◄── adapters
@@ -142,7 +141,7 @@ sequenceDiagram
 | `PartyRepositoryPort` | outbound | `PartyRepositoryImpl` (Hibernate Reactive / Panache) |
 | `PidOutboxPort` | outbound | `PidOutboxRepositoryImpl` |
 | `PartyEventPublisher` | outbound | `KafkaPartyEventPublisher` |
-| `PidOutboxEventPublisher` | outbound | `KafkaPidOutboxEventPublisher` |
+| `OutboxEventPublisher` | outbound | `KafkaPidOutboxEventPublisher` |
 
 ## Components from `openbank-libs`
 
