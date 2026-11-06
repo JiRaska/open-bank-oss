@@ -5,6 +5,7 @@
 
 package com.openbank.agent.integration
 
+import com.openbank.agent.application.ToolServiceCatalog
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -83,6 +84,9 @@ class McpEndpointRoutingIT {
             .statusCode(200)
             .body("result.tools.name", hasItem("get_catalog_revision"))
             .body("result.tools.find { it.name == 'get_catalog_revision' }.service", equalTo("product-catalog"))
-            .body("result.tools.find { it.name == 'get_catalog_revision' }.domain", equalTo("Core Banking"))
+            .body(
+                "result.tools.find { it.name == 'get_catalog_revision' }.domain",
+                equalTo(ToolServiceCatalog.domainOf("get_catalog_revision")),
+            )
     }
 }

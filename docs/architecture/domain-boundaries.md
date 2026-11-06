@@ -112,3 +112,9 @@ visibly marked stale, until the updated publisher runs. Older readers ignore the
 dataset fields. The migration requires no database conversion or message replay. Deploy the
 generated inventory together with readers that understand the taxonomy. Roll back the complete change through a reviewed
 revert, including readers and generated artifacts, rather than reverting declarations alone.
+
+MCP tool ownership is derived from the same per-module declarations and taxonomy copied
+into the agent image during resource processing. The tools/list metadata relay overlays
+validated published ownership for older agent images; it preserves the advertised tool
+set, downstream service identities, schemas, charter filtering and execution responses.
+External infrastructure without a governance declaration remains Unclassified.

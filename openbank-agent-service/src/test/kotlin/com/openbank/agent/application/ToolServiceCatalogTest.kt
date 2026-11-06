@@ -22,6 +22,11 @@ class ToolServiceCatalogTest {
         }
 
         assertThat(unmapped).describedAs("registered tools with no service/domain mapping").isEmpty()
+        val infrastructure = setOf("prometheus", "loki", "alertmanager")
+        val unclassified = McpToolRegistry().tools.map { it.name }.filter {
+            ToolServiceCatalog.serviceOf(it) !in infrastructure && ToolServiceCatalog.domainOf(it) == "Unclassified"
+        }
+        assertThat(unclassified).describedAs("banking tools missing their declared ownership").isEmpty()
     }
 
     @Test
@@ -33,7 +38,7 @@ class ToolServiceCatalogTest {
     @Test
     fun `the domain is derived through the service, so tools of one service share a domain`() {
         assertThat(ToolServiceCatalog.serviceOf("get_account")).isEqualTo("account-service")
-        assertThat(ToolServiceCatalog.domainOf("get_account")).isEqualTo("Core Banking")
+        assertThat(ToolServiceCatalog.domainOf("get_account")).isEqualTo("Accounts & deposits")
         assertThat(ToolServiceCatalog.domainOf("get_account_by_iban"))
             .isEqualTo(ToolServiceCatalog.domainOf("get_account"))
     }
@@ -42,15 +47,23 @@ class ToolServiceCatalogTest {
     fun `the agent-local HITL tools reach no downstream banking service`() {
         listOf("draft_ticket", "flip_feature_flag").forEach {
             assertThat(ToolServiceCatalog.serviceOf(it)).isEqualTo("agent-service")
-            assertThat(ToolServiceCatalog.domainOf(it)).isEqualTo("Governance")
+            assertThat(ToolServiceCatalog.domainOf(it)).isEqualTo("Technical platform")
         }
     }
 
     @Test
     fun `observability tools are grouped away from the banking domains`() {
-        assertThat(ToolServiceCatalog.domainOf("query_metrics")).isEqualTo("Observability")
-        assertThat(ToolServiceCatalog.domainOf("query_loki_logs")).isEqualTo("Observability")
-        assertThat(ToolServiceCatalog.domainOf("list_alerts")).isEqualTo("Observability")
-        assertThat(ToolServiceCatalog.domainOf("aml_list_cases")).isEqualTo("Compliance")
+        assertThat(ToolServiceCatalog.domainOf("query_metrics")).isEqualTo("Unclassified")
+        assertThat(ToolServiceCatalog.domainOf("query_loki_logs")).isEqualTo("Unclassified")
+        assertThat(ToolServiceCatalog.domainOf("list_alerts")).isEqualTo("Unclassified")
+        assertThat(ToolServiceCatalog.domainOf("aml_list_cases")).isEqualTo("Financial crime & audit")
+    }
+
+    @Test
+    fun `SEPA Instant legacy tool identity resolves the canonical module without renaming the service`() {
+        listOf("sepa_instant_list", "sepa_instant_get", "sepa_instant_list_by_debtor").forEach {
+            assertThat(ToolServiceCatalog.serviceOf(it)).isEqualTo("sepa-instant-service")
+            assertThat(ToolServiceCatalog.domainOf(it)).isEqualTo("Payments")
+        }
     }
 }
