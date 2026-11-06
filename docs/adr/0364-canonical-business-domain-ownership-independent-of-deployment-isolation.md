@@ -1,8 +1,7 @@
 ---
 date: 2026-11-06
 decision-status: proposed
-delivery-status: partial
-followup: "#14951 — apply reviewed service ownership and generated evidence after the foundation merges"
+delivery-status: shipped
 authors: [OpenBank contributors]
 supersedes: []
 superseded-by: []
@@ -48,20 +47,6 @@ without becoming owned by Accounting or Payments. Namespace comments attributing
    the taxonomy discriminator and catalog/governance agreement; incompatible content uses
    the explicitly stale, coherent image fallback. Expand exact publication permissions
    before publishing the versioned prefix. Image and publisher rollouts may overlap safely.
-
-## Delivery sequence
-
-The foundation delivers the expanded contract and its runtime, catalog and publication
-consumers first. Existing six-category declarations remain valid; only the admin channel
-assignment and previously missing Analytics declaration are included in this stage. New
-publishers may therefore publish the existing assignments with the new contract identifier
-before the ownership migration, without fabricating the target classification.
-
-The metadata-only follow-up in #14951 applies the reviewed per-service assignments,
-generated runbooks, alert labels and public inventory after this foundation is merged.
-This separation keeps each reviewed change within the released-component scope limit.
-Public teaser navigation is generated from populated ownership, so neither stage links
-to domain sections absent from its actual catalog.
 
 ## Alternatives considered
 
