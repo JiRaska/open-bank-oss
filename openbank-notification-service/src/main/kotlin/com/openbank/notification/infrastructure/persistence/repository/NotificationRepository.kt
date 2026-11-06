@@ -26,6 +26,24 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
         count("status = ?1 and createdAt < ?2", "PENDING", cutoff)
     }
 
+    /**
+     * The same population as [countStalePending], split by channel. The total alone cannot say
+     * which adapter left a row without an outcome, and answering that used to need a read of the
+     * production table.
+     */
+    fun countStalePendingByChannel(cutoff: Instant): Uni<Map<String, Long>> = Panache.withSession {
+        Panache.getSession().chain { session ->
+            session.createSelectionQuery(
+                "select n.channel, count(n) from NotificationEntity n " +
+                    "where n.status = :status and n.createdAt < :cutoff group by n.channel",
+                Array<Any>::class.java,
+            )
+                .setParameter("status", "PENDING")
+                .setParameter("cutoff", cutoff)
+                .resultList
+        }
+    }.map { rows: List<Array<Any>> -> rows.associate { row -> row[0] as String to (row[1] as Number).toLong() } }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 

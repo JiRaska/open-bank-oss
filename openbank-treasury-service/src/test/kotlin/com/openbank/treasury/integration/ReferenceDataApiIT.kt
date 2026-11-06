@@ -12,6 +12,7 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.nullValue
@@ -156,7 +157,7 @@ class ReferenceDataApiIT {
     @TestSecurity(user = "sam.senior", roles = ["ROLE_TREASURY_SENIOR_APPROVER"])
     fun `51 - a senior approver activates the raised limits, and the approval records them`() {
         post("/counterparty/CORP-IT-1/versions/1/approve").then().statusCode(200)
-            .body("approvalNote", org.hamcrest.Matchers.containsString("CZK none -> 1000000"))
+            .body("approvalNote", containsString("CZK none -> 1000000"))
         jdbc { c ->
             c.prepareStatement(
                 "select kind, limit_czk, synthetic from counterparties where counterparty_id = 'CORP-IT-1'",
@@ -225,6 +226,17 @@ class ReferenceDataApiIT {
         given().`when`().get("/api/v1/treasury/positions?date=$today").then().statusCode(403)
         given().`when`().get("/api/v1/treasury/deals/${UUID.randomUUID()}/cash-flows").then().statusCode(403)
         given().`when`().get("/api/v1/treasury/calendar?from=$today&to=${today.plusDays(7)}").then().statusCode(403)
+    }
+
+    @Test
+    @Order(10)
+    @TestSecurity(user = "erik.editor", roles = ["ROLE_TREASURY_REFERENCE_EDITOR"])
+    fun `10 - a null element in an import array is a 400 naming the item, never a 500 (#14760)`() {
+        // Schemathesis case BswX7W: `[null]` reached r.key as an NPE -> GenericExceptionMapper 500.
+        post("/calendar/import", "[null]").then().statusCode(400)
+            .body("message", containsString("item 0"))
+        post("/calendar/import", "[$calendarProposal, null]").then().statusCode(400)
+            .body("message", containsString("item 1"))
     }
 
     private fun status(kind: String, key: String, version: Int): String? = jdbc { c ->

@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [ai-agents, admin-ui, governance, notifications]
 summary: "Split every customer- and staff-facing prompt into an immutable git core and a business-editable style/playbook layer served by a new communication-service, edited in admin-ui under four-eyes and evals-on-publish."
-followup: "#9703 — copilot does not consume the style layer (D5 consumer, baseline fallback, style_version in audit); ROLE_COMMS_* declared in the realm, not role_action_matrix (D6)"
+followup: "#9703 — copilot does not consume the style layer (D5 composition, baseline fallback, style_version in audit); D4 evals-on-publish remains unproved"
 ---
 
 # ADR-0285 — Communication Studio: governed style and playbook layer for bots and staff
@@ -251,7 +251,7 @@ change to which model a persona uses (that is `ModelGateway` config and ADR-0175
 | D3 four-eyes | `grep -n 'commstyle.publish' openbank-libs/governance/rules.yaml` under `four_eyes.actions`; `grep -n commstyle-publish openbank-libs/governance/policies/rest.rego` | both non-empty | holds (#9150) |
 | D5 service | `cat openbank-communication-service/version.txt`; `ls openbank-infra/gitops/components/communication/` | a version; a Rollout, OPA bundle, TLS, secret | holds (0.1.0) |
 | D5 consumer | `git grep -il 'communication' openbank-copilot-service/src/main` | non-empty, and `style_version` written to the audit envelope | **fails** — empty (#9703) |
-| D6 roles | `grep -n 'ROLE_COMMS_' openbank-libs/governance/rules.yaml` inside `authz.role_action_matrix` | two role keys with `commstyle.*` grants | **fails** — roles exist only in `realm-template.json` (#9703) |
+| D6 roles | `grep -n 'ROLE_COMMS_' openbank-libs/governance/rules.yaml` inside `authz.role_action_matrix` | two role keys with `commstyle.*` grants | partially, see Amendment 2026-11-02: `ROLE_COMMS_APPROVER` → `commstyle.approval.read` only; membership in `realm-template.json` (#9784, #9801) |
 | D7 admin-ui | `ls openbank-admin-ui/src/app/communication/` | `page.tsx`, `[personaId]`, `edit/` | holds (#9173, #9634) |
 | D4 evals-on-publish | the publish endpoint refuses a draft whose golden-set replay regresses | a rejected publish in a test | not yet measured — golden-set editor is CRUD only (#9634) |
 
@@ -278,3 +278,23 @@ change to which model a persona uses (that is `ModelGateway` config and ADR-0175
 - ADR-0229 — roles single source of truth, persona-driven IA
 - ADR-0235 — continuous AI assurance
 - Issue #3187 — `ui-assistant` v1 prompt disclosure
+
+## Amendment 2026-11-02: interim role source for D6 (#9703)
+
+D6 stands unchanged as the target. Until the ADR-0229 single-source role pipeline exists, the
+interim state is as follows:
+
+- `openbank-infra/gitops/components/keycloak/realm-template.json` is the source of membership
+  for `ROLE_COMMS_EDITOR` and `ROLE_COMMS_APPROVER`. The two roles go to separate human
+  operator identities.
+- communication-service enforces the roles with `@RolesAllowed`. Publish and approval also
+  carry their own `@Authorize` actions and the four-eyes policy.
+- `rules.yaml: authz.role_action_matrix` grants only the read-only `commstyle.approval.read`
+  action to `ROLE_COMMS_APPROVER`. The maker actions and the write grants are not in the
+  matrix yet, for two reasons. The maker endpoints have no `@Authorize` action to name. And
+  writes must stay human-only, which is enforced by the action-specific OPA rules rather than
+  by the generic matrix permit.
+- A service account is still never granted `commstyle.publish`.
+
+When ADR-0229 can express those actions without widening access, the matrix becomes the
+source, as D6 says, and this amendment lapses.
