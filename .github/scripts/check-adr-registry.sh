@@ -265,6 +265,22 @@ TEST_MARKERS
   d=$(mkdir_fixture empty)
   expect "an empty ADR directory is an error" "$d" 1
 
+  # Field lookups use the first occurrence, including an empty first value.
+  # A last-value map or a truthiness-based cache would silently change both cases.
+  d=$(mkdir_fixture duplicate-first)
+  fm 0001 0001 | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case "$line" in decision-status:*) printf 'decision-status: invalid\n' ;; esac
+  done > "$d/0001-first.md"
+  expect "a later duplicate does not replace the first field value" "$d" 0
+
+  d=$(mkdir_fixture duplicate-empty)
+  fm 0001 0001 decision-status= | while IFS= read -r line; do
+    printf '%s\n' "$line"
+    case "$line" in decision-status:*) printf 'decision-status: accepted\n' ;; esac
+  done > "$d/0001-first.md"
+  expect "an empty first field is not replaced by a later value" "$d" 1 "decision-status '' is not one of"
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
   echo "self-test ok: ADR registry integrity is falsifiable (schema, literal-marker and anchored-section cases)"
   exit 0
@@ -413,6 +429,31 @@ for f in "${adrs[@]}"; do
     continue
   fi
 
+  # Resolve the first value of each field in one pass over the parsed block.
+  # fm_field has first-key semantics; retain them for duplicate and empty values.
+  # Keep values as data rather than starting a command-substitution subshell for
+  # every lookup. The parser and all schema checks below remain unchanged.
+  decision=""; delivery=""; date=""; summary_raw=""
+  authors_raw=""; tags_raw=""; repos_raw=""; supby_raw=""; sup_raw=""
+  seen_fields=" "
+  while IFS= read -r field_line; do
+    field_key=${field_line%%$'\t'*}
+    field_value=${field_line#*$'\t'}
+    case "$seen_fields" in *" $field_key "*) continue ;; esac
+    seen_fields+="$field_key "
+    case "$field_key" in
+      decision-status) decision=$field_value ;;
+      delivery-status) delivery=$field_value ;;
+      date) date=$field_value ;;
+      summary) summary_raw=$field_value ;;
+      authors) authors_raw=$field_value ;;
+      tags) tags_raw=$field_value ;;
+      delivery-repos) repos_raw=$field_value ;;
+      superseded-by) supby_raw=$field_value ;;
+      supersedes) sup_raw=$field_value ;;
+    esac
+  done <<< "$fm"
+
   # 4a. malformed lines (nesting, block scalars, stray text) --------------------
   while IFS=$'\t' read -r k v; do
     [[ "$k" == "!malformed" ]] && err "$base: front-matter line is not a flat 'key: value': $v"
@@ -440,10 +481,6 @@ for f in "${adrs[@]}"; do
     in_set "$k" "$SCHEMA_KEYS $OPTIONAL_KEYS" || err "$base: unknown front-matter key '$k' (typo? see docs/adr/SCHEMA.md)."
   done <<< "$fm"
 
-  decision=$(fm_field "$fm" decision-status)
-  delivery=$(fm_field "$fm" delivery-status)
-  date=$(fm_field "$fm" date)
-  summary_raw=$(fm_field "$fm" summary)
 
   # 4c. enums and date format ---------------------------------------------------
   in_set "$decision" "$DECISION_ENUM" || err "$base: decision-status '$decision' is not one of: $DECISION_ENUM"
@@ -464,7 +501,7 @@ for f in "${adrs[@]}"; do
   fi
 
   # 4e. authors non-empty ------------------------------------------------------
-  [[ -n "$(fm_list "$(fm_field "$fm" authors)")" ]] || err "$base: authors is empty."
+  [[ -n "$(fm_list "$authors_raw")" ]] || err "$base: authors is empty."
 
   # 4f. closed vocabularies ----------------------------------------------------
   tag_count=0
@@ -474,7 +511,7 @@ for f in "${adrs[@]}"; do
     if [[ -n "$allowed_tags" ]] && ! in_set "$t" "$allowed_tags"; then
       err "$base: tag '$t' is not in $TAGS_FILE — add it there in this PR, or pick an existing tag."
     fi
-  done <<< "$(fm_list "$(fm_field "$fm" tags)")"
+  done <<< "$(fm_list "$tags_raw")"
   if [[ $tag_count -lt 1 || $tag_count -gt 4 ]]; then
     err "$base: has $tag_count tags — the schema allows 1 to 4."
   fi
@@ -483,11 +520,11 @@ for f in "${adrs[@]}"; do
     if [[ -n "$allowed_repos" ]] && ! in_set "$r" "$allowed_repos"; then
       err "$base: delivery-repos names '$r', which is not in $KNOWN_REPOS — add it there first (or fix the typo)."
     fi
-  done <<< "$(fm_list "$(fm_field "$fm" delivery-repos)")"
+  done <<< "$(fm_list "$repos_raw")"
 
   # 4g. supersession is internally consistent ----------------------------------
-  supby=$(fm_list "$(fm_field "$fm" superseded-by)")
-  sup=$(fm_list "$(fm_field "$fm" supersedes)")
+  supby=$(fm_list "$supby_raw")
+  sup=$(fm_list "$sup_raw")
   if [[ -n "$supby" && "$decision" != "superseded" ]]; then
     err "$base: superseded-by is set but decision-status is '$decision' — it must be 'superseded'."
   fi
