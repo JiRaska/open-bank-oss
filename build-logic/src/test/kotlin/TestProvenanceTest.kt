@@ -48,6 +48,9 @@ class TestProvenanceTest {
         val invalidBytes = buildFactsInputs(listOf(directory), true)
         properties.writeBytes(byteArrayOf(0xc1.toByte()))
         assertNotEquals(invalidBytes, buildFactsInputs(listOf(directory), true))
+        facts.writeText(metadata(second))
+        properties.writeText("git.commit=$second\n")
+        assertEquals(normalized, buildFactsInputs(listOf(directory), true))
         properties.delete()
         assertNotEquals(normalized, buildFactsInputs(listOf(directory), true))
     }
