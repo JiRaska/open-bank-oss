@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: finrep-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-d6685693@sha256:e840dd2d34de55f9ee35b1de9a6bac6b5534d8f55e769e69181ceaaa3d9ce4ed
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-finrep-service:sandbox-0df91214@sha256:9d513380333a0534db793b8bb0707cec465fa2b95fd620c448bb116ef87241ac
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
