@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.3...sanctions-service-v0.18.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **sanctions:** defer single-list refresh to the scheduler and add a 202 v2 trigger ([#14785](https://github.com/JiRaska/open-bank-oss/issues/14785)) ([cc21e6a](https://github.com/JiRaska/open-bank-oss/commit/cc21e6aa47c13df81378bf11a4d5c598d9a8bcf1))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.2...sanctions-service-v0.18.3) (2026-10-29)
 
 

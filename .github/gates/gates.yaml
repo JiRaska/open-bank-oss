@@ -286,6 +286,23 @@ gates:
 
   # The shell probes this repo keeps getting wrong, each held to a known-positive AND a
   # known-negative. The run: IS the self-test; the whole file is the falsification harness.
+  - id: ecr-live-tags-selftest
+    name: "deployed ECR images keep their live- lifecycle shield (enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      The service ECR lifecycle policy keeps the newest N builds and expires the rest, so a deployed
+      image ranked beyond N would be deleted under running pods and fail only at the next pull.
+      ecr-live-tags.py derives the deployed set from gitops and shields it with a live- tag; this
+      gate keeps its reference parser and its tag/untag planner falsified against a known positive
+      (an unprotected tag is removed, a protected digest is tagged) and a known negative (#14189).
+    review_after: '2027-04-30'
+    min_subjects: 4
+    budget_seconds: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the script's own --selftest"
+    run: |
+      python3 .github/scripts/ecr-live-tags.py --selftest
+
   - id: probe-lib-known-positive
     name: "shell probes are falsified against a known-positive (enforced)"
     group: lint
@@ -1439,6 +1456,32 @@ gates:
       python3 .github/scripts/check-edge-decoy-rule-parity.py --selftest
     run: |
       python3 .github/scripts/check-edge-decoy-rule-parity.py
+
+  # ADR-0361 phase 1: a decoy credential fails silently two ways — unwired (renamed, tripwire
+  # still matching the old name) or armed (someone grants it permissions). ENFORCED.
+  - id: honeytoken-wiring
+    name: "every decoy credential is wired to a tripwire and holds no permission (ADR-0361, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
+    rationale: >-
+      Decoy credentials are only safe because they are powerless, and only useful because a
+      tripwire names them. Neither property is visible at runtime: an unwired one produces
+      exactly the silence a quiet week produces, and an armed one is a real credential. The
+      gate finds them by shape, pairs each ServiceAccount with a CloudWatch metric filter,
+      forbids any binding to it, pins the watched IAM user to a single explicit Deny "*", and
+      requires the EventBridge rules to opt in to read-only management events so the first call
+      an intruder makes alerts.
+    review_after: "2027-04-29"
+    min_subjects: 2   # one token-bearing ServiceAccount + one watched IAM user at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-honeytoken-wiring.py"
+      - "openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+    selftest: |
+      python3 .github/scripts/check-honeytoken-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-honeytoken-wiring.py
 
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"

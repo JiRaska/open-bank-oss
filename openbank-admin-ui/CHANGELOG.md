@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.18.0...admin-ui-v4.0.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207))
+
+### Features
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207)) ([4592d82](https://github.com/JiRaska/open-bank-oss/commit/4592d82576861a903ecc1b7c2d0e62863395f68e))
+
+
+### Bug Fixes
+
+* **admin-ui:** keep the SSO button disabled until the login page hydrates ([#14782](https://github.com/JiRaska/open-bank-oss/issues/14782)) ([f82897e](https://github.com/JiRaska/open-bank-oss/commit/f82897efdebe95cac3b70f289174a787c93ecd58)), closes [#14779](https://github.com/JiRaska/open-bank-oss/issues/14779)
+* **admin-ui:** override glob to 14.0.2 and minimatch to 11.0.1 for advisories ([#14761](https://github.com/JiRaska/open-bank-oss/issues/14761)) ([5bd6a1b](https://github.com/JiRaska/open-bank-oss/commit/5bd6a1b530a3a10aa57c83305cde0393c2425b78)), closes [#14757](https://github.com/JiRaska/open-bank-oss/issues/14757)
+* **admin-ui:** queue sanctions list refresh on the v2 trigger and show the queued state ([#14789](https://github.com/JiRaska/open-bank-oss/issues/14789)) ([eb48aee](https://github.com/JiRaska/open-bank-oss/commit/eb48aee81a3af10444b4e0269f45825307a7e161)), closes [#14780](https://github.com/JiRaska/open-bank-oss/issues/14780)
+* **admin-ui:** show auth-blocked fuzz operations as not run on the DAST tile ([#14778](https://github.com/JiRaska/open-bank-oss/issues/14778)) ([bee9491](https://github.com/JiRaska/open-bank-oss/commit/bee94917d748a5de85b63a6cc62bb76d0d0d8ef2))
+
 ## [3.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.17.0...admin-ui-v3.18.0) (2026-11-05)
 
 

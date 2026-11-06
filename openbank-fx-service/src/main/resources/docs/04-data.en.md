@@ -73,7 +73,7 @@ Indexes `idx_fx_outbox_status_created_at (status, created_at ASC)`, `idx_fx_outb
 
 `migrate-at-start = true`, `validate-on-migrate = false`. **Never edit an applied migration** (checksum mismatch → startup fail; use `QUARKUS_FLYWAY_REPAIR_AT_START=true` as the recovery lever).
 
-> **V3 rationale:** Hibernate Reactive + `PanacheEntity` allocate ids from a sequence `<table>_seq` (allocationSize 50). The `BIGSERIAL` PK only creates `<table>_id_seq`, and the schema is `generation:none`, so inserts would fail with *relation "fx_outbox_seq" does not exist*. V3 adds it. `HibernateSequenceGuardTest` guards against the regression. Rollback: `DROP SEQUENCE fx_outbox_seq;`.
+> **V3 rationale:** Hibernate Reactive + `PanacheEntity` allocate ids from a sequence `<table>_seq` (allocationSize 50). The `BIGSERIAL` PK only creates `<table>_id_seq`, and the schema is `generation:none`, so inserts would fail with *relation "fx_outbox_seq" does not exist*. V3 adds it. The CI gate `hibernate-sequence-guard` guards against the regression. Rollback: `DROP SEQUENCE fx_outbox_seq;`.
 
 ## PII & classification
 

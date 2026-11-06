@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# AlertFiringTooLong overwrites `severity` with its own `warning` label. Two long-firing
+# alerts that differ ONLY by severity (a warning and a critical tier of one alertname in one
+# namespace) used to collapse onto one labelset after that overwrite, and Prometheus failed
+# the whole rule evaluation with "vector contains metrics with the same labelset after
+# applying alert labels" -- so the rule reported nothing at all. The source severity is now
+# carried as `alert_severity` (and the source alertname as `alert_name`, since the rule's own
+# alertname overwrites it too), keeping every output series distinct.
+rule_files:
+  - prometheus-rules-jobs.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "two severity tiers of one alert firing for 8 days both report, without collision"
+    input_series:
+      # ALERTS_FOR_STATE's value is the unix time the alert became active (0 = epoch here).
+      - series: 'ALERTS_FOR_STATE{alertname="DiskFilling",severity="warning",namespace="db"}'
+        values: "0+0x12000"
+      - series: 'ALERTS_FOR_STATE{alertname="DiskFilling",severity="critical",namespace="db"}'
+        values: "0+0x12000"
+    alert_rule_test:
+      - eval_time: 8d
+        alertname: AlertFiringTooLong
+        exp_alerts:
+          - exp_labels:
+              alertname: AlertFiringTooLong
+              alert_name: DiskFilling
+              alert_severity: warning
+              namespace: db
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "DiskFilling (warning) has been firing for 8d 0h 0m 0s without being resolved"
+              description: "A correct alert that fires for a week unattended trains everyone to ignore it, and hides the next real one behind it. Either fix the condition, fix the rule (false positive), or silence it in Alertmanager with an owner and an expiry. Never leave it firing."
+          - exp_labels:
+              alertname: AlertFiringTooLong
+              alert_name: DiskFilling
+              alert_severity: critical
+              namespace: db
+              severity: warning
+              team: platform
+            exp_annotations:
+              summary: "DiskFilling (critical) has been firing for 8d 0h 0m 0s without being resolved"
+              description: "A correct alert that fires for a week unattended trains everyone to ignore it, and hides the next real one behind it. Either fix the condition, fix the rule (false positive), or silence it in Alertmanager with an owner and an expiry. Never leave it firing."
+
+  - interval: 1m
+    name: "an alert firing for 6 days does not report"
+    input_series:
+      - series: 'ALERTS_FOR_STATE{alertname="DiskFilling",severity="critical",namespace="db"}'
+        values: "432000+0x12000"
+    alert_rule_test:
+      - eval_time: 8d
+        alertname: AlertFiringTooLong
+        exp_alerts: []
