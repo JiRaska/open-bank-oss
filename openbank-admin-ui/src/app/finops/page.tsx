@@ -519,7 +519,7 @@ function FinOpsContent() {
                     </div>
                     <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
                       {t('Kategorie jsou odvozené z AWS služeb. Obchodní domény najdete v ', 'Categories are derived from AWS services. Business domains are shown in ')}
-                      <Link href="/finops/allocation" style={{ color: 'var(--accent)' }}>{t('alokaci nákladů', 'cost allocation')}</Link>.
+                      <Link href="/finops/allocation" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{t('alokaci nákladů', 'cost allocation')}</Link>.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
                       {categories.map(({ category, amount }) => {
