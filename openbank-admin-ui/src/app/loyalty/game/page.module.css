@@ -1,0 +1,10 @@
+.page { max-width: 76rem; margin: 0 auto; padding: 1.5rem; display: grid; gap: 1rem; color: var(--text-primary); }
+.page h1, .page p { margin: 0; }
+.page form { display: grid; gap: 1rem; }
+.level { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; }
+.level label { display: grid; gap: .35rem; min-width: 0; }
+.page input, .page select, .page button { font: inherit; padding: .65rem; color: var(--text-primary); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.page button { cursor: pointer; width: fit-content; }
+.page button:disabled { cursor: default; opacity: .6; }
+
+.page input, .page select { width: 100%; min-width: 0; box-sizing: border-box; }

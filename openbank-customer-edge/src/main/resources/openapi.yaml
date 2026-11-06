@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.89.0
+  version: 1.90.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -116,6 +116,47 @@ tags:
   - name: Complaints
 
 paths:
+  /customer/v1/game/levels:
+    get:
+      operationId: getGameLevels
+      summary: Lion Quest chapters and unlocks for the JWT party
+      description: OFF and inactive chapters are absent. Beta is a presentation hint, not a privileged entitlement. No marketing consent is required for an opened game.
+      security: [{customerOidc: []}]
+      parameters:
+        - {name: beta, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Server-evaluated catalogue; unknown themes must be hidden by the app
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, levels]
+                properties:
+                  revision: {type: integer, format: int64, minimum: 0}
+                  levels:
+                    type: array
+                    maxItems: 30
+                    items: {$ref: '#/components/schemas/CustomerGameLevel'}
+        '401': {description: Authentication required}
+        '403': {description: Invalid customer or acting-for context}
+        '502': {description: Invalid upstream catalogue}
+        '503': {description: Game catalogue unavailable; retain cached locks and bundled fallback}
+  /customer/v1/game/levels/{levelId}/completion:
+    post:
+      operationId: postGameLevelCompletion
+      summary: Idempotently record a game completion for the JWT party
+      description: The client supplies no party, points or banking outcome. Locked and disabled chapters cannot be completed. Completion only unlocks play.
+      security: [{customerOidc: []}]
+      parameters:
+        - {name: levelId, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}}
+        - {name: beta, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '204': {description: Completion recorded or already recorded}
+        '400': {description: Invalid chapter identifier}
+        '401': {description: Authentication required}
+        '403': {description: Invalid customer context or chapter locked/unavailable}
+        '503': {description: Completion could not be confirmed; retain as pending}
   /app-copy:
     get:
       operationId: getAppCopy
@@ -6971,6 +7012,36 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    GameRequirement:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [NONE, PREVIOUS_LEVEL, EARN_SOURCE]}
+        source: {type: string, nullable: true, enum: [EDUCATIONAL_CONTENT_COMPLETION, SAVINGS_GOAL_DEPOSIT, LOGIN_STREAK, ON_TIME_REPAYMENT]}
+        count: {type: integer, minimum: 1, maximum: 1000, default: 1}
+        hintCs: {type: string, maxLength: 160}
+        hintEn: {type: string, maxLength: 160}
+    GameLevel:
+      type: object
+      required: [id, theme, order, titleCs, titleEn, state]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        theme: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        order: {type: integer, minimum: 0, maximum: 99}
+        titleCs: {type: string, minLength: 1, maxLength: 80}
+        titleEn: {type: string, minLength: 1, maxLength: 80}
+        state: {type: string, enum: [OFF, BETA, LIVE]}
+        startsAt: {type: string, format: date-time, nullable: true}
+        endsAt: {type: string, format: date-time, nullable: true}
+        requirement: {$ref: '#/components/schemas/GameRequirement'}
+    CustomerGameLevel:
+      allOf:
+        - {$ref: '#/components/schemas/GameLevel'}
+        - type: object
+          required: [unlocked, completed]
+          properties:
+            unlocked: {type: boolean}
+            completed: {type: boolean}
     BusinessPaymentBatchDraftItem:
       type: object
       additionalProperties: false
