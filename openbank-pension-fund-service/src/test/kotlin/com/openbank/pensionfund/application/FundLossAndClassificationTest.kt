@@ -4,6 +4,7 @@
 
 package com.openbank.pensionfund.application
 
+import com.openbank.pensionfund.FixedFundTerms
 import com.openbank.pensionfund.application.port.MarketPricePort
 import com.openbank.pensionfund.application.port.PensionFundMetrics
 import com.openbank.pensionfund.application.port.StoreChanges
@@ -64,7 +65,7 @@ class FundLossAndClassificationTest {
     private val prices = object : MarketPricePort {
         override suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal? = null
     }
-    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE)
+    private val admin = FundAdministrationService(store, clock, 30, PensionFundMetrics.NONE, FixedFundTerms())
     private val navs = NavService(store, prices, clock, PensionFundMetrics.NONE)
     private val register = UnitRegisterService(store, clock, PensionFundMetrics.NONE)
     private val reporting = FundReportingService(store)
@@ -94,7 +95,7 @@ class FundLossAndClassificationTest {
             FundDefinition(
                 name = "Loss fund", isin = "CZ0000000037", lei = "315700ABCDEF12345678", depositaryReference = "DEP",
                 custodyAccountReference = "CUST", currency = "CZK", riskClass = 3, mandatoryConservative = false,
-                managementFeeRate = BigDecimal("0.01"), launchNavPerUnit = BigDecimal.ONE,
+                productRevisionId = FixedFundTerms.FEE_1_00_PERCENT, launchNavPerUnit = BigDecimal.ONE,
             ),
         ).id
         register.place(

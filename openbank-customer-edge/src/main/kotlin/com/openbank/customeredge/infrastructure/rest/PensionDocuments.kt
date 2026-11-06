@@ -91,6 +91,20 @@ internal object PensionFailure {
     private val QUESTION = Regex("^[A-Za-z0-9_.-]{1,64}$")
     private const val SERVICE = "pension service"
 
+    /**
+     * A READ's refusal. A 403 on a read can only mean access was denied: `PENSION_CHANGE_REFUSED`
+     * names a refused challenge or a foreign debit account, which a read has neither of. Everything
+     * else is projected exactly as [of] does.
+     */
+    fun ofRead(response: Response): Response {
+        if (response.status != FORBIDDEN) return of(response)
+        return EdgeJson.error(
+            FORBIDDEN,
+            "access to this pension information was denied",
+            mapOf("code" to "PENSION_ACCESS_DENIED"),
+        )
+    }
+
     fun of(response: Response): Response {
         val body = EdgeJson.parse(response)?.takeIf { it.isObject }
         val code = body?.text("code")

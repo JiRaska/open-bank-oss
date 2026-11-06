@@ -9,6 +9,7 @@ import com.openbank.ledger.infrastructure.persistence.entity.LedgerOutboxEntity
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -41,7 +42,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(LedgerOutboxDispatchFailureIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.ledger.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class LedgerOutboxDispatchFailureIT {
 
     // Keep app startup off a real broker; the mocked publisher never touches this channel, but the

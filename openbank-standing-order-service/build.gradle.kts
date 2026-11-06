@@ -59,8 +59,9 @@ kover {
             rule {
                 bound {
                     // Ratchet floor (ADR-0020, sweep #466): measured 39.3% (154/392) LINE at introduction,
-                    // ~5 pt headroom, raise-only from here.
-                    minValue = 34
+                    // ~5 pt headroom, raise-only from here. Raised to the money-path baseline 40 (#13144):
+                    // measured 86.1% (507/589) LINE on 2026-10-31.
+                    minValue = 40
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
