@@ -164,6 +164,8 @@ class RuntimeResourceInputsTest(unittest.TestCase):
             'from(rootProject.file(".")) { include(variable) }',
             'from(rootProject.file(".")) { include("data/*.json", variable) }',
             'from(rootProject.file(".")) { include("../../private") }',
+            'from(rootProject.file(".")) { include("data/?.json") }',
+            'from(rootProject.file("docs")) { include("?.md") }',
         ]
         for body in bodies:
             with self.subTest(body=body):

@@ -49,6 +49,8 @@ def _literal_path(value: str, *, pattern: bool = False) -> str:
             or ".." in value.split("/") or (not pattern and "*" in value)):
         raise UnsupportedInputs("resource input must be a static repository-relative path")
     parts = [part for part in value.split("/") if part not in {"", "."}]
+    if pattern and "?" in value:
+        raise UnsupportedInputs("question-mark include patterns are unsupported")
     if pattern and any("**" in part and part != "**" for part in parts):
         raise UnsupportedInputs("recursive '**' must occupy a complete path segment")
     return "/".join(parts) or "."
