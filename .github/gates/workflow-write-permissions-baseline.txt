@@ -62,6 +62,7 @@ main-red-watch.yml|job:reconcile|contents
 main-red-watch.yml|job:watch|contents
 main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
+ops-heartbeat.yml|job:watch|issues
 pact-verification-reconcile.yml|job:reconcile|actions
 perf-gate.yml|job:raise-issue|issues
 platform-images.yml|job:build|id-token

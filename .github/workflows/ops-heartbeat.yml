@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Outside check on the external CI timer. A timer on a server stops silently when the server dies or its
+# dispatch token expires, and nothing else would notice. The timer dispatches this workflow every 6 h with
+# a one-line queue report, which lands in the run summary. The scheduled path files an issue if no dispatch
+# arrived for 24 h. GitHub's cron is unreliable but delivers several runs a day, enough for that bound.
+
+name: Ops heartbeat
+
+on:
+  workflow_dispatch:
+    inputs:
+      report:
+        description: "One-line queue report from the external timer"
+        type: string
+        default: ""
+  schedule:
+    - cron: "37 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    name: Record the timer's report
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Write the report to the run summary
+        env:
+          REPORT: ${{ inputs.report }}
+        run: |
+          [[ "$REPORT" =~ ^[a-zA-Z0-9=,\ ?]*$ ]] || { echo "::error::unexpected report format"; exit 1; }
+          echo "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+
+  watch:
+    name: File an issue if the timer went quiet
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - name: Check the newest dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          R="$GITHUB_REPOSITORY"
+          last="$(gh run list -R "$R" --workflow ops-heartbeat.yml --event workflow_dispatch --limit 1 --json createdAt --jq '.[0].createdAt // ""')"
+          if [ -n "$last" ] && [ $(( $(date +%s) - $(date -u -d "$last" +%s) )) -le 86400 ]; then
+            echo "newest dispatch $last: timer alive"
+            exit 0
+          fi
+          title="External CI timer quiet for over 24 h"
+          open="$(gh issue list -R "$R" --state open --search "\"$title\" in:title" --json number --jq 'length')"
+          [ "$open" != "0" ] && { echo "already reported"; exit 0; }
+          gh issue create -R "$R" --title "$title" --body "ops-heartbeat.yml received no dispatch for 24 h (newest: ${last:-none}). Check the timer host and whether its dispatch token expired."
