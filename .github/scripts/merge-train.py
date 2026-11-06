@@ -6363,7 +6363,7 @@ def self_test() -> int:
             ok, why = first_in_line_updated("pPR", "pW2", "pP1")
             check("strict carrier (13): a first-in-line member needing regeneration is served first, no carrier overtakes it", ok, why)
             reset()
-            open_only("pW2", "pP1")
+            open_only("pW2", "pP1", "pP2")      # two more behind it, or nothing could overtake it
             advance_main()
             gh.post_status(gh.prs[36]["head"]["sha"], "success", "timed out", context=RELEASED_CONTEXT)
             s = settle_strict(cap=8)
