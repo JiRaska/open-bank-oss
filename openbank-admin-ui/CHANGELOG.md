@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.0.0...admin-ui-v4.1.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
 ## [4.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.18.0...admin-ui-v4.0.0) (2026-11-06)
 
 
