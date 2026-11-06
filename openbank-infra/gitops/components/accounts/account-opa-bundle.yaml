@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "7da022801c718922"
+    openbank.tech/policy-checksum: "f5add0098fb702c7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -590,7 +590,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
