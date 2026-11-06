@@ -765,6 +765,7 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PACT_CONSUMER: ${{ inputs.consumer }}
+          SERVICE: ${{ inputs.service }}
         run: |
           set -euo pipefail
           consumer_args=()
@@ -777,12 +778,24 @@ jobs:
               echo '::error::A consumer scope cannot be combined with a historical admin-ui proof.'
               exit 1
             fi
-            # pact-jvm's real consumer filter. build-logic forwards only an allowlist of system
-            # properties to the test JVM, and pact.filter.consumers is on it. A scoped run
+            # P keeps its own build-logic. Validate its effective Test task after
+            # configuration, before any provider task/JVM can publish a result.
+            scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
+            cat > "$scope_guard" <<'GRADLE'
+          gradle.projectsEvaluated {
+              def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
+              def task = provider.tasks.named("providerPactTest").get()
+              if (!(task instanceof org.gradle.api.tasks.testing.Test) ||
+                      task.systemProperties["pact.filter.consumers"] != System.getenv("PACT_CONSUMER")) {
+                  throw new GradleException("Consumer scope is not forwarded by the checked-out provider Test task; refusing replay.")
+              }
+          }
+          GRADLE
+            # A scoped run
             # publishes verification results only for the pacts it actually verified (pact-jvm
             # publishes per verified consumer pact), so the broker never records a result for a
             # consumer that was not replayed; other consumers stay unverified for this version.
-            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}")
+            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}" --init-script "$scope_guard")
           fi
           pact_url_arg=()
           if [ -n "${HISTORICAL_PACT_URL:-}" ]; then

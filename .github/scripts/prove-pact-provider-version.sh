@@ -75,6 +75,26 @@ regular_blob_at() {
     || refuse "approved fixture must be a regular 100644 blob at ${sha:0:8}"
 }
 
+# A missing bundle in P must not turn an existing parent symlink into a write
+# through src/test into production files. Check every target before writing any.
+safe_overlay_target() {
+  local sha="$1" path="$2" parent="" part remaining="$2" entry
+  while [ "$remaining" != "${remaining#*/}" ]; do
+    part="${remaining%%/*}"; remaining="${remaining#*/}"
+    parent="${parent:+$parent/}$part"
+    entry="$(git ls-tree "$sha" -- "$parent")"
+    if [ -n "$entry" ] && ! [[ "$entry" = '040000 tree '* ]]; then
+      refuse "overlay ancestor is not a regular directory in provider: $parent"
+    fi
+    if [ -L "$parent" ] || { [ -e "$parent" ] && [ ! -d "$parent" ]; }; then
+      refuse "overlay ancestor is not a regular directory in checkout: $parent"
+    fi
+  done
+  if [ -L "$path" ] || { [ -e "$path" ] && [ ! -f "$path" ]; }; then
+    refuse "overlay target is not a regular file in checkout: $path"
+  fi
+}
+
 # The trusted equivalence function lives next to this script (the workflow copies both out of the
 # trusted checkout before P replaces the workspace — P's own copy may predate --own-test-overlay).
 EQUIVALENCE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pact-version-tree-equivalent.sh"
@@ -144,6 +164,7 @@ prepare_overlay() {
     if [ -n "$(git ls-tree "$provider" -- "$path")" ]; then
       regular_blob_at "$provider" "$path"
     fi
+    safe_overlay_target "$provider" "$path"
   done
   # Validate the entire fixed bundle before importing any blob. Nothing from src/main,
   # pacts, build configuration or sibling tests is imported, even when P and F differ.

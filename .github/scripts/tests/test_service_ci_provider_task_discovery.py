@@ -233,9 +233,78 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             call = calls.read_text().splitlines()[-1]
             self.assertIn("-Dpact.filter.consumers=openbank-agent-service", call)
             self.assertNotIn("pactbroker.consumers", call)
+            guard = root / "runner-temp/pact-consumer-scope.init.gradle"
+            self.assertIn(f"--init-script {guard}", call)
+            guard_source = guard.read_text()
+            self.assertIn("gradle.projectsEvaluated", guard_source)
+            self.assertIn('provider.tasks.named("providerPactTest").get()', guard_source)
+            self.assertIn('task.systemProperties["pact.filter.consumers"]', guard_source)
+            self.assertIn('System.getenv("PACT_CONSUMER")', guard_source)
+            self.assertIn("throw new GradleException", guard_source)
             keys = re.findall(r"-D((?:pact|pactbroker)[\w.]*)=", call)
             self.assertTrue(keys)
             self.assertEqual(sorted(set(keys) - forwarded), [], "passed but never forwarded to the test JVM")
+
+    def test_missing_fixture_bundle_refuses_unsafe_provider_paths_without_writes(self):
+        helper = ROOT / ".github/scripts/prove-pact-provider-version.sh"
+        for service, package, fixture in (
+            ("openbank-clearing-service", "clearing", "ClearingPactBrokerProviderVerificationTest.kt"),
+            ("openbank-sepa-instant", "sepainstant", "SepaInstantPactBrokerProviderVerificationTest.kt"),
+        ):
+            seed = "AgentClearingPactSeed.kt" if package == "clearing" else "AgentSepaInstantPactSeed.kt"
+            for bad_path in ("ancestor-symlink", "ancestor-file", "second-target-symlink"):
+                with self.subTest(service=service, path=bad_path), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+
+                    def git(*args, root=root):
+                        return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+
+                    def write(path, text, root=root):
+                        target = root / path
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_text(text)
+
+                    git("init", "-q", "-b", "main")
+                    git("config", "user.name", "selftest")
+                    git("config", "user.email", "selftest@example.invalid")
+                    git("config", "commit.gpgsign", "false")
+                    contract = f"kotlin/com/openbank/{package}/contract"
+                    write(f"{service}/build.gradle.kts", "plugins {}\n")
+                    write(".github/workflows/auto-deploy.yml", "env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n")
+                    write(f"{service}/src/main/Runtime.kt", "provider runtime P\n")
+                    write(f"{service}/src/main/{contract}/{seed}", "runtime seed P\n")
+                    write(f"{service}/src/main/{contract}/{fixture}", "runtime fixture P\n")
+                    test_root = root / service / "src/test"
+                    if bad_path == "ancestor-symlink":
+                        test_root.symlink_to(root / service / "src/main", target_is_directory=True)
+                    elif bad_path == "ancestor-file":
+                        test_root.write_text("provider non-directory\n")
+                    git("add", service, ".github")
+                    git("commit", "-qm", "provider")
+                    provider = git("rev-parse", "HEAD")
+                    if test_root.exists() or test_root.is_symlink():
+                        test_root.unlink()
+                    write(f"{service}/src/main/Runtime.kt", "different runtime F\n")
+                    for name in (fixture, seed):
+                        write(f"{service}/src/test/{contract}/{name}", f"test fixture F {name}\n")
+                    git("add", service)
+                    git("commit", "-qm", "fixture")
+                    revision = git("rev-parse", "HEAD")
+                    git("checkout", "--quiet", "--detach", provider)
+                    if bad_path == "second-target-symlink":
+                        target = root / service / "src/test" / contract / seed
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.symlink_to(root / service / "src/main" / contract / seed)
+                    before = git("status", "--porcelain", "--untracked-files=all")
+                    result = subprocess.run(
+                        ["bash", str(helper), "--prepare-overlay", service, provider, revision, revision],
+                        cwd=root, capture_output=True, text=True, timeout=20, check=False,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertNotIn("OVERLAY_READY", result.stdout)
+                    self.assertEqual(git("status", "--porcelain", "--untracked-files=all"), before)
+                    self.assertEqual((root / service / "src/main" / contract / seed).read_text(), "runtime seed P\n")
+                    self.assertEqual((root / service / "src/main" / contract / fixture).read_text(), "runtime fixture P\n")
 
     def test_consumer_only_discovery_never_invokes_provider_task(self):
         with tempfile.TemporaryDirectory() as tmp:
