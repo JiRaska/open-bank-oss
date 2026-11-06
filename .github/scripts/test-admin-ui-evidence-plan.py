@@ -87,6 +87,18 @@ class EvidencePlanUIStreamTest(unittest.TestCase):
         events.insert(2, ui_change("data.aws_iam_policy_document.evidence", "read"))
         self.assertEqual(len(GUARD.validate_ui_stream(ui_source(events))), 3)
 
+    def test_accepts_real_plan_data_read_hooks_and_lock_release(self):
+        events = ui_events()
+        for kind in ["apply_start", "apply_progress", "apply_complete"]:
+            events.insert(1, {"type": kind, "hook": {"resource": {"addr": "data.aws_iam_policy_document.evidence"}, "action": "read"}})
+        events.append({"type": "state_lock_release"})
+        self.assertEqual(len(GUARD.validate_ui_stream(ui_source(events))), 1)
+        for address, action in [("aws_iam_role.admin_ui_evidence", "read"),
+                                ("data.aws_iam_policy_document.evidence", "update")]:
+            bad = ui_events() + [{"type": "apply_complete", "hook": {"resource": {"addr": address}, "action": action}}]
+            with self.subTest(address=address, action=action), self.assertRaises(ValueError):
+                GUARD.validate_ui_stream(ui_source(bad))
+
     def test_accepts_complete_no_change_plan(self):
         self.assertEqual(GUARD.validate_ui_stream(ui_source(ui_events([], {
             "operation": "plan", "add": 0, "change": 0, "remove": 0,

@@ -82,7 +82,8 @@ def validate_ui_stream(source):
     addresses = set()
     counts = {"add": 0, "change": 0, "remove": 0}
     summary = None
-    passive = {"log", "diagnostic", "resource_drift", "outputs", "refresh_start", "refresh_complete"}
+    passive = {"log", "diagnostic", "resource_drift", "outputs", "refresh_start", "refresh_complete",
+               "state_lock_acquire", "state_lock_release"}
     actions = {"noop": "no-op", "read": "read", "create": "create", "update": "update"}
     for index, event in enumerate(events):
         if not isinstance(event, dict):
@@ -95,6 +96,15 @@ def validate_ui_stream(source):
         if kind == "version":
             if index != 0:
                 raise ValueError("duplicate UI version")
+        elif kind in {"apply_start", "apply_progress", "apply_complete"}:
+            # OpenTofu emits apply_* hooks for data-source reads during planning.
+            # Accept only that read-only shape, never managed-resource execution.
+            hook = event.get("hook")
+            resource = hook.get("resource") if isinstance(hook, dict) else None
+            if (not isinstance(resource, dict) or hook.get("action") != "read"
+                    or not isinstance(resource.get("addr"), str)
+                    or not resource["addr"].startswith("data.")):
+                raise ValueError("plan contains non-data execution hook")
         elif kind == "planned_change":
             if summary is not None:
                 raise ValueError("planned change after summary")
