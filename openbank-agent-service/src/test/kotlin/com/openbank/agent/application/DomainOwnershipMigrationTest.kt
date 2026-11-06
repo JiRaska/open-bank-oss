@@ -44,7 +44,9 @@ class DomainOwnershipMigrationTest {
 
     private fun assertDomains(expected: String, vararg tools: String) {
         tools.forEach { tool ->
-            assertThat(ToolServiceCatalog.domainOf(tool)).describedAs("packaged ownership of %s", tool).isEqualTo(expected)
+            assertThat(ToolServiceCatalog.domainOf(tool))
+                .describedAs("packaged ownership of %s", tool)
+                .isEqualTo(expected)
         }
     }
 }
