@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.4...sdd-service-v0.14.5) (2026-11-06)
+
+
+### Security
+
+* **sdd:** authenticate the API by bearer only on the mTLS listener ([#14771](https://github.com/JiRaska/open-bank-oss/issues/14771)) ([c8e69ee](https://github.com/JiRaska/open-bank-oss/commit/c8e69ee878c54a2f8ac183c18069a3d771d25301))
+
 ## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.14.3...sdd-service-v0.14.4) (2026-10-19)
 
 
