@@ -28,8 +28,12 @@ runs:
         OPENBANK_COVERAGE_REPORT_OUTCOME: ${{ env.SERVICE_CI_REPORT_OUTCOME }}
       shell: bash
       run: |
+        # Schema v2 adds the keycloak infrastructure vocabulary (#12541). Every reader
+        # (extractor, Admin UI projection and staging) accepts v1 and v2, so the producer
+        # opts in here; v1 stays the collector default for the other lanes.
         python3 .github/scripts/collect-test-run-evidence.py \
           --service "$SERVICE" \
+          --schema-version 2 \
           --out "$SERVICE/build/test-intelligence/run.json"
 
     - name: Retain immutable Test Intelligence run envelope
