@@ -118,3 +118,9 @@ into the agent image during resource processing. The tools/list metadata relay o
 validated published ownership for older agent images; it preserves the advertised tool
 set, downstream service identities, schemas, charter filtering and execution responses.
 External infrastructure without a governance declaration remains Unclassified.
+
+Declared external resource inputs also drive the consuming service’s image rollout
+and immutable artifact comparison. A governance-only migration therefore rebuilds
+the MCP metadata consumer, while unrelated banking service images remain independent.
+The same input parser feeds CI selection, deployment selection and retry equivalence;
+provider proof runners copy it from their trusted verification source.

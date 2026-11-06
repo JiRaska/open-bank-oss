@@ -119,9 +119,9 @@ GLOBAL_IN_SCOPE_DIRS=(gradle config build-logic)
 
 # Which subpaths of a DEPENDENCY module are compile inputs. Not a new opinion: this is the repo's
 # own definition, from libs-change-dependents.sh (`^<module>/(src/main|build.gradle.kts)` plus the
-# global `openbank-libs/gradle/` version catalog), and auto-deploy's own change detection excludes
-# `openbank-libs/governance/` in as many words — "data for CI checks + admin-ui, not a compile
-# input". Comparing the whole directory instead is not free caution: measured 2026-08-03, all 32
+# global `openbank-libs/gradle/` version catalog). Declared external resource copies are
+# compared independently below; governance data is otherwise outside the compile classpath.
+# Comparing the whole directory instead is not free caution: measured 2026-08-03, all 32
 # services with a main-tagged pact version were refused, and 12 of them ONLY because four files
 # under openbank-libs/governance/ had moved. The service's OWN directory is still compared whole.
 DEP_SUBPATHS=(src/main build.gradle.kts gradle)
@@ -278,6 +278,19 @@ equivalent() {
   [ "$old_build_inputs" = "$new_build_inputs" ] \
     || differs "augmentation-time service build properties changed between ${pact_sha:0:8} and ${dispatch_sha:0:8}"
 
+  # External resources copied by processResources are image bytes too. Derive them
+  # from both revisions, including dependency modules, before classifying sibling data
+  # as irrelevant. No Gradle/PR code is evaluated and unknown resource syntax refuses.
+  local resource_helper resource_root resource_module resource_modules resource_result
+  local resource_args=()
+  resource_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime_resource_inputs.py"
+  resource_root="$(git rev-parse --show-toplevel)" || differs "cannot resolve resource input repository"
+  resource_modules="$( { in_scope_modules "$pact_sha" "$svc"; in_scope_modules "$dispatch_sha" "$svc"; } | sort -u)"
+  for resource_module in $resource_modules; do resource_args+=(--service "$resource_module"); done
+  resource_result="$(python3 "$resource_helper" --root "$resource_root" --compare \
+    "${resource_args[@]}" --base "$pact_sha" --head "$dispatch_sha" 2>&1)" \
+    || differs "packaged resource inputs changed or cannot be proven: ${resource_result}"
+
   # 1. Build the list of in-scope PATHS: this service whole, each dependency module's compile
   #    inputs, the global build directories, and the two `.github/` files that reach the image.
   local scope="" m d a b
@@ -352,6 +365,8 @@ equivalent() {
 # mocked `git` would test the mock. Each case asserts the DIRECTION as well as the verdict — a
 # harness that only ever sees the equivalent case cannot notice the rule being deleted.
 selftest() {
+  # Fixture commits belong to a separate repo, not a caller's gate index or object store.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
   local me tmp fail=0
   me="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   tmp="$(mktemp -d)"

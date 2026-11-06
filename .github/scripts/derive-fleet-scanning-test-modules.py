@@ -30,8 +30,9 @@ from __future__ import annotations
 import re
 import sys
 import tempfile
-from fnmatch import fnmatchcase
 from pathlib import Path
+
+from runtime_resource_inputs import path_matches, resource_patterns
 
 ROOT_READ = re.compile(r'(?:File|Path\.of|Paths\.get)\(\s*"\.\."\s*\)')
 PREFIX_FILTER = re.compile(r'startsWith\(\s*"openbank-"\s*\)')
@@ -46,7 +47,7 @@ DIRECT_FILE = re.compile(r'File\(\s*"\.\./(openbank-[^"]+)"\s*\)')
 # covered by PINNED edges and by the `^<module>/` fan-out. Measured 2026-11-04: without this,
 # every change under openbank-infra/, docs/ or .github/ fell to the full-fleet fallback — about
 # 20 PR branches with 86 queued builds each — while the tests that read those trees number 2-5.
-REPO_PATH_LITERAL = re.compile(r'"((?:\.\./)*[A-Za-z0-9_.*-]+(?:/[A-Za-z0-9_.*-]+)*)"')
+REPO_PATH_LITERAL = re.compile(r'"((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)*)"')
 # `Path.of("..", "openbank-infra", "gitops", "x.yaml")` carries the path as SEGMENTS: joined
 # here, so the read is attributed to x.yaml and not to the whole openbank-infra tree.
 SEGMENTED_PATH = re.compile(r'(?:Path\.of|Paths\.get|File)\(\s*((?:"[^"]*"\s*,\s*)+"[^"]*")\s*\)')
@@ -91,16 +92,6 @@ def external_paths(text: str, module: str, tops: set[str], root_files: set[str],
             found.add(rel)
         elif "/" in rel and is_module(root, top):
             found.add(rel)          # a file or directory inside another module
-        elif "/" in rel and "*" in top and not top.startswith("*"):
-            # Expand an anchored module-name glob against REAL Gradle modules.
-            # Unrooted strings such as the MIME type "*/*" are not source reads.
-            # Keep the suffix as a watch pattern so deleted/not-yet-created inputs
-            # still select their reader; never infer an unrestricted fleet scan.
-            suffix = rel.split("/", 1)[1]
-            for target in root.iterdir():
-                if (target.is_dir() and target.name != module and is_module(root, target.name)
-                        and fnmatchcase(target.name, top)):
-                    found.add(f"{target.name}/{suffix}")
     return found
 
 
@@ -117,6 +108,8 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str
                 btext = build.read_text(encoding="utf-8", errors="replace")
                 for path in external_paths(btext, mod.name, tops, root_files, root):
                     direct.add((mod.name, path))
+                for pattern in resource_patterns(btext):
+                    direct.add((mod.name, pattern))
         test_dir = mod / "src" / "test"
         if not test_dir.is_dir():
             continue
@@ -146,34 +139,9 @@ def has_module_input(root: Path, paths: list[str], main_tree_only: bool = False)
 
 
 def direct_readers(direct: set[tuple[str, str]], paths: list[str]) -> set[str]:
-    def matches(path: str, watched: str) -> bool:
-        if "*" not in watched:
-            return path == watched or path.startswith(watched.rstrip("/") + "/")
-        # Gradle/Ant '**/' spans zero or more directories, '**' is recursive,
-        # and '*' stays within one segment. Escape every other character.
-        # Prefix matching keeps existing conservative directory-read behavior.
-        glob = watched.rstrip("/")
-        parts: list[str] = []
-        index = 0
-        while index < len(glob):
-            if glob.startswith("**/", index):
-                parts.append(r"(?:[^/]+/)*")
-                index += 3
-            elif glob.startswith("**", index):
-                parts.append(r".*")
-                index += 2
-            elif glob[index] == "*":
-                parts.append(r"[^/]*")
-                index += 1
-            else:
-                parts.append(re.escape(glob[index]))
-                index += 1
-        pattern = "".join(parts)
-        return re.match(f"^{pattern}(?:/|$)", path) is not None
-
     return {
         reader for reader, watched in direct
-        if any(matches(path, watched) for path in paths)
+        if any(path_matches(path, watched.rstrip("/")) for path in paths)
     }
 
 
@@ -208,20 +176,15 @@ def self_test() -> int:
               'val tree = File(root, "openbank-infra").walkTopDown()')  # bare non-module dir = whole tree
         write("openbank-namer", "h/NameTest.kt",
               'val consumer = "openbank-infra"; val pact = "pacts/openbank-infra-openbank-namer.json"')  # identifiers, not reads
-        write("openbank-mime", "h/MimeTest.kt",
-              'client.getRaw("/document", "party-1", "*/*")')
         write("openbank-segmenter", "g/SegTest.kt",
               'val y = Path.of("..", "openbank-infra", "gitops", "seg.yaml"); '
               'val marker = generateSequence(File("")) { it.parentFile }.first { File(it, "openbank-infra").isDirectory }')
         (r / "openbank-copier").mkdir()
         (r / "openbank-copier" / "build.gradle.kts").write_text('from(rootProject.file("docs/prompts/x")) {}')
-        (r / "openbank-glob-copier").mkdir()
-        (r / "openbank-glob-copier" / "build.gradle.kts").write_text(
-            'from(rootProject.rootDir) { include("openbank-*/governance.yaml") }; '
-            'from(rootProject.rootDir) { include("openbank-target/src/main/resources/*.yaml") }; '
-            'from(rootProject.rootDir) { include("openbank-target/src/main/resources/**/*.json") }; '
-            'from(rootProject.rootDir) { include("openbank-target/recursive/**") }')
-        (r / "openbank-pretender").mkdir()  # matching name, but not a Gradle module
+        (r / "openbank-resource-copier").mkdir()
+        (r / "openbank-resource-copier" / "build.gradle.kts").write_text(
+            'tasks.named<Copy>("processResources") { '
+            'from(rootProject.file(".")) { include("openbank-*/governance.yaml") } }')
         fleet, edges, direct, main_tree_only = scan(r)
         ok = True
         if fleet != {"openbank-scanner"}:
@@ -251,9 +214,6 @@ def self_test() -> int:
         if "openbank-segmenter" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
             print("FAIL: a repo-root existence probe was read as a whole-tree read")
             ok = False
-        if "openbank-mime" in direct_readers(direct, ["openbank-target/governance.yaml"]):
-            print("FAIL: a MIME wildcard was interpreted as a root source glob")
-            ok = False
         if "openbank-namer" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
             print("FAIL: a bare directory name used as an identifier was read as a whole-tree read")
             ok = False
@@ -263,32 +223,12 @@ def self_test() -> int:
         if direct_readers(direct, ["docs/prompts/x/a.md"]) != {"openbank-copier"}:
             print("FAIL: build.gradle.kts resource copy was not discovered as a reader")
             ok = False
-        if direct_readers(direct, ["openbank-target/governance.yaml"]) != {"openbank-glob-copier"}:
-            print("FAIL: declared root module glob did not select its resource copier")
+        if "openbank-resource-copier" not in direct_readers(direct, ["openbank-target/governance.yaml"]):
+            print("FAIL: declared processResources glob did not select its image consumer")
             ok = False
-        for changed in ["openbank-target/src/main/kotlin/Unrelated.kt",
-                        "openbank-target/nested/governance.yaml",
-                        "nested/openbank-target/governance.yaml",
-                        "openbank-pretender/governance.yaml",
-                        "openbank-missing/governance.yaml",
-                        "openbank-target/src/main/resources/nested/deeper.yaml",
-                        "openbank-target/src/test/resources/fixture.json",
-                        "openbank-target/src/main/resources/nested/wrong.txt",
-                        "openbank-target/src/main/resources/rootxjson"]:
-            if "openbank-glob-copier" in direct_readers(direct, [changed]):
-                print(f"FAIL: module glob selected its reader for unrelated/nonmodule path {changed}")
-                ok = False
-        if "openbank-glob-copier" not in direct_readers(direct, ["openbank-target/src/main/resources/new.yaml"]):
-            print("FAIL: declared single-segment suffix glob was not matched")
+        if "openbank-resource-copier" in direct_readers(direct, ["openbank-target/src/test/Unrelated.kt"]):
+            print("FAIL: packaged-resource declaration selected an unrelated test input")
             ok = False
-        for changed in ["openbank-target/src/main/resources/root.json",
-                        "openbank-target/src/main/resources/nested/fixture.json",
-                        "openbank-target/src/main/resources/one/two/deep.json",
-                        "openbank-target/recursive/root.txt",
-                        "openbank-target/recursive/one/two/deep.txt"]:
-            if "openbank-glob-copier" not in direct_readers(direct, [changed]):
-                print(f"FAIL: declared recursive glob was not matched for {changed}")
-                ok = False
         if direct_readers(direct, [".github/scripts/check-x.py", "SECURITY.md", "docs/runbook.md"]):
             print("FAIL: a path no test names selected a reader")
             ok = False

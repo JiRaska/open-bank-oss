@@ -387,6 +387,8 @@ selftest() {
      || ! grep -Fq 'cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh' "$workflow" \
      || ! grep -Fq '"$RUNNER_TEMP/prove-pact-provider-version.sh"' "$workflow" \
      || ! grep -Fq 'cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh' "$workflow" \
+     || ! grep -Fq 'cp provider-proof-source/.github/scripts/runtime_resource_inputs.py' "$workflow" \
+     || ! grep -Fq 'cp provider-proof-source/.github/scripts/library_dependency_graph.py' "$workflow" \
      || grep -Fq 'bash .github/scripts/prove-pact-provider-version.sh --prepare-overlay' "$workflow"; then
     echo 'selftest FAIL: workflow does not preserve a trusted proof runner outside the P checkout' >&2
     fail=1
