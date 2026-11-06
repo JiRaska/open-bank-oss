@@ -4,6 +4,7 @@ package com.openbank.engagement.infrastructure.rest
 import com.openbank.engagement.application.port.out.GameStore
 import com.openbank.engagement.domain.model.game.GameCatalog
 import com.openbank.engagement.domain.model.game.GameCatalogConflict
+import com.openbank.engagement.domain.model.game.GameLevel
 import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -40,7 +41,8 @@ class GameLevelResource(
     @Path("/admin/catalog")
     @RolesAllowed("ROLE_ADMIN")
     @Authorize(action = "engagement.gameCatalog.write")
-    suspend fun update(catalog: GameCatalog): Response = try {
+    suspend fun update(request: GameCatalogWriteRequest): Response = try {
+        val catalog = request.toDomain()
         val actor = requireNotNull(identity.principal.name).also { require(it.isNotBlank()) }
         Response.ok(store.update(catalog, actor, clock.instant())).build()
     } catch (_: GameCatalogConflict) {
@@ -74,4 +76,12 @@ class GameLevelResource(
         val accepted = store.complete(requireNotNull(partyId), levelId, beta, clock.instant())
         return if (accepted) Response.noContent().build() else Response.status(Response.Status.FORBIDDEN).build()
     }
+}
+
+/** Nullable wire elements are rejected before the non-null domain is constructed. */
+data class GameCatalogWriteRequest(val revision: Long, val levels: List<GameLevel?>) {
+    fun toDomain(): GameCatalog = GameCatalog(
+        revision,
+        levels.mapIndexed { index, level -> requireNotNull(level) { "levels[$index] must not be null" } },
+    )
 }

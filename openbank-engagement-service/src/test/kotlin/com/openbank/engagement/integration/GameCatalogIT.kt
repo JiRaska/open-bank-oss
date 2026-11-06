@@ -26,6 +26,19 @@ class GameCatalogIT {
     lateinit var games: GameStore
 
     @Test
+    fun `null catalogue element returns 400 without changing stored revision`() {
+        val before = given().get(
+            "/api/v1/game/admin/catalog",
+        ).then().statusCode(200).extract().jsonPath().getLong("revision")
+        given().contentType("application/json").body("""{"revision":$before,"levels":[null]}""")
+            .put("/api/v1/game/admin/catalog").then().statusCode(400)
+        val after = given().get(
+            "/api/v1/game/admin/catalog",
+        ).then().statusCode(200).extract().jsonPath().getLong("revision")
+        assertThat(after).isEqualTo(before)
+    }
+
+    @Test
     fun `only the selected partys persisted education award unlocks an achievement chapter`(): Unit = runBlocking {
         val before = games.catalog()
         val party = UUID.randomUUID()
