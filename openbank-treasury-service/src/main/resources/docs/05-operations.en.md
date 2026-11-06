@@ -8,7 +8,7 @@ Treasury parses untrusted camt.053 uploads through `SecureXml`. Its DOM builder 
 
 Read the deal and its last transition through the authenticated treasury API before retrying an action. A pending approval still requires a different human approver; a rejected product mandate cannot be cleared with the senior counterparty override. For a booked deal whose financial effect is missing, compare the treasury transition, its outbox delivery and the ledger's idempotent journal result. Replaying the same transition without identifying which boundary failed can obscure a ledger or event-delivery fault.
 
-For reconciliation, inspect the statement's reconciliation result and outstanding breaks. A break represents a difference between expected and observed settlement; do not mark it settled from a successful XML upload alone. The repository runbook `docs/runbooks/svc-treasury.md` covers service health and recovery; deployment configuration remains in GitOps.
+For reconciliation, inspect the statement's reconciliation result and outstanding breaks. A break represents a difference between expected and observed settlement; do not mark it settled from a successful XML upload alone. The hourly break sweep re-reconciles every statement from the last 31 days, plus up to 50 older statements that still hold an open break, rotating through them so each is visited in turn; a late ledger booking therefore resolves a break whatever its statement's age. Nothing resolves a break except a matching reconciliation: there is no write-off path. The repository runbook `docs/runbooks/svc-treasury.md` covers service health and recovery; deployment configuration remains in GitOps.
 
 ## Mutation testing scope
 
