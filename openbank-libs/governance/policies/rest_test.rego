@@ -2114,3 +2114,13 @@ test_account_catalog_read_exact_identity_only if {
 		not rest.allow.allow with input as {"principal": candidate, "action": "catalog.read"} with data.openbank.bundle as bundle
 	}
 }
+
+# Game play is the only new edge authority; catalogue administration stays on the staff plane.
+test_edge_game_authority_is_narrow if {
+	edge := {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_API"], "service_account": true, "client_id": "openbank-edge"}
+	every action in {"engagement.game.read", "engagement.game.complete"} {
+		rest.allowed_reasons["edge-service-engagement"] with input as {"principal": edge, "action": action}
+	}
+	not rest.allowed_reasons["edge-service-engagement"] with input as {"principal": edge, "action": "engagement.gameCatalog.write"}
+	not rest.allowed_reasons["edge-service-engagement"] with input as {"principal": edge, "action": "engagement.gameCatalog.read"}
+}
