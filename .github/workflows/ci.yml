@@ -137,7 +137,8 @@ jobs:
                   openbank-product-catalog/src/main/resources/openapi.yaml \
                   openbank-developer-portal/ \
                   '*/governance.yaml' \
-                  openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
+                  openbank-libs/governance/governance.schema.json \
+                  openbank-libs/governance/domain-taxonomy.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
             echo "Admin UI, developer portal or governance files changed: $N"
             # Derive cross-package guard inputs from literal backend paths.

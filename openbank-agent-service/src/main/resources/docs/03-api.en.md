@@ -1,8 +1,8 @@
 # API
 
-The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
+The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.18.1**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
 
-Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`) and the API-contract version (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). They are independent.
+Two version axes apply (ADR-0048): the release version (`version.txt`) and the API-contract version (`openapi.yaml: info.version` = `1.18.1`, `openbank.api.version = "1"`). They are independent.
 
 ## Surfaces
 
@@ -26,6 +26,19 @@ A single JSON-RPC 2.0 dispatcher. The `method` field selects the operation. Noti
 | `tools/list` | Enumerate the available tools (name, description, JSON-Schema `inputSchema`). |
 | `tools/call` | Invoke a named tool with `arguments`. The call is authorized by the policy gate **before** execution; a denial returns a `ToolCallResult` with `isError=true` and the policy reason. |
 | `ping` | Liveness — returns `{ "pong": true }`. |
+
+### Business ownership metadata
+
+Each `tools/list` entry retains its downstream `service` identity. Its `domain` label is
+read from the same per-module `governance.yaml` and canonical domain taxonomy packaged
+into the service image during resource processing. External infrastructure without a
+declaration is `Unclassified`; known banking tools must resolve a declared owner.
+The historical `sepa-instant-service` tool identity resolves `openbank-sepa-instant`
+ownership without renaming tools or changing their target.
+
+The admin MCP relay overlays reviewed published ownership on successful `tools/list`
+responses when that metadata advances before the agent image. The tool set, charter
+filtering, capabilities, input schemas and `tools/call` responses remain unchanged.
 
 ### Tool catalogue (all read-only)
 

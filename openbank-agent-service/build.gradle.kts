@@ -25,6 +25,8 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // Parse the same bundled governance declarations as the catalog; already supplied by Quarkus YAML.
+    implementation("org.yaml:snakeyaml")
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
@@ -77,6 +79,15 @@ dependencies {
 // agent load their system prompts from the registered files at runtime instead of inline constants.
 // This copy is derived from openbank-libs/governance/prompts/ — never hand-edit it here.
 tasks.named<Copy>("processResources") {
+    // Image-pinned MCP metadata is derived from source ownership, never a second domain table.
+    from(rootProject.file(".")) {
+        include("openbank-*/governance.yaml")
+        into("business-domains")
+    }
+    from(rootProject.file("openbank-libs/governance/domain-taxonomy.json")) {
+        into("business-domains")
+        rename { "taxonomy.json" }
+    }
     from(rootProject.file("openbank-libs/governance/prompts/compliance-officer")) {
         include("oversight.v1.md")
         into("governance-prompts/compliance-officer")

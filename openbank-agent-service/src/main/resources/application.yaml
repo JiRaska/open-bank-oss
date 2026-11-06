@@ -1,4 +1,8 @@
 quarkus:
+  native:
+    resources:
+      includes: business-domains/**
+
   application:
     name: openbank-agent-service
 
