@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.3...billing-service-v0.17.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **billing:** read the product catalog as openbank-billing, not the shared client ([#14827](https://github.com/JiRaska/open-bank-oss/issues/14827)) ([a6d0948](https://github.com/JiRaska/open-bank-oss/commit/a6d0948f59d06341a60283da0fd15ba2daefbf6b))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.2...billing-service-v0.17.3) (2026-10-29)
 
 
