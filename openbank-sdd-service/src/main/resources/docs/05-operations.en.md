@@ -110,3 +110,11 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 The collection-debit consumer books the debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a readable COMPLETED transaction counts as debited; any other 2xx state (FAILED, in progress, unreadable) is thrown as completion-uncertain and retried with the same idempotency key. A 409 is an idempotent success. A refusal (400/422) throws `SddDebitFailedException` so the event reaches the DLQ. Any other answer or a dropped connection is thrown and retried with the same idempotency key. No configuration changed.
 
 Before retry logging, completion-uncertain exceptions retain only their controlled status and discard body-binding causes that can contain provider payloads. Retry counts and original idempotency keys remain unchanged. Other exception logging and the shared response-close logger remain outside this bounded guarantee.
+
+## Test coverage floor
+
+`koverVerify` enforces a LINE coverage floor of 40%, the money-path baseline in `rules.yaml: coverage.money_path_floor` (raised from 38 in #13144). Measured coverage on 2026-10-31 was 78.8% (472/599 lines). The floor is ratchet-only.
+
+## API identity on the mTLS listener
+
+In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `SddListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.

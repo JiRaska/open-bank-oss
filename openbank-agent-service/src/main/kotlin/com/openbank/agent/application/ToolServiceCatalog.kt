@@ -53,7 +53,7 @@ object ToolServiceCatalog {
         // Agent-local HITL tools — no downstream banking service; grouped under the agent itself.
         "draft_ticket" to "agent-service",
         "flip_feature_flag" to "agent-service",
-    )
+    ) + ProductAuthoringTools.CAPABILITIES.keys.associateWith { "agent-service" }
 
     private val domains: Map<String, String> = mapOf(
         "account-service" to "Core Banking",

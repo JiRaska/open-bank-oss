@@ -74,11 +74,39 @@ dependencies {
     // than a re-model of either. The domain package is framework-free (ADR-0002), so only the
     // domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-domestic-payment"))
+    // REAL clearing-service domain aggregates — `ClearingItem`/`ClearingBatch`/
+    // `SettlementPosition` and the `ClearingStatus`/`PaymentRail` vocabularies, with the batch
+    // totals computed by the same kernel-Money fold production's ClearingService uses — rather
+    // than a re-model of the clearing cycle. The domain package is framework-free (ADR-0002),
+    // so only the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-clearing-service"))
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the harness also drives the
+    // REAL pension-service domain — the PensionContract lifecycle (every edge listed in
+    // ContractStatus), the append-only Contribution credit (idempotent by paymentId) and the
+    // statutory StateContributionReturn obligation with its CzStateContributionCalendar deadlines
+    // (ZDPS §18) — rather than a re-model of any of them. The domain packages are framework-free
+    // (ADR-0002), so only the domain POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-pension-service"))
     // REAL `SctInstPayment` aggregate (sepa-instant) and the REAL scheme rule that guards it
     // (`SctInstSchemeRules.requireSchemeCurrency` — SCT Inst is euro-only, EPC rulebook), rather
     // than a re-model of either. The domain package is framework-free (ADR-0002 — no
     // jakarta/quarkus imports), so only the domain POJOs land on the classpath, not a runtime.
     implementation(project(":openbank-sepa-instant"))
+
+    // Issue #14366 (Test Intelligence simulation gap, money path): the harness also drives the
+    // REAL card-processing domain — the `CardAuthorization` aggregate (derived
+    // heldAmount/effectiveSpend holds) and the pure `AuthorizationLifecycle` policy
+    // (clear/reverse/expire, refusals as values rather than exceptions) — rather than a re-model
+    // of either. The domain package is framework-free (ADR-0002), so only the domain POJOs land
+    // on the classpath, not a runtime.
+    implementation(project(":openbank-card-processing-service"))
+    // REAL fx-service domain — the `FxRate` fixing with its ČNB-origin `inverted()` side-swap
+    // (a customer selling CZK is quoted 1/ask of the stored FOREIGN→CZK fixing, never a naive
+    // 1/bid) and the `FxConversionMath` margin/target-amount arithmetic — rather than a
+    // re-model of either. The domain package is framework-free (ADR-0002), so only the domain
+    // POJOs land on the classpath, not a runtime.
+    implementation(project(":openbank-fx-service"))
 
     // ADR-0143 phase 2d: the harness drives the REAL billing-service domain value objects
     // (AssessedFee, FeeJournalCommand, FeeReversalCommand — com.openbank.billing.domain) so
@@ -131,6 +159,27 @@ dependencies {
     // charge code, value-date format) and MT103 status vocabulary — rather than a re-model of
     // the cross-border rail. The domain package is framework-free (ADR-0002).
     implementation(project(":openbank-swift-service"))
+
+    // ADR-0032 §B: the harness also drives the REAL screening domain — the pure, framework-free
+    // `ScreeningPolicy` verdict over a conversion's screened names (BLOCK / REVIEW / CLEAR with
+    // the 0.85 potential-hit block threshold mirrored from sanctions' isHighRisk). It moved from
+    // fx-service into the shared financial-crime library (#13773), so the dependency follows it.
+    implementation(project(":openbank-libs-fincrime"))
+
+    // The harness also drives the REAL card-processing domain — the `CardAuthorization`
+    // aggregate (a derived, never-stored held amount) and the pure `AuthorizationLifecycle`
+    // policy (clear/reverse/expire with refusals as values, including the over-capture refusal
+    // that compares against the remainder so a near-Long.MAX presentment cannot wrap the
+    // check). The domain package is framework-free (ADR-0002), so only the domain POJOs land
+    // on the classpath.
+    implementation(project(":openbank-card-processing-service"))
+
+    // ADR-0352 phase 4: ProductReplayScenario replays the published reference products
+    // (openbank-products) through the pure interpreter with the production arithmetic
+    // (openbank-libs-finance); the synthetic portfolio generator is test data (openbank-libs-testing).
+    implementation(project(":openbank-products"))
+    implementation(project(":openbank-libs-finance"))
+    testImplementation(project(":openbank-libs-testing"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

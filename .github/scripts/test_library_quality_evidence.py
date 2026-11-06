@@ -125,8 +125,19 @@ class PollingEvidenceTest(unittest.TestCase):
         frame[2]['status'] = 'in_progress'
         result, reads = self.poll([frame])
         self.assertEqual(result, 1)
-        self.assertEqual(sum('/actions/runs?' in p for p in reads), 31)
+        # Before the budget: a fixed 30 s poll made 31 listings, 34 reads in all, per run.
+        # Backoff 30/60/120/240/240/(210 to deadline) lists 7 times: 10 reads in all.
+        self.assertEqual(sum('/actions/runs?' in p for p in reads), 7)
         self.assertEqual(sum('/jobs?' in p for p in reads), 2)
+        self.assertLessEqual(len(reads), 10)
+        self.assertLessEqual(len(reads), checker.MAX_API_CALLS)
+
+    def test_missing_evidence_still_fails_after_backoff(self):
+        frame = self.frame()
+        frame.pop(1)
+        result, reads = self.poll([frame])
+        self.assertEqual(result, 1)
+        self.assertLessEqual(len(reads), checker.MAX_API_CALLS)
 
     def test_running_producer_is_not_cached_and_is_read_when_completed(self):
         first = self.frame()
@@ -384,6 +395,28 @@ class TransportEvidenceTest(unittest.TestCase):
         rc, reads, _sleeps, _out = self.poll(faults=faults, frames=[first, second], timeout=10)
         self.assertEqual(rc, 1)
         self.assertTrue(any('/runs/2/attempts/2/jobs?' in e for e, *_ in reads))
+
+    def test_call_budget_exhaustion_fails_closed_never_passes(self):
+        frame = PollingEvidenceTest().frame()
+        frame[2]['status'] = 'in_progress'
+        with patch.object(checker, 'MAX_API_CALLS', 4), patch.object(checker, 'POLL_DELAYS', (1,)):
+            rc, reads, _sleeps, out = self.poll(frames=[frame, PollingEvidenceTest().frame()], timeout=900)
+        # files + list + 2 jobs = 4; the next listing (which would have passed) is refused.
+        self.assertEqual((rc, len(reads)), (1, 4))
+        self.assertIn("NOT_EVALUATED", out)
+        self.assertIn("API call budget of 4 exhausted", out)
+
+    def test_quota_retries_and_pages_are_charged_to_the_budget(self):
+        with patch.object(checker, 'MAX_API_CALLS', 2):
+            rc, reads, _sleeps, out = self.poll(faults=lambda _e, _n, now: self.quota(now[0], secondary=True))
+        self.assertEqual((rc, len(reads)), (1, 2))
+        self.assertIn("API call budget of 2 exhausted", out)
+
+    def test_low_shared_quota_stretches_the_poll_interval(self):
+        budget = checker.ReadBudget(900)
+        self.assertEqual([budget.poll_delay(i) for i in range(6)], [30, 60, 120, 240, 240, 240])
+        budget.quota_remaining = checker.LOW_QUOTA_REMAINING - 1
+        self.assertEqual(budget.poll_delay(0), checker.POLL_DELAYS[-1])
 
     def test_normal_success_and_unrelated_scope_do_not_add_reads(self):
         rc, reads, sleeps, _out = self.poll()

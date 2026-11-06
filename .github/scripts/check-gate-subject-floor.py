@@ -121,6 +121,12 @@ NO_CORPUS = {
     # again. It prints SUBJECTS= including zero, so "clean" and "did not look" stay
     # distinguishable in the log — the same shape as openapi-version-not-taken above.
     "no-epoch-instant-default",
+
+    # DIFF-SCOPED: its corpus is the automated Applications whose source.path this PR first
+    # introduces, so zero is the ordinary case and a floor would fail every other PR. It prints
+    # SUBJECTS= including zero, so "no new service" and "did not look" stay distinguishable; its
+    # self-test carries the known-positive.
+    "service-application-readiness",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list

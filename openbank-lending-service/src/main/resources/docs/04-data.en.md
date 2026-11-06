@@ -40,6 +40,7 @@ Monetary amounts are `NUMERIC(20,2)` with a separate `CHAR(3)` ISO-4217 `currenc
 | **V2** | `V2__installment_interest_accrual.sql` | Adds `installment.interest_accrued` + `accrued_at`; partial `idx_installment_accruable` (servicing posting loop, ADR-0028 Phase 2) |
 | **V3** | `V3__hibernate_sequences.sql` | `CREATE SEQUENCE lending_outbox_seq INCREMENT BY 50` — Panache id allocation needs `<table>_seq`; CREATE TABLE only made `<table>_id_seq`, and generation is `none`. Rollback: `DROP SEQUENCE lending_outbox_seq;` |
 | **V4** | `V4__loan_provisioning.sql` | Adds `loan_provisioning` (IFRS 9 stage/ECL history) + `idx_loan_provisioning_loan_period` (ADR-0028 Phase 3). Rollback: `DROP TABLE loan_provisioning;` |
+| **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Points `lending_outbox.id`'s default at `lending_outbox_seq` — native inserts (`loan.interest_accrued`) drew ids from the BIGSERIAL sequence starting at 1 and collided with the Panache entity path's pooled ids (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
 
 **Rule (CLAUDE.md):** never edit a migration after it is applied to a live DB — add a new versioned migration. `validate-on-migrate` is off; use `QUARKUS_FLYWAY_REPAIR_AT_START` only as a transient recovery measure.
 
