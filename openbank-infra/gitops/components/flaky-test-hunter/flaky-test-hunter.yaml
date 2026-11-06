@@ -27,7 +27,7 @@ spec:
         app.kubernetes.io/part-of: flaky-test-hunter
       annotations:
         # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
-        openbank.tech/policy-checksum: "669d4fac549899d6"
+        openbank.tech/policy-checksum: "e75161a1c84019d7"
     spec:
       securityContext:
         runAsNonRoot: true

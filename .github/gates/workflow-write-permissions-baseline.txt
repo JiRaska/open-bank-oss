@@ -268,3 +268,4 @@ vex-hotfix.yml|job:vex-hotfix|issues
 vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
 test-evidence-reconcile.yml|job:reconcile|id-token
+merge-train-wake.yml|job:wake|actions

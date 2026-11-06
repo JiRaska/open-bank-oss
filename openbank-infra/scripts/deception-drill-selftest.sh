@@ -17,14 +17,17 @@ cat > "$tmp/bin/aws" <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
   *ssm\ get-parameter*) echo '{"aws_access_key_id":"AKIASTUB","aws_secret_access_key":"stub"}' ;;
-  *sts\ get-caller-identity*) echo "arn:aws:iam::000000000000:user/service/stub" ;;
+  *sts\ get-caller-identity*)
+    # A long-lived key sent with the drill role's session token is InvalidClientTokenId in real AWS.
+    if [[ -n "${AWS_SESSION_TOKEN:-}" ]]; then echo "InvalidClientTokenId" >&2; exit 254; fi
+    echo "arn:aws:iam::000000000000:user/service/stub" ;;
   *get-metric-statistics*) echo "${STUB_METRIC:-None}" ;;
   *) echo "unexpected aws call: $*" >&2; exit 9 ;;
 esac
 STUB
 chmod +x "$tmp/bin/"*
 
-run() { DRILL_DECOY_URL=https://decoy.invalid/x DRILL_SSM_PARAM=/stub PATH="$tmp/bin:$PATH" TIMEOUT=2 POLL=1 SETTLE=0 DRILL_VERDICT="$tmp/verdict" STUB_METRIC="$1" bash "$HERE/deception-drill.sh" --scope aws >"$tmp/out" 2>&1; echo $?; }
+run() { AWS_SESSION_TOKEN=role-session DRILL_DECOY_URL=https://decoy.invalid/x DRILL_SSM_PARAM=/stub PATH="$tmp/bin:$PATH" TIMEOUT=2 POLL=1 SETTLE=0 DRILL_VERDICT="$tmp/verdict" STUB_METRIC="$1" bash "$HERE/deception-drill.sh" --scope aws >"$tmp/out" 2>&1; echo $?; }
 
 rc=$(run None || true)
 if [[ "$rc" != 1 ]] || ! grep -q '^key  *FAIL' "$tmp/out" || ! grep -q '^delivery  *FAIL' "$tmp/out"; then

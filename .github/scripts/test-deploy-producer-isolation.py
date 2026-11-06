@@ -74,7 +74,8 @@ class ProducerIsolationTests(unittest.TestCase):
                 git('config', 'user.name', 'test')
                 scripts = origin / '.github/scripts'
                 scripts.mkdir(parents=True)
-                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh'):
+                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh',
+                             'runtime_resource_inputs.py', 'library_dependency_graph.py'):
                     shutil.copyfile(ROOT / '.github/scripts' / name, scripts / name)
                 workflow = origin / '.github/workflows/auto-deploy.yml'
                 workflow.parent.mkdir()
@@ -201,7 +202,8 @@ class ProducerIsolationTests(unittest.TestCase):
                 git(directory, 'clone', '-q', '--no-tags', '--depth=100', origin.as_uri(), str(checkout))
                 if change == 'diverged':
                     git(checkout, 'fetch', '-q', 'origin', source)
-                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh'):
+                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh',
+                             'runtime_resource_inputs.py', 'library_dependency_graph.py'):
                     destination = checkout / '.github/scripts' / name
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(ROOT / '.github/scripts' / name, destination)

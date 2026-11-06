@@ -42,6 +42,11 @@ without becoming owned by Accounting or Payments. Namespace comments attributing
    Shared capability ownership does not merge stores or grant cross-context access.
    Runtime health and discovery overlay current published ownership as metadata only;
    operational targets and BFF exposure remain pinned to the deployed image.
+   MCP tools derive their image metadata from those same packaged declarations and taxonomy.
+   The tools/list relay overlays published ownership without changing tool identities,
+   capabilities, argument schemas or execution responses.
+   Declared packaged resource inputs drive CI, consumer image rollouts and immutable
+   artifact comparisons, so metadata-only updates reach the runtime consumer.
 5. Publish the expanded taxonomy at the separate `admin-ui/content/domains-v1` evidence
    prefix. Preserve the legacy selector for older images and rollback. New readers validate
    the taxonomy discriminator and catalog/governance agreement; incompatible content uses
