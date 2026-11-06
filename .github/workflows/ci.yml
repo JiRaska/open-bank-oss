@@ -667,6 +667,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       # Node 26, for the same reason ui-build pins it: it is what openbank-admin-ui's
       # dependency tree is resolved against (Dockerfile: node:26-alpine). The gates shard
       # had no setup-node at all, so it ran on whatever the runner image ships, and the
@@ -836,6 +839,10 @@ jobs:
           path: ${{ runner.temp }}/gate-results-${{ matrix.slug }}.json
           if-no-files-found: warn
           retention-days: 90
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   # Aggregates the shards into the single REQUIRED context named in the main-protection
   # ruleset. `cancelled` is treated as a failure on a PR for the same reason the Admin UI

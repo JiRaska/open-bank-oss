@@ -138,6 +138,9 @@ jobs:
           # No credential survives into the repository the generators run against.
           persist-credentials: false
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Install OPA
         run: |
           # regen-derived.sh --all runs gen-agents-opa-data.py, which evaluates the real policy and
@@ -187,6 +190,10 @@ jobs:
             ${{ runner.temp }}/merge-train-bundle/drops.txt
           retention-days: 1
           if-no-files-found: error
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   publish:
     name: verify by re-derivation, push own commits (App token, git only)
