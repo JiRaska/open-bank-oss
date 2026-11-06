@@ -20,3 +20,7 @@ Clients retain scoped cached locks and queue wins while offline; an unavailable
 response must not be converted into a successful empty catalogue. Responses are
 not cached by shared intermediaries. Deploy engagement first, then this edge and
 the admin console, then the mobile client. See `docs/game/lion-quest-admin.md`.
+
+Service authority, chapter path and query values are constructed separately using
+the shared structured upstream client. Host-bearing paths, query/fragment injection
+and redirects to another authority cannot change the completion destination.

@@ -22,7 +22,12 @@ class CustomerGameResourceTest {
     @Test
     fun `catalogue uses resolved party and projects only game fields`() {
         every {
-            upstream.get("https://engagement.test/api/v1/game/levels?partyId=$party&beta=true", party.toString())
+            upstream.getToService(
+                "https://engagement.test",
+                "/api/v1/game/levels",
+                mapOf("partyId" to party.toString(), "beta" to "true"),
+                party.toString(),
+            )
         } returns
             Response.ok(
                 """{"revision":2,"actor":"internal","levels":[{"level":{"id":"embankment","theme":"embankment","order":0,"titleCs":"N","titleEn":"E","state":"LIVE","requirement":{"kind":"NONE"},"private":"secret"},"unlocked":true,"completed":false}]}""",
@@ -36,26 +41,40 @@ class CustomerGameResourceTest {
 
     @Test
     fun `completion never accepts a client party and forwards beta only as a presentation hint`() {
-        every { upstream.post(any(), party.toString(), "{}", any()) } returns Response.noContent().build()
+        every { upstream.postToServiceWithQuery(any(), any(), any(), party.toString(), "{}") } returns
+            Response.noContent().build()
         assertThat(resource.complete("charles_bridge", true, null).status).isEqualTo(204)
         verify {
-            upstream.post(
-                "https://engagement.test/api/v1/game/levels/charles_bridge/completion?partyId=$party&beta=true",
+            upstream.postToServiceWithQuery(
+                "https://engagement.test",
+                "/api/v1/game/levels/charles_bridge/completion",
+                mapOf("partyId" to party.toString(), "beta" to "true"),
                 party.toString(),
                 "{}",
-                null,
             )
         }
-        assertThat(resource.complete("../admin", true, null).status).isEqualTo(400)
+        for (hostile in listOf(
+            "../admin",
+            "//untrusted.invalid",
+            "https://untrusted.invalid",
+            "x?partyId=other",
+            "x#fragment",
+            "x%2fadmin",
+            "x\\admin",
+        )) {
+            assertThat(resource.complete(hostile, true, null).status).isEqualTo(400)
+        }
+        verify(exactly = 1) { upstream.postToServiceWithQuery(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `malformed and unavailable upstreams do not become an unlocked catalogue`() {
         for (body in listOf("{}", "not json", """{"revision":1,"levels":[{}]}""")) {
-            every { upstream.get(any(), any()) } returns Response.ok(body).build()
+            every { upstream.getToService(any(), any(), any(), any()) } returns Response.ok(body).build()
             assertThat(resource.levels(false, null).status).isEqualTo(502)
         }
-        every { upstream.get(any(), any()) } returns Response.status(500).entity("private").build()
+        every { upstream.getToService(any(), any(), any(), any()) } returns
+            Response.status(500).entity("private").build()
         val response = resource.levels(false, null)
         assertThat(response.status).isEqualTo(503)
         assertThat(response.entity.toString()).doesNotContain("private")

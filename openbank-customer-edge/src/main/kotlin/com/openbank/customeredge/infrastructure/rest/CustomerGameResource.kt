@@ -31,7 +31,12 @@ class CustomerGameResource(
     @Authorize(action = "customer.game.read")
     fun levels(@QueryParam("beta") beta: Boolean, @HeaderParam("X-Acting-For") actingFor: String?): Response {
         val party = parties.resolve(actingFor).toString()
-        upstream.get("${serviceUrl.trimEnd('/')}/api/v1/game/levels?partyId=$party&beta=$beta", party).use { response ->
+        upstream.getToService(
+            serviceUrl,
+            "/api/v1/game/levels",
+            mapOf("partyId" to party, "beta" to beta.toString()),
+            party,
+        ).use { response ->
             if (response.status !=
                 Response.Status.OK.statusCode
             ) {
@@ -79,8 +84,10 @@ class CustomerGameResource(
     ): Response {
         if (!levelId.matches(Regex("[a-z][a-z0-9_]{0,63}"))) return Response.status(Response.Status.BAD_REQUEST).build()
         val party = parties.resolve(actingFor).toString()
-        upstream.post(
-            "${serviceUrl.trimEnd('/')}/api/v1/game/levels/$levelId/completion?partyId=$party&beta=$beta",
+        upstream.postToServiceWithQuery(
+            serviceUrl,
+            "/api/v1/game/levels/$levelId/completion",
+            mapOf("partyId" to party, "beta" to beta.toString()),
             party,
             "{}",
         ).use { response ->
