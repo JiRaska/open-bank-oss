@@ -87,7 +87,7 @@ that a test's assertions substantiate the threat-model mitigation.
 per money-path screen, `@verifies:admin-ui/E2E-<screen>`, plus `admin-ui/E2E-SSO`. It signs in twice:
 as the least-privilege e2e operator, and as the synthetic operator for screens the first cannot see
 (`/approvals`, `/delegations`, `/settlements`). `/treasury` admits neither, so its verdict is only
-that it refuses them. Any non-GET to the app's origin outside `/api/auth/` is aborted and fails the
+that it refuses them. Any non-GET to the app's origin outside `/api/auth/` and the browser trace export is aborted and fails the
 test, and a 5xx from a same-origin API call fails it too.
 
 The result reaches Test Intelligence as journey `admin-money-path-screens`, and

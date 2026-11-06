@@ -36,8 +36,10 @@ function watchTraffic(page: Page) {
     const req = route.request()
     const url = new URL(req.url())
     // Same origin only, so a Server Action POST to a page path counts as well as an /api route.
-    // The cross-origin error-telemetry beacon is not a write to a bank backend.
-    if (url.origin === APP_ORIGIN && req.method() !== 'GET' && req.method() !== 'HEAD' && !url.pathname.startsWith('/api/auth/')) {
+    // Auth and the browser trace export are the only writes a screen makes by itself; neither
+    // reaches a bank backend, and neither does the cross-origin error-telemetry beacon.
+    if (url.origin === APP_ORIGIN && req.method() !== 'GET' && req.method() !== 'HEAD'
+        && !url.pathname.startsWith('/api/auth/') && url.pathname !== '/api/telemetry/traces') {
       writes.push(`${req.method()} ${url.pathname}`)
       await route.abort()
       return

@@ -104,7 +104,7 @@ jobs:
         working-directory: openbank-admin-ui
         env:
           CI: 'true'
-          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/deployed-session/deployed-session.xml
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/e2e/deployed-session.xml
           OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-deployed-session.json
         run: npx playwright test --config playwright.deployed-session.config.ts
       # The stored session is a live credential: never leave it on the runner past the run.
