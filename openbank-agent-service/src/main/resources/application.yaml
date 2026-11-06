@@ -377,6 +377,18 @@ agent:
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly
+      # Runtime projection of the product-author charter (ADR-0352 §12): exactly its five product
+      # tools. There is no publish/sign/approve tool registered at all, so none can be granted here.
+      - agent-id: product-author
+        model: llama-3.3-70b-versatile
+        tokens-per-run: 150000
+        runs-per-day: 100
+        allowed-capabilities:
+          - product.lint
+          - product.compile
+          - product.simulate
+          - product.explain
+          - product.propose
   # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails /
   # ADR-0265). Complements the deterministic filter above; neither replaces the other. Off by
   # default, and when off every classification reports `unavailable` rather than `safe`, so the
