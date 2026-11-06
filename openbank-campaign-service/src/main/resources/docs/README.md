@@ -4,6 +4,16 @@ Campaign management (ADR-0200 / ADR-0209 D3 / ADR-0333): deterministic, versione
 per-enrolment Temporal journeys; consent-gated delivery through notification-service; and bounded,
 resumable audience admission.
 
+## Authorization
+
+Every endpoint carries `@Authorize`. The build sets `openbank.authz.opa-pdp-producer.enabled: true`,
+so decisions go to the OPA sidecar in the pod (`opa.url`, default `http://localhost:8181`; `opa.path`
+`/v1/data/openbank/rest/allow`; `opa.timeout-ms` 500), which serves `campaign-opa-bundle`. Without
+that switch no decision bean exists and every call takes the interceptor's "no PolicyDecisionPoint
+bean" branch, so the sidecar is never asked. `AUTHZ_ENFORCE` in the deployment decides whether a
+deny blocks the request or is only logged as an advisory `would DENY`; the service is deployed
+advisory until that log is clean. Tests run with `authz.enforce: false` under `%test`.
+
 ## Bulk admission
 
 `POST /api/v1/campaigns/{id}/bulk-runs` creates a durable run for an active campaign. The scheduler

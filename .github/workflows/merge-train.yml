@@ -30,7 +30,7 @@ name: Merge train
 # bursts: one run in flight, at most ONE pending (a newer queued run replaces the older pending one).
 on:
   schedule:
-    - cron: "*/10 * * * *"   # heartbeat fallback only
+    - cron: "*/10 * * * *"   # heartbeat; also the wake-up for a member PR whose own CI turned green
   push:
     branches: [main]         # main moved: strict-lane heads are behind, a carrier base is stale
   workflow_run:
@@ -45,6 +45,15 @@ on:
     # bounds the resulting latency. Only the slow, decision-relevant producers stay.
     workflows: ["Services CI", "CI", "Security scan", "Merge train owner approval"]
     types: [completed]
+    # Debounce (2026-11-02): even narrowed to four producers, 53 of the last 60 runs came from here
+    # and 56 of 60 were cancelled — every PR's CI completion still queued a run that replaced the one
+    # pending slot before a hosted runner (20-job cap) picked it up; settle once waited 36 min and
+    # carriers went stale against a moving main. Only two head branches carry a decision: a carrier
+    # (`train/<run>-<attempt>`, whose CI settle judges) and main (main-red freshness; the owner
+    # approval dispatch also runs on main). `branches:` matches the TRIGGERING run's head branch and
+    # is applied before anything is queued, so an ordinary PR's CI finishing costs no run and no
+    # runner slot. A member PR turning green is picked up by the cron heartbeat, or at once when armed.
+    branches: [main, "train/**"]
   pull_request_target:
     # Runs in the BASE context; nothing here checks out or executes the PR (all jobs use ref: main).
     types: [auto_merge_enabled]
@@ -53,7 +62,7 @@ on:
       batch_size:
         description: "Maximum members per train"
         type: number
-        default: 8
+        default: 16
 
 permissions:
   contents: read
@@ -159,7 +168,7 @@ jobs:
           # Read-only. The script strips it — and everything not on its allowlist — from the
           # environment the generators run in.
           GH_TOKEN: ${{ github.token }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
         run: |
           set -euo pipefail
           python3 .github/scripts/merge-train.py build \
@@ -210,7 +219,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
           # Isolated git config for THIS step only (see settle).
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_CONFIG_GLOBAL: /dev/null

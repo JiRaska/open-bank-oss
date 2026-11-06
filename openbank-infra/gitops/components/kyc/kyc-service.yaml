@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-kyc-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "967b66f960aad03f"
+        openbank.tech/policy-checksum: "31a6aef98a43fb59"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -153,7 +153,7 @@ spec:
             # (the interceptor logs "would DENY" without blocking) until the live decision log confirms
             # the deny population is empty, then a separate deliberate flip sets it true.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
