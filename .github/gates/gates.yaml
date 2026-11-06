@@ -1457,6 +1457,32 @@ gates:
     run: |
       python3 .github/scripts/check-edge-decoy-rule-parity.py
 
+  # ADR-0361 phase 1: a decoy credential fails silently two ways — unwired (renamed, tripwire
+  # still matching the old name) or armed (someone grants it permissions). ENFORCED.
+  - id: honeytoken-wiring
+    name: "every decoy credential is wired to a tripwire and holds no permission (ADR-0361, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
+    rationale: >-
+      Decoy credentials are only safe because they are powerless, and only useful because a
+      tripwire names them. Neither property is visible at runtime: an unwired one produces
+      exactly the silence a quiet week produces, and an armed one is a real credential. The
+      gate finds them by shape, pairs each ServiceAccount with a CloudWatch metric filter,
+      forbids any binding to it, pins the watched IAM user to a single explicit Deny "*", and
+      requires the EventBridge rules to opt in to read-only management events so the first call
+      an intruder makes alerts.
+    review_after: "2027-04-29"
+    min_subjects: 2   # one token-bearing ServiceAccount + one watched IAM user at authoring time
+    selftest_inputs:
+      - ".github/scripts/check-honeytoken-wiring.py"
+      - "openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+    selftest: |
+      python3 .github/scripts/check-honeytoken-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-honeytoken-wiring.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
