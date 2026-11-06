@@ -45,7 +45,7 @@ required to read or play an explicitly opened game.
 
 V12 creates `game_catalog`, `game_catalog_audit` and `game_completion`; its SQL file
 contains the reverse migration. Party erasure removes game completions through
-the existing erasure consumer, with failure retained in its bounded retry/DLQ path.
+the existing erasure consumer, with failure retained in its bounded retry/DLQ path. Erasure shares the catalogue lock with completion writes; the permanent erasure flag rejects delayed device replays.
 Catalogue history contains operator attribution, not customer game progress.
 
 Deploy engagement-service and its migration/policy first, then customer-edge and

@@ -93,8 +93,16 @@ export default function GameCatalogPage() {
         <label>{t('Začátek (UTC)', 'Starts (UTC)')}<input type="datetime-local" value={level.startsAt?.slice(0, 16) ?? ''} onChange={e => change(index, { startsAt: e.target.value ? `${e.target.value}:00Z` : null })} /></label>
         <label>{t('Konec (UTC)', 'Ends (UTC)')}<input type="datetime-local" value={level.endsAt?.slice(0, 16) ?? ''} onChange={e => change(index, { endsAt: e.target.value ? `${e.target.value}:00Z` : null })} /></label>
         <label>{t('Odemčení', 'Unlock')}<select value={level.requirement.kind} onChange={e => { const kind = e.target.value as Requirement['kind']; change(index, { requirement: { ...level.requirement, kind, source: kind === 'EARN_SOURCE' ? source : null } }) }}>
-          <option value="NONE">{t('Bez podmínky', 'No requirement')}</option><option value="PREVIOUS_LEVEL">{t('Dokončení předchozího kola', 'Complete previous chapter')}</option><option value="EARN_SOURCE">{t('Bankovní úspěch: dokončené vzdělávání', 'Bank achievement: completed education')}</option>
+          <option value="NONE">{t('Bez podmínky', 'No requirement')}</option><option value="PREVIOUS_LEVEL">{t('Dokončení předchozího kola', 'Complete previous chapter')}</option><option value="EARN_SOURCE">{t('Bankovní úspěch', 'Bank achievement')}</option>
         </select></label>
+        {level.requirement.kind === 'EARN_SOURCE' && <label>{t('Zdroj úspěchu', 'Achievement source')}
+          <select value={level.requirement.source ?? source} onChange={e => change(index, { requirement: { ...level.requirement, source: e.target.value } })}>
+            <option value="EDUCATIONAL_CONTENT_COMPLETION">{t('Dokončené vzdělávání', 'Completed education')}</option>
+            <option value="SAVINGS_GOAL_DEPOSIT" disabled>{t('Vklad do cíle — zatím nedostupné', 'Savings deposit — not available yet')}</option>
+            <option value="LOGIN_STREAK" disabled>{t('Pravidelné přihlášení — zatím nedostupné', 'Login streak — not available yet')}</option>
+            <option value="ON_TIME_REPAYMENT" disabled>{t('Včasná splátka — zatím nedostupné', 'On-time repayment — not available yet')}</option>
+          </select>
+        </label>}
         {level.requirement.kind === 'EARN_SOURCE' && <label>{t('Počet dokončení', 'Completion count')}<input type="number" min={1} max={1000} required value={level.requirement.count} onChange={e => change(index, { requirement: { ...level.requirement, count: Number(e.target.value) } })} /></label>}
         <label>{t('Česká nápověda k odemčení', 'Czech unlock hint')}<input maxLength={160} value={level.requirement.hintCs} onChange={e => change(index, { requirement: { ...level.requirement, hintCs: e.target.value } })} /></label>
         <label>{t('Anglická nápověda k odemčení', 'English unlock hint')}<input maxLength={160} value={level.requirement.hintEn} onChange={e => change(index, { requirement: { ...level.requirement, hintEn: e.target.value } })} /></label>

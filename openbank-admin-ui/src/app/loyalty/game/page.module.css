@@ -8,3 +8,6 @@
 .page button:disabled { cursor: default; opacity: .6; }
 
 .page input, .page select { width: 100%; min-width: 0; box-sizing: border-box; }
+
+.page h1 { font-size: 1.8rem; font-weight: 700; line-height: 1.25; }
+.page p { line-height: 1.6; }

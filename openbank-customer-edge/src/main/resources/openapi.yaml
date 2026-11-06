@@ -116,7 +116,7 @@ tags:
   - name: Complaints
 
 paths:
-  /customer/v1/game/levels:
+  /game/levels:
     get:
       operationId: getGameLevels
       summary: Lion Quest chapters and unlocks for the JWT party
@@ -142,7 +142,7 @@ paths:
         '403': {description: Invalid customer or acting-for context}
         '502': {description: Invalid upstream catalogue}
         '503': {description: Game catalogue unavailable; retain cached locks and bundled fallback}
-  /customer/v1/game/levels/{levelId}/completion:
+  /game/levels/{levelId}/completion:
     post:
       operationId: postGameLevelCompletion
       summary: Idempotently record a game completion for the JWT party

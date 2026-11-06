@@ -8,7 +8,7 @@ const initial = {
     id, theme: id, order, titleCs: ['Náplavka', 'Staroměstské střechy', 'Karlův most'][order],
     titleEn: ['Embankment', 'Old Town rooftops', 'Charles Bridge'][order],
     state: order === 0 ? 'LIVE' : 'BETA', startsAt: null, endsAt: null,
-    requirement: { kind: order === 0 ? 'NONE' : 'PREVIOUS_LEVEL', source: null, count: 1, hintCs: 'Dokonči předchozí kolo', hintEn: 'Complete previous chapter' },
+    requirement: { kind: order === 0 ? 'NONE' : 'PREVIOUS_LEVEL', source: null, count: 1, hintCs: order === 0 ? '' : 'Dokonči předchozí kolo', hintEn: order === 0 ? '' : 'Complete previous chapter' },
   })),
 }
 
@@ -25,12 +25,18 @@ for (const theme of ['light', 'dark']) {
       expect(body.revision).toBe(writes === 1 ? 0 : 1)
       if (writes > 1) { await route.fulfill({ status: 409, json: { error: 'catalogue_changed' } }); return }
       expect(body.levels[2].state).toBe('LIVE')
+      expect(body.levels[2].requirement).toMatchObject({ kind: 'EARN_SOURCE', source: 'EDUCATIONAL_CONTENT_COMPLETION', count: 1 })
       await route.fulfill({ json: { ...body, revision: 1 } })
     })
     await page.goto('/loyalty/game')
     await expect(page.getByRole('heading', { name: /Lví stezka|Lion Quest/ })).toBeVisible()
     await expect(page.getByRole('group')).toHaveCount(3)
     await page.getByLabel(/Dostupnost|Availability/).nth(2).selectOption('LIVE')
+    await page.getByLabel(/Odemčení|^Unlock/).nth(2).selectOption('EARN_SOURCE')
+    await expect(page.locator('option[value=LOGIN_STREAK]')).toHaveJSProperty('disabled', true)
+    const achievement = page.getByLabel(/^Zdroj úspěchu|^Achievement source/)
+    await achievement.press('End')
+    await expect(achievement).toHaveValue('EDUCATIONAL_CONTENT_COMPLETION')
     await page.getByRole('button', { name: /Uložit změny|Save changes/ }).click()
     await expect(page.getByRole('status')).toContainText(/uložené|saved/)
     await page.screenshot({ path: info.outputPath(`game-catalog-${theme}-bottom.png`) })

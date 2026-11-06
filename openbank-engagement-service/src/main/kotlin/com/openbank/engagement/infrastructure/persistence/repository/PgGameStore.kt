@@ -75,25 +75,41 @@ class PgGameStore(private val pool: PgPool, private val mapper: ObjectMapper) : 
         connection.query("$READ FOR SHARE").execute().flatMap { rows ->
             val catalog = decode(rows.first().getString("document"))
             connection.preparedQuery(
-                "SELECT level_id FROM game_completion WHERE party_id = $1",
-            ).execute(Tuple.of(party)).flatMap { done ->
-                val completed = done.map { it.getString("level_id") }.toSet()
-                connection.preparedQuery(
-                    "SELECT earn_source_id, count(*) AS total FROM gamification_award WHERE party_id = $1 GROUP BY earn_source_id",
-                ).execute(Tuple.of(party)).map { awards ->
-                    GameAccess.evaluate(
-                        catalog,
-                        completed,
-                        awards.associate {
-                            it.getString("earn_source_id") to
-                                it.getLong("total")
-                        },
-                        beta,
-                        at,
-                    )
+                "SELECT EXISTS(SELECT 1 FROM party_adverse_state WHERE party_id = $1 AND state = 'ERASURE_REQUESTED') AS erased",
+            ).execute(Tuple.of(party)).flatMap { flags ->
+                if (flags.first().getBoolean("erased")) {
+                    Uni.createFrom().item(CustomerGameCatalog(catalog.revision, emptyList()))
+                } else {
+                    progress(connection, party, catalog, beta, at)
                 }
             }
         }
+
+    private fun progress(
+        connection: SqlConnection,
+        party: UUID,
+        catalog: GameCatalog,
+        beta: Boolean,
+        at: Instant,
+    ): Uni<CustomerGameCatalog> = connection.preparedQuery(
+        "SELECT level_id FROM game_completion WHERE party_id = $1",
+    ).execute(Tuple.of(party)).flatMap { done ->
+        val completed = done.map { it.getString("level_id") }.toSet()
+        connection.preparedQuery(
+            "SELECT earn_source_id, count(*) AS total FROM gamification_award WHERE party_id = $1 GROUP BY earn_source_id",
+        ).execute(Tuple.of(party)).map { awards ->
+            GameAccess.evaluate(
+                catalog,
+                completed,
+                awards.associate {
+                    it.getString("earn_source_id") to
+                        it.getLong("total")
+                },
+                beta,
+                at,
+            )
+        }
+    }
 
     override suspend fun audit(): List<Map<String, Any>> = pool.query(
         "SELECT revision, actor, changed_at, before_document, after_document FROM game_catalog_audit ORDER BY revision DESC LIMIT 50",
@@ -110,7 +126,12 @@ class PgGameStore(private val pool: PgPool, private val mapper: ObjectMapper) : 
     }.awaitSuspending()
 
     override suspend fun erase(party: UUID) {
-        pool.preparedQuery("DELETE FROM game_completion WHERE party_id = $1").execute(Tuple.of(party)).awaitSuspending()
+        // Reuse the catalogue lock to serialize erasure against in-flight completion transactions.
+        pool.withTransaction { connection ->
+            connection.query("$READ FOR UPDATE").execute().flatMap {
+                connection.preparedQuery("DELETE FROM game_completion WHERE party_id = $1").execute(Tuple.of(party))
+            }
+        }.awaitSuspending()
     }
 
     private fun decode(json: String) = mapper.readValue(json, GameCatalog::class.java)
