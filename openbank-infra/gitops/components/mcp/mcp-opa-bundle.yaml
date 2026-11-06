@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "3d493ca1de226edc"
+    openbank.tech/policy-checksum: "87b6a834d0e65f0d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -590,7 +590,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log

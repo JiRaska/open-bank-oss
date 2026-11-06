@@ -576,7 +576,7 @@ allowed_reasons contains "edge-service-consent" if {
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-edge")
-	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
 }
 
 # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log

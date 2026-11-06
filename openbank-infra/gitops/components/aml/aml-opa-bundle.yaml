@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
   annotations:
-    openbank.tech/policy-checksum: "c89206ee8a84531d"
+    openbank.tech/policy-checksum: "3531b812dae7f657"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -590,7 +590,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
