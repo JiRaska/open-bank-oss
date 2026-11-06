@@ -8,7 +8,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, supply-chain, capacity]
-summary: "Hosted service builds read a shared remote Gradle build cache outside AWS; only main-push builds may write it, through a credential in a main-only environment, so unchanged modules come from cache instead of a full rebuild."
+summary: "Hosted service builds read a shared remote Gradle build cache outside AWS; only main builds (push or seeding dispatch) may write it, through a credential in a main-only environment, so unchanged modules come from cache."
 ---
 
 # ADR-0363 — Remote Gradle build cache for hosted CI, written only from main
@@ -52,8 +52,9 @@ service build to it with an asymmetric trust split:
    `GRADLE_REMOTE_CACHE_URL` and a read-only credential, so PR builds resolve unchanged
    modules from cache.
 2. **Write only from main.** `GRADLE_REMOTE_CACHE_PUSH=true` and the write credential exist only
-   in a job that runs on `push` to `main`, bound to a GitHub Environment restricted to the `main`
-   branch. A pull request, including a same-repo one, can never obtain the write credential,
+   in a job that runs main's own code on `main` (a `push`, or a `workflow_dispatch` with no
+   historical `ref`, which is how a full-fleet run seeds the cache), bound to a GitHub Environment
+   restricted to the `main` branch. A pull request, including a same-repo one, can never obtain the write credential,
    because environment secrets are released only to jobs running on the allowed branch.
 3. **Outside AWS.** The node runs on a small dedicated host outside the AWS account, so cache
    traffic from GitHub-hosted runners costs no NAT, ALB or AWS egress. Its URL and the read-only
@@ -107,8 +108,9 @@ service build to it with an asymmetric trust split:
 
 **Enforcement.** The enforced gate `remote-build-cache-write-scope`
 (`check-remote-build-cache-write-scope.py`) fails a job that sets `GRADLE_REMOTE_CACHE_PUSH` without
-a push-to-main condition, references the write credential outside a push-to-main
-`environment: gradle-cache-writer`, or passes that credential to a reusable workflow. The node
+a main-only condition (push or dispatch on `main`, dispatch only with an empty `inputs.ref`),
+references the write credential outside such an `environment: gradle-cache-writer`, widens
+`remote-build-cache.sh`'s write switch, or passes that credential to a reusable workflow. The node
 itself rejects writes from the read-only account, so the workflow is not the only line.
 
 ### Delivery check

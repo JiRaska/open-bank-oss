@@ -1113,6 +1113,36 @@ PYSTUB
   echo "self-test case 48c checked (empty/malformed/scalar/no deploy_holds -> non-zero)"
   rm -rf "$fkd"
 
+  # case 49 — the supersede STEP must stay behind the freshness verify (2026-11-03 analysis of
+  # run 41595162818). Skipping it when verify fails looks like a bug but is the guard: the file
+  # coverage above proves a newer PR touches the same manifests, NOT that its pins are fresh, and
+  # deploy-window's select_candidate falls through to an older PR when the newest one fails
+  # verify. `if: always()` would close that fallback while the replacement is unarmable. The
+  # step must (a) come after "Verify GitOps image source freshness" and (b) carry no
+  # always()/failure()/cancelled() override of the implicit success() gate.
+  local wf
+  wf="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../workflows/auto-deploy.yml"
+  if ! python3 - "$wf" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+def step(name):
+    m = re.search(r"(?ms)^      - name: " + re.escape(name) + r"\n(.*?)(?=^      - |^  [A-Za-z0-9_-]+:\n|\Z)", src)
+    return m
+v, c = step("Verify GitOps image source freshness"), step("Close superseded deploy PRs")
+if not v or not c:
+    sys.exit("verify or supersede step not found")
+if v.start() > c.start():
+    sys.exit("supersede step precedes the freshness verify")
+cond = re.search(r"(?m)^        if: (.*)$", c.group(1))
+if cond and re.search(r"always\(\)|failure\(\)|cancelled\(\)", cond.group(1)):
+    sys.exit("supersede step overrides the success() gate: " + cond.group(1))
+PY
+  then
+    echo "SELF-TEST FAIL case 49: supersede step is not gated on a successful freshness verify"; ok=1
+  else
+    echo "self-test case 49 OK (supersede runs only after a successful freshness verify)"
+  fi
+
   # case 29 — producer-run isolation (#13460) suffixes every branch with `-run<id>`. The sha must
   # still parse, or KEEP_SHA is empty and every run classifies every predecessor SKIP — measured on
   # main: `closed=0 skipped=24` with "could not read a commit sha off" on each run. A malformed

@@ -83,10 +83,12 @@ on:
         value: ${{ toJSON(jobs) }}
     secrets:
       PACT_BROKER_PASSWORD:
-        # Must be declared here for the caller to pass it explicitly: an undeclared
-        # secret in the caller's `secrets:` map is a workflow-file error. Optional so
-        # the workflow still loads where the secret is unset (forks) — the pact steps
-        # already gate on pactbroker.url / an empty password.
+        # Declared for callers that pass it explicitly (verify-provider.yml; the
+        # _service-ci-pr.yml projection): an undeclared secret in a caller's `secrets:`
+        # map is a workflow-file error. services-ci.yml's build_other_* callers use
+        # `secrets: inherit` instead (see the build job's environment comment). Optional
+        # so the workflow still loads where the secret is unset (forks). It is read only
+        # by the `contract` job, whose `if:` admits push / workflow_dispatch on main.
         description: "Pact Broker password (ADR-0092) — publishing pacts + verification results."
         required: false
 
@@ -114,7 +116,11 @@ jobs:
     # holder of the cache write secret; every other event runs without an environment. The secret
     # is deliberately NOT declared under on.workflow_call.secrets: a declared-but-unpassed secret
     # resolves to '' and shadows the environment one (2026-11-04: main builds wrote 0 entries).
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
+    # Not declaring it is necessary but not sufficient: a called workflow resolves ENVIRONMENT
+    # secrets to '' unless its caller uses `secrets: inherit` (actions/runner issue 4453;
+    # 2026-11-05 a main push still logged an empty W). services-ci.yml's build_other_* callers
+    # therefore inherit; its build_pr_* callers keep an explicit map and never enter this env.
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
