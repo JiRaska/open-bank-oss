@@ -142,3 +142,7 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Test coverage floor
 
 `koverVerify` enforces a LINE coverage floor of 40%, the money-path baseline in `rules.yaml: coverage.money_path_floor` (raised from 34 in #13144). Measured coverage on 2026-10-31 was 86.1% (507/589 lines). The floor is ratchet-only.
+
+## API identity on the mTLS listener
+
+In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `StandingOrderListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.
