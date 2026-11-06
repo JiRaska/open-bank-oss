@@ -80,12 +80,14 @@ describe('allocate', () => {
     expect(sumDom).toBeCloseTo(sumSvc, 1)
   })
 
-  it('rolls services up to their manifest domain; unknown footprint -> platform + unmapped', () => {
+  it('rolls services up to their manifest domain; unknown footprint -> unclassified + unmapped', () => {
     const r = allocate(report([{ name: 'Amazon Elastic Compute Cloud - Compute', amount: 90 }]), FOOTPRINTS, GROUPS)
     const core = r.byDomain.find(d => d.domain === 'core')
-    const platform = r.byDomain.find(d => d.domain === 'platform')
-    expect(core?.serviceCount).toBe(2)           // account + ledger
-    expect(platform?.serviceCount).toBe(1)       // keycloak
+    const unclassified = r.byDomain.find(d => d.domain === 'unclassified')
+    const accounting = r.byDomain.find(d => d.domain === 'accounting')
+    expect(core?.serviceCount).toBe(1)           // account
+    expect(accounting?.serviceCount).toBe(1)     // ledger
+    expect(unclassified?.serviceCount).toBe(1)       // keycloak
     expect(r.unmapped).toEqual(['keycloak'])
   })
 

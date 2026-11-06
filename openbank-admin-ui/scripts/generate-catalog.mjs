@@ -26,6 +26,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { DATA_DOMAINS } from './governance-schema.mjs'
 import { runnableModules } from './service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -124,6 +125,14 @@ for (const name of entries) {
   const runnable = runnableNames.has(name)
   const { port, mgmtPort } = readPorts(dir)
   const moneyPath = gov.moneyPath.has(name)
+  let dataDomain = null
+  const declaration = readText(path.join(dir, 'governance.yaml'))
+  if (declaration !== null) {
+    const parsed = parseYaml(declaration)
+    if (!DATA_DOMAINS.includes(parsed?.dataDomain)) throw new Error(`${name}: invalid or missing dataDomain`)
+    dataDomain = parsed.dataDomain
+  }
+  if (runnable && dataDomain === null) throw new Error(`${name}: missing domain ownership in governance.yaml`)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
   const gaps = []
@@ -137,6 +146,7 @@ for (const name of entries) {
     short: name.replace(/^openbank-/, ''),
     kind: name === 'openbank-admin-ui' ? 'ui' : name === 'openbank-libs' ? 'library' : isService ? 'service' : 'component',
     runnable,
+    dataDomain,
     port,
     mgmtPort,
     releaseVersion,
@@ -158,6 +168,7 @@ const totals = {
 
 const catalog = {
   schema: 'openbank.catalog/v1',
+    domainTaxonomy: 'openbank.domain-taxonomy/v1',
   generator: 'generate-catalog.mjs',
   source: 'code-derived (version.txt, openapi.yaml, rules.yaml) — ADR-0029 D3 / ADR-0048',
   // collectedAt is stamped by the caller/CI (kept null here so the artifact is

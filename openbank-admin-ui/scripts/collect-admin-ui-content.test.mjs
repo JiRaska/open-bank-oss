@@ -10,6 +10,7 @@ import {
   ADMIN_UI_CONTENT_MAX_BYTES,
   isAdminUiContentSnapshot,
   createAdminUiContentSnapshotReader,
+  adminUiContentSnapshotBaseUrl,
 } from '../src/lib/evidence/contentSnapshot.ts'
 import { collectRepositoryDocumentation } from './collect-repository-documentation.mjs'
 import { collectAdminUiContent, readBoundedSourceFile } from './collect-admin-ui-content.mjs'
@@ -238,5 +239,76 @@ test('legacy, platform-only, documentation-only and combined content remain comp
     const malformed = structuredClone(combined)
     malformed.content[field] = null
     assert.equal(isAdminUiContentSnapshot(malformed), false)
+  }
+})
+
+// A pre-migration published bundle must not override ownership baked into a newer image.
+test('domain ownership contract rejects legacy or inconsistent bundles and accepts coherent publication', async () => {
+  const source = JSON.parse(collectAdminUiContent({ repoRoot: ROOT, sourceSha: SOURCE_SHA }))
+  assert.equal(source.content.catalog.domainTaxonomy, 'openbank.domain-taxonomy/v1')
+  assert.equal(source.content.governance.domainTaxonomy, 'openbank.domain-taxonomy/v1')
+  assert.ok(isAdminUiContentSnapshot(source))
+  const bad = mutate => {
+    const copy = structuredClone(source)
+    mutate(copy)
+    assert.equal(isAdminUiContentSnapshot(copy), false)
+    return copy
+  }
+  const legacy = bad(copy => {
+    delete copy.content.catalog.domainTaxonomy
+    delete copy.content.governance.domainTaxonomy
+    for (const row of copy.content.catalog.services) delete row.dataDomain
+  })
+  bad(copy => { delete copy.content.catalog.domainTaxonomy })
+  bad(copy => { delete copy.content.governance.domainTaxonomy })
+  bad(copy => { copy.content.catalog.services.find(row => row.runnable).dataDomain = null })
+  bad(copy => { copy.content.catalog.services.find(row => row.runnable).dataDomain = 'invented' })
+  bad(copy => { copy.content.governance.services[0].dataDomain = 'invented' })
+  bad(copy => {
+    copy.content.governance.services.find(row => row.serviceName === 'pension-service').dataDomain = 'platform'
+  })
+  bad(copy => {
+    copy.content.catalog.services.find(row => row.name === 'openbank-wealth-service').dataDomain = 'platform'
+  })
+
+  const previousUrl = process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
+  process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL = 'https://evidence.example/admin-ui/content'
+  try {
+    for (const [snapshot, expected] of [[legacy, 'unavailable'], [source, 'ready']]) {
+      const bytes = Buffer.from(JSON.stringify(snapshot))
+      const hash = createHash('sha256').update(bytes).digest('hex')
+      const collectedAt = snapshot.collectedAt
+      const pointer = { schemaVersion: 1, snapshot: `snapshots/1-1-${hash}.json`, sha256: hash,
+        sourceSha: SOURCE_SHA, runId: 1, runAttempt: 1, collectedAt,
+        expiresAt: new Date(Date.parse(collectedAt) + 60_000).toISOString(), complete: true }
+      const reader = createAdminUiContentSnapshotReader({ now: () => Date.parse(collectedAt) + 1000,
+        fetchImpl: async url => String(url).endsWith('/current.json')
+          ? new Response(JSON.stringify(pointer)) : new Response(bytes) })
+      const result = await reader.read()
+      assert.equal(result.status, expected)
+      if (expected === 'unavailable') assert.equal(result.snapshot, null)
+      else assert.equal(result.snapshot.content.catalog.services.find(row => row.name === 'openbank-pension-service').dataDomain, 'pensions')
+    }
+  } finally {
+    if (previousUrl === undefined) delete process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
+    else process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL = previousUrl
+  }
+})
+
+
+test('taxonomy reader uses its independent pointer and preserves an explicit URL override', () => {
+  const oldStore = process.env.OPENBANK_EVIDENCE_STORE_URL
+  const oldOverride = process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
+  try {
+    process.env.OPENBANK_EVIDENCE_STORE_URL = 'https://evidence.example/'
+    delete process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
+    assert.equal(adminUiContentSnapshotBaseUrl(), 'https://evidence.example/admin-ui/content/domains-v1')
+    process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL = 'https://custom.example/reviewed-content'
+    assert.equal(adminUiContentSnapshotBaseUrl(), 'https://custom.example/reviewed-content')
+  } finally {
+    if (oldStore === undefined) delete process.env.OPENBANK_EVIDENCE_STORE_URL
+    else process.env.OPENBANK_EVIDENCE_STORE_URL = oldStore
+    if (oldOverride === undefined) delete process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
+    else process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL = oldOverride
   }
 })

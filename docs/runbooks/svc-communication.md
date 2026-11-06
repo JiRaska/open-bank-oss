@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-communication-service
 
-> Operational runbook for the `communication` service. Data domain **platform**,
+> Operational runbook for the `communication` service. Data domain **engagement**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
@@ -23,7 +23,7 @@ the public HTTP port is not a health-evidence substitute.
 |---|---|
 | Service | `openbank-communication-service` |
 | HTTP port | `8158` |
-| Data domain | platform |
+| Data domain | engagement |
 | Datastore | PostgreSQL (database `openbank_communication`) |
 | Classification | internal |
 | Retention | 3 years |

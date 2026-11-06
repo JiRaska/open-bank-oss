@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type DataLineageRole = 'producer' | 'consumer' | 'both' | 'internal'
-export type DataDomain = 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
+import type { DomainId } from './domains'
+export type DataDomain = DomainId
 
 export interface LineageNode {
   serviceName: string

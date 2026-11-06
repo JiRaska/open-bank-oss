@@ -24,50 +24,50 @@ import {
   type MapExternalEdge as ExternalEdgeT, type MapExternalNode as ExternalNodeT,
   type MapInfraEdge as InfraEdgeT, type MapInfraNode as InfraNodeT,
 } from '@/lib/governance/service-map-evidence'
+import { DOMAIN_GROUPS, domainColor, domainLabel } from '@/lib/governance/domains'
 import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 
-// Editorial PROSE per node (display name, map group, one-line description), keyed by registry id.
+// Editorial prose per node (display name and one-line description), keyed by registry id.
 // This is NOT the service list: the nodes are one per runnable catalog module (see buildServices),
-// so a module with no entry here still appears - with its registry label, a group derived from the
-// registry group, and the OpenAPI title as description.
-const EDITORIAL: Record<string, { name: string; group: string; desc: string }> = {
-  'account': { name: 'Account Service', group: 'core', desc: 'Account lifecycle management, IBAN assignment' },
-  'ledger': { name: 'Ledger Service', group: 'core', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
-  'transaction': { name: 'Transaction Service', group: 'core', desc: 'Transaction processing, partitioned by booking_date' },
-  'product-catalog': { name: 'Product Catalog', group: 'core', desc: 'Banking products, pricing, limits' },
-  'balance': { name: 'Balance Service', group: 'core', desc: 'Real-time balance tracking, holds management' },
-  'interest': { name: 'Interest Service', group: 'core', desc: 'Interest calculation and accrual' },
-  'fx': { name: 'FX Service', group: 'core', desc: 'Foreign exchange rates and conversion' },
-  'pid': { name: 'PID Service', group: 'identity', desc: 'Party identity documents, external IDs' },
-  'party': { name: 'Party Service', group: 'identity', desc: 'Customer/company master data, PEP/sanctions flags' },
-  'agent': { name: 'Agent Service', group: 'platform', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
-  'notification': { name: 'Notification Service', group: 'platform', desc: 'Email/SMS/Push notifications, template engine' },
-  'security-scanner': { name: 'Security Scanner', group: 'platform', desc: 'Continuous vulnerability scanning' },
-  'card-issuance': { name: 'Card Issuance', group: 'cards', desc: 'Card issuance and lifecycle management' },
-  'dispute': { name: 'Dispute Service', group: 'cards', desc: 'Card disputes and chargebacks' },
-  'audit': { name: 'Audit Service', group: 'compliance', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
-  'kyc': { name: 'KYC Service', group: 'compliance', desc: 'KYC/CDD/EDD case management, document verification' },
-  'aml': { name: 'AML Service', group: 'compliance', desc: 'AML screening, SAR filing' },
-  'sanctions': { name: 'Sanctions Service', group: 'compliance', desc: 'Real-time sanctions list screening' },
-  'fraud': { name: 'Fraud Service', group: 'compliance', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
-  'sepa-payment': { name: 'SEPA Payment', group: 'payment', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
-  'sepa-instant': { name: 'SEPA Instant', group: 'payment', desc: 'Real-time EUR payment processing' },
-  'domestic-payment': { name: 'Domestic Payment', group: 'payment', desc: 'Czech domestic payments' },
-  'standing-order': { name: 'Standing Order', group: 'payment', desc: 'Recurring payments and scheduled transfers' },
-  'swift': { name: 'SWIFT Service', group: 'payment', desc: 'SWIFT MT/MX messaging' },
-  'clearing': { name: 'Clearing Service', group: 'payment', desc: 'Interbank clearing and settlement' },
-  'consent': { name: 'Consent Service', group: 'psd2', desc: 'PSD2 consent management' },
-  'sca': { name: 'SCA Service', group: 'psd2', desc: 'Strong Customer Authentication' },
-  'psd2': { name: 'PSD2 Service', group: 'psd2', desc: 'PSD2 API gateway' },
-  'tpp-registry': { name: 'TPP Registry', group: 'psd2', desc: 'Third Party Provider registry' },
-  'lending': { name: 'Lending Service', group: 'core', desc: 'Loan products and origination' },
-  'statement': { name: 'Statement Service', group: 'core', desc: 'Account statement generation (EoM)' },
-  'onboarding': { name: 'Onboarding Service', group: 'identity', desc: 'Customer onboarding journey (ADR-0069)' },
-  'anacredit': { name: 'AnaCredit Service', group: 'compliance', desc: 'AnaCredit regulatory reporting (ECB)' },
-  'sdd': { name: 'SEPA Direct Debit', group: 'payment', desc: 'SEPA Direct Debit mandates and collections' },
+// so a module with no entry here still appears with its registry label and OpenAPI title.
+// Business domains always come from the canonical registry, never editorial overrides.
+const EDITORIAL: Record<string, { name: string; desc: string }> = {
+  'account': { name: 'Account Service', desc: 'Account lifecycle management, IBAN assignment' },
+  'ledger': { name: 'Ledger Service', desc: 'Double-entry bookkeeping, GL accounts, journal entries' },
+  'transaction': { name: 'Transaction Service', desc: 'Transaction processing, partitioned by booking_date' },
+  'product-catalog': { name: 'Product Catalog', desc: 'Banking products, pricing, limits' },
+  'balance': { name: 'Balance Service', desc: 'Real-time balance tracking, holds management' },
+  'interest': { name: 'Interest Service', desc: 'Interest calculation and accrual' },
+  'fx': { name: 'FX Service', desc: 'Foreign exchange rates and conversion' },
+  'pid': { name: 'PID Service', desc: 'Party identity documents, external IDs' },
+  'party': { name: 'Party Service', desc: 'Customer/company master data, PEP/sanctions flags' },
+  'agent': { name: 'Agent Service', desc: 'AI agent MCP server, OpenBank tools for LLMs' },
+  'notification': { name: 'Notification Service', desc: 'Email/SMS/Push notifications, template engine' },
+  'security-scanner': { name: 'Security Scanner', desc: 'Continuous vulnerability scanning' },
+  'card-issuance': { name: 'Card Issuance', desc: 'Card issuance and lifecycle management' },
+  'dispute': { name: 'Dispute Service', desc: 'Card disputes and chargebacks' },
+  'audit': { name: 'Audit Service', desc: 'Immutable audit trail, EBA ICT Risk compliance' },
+  'kyc': { name: 'KYC Service', desc: 'KYC/CDD/EDD case management, document verification' },
+  'aml': { name: 'AML Service', desc: 'AML screening, SAR filing' },
+  'sanctions': { name: 'Sanctions Service', desc: 'Real-time sanctions list screening' },
+  'fraud': { name: 'Fraud Service', desc: 'Real-time fraud detection & transaction monitoring (ADR-0084)' },
+  'sepa-payment': { name: 'SEPA Payment', desc: 'SEPA Credit Transfer, SCT Inst, SEPA Direct Debit' },
+  'sepa-instant': { name: 'SEPA Instant', desc: 'Real-time EUR payment processing' },
+  'domestic-payment': { name: 'Domestic Payment', desc: 'Czech domestic payments' },
+  'standing-order': { name: 'Standing Order', desc: 'Recurring payments and scheduled transfers' },
+  'swift': { name: 'SWIFT Service', desc: 'SWIFT MT/MX messaging' },
+  'clearing': { name: 'Clearing Service', desc: 'Interbank clearing and settlement' },
+  'consent': { name: 'Consent Service', desc: 'PSD2 consent management' },
+  'sca': { name: 'SCA Service', desc: 'Strong Customer Authentication' },
+  'psd2': { name: 'PSD2 Service', desc: 'PSD2 API gateway' },
+  'tpp-registry': { name: 'TPP Registry', desc: 'Third Party Provider registry' },
+  'lending': { name: 'Lending Service', desc: 'Loan products and origination' },
+  'statement': { name: 'Statement Service', desc: 'Account statement generation (EoM)' },
+  'onboarding': { name: 'Onboarding Service', desc: 'Customer onboarding journey (ADR-0069)' },
+  'anacredit': { name: 'AnaCredit Service', desc: 'AnaCredit regulatory reporting (ECB)' },
+  'sdd': { name: 'SEPA Direct Debit', desc: 'SEPA Direct Debit mandates and collections' },
 }
 
-const MAP_GROUP: Record<string, string> = { payments: 'payment', 'open-banking': 'psd2' }
 
 type MapService = { id: string; name: string; group: string; color: string; desc: string; container: string; port: number; k8s: string }
 
@@ -75,12 +75,12 @@ type MapService = { id: string; name: string; group: string; color: string; desc
 function buildServices(registry: readonly ServiceEntry[], apiTitles: Record<string, string>): MapService[] {
   return registry.map(r => {
     const e = EDITORIAL[r.id]
-    const group = e?.group ?? MAP_GROUP[r.group] ?? r.group
+    const group = r.group
     return {
       id: r.id,
       name: e?.name ?? r.label,
       group,
-      color: `var(--map-${group})`,
+      color: domainColor(group),
       desc: e?.desc ?? apiTitles[r.container] ?? '',
       container: r.container,
       port: r.port,
@@ -89,15 +89,6 @@ function buildServices(registry: readonly ServiceEntry[], apiTitles: Record<stri
   })
 }
 
-const GROUP_LABELS: Record<string, { label: string; color: string }> = {
-  core:       { label: 'Core Banking',    color: 'var(--map-core)' },
-  payment:    { label: 'Payments',        color: 'var(--map-payment)' },
-  compliance: { label: 'Compliance',      color: 'var(--map-compliance)' },
-  identity:   { label: 'Identity',        color: 'var(--map-identity)' },
-  psd2:       { label: 'PSD2 / Open Banking', color: 'var(--map-psd2)' },
-  platform:   { label: 'Platform',        color: 'var(--map-platform)' },
-  cards:      { label: 'Cards',           color: 'var(--map-cards)' },
-}
 type HealthStatus = 'UP' | 'DOWN' | 'UNKNOWN'
 type EvidenceState = 'loading' | 'ok' | 'unreachable' | 'not_deployed' | 'scaled_to_zero' | 'unauthorized' | 'error'
 type EvidenceResult<T> = { ok: true; value: T } | { ok: false; state: EvidenceState }
@@ -132,15 +123,9 @@ const GROUP_GAP = 32
 const COL_GAP = 52
 const CANVAS_PAD = 44
 
-// Which groups stack in which column, and how many node-columns each group uses.
-const GROUP_COLUMNS: string[][] = [
-  ['core', 'payment', 'psd2'],
-  ['identity', 'cards', 'compliance'],
-  ['platform'],
-]
-const GROUP_GRID_COLS: Record<string, number> = {
-  core: 4, payment: 4, psd2: 4, identity: 3, cards: 2, compliance: 3, platform: 6,
-}
+// Every populated canonical domain participates; new domains need no layout edit.
+const MAX_GROUP_GRID_COLS = 4
+const GROUP_COLUMN_COUNT = 3
 
 type GroupBox = { key: string; label: string; color: string; x: number; y: number; w: number; h: number }
 
@@ -153,42 +138,38 @@ function computeLayout(services: readonly MapService[]): Layout {
   const nodes: Record<string, Pt> = {}
   const groups: GroupBox[] = []
 
-  const colWidth = GROUP_COLUMNS.map(col =>
-    PAD_X * 2 + Math.max(...col.map(g => GROUP_GRID_COLS[g] || 1)) * CELL_W,
-  )
-  const colX: number[] = []
-  let acc = CANVAS_PAD
-  for (let c = 0; c < GROUP_COLUMNS.length; c++) { colX[c] = acc; acc += colWidth[c] + COL_GAP }
-
-  let maxY = 0
-  GROUP_COLUMNS.forEach((col, c) => {
-    let y = CANVAS_PAD
-    for (const g of col) {
-      const list = byGroup[g] || []
-      const cols = GROUP_GRID_COLS[g] || 1
-      const rows = Math.max(1, Math.ceil(list.length / cols))
-      const w = colWidth[c]
-      const h = PAD_TOP + rows * CELL_H + PAD_BOT
-      const meta = GROUP_LABELS[g]
-      groups.push({ key: g, label: meta?.label ?? g, color: meta?.color ?? 'var(--map-infrastructure)', x: colX[c], y, w, h })
-      const gridW = cols * CELL_W
-      const startX = colX[c] + (w - gridW) / 2 + CELL_W / 2
-      list.forEach((s, i) => {
-        nodes[s.id] = {
-          cx: startX + (i % cols) * CELL_W,
-          cy: y + PAD_TOP + Math.floor(i / cols) * CELL_H + CELL_H / 2 - 8,
-        }
-      })
-      y += h + GROUP_GAP
-    }
-    maxY = Math.max(maxY, y)
-  })
+  const orderedGroups = [
+    ...DOMAIN_GROUPS.filter(group => byGroup[group]?.length),
+    ...Object.keys(byGroup).filter(group => !DOMAIN_GROUPS.some(known => known === group)).sort(),
+  ]
+  const columnCount = Math.min(GROUP_COLUMN_COUNT, Math.max(1, orderedGroups.length))
+  const columnWidth = PAD_X * 2 + MAX_GROUP_GRID_COLS * CELL_W
+  const columnY = Array<number>(columnCount).fill(CANVAS_PAD)
+  for (const group of orderedGroups) {
+    const column = columnY.indexOf(Math.min(...columnY))
+    const list = byGroup[group]
+    const cols = Math.min(MAX_GROUP_GRID_COLS, list.length)
+    const rows = Math.ceil(list.length / cols)
+    const x = CANVAS_PAD + column * (columnWidth + COL_GAP)
+    const y = columnY[column]
+    const h = PAD_TOP + rows * CELL_H + PAD_BOT
+    groups.push({ key: group, label: domainLabel(group, 'en'), color: domainColor(group), x, y, w: columnWidth, h })
+    const gridW = cols * CELL_W
+    const startX = x + (columnWidth - gridW) / 2 + CELL_W / 2
+    list.forEach((service, i) => {
+      nodes[service.id] = {
+        cx: startX + (i % cols) * CELL_W,
+        cy: y + PAD_TOP + Math.floor(i / cols) * CELL_H + CELL_H / 2 - 8,
+      }
+    })
+    columnY[column] += h + GROUP_GAP
+  }
 
   return {
     nodes,
     groups,
-    width: colX[colX.length - 1] + colWidth[colWidth.length - 1] + CANVAS_PAD,
-    height: maxY - GROUP_GAP + CANVAS_PAD,
+    width: CANVAS_PAD * 2 + columnCount * columnWidth + (columnCount - 1) * COL_GAP,
+    height: Math.max(...columnY) - (orderedGroups.length ? GROUP_GAP : 0) + CANVAS_PAD,
   }
 }
 
@@ -346,7 +327,7 @@ function TierChip({ pos, color, label, active, dim, faded, onClick, onEnter, onL
 const initialGovData: Record<string, GovernanceManifestEntry> = {}
 
 export default function ServiceMapPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   // The node set is DERIVED: every runnable module in the code-generated catalog (the same
   // /api/catalog/services artifact the other service views use), never a list typed into this page.
   const [registry, setRegistry] = useState<ServiceEntry[]>([])
@@ -571,18 +552,7 @@ export default function ServiceMapPage() {
       })).filter(c => c.svc)
     : []
 
-  // Render-site translations for strings that live in the module-scope data
-  // arrays (GROUP_LABELS, SERVICES.desc) — the hook can't run at module scope.
-  const groupLabelCs: Record<string, string> = {
-    core: 'Jádrový banking',
-    payment: 'Platby',
-    compliance: 'Compliance',
-    identity: 'Identita',
-    psd2: 'PSD2 / Open Banking',
-    platform: 'Platforma',
-    cards: 'Karty',
-  }
-  const groupLabel = (key: string) => t(groupLabelCs[key] ?? GROUP_LABELS[key]?.label ?? key, GROUP_LABELS[key]?.label ?? key)
+  const groupLabel = (key: string) => domainLabel(key, language === 'cs' ? 'cs' : 'en')
   const descCs: Record<string, string> = {
     account: 'Správa životního cyklu účtu, přidělování IBAN',
     ledger: 'Podvojné účetnictví, GL účty, účetní zápisy',
@@ -650,7 +620,7 @@ export default function ServiceMapPage() {
 
       <ContentSourceNote source={contentSource} />
 
-      <CatalogDriftBanner present={CATALOG_PRESENT} />
+      {registry.length > 0 && <CatalogDriftBanner present={CATALOG_PRESENT} />}
 
       <section className="card" aria-label={t('Stav zdrojů mapy', 'Map evidence status')} style={{ padding: '12px 14px', marginBottom: 16, display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10 }}>
         {(Object.keys(evidence) as (keyof typeof evidence)[]).map(key => {
@@ -672,7 +642,7 @@ export default function ServiceMapPage() {
       {/* Filter tabs and Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
         <div role="group" aria-label={t('Filtrování skupin služeb', 'Service group filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-          {[['all', t('Vše', 'All')], ...Object.entries(GROUP_LABELS).map(([k]) => [k, groupLabel(k)])].map(([key, label]) => (
+          {[['all', t('Vše', 'All')], ...DOMAIN_GROUPS.filter(group => SERVICES.some(service => service.group === group)).map(group => [group, groupLabel(group)])].map(([key, label]) => (
             <button key={key} onClick={() => setFilter(key)}
               type="button" aria-pressed={filter === key}
               style={{
