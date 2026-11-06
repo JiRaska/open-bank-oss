@@ -536,6 +536,10 @@ jobs:
           # predate --own-test-overlay, and P must never get to judge its own equivalence.
           cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
             "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          cp provider-proof-source/.github/scripts/runtime_resource_inputs.py \
+            "$RUNNER_TEMP/runtime_resource_inputs.py"
+          cp provider-proof-source/.github/scripts/library_dependency_graph.py \
+            "$RUNNER_TEMP/library_dependency_graph.py"
           chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

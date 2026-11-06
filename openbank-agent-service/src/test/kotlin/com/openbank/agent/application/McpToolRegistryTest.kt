@@ -73,7 +73,7 @@ class McpToolRegistryTest {
         assertThat(registry.serviceOf("list_products")).isEqualTo("product-catalog")
         assertThat(registry.serviceOf("get_catalog_revision")).isEqualTo("product-catalog")
         assertThat(registry.serviceOf("list_ledger_journals")).isEqualTo("ledger-service")
-        assertThat(registry.domainOf("get_account")).isEqualTo("Core Banking")
+        assertThat(registry.domainOf("get_account")).isEqualTo("Accounts & deposits")
     }
 
     @Test

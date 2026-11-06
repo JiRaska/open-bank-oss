@@ -99,3 +99,12 @@ idempotentně podle cycle id a nikdy souběžně s běžícím sweepem.
 `openbank_billing_fee_post_closed_day_refusals_total`; spustí se alert `BillingFeeRefusedIntoClosedDay`.
 Náprava: runbook `0033-billing-fee-refused-into-closed-day.md` (přefakturace pod novým klíčem se
 čtyřma očima, záznam v `billing_fee_rebill`).
+
+## Čtení produktového katalogu vlastní identitou služby
+
+Čtení publikované revize (`ProductCatalogRestClient`, `GET /api/v2/legacy-products/{productId}/published-revision`) se odesílá s pojmenovaným OIDC klientem `m2m`, který se autentizuje jako `openbank-billing` (ROLE_API a
+scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-catalog uděluje
+`catalog.read` této identitě jménem (`service-named-catalog-read`); sdílenému klientovi se samotnou
+ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
+zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
+`M2mOidcClientIdentityWiringTest`.

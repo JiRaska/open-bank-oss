@@ -704,7 +704,7 @@ gates:
       one making every open PR `behind` and restarting its checks. deploy-window.py decides when
       a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
       it must never introduce is a built image that nothing pins, or a pin that rewinds a
-      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service, or a new tag over the digest it replaced; the self-test proves all three (two pushes in one window -> one PR pins both, a moved
       service is not rewound, a matching manual deploy bypasses the time window without arming a
       second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
       against live PRs, so this is where it can go red before it acts.
@@ -714,6 +714,9 @@ gates:
       set -e
       python3 .github/scripts/deploy-window.py --self-test
       python3 .github/scripts/test-deploy-producer-isolation.py
+      python3 .github/scripts/test-check-deploy-source-freshness.py \
+        DeploySourceFreshnessTest.test_new_tag_over_the_replaced_digest_fails \
+        DeploySourceFreshnessTest.test_pin_without_a_digest_fails
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -1469,15 +1472,26 @@ gates:
       gate finds them by shape, pairs each ServiceAccount with a CloudWatch metric filter,
       forbids any binding to it, pins the watched IAM user to a single explicit Deny "*", and
       requires the EventBridge rules to opt in to read-only management events so the first call
-      an intruder makes alerts.
+      an intruder makes alerts. Since 2026-10-31 it also holds HoneyEndpointHit to a subject:
+      some workload must set OPENBANK_SECURITY_HONEY_PATHS, and HoneytokenFilter must stay
+      @PreMatching (a post-matching filter was never called for an unrouted path, which is why
+      it had never counted a hit). It also pins the scheduled-drill role to deception-drill.yml
+      on main (no IfExists, no PR trigger).
     review_after: "2027-04-29"
-    min_subjects: 2   # one token-bearing ServiceAccount + one watched IAM user at authoring time
+    min_subjects: 4   # token SA + watched IAM user + customer-edge decoy paths + drill role (2026-10-31)
     selftest_inputs:
       - ".github/scripts/check-honeytoken-wiring.py"
       - "openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml"
       - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+      - "openbank-infra/gitops/components/customer-edge/customer-edge.yaml"
+      - "openbank-libs-runtime/src/main/kotlin/com/openbank/libs/security/HoneytokenFilter.kt"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception-delivery.tf"
+      - ".github/workflows/deception-drill.yml"
+      - "openbank-infra/scripts/deception-drill.sh"
+      - "openbank-infra/scripts/deception-drill-selftest.sh"
     selftest: |
       python3 .github/scripts/check-honeytoken-wiring.py --selftest
+      bash openbank-infra/scripts/deception-drill-selftest.sh
     run: |
       python3 .github/scripts/check-honeytoken-wiring.py
 
@@ -2312,6 +2326,7 @@ gates:
     mode: enforced
     budget_seconds: 90   # builds 17 git trees
     run: |
+      python3 .github/scripts/test_runtime_resource_inputs.py
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
   # A provider's two verification twins must serve the SAME @State handlers, and the folder twin's
@@ -3301,6 +3316,7 @@ gates:
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
+      python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
@@ -5125,6 +5141,22 @@ gates:
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
 
+  - id: service-ci-path-selection-scenarios
+    name: "Services CI selector replays real push/PR path sets against the real tree (#11560)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the test. It drives the extracted module selector with a
+      stubbed `git diff` for both events; falsified by making filter-lib-test-only-paths.py pass its
+      input through, or by making the fleet-scanner expansion ignore the changed paths (a shared
+      library test-only change then selects more than its owner).
+    rationale: "The scenario file existed but nothing ran it, so a shared-library test-only change that fanned out to cross-module readers or the full fleet could regress unseen (#11560)."
+    review_after: "2027-05-01"
+    budget_seconds: 300   # 40 selector runs over the real module tree
+    min_subjects: 40
+    run: |
+      python3 .github/scripts/test-service-ci-path-selection.py
+
   - id: gitops-image-pin-only
     name: "Services CI: image-pin-only GitOps diffs are inert, everything else relevant (enforced)"
     group: gitops
@@ -5933,10 +5965,12 @@ gates:
   # latest scheduled main envelope. Advisory first (ADR-0144; rules.yaml: threat_model_test_evidence).
   # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
   # never becomes a red PR. The finding output, not the exit code, is the signal (advisory exits 0).
+  # --pr-base skips the ~90 gh calls on a PR that touches no threat model: the answer is main's anyway.
   - id: threat-model-test-evidence
     name: "threat-model cited tests ran green in the latest run (ADR-0144, advisory)"
     group: security
     mode: advisory
+    needs_base: optional
     verified: "2026-10-17 — self-test pins red, absent, skipped, stale-green-masking and no-envelope cases"
     min_subjects: 23
     budget_seconds: 180
@@ -5946,7 +5980,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
     run: |
-      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence
+      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}"
 
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
@@ -7346,18 +7380,19 @@ gates:
     run: |
       python3 .github/scripts/check-product-ir-run-limits.py --root . --enforce
 
-  # ADR-0352 §5, §11: the DSL is sugar and the committed IR JSON is the artifact. Two authoring
-  # paths exist today (the Kotlin DSL and raw JSON); MCP/Studio join in phases 5-6. This gate holds
-  # the static half of "every path yields the same canonical bytes": every committed ir/<name>.json
-  # has a DSL product of that name and ReferenceProductsTest (the JVM half, which compiles the DSL and
-  # compares canonical bytes with the committed file) exists, is not disabled and covers the set.
+  # ADR-0352 §5, §11, §12: the DSL is sugar and the committed IR JSON is the artifact. Every
+  # authoring path must yield the same canonical bytes: the static half here holds that each
+  # committed ir/<name>.json has a DSL product of that name and that both JVM halves exist, are not
+  # disabled and cover their set — ReferenceProductsTest (DSL == committed IR) and, since phase 5a,
+  # ProductIrAuthoringParityTest (obp CLI == MCP product_compile, byte for byte). The Studio form
+  # surface (phase 6) is not on main and is printed PENDING on every run.
   - id: product-ir-authoring-parity
-    name: "committed product IR equals the DSL that authored it, canonical byte for byte (ADR-0352, advisory)"
+    name: "committed product IR equals the DSL, and the CLI and MCP surfaces compile it to the same bytes (ADR-0352, advisory)"
     group: kotlin
     mode: advisory
-    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if the committed IR and the DSL that claims to author it diverge, two authoring tools yield two hashes for one product and the review approved neither. The JVM half is a test; this half keeps that test's scope equal to the committed files."
+    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if two authoring surfaces yield two hashes for one product, the review approved neither. The JVM halves are tests; this half keeps their scope equal to the committed files and the registered surfaces."
     review_after: "2027-03-31"
-    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test. STATIC half only: it reads comment-stripped Kotlin, so a token in a comment, an @Disabled annotation, a DSL product named only in a comment and a build that excludes the test each turn it red (--self-test, 17 cases; @Disabled added to the real ReferenceProductsTest turned the real tree red). The byte comparison itself is the JVM test in the module CI lane; this gate does not run it"
+    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 23 --self-test cases (a missing, disabled, one-sided, comment-only or status-blind surface test each red). Surface half covers lint/compile/simulate/explain plus invalid-IR and unknown-rule failures on RAW bytes and isError==non-zero exit; proven red by perturbing the MCP handler in place (EUR->CZK bytes: 3/3 red; failures not flagged isError: 3/3 red), green on revert. Studio form surface PENDING (no draft-from-form path on main)"
     budget_seconds: 10
     min_subjects: 3   # three reference products at introduction (2026-10-23)
     selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test
