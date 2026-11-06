@@ -33,14 +33,17 @@ class RestDownstreamReadAdapterTest {
         val registry = McpToolRegistry()
         val declared = registry.tools.map { it.name }.toSet()
         val proposalTools = setOf("draft_ticket", "flip_feature_flag")
+        // ADR-0352 §12: the product tools run in-process over ProductToolkit — no downstream call.
+        val inProcessTools = com.openbank.agent.application.ProductAuthoringTools.CAPABILITIES.keys
 
-        val expectedReads = declared - proposalTools
+        val expectedReads = declared - proposalTools - inProcessTools
         assertThat(expectedReads).isNotEmpty()
         assertThat(expectedReads.filterNot { adapter.handles(it) })
             .describedAs("read tools offered to the model that this adapter cannot serve")
             .isEmpty()
         // The proposal tools are HITL, not reads — they must never resolve to a downstream call.
         assertThat(proposalTools.filter { adapter.handles(it) }).isEmpty()
+        assertThat(inProcessTools.filter { adapter.handles(it) }).isEmpty()
         assertThat(adapter.handles("delete_everything")).isFalse()
     }
 

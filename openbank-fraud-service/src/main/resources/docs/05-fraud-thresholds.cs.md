@@ -11,6 +11,7 @@ Verzi 1 zakládá `V9__fraud_threshold_set.sql`. Obsahuje přesně hodnoty, kter
 ## Změna prahu (čtyři oči)
 
 1. Uživatel z rizik nebo compliance (`ROLE_RISK`, `ROLE_COMPLIANCE`) pošle `POST /api/v1/fraud/thresholds/proposals` s celou novou verzí: všechna tři pravidla, částky jako desetinné řetězce, verze vyšší než všechny živé a volitelně `effectiveFrom`. Tím se žádný verdikt nezmění.
+   Každé pravidlo musí nést mapu částek podle měny. Pravidlo zadané jako `null` (například `"thresholds": {"amount": null}`) je chybný návrh a služba odpoví 400, stejně jako u chybějící nebo nedesetinné částky; nic se neuloží.
 2. Jiný uživatel zavolá `POST /api/v1/fraud/thresholds/proposals/{id}/decide`. Navrhovatel nemůže schválit vlastní návrh: služba vrátí 422 a odmítne to i CHECK constraint v databázi.
 3. Po schválení sada platí od pozdějšího z `effectiveFrom` a okamžiku schválení. Zpětné datování není možné.
 

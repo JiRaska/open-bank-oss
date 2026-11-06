@@ -47,7 +47,7 @@ test.describe('/finops/allocation — semantic theme', () => {
       await expect(page.getByRole('heading', { level: 1, name: /Cost Allocation|Rozpad nákladů/i })).toBeVisible()
       await expect(page.getByText('payment-service')).toBeVisible()
       await expect(page.getByText(/Payment execution|Provedení platby/i)).toBeVisible()
-      await expect(page.getByText(/running components.*not in the governance manifest|běžících komponent.*není v governance manifestu/i)).toBeVisible()
+      await expect(page.getByText(/running components have no verified domain|běžících komponent nemá ověřenou doménu/i)).toBeVisible()
       await expect(page.getByText(/per-flow sum can exceed 100%|součet přes procesy proto může přesáhnout 100 %/i)).toBeVisible()
 
       await expect(page.getByRole('region', { name: /Cost domain classification source|Zdroj klasifikace nákladových domén/i })).toBeVisible()

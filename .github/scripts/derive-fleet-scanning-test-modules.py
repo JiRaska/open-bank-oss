@@ -32,6 +32,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from runtime_resource_inputs import path_matches, resource_patterns
+
 ROOT_READ = re.compile(r'(?:File|Path\.of|Paths\.get)\(\s*"\.\."\s*\)')
 PREFIX_FILTER = re.compile(r'startsWith\(\s*"openbank-"\s*\)')
 PINNED = re.compile(r'(?:File\(\s*"\.\./|Path\.of\(\s*"\.\.",\s*"|Paths\.get\(\s*"\.\.",\s*")(openbank-[a-z0-9-]+)')
@@ -106,6 +108,8 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str
                 btext = build.read_text(encoding="utf-8", errors="replace")
                 for path in external_paths(btext, mod.name, tops, root_files, root):
                     direct.add((mod.name, path))
+                for pattern in resource_patterns(btext):
+                    direct.add((mod.name, pattern))
         test_dir = mod / "src" / "test"
         if not test_dir.is_dir():
             continue
@@ -137,7 +141,7 @@ def has_module_input(root: Path, paths: list[str], main_tree_only: bool = False)
 def direct_readers(direct: set[tuple[str, str]], paths: list[str]) -> set[str]:
     return {
         reader for reader, watched in direct
-        if any(path == watched or path.startswith(watched.rstrip("/") + "/") for path in paths)
+        if any(path_matches(path, watched.rstrip("/")) for path in paths)
     }
 
 
@@ -177,6 +181,10 @@ def self_test() -> int:
               'val marker = generateSequence(File("")) { it.parentFile }.first { File(it, "openbank-infra").isDirectory }')
         (r / "openbank-copier").mkdir()
         (r / "openbank-copier" / "build.gradle.kts").write_text('from(rootProject.file("docs/prompts/x")) {}')
+        (r / "openbank-resource-copier").mkdir()
+        (r / "openbank-resource-copier" / "build.gradle.kts").write_text(
+            'tasks.named<Copy>("processResources") { '
+            'from(rootProject.file(".")) { include("openbank-*/governance.yaml") } }')
         fleet, edges, direct, main_tree_only = scan(r)
         ok = True
         if fleet != {"openbank-scanner"}:
@@ -214,6 +222,12 @@ def self_test() -> int:
             ok = False
         if direct_readers(direct, ["docs/prompts/x/a.md"]) != {"openbank-copier"}:
             print("FAIL: build.gradle.kts resource copy was not discovered as a reader")
+            ok = False
+        if "openbank-resource-copier" not in direct_readers(direct, ["openbank-target/governance.yaml"]):
+            print("FAIL: declared processResources glob did not select its image consumer")
+            ok = False
+        if "openbank-resource-copier" in direct_readers(direct, ["openbank-target/src/test/Unrelated.kt"]):
+            print("FAIL: packaged-resource declaration selected an unrelated test input")
             ok = False
         if direct_readers(direct, [".github/scripts/check-x.py", "SECURITY.md", "docs/runbook.md"]):
             print("FAIL: a path no test names selected a reader")
