@@ -14,21 +14,7 @@ its model, invariants and writes. A deployment namespace provides runtime isolat
 business flow uses several contexts, so participation in a payment or pension flow does
 not transfer ownership to the flow's domain. These are separate concepts.
 
-## Staged delivery
-
-The foundation change delivers the shared taxonomy, compatible readers and publishers,
-metadata-only runtime ownership overlay, and narrow evidence publication permissions.
-Existing service declarations remain authoritative during this phase; the foundation does
-not claim that their historical assignments have already been corrected. It adds the
-previously missing Analytics declaration and classifies the admin channel explicitly.
-
-The follow-up tracked by [#14951](https://github.com/JiRaska/open-bank-oss/issues/14951)
-applies the reviewed service assignments below, regenerates their runbooks and public
-inventory, and aligns card alert labels. That metadata-only migration depends on the
-foundation being merged first. Generated navigation includes only currently populated
-domains, so the foundation and migration inventories both remain coherent.
-
-## Target responsibility review
+## Responsibility review
 
 | Domain | Responsibility and boundary |
 |---|---|
@@ -82,7 +68,7 @@ updates without waiting for an unrelated image rebuild.
 
 FinOps domain rollups follow ownership. A cross-domain flow's showback continues to include
 all required services and may overlap with other flows (ADR-0062); those flow totals must
-not be interpreted as a partition of fleet spend. The metadata migration changes card-specific alert domain labels to
+not be interpreted as a partition of fleet spend. Card-specific alert domain labels use
 `cards`; alert expressions and service identities remain unchanged.
 
 ## Verification and rollback
