@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
-dataDomain: platform
+dataDomain: reporting
 primaryDatastore: PostgreSQL
 databaseName: openbank_tax_reporting
 dataLineageRole: consumer

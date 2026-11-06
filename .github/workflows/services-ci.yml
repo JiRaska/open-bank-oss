@@ -83,6 +83,16 @@ jobs:
       verification-shards-json: ${{ steps.detect.outputs.verification-shards-json }}
       admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       # Read admission policy from the trusted base before checking out PR code.
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -163,6 +173,17 @@ jobs:
             python3 .github/scripts/check-service-docs-freshness_test.py
           fi
           python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA" --head "$HEAD_SHA"
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   renderer-tests:
     name: Renderer font and request security tests
@@ -2820,6 +2841,16 @@ jobs:
       pull-requests: read
       contents: read
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -2870,6 +2901,17 @@ jobs:
           SERVICES_JSON: ${{ needs.changes.outputs.services }}
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: python3 .github/scripts/check-service-build-results.py
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)

@@ -431,17 +431,27 @@ function FinOpsContent() {
                 </span>
               </div>
             ) : (() => {
-              const DOMAIN_COLOR: Record<string, string> = {
-                Platform: '#6366f1', Governance: '#d97706', Security: '#dc2626',
-                Observability: '#0891b2', FinOps: '#16a34a', Tax: '#94a3b8',
+              const AWS_CATEGORY_COLOR: Record<string, string> = {
+                Platform: 'var(--accent)', Governance: 'var(--warning)', Security: 'var(--danger)',
+                Observability: 'var(--info)', FinOps: 'var(--success)', Tax: 'var(--text-tertiary)',
+                Unclassified: 'var(--text-tertiary)',
               }
-              const domainTotals: Record<string, number> = {}
+              const awsCategoryLabel = (category: string) => ({
+                Platform: t('Platformní infrastruktura', 'Platform infrastructure'),
+                Governance: t('Cloudová governance', 'Cloud governance'),
+                Security: t('Zabezpečení cloudu', 'Cloud security'),
+                Observability: t('Pozorovatelnost', 'Observability'),
+                FinOps: t('Správa nákladů', 'Cost management'),
+                Tax: t('Daň', 'Tax'),
+                Unclassified: t('Nezařazeno', 'Unclassified'),
+              }[category] ?? category)
+              const categoryTotals: Record<string, number> = {}
               for (const s of costs.services) {
-                const d = (s as ServiceCost).domain ?? 'Platform'
-                domainTotals[d] = (domainTotals[d] ?? 0) + s.amount
+                const category = (s as ServiceCost).domain ?? 'Unclassified'
+                categoryTotals[category] = (categoryTotals[category] ?? 0) + s.amount
               }
-              const domains = Object.entries(domainTotals)
-                .map(([domain, amount]) => ({ domain, amount: Math.round(amount * 100) / 100 }))
+              const categories = Object.entries(categoryTotals)
+                .map(([category, amount]) => ({ category, amount: Math.round(amount * 100) / 100 }))
                 .sort((a, b) => b.amount - a.amount)
               const tax = costs.services.filter(s => (s as ServiceCost).domain === 'Tax').reduce((sum, s) => sum + s.amount, 0)
               const exTax = Math.round((costs.total - tax) * 100) / 100
@@ -502,18 +512,22 @@ function FinOpsContent() {
                   {/* DAILY SPEND TREND — the per-day series we otherwise only read in the console */}
                   <DailySpendTrend daily={costs.daily} currency={costs.currency} />
 
-                  {/* BY DOMAIN — process/business view */}
+                  {/* AWS cost categories are separate from canonical business-domain ownership. */}
                   <div style={{ marginBottom: '20px' }}>
                     <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                      {t('Rozpad po doménách (procesní pohled)', 'By domain (process / business view)')}
+                      {t('Kategorie cloudových nákladů', 'Cloud cost categories')}
                     </div>
+                    <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
+                      {t('Kategorie jsou odvozené z AWS služeb. Obchodní domény najdete v ', 'Categories are derived from AWS services. Business domains are shown in ')}
+                      <Link href="/finops/allocation" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{t('alokaci nákladů', 'cost allocation')}</Link>.
+                    </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                      {domains.map(({ domain, amount }) => {
+                      {categories.map(({ category, amount }) => {
                         const pct = costs.total > 0 ? (amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[domain] ?? 'var(--accent)'
+                        const color = AWS_CATEGORY_COLOR[category] ?? 'var(--text-tertiary)'
                         return (
-                          <div key={domain} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '12px', fontWeight: 700, color, width: '110px', flexShrink: 0 }}>{domain}</span>
+                          <div key={category} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color, width: '110px', flexShrink: 0 }}>{awsCategoryLabel(category)}</span>
                             <div style={{ flex: 1, height: '10px', background: 'var(--surface-3)', borderRadius: '5px', overflow: 'hidden' }}>
                               <div style={{ width: `${Math.max(pct, 0.5)}%`, height: '100%', background: color, borderRadius: '5px' }} />
                             </div>
@@ -535,7 +549,7 @@ function FinOpsContent() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
                       {costs.services.map(svc => {
                         const pct = costs.total > 0 ? (svc.amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[(svc as ServiceCost).domain ?? 'Platform'] ?? 'var(--accent)'
+                        const color = AWS_CATEGORY_COLOR[(svc as ServiceCost).domain ?? 'Unclassified'] ?? 'var(--text-tertiary)'
                         return (
                           <div key={svc.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />

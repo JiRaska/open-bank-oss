@@ -24,6 +24,12 @@ cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),
  ('gitops-no-reader',['openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml'],'empty'),
  ('detekt-config',['config/detekt/detekt.yml'],'full')]
 cases += [('canonical-runtime-image', ['.github/workflows/Dockerfile.deploy'], 'full'), ('shared-benchmark-build', ['openbank-libs-benchmarks/build.gradle.kts'], 'full'), ('shared-detekt-source', ['openbank-libs-detekt-rules/src/main/kotlin/Sample.kt'], 'full')]
+# #11560: a shared library's own src/test edit (exact #12298 path) builds only its owner alone;
+# mixed with a docs page it adds only that page's own readers, never the fleet or another library.
+lend='openbank-libs-lending/src/test/kotlin/com/openbank/libs/lending/AmortizationSmallPrincipalTest.kt'
+cases += [('shared-lib-test-only', [lend], 'lending'), ('shared-lib-test-and-docs', [lend, 'docs/ROADMAP.md'], 'lending-docs')]
+cases += [('ownership-resource', ['openbank-pension-service/governance.yaml'], 'resource-copy'),
+          ('ownership-resource-test-negative', ['openbank-pension-service/src/test/kotlin/Sample.kt'], 'resource-copy-negative')]
 results=[]
 with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
  t=Path(tmp);g=t/'git';g.write_text('#!/bin/bash\nif [ "$1" = diff ] && [[ " $* " == *" --name-only "* ]]; then printf "%s\\n" "$OB_TEST_FILES"; elif [ "$1" = fetch ]; then exit 0; elif [ "$1" = merge-base ]; then /usr/bin/git rev-parse HEAD; else /usr/bin/git "$@"; fi\n');g.chmod(0o755)
@@ -37,9 +43,14 @@ with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
    selected=set((Path(env['SELECT_OUT'])/'changed.txt').read_text().split())
    if expected=='empty':assert not selected,(event,name,selected)
    elif expected=='full':assert selected==allmods,(event,name,selected)
+   elif expected=='lending':assert selected=={'openbank-libs-lending'},(event,name,sorted(selected))
+   elif expected=='lending-docs':assert 'openbank-libs-lending' in selected and selected!=allmods and not {m for m in selected if m.startswith('openbank-libs-')}-{'openbank-libs-lending'},(event,name,sorted(selected))
    elif expected=='charter':assert {'openbank-agent-service','openbank-mcp-service'} <= selected and selected!=allmods,(event,name,selected)
+   elif expected=='resource-copy':assert {'openbank-pension-service','openbank-agent-service','openbank-libs-runtime'} <= selected and selected!=allmods,(event,name,selected)
+   elif expected=='resource-copy-negative':assert 'openbank-pension-service' in selected and 'openbank-agent-service' not in selected and selected!=allmods,(event,name,selected)
    elif expected=='canary':assert selected=={'openbank-libs'},(event,name,selected)
    elif expected.startswith('readers:'):assert selected==set(expected[8:].split(',')),(event,name,sorted(selected))
    else:assert 'openbank-account-service' in selected and 'openbank-libs-runtime' in selected and selected!=allmods,(event,name,selected)
    results.append({'event':event,'case':name,'selected':sorted(selected),'exit':0})
 print('PASS',len(results),'actual push/PR selector scenarios')
+print(f'SUBJECTS={len(results)}')

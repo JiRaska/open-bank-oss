@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.18.0"
+  version: "1.18.1"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -69,6 +69,10 @@ paths:
         Single endpoint for all MCP protocol messages. The `method` field in the request body
         determines the operation. Returns `204 No Content` for notification methods
         (e.g. `notifications/initialized`).
+        Each `tools/list` entry retains its downstream `service` identity. Its `domain` is the
+        canonical English ownership label derived from the image-bundled governance declaration
+        and business-domain taxonomy; infrastructure without a declaration is `Unclassified`.
+        These labels are descriptive metadata and do not grant tool capabilities or access.
       requestBody:
         required: true
         content:

@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.1.0...admin-ui-v4.2.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** preview role and permission catalog in settings ([#14980](https://github.com/JiRaska/open-bank-oss/issues/14980)) ([e1530f5](https://github.com/JiRaska/open-bank-oss/commit/e1530f5b31a0bde3b73064c42c6f45d08bcc8b7f))
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
+## [4.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.0.0...admin-ui-v4.1.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
 ## [4.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.18.0...admin-ui-v4.0.0) (2026-11-06)
 
 
