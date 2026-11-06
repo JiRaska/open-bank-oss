@@ -322,6 +322,7 @@ JUDGE_CODE = PRIVILEGED_GATE_CODE + (
     ".github/workflows/merge-train.yml",
 )
 JUDGE_PREFIXES = (".github/workflows/", ".github/actions/")
+WORKFLOWS_DIR = ".github/workflows"
 JUDGE_PATHS = JUDGE_CODE + (".github/gates/gates.yaml", "openbank-libs/governance/rules.yaml", ".github/CODEOWNERS")
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
@@ -3310,7 +3311,12 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
     `- id:` set after the merge is not the union of main's and every member's (an id lost in the merge
     would retire a gate for the members riding with it) is skipped — it rides alone or takes today's
     lane; merge-tree failing to decide refuses the batch. A JUDGE member (judge_is) rides ALONE: when
-    it is the oldest eligible member it is the whole carrier, otherwise it waits for the next one."""
+    it is the oldest eligible member it is the whole carrier, otherwise it waits for the next one.
+
+    A member that can only take the update-branch lane (it needs regeneration, or changes a workflow,
+    which the App's token cannot push to a carrier branch) is skipped behind members already applied,
+    but when it is FIRST in line no carrier is built this tick: `views` is in serving order (expedited,
+    then oldest), and carriers built around it would overtake it until the eligible set drained."""
     own, own_tree = base, git.tree(base)
     base_special = git.special_entries(base)
     gates_union = gate_ids(git("show", f"{base}:{GATES_YAML}", check=False).stdout)
@@ -3326,6 +3332,8 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
         why = needs_regeneration(files, fragments, outputs)
         if why:
             log(f"#{n:>6} strict    not batched: needs regeneration — {why}; today's lane serves it")
+            if not applied:
+                return None   # first in line: no carrier overtakes it (see the docstring)
             continue
         is_judge = any(judge_is(f) for f in files)
         if is_judge and applied:
@@ -3342,6 +3350,13 @@ def build_strict_carrier(git, base: str, views: list[dict], cap: int, judge_is, 
         tree = r.stdout.split()[0]
         if tree == own_tree:
             log(f"#{n:>6} strict    not batched: no-op over the members ahead of it")
+            continue
+        # Read from the trees, not the PR's file list: a rename reports only its new name there, and
+        # what GitHub refuses is any change under the directory in the pushed commit.
+        if git("diff-tree", "-r", "--no-renames", "--name-only", own_tree, tree, "--", WORKFLOWS_DIR, check=False).stdout.strip():
+            log(f"#{n:>6} strict    not batched: changes {WORKFLOWS_DIR}, which the App may not push — today's lane serves it")
+            if not applied:
+                return None   # first in line: no carrier overtakes it (see the docstring)
             continue
         if git.special_entries(tree) - base_special:
             log(f"#{n:>6} strict    not batched: adds a symlink or gitlink — never a strict carrier")
@@ -3386,6 +3401,8 @@ def strict_batch_views(gh, git, base: str, strict: list, fixes: dict, summary: d
             continue
         if RELEASED_CONTEXT in (view.get("app") or {}):
             log(f"#{n:>6} strict    not batched: a strict carrier timed out on this head — update-branch lane")
+            if not out:
+                return []   # first in line: same no-overtaking rule as build_strict_carrier
             continue
         if git("merge-base", "--is-ancestor", base, head, check=False).returncode == 0:
             continue   # current: strict_lane merges it this tick, main moves — no carrier under it
@@ -3409,7 +3426,12 @@ def publish_strict_carrier(gh, git, base: str, tip: str, applied: list[tuple[int
             log(f"::notice::#{n} source intent or head changed — strict carrier not published")
             return None
     branch = strict_train_branch(run_id, attempt)
-    Pusher(git, branch, gh.remote).push(tip)
+    try:
+        Pusher(git, branch, gh.remote).push(tip)
+    except subprocess.CalledProcessError as e:
+        # A refused push must not end the tick: the train and fast lanes are served by this same run.
+        log(f"::warning::strict carrier not published: push refused (rc={e.returncode}) — update-branch lane this tick")
+        return None
     gh.post_status(tip, "success", f"tree={git.tree(tip)}", context=RECORD_CONTEXT)
     carrier = gh.create_carrier(branch)
     if carrier is None:
@@ -3417,6 +3439,12 @@ def publish_strict_carrier(gh, git, base: str, tip: str, applied: list[tuple[int
         return None
     log(f"published strict carrier #{carrier} ({branch}) over {base[:12]}: members {[n for n, _ in applied]}")
     return carrier
+
+
+def close_strict_carrier(gh, git, summary: dict, carrier: int, branch: str, tag: str) -> None:
+    summary.setdefault("strict_carriers", []).append((carrier, tag))
+    gh.close_carrier(carrier)
+    Pusher(git, branch, gh.remote).delete()
 
 
 def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], main_red: dict[str, str],
@@ -3431,11 +3459,6 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
     open_after, acted = False, False
     for p in [p for p in gh.open_prs() if is_strict_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
-
-        def close(tag: str) -> None:
-            summary.setdefault("strict_carriers", []).append((carrier, tag))
-            gh.close_carrier(carrier)
-            Pusher(git, branch, gh.remote).delete()
 
         extra = train_extra_gates(git, base)
         if extra is None:
@@ -3472,12 +3495,12 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
             log(f"::warning::strict carrier #{carrier}: {expired} — closed with no verdict, nobody blamed; "
                 f"its members take the update-branch lane on these heads")
             acted = True
-            for n, head in members:
+            for _n, head in members:
                 if RELEASED_CONTEXT not in gh.app_statuses(head):
                     gh.post_status(head, "success", f"strict lane: strict carrier #{carrier} timed out on this head; "
                                    "it rides no further strict carrier", context=RELEASED_CONTEXT)
             summary["inconclusive"].append(carrier)
-            close("expired")
+            close_strict_carrier(gh, git, summary, carrier, branch, "expired")
             continue
         if not failing and inconclusive:
             if not gh.app_statuses(sha).get(RERUN_CONTEXT, ("", ""))[0] and gh.rerun_inconclusive(sha, inconclusive):
@@ -3489,13 +3512,13 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
             log(f"::warning::strict carrier #{carrier}: still inconclusive ({', '.join(inconclusive)}) — closed with no verdict")
             acted = True
             summary["inconclusive"].append(carrier)
-            close("inconclusive")
+            close_strict_carrier(gh, git, summary, carrier, branch, "inconclusive")
             continue
         if not failing and main_only:
             log(f"::warning::strict carrier #{carrier}: red only on {', '.join(main_only)}, red on main too — no verdict")
             acted = True
             summary["inconclusive"].append(carrier)
-            close("main-red")
+            close_strict_carrier(gh, git, summary, carrier, branch, "main-red")
             continue
         acted = True
         rec_state, rec_desc = gh.app_statuses(sha).get(RECORD_CONTEXT, ("", ""))
@@ -3510,7 +3533,7 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
         if problem:
             log(f"::warning::strict carrier #{carrier}: {problem}")
             summary["rejected"].append(carrier)
-            close("rejected")
+            close_strict_carrier(gh, git, summary, carrier, branch, "rejected")
             continue
         if failing:
             if len(members) == 1:
@@ -3522,11 +3545,11 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
                 for _n, head in members:
                     gh.post_status(head, "pending", f"bisect size {max(1, len(members) // 2)}")
                 summary["bisected"].append([n for n, _ in members])
-            close("red")
+            close_strict_carrier(gh, git, summary, carrier, branch, "red")
             continue
         if shadow:
             log(f"strict carrier #{carrier}: green (shadow: no status, no merge)")
-            close("shadow")
+            close_strict_carrier(gh, git, summary, carrier, branch, "shadow")
             continue
         expected = live_main
         for n, head in members:
@@ -3558,7 +3581,7 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
                 log(f"::warning::strict carrier #{carrier}: main {after[:12]} after the last merge does not carry the "
                     f"carrier's tree — no further strict carrier this tick")
                 summary["strict_tree_mismatch"] = carrier
-        close("merged")
+        close_strict_carrier(gh, git, summary, carrier, branch, "merged")
     return open_after, acted
 
 
@@ -4328,7 +4351,8 @@ def retry_planner_self_test(check) -> None:
 # PR's full run; the ceiling moves to 15,500 (~4 % headroom), still well under the 18,534 that first
 # overran the shard budget. Re-review of #14891 (judge-alone sequences, the inverse-rule ticks, the
 # post-merge tree check): spawns=15,550 at 594 cases before trimming two no-op ticks; ceiling 15,800.
-SELF_TEST_SPAWN_CEILING = 15800
+# Strict carrier serving order, workflow members and the refused push: spawns=15,928 at 605 cases; ceiling 16,200.
+SELF_TEST_SPAWN_CEILING = 16200
 
 
 def self_test() -> int:
@@ -6063,8 +6087,9 @@ def self_test() -> int:
             open_only("pW2", "pP1", "pJ1", "pJ2")
             advance_main()
             batches = [settle_strict(cap=8).get("strict_batch") for _ in range(3)]
-            check("strict carrier (2): judge members never share a carrier — non-judge pair first, then each judge member alone",
-                  batches == [[36, 88], [81], [82]] and gh.merged == [36, 88, 81] and gh.updates == [],
+            check("strict carrier (2): judge members never share a carrier — non-judge pair first, then each judge member "
+                  "alone; a workflow member (the App cannot push it) takes update-branch instead",
+                  batches == [[36, 88], [81], None] and gh.merged == [36, 88, 81] and gh.updates == [82],
                   f"batches={batches} merged={gh.merged} updates={gh.updates}")
             syn_refs = referenced_scripts(Git(origin), gh.main_sha())
             for f in (".github/workflows/ci.yml", ".github/workflows/_service-ci.yml", ".github/actions/x/action.yml",
@@ -6322,6 +6347,100 @@ def self_test() -> int:
                   gh.merged == [36, 88] and s.get("strict_tree_mismatch") is not None and not strict_open()
                   and s["culprits"] == [] and 90 not in (s.get("strict_batch") or []),
                   f"merged={gh.merged} {s} open={len(strict_open())}")
+            reset()
+
+            # (13) serving order: a member that can only take the update-branch lane, FIRST in line, is not
+            # overtaken by a carrier (expedite is how a workflow member gets first here).
+            def first_in_line_updated(name, *others):
+                open_only(name, *others)
+                gh.prs[numbers[name]]["labels"] = [{"name": EXPEDITE_LABEL}]
+                advance_main()
+                s13 = settle_strict(cap=8)
+                return not strict_open() and gh.updates == [numbers[name]], f"open={len(strict_open())} updates={gh.updates} {s13}"
+            ok, why = first_in_line_updated("pJ2", "pW2", "pP1")
+            check("strict carrier (13): an expedited workflow member is served first, no carrier overtakes it", ok, why)
+            reset()
+            ok, why = first_in_line_updated("pPR", "pW2", "pP1")
+            check("strict carrier (13): a first-in-line member needing regeneration is served first, no carrier overtakes it", ok, why)
+            reset()
+            open_only("pW2", "pP1")
+            advance_main()
+            gh.post_status(gh.prs[36]["head"]["sha"], "success", "timed out", context=RELEASED_CONTEXT)
+            s = settle_strict(cap=8)
+            check("strict carrier (13): a first-in-line member released from a timed-out carrier is served first",
+                  not strict_open() and gh.updates == [36], f"updates={gh.updates} {s}")
+            reset()
+
+            # (14) the App's token cannot push under .github/workflows: decided from the TREES, so a rename
+            # (the PR file list names only the new path) cannot slip through. Fixture origin refuses such
+            # pushes the way GitHub does; a refused push of any kind must not end the tick.
+            hook = pathlib.Path(origin, ".git", "hooks", "update")
+            hook.parent.mkdir(exist_ok=True)
+            gh.g("config", "core.hooksPath", str(hook.parent))
+            hook.write_text("#!/bin/sh\ncase \"$1\" in refs/heads/train/strict-*) "
+                            "[ -f \"$GIT_DIR/refuse-all\" ] && exit 1\n"
+                            "[ -n \"$(git diff --name-only main \"$3\" -- .github/workflows)\" ] && exit 1;; esac\nexit 0\n")
+            hook.chmod(0o755)
+            try:
+                open_only("pW2", "pJ2")
+                advance_main()
+                g14 = Git(clone("settle14"))
+                b14 = gh.main_sha()
+                g14("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+                j2 = gh.prs[82]["head"]["sha"]
+                tip14 = g14("commit-tree", g14("merge-tree", "--write-tree", b14, j2).stdout.split()[0], "-p", b14, "-m", "x").stdout.strip()
+                refused = False
+                try:
+                    Pusher(g14, "train/strict-1-1", gh.remote).push(tip14)
+                except subprocess.CalledProcessError:
+                    refused = True
+                check("strict carrier (14) control: the fixture origin refuses a workflow change on a carrier branch", refused)
+                lying = [{"number": 82, "head_sha": j2, "files": [".github/scripts/renamed.py"]},
+                         {"number": 36, "head_sha": gh.prs[36]["head"]["sha"], "files": [".github/scripts/two.py"]}]
+                check("strict carrier (14): the workflow change is read from the trees, not the PR's file list",
+                      build_strict_carrier(g14, b14, lying, 8, lambda _f: False, [], []) is None)
+                pathlib.Path(origin, ".git", "refuse-all").write_text("")
+                reset()
+                open_only("pW2", "pP1")
+                advance_main()
+                s = settle_strict(cap=8)
+                check("strict carrier (14): a refused push ends nothing — no carrier, and the same tick serves update-branch",
+                      not strict_open() and gh.updates == [36] and "strict_carrier" not in s, f"updates={gh.updates} {s}")
+            finally:
+                hook.unlink()
+                pathlib.Path(origin, ".git", "refuse-all").unlink(missing_ok=True)
+                gh.g("config", "--unset", "core.hooksPath")
+            reset()
+
+            # (15) a member the strict lane would not serve never rides: an unapproved codex head, or a head
+            # red on a required context (the unticked money-path checklist is one); revoked after the carrier
+            # is built, it does not merge.
+            gh.g("branch", "codex/strict-p1", "pP1")
+            open_only("pW2", "pP2")
+            gh.add_pr(190, "codex/strict-p1", "2026-02-01")
+            advance_main()
+            s = settle_strict(cap=8)
+            check("strict carrier (15): an unapproved codex member never rides", s.get("strict_batch") == [36, 90], str(s))
+            reset()
+            open_only("pW2", "pP2", "pP1")
+            gh.head_checks[gh.prs[88]["head"]["sha"]] = {"Validate manifests": "failure"}
+            advance_main()
+            s = settle_strict(cap=8)
+            check("strict carrier (15): a member red on a required context (checklist unticked) never rides",
+                  s.get("strict_batch") == [36, 90], str(s))
+            gh.head_checks.clear()
+            reset()
+            open_only("pW2", "pP2")
+            gh.add_pr(190, "codex/strict-p1", "2026-02-01")
+            h190 = gh.prs[190]["head"]["sha"]
+            gh.post_status(h190, "success", "owner-approved PR #190", OWNER_APPROVAL_CONTEXT)
+            advance_main()
+            s = settle_strict(cap=8)
+            batch = s.get("strict_batch")
+            gh.post_status(h190, "failure", "owner-revoked PR #190", OWNER_APPROVAL_CONTEXT)
+            s = settle_strict(cap=8)
+            check("strict carrier (15): an approval revoked after the carrier was built stops that member's merge",
+                  batch == [36, 90, 190] and gh.merged == [36, 90] and 190 not in gh.merged, f"{batch} merged={gh.merged} {s}")
             reset()
 
             # GREEN CARRIER FIRST (#13400): a train whose CI went green while a strict-lane reservation

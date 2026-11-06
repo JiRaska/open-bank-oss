@@ -736,7 +736,7 @@ def identify(env, fetch_pr) -> tuple[str, dict | None, int]:
     if carrier_lib.is_verified_carrier(event, repo) and not rerun:
         return "carrier", event, 0
     ref = str(((event or {}).get("head") or {}).get("ref") or env.get("GITHUB_HEAD_REF", ""))
-    if not carrier_lib.TRAIN_BRANCH_RE.fullmatch(ref):
+    if not carrier_lib.is_carrier_branch(ref):
         return "ordinary", event, 0
     live = fetch_pr(repo, number) if (repo and number.isdigit()) else None
     if live is None:
@@ -1374,6 +1374,7 @@ def self_test() -> int:
                       ("bot login and type, wrong numeric id", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "Bot", "id": 1})),
                       ("bot login and type, no numeric id", carrier_pr(user={"login": carrier_lib.BOT_LOGIN, "type": "Bot"})),
                       ("wrong branch", carrier_pr(head={"ref": "train/x", "sha": "HEAD", "repo": {"full_name": repo}})),
+                      ("wrong strict branch", carrier_pr(head={"ref": "train/strict-x", "sha": "HEAD", "repo": {"full_name": repo}})),
                       ("fork head", carrier_pr(head={"ref": "train/123-1", "sha": "HEAD", "repo": {"full_name": "evil/r"}})),
                       ("missing label", carrier_pr(labels=[])),
                       ("unreadable PR", None)]:
@@ -1464,6 +1465,10 @@ def self_test() -> int:
     rc, out, calls = gate_main_with(spoof, spoof, "train/123-1")
     if rc == 0 or CARRIER_NOTE in out:
         print(f"self-test FAIL (main-spoof): a faked train/ branch from a non-App author passed (rc={rc}):\n{out[-500:]}"); bad += 1
+    strict_real = {**carrier_pr(head={"ref": "train/strict-123-1", "sha": "HEAD", "repo": {"full_name": repo}}), "number": 500}
+    rc, out, calls = gate_main_with(strict_real, None, "train/strict-123-1")
+    if rc != 0 or CARRIER_NOTE not in out:
+        print(f"self-test FAIL (main-strict-carrier): a real strict carrier was not judged as a carrier (rc={rc}):\n{out[-500:]}"); bad += 1
     rc, out, calls = gate_main_with(real, None, "train/123-1")
     if rc != 0 or CARRIER_NOTE not in out or calls != {"pr": 0, "record": 1, "bodies": 0, "gh": 0}:
         print(f"self-test FAIL (main-carrier-no-member-reads): a real carrier made {calls} / rc={rc}, want PASS "
@@ -1557,7 +1562,8 @@ def self_test() -> int:
     m_id = re.search(r"^BOT_ID = ([0-9_]+)", mt, re.M)
     if not m_id or int(m_id.group(1).replace("_", "")) != carrier_lib.BOT_ID:
         print("self-test FAIL: merge_train_carrier.BOT_ID drifted from merge-train.py"); bad += 1
-    if (carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.OWN_MEMBER_RE.pattern not in mt
+    if (carrier_lib.TRAIN_BRANCH_RE.pattern not in mt or carrier_lib.STRICT_TRAIN_BRANCH_RE.pattern not in mt
+            or carrier_lib.OWN_MEMBER_RE.pattern not in mt
             or carrier_lib.RECORD_RE.pattern not in mt):
         print("self-test FAIL: merge_train_carrier branch/member regex drifted from merge-train.py"); bad += 1
 

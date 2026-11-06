@@ -575,7 +575,15 @@ and judges it exactly like one strict PR:
   whose path carries a control character (neither enters the strict list, and the builder refuses the
   tree as well). A member that conflicts with main (told once, as in the strict lane) or with the members
   ahead of it (dropped from this carrier without a notice; the next one takes it). A main-red fix (served
-  alone). The cap is `STRICT_BATCH_CAP` (default 8).
+  alone). A member changing anything under `.github/workflows`, read from the merged trees and not the PR's
+  file list: GitHub refuses a push of such a commit from an App token without the `workflows` permission,
+  so it can only take the update-branch path. A refused push of any kind leaves the tick running and no
+  carrier open. The cap is `STRICT_BATCH_CAP` (default 8).
+- **No carrier overtakes the first in line.** The strict list is in serving order (expedited, then oldest).
+  When its first eligible member can only take the update-branch path (a workflow change, a regeneration, a
+  head released from a timed-out carrier), no carrier is built that tick and that member is served; behind
+  members already applied it is simply skipped. Otherwise carriers would pass it until the eligible set
+  ran out, and `merge-priority:expedite` would mean nothing for a workflow PR.
 - **A judge member rides alone — the inverse rule, fail closed.** A strict member may be batched only
   when EVERY file it touches is under `.github/scripts/` AND is named by no workflow, action or
   `gates.yaml` entry on main — by full path or by bare basename (a script run as `"$DIR/name.sh"`),
