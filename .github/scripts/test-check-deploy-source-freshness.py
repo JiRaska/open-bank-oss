@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import subprocess
 import tempfile
@@ -27,12 +28,17 @@ class DeploySourceFreshnessTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="deploy-source-freshness-")
         self.root = Path(self.temp.name)
+        self.fixture_env = {key: value for key, value in os.environ.items() if key not in {
+            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR"}}
         self.git("init", "-q", "-b", "main")
         self.git("config", "user.email", "freshness-test@example.invalid")
         self.git("config", "user.name", "Freshness Fixture")
         self.git("config", "commit.gpgsign", "false")
         (self.root / ".github/scripts").mkdir(parents=True)
         shutil.copy2(VERIFY_SCRIPT, self.root / ".github/scripts/pact-version-tree-equivalent.sh")
+        for helper in ("runtime_resource_inputs.py", "library_dependency_graph.py"):
+            shutil.copy2(SCRIPT_DIR / helper, self.root / ".github/scripts" / helper)
         shutil.copy2(DEPLOY_SCRIPT, self.root / ".github/scripts/deploy-window.py")
         (self.root / "openbank-example-service/src/main").mkdir(parents=True)
         (self.root / "openbank-other-service/src/main").mkdir(parents=True)
@@ -52,6 +58,8 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.write("config/detekt.yml", "config: {}\n")
         self.write("build-logic/build.gradle.kts", "plugins {}\n")
         self.write(".github/workflows/Dockerfile.deploy", "FROM scratch\n")
+        self.write(".github/workflows/auto-deploy.yml",
+                   "env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n")
         self.write("build.gradle.kts", "plugins {}\n")
         self.write("settings.gradle.kts", "rootProject.name = \"fixture\"\n")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
@@ -62,7 +70,7 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, check=True,
+        return subprocess.run(["git", *args], cwd=self.root, env=self.fixture_env, check=True,
                               capture_output=True, text=True).stdout.strip()
 
     def write(self, relative: str, content: str) -> None:

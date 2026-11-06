@@ -1,8 +1,8 @@
 # API
 
-REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
+REST/RPC kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.18.1**). Služba je **interní** — **není** vystavena přes API Gateway externím TPP.
 
-Platí dvě verzovací osy (ADR-0048): release verze (`version.txt` = `1.27.4`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). Jsou nezávislé.
+Platí dvě verzovací osy (ADR-0048): release verze (`version.txt`) a API-kontraktová verze (`openapi.yaml: info.version` = `1.18.1`, `openbank.api.version = "1"`). Jsou nezávislé.
 
 ## Povrchy
 
@@ -26,6 +26,20 @@ Jediný JSON-RPC 2.0 dispatcher. Pole `method` vybírá operaci. Notifikační m
 | `tools/list` | Vyjmenuje dostupné nástroje (name, description, JSON-Schema `inputSchema`). |
 | `tools/call` | Vyvolá pojmenovaný nástroj s `arguments`. Volání je autorizováno policy gate **před** provedením; zamítnutí vrací `ToolCallResult` s `isError=true` a důvodem policy. |
 | `ping` | Liveness — vrací `{ "pong": true }`. |
+
+### Metadata obchodního vlastnictví
+
+Každá položka `tools/list` zachovává identitu cílové služby v poli `service`. Štítek
+`domain` pochází ze stejné modulové deklarace `governance.yaml` a kanonické taxonomie
+domén přibalené při sestavení obrazu služby. Externí infrastruktura bez deklarace je
+`Unclassified`; známé bankovní nástroje musí mít doloženého vlastníka.
+Historická identita nástrojů `sepa-instant-service` přebírá vlastnictví modulu
+`openbank-sepa-instant` bez přejmenování nástrojů nebo změny jejich cíle.
+
+MCP relay v admin UI doplňuje aktuální schválené publikované vlastnictví pouze do
+úspěšných odpovědí `tools/list`, pokud metadata předběhnou obraz agent služby. Množina
+nástrojů, filtrování podle charteru, capabilities, vstupní schémata a odpovědi
+`tools/call` zůstávají zachované.
 
 ### Katalog nástrojů (vše read-only)
 

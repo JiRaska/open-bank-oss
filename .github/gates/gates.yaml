@@ -2323,6 +2323,7 @@ gates:
     mode: enforced
     budget_seconds: 90   # builds 17 git trees
     run: |
+      python3 .github/scripts/test_runtime_resource_inputs.py
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
   # A provider's two verification twins must serve the SAME @State handlers, and the folder twin's

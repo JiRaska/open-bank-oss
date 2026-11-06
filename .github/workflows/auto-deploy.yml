@@ -40,6 +40,12 @@ on:
       # The canonical runtime image reads the service Dockerfile's EXPOSE declaration.
       # A port-only change therefore requires a rebuild just as source does.
       - "openbank-*/Dockerfile"
+      - "openbank-*/build.gradle.kts"
+      # Packaged ownership and prompt resources are narrowed to their declared consumers.
+      - "openbank-*/governance.yaml"
+      - "openbank-libs/governance/domain-taxonomy.json"
+      - "openbank-libs/governance/agents.yaml"
+      - "openbank-libs/governance/prompts/**"
       # The fast-jar build copies this canonical recipe for every Gradle service,
       # including services with no per-module Dockerfile.
       - ".github/workflows/Dockerfile.deploy"
@@ -47,8 +53,8 @@ on:
       # openbank-libs-domain / openbank-libs-runtime, both already covered by the
       # openbank-*/src/main/** glob above) — only its build file and Gradle wrapper
       # still affect the build. A bare "openbank-libs/**" glob also matches
-      # openbank-libs/docs/** and openbank-libs/governance/**, neither a compile
-      # input, so it silently triggered a 37-service rebuild on docs-only changes.
+      # openbank-libs/docs/** and most governance data, so a bare glob would trigger
+      # fleet rebuilds. Explicit packaged resource inputs are selected separately.
       - "openbank-libs/build.gradle.kts"
       - "openbank-libs/gradle/**"
       - "openbank-libs-domain/build.gradle.kts"
@@ -315,12 +321,10 @@ jobs:
           }
 
           # Parent diff also bounds manual dispatch to eligible services (#3318, #3454).
-          CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD 2>/dev/null || git diff --name-only HEAD 2>/dev/null)"
+          CHANGED_FILES="$(git diff --no-renames --name-only HEAD~1 HEAD 2>/dev/null || git diff --no-renames --name-only HEAD 2>/dev/null)"
 
-          # Shared paths that affect every service. Governance catalogs
-          # (openbank-libs/governance/) are excluded — they are data for CI
-          # checks + admin-ui, not a compile input, so a mixed push touching a
-          # control catalog and one service must rebuild ONE service, not 33.
+          # Shared code follows library edges; copied governance resources follow their
+          # declared consumers below, without treating catalogs as fleet-wide code.
           # NB: here-string, not `echo | grep -q` — under pipefail a -q early
           # exit SIGPIPEs the echo and the match is racily mis-read as false
           # (same footgun documented in services-ci.yml).
@@ -345,7 +349,9 @@ jobs:
             | bash .github/scripts/auto-deploy-template-dependents.sh \
               "$ALL_SERVICES" "$SELF_BUILT_SERVICES")"
 
-          # Services changed directly in this push.
+          RESOURCE_DEPENDENTS="$(printf '%s\n' "$CHANGED_FILES" | python3 .github/scripts/runtime_resource_inputs.py --root . --ref HEAD --readers "$ALL_SERVICES")"
+
+          # Services changed directly in this push, or through declared packaged inputs.
           DIRECT_SERVICES=()
           for svc in $ALL_SERVICES; do
             # Keep this aligned with the push trigger: release-please changes only
@@ -354,7 +360,7 @@ jobs:
               DIRECT_SERVICES+=("$svc")
             fi
           done
-          for svc in $TEMPLATE_DEPENDENTS; do
+          for svc in $TEMPLATE_DEPENDENTS $RESOURCE_DEPENDENTS; do
             DIRECT_SERVICES+=("$svc")
           done
 

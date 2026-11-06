@@ -7,6 +7,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { allocate, type CostReportLike, type ServiceFootprint } from '@/lib/finops/allocation'
 import { canonicalServiceId } from '@/lib/finops/costGroups'
+import { DOMAIN_IDS } from '@/lib/governance/domains'
 import type { DataDomain } from '@/lib/governance/manifest'
 import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
@@ -83,7 +84,7 @@ export async function GET() {
     async () => readJson(process.env.OPENBANK_GOVERNANCE ?? path.resolve(process.cwd(), 'governance.json')) as Promise<Record<string, unknown> | null>,
   )
   const domains = new Map<string, DataDomain>()
-  const validDomains = new Set<string>(['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform'])
+  const validDomains = new Set<string>(DOMAIN_IDS)
   const services = governance.value?.services
   for (const service of Array.isArray(services) ? services : []) {
     if (service && typeof service === 'object' && typeof service.serviceName === 'string'

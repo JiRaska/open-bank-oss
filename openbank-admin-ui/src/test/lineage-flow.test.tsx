@@ -39,7 +39,7 @@ describe('data-lineage flow page', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
     expect(screen.getByTestId('lineage-loading')).toHaveTextContent(/Loading verified data lineage/i)
-    expect(screen.queryByText('CORE · 0')).not.toBeInTheDocument()
+    expect(screen.queryByText('ACCOUNTS & DEPOSITS · 0')).not.toBeInTheDocument()
   })
 
   it('renders domain bands with the code-derived lineage nodes', async () => {
@@ -48,8 +48,31 @@ describe('data-lineage flow page', () => {
     await waitFor(() => expect(screen.getByText('account')).toBeInTheDocument())
     expect(screen.getByText('ledger')).toBeInTheDocument()
     expect(screen.getByText('sepa-payment')).toBeInTheDocument()
-    expect(screen.getByText('CORE · 2')).toBeInTheDocument()
+    expect(screen.getByText('ACCOUNTS & DEPOSITS · 2')).toBeInTheDocument()
     expect(screen.getByText('PAYMENTS · 1')).toBeInTheDocument()
+  })
+
+  it('keeps pensions, wealth and unclassified lineage separate from technical platform', async () => {
+    const services = [
+      { serviceName: 'pension-service', dataDomain: 'pensions', dataLineageRole: 'both' },
+      { serviceName: 'pension-fund-service', dataDomain: 'pensions', dataLineageRole: 'both' },
+      { serviceName: 'wealth-service', dataDomain: 'wealth', dataLineageRole: 'both' },
+      { serviceName: 'devops-agent', dataDomain: 'platform', dataLineageRole: 'internal' },
+      { serviceName: 'unclassified-service', dataDomain: null, dataLineageRole: null },
+    ]
+    const fallback = mockFetch()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/catalog/governance')
+      ? new Response(JSON.stringify({ available: true, services }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : fallback(input)))
+    render(React.createElement(Providers, null, React.createElement(LineageFlowPage)))
+    expect(await screen.findByText('PENSIONS · 2')).toBeInTheDocument()
+    expect(screen.getByText('WEALTH · 1')).toBeInTheDocument()
+    expect(screen.getByText('TECHNICAL PLATFORM · 1')).toBeInTheDocument()
+    expect(screen.getByText('UNCLASSIFIED · 1')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Pensions', exact: true }))
+    expect(screen.getByText('pension')).toBeInTheDocument()
+    expect(screen.getByText('pension-fund')).toBeInTheDocument()
+    expect(screen.queryByText('wealth')).not.toBeInTheDocument()
   })
 
   it('animates flow by default and stops when toggled off', async () => {
