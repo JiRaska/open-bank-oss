@@ -806,7 +806,7 @@ export default function ServiceMapPage() {
                     const label = svc.name.replace(/ Service$/, '')
                     const { w: bw, h: bh } = brickSize(degrees[svc.id] ?? 0)
                     return (
-                      <g key={svc.id} role="button" tabIndex={0} aria-label={label}
+                      <g key={svc.id} role="button" tabIndex={0} aria-label={label} data-service-name={svc.container}
                         style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
                         opacity={emphasized ? 1 : 0.25}
                         onClick={() => setSelected(s => s === svc.id ? null : svc.id)}
