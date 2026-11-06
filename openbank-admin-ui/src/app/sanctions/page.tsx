@@ -30,6 +30,7 @@ import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { statusTone } from '@/components/ui/tone'
 import { readApprovalId } from '@/lib/approvals/triage'
 import { trustedHttpsUrl } from '@/lib/security/trustedUrls'
+import { SanctionsRefreshState } from '@/components/sanctions/SanctionsRefreshState'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -171,6 +172,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
               <div>{new Date(list.lastUpdatedAt).toLocaleString(dateLocale)}</div>
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
+          <SanctionsRefreshState refreshRequestedAt={list.refreshRequestedAt} dateLocale={dateLocale} />
         </div>
         <Can permission="sanctions:manage">
         <button type="button" onClick={handleRefresh} disabled={refreshing} aria-busy={refreshing} aria-label={t('Stáhnout sankční seznam', 'Download sanctions list')}
@@ -414,6 +416,12 @@ export default function SanctionsPage() {
   const handleRefreshList = async (listType: string) => {
     setListsError('')
     const res = await fetch(`/api/sanctions/lists/${listType}/refresh`, { method: 'POST' })
+    if (res.status === 422) {
+      // The service refuses a disabled list: the scheduler would never carry the request out.
+      setListsError(t('Seznam je pozastavený — nejdřív obnovte automatické aktualizace, pak ho lze stáhnout.',
+        'This list is paused — resume its automatic updates before downloading it.'))
+      return
+    }
     if (!res.ok) {
       const errorPayload = await res.json().catch(() => ({ error: 'Refresh failed' })) as ApiError
       setListsError(errorPayload.error ?? t(`Obnovení listu selhalo (HTTP ${res.status})`, `Failed to refresh list (HTTP ${res.status})`))

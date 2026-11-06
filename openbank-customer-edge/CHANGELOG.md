@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.1...customer-edge-v1.7.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.0...customer-edge-v1.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+* **customer-edge:** answer a refused pension read as access denied, not a change refusal ([#14649](https://github.com/JiRaska/open-bank-oss/issues/14649)) ([4d94d31](https://github.com/JiRaska/open-bank-oss/commit/4d94d31f3530e5a5b79aef1b21777fe8a3b8b04d))
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.2...customer-edge-v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **customer-edge:** page the unified notification inbox by keyset cursor ([#14622](https://github.com/JiRaska/open-bank-oss/issues/14622)) ([fab74b5](https://github.com/JiRaska/open-bank-oss/commit/fab74b50dc95032b074bd1c8ecc387b47c889c46)), closes [#12260](https://github.com/JiRaska/open-bank-oss/issues/12260)
+
 ## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
 
 

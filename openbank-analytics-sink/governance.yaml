@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# Analytical ingestion transport; business facts remain owned by producer domains.
+dataDomain: platform
+primaryDatastore: none
+ownsNoDatabase: true
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: No local database; downstream warehouse retention is governed by its operator.
+evidenceExported: false

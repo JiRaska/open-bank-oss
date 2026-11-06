@@ -42,3 +42,5 @@ Klienti interních služeb s injektovaným JDK `HttpClient` (LLM gateway, obsaho
 ## Účast na závěrce dne (ADR-0342)
 
 `com.openbank.libs.close` (v `openbank-libs-runtime`) je strana účastníka kontraktu závěrky dne s ledgerem: `CloseParticipationAssembler` skládá uložené běhy úloh služby do jednoho hlášení za účetní den a `CloseParticipationReporter` ho doručuje, aniž by kdy shodil volající úlohu. Běh, který byl odmítnut nebo částečně selhal, se složí na `REFUSED`, což ledger bere jako NEÚPLNÉ: den zůstane v `CUTOFF`, dokud účastník nenahlásí `RAN` nebo ho operátor nepromině. Obchodní data musí pocházet z `AccountingClock`, nikdy z UTC beanu `Clock`.
+
+Zahřátí typů endpointů rozbalí každý typ na vnořené typy (obsah kontejnerů, klíče map a generické vazby, rekurzivně), než sestaví serializéry. DTO dosažitelné jen přes typovou proměnnou, např. `Page<List<Dto>>`, je tak zahřáté před připraveností, ne až při prvním požadavku (#12042). Neprůhledné listy jako `String` a primitivní typy se přeskakují.

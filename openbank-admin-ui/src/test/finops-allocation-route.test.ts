@@ -127,7 +127,7 @@ describe('GET /api/finops/allocation', () => {
     })
     const unknown = await (await GET()).json()
     expect(unknown.unmapped).toContain('account-service')
-    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('platform')
+    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('unclassified')
   })
 
   it('keeps domains unmapped when neither published nor image governance is available', async () => {
@@ -136,7 +136,7 @@ describe('GET /api/finops/allocation', () => {
     const { GET } = await import('../app/api/finops/allocation/route')
     const body = await (await GET()).json()
     expect(body.unmapped).toEqual(['account-service', 'ledger-service'])
-    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'platform' })])
+    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'unclassified' })])
     expect(body.governanceSource).toMatchObject({ source: 'unavailable', status: 'unavailable' })
   })
 

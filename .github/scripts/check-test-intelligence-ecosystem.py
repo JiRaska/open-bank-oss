@@ -978,7 +978,7 @@ def service_ci_evidence_source(root: Path, workflow: str) -> str:
                 or 'git checkout --detach --quiet "$resolved_ref"' not in historical_lines):
             return ''
         paths = {
-            '.github/actions/service-ci-coverage-evidence/action.yml': '10e8de61f2a7e3541926b4857d2f1a10f4c2dee53c5eb933cb9090d439f3b313',
+            '.github/actions/service-ci-coverage-evidence/action.yml': '233dec2b2172bc9b63a01ef2653a7e7ae2bd896131e1321af2fc022769b3bad4',
             '.github/scripts/service-ci-steps/diagnostic-actions.sh': '860f5df9ff1cc9f7a3d829e437d0dfb903189d4a9cb5984c8d834444e2048a79',
         }
         for relative, expected_hash in paths.items():

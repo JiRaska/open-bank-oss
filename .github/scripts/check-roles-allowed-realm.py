@@ -171,7 +171,12 @@ def scan(root: pathlib.Path, known, consts):
     ("annotation" or "probe") so the finding names what was actually read.
     """
     for f in sorted(root.glob("openbank-*/src/main/kotlin/**/*.kt")):
-        src = strip_comments(f.read_text())
+        text = f.read_text()
+        # Comment stripping only blanks characters, so it cannot introduce either token.
+        # Read every file, but keep the complete parser for every possible reference.
+        if "@RolesAllowed" not in text and "hasRole" not in text:
+            continue
+        src = strip_comments(text)
         for pattern, form in ((ANNOTATION_RE, "annotation"), (HASROLE_RE, "probe")):
             for m in pattern.finditer(src):
                 # The annotation captures its whole argument list in group 1; the probe
@@ -302,6 +307,20 @@ def self_test() -> int:
         if "ROLE_PROBE_IN_A_COMMENT" in allnames:
             fails.append("a hasRole probe inside a // comment was read as code")
 
+        # Separate files prevent one reference form from masking a broken filter for the other.
+        (svc / "AnnotationOnly.kt").write_text('\n@RolesAllowed\n("ROLE_ONLY_ANNOTATION")\n')
+        (svc / "ProbeOnly.kt").write_text('\nfun f() = identity.hasRole\n("ROLE_ONLY_PROBE")\n')
+        (svc / "CommentOnly.kt").write_text(
+            '/* nested /* @RolesAllowed("ROLE_COMMENT_ONLY") */ hasRole("ROLE_COMMENT_ONLY") */\n')
+        (svc / "Unrelated.kt").write_text('val label = "権限"\n// @Roles and has Roles are not references\n')
+        rows = [(rel.name, line, names, dead, form) for rel, line, names, dead, form in scan(root, known, consts)]
+        for filename, name, form in (("AnnotationOnly.kt", "ROLE_ONLY_ANNOTATION", "annotation"),
+                                     ("ProbeOnly.kt", "ROLE_ONLY_PROBE", "probe")):
+            if (filename, 2, [name], [name], form) not in rows:
+                fails.append(f"reference filter dropped {form} or changed its line/role: {filename}")
+        if any(filename in {"CommentOnly.kt", "Unrelated.kt"} for filename, *_ in rows):
+            fails.append("reference filter admitted a comment or an unrelated Unicode source")
+
     # --- the comment stripper, which is where nesting bites (Kotlin block comments NEST) ---
     if "X" in strip_comments("/* a /* b */ X */"):
         fails.append("nested block comments closed early — text after the inner */ was kept")
@@ -323,7 +342,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: @RolesAllowed + hasRole realm parity is falsifiable (20 cases)")
+    print("self-test ok: @RolesAllowed + hasRole realm parity is falsifiable (24 cases)")
     return 0
 
 
