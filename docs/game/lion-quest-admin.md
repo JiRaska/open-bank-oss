@@ -17,7 +17,9 @@ identify stored completions and should be retained when changing names or order.
 - Admin write: `PUT /api/v1/game/admin/catalog`, admin only. Send the revision from
   the read. PostgreSQL serializes updates; stale revisions receive 409. The new
   document and audit record (verified actor and before/after values) commit in one
-  transaction. Reload before retrying a conflict; the form retains unsaved edits.
+  transaction. The deployed OPA policy grants this exact write only to a verified
+  human administrator, excluding machine identities even when they carry an admin role.
+  Reload before retrying a conflict; the form retains unsaved edits.
 - Audit: `GET /api/v1/game/admin/audit`, admin/compliance, latest 50 changes.
 - Customer read: `GET /customer/v1/game/levels?beta=true|false`.
 - Completion: `POST /customer/v1/game/levels/{levelId}/completion?beta=true|false`.
