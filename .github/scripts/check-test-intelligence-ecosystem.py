@@ -930,7 +930,7 @@ def bounded_kover_report(workflow: str, root: Path | None = None) -> bool:
         if not shared.is_file() or shared.is_symlink():
             return False
         return (hashlib.sha256(helper.read_bytes()).hexdigest() ==
-                '15a5349221070810f671a4558bdac2c083dd474898ce9cd972644d75774b5b73'
+                '9c91021288338da03ffa16d9bffa8b2b7147a6dfa283326eede7a1c4eb7d0774'
                 and hashlib.sha256(shared.read_bytes()).hexdigest() ==
                 '64062707a69e5f92bb18eae0eaaa8492935cd21cb8fa056b0de35587dbfc9f89')
     except (KeyError, TypeError, AttributeError, ValueError, OSError, StopIteration, yaml.YAMLError):
