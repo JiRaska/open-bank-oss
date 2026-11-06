@@ -4,11 +4,12 @@ import { test, expect } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 // The same canonical declarations feed each view. Namespace intentionally carries
-// no business-domain meaning: all four fixtures share one deployment namespace.
+// no business-domain meaning: all service fixtures share one deployment namespace.
 const modules = [
   { name: 'openbank-pension-service', short: 'pension-service', dataDomain: 'pensions', port: 8201 },
   { name: 'openbank-pension-fund-service', short: 'pension-fund-service', dataDomain: 'pensions', port: 8202 },
   { name: 'openbank-wealth-service', short: 'wealth-service', dataDomain: 'wealth', port: 8203 },
+  { name: 'openbank-ledger-service', short: 'ledger-service', dataDomain: 'accounting', port: 8205 },
   { name: 'openbank-devops-agent', short: 'devops-agent', dataDomain: 'platform', port: 8204 },
 ]
 
@@ -56,6 +57,15 @@ test('business domains stay consistent across map, lineage and service catalog',
   await expect(page.getByText('PENSIONS · 2', { exact: true })).toBeVisible()
   await expect(page.getByText('WEALTH · 1', { exact: true })).toBeVisible()
   await expect(page.getByText('TECHNICAL PLATFORM · 1', { exact: true })).toBeVisible()
+
+  await page.goto('/docs/api')
+  const apiFilters = page.getByRole('group', { name: 'Filter by domain' })
+  await expect(apiFilters.getByRole('button', { name: 'Financial accounting', exact: true })).toBeVisible()
+  await apiFilters.getByRole('button', { name: 'Pensions', exact: true }).click()
+  await expect(page.getByText('Pension Service', { exact: true })).toBeVisible()
+  await expect(page.getByText('Pension Fund Service', { exact: true })).toBeVisible()
+  await expect(page.getByText('Wealth Service', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('Ledger Service', { exact: true })).toHaveCount(0)
 
   await page.goto('/services')
   await page.getByRole('combobox').first().selectOption('pensions')

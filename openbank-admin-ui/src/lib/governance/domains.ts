@@ -10,112 +10,112 @@ export const DOMAIN_META = {
     "labelCs": "Účty a vklady",
     "description": "Account lifecycle, deposit balances, interest and customer statements.",
     "kind": "business",
-    "color": "var(--accent)"
+    "color": "var(--accent-text)"
   },
   "accounting": {
     "labelEn": "Financial accounting",
     "labelCs": "Finanční účetnictví",
     "description": "Double-entry books and financial posting; tenant isolation remains independent of capability ownership.",
     "kind": "business",
-    "color": "var(--info)"
+    "color": "var(--info-text)"
   },
   "lending": {
     "labelEn": "Lending",
     "labelCs": "Úvěry",
     "description": "Credit origination, contracts, repayment and servicing.",
     "kind": "business",
-    "color": "var(--warning)"
+    "color": "var(--warning-text)"
   },
   "payments": {
     "labelEn": "Payments",
     "labelCs": "Platby",
     "description": "Payment instructions, schemes, clearing and settlement.",
     "kind": "business",
-    "color": "var(--success)"
+    "color": "var(--success-text)"
   },
   "cards": {
     "labelEn": "Cards",
     "labelCs": "Karty",
     "description": "Card issuance, processing, disputes and chargebacks.",
     "kind": "business",
-    "color": "var(--danger)"
+    "color": "var(--danger-text)"
   },
   "wealth": {
     "labelEn": "Wealth",
     "labelCs": "Majetek a investice",
     "description": "Declared holdings and wealth composition; does not imply custody or trading.",
     "kind": "business",
-    "color": "var(--info)"
+    "color": "var(--info-text)"
   },
   "pensions": {
     "labelEn": "Pensions",
     "labelCs": "Penzijní produkty a fondy",
     "description": "Participant contracts and contributions plus fund, unit and NAV operations in separate bounded contexts.",
     "kind": "business",
-    "color": "var(--accent)"
+    "color": "var(--accent-text)"
   },
   "treasury": {
     "labelEn": "Treasury",
     "labelCs": "Treasury",
     "description": "Bank liquidity, funding and treasury deal lifecycle.",
     "kind": "business",
-    "color": "var(--success)"
+    "color": "var(--success-text)"
   },
   "products": {
     "labelEn": "Products & pricing",
     "labelCs": "Produkty a cenotvorba",
     "description": "Product definitions, product composition, fees and billing.",
     "kind": "business",
-    "color": "var(--warning)"
+    "color": "var(--warning-text)"
   },
   "identity": {
     "labelEn": "Party & identity",
     "labelCs": "Klienti a identita",
     "description": "Party reference data, onboarding, business identity, identity documents, authentication and delegated authority; KYC due-diligence cases remain in Compliance.",
     "kind": "supporting",
-    "color": "var(--success)"
+    "color": "var(--success-text)"
   },
   "compliance": {
     "labelEn": "Financial crime & audit",
     "labelCs": "Finanční kriminalita a audit",
     "description": "AML, sanctions, fraud investigations and audit evidence.",
     "kind": "supporting",
-    "color": "var(--danger)"
+    "color": "var(--danger-text)"
   },
   "risk": {
     "labelEn": "Risk management",
     "labelCs": "Řízení rizik",
     "description": "Balance-sheet risk, capital, liquidity, ALM/IRRBB, valuation and limit assessment.",
     "kind": "business",
-    "color": "var(--warning)"
+    "color": "var(--warning-text)"
   },
   "reporting": {
     "labelEn": "Regulatory & tax reporting",
     "labelCs": "Regulatorní a daňový reporting",
     "description": "Financial, credit and tax reporting; tax residency remains party data, not product ownership.",
     "kind": "supporting",
-    "color": "var(--info)"
+    "color": "var(--info-text)"
   },
   "engagement": {
     "labelEn": "Customer engagement",
     "labelCs": "Péče o klienty a komunikace",
     "description": "Campaigns, incentives, referrals, loyalty and customer communication.",
     "kind": "business",
-    "color": "var(--accent)"
+    "color": "var(--accent-text)"
   },
   "open-banking": {
     "labelEn": "Open banking",
     "labelCs": "Otevřené bankovnictví",
     "description": "Third-party access, PSD2 consent and provider registration.",
     "kind": "business",
-    "color": "var(--warning)"
+    "color": "var(--warning-text)"
   },
   "channels": {
     "labelEn": "Channels",
     "labelCs": "Klientské a obslužné kanály",
     "description": "Customer and operator access and composition across domain APIs.",
     "kind": "supporting",
-    "color": "var(--info)"
+    "color": "var(--info-text)"
   },
   "documents": {
     "labelEn": "Document services",

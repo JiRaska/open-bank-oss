@@ -18,6 +18,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import https from 'node:https'
 import { getRegistry } from '@/lib/services/fleet'
 import { k8sNameOf } from '@/lib/services/registry'
+import { currentDomainOwnership } from '@/lib/services/domainOwnership'
 
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount'
 const TOKEN_PATH = `${SA_DIR}/token`
@@ -57,8 +58,9 @@ export interface ServiceDiscoverySnapshot {
 
 // Business ownership is independent of namespace and legal-entity tenancy.
 // Unknown deployments stay visible as unclassified, never as an invented platform owner.
-function groupForWorkload(name: string): ServiceGroup {
-  return getRegistry().find(service => k8sNameOf(service) === name)?.group ?? 'unclassified'
+async function currentWorkloadDomains(): Promise<ReadonlyMap<string, ServiceGroup>> {
+  const ownership = await currentDomainOwnership(getRegistry())
+  return ownership.byWorkload
 }
 
 export function inCluster(): boolean {
@@ -189,9 +191,10 @@ export async function collectServiceDiscovery(
     }
   }
 
-  const [deploymentResults, rolloutResults] = await Promise.all([
+  const [deploymentResults, rolloutResults, workloadDomains] = await Promise.all([
     Promise.all(targetNamespaces.map((n) => list(`/apis/apps/v1/namespaces/${n}/deployments?limit=500`))),
     Promise.all(targetNamespaces.map((n) => list(`/apis/argoproj.io/v1alpha1/namespaces/${n}/rollouts?limit=500`))),
+    currentWorkloadDomains(),
   ])
   const results = [...deploymentResults, ...rolloutResults]
   const successfulLists = results.filter((result) => result.ok).length
@@ -221,7 +224,7 @@ export async function collectServiceDiscovery(
         name: d.metadata.name,
         namespace: d.metadata.namespace,
         port: businessPort(d),
-        group: groupForWorkload(d.metadata.name),
+        group: workloadDomains.get(d.metadata.name) ?? 'unclassified',
         ready: readyReplicas > 0 && readyReplicas >= replicas,
         replicas,
         readyReplicas,

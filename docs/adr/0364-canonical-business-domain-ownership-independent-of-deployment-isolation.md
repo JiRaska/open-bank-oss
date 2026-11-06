@@ -30,7 +30,7 @@ without becoming owned by Accounting or Payments. Namespace comments attributing
    bilingual labels, capability definitions and business/supporting/platform distinction.
    Each module's `governance.yaml:dataDomain` owns its one primary assignment.
 2. Derive governance, catalog membership, registry groups, discovery classification,
-   dashboard, lineage, FinOps, public inventory and map groups from those declarations.
+   dashboard, API catalog, lineage, FinOps, public inventory and map groups from those declarations.
    New runnable modules cannot omit ownership. Unknown observed workloads remain visible
    as Unclassified; unknown ownership is never a claim of Platform ownership.
 3. Use the responsibilities reviewed in [domain-boundaries.md](../architecture/domain-boundaries.md).
@@ -40,6 +40,8 @@ without becoming owned by Accounting or Payments. Namespace comments attributing
 4. Preserve existing bounded-context models, write ownership, tenant isolation, namespaces,
    workload identities, API routes, topics, database ownership and access controls.
    Shared capability ownership does not merge stores or grant cross-context access.
+   Runtime health and discovery overlay current published ownership as metadata only;
+   operational targets and BFF exposure remain pinned to the deployed image.
 5. Publish the expanded taxonomy at the separate `admin-ui/content/domains-v1` evidence
    prefix. Preserve the legacy selector for older images and rollback. New readers validate
    the taxonomy discriminator and catalog/governance agreement; incompatible content uses

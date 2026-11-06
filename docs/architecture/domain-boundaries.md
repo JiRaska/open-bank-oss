@@ -60,6 +60,12 @@ identities remain the compatibility boundary. Service discovery resolves a known
 business domain from the canonical inventory, separately from its namespace. Unknown
 ownership is shown as unclassified; it must not masquerade as a platform assignment.
 
+The API catalog uses the same primary ownership as the service map. Discovery and
+static health reads overlay ownership from one validated published catalog, while their
+operational target registry remains image-pinned. Metadata publication cannot change
+ports, tenant selection, routing or the BFF allowlist. This allows reviewed ownership
+updates without waiting for an unrelated image rebuild.
+
 FinOps domain rollups follow ownership. A cross-domain flow's showback continues to include
 all required services and may overlap with other flows (ADR-0062); those flow totals must
 not be interpreted as a partition of fleet spend. Card-specific alert domain labels use
@@ -75,8 +81,7 @@ their generators. The schema is expanded before readers consume new identifiers.
 
 The publisher and new default reader use `admin-ui/content/domains-v1`, leaving the
 legacy `admin-ui/content` pointer untouched. This isolates the enum change from older
-images and browser clients even when publication and image deployment finish in either
-order. An explicit `OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL` still takes precedence;
+server images even when publication and image deployment finish in either order. An explicit `OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL` still takes precedence;
 pointing it at a legacy bundle causes validated image fallback rather than reinterpretation.
 
 Expand the evidence writer's exact selector, snapshot and ListBucket prefixes through the
