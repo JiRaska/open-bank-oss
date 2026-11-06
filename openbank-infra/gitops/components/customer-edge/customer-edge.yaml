@@ -127,6 +127,15 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0357 / ADR-0279 WS2: honey endpoints answered by HoneytokenFilter with a plain
+            # 404, counted in openbank_security_honeytoken_hits_total and logged for the Loki
+            # rule HoneyEndpointHit. Unlike the Envoy edge decoys these sit UNDER the real
+            # /customer/v1 prefix, so they are reached both from the internet and by an
+            # in-cluster caller that skips Envoy (lateral movement) — a signal Envoy cannot
+            # see. No real route lives under internal/ or admin/ here; check-honeytoken-wiring.py
+            # requires this variable to stay set while HoneyEndpointHit exists.
+            - name: OPENBANK_SECURITY_HONEY_PATHS
+              value: "/customer/v1/internal/debug,/customer/v1/admin/export"
             # ADR-0331 / ADR-0252: the only callers whose x-openbank-synthetic header this edge
             # honours. A bank-owned canary customer, never anyone else; the identity gate
             # (check-synthetic-customer-identity.py) holds this list to the declared

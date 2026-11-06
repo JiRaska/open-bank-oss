@@ -26,7 +26,15 @@ Checks:
   - the decoy IAM user has exactly one inline policy, it is an explicit Deny "*", and no policy
     attachment or group membership references it;
   - the EventBridge rules opt in to read-only management events (without that, the attacker's
-    first call, sts:GetCallerIdentity, never reaches the rule).
+    first call, sts:GetCallerIdentity, never reaches the rule);
+  - while a Loki rule named HoneyEndpointHit exists, at least one workload sets a non-empty
+    OPENBANK_SECURITY_HONEY_PATHS (else the rule has no subject, the ADR-0279 shape), and
+    HoneytokenFilter stays @PreMatching (a post-matching filter is never called for a path
+    with no resource method, i.e. for every decoy path; measured 2026-10-31);
+  - the scheduled-drill role (aws_iam_role.deception_drill) trusts only deception-drill.yml on
+    main by StringEquals on sub AND job_workflow_ref (never IfExists), and that workflow
+    triggers on schedule/workflow_dispatch only; a pull_request trigger would hand a role that
+    reads a decoy credential to PR code.
 
 Usage:
     check-honeytoken-wiring.py             # scan
@@ -44,6 +52,10 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 TOFU = REPO / "openbank-infra" / "aws" / "envs" / "sandbox-substrate"
+FILTER = REPO / "openbank-libs-runtime" / "src" / "main" / "kotlin" / "com" / "openbank" / "libs" / "security" / "HoneytokenFilter.kt"
+HONEY_ENV = "OPENBANK_SECURITY_HONEY_PATHS"
+DRILL_WORKFLOW = REPO / ".github" / "workflows" / "deception-drill.yml"
+DRILL_REF = "JiRaska/open-bank-oss/.github/workflows/deception-drill.yml@refs/heads/main"
 FILTER_SA_RE = re.compile(r'system:serviceaccount:(?P<ns>[a-z0-9-]+):(?P<name>[a-z0-9-]+)')
 RESOURCE_RE = re.compile(r'^resource\s+"(?P<type>[\w]+)"\s+"(?P<name>[\w]+)"\s*\{', re.M)
 
@@ -131,7 +143,65 @@ def bound_subjects(gitops: Path) -> set[tuple[str, str]]:
     return found
 
 
-def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
+def honey_path_workloads(gitops: Path) -> list[str]:
+    """Workload containers that set a non-empty decoy-path env."""
+    found = []
+    for path in _candidates(gitops, HONEY_ENV):
+        try:
+            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+        except yaml.YAMLError:
+            continue
+        for d in docs:
+            if not isinstance(d, dict):
+                continue
+            spec = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
+            for c in spec.get("containers") or []:
+                for e in c.get("env") or []:
+                    if e.get("name") == HONEY_ENV and str(e.get("value") or "").strip(","):
+                        found.append(f"{(d.get('metadata') or {}).get('name')}/{c.get('name')}")
+    return found
+
+
+def honey_rule_present(gitops: Path) -> bool:
+    return any(True for _ in _candidates(gitops, "alert: HoneyEndpointHit"))
+
+
+def _data_blocks(text: str) -> dict[str, str]:
+    out = {}
+    for m in re.finditer(r'^data\s+"aws_iam_policy_document"\s+"(\w+)"\s*\{', text, re.M):
+        depth, i = 0, m.end() - 1
+        while i < len(text):
+            depth += {"{": 1, "}": -1}.get(text[i], 0)
+            if depth == 0:
+                break
+            i += 1
+        out[m.group(1)] = text[m.end():i]
+    return out
+
+
+def drill_findings(text: str, blocks, workflow: Path) -> tuple[list[str], int]:
+    roles = [b for t, n, b in blocks if t == "aws_iam_role" and n == "deception_drill"]
+    if not roles:
+        return [], 0
+    out = []
+    trust = _data_blocks(text).get("deception_drill_assume", "")
+    if DRILL_REF not in text or "local.deception_drill_workflow_ref" not in trust:
+        out.append("drill role trust does not pin job_workflow_ref to deception-drill.yml on main")
+    if "IfExists" in trust:
+        out.append("drill role trust uses an IfExists condition - an absent claim would skip the pin")
+    if ':ref:refs/heads/main"' not in trust or "pull_request" in trust or "refs/*" in trust:
+        out.append("drill role trust must accept sub repo:...:ref:refs/heads/main only")
+    if not workflow.exists():
+        out.append("drill role exists but .github/workflows/deception-drill.yml does not")
+    else:
+        on = (yaml.safe_load(workflow.read_text(encoding="utf-8")) or {}).get(True) or {}
+        bad = sorted(set(on) - {"schedule", "workflow_dispatch"})
+        if bad:
+            out.append(f"deception-drill.yml triggers on {bad}: only schedule/workflow_dispatch may reach the drill role")
+    return out, 1
+
+
+def scan(gitops: Path, tofu: Path, filter_src: Path = FILTER, workflow: Path = DRILL_WORKFLOW) -> tuple[list[str], int]:
     findings: list[str] = []
     text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(tofu.glob("*.tf")))
     blocks = _blocks(text)
@@ -192,7 +262,16 @@ def scan(gitops: Path, tofu: Path) -> tuple[list[str], int]:
         if t == "aws_cloudwatch_event_rule" and any(f"local.{l}" in b for l in rule_locals):
             if "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS" not in b:
                 findings.append("an access-key EventBridge rule does not opt in to read-only management events — sts:GetCallerIdentity would never alert")
-    return findings, len(sas) + len(users)
+    workloads = honey_path_workloads(gitops)
+    if honey_rule_present(gitops) and not workloads:
+        findings.append(f"HoneyEndpointHit exists but no workload sets {HONEY_ENV} — an alert with no subject")
+    if workloads:
+        src = filter_src.read_text(encoding="utf-8") if filter_src.exists() else ""
+        if not re.search(r"^@PreMatching\s*$", src, re.M):
+            findings.append("HoneytokenFilter is not @PreMatching — it is never called for an unrouted decoy path")
+    drill, n_drill = drill_findings(text, blocks, workflow)
+    findings += drill
+    return findings, len(sas) + len(users) + len(workloads) + n_drill
 
 
 def selftest() -> int:
@@ -248,15 +327,41 @@ def selftest() -> int:
             "tofu", "deception.tf",
             lambda s: s.replace('state         = "ENABLED_WITH_ALL_CLOUDTRAIL_MANAGEMENT_EVENTS"', 'state         = "ENABLED"', 1),
             "read-only management events"),
+        "decoy paths unset": (
+            "gitops", "components/customer-edge/customer-edge.yaml",
+            lambda s: s.replace(f"name: {HONEY_ENV}", "name: OPENBANK_SECURITY_HONEY_PATHS_DISABLED", 1),
+            "an alert with no subject"),
+        "filter post-matching": (
+            "filter", "HoneytokenFilter.kt",
+            lambda s: s.replace("\n@PreMatching\n", "\n", 1),
+            "not @PreMatching"),
+        "drill reachable from a PR": (
+            "filter", "deception-drill.yml",
+            lambda s: s.replace("  workflow_dispatch:\n", "  workflow_dispatch:\n  pull_request:\n", 1),
+            "only schedule/workflow_dispatch"),
+        "drill pin weakened to IfExists": (
+            "tofu", "deception-delivery.tf",
+            lambda s: s.replace('test     = "StringEquals"\n      variable = "${local.ci_substrate_oidc_host}:job_workflow_ref"',
+                                'test     = "StringEqualsIfExists"\n      variable = "${local.ci_substrate_oidc_host}:job_workflow_ref"', 1),
+            "IfExists"),
+        "drill trusts any ref": (
+            "tofu", "deception-delivery.tf",
+            lambda s: s.replace(':ref:refs/heads/main"]', ':ref:refs/*"]', 1),
+            "ref:refs/heads/main only"),
     }
     for label, (tree, rel, mutate, expect) in cases.items():
         with tempfile.TemporaryDirectory() as tmp:
             g, t = Path(tmp) / "gitops", Path(tmp) / "tofu"
-            shutil.copytree(GITOPS / "components" / "platform", g / "components" / "platform")
+            for comp in ("platform", "customer-edge", "observability"):
+                shutil.copytree(GITOPS / "components" / comp, g / "components" / comp)
             shutil.copytree(TOFU, t, ignore=shutil.ignore_patterns(".terraform", "lambda"))
-            target = (g if tree == "gitops" else t) / rel
+            k = Path(tmp) / "HoneytokenFilter.kt"
+            shutil.copy(FILTER, k)
+            w = Path(tmp) / "deception-drill.yml"
+            shutil.copy(DRILL_WORKFLOW, w)
+            target = {"gitops": g, "tofu": t, "filter": Path(tmp)}[tree] / rel
             target.write_text(mutate(target.read_text(encoding="utf-8")), encoding="utf-8")
-            bad, _ = scan(g, t)
+            bad, _ = scan(g, t, k, w)
             if not any(expect in f for f in bad):
                 print(f"SELFTEST FAIL: case '{label}' was not reported (got {bad})")
                 return 1
@@ -270,7 +375,7 @@ def main() -> int:
     if ap.parse_args().selftest:
         return selftest()
     findings, subjects = scan(GITOPS, TOFU)
-    print(f"SUBJECTS={subjects}  # token-bearing ServiceAccounts + watched IAM users in the substrate root")
+    print(f"SUBJECTS={subjects}  # token-bearing SAs + watched IAM users + decoy-path workloads + drill role")
     for f in findings:
         print(f"::error::{f}")
     if findings:
