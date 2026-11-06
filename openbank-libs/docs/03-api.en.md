@@ -296,6 +296,17 @@ No code required. Auto-discovery via Jandex:
 | `GET /api/v1/info` | Service name, version, **`stack`** (Kotlin/Quarkus/JDK/Gradle/libs) — used by admin UI Tech Inventory |
 | `GET /api/v1/config` | Live snapshot of rate-limit + circuit-breaker + retry + timeout config |
 
+## api.error — truncated multipart bodies
+
+The shared `GenericExceptionMapper` classifies a multipart request body that ends before its closing
+boundary as a client error: 400 `VALIDATION_ERROR`, not 500. RESTEasy Reactive's parser reports this
+as a plain `java.io.IOException` with the message "Connection terminated reading multipart data", so
+the mapper recognises it only when BOTH that exact message and the throwing frame (the parser package
+`org.jboss.resteasy.reactive.server.core.multipart.`) match, anywhere in the first eight links of the
+cause chain. Any other `IOException`, including the parser's own temp-file or disk failures, stays
+500. Every service with a multipart upload endpoint inherits this; party-service's
+`PartyTruncatedMultipartIT` drives it over real HTTP.
+
 ## util — BuildInfo
 
 ```kotlin

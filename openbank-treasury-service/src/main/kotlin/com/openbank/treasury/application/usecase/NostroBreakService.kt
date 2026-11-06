@@ -23,6 +23,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -41,6 +42,13 @@ class NostroBreakService(
     private val clock: Clock,
 ) : NostroBreakUseCase {
 
+    /**
+     * Where the previous sweep stopped in the ordered out-of-window set. The next pass starts after
+     * it and wraps, so every statement with an open break is visited within ceil(n / bound) passes
+     * instead of the same lowest ids every time. Per instance: a restart only restarts the rotation.
+     */
+    private val cursor = AtomicReference<UUID?>(null)
+
     private val ibans: Set<String> = accounts.keys.map { normalize(it) }.toSet()
 
     override suspend fun observe(statementId: UUID): BreakChanges {
@@ -55,7 +63,14 @@ class NostroBreakService(
 
     override suspend fun sweep(today: LocalDate): NostroBreakSweep {
         val failures = mutableListOf<Throwable>()
-        val ids = statements.statementIdsSince(today.minusDays(LOOKBACK_DAYS))
+        val recent = statements.statementIdsSince(today.minusDays(LOOKBACK_DAYS))
+        // An open break whose statement has left the lookback window is still re-reconciled, or a
+        // late ledger booking could never resolve it and its alert could never clear. Bounded, and
+        // idempotent: observe() applies only the difference between a reconciliation and the book.
+        val older = nextOutOfWindow(
+            breakRepo.open().map { it.statementUuid }.distinct().sorted().filterNot { it in recent },
+        )
+        val ids = recent + older
         ids.forEach { id ->
             try {
                 observe(id)
@@ -111,6 +126,15 @@ class NostroBreakService(
             .map { NostroBreakView(it, it.ageBusinessDays(today), policy.isAged(it, today)) }
     }
 
+    private fun nextOutOfWindow(candidates: List<UUID>): List<UUID> {
+        if (candidates.size <= MAX_OUT_OF_WINDOW_STATEMENTS) return candidates
+        val after = cursor.get()
+        val start = after?.let { c -> candidates.indexOfFirst { it > c }.takeIf { it >= 0 } } ?: 0
+        val batch = (candidates.drop(start) + candidates.take(start)).take(MAX_OUT_OF_WINDOW_STATEMENTS)
+        cursor.set(batch.last())
+        return batch
+    }
+
     /** The Prague bank day, never the pod's UTC default: after 22:00/23:00 UTC that is already tomorrow. */
     private fun bankToday(): LocalDate = AccountingClock.bank(clock).today()
 
@@ -122,5 +146,11 @@ class NostroBreakService(
          * line booked late resolves the break it caused. Older open breaks keep ageing untouched.
          */
         const val LOOKBACK_DAYS = 31L
+
+        /**
+         * At most this many older statements re-reconciled per sweep for their open breaks, so a
+         * backlog of ancient breaks cannot turn one hourly pass into hundreds of ledger reads.
+         */
+        const val MAX_OUT_OF_WINDOW_STATEMENTS = 50
     }
 }

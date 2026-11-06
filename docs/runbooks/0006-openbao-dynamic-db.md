@@ -352,6 +352,10 @@ bao "bao kv put openbank/jwt-signing/<service> current_key='${INITIAL_KEY}' prev
 - ~~`vault_admin` Postgres role not yet created → complete §3 above before next run~~ DONE
   2026-07-11, though §3 itself was incomplete at the time — see the 2026-07-11 "Fixed items" below
 
+**Tier 2 — `secret-rotator`: RETIRED (ADR-0177).** It wrote `openbank/keycloak/<svc>` while services
+read `openbank/<svc>`, no workload reads `openbank/jwt-signing/*`, and it never recorded a success.
+The CronJob and its seed script were removed. Steps in this runbook that mention it are historical.
+
 ~~**Tier 2 — `secret-rotator` (`secret-rotator-cronjob.yaml`):**~~
 - ~~Script reads `secret/...`; KV mount is `openbank/`~~ FIXED (all paths corrected)
 - No `openbank/keycloak/*` or `openbank/jwt-signing/*` KV tree yet → complete §5 above

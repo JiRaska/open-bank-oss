@@ -296,6 +296,17 @@ Factory automaticky doplní:
 | `GET /api/v1/info` | Service name, version, **`stack`** (Kotlin/Quarkus/JDK/Gradle/libs) — používá admin UI Tech Inventory |
 | `GET /api/v1/config` | Live snapshot rate-limit + circuit-breaker + retry + timeout config |
 
+## api.error — useknutá multipart těla
+
+Sdílený `GenericExceptionMapper` klasifikuje multipart tělo požadavku, které skončí před uzavírací
+hranicí, jako chybu klienta: 400 `VALIDATION_ERROR`, ne 500. Parser RESTEasy Reactive to hlásí jako
+obyčejnou `java.io.IOException` se zprávou "Connection terminated reading multipart data", proto ji
+mapper rozpozná jen tehdy, když se shoduje ZÁROVEŇ přesná zpráva i rámec, který ji vyhodil (balíček
+parseru `org.jboss.resteasy.reactive.server.core.multipart.`), kdekoli v prvních osmi článcích řetězu
+příčin. Každá jiná `IOException`, včetně chyb dočasného souboru nebo disku v samotném parseru, zůstává
+500. Dědí to každá služba s multipart uploadem; `PartyTruncatedMultipartIT` v party-service to ověřuje
+přes skutečné HTTP.
+
 ## util — BuildInfo
 
 ```kotlin
