@@ -9,6 +9,8 @@ import { buildRegistry, type CatalogFleetModule } from '@/lib/services/registry'
 import { getGovernanceManifest } from '@/lib/governance/governanceLoader'
 import { collectServiceDiscovery } from '@/lib/discovery'
 import { allocate } from '@/lib/finops/allocation'
+import { canonicalToolDomains } from '@/lib/agent/toolDomains'
+import { domainLabel } from '@/lib/governance/domains'
 
 const root = path.resolve(process.cwd(), '..')
 const catalog = JSON.parse(readFileSync('catalog.json', 'utf8')) as { services: CatalogFleetModule[] }
@@ -48,6 +50,35 @@ describe('reviewed business ownership metadata migration', () => {
     for (const [service, domain] of Object.entries(responsibilities)) {
       expect(result.services.find(row => row.name === service)?.group, service).toBe(domain)
     }
+  })
+
+  it('projects migrated real ownership onto MCP tools without changing advertised execution contracts', async () => {
+    // No ownership mock: the production helper resolves this checkout's real
+    // generated catalog and governance through its normal source/fallback path.
+    const cases = [
+      ['list_ledger_journals', 'ledger-service', 'accounting', 'query.ledger.readonly'],
+      ['list_transactions', 'transaction-service', 'accounting', 'query.ledger.readonly'],
+      ['dispute_list', 'dispute-service', 'cards', 'query.disputes.readonly'],
+      ['list_products', 'product-catalog', 'products', 'query.catalog.readonly'],
+      ['sepa_instant_list', 'sepa-instant-service', 'payments', 'query.payments.readonly'],
+      ['sepa_instant_get', 'sepa-instant-service', 'payments', 'query.payments.readonly'],
+      ['sepa_instant_list_by_debtor', 'sepa-instant-service', 'payments', 'query.payments.readonly'],
+    ] as const
+    const tools = cases.map(([name, service, , capability]) => ({
+      name, service, domain: 'Legacy grouping', capabilities: [capability],
+      inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+    }))
+    const before = structuredClone(tools)
+    const projected = await canonicalToolDomains(tools)
+    expect(projected).toHaveLength(cases.length)
+    for (const [index, tool] of tools.entries()) {
+      expect(projected[index]).toEqual({ ...tool, domain: domainLabel(cases[index][2], 'en') })
+      expect((projected[index] as typeof tool).name).toBe(tool.name)
+      expect((projected[index] as typeof tool).service).toBe(tool.service)
+      expect((projected[index] as typeof tool).inputSchema).toBe(tool.inputSchema)
+      expect((projected[index] as typeof tool).capabilities).toBe(tool.capabilities)
+    }
+    expect(tools).toEqual(before)
   })
 
   it('allocates the real ledger and transaction costs to Accounting while retaining other business owners', () => {

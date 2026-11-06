@@ -47,7 +47,7 @@ class ToolServiceCatalogTest {
     fun `the agent-local HITL tools reach no downstream banking service`() {
         listOf("draft_ticket", "flip_feature_flag").forEach {
             assertThat(ToolServiceCatalog.serviceOf(it)).isEqualTo("agent-service")
-            assertThat(ToolServiceCatalog.domainOf(it)).isEqualTo("Technical platform")
+            assertThat(ToolServiceCatalog.domainOf(it)).isEqualTo("Channels")
         }
     }
 

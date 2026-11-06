@@ -2,7 +2,7 @@
 import { test, expect } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-test('generated governance catalog renders pension contracts and funds in their real business domain', async ({ page, context, baseURL }) => {
+test('generated governance catalog renders pension contracts and funds in their real business domain', async ({ page, context, baseURL }, testInfo) => {
   await signInAsOperator(context, baseURL!)
   // Runtime health is independent of business ownership. Keep the source catalog
   // and governance endpoints real so this exercises generated source through UI.
@@ -31,7 +31,7 @@ test('generated governance catalog renders pension contracts and funds in their 
   for (const source of ['health', 'governance', 'topology']) {
     await expect(page.getByTestId(`map-evidence-${source}`).first()).not.toContainText('Loading', { timeout: 15_000 })
   }
-  await page.screenshot({ path: '/private/tmp/domain-taxonomy-map.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('domain-taxonomy-map.png'), fullPage: true })
   await filters.getByRole('button', { name: 'Pensions', exact: true }).click()
   const nodes = page.locator('svg').getByRole('button')
   await expect(nodes.filter({ hasText: 'Pension Fund' })).toHaveCount(1)
