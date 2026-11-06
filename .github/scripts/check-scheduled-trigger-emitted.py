@@ -49,13 +49,7 @@ ENUM_RE = re.compile(r"enum\s+class\s+(\w*Trigger)\s*\{([^}]*)\}", re.S)
 # check-pact-provider-replay.py, also empty). A new entry needs a reason and a way out.
 # Each value is (reason, expires): `expires` is an ISO date (UTC) after which the entry itself
 # FAILS the gate, so the way out is enforced rather than promised in prose.
-KNOWN_UNEMITTED: dict[str, tuple[str, str]] = {
-    "openbank-flaky-test-hunter": (
-        "weekly sweep removed 2026-10-17 (pod has no checkout); SCHEDULED kept "
-        "@Deprecated so Temporal histories (168 h retention) still deserialize. Delete both after 2026-10-31.",
-        "2026-10-31",
-    ),
-}
+KNOWN_UNEMITTED: dict[str, tuple[str, str]] = {}
 
 
 def today_utc() -> datetime.date:

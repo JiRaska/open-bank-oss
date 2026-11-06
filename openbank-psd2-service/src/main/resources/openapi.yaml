@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: PSD2 Open Banking API
-  version: 2.8.0
+  version: 2.9.0
   description: |
     PSD2-compliant open banking — Account Information Service (AIS) and
     Payment Initiation Service (PIS) for Third Party Providers.
@@ -210,6 +210,8 @@ paths:
       responses:
         '200':
           description: Balance data
+        '401':
+          description: Missing or invalid TPP credentials
 
   /open-banking/v2/accounts/{accountId}/transactions:
     get:
@@ -245,6 +247,8 @@ paths:
       responses:
         '200':
           description: Transaction list
+        '401':
+          description: Missing or invalid TPP credentials
 
   /open-banking/v2/payments/sepa-credit-transfers:
     post:
@@ -271,6 +275,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '401':
+          description: Missing or invalid TPP credentials
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
 
@@ -299,6 +305,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '401':
+          description: Missing or invalid TPP credentials
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
 
@@ -359,6 +367,8 @@ paths:
       responses:
         '201':
           description: Payment initiated
+        '401':
+          description: Missing or invalid TPP credentials
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
 
@@ -387,6 +397,8 @@ paths:
       responses:
         '200':
           description: Payment status
+        '401':
+          description: Missing or invalid TPP credentials
 
 components:
   responses:

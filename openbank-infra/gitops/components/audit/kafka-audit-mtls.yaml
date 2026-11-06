@@ -77,6 +77,18 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.accounts.account.status-changed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.accounts.savings-withdrawal.approved
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.transactions.transaction.initiated
           patternType: literal
         operations: [Read, Describe]
@@ -205,6 +217,14 @@ spec:
       - resource:
           type: topic
           name: openbank.swift.institution-transfers
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #13177: tpp-registry-service holds Write on this topic, so it is ACL-guarded and the
+      # audit trail needs an explicit Read grant to receive TPP register changes.
+      - resource:
+          type: topic
+          name: openbank.tpp.registry.event
           patternType: literal
         operations: [Read, Describe]
         host: "*"

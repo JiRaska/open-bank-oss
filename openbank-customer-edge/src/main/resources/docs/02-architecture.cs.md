@@ -116,6 +116,10 @@ Zákaznický token (z customers realmu) se **nikdy nepřeposílá** — upstream
 - **Režim selhání** — jakákoli výjimka transportu degraduje na JSON `502 {"error":"upstream unavailable"}`.
 - **Syntetická značka (ADR-0252)** — každý upstream request staví `upstreamRequest()`, který přidá `x-openbank-synthetic: true`, když vstupní filtr edge request přijal jako syntetický (MDC nebo OTel baggage, obojí nastavené jen pro principála z `openbank.synthetic.trusted-principals`). Hlavičku od klienta nikdy nekopíruje. Jedinou výjimkou je request na token. `UpstreamClientSyntheticTaintTest` hlídá chování i jediný vstupní bod.
 
+## Deadline sjednocené notifikační schránky
+
+Sjednocená notifikační schránka (`UnifiedNotificationInbox`) používá jeden monotónní souhrnný deadline 10 sekund (`UNIFIED_NOTIFICATION_TIMEOUT_SECONDS`) pro všechny party feedy. Syntetické požadavky zůstávají sekvenční na vlákně volajícího, aby zachovaly taint; každý upstream request dostane jen zbývající rozpočet deadline. Běžné požadavky čtou party feedy souběžně (nejvýše 16 současně na repliku, 128 ve frontě) pod stejným deadline. Po vypršení se další party už nevolají a schránka selže uzavřeně odpovědí `502 {"code":"NOTIFICATIONS_UNAVAILABLE"}` bez částečných výsledků.
+
 ## Model vlastnictví / IDOR
 
 Některé upstreamy omezují jen podle `accountId` (party hlavička je tam jen poradní), takže edge je hranicí IDOR:

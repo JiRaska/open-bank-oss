@@ -9,7 +9,7 @@ import com.openbank.libs.domain.error.ErrorCode
 import com.openbank.libs.domain.error.NotFound
 import com.openbank.libs.domain.error.RateLimitExceeded
 import com.openbank.libs.domain.error.requireParam
-import com.openbank.notification.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest

@@ -199,6 +199,48 @@ own_scope() {
 }
 
 # ── the decision ───────────────────────────────────────────────────────────────────────
+# A SELF-BUILT service (auto-deploy.yml SELF_BUILT_SERVICES, e.g. the Python document-renderer)
+# is built by `docker buildx build -f <svc>/Dockerfile <svc>`: the build context IS the service
+# directory and nothing else reaches the image (no Gradle, no Dockerfile.deploy, no shared libs).
+# So it is equivalent exactly when that directory is the same git tree at both commits. Every
+# precondition below fails CLOSED: if the input set cannot be determined, the verdict is DIFFERENT.
+self_built_equivalent() {
+  local svc="$1" pact_sha="$2" dispatch_sha="$3" decl n a b df srcs src
+  decl="$(git show "$dispatch_sha:.github/workflows/auto-deploy.yml" 2>/dev/null \
+    | grep -E '^[[:space:]]+SELF_BUILT_SERVICES:[[:space:]]*' || true)"
+  n="$(printf '%s\n' "$decl" | grep -c . || true)"
+  [ "$n" -eq 1 ] \
+    || differs "${svc} is not a Gradle module and SELF_BUILT_SERVICES is not declared exactly once at ${dispatch_sha:0:8} — cannot derive what it is built from"
+  case " $(printf '%s' "$decl" | sed -E 's/^[^:]*:[[:space:]]*//; s/["'"'"']//g') " in
+    *" ${svc} "*) ;;
+    *) differs "${svc} is neither a Gradle module nor declared in SELF_BUILT_SERVICES — cannot derive what it is built from" ;;
+  esac
+  for b in "$pact_sha" "$dispatch_sha"; do
+    git cat-file -e "$b:$svc/Dockerfile" 2>/dev/null \
+      || differs "self-built ${svc} has no Dockerfile at ${b:0:8} — build input set cannot be determined"
+  done
+  # The context is the service directory, so a COPY/ADD source that leaves it (.., absolute,
+  # URL) would be an input this proof cannot see.
+  df="$(git show "$dispatch_sha:$svc/Dockerfile")"
+  srcs="$(printf '%s\n' "$df" | grep -iE '^[[:space:]]*(COPY|ADD)[[:space:]]' | grep -viE -- '--from=' || true)"
+  while IFS= read -r src; do
+    [ -n "$src" ] || continue
+    # Sources only: drop COPY/ADD, --flags and the final token (the in-image destination).
+    src="$(printf '%s\n' "$src" | awk '{n=0; for(i=2;i<=NF;i++) if($i !~ /^--/) t[++n]=$i; for(i=1;i<n;i++) printf "%s ", t[i]}')"
+    case " $src" in
+      *..*|*" /"*|*http://*|*https://*) differs "self-built ${svc} Dockerfile has a COPY/ADD source outside its own directory (${src}) — input set cannot be determined" ;;
+    esac
+  done <<< "$srcs"
+  a="$(obj_at "$pact_sha" "$svc")"; b="$(obj_at "$dispatch_sha" "$svc")"
+  [ "$a" != ABSENT ] && [ "$b" != ABSENT ] \
+    || differs "self-built ${svc} directory is absent at ${pact_sha:0:8} or ${dispatch_sha:0:8}"
+  [ "$a" = "$b" ] \
+    || differs "${svc} (self-built build context) differs between ${pact_sha:0:8} and ${dispatch_sha:0:8} (${a:0:8} vs ${b:0:8})"
+  verdict EQUIVALENT \
+    "self-built ${svc}: its whole build context directory is the same git tree at ${pact_sha:0:8} and ${dispatch_sha:0:8}, and ${pact_sha:0:8} is an ancestor"
+  exit 0
+}
+
 equivalent() {
   local svc="$1" pact_sha="$2" dispatch_sha="$3"
 
@@ -207,11 +249,13 @@ equivalent() {
   commit_exists "$dispatch_sha" \
     || differs "dispatch sha ${dispatch_sha} is not a commit in this checkout"
 
-  git cat-file -e "$dispatch_sha:$svc/build.gradle.kts" 2>/dev/null \
-    || differs "${svc} is not a Gradle module at ${dispatch_sha} — cannot derive what it is built from"
-
   git merge-base --is-ancestor "$pact_sha" "$dispatch_sha" 2>/dev/null \
     || differs "pact version ${pact_sha} is not an ancestor of ${dispatch_sha} — history diverged or was rewritten, so 'main moved forward without touching this service' is not what happened"
+
+  if ! git cat-file -e "$dispatch_sha:$svc/build.gradle.kts" 2>/dev/null; then
+    self_built_equivalent "$svc" "$pact_sha" "$dispatch_sha"
+    return
+  fi
 
   # These values are read by @IfBuildProperty during augmentation. Compare the values from
   # both workflow revisions rather than the whole workflow blob: orchestration-only edits do
@@ -482,6 +526,23 @@ selftest() {
   unsafe2="$(_commit 'svc-a/src/main/[input].kt' changed)"
   _expect "production bracketed path remains refused" DIFFERENT --own-test-overlay svc-a "$unsafe1" "$unsafe2"
 
+  # Self-built (non-Gradle) service: equivalent iff its whole build-context directory is equal.
+  local sb0 sb1 sb2 sb3 sb4
+  sb0="$(cd "$tmp" && git checkout -q "$s6c" && mkdir -p svc-py \
+      && printf 'FROM scratch\nCOPY app.py .\n' > svc-py/Dockerfile && printf 'x\n' > svc-py/app.py \
+      && printf 'env:\n  SELF_BUILT_SERVICES: "svc-py"\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: memory\n  OTHER_SETTING: two\n' > .github/workflows/auto-deploy.yml \
+      && git add -A && git commit -qm 'self-built base' >/dev/null && git rev-parse HEAD)"
+  _expect "self-built: identical" EQUIVALENT svc-py "$sb0" "$sb0"
+  sb1="$(_commit svc-b/src/main/B.kt unrelated-after-selfbuilt)"
+  _expect "self-built: unrelated service moved" EQUIVALENT svc-py "$sb0" "$sb1"
+  sb2="$(_commit svc-py/app.py changed)"
+  _expect "self-built: own source changed" DIFFERENT svc-py "$sb1" "$sb2"
+  sb3="$(_commit svc-py/tests/t.py new)"
+  _expect "self-built: own new file changed" DIFFERENT svc-py "$sb2" "$sb3"
+  _expect "self-built: undeclared non-gradle dir refused" DIFFERENT docs "$sb0" "$sb1"
+  sb4="$(cd "$tmp" && printf 'FROM scratch\nCOPY ../shared/x .\n' > svc-py/Dockerfile && git add -A && git commit -qm escape >/dev/null && git rev-parse HEAD)"
+  _expect "self-built: Dockerfile COPY escaping context fails closed" DIFFERENT svc-py "$sb4" "$sb4"
+
   # Keep the fail-closed workflow-input negatives last: each commit intentionally makes the
   # required inputs missing or ambiguous, so later known-positive cases must not inherit it.
   local s6d s6e s6f s6g
@@ -502,7 +563,7 @@ selftest() {
       && git rev-parse HEAD)"
   _expect "first augmentation-time build input fails closed when duplicated" DIFFERENT svc-a "$s6c" "$s6g"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 34 cases (31 main + 3 admin/path regressions) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 40 cases (31 main + 3 admin/path regressions + 6 self-built) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 

@@ -5,6 +5,7 @@
 package com.openbank.dispute.integration
 
 import com.openbank.dispute.it.TraceContractProfile
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.libs.testing.trace.RecordingSpanExporter
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -34,7 +35,7 @@ import org.junit.jupiter.api.Test
  * observable cause.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.dispute.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestProfile(TraceContractProfile::class)
 class DisputeTraceContractIT {
 
