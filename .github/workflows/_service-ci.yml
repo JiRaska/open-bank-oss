@@ -64,6 +64,11 @@ on:
         required: false
         default: ""
         type: string
+      consumer:
+        description: "Optional consumer name; blank verifies every consumer."
+        required: false
+        default: ""
+        type: string
       historical_admin_ui_version:
         description: "Validated one-off admin-ui version for product-catalog; blank keeps normal selection."
         required: false
@@ -83,13 +88,13 @@ on:
         value: ${{ toJSON(jobs) }}
     secrets:
       PACT_BROKER_PASSWORD:
-        # Must be declared here for the caller to pass it explicitly: an undeclared
-        # secret in the caller's `secrets:` map is a workflow-file error. Optional so
-        # the workflow still loads where the secret is unset (forks) — the pact steps
-        # already gate on pactbroker.url / an empty password.
+        # Declared for callers that pass it explicitly (verify-provider.yml; the
+        # _service-ci-pr.yml projection): an undeclared secret in a caller's `secrets:`
+        # map is a workflow-file error. services-ci.yml's build_other_* callers use
+        # `secrets: inherit` instead (see the build job's environment comment). Optional
+        # so the workflow still loads where the secret is unset (forks). It is read only
+        # by the `contract` job, whose `if:` admits push / workflow_dispatch on main.
         description: "Pact Broker password (ADR-0092) — publishing pacts + verification results."
-        required: false
-      GRADLE_CACHE_WRITE_PASSWORD:
         required: false
 
 permissions:
@@ -113,8 +118,14 @@ jobs:
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
     # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
-    # holder of the cache write secret; every other event runs without an environment.
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
+    # holder of the cache write secret; every other event runs without an environment. The secret
+    # is deliberately NOT declared under on.workflow_call.secrets: a declared-but-unpassed secret
+    # resolves to '' and shadows the environment one (2026-11-04: main builds wrote 0 entries).
+    # Not declaring it is necessary but not sufficient: a called workflow resolves ENVIRONMENT
+    # secrets to '' unless its caller uses `secrets: inherit` (actions/runner issue 4453;
+    # 2026-11-05 a main push still logged an empty W). services-ci.yml's build_other_* callers
+    # therefore inherit; its build_pr_* callers keep an explicit map and never enter this env.
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     # This job executes pull-request code.  Keep the OIDC token unavailable even though the
     # trusted contract job below needs it for the private ECR pull-through cache.
     permissions:
@@ -525,6 +536,10 @@ jobs:
           # predate --own-test-overlay, and P must never get to judge its own equivalence.
           cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
             "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          cp provider-proof-source/.github/scripts/runtime_resource_inputs.py \
+            "$RUNNER_TEMP/runtime_resource_inputs.py"
+          cp provider-proof-source/.github/scripts/library_dependency_graph.py \
+            "$RUNNER_TEMP/library_dependency_graph.py"
           chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -753,13 +768,46 @@ jobs:
         if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_CONSUMER: ${{ inputs.consumer }}
+          SERVICE: ${{ inputs.service }}
         run: |
+          set -euo pipefail
+          consumer_args=()
+          if [ -n "${PACT_CONSUMER:-}" ]; then
+            [[ "$PACT_CONSUMER" =~ ^openbank-[a-z0-9-]+$ ]] || {
+              echo '::error::Consumer must be an openbank-* module name.'
+              exit 1
+            }
+            if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
+              echo '::error::A consumer scope cannot be combined with a historical admin-ui proof.'
+              exit 1
+            fi
+            # P keeps its own build-logic. Validate its effective Test task after
+            # configuration, before any provider task/JVM can publish a result.
+            scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
+            cat > "$scope_guard" <<'GRADLE'
+          gradle.projectsEvaluated {
+              def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
+              def task = provider.tasks.named("providerPactTest").get()
+              if (!(task instanceof org.gradle.api.tasks.testing.Test) ||
+                      task.systemProperties["pact.filter.consumers"] != System.getenv("PACT_CONSUMER")) {
+                  throw new GradleException("Consumer scope is not forwarded by the checked-out provider Test task; refusing replay.")
+              }
+          }
+          GRADLE
+            # A scoped run
+            # publishes verification results only for the pacts it actually verified (pact-jvm
+            # publishes per verified consumer pact), so the broker never records a result for a
+            # consumer that was not replayed; other consumers stay unverified for this version.
+            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}" --init-script "$scope_guard")
+          fi
           pact_url_arg=()
           if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
             pact_url_arg=(-Dpact.filter.pacturl="${HISTORICAL_PACT_URL}" -Dpact.filter.consumers=openbank-admin-ui)
           fi
           ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
+            ${consumer_args[@]+"${consumer_args[@]}"} \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
             -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
@@ -769,7 +817,7 @@ jobs:
             -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}" \
-            "${pact_url_arg[@]}"
+            ${pact_url_arg[@]+"${pact_url_arg[@]}"}
 
       - name: Require historical broker verifier interactions
         if: ${{ inputs.historical_admin_ui_version != '' }}

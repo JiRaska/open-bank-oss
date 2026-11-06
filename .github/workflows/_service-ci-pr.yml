@@ -18,6 +18,11 @@ name: _service-ci-pr
         required: false
         default: ''
         type: string
+      consumer:
+        description: Optional consumer name; blank verifies every consumer.
+        required: false
+        default: ''
+        type: string
       historical_admin_ui_version:
         description: Validated one-off admin-ui version for product-catalog; blank keeps normal selection.
         required: false
@@ -36,8 +41,6 @@ name: _service-ci-pr
       PACT_BROKER_PASSWORD:
         description: "Pact Broker password (ADR-0092) \u2014 publishing pacts + verification results."
         required: false
-      GRADLE_CACHE_WRITE_PASSWORD:
-        required: false
 permissions:
   contents: read
 jobs:
@@ -48,8 +51,8 @@ jobs:
       && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini'
       || 'ubuntu-latest') }}
     timeout-minutes: 45
-    environment: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'gradle-cache-writer'
-      || '' }}
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     permissions:
       contents: read
       actions: read

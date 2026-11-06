@@ -11,6 +11,7 @@ import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { buildRegistry } from '@/lib/services/registry'
+import { domainColor, domainLabel } from '@/lib/governance/domains'
 import { aggregateNamedWorkloadStatuses } from '@/lib/health/workloadHealth'
 
 // Card → Kubernetes Deployment/Service name (the BFF's canonical key, ADR-0056).
@@ -23,10 +24,9 @@ function k8sName(svc: { specId: string | null; k8sName?: string }): string {
   return svc.specId ? svc.specId.replace(/^openbank-/, '') : 'product-catalog'
 }
 
-// A catalog card. Modules with editorial prose (EDITORIAL below) carry a group and a
-// hand-written description; modules discovered ONLY from the code-derived catalog
-// (ADR-0029 D3) are rendered with `derived: true` and the facts the catalog actually
-// knows (api title, versions) — no hardcoded group.
+// A catalog card. Business ownership always comes from the canonical registry.
+// Editorial prose supplies display names and descriptions only; newly discovered
+// modules retain the same ownership contract without requiring editorial entries.
 interface Service {
   id: string
   name: string
@@ -69,40 +69,40 @@ function prettyName(short: string): string {
     .join(' ')
 }
 
-// Editorial PROSE overlay (display name, group, description) keyed by registry id - NOT the service
+// Editorial PROSE overlay (display name and description) keyed by registry id - NOT the service
 // list. The page renders one card per runnable catalog module (buildRegistry over
 // /api/catalog/services); a module with no entry here still gets a card (`derived`), with the OpenAPI
 // title as its description. Ports, module names and workload names are never typed: they come from
 // the catalog (application.yaml / build scripts).
-const EDITORIAL: Record<string, { name: string; group: string; version: string; desc: string }> = {
-  'account': { name: 'Account Service', group: 'Core Banking', version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)' },
-  'ledger': { name: 'Ledger Service', group: 'Core Banking', version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)' },
-  'transaction': { name: 'Transaction Service', group: 'Core Banking', version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)' },
-  'balance': { name: 'Balance Service', group: 'Core Banking', version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)' },
-  'product-catalog': { name: 'Product Catalog', group: 'Core Banking', version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)' },
-  'pid': { name: 'PID Service', group: 'Identity', version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)' },
-  'consent': { name: 'Consent Service', group: 'PSD2', version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)' },
-  'psd2': { name: 'PSD2 Service', group: 'PSD2', version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)' },
-  'tpp-registry': { name: 'TPP Registry', group: 'PSD2', version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)' },
-  'agent': { name: 'Agent Service (MCP)', group: 'Platform', version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)' },
-  'sca': { name: 'SCA Service', group: 'PSD2', version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)' },
-  'party': { name: 'Party Service', group: 'Identity', version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)' },
-  'notification': { name: 'Notification Service', group: 'Platform', version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)' },
-  'audit': { name: 'Audit Service', group: 'Compliance', version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)' },
-  'kyc': { name: 'KYC Service', group: 'Compliance', version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)' },
-  'sepa-payment': { name: 'SEPA Payment', group: 'Payments', version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)' },
-  'domestic-payment': { name: 'Domestic Payment', group: 'Payments', version: 'v1', desc: 'Czech domestic payments (Local clearing network)' },
-  'aml': { name: 'AML Service', group: 'Compliance', version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)' },
-  'card-issuance': { name: 'Card Issuance Service', group: 'Cards', version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)' },
-  'fx': { name: 'FX Service', group: 'Core Banking', version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)' },
-  'security-scanner': { name: 'Security Scanner', group: 'Platform', version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)' },
-  'standing-order': { name: 'Standing Order Service', group: 'Payments', version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)' },
-  'swift': { name: 'SWIFT Service', group: 'Payments', version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)' },
-  'sanctions': { name: 'Sanctions Service', group: 'Compliance', version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)' },
-  'clearing': { name: 'Clearing Service', group: 'Payments', version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)' },
-  'interest': { name: 'Interest Service', group: 'Core Banking', version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)' },
-  'dispute': { name: 'Dispute Service', group: 'Cards', version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)' },
-  'sepa-instant': { name: 'SEPA Instant Service', group: 'Payments', version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)' },
+const EDITORIAL: Record<string, { name: string; version: string; desc: string }> = {
+  'account': { name: 'Account Service', version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)' },
+  'ledger': { name: 'Ledger Service', version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)' },
+  'transaction': { name: 'Transaction Service', version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)' },
+  'balance': { name: 'Balance Service', version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)' },
+  'product-catalog': { name: 'Product Catalog', version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)' },
+  'pid': { name: 'PID Service', version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)' },
+  'consent': { name: 'Consent Service', version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)' },
+  'psd2': { name: 'PSD2 Service', version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)' },
+  'tpp-registry': { name: 'TPP Registry', version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)' },
+  'agent': { name: 'Agent Service (MCP)', version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)' },
+  'sca': { name: 'SCA Service', version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)' },
+  'party': { name: 'Party Service', version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)' },
+  'notification': { name: 'Notification Service', version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)' },
+  'audit': { name: 'Audit Service', version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)' },
+  'kyc': { name: 'KYC Service', version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)' },
+  'sepa-payment': { name: 'SEPA Payment', version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)' },
+  'domestic-payment': { name: 'Domestic Payment', version: 'v1', desc: 'Czech domestic payments (Local clearing network)' },
+  'aml': { name: 'AML Service', version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)' },
+  'card-issuance': { name: 'Card Issuance Service', version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)' },
+  'fx': { name: 'FX Service', version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)' },
+  'security-scanner': { name: 'Security Scanner', version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)' },
+  'standing-order': { name: 'Standing Order Service', version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)' },
+  'swift': { name: 'SWIFT Service', version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)' },
+  'sanctions': { name: 'Sanctions Service', version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)' },
+  'clearing': { name: 'Clearing Service', version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)' },
+  'interest': { name: 'Interest Service', version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)' },
+  'dispute': { name: 'Dispute Service', version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)' },
+  'sepa-instant': { name: 'SEPA Instant Service', version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)' },
 }
 
 // Czech translations for the editorial SERVICES `desc` prose, keyed by service id.
@@ -139,31 +139,7 @@ const SERVICE_DESC_CS: Record<string, string> = {
   'sepa-instant':    'Zpracování okamžitých EUR plateb v reálném čase (Clearing SCT Inst)',
 }
 
-// Czech labels for the fixed set of service groups (also used as GROUP_COLORS keys
-// and filter values, so the English string stays the canonical key).
-const GROUP_LABELS_CS: Record<string, string> = {
-  'Core Banking': 'Jádrové bankovnictví',
-  'Identity':     'Identita',
-  'Compliance':   'Compliance',
-  'Payments':     'Platby',
-  'PSD2':         'PSD2',
-  'Platform':     'Platforma',
-  'Cards':        'Karty',
-  'Other':        'Ostatní',
-}
-
 const SPEC_BASE_URL = 'https://raw.githubusercontent.com/JiRaska/open-bank-oss/main'
-
-const GROUP_COLORS: Record<string, string> = {
-  'Core Banking': '#2563eb',
-  'Identity':     '#059669',
-  'Compliance':   '#dc2626',
-  'Payments':     '#7c3aed',
-  'PSD2':         '#d97706',
-  'Platform':     '#6b7280',
-  'Cards':        '#d02571',
-  'Other':        '#64748b',
-}
 
 const METHOD_COLORS: Record<string, { bg: string, text: string, border: string }> = {
   get: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
@@ -440,7 +416,7 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
 }
 
 export default function ApiCatalogPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [statuses, setStatuses] = useState<Record<string, ServiceStatus>>({})
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -545,7 +521,7 @@ export default function ApiCatalogPage() {
             id: r.id,
             name: ed?.name ?? prettyName(r.container),
             port: r.port,
-            group: ed?.group ?? 'Other',
+            group: r.group,
             version: ed?.version ?? (api?.apiVersion ? `v${String(api.apiVersion).split('.')[0]}` : 'v1'),
             desc: ed?.desc ?? api?.apiTitle ?? '',
             specId: r.container,
@@ -607,8 +583,7 @@ export default function ApiCatalogPage() {
       .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
   })
 
-  // Translate a group key (kept canonical/English as the GROUP_COLORS + filter key).
-  const groupLabel = (g: string) => g === 'all' ? t('Vše', 'All') : t(GROUP_LABELS_CS[g] ?? g, g)
+  const groupLabel = (group: string) => group === 'all' ? t('Vše', 'All') : domainLabel(group, language === 'cs' ? 'cs' : 'en')
 
   return (
     <div>
@@ -669,9 +644,9 @@ export default function ApiCatalogPage() {
           <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
-              color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${groupFilter === g ? 'var(--accent-strong)' : 'var(--border)'}`,
+              background: groupFilter === g ? 'var(--accent-strong)' : 'var(--surface)',
+              color: groupFilter === g ? 'var(--accent-strong-text)' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
         ))}
@@ -715,7 +690,7 @@ export default function ApiCatalogPage() {
         {filtered.map(svc => {
           const status = statuses[svc.id]
           const isExpanded = expanded === svc.id
-          const groupColor = GROUP_COLORS[svc.group] || '#6b7280'
+          const groupColor = domainColor(svc.group)
           const k8s = k8sName(svc)
           // Real, code-derived facts (ADR-0029 D3) overlaid on the editorial card.
           const cat = catalog[svc.specId ?? 'openbank-product-catalog']
@@ -759,8 +734,8 @@ export default function ApiCatalogPage() {
                     <span className="api-group-chip" style={{
                       '--api-group-color': groupColor,
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`,
-                      borderRadius: '4px', border: `1px solid ${groupColor}30`,
+                      background: `color-mix(in srgb, ${groupColor} 8%, transparent)`,
+                      borderRadius: '4px', border: `1px solid color-mix(in srgb, ${groupColor} 18%, transparent)`,
                     } as CSSProperties}>{groupLabel(svc.group)}</span>
                     <span style={{
                       fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',

@@ -18,12 +18,12 @@ Legend: **Met** — paste the justification; **Unmet** — the honest gap and wh
 | `bus_factor` | **Unmet** (honest) | Same as `access_continuity`; the criterion needs ≥2 significant contributors. |
 | `documentation_roadmap` | **Met** | Governance follow-ups live as labeled GitHub issues (ADR-0052 backlog discipline); the coverage/mutation roadmap is issue #321; rules.yaml `target_enforce_date` fields (ADR-0144) are the enforcement roadmap, machine-readable. |
 | `documentation_architecture` | **Met** | docs/adr/ — 140+ Architecture Decision Records with status + delivery tracking; per-service CLAUDE.md; hexagonal architecture spec in ADR-0002. |
-| `documentation_security` | **Met** | SECURITY.md (disclosure policy, SLAs); docs/threat-models/ (33 STRIDE/DFD models, CI-gated for all 14 money-path services); ADR-0030 (SSDLC), ADR-0146 (incident response). |
+| `documentation_security` | **Met** | SECURITY.md (disclosure policy, response timeframes); docs/threat-models/ (33 STRIDE/DFD models, CI-gated for all 14 money-path services); ADR-0030 (SSDLC), ADR-0146 (incident response). |
 | `documentation_quick_start` | **Met** | README quick start + CONTRIBUTING.md dev setup (JDK 25, Gradle, Docker); one-command service build. |
 | `documentation_current` | **Met** | Docs gates in CI (`admin_ui_docs_currency` rule; ADR registry check); release notes generated per component by release-please. |
 | `documentation_achievements` | **Met** | README badges: CI, security scan, Scorecard, Best Practices, codecov. |
 | `homepage_url` / `hardened_site` / `sites_password_security` | **Met** | Hosted on github.com (HTTPS/HSTS, GitHub credential policy applies). |
-| `report_url` / `vulnerability_response_process` | **Met** | SECURITY.md: private GitHub Security Advisories, response SLAs (Critical 72h/30d, High 7d/60d…), coordinated disclosure. |
+| `report_url` / `vulnerability_response_process` | **Met** | SECURITY.md: private GitHub Security Advisories, stated timeframes (acknowledgement within 5 business days, initial assessment within 10 business days, updates at least every 30 days; fix targets Critical 30d, High 60d), coordinated disclosure; full policy in docs/security/vulnerability-disclosure-policy.md. |
 | `vulnerability_report_credit` | **Met** | SECURITY.md commits to reporter credit on disclosure (add one sentence if the wording is missing). |
 | `code_of_conduct` | **Met** | CODE_OF_CONDUCT.md — Contributor Covenant v2.1. |
 | `dco` | **Met** | CONTRIBUTING.md requires DCO sign-off (`git commit -s`) on every commit; cryptographic signatures (`-S`) additionally enforced by the main ruleset. |

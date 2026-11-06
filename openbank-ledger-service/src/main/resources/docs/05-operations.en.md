@@ -156,3 +156,7 @@ reports on the identity it already posts journals with, the Keycloak client `ope
 (`service-account-openbank-treasury`). Its map entry adds `ledger.close.participate` for
 `participants/treasury` only; its existing `ledger.create` and nostro read grants are unchanged, and it
 cannot report for any other participant.
+
+## Offline historical FINREP replay
+
+The build defines an explicit `historicalFinrepPactTest` task that replays one validated historical FINREP Pact artifact locally against the ledger provider. It is not broker verification: it never changes broker selectors, never publishes results, and refuses to run unless the supplied provider commit is a 40-hex SHA that is an ancestor of `origin/main`. It is not part of the default build.
