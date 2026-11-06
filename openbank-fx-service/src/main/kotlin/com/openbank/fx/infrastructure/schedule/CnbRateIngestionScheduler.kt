@@ -19,8 +19,8 @@ import java.time.Duration
 /**
  * Daily job that ingests the ČNB central-bank fixing shortly after its ~14:30 Europe/Prague
  * publication (ADR-0046: 14:40). Ingestion is idempotent per business day, so a missed or repeated
- * run is harmless. Failures are logged and swallowed — the scheduler must never crash, and the
- * manual `POST /api/v1/fx/cnb/ingest` endpoint covers backfill.
+ * run is harmless, which is what makes the boot-time catch-up trigger safe. Failures are logged
+ * and swallowed — the scheduler must never crash, and the manual `POST /api/v1/fx/cnb/ingest` endpoint covers backfill.
  */
 @ApplicationScoped
 class CnbRateIngestionScheduler(
@@ -64,9 +64,22 @@ class CnbRateIngestionScheduler(
     // The cron is a config expression (same default as before) purely so an IT can shrink it and
     // drive the *real* scheduler dispatch — calling this method directly supplies a context the
     // scheduler does not, and would pass against the broken code.
+    //
+    // The second trigger is a boot-time catch-up, the same shape CnbPolicyRateIngestionScheduler
+    // already carries: the liveness gauge is per POD, and sandbox fx pods are replaced several
+    // times a day (spot/consolidation), so a pod that started after 14:40 Prague reported
+    // `openbank_workflow_success_recorded == 0` for this workflow until the next day's cron, and
+    // most pods never lived that long (measured 2026-11-04: 3 of 12 fx pods in 3 days ever
+    // recorded a success while the ingestion itself worked). Ingestion is idempotent per business
+    // day, so the catch-up run costs one unchanged fetch.
     @Scheduled(
         cron = "{openbank.cnb.ingestion-cron:0 40 14 * * ?}",
         timeZone = "Europe/Prague",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+    )
+    @Scheduled(
+        every = "{openbank.cnb.startup-every:24h}",
+        delayed = "{openbank.cnb.initial-delay:30s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun ingestDailyFixing() {

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "713780d80b14b365"
+    openbank.tech/policy-checksum: "200f5357b16681bd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -985,6 +985,18 @@ data:
     allowed_reasons contains "service-agent-dispute-read" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-agent")
+    	input.action in {"dispute.list", "dispute.read"}
+    }
+
+    # Oversight read by a human ROLE_AUDITOR (advisory would-DENY triage, 2026-11-04). admin-ui gates
+    # /disputes on `compliance:view` = [ADMIN, COMPLIANCE, AUDITOR] (caller-audit item 6), so an auditor
+    # IS an intended consumer, yet no reason granted it: the advisory log recorded 64 would-DENY for
+    # dispute.list from a VIEWER+AUDITOR user. Pure ROLE_VIEWER stays a deliberate non-grant (item 6).
+    # Read plane only, human principals only.
+    allowed_reasons contains "dispute-auditor-read" if {
+    	input.principal.type == "HUMAN"
+    	not principal_is_machine
+    	"ROLE_AUDITOR" in input.principal.roles
     	input.action in {"dispute.list", "dispute.read"}
     }
   agents.rego: |

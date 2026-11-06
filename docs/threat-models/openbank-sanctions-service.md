@@ -171,6 +171,31 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-04** — **Deferred single-list refresh trigger, v2 (#14780).** New `POST
+  /api/v2/sanctions/lists/{listType}/refresh` flags the list (`refresh_requested_at`, the #9048
+  refresh-all mechanism) and answers 202 without downloading anything. The import runs through the
+  fenced `refresh()` on the next scheduler tick, so publication fencing and the change journal are
+  unchanged. It requires `Idempotency-Key`, uses the same OPA action `sanctions.trigger` and the
+  same roles (`ROLE_OPERATOR`, `ROLE_ADMIN`) as v1, so no new privilege exists. The v1 operation
+  is UNCHANGED (synchronous import, 200 + the refreshed list). **STRIDE-D:** a caller can now
+  trigger a refresh without holding a request open for a whole feed download (API fuzz timed out
+  on PEP_GLOBAL via v1). **STRIDE-R:** v2 refuses a DISABLED list (422) rather than accepting work
+  the scheduler would never carry out. **Residual:** v1 still holds the request for the full
+  import; the admin console moves to v2. Evidence: `SanctionsListRefreshDeferredIT`. Rollback:
+  revert the PR; no migration.
+- **2026-11-04** — **v1 single-list refresh cannot stack concurrent imports (#14780).** **STRIDE-D:**
+  `POST /api/v1/sanctions/lists/{listType}/refresh` still imports in-request (contract unchanged),
+  and before this a second call for the same list waited on the fence's advisory lock (up to the 30 s
+  `lock_timeout`, holding a request thread), then ran another full import, so repeated calls on a
+  large feed (PEP_GLOBAL, ~700k entries) queued one full download each. The HTTP path now takes
+  the SAME advisory key with `pg_try_advisory_lock` and refuses at once with **409 + Retry-After**
+  (`SanctionsRefreshInProgress`, rendered by libs-runtime's `DomainExceptionMapper`) when the list is
+  already refreshing, whether the other refresh is a request or the scheduler. The scheduler keeps
+  its bounded wait. 409 is documented in `openapi.yaml` as an additive response. Evidence:
+  `SanctionsListRefreshDeferredIT` drives two concurrent v1 calls against a held import. The
+  second gets 409, and with the old waiting lock it hung until the client's read timeout. Rollback:
+  revert the PR.
+
 - **2026-10-29** — **Subject-bound, expiring whitelist retry (#11694).** A new screening attempt
   no longer needs to inherit an old `CLEAR`: after the fresh list search, an unexpired
   `WHITELISTED` review may cover exactly the same explicit subject and reviewed match identities

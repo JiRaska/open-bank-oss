@@ -10,7 +10,12 @@ info:
   # 2.3.0 -> 3.0.0 (#10760): CZ_TERRORISTS is a new response enum value, so the six operations
   # returning SanctionsCheck move to parallel /api/v3 contracts. Their /api/v1 schemas retain the
   # original seven values throughout the deprecation window; list administration is unchanged.
-  version: 3.0.0
+  # 3.0.0 -> 3.1.0 (#14780): POST /api/v2/sanctions/lists/{listType}/refresh (202) is added — the
+  # single-list sibling of #9048's refresh-all. ADDITIVE only: the v1 single-list operation is
+  # unchanged (synchronous import, 200 + the refreshed list). Moving it would flip its meaning from
+  # "imported" to "queued", which #9048 treated as breaking for refresh-all. v1 additionally
+  # documents 409 for a refresh of the same list already in flight (additive response).
+  version: 3.1.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -343,6 +348,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SanctionsList'
+        '409':
+          description: >-
+            A refresh of this list is already running (another request or the scheduler); this
+            request was not queued behind it. Retry after the Retry-After interval (#14780).
+
+  /api/v2/sanctions/lists/{listType}/refresh:
+    post:
+      tags: [SanctionsLists]
+      summary: Trigger manual refresh of a specific list
+      description: >-
+        Flags one enabled list for refresh and answers immediately. The import runs on the next
+        scheduler tick, and progress is observable through the list's lastUpdatedAt on
+        GET /api/v1/sanctions/lists.
+      operationId: refreshSanctionsListV2
+      parameters:
+        - name: listType
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: >-
+            Required on money-path POSTs (#8351). Flagging is idempotent by construction, so a
+            retried key converges to the same state.
+          schema:
+            type: string
+      responses:
+        '202':
+          description: Refresh of the list queued on the scheduler.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requested]
+                properties:
+                  requested:
+                    type: string
+                    description: The list type flagged for refresh.
+        '400':
+          description: Idempotency-Key header missing.
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The list is disabled; the scheduler would never refresh it.
 
   /api/v1/sanctions/lists/refresh-all:
     post:
