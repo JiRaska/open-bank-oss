@@ -43,7 +43,14 @@ test('approval inbox rejects a self-approval @verifies:approvals/A1', async ({ p
   test class — or whose `verifies:<scope>/<row-id>` tests — is absent from the latest run or not
   green. A component with no envelope is *unknown*, never a verdict.
 
-The gate is advisory until `rules.yaml: threat_model_test_evidence.target_enforce_date` (ADR-0144).
+A row can also name an id in its mitigation, in backticks: `` `verifies:admin-ui/E2E-ledger` ``. A
+named id must exist and be green, so deleting or skipping the test fails it.
+
+The gate is a ratchet. A finding fails a PR only if it is missing from
+`.github/gates/baselines/threat-model-test-evidence.txt` and the PR touches that threat model. On a
+push to `main`, on an unrelated PR, or if evidence cannot be read, it stays a warning or notice, so
+it catches a claim being written against a test that does not run. It does not catch an existing
+green citation going red later: that surfaces as a warning.
 
 ## Evidence provenance and limits
 
@@ -76,13 +83,13 @@ that a test's assertions substantiate the threat-model mitigation.
 ## Admin UI authenticated deployed lane (#13171)
 
 `openbank-admin-ui/e2e/deployed-session.spec.ts` (job `session-smoke` in
-`admin-ui-deployed-auth-gate.yml`) signs in through the real Keycloak login form as the
-least-privilege e2e operator and declares one id per money-path screen,
-`@verifies:admin-ui/E2E-<screen>`, plus `admin-ui/E2E-SSO` for the sign-in itself. Screens the
-operator's read-only roles do not admit are asserted to redirect to `/auth/forbidden`, so every
-listed screen has a verdict. The ids reach Test Intelligence through the lane's run envelope.
+`admin-ui-deployed-auth-gate.yml`) signs in through the real Keycloak login form and declares one id
+per money-path screen, `@verifies:admin-ui/E2E-<screen>`, plus `admin-ui/E2E-SSO`. It signs in twice:
+as the least-privilege e2e operator, and as the synthetic operator for screens the first cannot see
+(`/approvals`, `/delegations`, `/settlements`). `/treasury` admits neither, so its verdict is only
+that it refuses them. Any non-GET to the app's origin outside `/api/auth/` is aborted and fails the
+test, and a 5xx from a same-origin API call fails it too.
 
-`threat-model-test-evidence` stays **advisory**. No `docs/threat-models/admin-ui.md` register row
-cites these ids yet, so the gate has nothing of this lane's to judge, and
-`rules.yaml: threat_model_test_evidence` sets enforcement after a month of triaged advisory output
-(`target_enforce_date`). Promoting it now would enforce a verdict nobody has reviewed.
+The result reaches Test Intelligence as journey `admin-money-path-screens`, and
+`docs/threat-models/openbank-admin-ui.md` cites these ids, so the gate judges them from the latest
+scheduled run of that workflow.

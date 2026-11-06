@@ -748,16 +748,18 @@ def money_path(root: pathlib.Path) -> list[str]:
 # `Corpus.resolve` proves a cited test class EXISTS. It cannot tell a green test from one that has
 # been red, skipped or deleted from the CI task for a month. The Test Intelligence run envelopes
 # can: a cited test class must have run, and run green, in the latest evidence for its component.
+VERIFIES_CITATION = re.compile(r"`verifies:([a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]{0,63})`")
 TEST_CLASS = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
 
 
-def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None) -> dict[str, dict]:
+def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None,
+                  workflow: str = "services-ci.yml") -> dict[str, dict]:
     """Validate producer envelopes against the independently selected scheduled-main run.
 
     The newest observation per component from that exact run/attempt wins. Other sources,
     malformed envelopes and unknown provenance cannot establish a green result.
     """
-    if not valid_evidence_run(trusted_run):
+    if not valid_evidence_run(trusted_run, workflow):
         return {}  # caller must supply independently selected scheduled-main run metadata
     collector = evidence_collector()
     newest: dict[str, tuple[object, dict]] = {}
@@ -815,7 +817,20 @@ def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
         for rid, _threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
             if kind == "prose":
                 continue  # no row id to attribute a verdict to; the register rows are the claims
-            declared = ev["verifies"].get(f"{scope}/{rid}")
+            # An id the mitigation NAMES must have run green: unlike the row-id convention below,
+            # its absence is a finding, because the row says this test proves it.
+            named = sorted(set(VERIFIES_CITATION.findall(mitig)))
+            for vid in named:
+                judged += 1
+                states = ev["verifies"].get(vid)
+                if states is None:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites `verifies:{vid}`, which has no result in the latest {comp} run "
+                                     "(deleted, renamed or not executed)"))
+                elif states != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites `verifies:{vid}`, whose latest result is {', '.join(sorted(states))}"))
+            declared = None if f"{scope}/{rid}" in named else ev["verifies"].get(f"{scope}/{rid}")
             if declared is not None:
                 judged += 1
                 if declared != {"passed"}:
@@ -861,13 +876,13 @@ def evidence_collector():
     return module
 
 
-def valid_evidence_run(run: dict | None) -> bool:
-    """Metadata from the trusted repository's scheduled Services CI API selection."""
+def valid_evidence_run(run: dict | None, workflow: str = "services-ci.yml") -> bool:
+    """Metadata from the trusted repository's scheduled API selection of `workflow`."""
     if not isinstance(run, dict):
         return False
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     return (run.get("event") == "schedule" and run.get("head_branch") == "main"
-            and run.get("path") == ".github/workflows/services-ci.yml"
+            and run.get("path") == f".github/workflows/{workflow}"
             and isinstance(run.get("repository"), dict)
             and run["repository"].get("full_name") == repo
             and isinstance(run.get("head_repository"), dict)
@@ -881,22 +896,23 @@ def valid_evidence_run(run: dict | None) -> bool:
             and run.get("status") == "completed")
 
 
-def fetch_latest_evidence(dest: pathlib.Path) -> tuple[list[pathlib.Path], dict | None]:
+def fetch_latest_evidence(dest: pathlib.Path, workflow: str = "services-ci.yml",
+                          artifact_prefix: str = "test-intelligence-run-") -> tuple[list[pathlib.Path], dict | None]:
     """Select the latest scheduled run regardless of result; never fall back to old green."""
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     try:
         result = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/workflows/services-ci.yml/runs?branch=main&event=schedule&per_page=1"],
+            ["gh", "api", f"repos/{repo}/actions/workflows/{workflow}/runs?branch=main&event=schedule&per_page=1"],
             capture_output=True, text=True, timeout=60, check=True)
         run = json.loads(result.stdout)["workflow_runs"][0]
-        if not valid_evidence_run(run):
+        if not valid_evidence_run(run, workflow):
             print("UNRESOLVED: newest scheduled run is pending or its provenance is invalid")
             return [], None
         print(f"Evidence source: run {run['id']} attempt {run['run_attempt']}, "
               f"commit {run['head_sha']}, conclusion {run.get('conclusion')}")
         listing = subprocess.run(
             ["gh", "api", f"repos/{repo}/actions/runs/{run['id']}/artifacts", "--paginate", "--jq",
-             '.artifacts[] | select(.expired == false and (.name | startswith("test-intelligence-run-"))) | .name'],
+             '.artifacts[] | select(.expired == false and (.name | startswith("' + artifact_prefix + '"))) | .name'],
             capture_output=True, text=True, timeout=120, check=True)
         from concurrent.futures import ThreadPoolExecutor
 
@@ -1289,6 +1305,22 @@ def self_test() -> int:
         _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
         case("evidence: a declared verifies id is judged by its own tests",
              sorted({r for _k, _s, r, _d2 in _f}), ["T2", "T3", "T4"])
+        (_root / "docs" / "threat-models" / "openbank-x.md").write_text(
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            "| V1 | Replay | `verifies:x/E2E-green` asserts it |\n"
+            "| V2 | Bypass | `verifies:x/E2E-skipped` asserts it |\n"
+            "| V3 | Drift | `verifies:x/E2E-deleted` asserts it |\n", encoding="utf-8")
+        (_root / "ev" / "named.json").write_text(json.dumps(_env("2026-10-19T03:00:00Z", [
+            {"classname": "a.spec.ts", "state": "passed", "verifies": ["x/E2E-green"]},
+            {"classname": "a.spec.ts", "state": "skipped", "verifies": ["x/E2E-skipped"]}])))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
+        case("evidence: a NAMED verifies id that is skipped or absent is UNVERIFIED; green is not",
+             sorted(r for _k, _s, r, _d2 in _f), ["V2", "V3"])
+        _other = dict(_trusted, path=".github/workflows/other.yml")
+        case("evidence: a run from another workflow cannot witness the selected source",
+             load_evidence([_root / "ev"], _other), {})
+        case("evidence: the named source accepts its own workflow",
+             sorted(load_evidence([_root / "ev"], _other, "other.yml")), ["openbank-x"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")

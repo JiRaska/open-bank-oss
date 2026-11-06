@@ -4,8 +4,9 @@
 # and uses no credentials (#13171). One small job; the 106 stubbed specs stay in the PR lane.
 # A second job, `session-smoke`, signs in through the real Keycloak form as the least-privilege e2e
 # operator (realm roles ROLE_VIEWER + ROLE_AUDITOR) and smoke-tests each money-path screen read-only.
-# Its password exists ONLY as the ADMIN_UI_E2E_PASSWORD Actions secret; without it the job skips with
-# a visible job-summary notice instead of passing as if it had tested something.
+# Screens that operator may not see are also opened as the synthetic operator (ROLE_OPERATOR).
+# The passwords exist ONLY as Actions secrets; without them the job skips with a visible job-summary
+# notice instead of passing as if it had tested something.
 name: Admin UI deployed auth-gate
 
 on:
@@ -69,18 +70,19 @@ jobs:
     env:
       ADMIN_UI_E2E_USERNAME: ${{ vars.ADMIN_UI_E2E_USERNAME || 'e2e-operator@openbank.local' }}
       ADMIN_UI_E2E_PASSWORD: ${{ secrets.ADMIN_UI_E2E_PASSWORD }}
+      SYNTHETIC_OPERATOR_USERNAME: ${{ secrets.SYNTHETIC_OPERATOR_USERNAME }}
+      SYNTHETIC_OPERATOR_PASSWORD: ${{ secrets.SYNTHETIC_OPERATOR_PASSWORD }}
     steps:
       - id: secret
         run: |
-          if [ -z "${ADMIN_UI_E2E_PASSWORD}" ]; then
+          if [ -z "${ADMIN_UI_E2E_PASSWORD}" ] || [ -z "${SYNTHETIC_OPERATOR_USERNAME}" ] || [ -z "${SYNTHETIC_OPERATOR_PASSWORD}" ]; then
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning title=Authenticated e2e NOT RUN::ADMIN_UI_E2E_PASSWORD secret is not set; no screen was tested."
+            echo "::warning title=Authenticated e2e NOT RUN::an operator credential secret is not set; no screen was tested."
             {
               echo "## Authenticated admin-ui e2e: NOT RUN"
               echo
-              echo "The \`ADMIN_UI_E2E_PASSWORD\` Actions secret is not set, so no money-path screen was"
-              echo "signed in to or tested. This is a skip, not a pass. Provision the e2e operator's"
-              echo "password (#13171) to enable the lane."
+              echo "An operator credential Actions secret is not set, so no money-path screen was"
+              echo "signed in to or tested. This is a skip, not a pass (#13171)."
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -103,6 +105,7 @@ jobs:
         env:
           CI: 'true'
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/deployed-session/deployed-session.xml
+          OPENBANK_BROWSER_VITALS_OUTPUT: build/test-intelligence/browser-vitals-deployed-session.json
         run: npx playwright test --config playwright.deployed-session.config.ts
       # The stored session is a live credential: never leave it on the runner past the run.
       - if: always() && steps.secret.outputs.present == 'true'
@@ -111,6 +114,9 @@ jobs:
         run: |
           python3 .github/scripts/collect-test-run-evidence.py \
             --service openbank-admin-ui --component openbank-admin-ui \
+            --synthetic-journey admin-money-path-screens \
+            --synthetic-variant chromium \
+            --browser-vitals openbank-admin-ui/build/test-intelligence/browser-vitals-deployed-session.json \
             --out openbank-admin-ui/build/test-intelligence/run-deployed-session.json
       - if: always() && steps.secret.outputs.present == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
