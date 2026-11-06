@@ -80,7 +80,7 @@ dependencies {
 // This copy is derived from openbank-libs/governance/prompts/ — never hand-edit it here.
 tasks.named<Copy>("processResources") {
     // Image-pinned MCP metadata is derived from source ownership, never a second domain table.
-    from(rootProject.rootDir) {
+    from(rootProject.file(".")) {
         include("openbank-*/governance.yaml")
         into("business-domains")
     }
