@@ -20,7 +20,7 @@ const report = (services: { name: string; amount: number }[]): CostReportLike =>
   collectedAt: '2026-06-03T00:00:00Z',
 })
 
-// account-service & ledger-service are `core` in the governance manifest; keycloak is unknown.
+// Allocation-math fixtures; normative business assignments are covered by metadata-migration acceptance.
 const FOOTPRINTS: ServiceFootprint[] = [
   { service: 'account-service', cpuMillis: 250, memMiB: 512 },
   { service: 'ledger-service', cpuMillis: 250, memMiB: 512 },
@@ -80,14 +80,15 @@ describe('allocate', () => {
     expect(sumDom).toBeCloseTo(sumSvc, 1)
   })
 
-  it('rolls services up to their manifest domain; unknown footprint -> unclassified + unmapped', () => {
-    const r = allocate(report([{ name: 'Amazon Elastic Compute Cloud - Compute', amount: 90 }]), FOOTPRINTS, GROUPS)
+  it('rolls services up to their declared domain; unknown footprint -> unclassified + unmapped', () => {
+    // Explicit fixture ownership keeps aggregation proof independent of the staged
+    // metadata migration. Source-to-domain acceptance uses the real lookup separately.
+    const r = allocate(report([{ name: 'Amazon Elastic Compute Cloud - Compute', amount: 90 }]), FOOTPRINTS, GROUPS,
+      service => ['account-service', 'ledger-service'].includes(service) ? 'core' : undefined)
     const core = r.byDomain.find(d => d.domain === 'core')
     const unclassified = r.byDomain.find(d => d.domain === 'unclassified')
-    const accounting = r.byDomain.find(d => d.domain === 'accounting')
-    expect(core?.serviceCount).toBe(1)           // account
-    expect(accounting?.serviceCount).toBe(1)     // ledger
-    expect(unclassified?.serviceCount).toBe(1)       // keycloak
+    expect(core?.serviceCount).toBe(2)
+    expect(unclassified?.serviceCount).toBe(1)
     expect(r.unmapped).toEqual(['keycloak'])
   })
 

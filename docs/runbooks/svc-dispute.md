@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-dispute-service
 
-> Operational runbook for the `dispute` service. Data domain **cards**,
+> Operational runbook for the `dispute` service. Data domain **compliance**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-dispute-service` |
 | HTTP port | `8135` |
-| Data domain | cards |
+| Data domain | compliance |
 | Datastore | PostgreSQL (database `openbank_dispute`) |
 | Classification | confidential |
 | Retention | 7 years |

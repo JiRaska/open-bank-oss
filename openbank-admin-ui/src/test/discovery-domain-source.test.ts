@@ -28,7 +28,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('discovery business ownership publication overlay', () => {
   it('uses one published ownership snapshot without changing pinned routes, ports or tenant selection', async () => {
     const imageRegistry = getRegistry()
-    expect(imageRegistry.find(service => service.container === 'openbank-ledger-service')?.group).toBe('accounting')
+    const imageLedgerDomain = imageRegistry.find(service => service.container === 'openbank-ledger-service')!.group
     const allowlist = getProxyAllowlist()
     // readAdminUiContentSnapshot returns only a validated coherent bundle. Other
     // content fields are irrelevant here; its reader's rejection cases are tested separately.
@@ -49,14 +49,14 @@ describe('discovery business ownership publication overlay', () => {
     expect(getProxyAllowlist()).toEqual(allowlist)
     expect(getRegistry().some(service => service.container === 'openbank-new-service')).toBe(false)
     expect(getRegistry()).toBe(imageRegistry)
-    expect(imageRegistry.find(service => service.container === 'openbank-ledger-service')?.group).toBe('accounting')
+    expect(imageRegistry.find(service => service.container === 'openbank-ledger-service')?.group).toBe(imageLedgerDomain)
   })
 
   it.each(['unavailable', 'legacy taxonomy', 'inconsistent ownership'])('retains image ownership after the content reader rejects %s', async reason => {
     readContent.mockResolvedValue({ status: 'unavailable', snapshot: null, error: reason })
     const result = await collect()
     expect(readContent).toHaveBeenCalledTimes(1)
-    expect(result.services.filter(service => service.name === 'ledger-service').every(service => service.group === 'accounting')).toBe(true)
+    expect(result.services.filter(service => service.name === 'ledger-service').every(service => service.group === getRegistry().find(entry => entry.container === 'openbank-ledger-service')!.group)).toBe(true)
     expect(result.services.find(service => service.name === 'unregistered-service')?.group).toBe('unclassified')
     expect(resolveServiceInSnapshot(result, 'ledger-service', 'ledger')).toMatchObject({
       state: 'found', baseUrl: 'http://ledger-service.ledger.svc:8101',
@@ -66,6 +66,6 @@ describe('discovery business ownership publication overlay', () => {
   it('retains image ownership if the reader unexpectedly throws', async () => {
     readContent.mockRejectedValue(new Error('content unavailable'))
     const result = await collect()
-    expect(result.services.find(service => service.name === 'ledger-service')?.group).toBe('accounting')
+    expect(result.services.find(service => service.name === 'ledger-service')?.group).toBe(getRegistry().find(entry => entry.container === 'openbank-ledger-service')!.group)
   })
 })

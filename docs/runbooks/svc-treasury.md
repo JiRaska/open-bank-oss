@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-treasury-service
 
-> Operational runbook for the `treasury` service. Data domain **treasury**,
+> Operational runbook for the `treasury` service. Data domain **core**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-treasury-service` |
 | HTTP port | `8160` |
-| Data domain | treasury |
+| Data domain | core |
 | Datastore | PostgreSQL (database `openbank_treasury`) |
 | Classification | confidential |
 | Retention | 10 years |

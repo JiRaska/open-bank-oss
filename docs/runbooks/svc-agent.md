@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-agent-service
 
-> Operational runbook for the `agent` service. Data domain **channels**,
+> Operational runbook for the `agent` service. Data domain **platform**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-agent-service` |
 | HTTP port | `8109` |
-| Data domain | channels |
+| Data domain | platform |
 | Datastore | PostgreSQL (database `openbank_agent`) |
 | Classification | internal |
 | Retention | 1 year |

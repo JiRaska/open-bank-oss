@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-notification-service
 
-> Operational runbook for the `notification` service. Data domain **engagement**,
+> Operational runbook for the `notification` service. Data domain **platform**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-notification-service` |
 | HTTP port | `8112` |
-| Data domain | engagement |
+| Data domain | platform |
 | Datastore | PostgreSQL (database `openbank_notifications`) |
 | Classification | confidential |
 | Retention | 2 years |

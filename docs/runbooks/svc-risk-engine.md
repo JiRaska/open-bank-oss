@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-risk-engine
 
-> Operational runbook for the `risk-engine` service. Data domain **risk**,
+> Operational runbook for the `risk-engine` service. Data domain **core**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-risk-engine` |
 | HTTP port | `8159` |
-| Data domain | risk |
+| Data domain | core |
 | Datastore | PostgreSQL (database `openbank_risk`) |
 | Classification | confidential |
 | Retention | 10 years |

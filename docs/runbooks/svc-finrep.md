@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-finrep-service
 
-> Operational runbook for the `finrep` service. Data domain **reporting**,
+> Operational runbook for the `finrep` service. Data domain **compliance**,
 > classification **confidential**, datastore **none**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-finrep-service` |
 | HTTP port | `8140` |
-| Data domain | reporting |
+| Data domain | compliance |
 | Datastore | none (database `—`) |
 | Classification | confidential |
 | Retention | 10 years |

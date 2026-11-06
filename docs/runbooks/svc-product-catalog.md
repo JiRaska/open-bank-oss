@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-product-catalog
 
-> Operational runbook for the `product-catalog` service. Data domain **products**,
+> Operational runbook for the `product-catalog` service. Data domain **core**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-product-catalog` |
 | HTTP port | `8104` |
-| Data domain | products |
+| Data domain | core |
 | Datastore | PostgreSQL (database `openbank_products`) |
 | Classification | internal |
 | Retention | indefinite |

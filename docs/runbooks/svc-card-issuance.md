@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-card-issuance-service
 
-> Operational runbook for the `card-issuance` service. Data domain **cards**,
+> Operational runbook for the `card-issuance` service. Data domain **payments**,
 > classification **restricted**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-card-issuance-service` |
 | HTTP port | `8118` |
-| Data domain | cards |
+| Data domain | payments |
 | Datastore | PostgreSQL (database `openbank_cards`) |
 | Classification | restricted |
 | Retention | 7 years |

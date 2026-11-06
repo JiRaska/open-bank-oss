@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-lending-service
 
-> Operational runbook for the `lending` service. Data domain **lending**,
+> Operational runbook for the `lending` service. Data domain **payments**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-lending-service` |
 | HTTP port | `8126` |
-| Data domain | lending |
+| Data domain | payments |
 | Datastore | PostgreSQL (database `openbank_lending`) |
 | Classification | confidential |
 | Retention | 7 years |

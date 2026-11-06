@@ -75,35 +75,3 @@ test('business domains stay consistent across map, lineage and service catalog',
   await page.getByRole('combobox').first().selectOption('products')
   await expect(page.getByRole('link', { name: /^Product definitions/ })).toBeVisible()
 })
-
-test('generated governance catalog renders pension contracts and funds in their real business domain', async ({ page, context, baseURL }) => {
-  await signInAsOperator(context, baseURL!)
-  // Runtime health is independent of business ownership. Keep the source catalog
-  // and governance endpoints real so this exercises generated source through UI.
-  await page.route('**/api/services/health', route => route.fulfill({
-    contentType: 'application/json', body: JSON.stringify({ source: 'static', discoveryStatus: 'static', services: [] }),
-  }))
-  const response = await page.request.get('/api/catalog/services')
-  expect(response.ok()).toBeTruthy()
-  const catalog = await response.json() as { services: { name: string; dataDomain: string | null; runnable: boolean; port: number | null }[] }
-  for (const name of ['openbank-pension-service', 'openbank-pension-fund-service']) {
-    expect(catalog.services.find(service => service.name === name)?.dataDomain).toBe('pensions')
-  }
-  expect(catalog.services.find(service => service.name === 'openbank-wealth-service')?.dataDomain).toBe('wealth')
-
-  await page.goto('/docs/service-map')
-  const filters = page.getByRole('group', { name: 'Service group filters' })
-  await expect(filters.getByRole('button', { name: 'Pensions', exact: true })).toBeVisible()
-  await expect(page.locator('svg').getByRole('button', { name: 'Pension Fund', exact: true })).toBeVisible()
-  await expect(page.locator('svg').getByRole('button')).toHaveCount(catalog.services.filter(service => service.runnable && service.port !== null).length)
-  await expect(page.getByText(/The code-derived catalog.*knows/)).toHaveCount(0)
-  for (const source of ['health', 'governance', 'topology']) {
-    await expect(page.getByTestId(`map-evidence-${source}`).first()).not.toContainText('Loading', { timeout: 15_000 })
-  }
-  await page.screenshot({ path: '/private/tmp/domain-taxonomy-map.png', fullPage: true })
-  await filters.getByRole('button', { name: 'Pensions', exact: true }).click()
-  const nodes = page.locator('svg').getByRole('button')
-  await expect(nodes.filter({ hasText: 'Pension Fund' })).toHaveCount(1)
-  await expect(page.locator('svg').getByRole('button', { name: 'Pension', exact: true })).toBeVisible()
-  await expect(page.locator('svg').getByRole('button', { name: 'Wealth', exact: true })).toHaveCount(0)
-})

@@ -3,7 +3,7 @@
 """Render the existing admin catalog into the public platform page, never invent runtime status.
 
 Run from any directory. Requires Node and the admin-ui's installed yaml dependency.
-Only the marked section is generated. Business ownership comes from catalog.dataDomain;
+Only marked catalog and teaser navigation sections are generated. Business ownership comes from catalog.dataDomain;
 labels and descriptions come from the shared domain taxonomy. Unclassified supporting
 modules remain explicitly visible instead of being attributed to the technical platform.
 """
@@ -30,7 +30,7 @@ def load_domains():
     return domains
 
 
-def render(catalog, revision, date):
+def group_modules(catalog):
     services = catalog['services']
     if not services or len({s['name'] for s in services}) != len(services):
         raise ValueError('Catalog must contain unique modules')
@@ -47,6 +47,19 @@ def render(catalog, revision, date):
             raise ValueError(f'Unknown domain for {service["name"]}: {domain}')
         else:
             by_domain[domain].append(service)
+    return domains, by_domain, unclassified
+
+
+def render_domain_nav(catalog):
+    domains, by_domain, _ = group_modules(catalog)
+    return '\n'.join(
+        f'<a href="platform.html#{html.escape(d["id"], quote=True)}">{html.escape(d["labelEn"])} ↗</a>'
+        for d in domains if by_domain[d['id']])
+
+
+def render(catalog, revision, date):
+    services = catalog['services']
+    domains, by_domain, unclassified = group_modules(catalog)
     areas = [(d['id'], d['labelEn'], d['description'], by_domain[d['id']])
              for d in domains if by_domain[d['id']]]
     if unclassified:
@@ -82,19 +95,26 @@ def main():
     source_paths = ['openbank-*/version.txt', 'openbank-*/build.gradle.kts', 'openbank-*/package.json', 'openbank-*/src/main/resources/openapi.yaml', 'openbank-libs/governance/rules.yaml', 'openbank-*/governance.yaml', 'openbank-libs/governance/domain-taxonomy.json', 'openbank-admin-ui/scripts/generate-catalog.mjs', 'openbank-infra/web/generate-public-catalog.py']
     revision = subprocess.check_output(['git', 'log', '-1', '--format=%H', '--', *source_paths], cwd=ROOT, text=True).strip()
     date = subprocess.check_output(['git', 'show', '-s', '--format=%cs', revision], cwd=ROOT, text=True).strip()
-    target = SITE / 'platform.html'
-    text = target.read_text()
-    start, end = '<!-- CATALOG:START -->', '<!-- CATALOG:END -->'
-    if text.count(start) != 1 or text.count(end) != 1:
-        raise ValueError('Missing or ambiguous catalog markers')
-    before, rest = text.split(start)
-    _, after = rest.split(end)
-    output = before + start + '\n' + render(catalog, revision, date) + '\n' + end + after
+    outputs = []
+    for filename, marker, body in [
+        ('platform.html', 'CATALOG', render(catalog, revision, date)),
+        ('index.html', 'INDEX_DOMAIN_NAV', render_domain_nav(catalog)),
+    ]:
+        target = SITE / filename
+        text = target.read_text()
+        start, end = f'<!-- {marker}:START -->', f'<!-- {marker}:END -->'
+        if text.count(start) != 1 or text.count(end) != 1:
+            raise ValueError(f'Missing or ambiguous {marker} markers in {filename}')
+        before, rest = text.split(start)
+        _, after = rest.split(end)
+        output = before + start + '\n' + body + '\n' + end + after
+        outputs.append((target, text, output))
     if args.check:
-        if output != text:
-            raise SystemExit('Public catalog is stale: run generate-public-catalog.py')
+        if any(output != text for _, text, output in outputs):
+            raise SystemExit('Public catalog or domain navigation is stale: run generate-public-catalog.py')
     else:
-        target.write_text(output)
+        for target, _, output in outputs:
+            target.write_text(output)
     print(f'Public catalog: {len(catalog["services"])} modules; {"verified" if args.check else "rendered"}.')
 
 if __name__ == '__main__':

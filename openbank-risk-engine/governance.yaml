@@ -5,7 +5,7 @@
 #
 # Balance-sheet risk engine (ADR-0313, ADR-0314). Read-only: it pulls the ledger trial balance
 # and sub-ledger balances, stores a tied-out contract-level snapshot and never writes the ledger.
-dataDomain: risk
+dataDomain: core
 primaryDatastore: PostgreSQL
 databaseName: openbank_risk
 dataLineageRole: consumer

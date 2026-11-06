@@ -55,6 +55,25 @@ class PublicDomainCatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Unknown domain'):
             self.render(service('pension-service', 'invented'))
 
+    def test_teaser_navigation_contains_only_populated_canonical_domains(self):
+        rendered = module.render_domain_nav(catalog(
+            service('wealth-service', 'wealth'), service('pension-service', 'pensions'),
+            service('pension-fund-service', 'pensions'), service('support-library', None)))
+        self.assertEqual(rendered.count('platform.html#pensions'), 1)
+        self.assertEqual(rendered.count('platform.html#wealth'), 1)
+        self.assertNotIn('platform.html#treasury', rendered)
+        self.assertNotIn('platform.html#platform', rendered)
+        self.assertNotIn('platform.html#unclassified', rendered)
+        domain = next(d for d in module.load_domains() if d['id'] == 'wealth')
+        self.assertIn(domain['labelEn'], rendered)
+
+    def test_teaser_navigation_does_not_invent_ownership_for_unclassified_modules(self):
+        self.assertEqual(module.render_domain_nav(catalog(service('support-library', None))), '')
+
+    def test_teaser_navigation_rejects_unknown_ownership(self):
+        with self.assertRaisesRegex(ValueError, 'Unknown domain'):
+            module.render_domain_nav(catalog(service('pension-service', 'invented')))
+
     def test_duplicate_module_and_invalid_path_are_rejected(self):
         item = service('wealth-service', 'wealth')
         with self.assertRaisesRegex(ValueError, 'unique modules'):

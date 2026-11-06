@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-wealth-service
 
-> Operational runbook for the `wealth` service. Data domain **wealth**,
+> Operational runbook for the `wealth` service. Data domain **open-banking**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-wealth-service` |
 | HTTP port | `8154` |
-| Data domain | wealth |
+| Data domain | open-banking |
 | Datastore | PostgreSQL (database `openbank_wealth`) |
 | Classification | confidential |
 | Retention | 10 years |

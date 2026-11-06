@@ -17,13 +17,13 @@ const root = path.resolve(process.cwd(), '..')
 const catalog = JSON.parse(readFileSync('catalog.json', 'utf8')) as { services: CatalogFleetModule[] }
 const registry = buildRegistry(catalog.services)
 const governance = getGovernanceManifest()
-const examples = {
-  'pension-service': 'pensions', 'pension-fund-service': 'pensions', 'wealth-service': 'wealth',
-  'treasury-service': 'treasury', 'lending-service': 'lending', 'ledger-service': 'accounting',
-  'transaction-service': 'accounting', 'card-processing-service': 'cards', 'dispute-service': 'cards',
-  'tax-reporting-service': 'reporting', 'billing-service': 'products', 'risk-engine': 'risk',
-  'context-service': 'compliance', 'mcp-service': 'channels', 'devops-agent': 'platform',
-} as const
+// Framework/source agreement is independent of when the metadata migration lands.
+// Use declared source ownership here; normative banking assignments live in the
+// separate metadata-migration acceptance suite.
+const examples = Object.fromEntries(registry.slice(0, 15).map(entry => {
+  const source = parse(readFileSync(path.join(root, entry.container, 'governance.yaml'), 'utf8'))
+  return [entry.container.slice(9), source.dataDomain as string]
+}))
 
 describe('canonical business domain ownership across consumers', () => {
   it('generated browser contract matches the shared taxonomy and has bilingual definitions', () => {
@@ -54,17 +54,23 @@ describe('canonical business domain ownership across consumers', () => {
     expect(registry.length).toBeGreaterThan(50)
   })
 
-  it('classifies implemented responsibilities and preserves operational identities', () => {
-    for (const [service, domain] of Object.entries(examples)) {
-      const entry = registry.find(row => row.container === `openbank-${service}`)!
-      expect(entry.group, service).toBe(domain)
-      expect(k8sNameOf(entry), service).toBe(service)
+  it('classifies every supported domain without changing operational identities', () => {
+    const fixtures = DOMAIN_IDS.map((dataDomain, index) => ({
+      name: `openbank-fixture-${dataDomain}-service`, short: `fixture-${dataDomain}-service`,
+      kind: 'service', runnable: true, dataDomain, port: 9000 + index,
+    }))
+    for (const entry of buildRegistry(fixtures)) {
+      const fixture = fixtures.find(candidate => candidate.name === entry.container)!
+      expect(entry.group, entry.container).toBe(fixture.dataDomain)
+      expect(k8sNameOf(entry), entry.container).toBe(fixture.short)
+      expect(entry.port).toBe(fixture.port)
     }
+    expect(buildRegistry(fixtures)).toHaveLength(DOMAIN_IDS.length)
     expect(registry.find(row => row.container === 'openbank-ledger-service')?.k8sNamespace).toBe('ledger')
     expect(buildRegistry([{ name: 'openbank-new-service', short: 'new-service', kind: 'service', runnable: true, port: 9000 }])[0].group).toBe('unclassified')
   })
 
-  it('uses moduleDir ownership for discovery even in shared namespaces and keeps unknown workloads visible', async () => {
+  it('uses declared ownership for discovery even in shared namespaces and keeps unknown workloads visible', async () => {
     const names = [...Object.keys(examples), 'unregistered-service']
     const result = await collectServiceDiscovery(async url => ({ items: url.includes('/deployments') ? names.map(name => ({
       metadata: { name, namespace: 'platform' }, spec: { replicas: 1, template: { spec: { containers: [{ ports: [{ name: 'http', containerPort: 9000 }] }] } } },

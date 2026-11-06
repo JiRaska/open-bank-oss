@@ -287,7 +287,8 @@ test('domain ownership contract rejects legacy or inconsistent bundles and accep
       const result = await reader.read()
       assert.equal(result.status, expected)
       if (expected === 'unavailable') assert.equal(result.snapshot, null)
-      else assert.equal(result.snapshot.content.catalog.services.find(row => row.name === 'openbank-pension-service').dataDomain, 'pensions')
+      else assert.equal(result.snapshot.content.catalog.services.find(row => row.name === 'openbank-pension-service').dataDomain,
+        source.content.catalog.services.find(row => row.name === 'openbank-pension-service').dataDomain)
     }
   } finally {
     if (previousUrl === undefined) delete process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL

@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-mcp-service
 
-> Operational runbook for the `mcp` service. Data domain **channels**,
+> Operational runbook for the `mcp` service. Data domain **payments**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-mcp-service` |
 | HTTP port | `8150` |
-| Data domain | channels |
+| Data domain | payments |
 | Datastore | PostgreSQL (database `openbank_mcp`) |
 | Classification | confidential |
 | Retention | 13-months |

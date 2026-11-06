@@ -41,7 +41,7 @@ spec:
           for: 5m
           labels:
             severity: critical
-            domain: cards
+            domain: payments
           annotations:
             # Driven by real card traffic, not by a periodic job: there is no subject period to
             # compare the window against, and declaring one would invent a cadence the path has not got.
@@ -62,7 +62,7 @@ spec:
           for: 15m
           labels:
             severity: warning
-            domain: cards
+            domain: payments
           annotations:
             # Driven by real card traffic, not by a periodic job: there is no subject period to
             # compare the window against, and declaring one would invent a cadence the path has not got.
@@ -85,7 +85,7 @@ spec:
           for: 10m
           labels:
             severity: critical
-            domain: cards
+            domain: payments
           annotations:
             summary: Card ledger posting remains unconfirmed after retries
             description: >-
@@ -111,7 +111,7 @@ spec:
           for: 30m
           labels:
             severity: warning
-            domain: cards
+            domain: payments
           annotations:
             # Driven by real card traffic, not by a periodic job: there is no subject period to
             # compare the window against, and declaring one would invent a cadence the path has not got.
@@ -134,7 +134,7 @@ spec:
           for: 10m
           labels:
             severity: warning
-            domain: cards
+            domain: payments
           annotations:
             # Driven by real card traffic, not by a periodic job: there is no subject period to
             # compare the window against, and declaring one would invent a cadence the path has not got.
@@ -163,7 +163,7 @@ spec:
           for: 30m
           labels:
             severity: warning
-            domain: cards
+            domain: payments
           annotations:
             # Driven by real card traffic, not by a periodic job: there is no subject period to
             # compare the window against, and declaring one would invent a cadence the path has not got.

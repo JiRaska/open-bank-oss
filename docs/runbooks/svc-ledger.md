@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-ledger-service
 
-> Operational runbook for the `ledger` service. Data domain **accounting**,
+> Operational runbook for the `ledger` service. Data domain **core**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-ledger-service` |
 | HTTP port | `8101` |
-| Data domain | accounting |
+| Data domain | core |
 | Datastore | PostgreSQL (database `openbank_ledger`) |
 | Classification | confidential |
 | Retention | 10 years |

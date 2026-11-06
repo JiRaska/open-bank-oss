@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-anacredit-service
 
-> Operational runbook for the `anacredit` service. Data domain **reporting**,
+> Operational runbook for the `anacredit` service. Data domain **compliance**,
 > classification **restricted**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-anacredit-service` |
 | HTTP port | `8137` |
-| Data domain | reporting |
+| Data domain | compliance |
 | Datastore | PostgreSQL (database `openbank_anacredit`) |
 | Classification | restricted |
 | Retention | 10 years |

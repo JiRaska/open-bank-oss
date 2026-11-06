@@ -4,7 +4,7 @@
 #
 # openbank-clearing-simulator is a NON-PRODUCTION scheme/clearing counterparty (ADR-0104 D2):
 # stateless, deterministic, no datastore, no posting authority, contacts no real network.
-dataDomain: platform
+dataDomain: payments
 primaryDatastore: none
 ownsNoDatabase: true
 dataLineageRole: internal

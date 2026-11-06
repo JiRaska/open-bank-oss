@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-clearing-simulator
 
-> Operational runbook for the `clearing-simulator` service. Data domain **platform**,
+> Operational runbook for the `clearing-simulator` service. Data domain **payments**,
 > classification **internal**, datastore **none**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-clearing-simulator` |
 | HTTP port | `8139` |
-| Data domain | platform |
+| Data domain | payments |
 | Datastore | none (database `—`) |
 | Classification | internal |
 | Retention | none (stateless — persists nothing) |

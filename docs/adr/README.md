@@ -368,7 +368,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0361](0361-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
 | [0362](0362-ci-cd-throughput-and-safety-no-downgrade-and-no-stale-as-enforced-invariants-waste-cut-by-measurement.md) | CI/CD throughput and safety: no-downgrade and no-stale as enforced invariants, waste cut by measurement | Proposed | Partial | ci,gitops,governance | — |
 | [0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md) | Remote Gradle build cache for hosted CI, written only from main | Proposed | Partial | ci,supply-chain,capacity | — |
-| [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Proposed | Shipped | architecture,governance,gitops | — |
+| [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Proposed | Partial | architecture,governance,gitops | — |
 
 ## By tag
 

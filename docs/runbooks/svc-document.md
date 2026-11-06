@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-document-service
 
-> Operational runbook for the `document` service. Data domain **documents**,
+> Operational runbook for the `document` service. Data domain **platform**,
 > classification **restricted**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-document-service` |
 | HTTP port | `8143` |
-| Data domain | documents |
+| Data domain | platform |
 | Datastore | PostgreSQL (database `openbank_documents`) |
 | Classification | restricted |
 | Retention | 10 years |

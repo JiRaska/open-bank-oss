@@ -22,6 +22,7 @@ describe('off-cluster health ownership publication overlay', () => {
   it('uses current published ownership while probing only image-pinned targets', async () => {
     const imageRegistry = getRegistry()
     const ledger = imageRegistry.find(service => service.container === 'openbank-ledger-service')!
+    const imageLedgerDomain = ledger.group
     const allowlist = getProxyAllowlist()
     readContent.mockResolvedValue({ status: 'ready', snapshot: { content: { catalog: { services: [
       { name: ledger.container, dataDomain: 'treasury', port: 9999, container: 'untrusted-target' },
@@ -36,14 +37,14 @@ describe('off-cluster health ownership publication overlay', () => {
     expect(targets).toContain(`http://localhost:${ledger.port}/q/health/ready`)
     expect(targets.some(url => url.includes(':9999') || url.includes('untrusted-target'))).toBe(false)
     expect(getProxyAllowlist()).toEqual(allowlist)
-    expect(imageRegistry.find(service => service.container === ledger.container)?.group).toBe('accounting')
+    expect(imageRegistry.find(service => service.container === ledger.container)?.group).toBe(imageLedgerDomain)
   })
 
   it.each(['unavailable', 'legacy taxonomy', 'inconsistent ownership'])('retains image ownership when the content reader rejects %s', async reason => {
     readContent.mockResolvedValue({ status: 'unavailable', snapshot: null, error: reason })
     const body = await (await GET()).json()
     expect(body.services.find((service: { name: string }) => service.name === 'ledger-service')).toMatchObject({
-      group: 'accounting', status: 'UP',
+      group: getRegistry().find(entry => entry.container === 'openbank-ledger-service')!.group, status: 'UP',
     })
   })
 })

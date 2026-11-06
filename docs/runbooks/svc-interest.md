@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-interest-service
 
-> Operational runbook for the `interest` service. Data domain **core**,
+> Operational runbook for the `interest` service. Data domain **payments**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-interest-service` |
 | HTTP port | `8125` |
-| Data domain | core |
+| Data domain | payments |
 | Datastore | PostgreSQL (database `openbank_interest`) |
 | Classification | internal |
 | Retention | 5 years |

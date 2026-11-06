@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-onboarding-service
 
-> Operational runbook for the `onboarding` service. Data domain **identity**,
+> Operational runbook for the `onboarding` service. Data domain **compliance**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-onboarding-service` |
 | HTTP port | `8130` |
-| Data domain | identity |
+| Data domain | compliance |
 | Datastore | PostgreSQL (database `openbank_onboarding`) |
 | Classification | confidential |
 | Retention | 7 years |
