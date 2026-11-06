@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.32.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.5...agent-service-v1.32.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
 ## [1.31.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.4...agent-service-v1.31.5) (2026-10-28)
 
 

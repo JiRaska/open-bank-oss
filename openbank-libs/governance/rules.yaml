@@ -22,11 +22,16 @@ related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0
 # PR after its release condition is met; the gate also reads the base rules so a
 # single PR cannot remove a hold and advance the image together.
 deploy_holds:
+  # approved_image (optional, per service): the last image the owner approved while the service is
+  # held, as <service>:<tag>@sha256:<digest> or a bare sha256:<digest>. check-deploy-holds.py fails
+  # when ANY GitOps pin of a held service differs from it (whole tree, not only the PR diff); a hold
+  # without one is reported, not failed. Changing it is an owner approval: review it as one.
   services:
     openbank-analytics-sink:
       issue: "#13304"
       reason: "The consolidated deployment proposes an analytics-sink image that is not covered by an existing durable hold"
       release_condition: "The owner approves the exact image and rollout window after registry publication, provenance and signature, vulnerability scan, applicable contracts, and sandbox runtime capability are verified; remove this hold only in a separately reviewed change."
+      approved_image: 'openbank-analytics-sink:sandbox-8b2932e8@sha256:27a7a441a6b8af0fd97bd2c12f1bb85a2fc1d6fc5463ab65dff4e9308f4db198'
     openbank-transaction-service:
       all_of:
       - issue: "#13231"
@@ -35,10 +40,12 @@ deploy_holds:
       - issue: "#13888"
         reason: "Temporal SDK 1.40 requires retained versioned workers and an API-only rollout; the existing mixed worker image substitution is unsafe."
         release_condition: "Retain the original immutable SDK 1.25 worker, verify old-history migration and versioned workflow/activity pollers on the deployed server, prepare API replicas with their worker disabled, and approve routing rollback with both worker versions retained. Remove only this condition in a separately reviewed change after recording environment evidence."
+      approved_image: 'openbank-transaction-service:sandbox-9e765663@sha256:4098cd84fd6c5fd39351c9fe6b94d57bb482fcb1e6e3c7a6874cbc655b4305d1'
     openbank-card-processing-service:
       issue: "#13231"
       reason: "Automatic ledger posting re-drive must wait for verified provider-wide idempotency protection."
       release_condition: "The provider V22 migration is committed and its registry, partition triggers and cross-date idempotency checks are verified; the owner explicitly approves re-driving the existing clearing backlog."
+      approved_image: 'openbank-card-processing-service:sandbox-5cc84e19@sha256:d18fdaa8b58dd824bb7828b4c129d3ad8b56fbe657ea48f7fb3525084850af0f'
     # Migrated from deploy branches (issue #11503). Entries inherited from deploy PR #12948
     # recorded no reason and were released; money-path services carry a staged wave entry in
     # their place. Every entry with its own issue, reason or release condition is kept.
@@ -47,6 +54,7 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2a after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Remove the wave 2a entries in one reviewed change.'
+      approved_image: 'openbank-billing-service:sandbox-9e765663@sha256:d8a10ecfe6a6a0574f115234014a529665edec79e25b5e65da760b9dce6d928d'
     openbank-interest-service:
       all_of:
       - issue: "#13167"
@@ -55,6 +63,7 @@ deploy_holds:
       - issue: "#13173"
         reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
+      approved_image: 'openbank-interest-service:sandbox-3b1311c5@sha256:27175d95e406371ea8f4a5e6ac8f3c9227502e654ead140943f4600cc44fe2fb'
     openbank-ledger-service:
       all_of:
       - issue: '#13167'
@@ -63,11 +72,13 @@ deploy_holds:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
+      approved_image: 'openbank-ledger-service:sandbox-9e765663@sha256:f5c33998e39b07fa1b067b1993a338971cccc4dca1461af2a6636d11efae7083'
     openbank-lending-service:
       all_of:
       - issue: '#11503'
         reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
         release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
+      approved_image: 'openbank-lending-service:sandbox-7f966f31@sha256:9c0a06e63cccbf2c13c4dd77e908cb4bbc06145cf212f22951e34e228524cb4a'
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------
@@ -2717,7 +2728,7 @@ ci_runners:
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
-  pools:                                # three ARC scale sets: build/deploy TRUST split + build/batch CAPACITY split
+  pools:                                # four ARC scale sets: build/deploy trust, build/batch capacity, isolated DR
     build:                              # executes PR code, merge-required (compile, unit/IT tests, admin-ui, manifests)
       scale_set: openbank-build
       cloud_write_credentials: false    # no ECR push, no ArgoCD, no prod secrets
@@ -2775,14 +2786,12 @@ ci_runners:
     sign_images: cosign
     deploy_only_signed_digests: true
   gate: ci-runner-governance
-  enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
+  enforced: planned                     # ADR-0053 Accepted; the full runtime/trust control remains pending
   target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
                                       # blocker unresolved and turned an enforced gate red on every
-                                      # PR regardless of its diff. Extending the horizon is the
-                                      # sanctioned move here; the alternative -- flipping `enforced`
-                                      # to satisfy the date -- would claim a control this repo does
-                                      # not have.
-  blocked_on: "RESOLVED for the lint half 2026-10-14: check-ci-runner-pools.py (enforced, gates.yaml ci-runner-pools) reads pr_jobs_allowed_pools straight from this file and rejects any pull_request/pull_request_target job on a non-allowed pool (fleet clean, self-test reachable). The OpenTofu half is unchanged: arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository (#8388 is the measured case: batch/dr written in tofu, never applied, caught only because the gate subtracts KNOWN_UNAPPLIED). Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
+                                      # PR regardless of its diff. The remaining runtime/trust
+                                      # assertions need proof before this umbrella rule can enforce.
+  blocked_on: "The enforced ci-runner-pool-capacity gate checks source declarations, OpenTofu resources, workflow labels, and pr_jobs_allowed_pools. Batch and DR scale sets and listeners were observed Ready in a read-only check for #6458, but neither that observation nor the source gate proves job pickup, ephemeral-per-job behavior, or credential isolation. The full ci-runner-governance rule remains planned until those runtime and trust claims have enforceable evidence."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
@@ -3011,13 +3020,13 @@ finops_tiers:
 # FinOps cost-allocation groups — showback business flows (ADR-0062). The /api/finops/costs
 # snapshot is aggregated by AWS SERVICE (EC2, EKS, RDS); this section is the missing layer
 # that lets the admin-ui roll cloud spend up the BUSINESS taxonomy: service -> data domain
-# (cost-center, from admin-ui manifest.ts dataDomain) -> business flow (here). The allocator
+# (cost-center, from per-module governance.yaml dataDomain) -> business flow (here). The allocator
 # (admin-ui src/lib/finops/allocation.ts) splits the shared COMPUTE pool across services by
 # their declared resource requests (derive -> show, ADR-0029), then sums per group.
 #
 # Service ids use the CANONICAL key = the admin-ui manifest serviceName (NO `openbank-`
 # prefix), which also equals the gitops Deployment metadata.name (ledger-service,
-# account-service, ...). This is the stable join key across manifest.ts (domain source) and
+# account-service, ...). This is the stable join key across governance.yaml (ownership source) and
 # the gitops resource-request footprints; money_path_services uses a different `openbank-*`
 # convention and is intentionally NOT the join key here. A drift test (admin-ui
 # finops-taxonomy.test.ts) fails the build if any service below is unknown to manifest.ts.
@@ -3944,9 +3953,11 @@ product_ir_authoring_parity:
     - "every committed ir/<name>.json has a DSL product declared under that name, and every DSL product has a committed IR"
     - "ReferenceProductsTest compiles each DSL product and asserts its canonical JSON equals the committed file byte for byte (JVM half)"
     - "the parity test exists, is not disabled and iterates ReferenceProducts.all"
+    - "ProductIrAuthoringParityTest runs one fixture per reference product (keys reverse-ordered) through the obp CLI and the MCP handlers for lint, compile, simulate and explain, including invalid-IR and unknown-rule failures, and asserts identical raw bytes and that MCP isError holds exactly when the CLI exits non-zero (surface half, phase 5a)"
+    - "the Studio form surface is declared PENDING until product-catalog has a draft-from-form path (phase 6)"
   gate: product-ir-authoring-parity
   enforced: advisory
-  target_enforce_date: "2027-03-31"   # ADR-0144; enforce once the MCP/Studio authoring paths (phases 5-6) are in scope
+  target_enforce_date: "2026-12-31"   # ADR-0144; CLI+MCP surfaces in scope since phase 5a, Studio joins in phase 6
   ci_producer: ".github/scripts/check-product-ir-authoring-parity.py"
 
 product_ir_formal_properties:

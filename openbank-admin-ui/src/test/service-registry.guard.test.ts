@@ -506,7 +506,7 @@ describe('service registry drift guard', () => {
     // name, and the preceding GitOps guard verifies it against the module's Argo application.
     // Ports and other fleet facts remain derived from catalog.json.
     for (const [name, o] of Object.entries(SERVICE_OVERRIDES)) {
-      expect(Object.keys(o).filter(k => !['label', 'group', 'id', 'k8sName', 'k8sNamespace', 'exposeViaBff'].includes(k)), name).toEqual([])
+      expect(Object.keys(o).filter(k => !['label', 'id', 'k8sName', 'k8sNamespace', 'exposeViaBff'].includes(k)), name).toEqual([])
     }
   })
 })

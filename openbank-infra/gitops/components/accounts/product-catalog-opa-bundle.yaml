@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: product-catalog
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "527391bae520f1c4"
+    openbank.tech/policy-checksum: "c994e504f3c7e731"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -892,6 +892,33 @@ data:
     	not principal_is_machine
     	not startswith(input.principal.id, "agent:")
     }
+
+    # Named service readers of the published catalog (would-DENY triage, 2026-11-04). These four
+    # services read product configuration or published revisions and used to ride the shared
+    # openbank-services principal, which ROLE_API alone deliberately does not admit (see
+    # catalog-read-staff-viewer above). Each now authenticates as its OWN Keycloak client carrying the
+    # catalog:read scope; only that named identity, holding both ROLE_API and CATALOG_SCOPE_READ, is
+    # admitted, and only on catalog.read. catalog.list and every write stay closed to them.
+    #   card-issuance: ProductCatalogClient.getByCode   (GET /api/v1/products/by-code/{code})
+    #   document:      ProductCatalogClient.getById     (GET /api/v1/products/{id})
+    #   billing:       published revision               (GET /api/v2/legacy-products/{productId}/published-revision)
+    #   lending:       published loan revision          (GET /api/v2/products/{offeringId})
+    catalog_named_service_readers := {
+    	"service-account-openbank-card-issuance",
+    	"service-account-openbank-document",
+    	"service-account-openbank-billing",
+    	"service-account-openbank-lending",
+    }
+
+    allowed_reasons contains "service-named-catalog-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	some name in catalog_named_service_readers
+    	machine_named(name)
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1168,6 +1195,10 @@ data:
       - query.account.readonly
       - query.consent.readonly
       - verify.mandate
+      - product.lint
+      - product.compile
+      - product.simulate
+      - product.explain
       write_proposal:
       - draft.ticket
       - gh.pr.open
@@ -1175,12 +1206,15 @@ data:
       - git.branch
       - git.commit.signed
       - run.skill
+      - product.propose
       deny:
       - money.transfer
       - money.post.ledger
       - gh.pr.merge
       - gh.pr.approve
       - secrets.read.raw
+      - product.publish
+      - product.sign
     agents:
     - id: compliance-officer
       tools:
@@ -1234,6 +1268,21 @@ data:
         - query.interest.readonly
         - query.disputes.readonly
         - query.observability.readonly
+    - id: product-author
+      tools:
+        allow:
+        - product.lint
+        - product.compile
+        - product.simulate
+        - product.explain
+        - product.propose
+        deny:
+        - product.publish
+        - product.sign
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
     - id: rca-investigator
       tools:
         allow:

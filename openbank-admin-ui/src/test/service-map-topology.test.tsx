@@ -15,6 +15,7 @@ import React from 'react'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { SessionProvider } from '@/components/auth/SessionProvider'
+import { DOMAIN_IDS, domainLabel } from '@/lib/governance/domains'
 import ServiceMapPage from '@/app/docs/service-map/page'
 
 // Minimal graph in the /api/catalog/graph shape. Sources are modules that ARE on
@@ -55,10 +56,10 @@ const CATALOG = {
   schema: 'openbank.catalog/v1',
   available: true,
   services: [
-    { name: 'openbank-account-service', short: 'account-service', kind: 'service', runnable: true, port: 8100 },
-    { name: 'openbank-ledger-service', short: 'ledger-service', kind: 'service', runnable: true, port: 8101 },
+    { name: 'openbank-account-service', short: 'account-service', kind: 'service', runnable: true, dataDomain: 'core', port: 8100 },
+    { name: 'openbank-ledger-service', short: 'ledger-service', kind: 'service', runnable: true, dataDomain: 'accounting', port: 8101 },
     { name: 'openbank-notification-service', short: 'notification-service', kind: 'service', runnable: true, port: 8112 },
-    { name: 'openbank-agent-service', short: 'agent-service', kind: 'service', runnable: true, port: 8109 },
+    { name: 'openbank-agent-service', short: 'agent-service', kind: 'service', runnable: true, dataDomain: 'platform', port: 8109 },
   ],
 }
 
@@ -84,6 +85,30 @@ function mockFetch() {
 describe('service-map data-flow tiers', () => {
   beforeEach(() => { vi.stubGlobal('fetch', mockFetch()) })
   afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+  it('lays out and filters every canonical business domain without dropping new services', async () => {
+    const catalog = { services: DOMAIN_IDS.map((domain, index) => ({
+      name: `openbank-domain-${domain}-service`, short: `domain-${domain}-service`,
+      kind: 'service', runnable: true, dataDomain: domain, port: 8200 + index,
+    })) }
+    const fallback = mockFetch()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/catalog/services')
+      ? new Response(JSON.stringify(catalog), { status: 200, headers: { 'content-type': 'application/json' } })
+      : fallback(input)))
+    render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
+    const serviceLabel = (domain: string) => `Domain ${domain.split('-').map(word => word[0].toUpperCase() + word.slice(1)).join(' ')}`
+    await screen.findByRole('button', { name: serviceLabel('core'), exact: true })
+    const buttonLabels = screen.getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent)
+    for (const domain of DOMAIN_IDS) {
+      expect(buttonLabels).toContain(serviceLabel(domain))
+      expect(buttonLabels).toContain(domainLabel(domain, 'en'))
+    }
+    fireEvent.click(screen.getByRole('button', { name: domainLabel('pensions', 'en'), exact: true }))
+    expect(screen.getByRole('button', { name: 'Domain Pensions', exact: true })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domain Platform', exact: true })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'All', exact: true }))
+    expect(screen.getByRole('button', { name: 'Domain Wealth', exact: true })).toBeInTheDocument()
+  })
 
   it('renders the infra + external bands with their code-derived nodes', async () => {
     render(React.createElement(Providers, null, React.createElement(ServiceMapPage)))
