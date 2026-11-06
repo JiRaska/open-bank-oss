@@ -72,6 +72,13 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Čtení provozních signálů', en: 'Signal analysis' }, { cs: 'Hledání souvislostí', en: 'Correlation' }, { cs: 'Hypotéza příčiny', en: 'Root-cause hypothesis' }],
     accent: '#0891b2', glow: '#a5f3fc', shell: '#ecfeff', variant: 'lens', icon: SearchCheck,
   },
+  'product-author': {
+    name: { cs: 'Tvora', en: 'Tvora' }, role: { cs: 'Autorka produktů', en: 'Product author' },
+    purpose: { cs: 'Navrhuje a kontroluje produkty jako kód stejnými nástroji jako CLI obp a předkládá je ke schválení.', en: 'Drafts and checks products as code with the same tools as the obp CLI and submits them for approval.' },
+    value: { cs: 'Zkracuje cestu od nápadu na produkt k ověřenému návrhu, aniž by sama cokoli publikovala.', en: 'Shortens the path from a product idea to a verified draft without ever publishing anything itself.' },
+    talents: [{ cs: 'Kontrola produktových pravidel', en: 'Product rule checks' }, { cs: 'Simulace portfolia', en: 'Portfolio simulation' }, { cs: 'Návrh revize ke schválení', en: 'Draft revision for review' }],
+    accent: '#7c3aed', glow: '#ddd6fe', shell: '#f5f3ff', variant: 'lens', icon: SearchCheck,
+  },
   'customer-copilot': {
     name: { cs: 'Kora', en: 'Cora' }, role: { cs: 'Klientská průvodkyně', en: 'Customer companion' },
     purpose: { cs: 'Pomáhá klientovi s jeho vlastními daty a připravuje návrhy, které vždy dokončí člověk přes SCA.', en: 'Helps customers with their own data and prepares proposals always completed by a human through SCA.' },
