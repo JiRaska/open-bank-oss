@@ -1288,7 +1288,8 @@ def self_test() -> int:
             with tempfile.TemporaryDirectory() as scratch:
                 destination = pathlib.Path(scratch)
 
-                def fake_gh(command, **kwargs):
+                def fake_gh(command, *, selected=selected, fault=fault, names=names,
+                            downloaded=downloaded, **kwargs):
                     if command[1] == "api":
                         if "workflows/" in command[2]:
                             body = json.dumps({"workflow_runs": [selected]})
