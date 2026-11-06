@@ -150,3 +150,28 @@ released/expired rows without releasing funds. The consumer Pact covers an activ
 result and propagation of a missing-identity 401; its canonical contract test is discovered by
 Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
 production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.
+
+## Product as Code authoring tools (ADR-0352 §12)
+
+Five MCP tools let the `product-author` charter draft and check Product IR v1. They run in-process
+over `ProductToolkit` (openbank-libs-domain), the exact functions the `obp` CLI calls, and return
+the toolkit's canonical JSON unchanged — so the CLI and MCP surfaces yield identical bytes for the
+same document (gate `product-ir-authoring-parity`). None of them calls another service.
+
+| Tool | Capability | Tier | Arguments | Effect |
+|---|---|---|---|---|
+| `product_lint` | `product.lint` | read | `ir` | schema, run limits, `ruleId` uniqueness; `{ok:false, problems}` for an invalid document |
+| `product_compile` | `product.compile` | read | `ir` | canonical IR and `revisionHash` |
+| `product_simulate` | `product.simulate` | read | `ir`, `portfolio`, `from?`, `to?` | replays a portfolio fixture through the pure interpreter; posts nothing |
+| `product_explain` | `product.explain` | read | `ir`, `ruleId` or `instruction` | the rule's JSON pointer in the canonical IR |
+| `product_propose` | `product.propose` | write_proposal | `ir`, `offeringId`, `schemaId`, `schemaVersion`, `rationale` | records the DRAFT-revision plan as a HITL proposal; writes nothing to the catalog |
+
+There is no publish, sign or approve tool. `product.publish` and `product.sign` are in
+`tool_tiers.deny` (agents.yaml) and a unit test fails the build if any registered tool name contains
+`publish`, `sign` or `approve`. Publishing stays a human, four-eyes catalog action (ADR-0259) and
+the identity-bound signature belongs to the catalog publish path (ADR-0352 §4). JSON-text arguments
+are capped at 256 KiB, the proposal `rationale` at 4 KiB.
+
+A tool result is `isError = true` exactly when `obp` would exit non-zero for the same input — an
+invalid IR (`{ok:false, problems}`, the same bytes obp prints on stderr), an unknown `ruleId`, or a
+foreign instruction — so an agent that reads only `isError` never takes a failed check for success.

@@ -43,6 +43,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # The product-catalog lookup no longer rides the shared openbank-services principal, which
+    # product-catalog deliberately refuses on catalog.read. ProductCatalogClient selects this NAMED
+    # client (@OidcClientFilter("m2m")), so its principal is service-account-openbank-card-issuance
+    # (ROLE_API plus the catalog:read scope), granted by name in product_catalog_rest_ext.rego.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-card-issuance
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   rest-client:
     # Short timeouts on purpose: product-catalog is KEDA scale-to-zero, and this lookup is
     # fail-open (see CardProductCatalogPort) — waiting on a cold start would delay every issue
