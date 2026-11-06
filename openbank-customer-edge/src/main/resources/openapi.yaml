@@ -130,14 +130,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [revision, levels]
-                properties:
-                  revision: {type: integer, format: int64, minimum: 0}
-                  levels:
-                    type: array
-                    maxItems: 30
-                    items: {$ref: '#/components/schemas/CustomerGameLevel'}
+                $ref: '#/components/schemas/CustomerGameCatalog'
         '401': {description: Authentication required}
         '403': {description: Invalid customer or acting-for context}
         '502': {description: Invalid upstream catalogue}
@@ -7021,9 +7014,18 @@ components:
         count: {type: integer, minimum: 1, maximum: 1000, default: 1}
         hintCs: {type: string, maxLength: 160}
         hintEn: {type: string, maxLength: 160}
-    GameLevel:
+    CustomerGameCatalog:
       type: object
-      required: [id, theme, order, titleCs, titleEn, state]
+      required: [revision, levels]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        levels:
+          type: array
+          maxItems: 30
+          items: {$ref: '#/components/schemas/CustomerGameLevel'}
+    CustomerGameLevel:
+      type: object
+      required: [id, theme, order, titleCs, titleEn, state, unlocked, completed]
       properties:
         id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
         theme: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
@@ -7031,17 +7033,9 @@ components:
         titleCs: {type: string, minLength: 1, maxLength: 80}
         titleEn: {type: string, minLength: 1, maxLength: 80}
         state: {type: string, enum: [OFF, BETA, LIVE]}
-        startsAt: {type: string, format: date-time, nullable: true}
-        endsAt: {type: string, format: date-time, nullable: true}
         requirement: {$ref: '#/components/schemas/GameRequirement'}
-    CustomerGameLevel:
-      allOf:
-        - {$ref: '#/components/schemas/GameLevel'}
-        - type: object
-          required: [unlocked, completed]
-          properties:
-            unlocked: {type: boolean}
-            completed: {type: boolean}
+        unlocked: {type: boolean}
+        completed: {type: boolean}
     BusinessPaymentBatchDraftItem:
       type: object
       additionalProperties: false
