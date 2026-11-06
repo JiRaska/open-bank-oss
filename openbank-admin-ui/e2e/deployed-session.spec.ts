@@ -66,7 +66,8 @@ async function expectScreenRenders(page: Page, screen: string) {
   await expect(main.getByRole('heading').first()).toBeVisible()
   // Graceful-state rule: an undeployed backend renders DataUnavailable, never a raw failure.
   await expect(main).not.toContainText(/Application error|Internal Server Error|HTTP \d{3}/)
-  await page.waitForLoadState('networkidle').catch(() => {})
+  // Bounded: a polling screen never goes idle, and that is not a failure.
+  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
   expect(serverErrors, 'the screen depends on a failing API').toEqual([])
   expect(writes, 'a read-only smoke attempted a write').toEqual([])
 }
