@@ -69,7 +69,7 @@ com.openbank.ledger/
 ├── application/               ◄── orchestrace use-casů
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, CnbRateProvider
+│   │                          LedgerOutboxRepository, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adaptéry
@@ -92,7 +92,7 @@ com.openbank.ledger/
 | `FxRevaluationUseCase` (in) | `FxRevaluationService` | denní mark-to-ČNB revalvace |
 | `JournalRepository` (out) | `PanacheJournalRepository` | perzistence/čtení zápisů + řádků |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | vyhledávání v účtové osnově dle kódu/id |
-| `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | zařazení + nárokování outbox řádků |
+| `LedgerOutboxRepository` (out) | `LedgerOutboxRepositoryImpl` | zařazení + nárokování outbox řádků |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | zákonný kurz ČNB |
 
 ## Outbox tok

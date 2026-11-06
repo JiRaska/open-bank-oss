@@ -41,6 +41,7 @@ dependency-submission.yml|job:submit|contents
 deploy-code-lag-watch.yml|job:watch|issues
 deploy-drift-watch.yml|job:watch|issues
 deps-freshness.yml|job:freshness|issues
+ecr-live-tags.yml|job:tag|id-token
 external-feed-watch.yml|job:watch|issues
 finops-lifecycle.yml|job:audit|issues
 fleet-attestation.yml|job:close-probe-issue|issues

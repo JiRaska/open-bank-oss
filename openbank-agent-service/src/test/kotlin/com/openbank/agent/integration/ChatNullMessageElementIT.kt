@@ -5,8 +5,9 @@
 
 package com.openbank.agent.integration
 
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -22,7 +23,11 @@ import org.junit.jupiter.api.Test
  * produce the null element at all.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class ChatNullMessageElementIT {
 
     @Test

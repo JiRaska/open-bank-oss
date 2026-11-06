@@ -8,18 +8,24 @@ import { forwardToSanctionsService } from '@/lib/sanctions/upstream'
 export const dynamic = 'force-dynamic'
 
 /**
- * Trigger a refresh of one sanctions list. `id` here is the listType (e.g. OFAC_SDN), not a uuid.
+ * Queue a refresh of one sanctions list. `id` here is the listType (e.g. OFAC_SDN), not a uuid.
  *
- * Moved onto the shared helper in #3334, same reason as the sibling PUT: it hand-rolled its fetch
- * and sent no `Authorization`, so an operator's manual refresh 401'd against a healthy service.
- * Keeps the longer 15s budget — a refresh fetches and parses a real upstream feed.
+ * #14780: calls the v2 trigger, which answers 202 at once and flags the list for the scheduler;
+ * the v1 route imported the feed inside the request and a large feed outlived any timeout. The
+ * UI therefore shows the list as QUEUED (its `refreshRequestedAt`), never as freshly downloaded.
+ * Moved onto the shared helper in #3334 so the operator's bearer is relayed.
  */
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   return forwardToSanctionsService(
-    `/api/v1/sanctions/lists/${encodeURIComponent(id)}/refresh`,
+    `/api/v2/sanctions/lists/${encodeURIComponent(id)}/refresh`,
     'POST',
-    undefined,
-    15_000,
+    {},
+    10_000,
+    {
+      // The v2 contract requires an Idempotency-Key (#8351). A fresh key per click is correct:
+      // flagging is idempotent by construction, so any retry converges to the same state.
+      'Idempotency-Key': crypto.randomUUID(),
+    },
   )
 }
