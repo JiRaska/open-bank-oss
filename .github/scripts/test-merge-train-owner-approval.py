@@ -234,6 +234,10 @@ class SourceIntentBoundaryTest(unittest.TestCase):
     """Real decision functions; only API, Git, and bundle transport are local stand-ins."""
 
     def setUp(self):
+        # The stuck-PR issue has its own tests; these count the API calls of the status boundary.
+        stuck = patch.object(train, "report_stuck")
+        stuck.start()
+        self.addCleanup(stuck.stop)
         self.head, self.base, self.tip = "a" * 40, "b" * 40, "c" * 40
         self.pr = {"number": 7, "state": "open", "draft": False, "auto_merge": {"enabled_by": "owner"},
                    "head": {"sha": self.head, "ref": "agent/example", "repo": {"full_name": "owner/repo"}},

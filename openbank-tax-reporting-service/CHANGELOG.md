@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.0...tax-reporting-service-v0.47.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **tax-reporting:** report an unconfigured deadline check apart from a dead scheduler ([#14822](https://github.com/JiRaska/open-bank-oss/issues/14822)) ([681689f](https://github.com/JiRaska/open-bank-oss/commit/681689f20b0cb51a2f6041e6e5e0852b242e9954))
+
 ## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.46.0...tax-reporting-service-v0.47.0) (2026-10-28)
 
 
