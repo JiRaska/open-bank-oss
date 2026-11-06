@@ -201,3 +201,24 @@ test_b8agent_other_api_identity_gets_nothing if {
 		not "service-agent-dispute-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-services"), "action": action}
 	}
 }
+
+# --- dispute-auditor-read: auditors read, never write; a pure viewer still gets nothing ---
+
+auditor := {"service_account": false, "type": "HUMAN", "id": "u-aud", "roles": ["ROLE_VIEWER", "ROLE_AUDITOR"]}
+
+test_auditor_lists_and_reads_disputes if {
+	every a in ["dispute.list", "dispute.read"] {
+		"dispute-auditor-read" in allowed_reasons with input as {"principal": auditor, "action": a}
+	}
+}
+
+test_auditor_cannot_write_dispute if {
+	not "dispute-auditor-read" in allowed_reasons with input as {"principal": auditor, "action": "dispute.update"}
+}
+
+test_machine_auditor_not_granted if {
+	not "dispute-auditor-read" in allowed_reasons with input as {
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-x", "roles": ["ROLE_AUDITOR"]},
+		"action": "dispute.list",
+	}
+}

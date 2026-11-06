@@ -97,7 +97,7 @@ Symptom: `FlywayValidateException`. Cause: an applied migration was edited. Fix:
 
 ### Missing `swift_outbox_seq`
 
-Symptom: outbox INSERT fails with `relation "swift_outbox_seq" does not exist`. Cause: `V3` not applied. Fix: ensure migration V3 ran; covered by `HibernateSequenceGuardTest`.
+Symptom: outbox INSERT fails with `relation "swift_outbox_seq" does not exist`. Cause: `V3` not applied. Fix: ensure migration V3 ran; covered by the CI gate `hibernate-sequence-guard`.
 
 ### Idempotency key conflict
 
@@ -116,7 +116,7 @@ than `min-age`. A record the consumer cannot process is dead-lettered by the cha
 
 ## Tests & coverage
 
-- Tests: `SwiftServiceTest`, `SwiftMessageTest`, `HibernateSequenceGuardTest` (Quarkus JUnit5, AssertJ, MockK).
+- Tests: `SwiftServiceTest`, `SwiftMessageTest` (Quarkus JUnit5, AssertJ, MockK).
 - Coverage: Kover line floor **40%** (money-path baseline, ratchet-only, per `rules.yaml`); raise as tests land toward the 70% money-path target.
 
 ## Deploy / release

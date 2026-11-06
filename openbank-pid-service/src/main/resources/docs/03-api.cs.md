@@ -86,9 +86,9 @@ Chyby používají jednotné tělo `ApiError` z `openbank-libs`:
 | HTTP | `code` | Kdy | Zdroj |
 |---|---|---|---|
 | `400` | `VALIDATION_ERROR` | nelegální přechod PID case | `InvalidPartyCaseTransitionMapper` |
-| `404` | `NOT_FOUND` | party / vztah / externí id nenalezeno | `PartyNotFoundMapper` |
-| `409` | `CONFLICT` | duplicitní bankID sub při vytvoření | `PartyAlreadyExistsMapper` |
-| `409` | `CONFLICT` | party už má aktivní roli | `RelationshipAlreadyExistsMapper` |
+| `404` | `NOT_FOUND` | party / vztah / externí id nenalezeno | libs `ResourceNotFoundExceptionMapper` |
+| `409` | `CONFLICT` | duplicitní bankID sub při vytvoření | libs `ResourceConflictExceptionMapper` |
+| `409` | `CONFLICT` | party už má aktivní roli | libs `ResourceConflictExceptionMapper` |
 | `401`/`403` | — | chybějící token / špatná role | Quarkus security (`@RolesAllowed`) |
 
 ## Vysílané události (Kafka topic `party.events`)

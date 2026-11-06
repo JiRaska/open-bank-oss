@@ -339,11 +339,27 @@ private val PERSISTENCE_STATUS: Map<String, ErrorCode> = mapOf(
 /** Cause chains are not trusted to be acyclic, and a self-referencing link is also guarded. */
 private const val MAX_CAUSE_DEPTH = 8
 
+/**
+ * A multipart body that ends before its closing boundary: RESTEasy Reactive's parser raises a PLAIN
+ * `java.io.IOException` ("Connection terminated reading multipart data"), so the by-name table above
+ * cannot hold it without classifying every IOException as the caller's fault. It is identified by
+ * BOTH its exact message and the frame that threw it (the multipart parser package): the parser
+ * can also fail on genuine server I/O (temp file, disk), and those must stay 500. Found by fleet fuzzing on party-service's /parties/{id}/documents/upload (run 41631915107).
+ */
+private const val MULTIPART_PARSER_PACKAGE = "org.jboss.resteasy.reactive.server.core.multipart."
+
+private const val MULTIPART_TRUNCATED_MESSAGE = "Connection terminated reading multipart data"
+
+private fun Throwable.isTruncatedMultipart(): Boolean = javaClass.name == "java.io.IOException" &&
+    message == MULTIPART_TRUNCATED_MESSAGE &&
+    stackTrace.firstOrNull()?.className?.startsWith(MULTIPART_PARSER_PACKAGE) == true
+
 private fun classifyByName(exception: Throwable): ErrorCode? {
     var current: Throwable? = exception
     var depth = 0
     while (current != null && depth < MAX_CAUSE_DEPTH) {
         PERSISTENCE_STATUS[current.javaClass.name]?.let { return it }
+        if (current.isTruncatedMultipart()) return ErrorCode.VALIDATION_ERROR
         if (current.cause === current) return null
         current = current.cause
         depth++
