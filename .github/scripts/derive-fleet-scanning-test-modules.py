@@ -91,8 +91,9 @@ def external_paths(text: str, module: str, tops: set[str], root_files: set[str],
             found.add(rel)
         elif "/" in rel and is_module(root, top):
             found.add(rel)          # a file or directory inside another module
-        elif "/" in rel and "*" in top:
-            # Expand only a declared top-level glob against REAL Gradle modules.
+        elif "/" in rel and "*" in top and not top.startswith("*"):
+            # Expand an anchored module-name glob against REAL Gradle modules.
+            # Unrooted strings such as the MIME type "*/*" are not source reads.
             # Keep the suffix as a watch pattern so deleted/not-yet-created inputs
             # still select their reader; never infer an unrestricted fleet scan.
             suffix = rel.split("/", 1)[1]
@@ -207,6 +208,8 @@ def self_test() -> int:
               'val tree = File(root, "openbank-infra").walkTopDown()')  # bare non-module dir = whole tree
         write("openbank-namer", "h/NameTest.kt",
               'val consumer = "openbank-infra"; val pact = "pacts/openbank-infra-openbank-namer.json"')  # identifiers, not reads
+        write("openbank-mime", "h/MimeTest.kt",
+              'client.getRaw("/document", "party-1", "*/*")')
         write("openbank-segmenter", "g/SegTest.kt",
               'val y = Path.of("..", "openbank-infra", "gitops", "seg.yaml"); '
               'val marker = generateSequence(File("")) { it.parentFile }.first { File(it, "openbank-infra").isDirectory }')
@@ -247,6 +250,9 @@ def self_test() -> int:
             ok = False
         if "openbank-segmenter" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
             print("FAIL: a repo-root existence probe was read as a whole-tree read")
+            ok = False
+        if "openbank-mime" in direct_readers(direct, ["openbank-target/governance.yaml"]):
+            print("FAIL: a MIME wildcard was interpreted as a root source glob")
             ok = False
         if "openbank-namer" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
             print("FAIL: a bare directory name used as an identifier was read as a whole-tree read")
