@@ -3,6 +3,7 @@
 """Regression tests for immutable GitOps deploy source-freshness checks."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import os
 import shutil
@@ -22,6 +23,11 @@ CHECKER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECKER)
 VERIFY_SCRIPT = SCRIPT_DIR / "pact-version-tree-equivalent.sh"
 DEPLOY_SCRIPT = SCRIPT_DIR / "deploy-window.py"
+
+
+def pinned(tag: str) -> str:
+    """A tag with its own digest, as the producer writes it; an explicit digest is kept."""
+    return tag if "@" in tag else f"{tag}@sha256:{hashlib.sha256(tag.encode()).hexdigest()}"
 
 
 class DeploySourceFreshnessTest(unittest.TestCase):
@@ -70,8 +76,12 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, env=self.fixture_env, check=True,
-                              capture_output=True, text=True).stdout.strip()
+        # Name git's own reason on failure, because CalledProcessError's message drops stderr.
+        result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=self.root,
+                                env=self.fixture_env, capture_output=True, text=True)
+        if result.returncode:
+            self.fail(f"git {args} rc={result.returncode}: {result.stdout}{result.stderr}")
+        return result.stdout.strip()
 
     def write(self, relative: str, content: str) -> None:
         path = self.root / relative
@@ -80,17 +90,19 @@ class DeploySourceFreshnessTest(unittest.TestCase):
 
     @staticmethod
     def manifest(tag: str) -> str:
-        return ("image: ghcr.io/openbank/openbank-example-service:" + tag + "\n")
+        return ("image: ghcr.io/openbank/openbank-example-service:" + pinned(tag) + "\n")
 
     def commit(self, message: str) -> str:
         self.git("add", "-A")
         self.git("commit", "-qm", message)
         return self.git("rev-parse", "HEAD")
 
-    def candidate(self, pin: str | None = None, extra_path: str | None = None) -> tuple[str, str]:
+    def candidate(self, pin: str | None = None, extra_path: str | None = None,
+                  raw: bool = False) -> tuple[str, str]:
         base = self.git("rev-parse", "HEAD")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
-                   self.manifest(pin or "sandbox-11111111"))
+                   f"image: ghcr.io/openbank/openbank-example-service:{pin}\n" if raw
+                   else self.manifest(pin or "sandbox-11111111"))
         if extra_path:
             self.write(extra_path, "candidate change\n")
         head = self.commit("deploy candidate")
@@ -101,10 +113,27 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         base, head = self.candidate(f"sandbox-{self.source[:8]}")
         self.assertEqual([], CHECKER.verify(self.root, base, head))
 
+    def test_new_tag_over_the_replaced_digest_fails(self) -> None:
+        """The shape of #14905: the kubelet pulls by digest, so this runs the old image."""
+        tag = f"sandbox-{self.source[:8]}"
+        old = pinned("sandbox-00000000").split("@", 1)[1]
+        base, head = self.candidate(f"{tag}@{old}")
+        failures = CHECKER.verify(self.root, base, head, fresh=lambda image, tag: True)
+        self.assertTrue(any("keeps the digest" in f for f in failures), failures)
+
+    def test_pin_without_a_digest_fails(self) -> None:
+        # From a pin that never had one: the retag rule cannot fire, only require_digest can.
+        self.write("openbank-infra/gitops/components/example/deployment.yaml",
+                   "image: ghcr.io/openbank/openbank-example-service:sandbox-00000000\n")
+        self.commit("tag-only pin")
+        base, head = self.candidate(f"sandbox-{self.source[:8]}", raw=True)
+        failures = CHECKER.verify(self.root, base, head, fresh=lambda image, tag: True)
+        self.assertTrue(any("has no digest" in f for f in failures), failures)
+
     def test_new_image_pin_passes_when_its_source_is_current(self) -> None:
         base = self.git("rev-parse", "HEAD")
         self.write("openbank-infra/gitops/components/example/added-image.yaml",
-                   "image: ghcr.io/openbank/openbank-other-service:" + f"sandbox-{self.source[:8]}\n")
+                   "image: ghcr.io/openbank/openbank-other-service:" + pinned(f"sandbox-{self.source[:8]}") + "\n")
         head = self.commit("add current image pin")
         self.git("checkout", "--detach", base)
         self.assertEqual([], CHECKER.verify(self.root, base, head))
@@ -114,7 +143,7 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         tag = f"sandbox-{self.source[:8]}"
         base = self.git("rev-parse", "HEAD")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
-                   f"image: ghcr.io/{image}:{tag}\n")
+                   f"image: ghcr.io/{image}:{pinned(tag)}\n")
         head = self.commit("replace image pin")
         self.git("checkout", "--detach", base)
 
@@ -136,9 +165,9 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         tag_a, tag_b = f"sandbox-{self.source[:8]}", "sandbox-11111111"
         base = self.git("rev-parse", "HEAD")
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
-                   f"image: ghcr.io/{image}:{tag_a}\n")
+                   f"image: ghcr.io/{image}:{pinned(tag_a)}\n")
         self.write("openbank-infra/gitops/components/example/second-pin.yaml",
-                   f"image: ghcr.io/{image}:{tag_b}\n")
+                   f"image: ghcr.io/{image}:{pinned(tag_b)}\n")
         head = self.commit("replace and add image pins")
         self.git("checkout", "--detach", base)
 
@@ -157,7 +186,7 @@ class DeploySourceFreshnessTest(unittest.TestCase):
         self.write("openbank-infra/gitops/components/example/deployment.yaml",
                    self.manifest(f"sandbox-{self.source[:8]}"))
         self.write("openbank-infra/gitops/components/example/added-image.yaml",
-                   "image: ghcr.io/openbank/openbank-other-service:" + f"sandbox-{self.source[:8]}\n")
+                   "image: ghcr.io/openbank/openbank-other-service:" + pinned(f"sandbox-{self.source[:8]}") + "\n")
         head = self.commit("fresh replacement and stale new image")
         self.git("checkout", "--detach", base)
         failures = CHECKER.verify(self.root, base, head)

@@ -111,7 +111,7 @@ class ProducerIsolationTests(unittest.TestCase):
                 diff.write_text('--- a/openbank-infra/gitops/test.yaml\n'
                                 '+++ b/openbank-infra/gitops/test.yaml\n'
                                 '-image: registry.invalid/openbank-test-service:sandbox-00000000\n'
-                                f'+image: registry.invalid/openbank-test-service:{tag}\n')
+                                f'+image: registry.invalid/openbank-test-service:{tag}@sha256:{"a" * 64}\n')
                 marker = directory / 'reads'
                 env = {**clean_env, 'PR_NUMBER': '1', 'GITHUB_REPOSITORY': 'example/repo',
                        'PROPOSAL_DIFF': str(diff), 'READ_MARKER': str(marker)}
@@ -209,7 +209,7 @@ class ProducerIsolationTests(unittest.TestCase):
                     shutil.copyfile(ROOT / '.github/scripts' / name, destination)
                 image = 'registry.invalid/openbank-example'
                 diff = (f'--- a/manifests.yaml\n+++ b/manifests.yaml\n'
-                        f'-image: {image}:sandbox-00000000\n+image: {image}:sandbox-{source[:8]}\n')
+                        f'-image: {image}:sandbox-00000000\n+image: {image}:sandbox-{source[:8]}@sha256:{"a" * 64}\n')
 
                 def check_pin(checkout=checkout, env=env, diff=diff):
                     return subprocess.run(['python3', '.github/scripts/deploy-window.py', 'verify'],
