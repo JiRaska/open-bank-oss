@@ -75,7 +75,7 @@ com.openbank.productcatalog/
         └── FeesResource             /api/v1/fees
 ```
 
-`ProductRepository` is the outbound persistence port. Native-image reflection registration lives in infrastructure, keeping the domain free of framework imports (ADR-0002).
+`ProductRepository` is the outbound persistence port. Native-image reflection registration lives in infrastructure, keeping the domain free of framework imports (ADR-0002). It also covers the catalog-pack manifest types (`RevisionApprovalPolicy`, `ApprovalRoleSpec`) that `CatalogPackSeeder` deserializes at startup; without them the native image fails to boot.
 
 ## Domain model
 

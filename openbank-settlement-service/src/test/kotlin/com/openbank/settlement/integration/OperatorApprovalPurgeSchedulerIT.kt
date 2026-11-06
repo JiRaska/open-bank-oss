@@ -4,8 +4,9 @@
 
 package com.openbank.settlement.integration
 
-import com.openbank.settlement.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -24,7 +25,10 @@ import javax.sql.DataSource
  * real scheduler does not (#2148, #2187).
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 @TestProfile(OperatorApprovalPurgeSchedulerIT.FastPurgeProfile::class)
 class OperatorApprovalPurgeSchedulerIT {
 

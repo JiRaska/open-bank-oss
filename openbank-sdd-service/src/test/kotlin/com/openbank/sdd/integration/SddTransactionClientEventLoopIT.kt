@@ -10,6 +10,7 @@ import com.openbank.clients.transaction.TransactionCompletionUncertainException
 import com.openbank.clients.transaction.TransactionHttpException
 import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.clients.transaction.model.TransactionResponse
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResource
@@ -39,7 +40,7 @@ import java.util.concurrent.TimeUnit
 @QuarkusTest
 @QuarkusTestResource(SddTransactionClientEventLoopIT.Stub::class)
 @QuarkusTestResource(SddBootSmokeIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.sdd.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class SddTransactionClientEventLoopIT {
 
     class Stub : QuarkusTestResourceLifecycleManager {

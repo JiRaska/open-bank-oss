@@ -5,6 +5,7 @@ package com.openbank.ledger.integration
 
 import com.openbank.ledger.domain.model.PeriodTrialBalance
 import com.openbank.ledger.domain.model.PeriodType
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -28,7 +29,7 @@ import javax.sql.DataSource
  * wiring and cannot prove the production workflow.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.ledger.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class ClosedPeriodEvidenceIT {
 
