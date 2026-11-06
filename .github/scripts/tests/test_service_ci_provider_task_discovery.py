@@ -247,6 +247,9 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
 
     def test_missing_fixture_bundle_refuses_unsafe_provider_paths_without_writes(self):
         helper = ROOT / ".github/scripts/prove-pact-provider-version.sh"
+        # The gate runner's private index belongs to its checkout, not these repos.
+        fixture_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        fixture_env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         for service, package, fixture in (
             ("openbank-clearing-service", "clearing", "ClearingPactBrokerProviderVerificationTest.kt"),
             ("openbank-sepa-instant", "sepainstant", "SepaInstantPactBrokerProviderVerificationTest.kt"),
@@ -257,7 +260,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                     root = Path(tmp)
 
                     def git(*args, root=root):
-                        return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+                        return subprocess.check_output(["git", *args], cwd=root, env=fixture_env, text=True).strip()
 
                     def write(path, text, root=root):
                         target = root / path
@@ -268,6 +271,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                     git("config", "user.name", "selftest")
                     git("config", "user.email", "selftest@example.invalid")
                     git("config", "commit.gpgsign", "false")
+                    git("config", "core.hooksPath", os.devnull)
                     contract = f"kotlin/com/openbank/{package}/contract"
                     write(f"{service}/build.gradle.kts", "plugins {}\n")
                     write(".github/workflows/auto-deploy.yml", "env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n")
@@ -298,7 +302,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                     before = git("status", "--porcelain", "--untracked-files=all")
                     result = subprocess.run(
                         ["bash", str(helper), "--prepare-overlay", service, provider, revision, revision],
-                        cwd=root, capture_output=True, text=True, timeout=20, check=False,
+                        cwd=root, env=fixture_env, capture_output=True, text=True, timeout=20, check=False,
                     )
                     self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertNotIn("OVERLAY_READY", result.stdout)
