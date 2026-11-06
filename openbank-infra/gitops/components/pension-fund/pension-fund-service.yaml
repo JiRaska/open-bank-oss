@@ -103,6 +103,18 @@ spec:
                 secretKeyRef:
                   name: pension-fund-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0341: a fund's management fee is read from its pinned catalog revision over
+            # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED; client cert
+            # pension-fund-service-client-tls, %prod TLS bucket catalog-authority) with this
+            # service's OWN client token (Keycloak openbank-pension-fund, catalog:read only).
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: https://product-catalog.accounts.svc:8443
+            - name: OIDC_PENSION_FUND_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pension-fund-service-m2m-oidc
+                  key: OIDC_PENSION_FUND_CLIENT_SECRET
+                  optional: true
             # OPA sidecar enforced from the first rollout: pension_fund_rest_ext.rego grants fund
             # administration to real staff only; no service-account reaches a write by any rule.
             - name: AUTHZ_ENFORCE
@@ -135,6 +147,9 @@ spec:
           volumeMounts:
             - name: internal-tls
               mountPath: /mnt/internal-tls
+              readOnly: true
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -217,6 +232,9 @@ spec:
         - name: internal-tls
           secret:
             secretName: pension-fund-service-internal-tls
+        - name: catalog-tls
+          secret:
+            secretName: pension-fund-service-client-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

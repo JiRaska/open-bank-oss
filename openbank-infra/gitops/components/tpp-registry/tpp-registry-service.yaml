@@ -110,7 +110,7 @@ spec:
             # "would DENY" without blocking) until the live decision log confirms the deny population
             # is empty, then a separate deliberate flip sets it true (rules.yaml AUTHZ_ENFORCE guardrail).
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management

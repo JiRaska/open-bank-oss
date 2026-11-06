@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "9a48b23f922eabce"
+    openbank.tech/policy-checksum: "f7dcefc80d73d4b1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -907,6 +907,21 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "statement.export"
+    }
+
+    # Restatement of a closed period after a data correction (StatementResource POST
+    # /{accountId}/{ccy}/restate, @RolesAllowed ROLE_OPERATOR/ADMIN, ADR-0035 D): issues a NEW
+    # sequenced close referencing the superseded one, never edits the existing record. Same shape as
+    # statement.close above: the operator console's manual correction path, no in-repo M2M caller.
+    # Without this rule base rest.rego grants nothing ("restate" is outside every base verb set), so
+    # the enforce flip would 403 every restatement. Human OPERATOR/ADMIN only; the machine exclusion is
+    # load-bearing because the edge M2M identity carries ROLE_OPERATOR.
+    allowed_reasons contains "operator-statement-restate" if {
+    	input.principal.type == "HUMAN"
+    	not principal_is_machine
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "statement.restate"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
