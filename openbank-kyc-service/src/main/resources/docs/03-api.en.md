@@ -44,7 +44,7 @@ This service does **not** use a per-request `Idempotency-Key` cache. Idempotency
 
 ## Error model
 
-Errors use the shared `com.openbank.libs.api.error.ApiError` (`{ id, status, code, message }`). A missing case raises `KycCaseNotFoundException`, mapped by `KycNotFoundMapper` to **HTTP 404** with `code = NOT_FOUND`. `GET /cases/party/{partyId}` returns a bare 404 when no case exists.
+Errors use the shared `com.openbank.libs.api.error.ApiError` (`{ id, status, code, message }`). A missing case raises `KycCaseNotFoundException`, mapped by the shared libs-runtime `ResourceNotFoundExceptionMapper` to **HTTP 404** with `code = NOT_FOUND`. `GET /cases/party/{partyId}` returns a bare 404 when no case exists.
 
 ## Auth
 

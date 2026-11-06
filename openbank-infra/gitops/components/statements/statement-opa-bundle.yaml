@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: statement-service
     app.kubernetes.io/part-of: statements
   annotations:
-    openbank.tech/policy-checksum: "055aff1ccf69523e"
+    openbank.tech/policy-checksum: "f4c85cba7dbab9fd"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -907,6 +907,21 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
     	input.action == "statement.export"
+    }
+
+    # Restatement of a closed period after a data correction (StatementResource POST
+    # /{accountId}/{ccy}/restate, @RolesAllowed ROLE_OPERATOR/ADMIN, ADR-0035 D): issues a NEW
+    # sequenced close referencing the superseded one, never edits the existing record. Same shape as
+    # statement.close above: the operator console's manual correction path, no in-repo M2M caller.
+    # Without this rule base rest.rego grants nothing ("restate" is outside every base verb set), so
+    # the enforce flip would 403 every restatement. Human OPERATOR/ADMIN only; the machine exclusion is
+    # load-bearing because the edge M2M identity carries ROLE_OPERATOR.
+    allowed_reasons contains "operator-statement-restate" if {
+    	input.principal.type == "HUMAN"
+    	not principal_is_machine
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	input.action == "statement.restate"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2189,9 +2204,10 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
-        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+        # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+        # deliberately ONE read action rather than the role's full duty set. What is missing is
+        # missing on purpose:
         #
         #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -2210,10 +2226,10 @@ data:
         #   already, so this entry is a provable subset of today's effective grant and changes no
         #   decision — the same seeding property the matrix was built on.
         #
-        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-        # editor duty has no action name for the matrix to key on. Declaring the editor role here
-        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+        # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+        # name for the matrix to key on. A future single-source migration needs governed action
+        # names and must preserve the action-specific human-only write policy.
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
