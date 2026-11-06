@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import com.openbank.buildlogic.buildFactsInputs
+import io.quarkus.gradle.tasks.QuarkusBuildTask
 import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
 import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
 import java.util.zip.ZipFile
@@ -18,6 +20,7 @@ plugins {
     id("org.jetbrains.kotlin.plugin.allopen")
     id("org.cyclonedx.bom")
     id("org.jetbrains.kotlinx.kover")
+    id("openbank.test-provenance")
     // Static analysis gate (detekt + ktlint, ratchet via per-module baselines).
     id("openbank.static-analysis")
     id("openbank.packaged-library-sbom")
@@ -147,6 +150,14 @@ tasks.named<Copy>("processResources") {
     dependsOn(generateServiceDocs)
 }
 
+// Runtime classpath normalization also applies to Quarkus augmentation. Its
+// artifact cache must retain the FULL metadata, including the current source SHA.
+tasks.withType<QuarkusBuildTask>().configureEach {
+    inputs.property("unfilteredBuildFacts", providers.provider {
+        buildFactsInputs(classpath.files, normalizeCommit = false)
+    })
+}
+
 val verifyServiceDocs by tasks.registering {
     group = "verification"
     description = "Verify that current service documentation is packaged in the Quarkus application JAR."
@@ -162,7 +173,9 @@ val verifyServiceDocs by tasks.registering {
             val commit = properties
                 ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
             check(facts != null && facts.contains(project.version.toString())
-                && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()) {
+                && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()
+                && facts == generatedServiceDocs.get().asFile.resolve("docs/00-build.md").readText()
+                && properties == generatedServiceDocs.get().asFile.resolve("openbank-service-build.properties").readText()) {
                 "${project.name}: current build facts were not packaged in the Quarkus application JAR"
             }
         }
