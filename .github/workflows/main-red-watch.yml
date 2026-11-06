@@ -64,6 +64,9 @@ on:
       # #13201: publishes Test Intelligence evidence for running images; red means the
       # Test Intelligence page silently falls back to the bundled snapshot.
       - "Test evidence reconcile"
+      # #14189: keeps deployed images shielded from ECR lifecycle expiry. Its red means a new
+      # deploy is not tagged live-, so that image can expire under its running pods.
+      - "ECR live tags"
       # Pushes to main unconditionally (issue #4240). Its red is meaningful in a way worth
       # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
       # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
