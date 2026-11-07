@@ -5963,8 +5963,8 @@ gates:
 
   # Evidence half of threat-model-claims-resolve (#13171): the cited test must have RUN GREEN in the
   # latest scheduled main envelope. Ratchet (rules.yaml: threat_model_test_evidence): a finding fails
-  # only when it is new against the baseline AND this PR touches that threat model, so existing
-  # claims, a test going red on main and a push to main all stay warnings.
+  # only when it is new against the baseline AND this PR adds or edits the row citing it, so other
+  # rows, a test going red on main and a push to main all stay warnings. The baseline only shrinks.
   # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
   # never becomes a red PR.
   # --pr-base skips the ~90 gh calls on a PR that touches no threat model: the answer is main's anyway.
@@ -5973,7 +5973,7 @@ gates:
     group: security
     mode: enforced
     needs_base: optional
-    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope and ratchet attribution cases; CLI run red on a skipped cited id"
+    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line"
     min_subjects: 23
     budget_seconds: 180
     rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."

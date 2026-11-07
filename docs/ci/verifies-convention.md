@@ -47,10 +47,11 @@ A row can also name an id in its mitigation, in backticks: `` `verifies:admin-ui
 named id must exist and be green, so deleting or skipping the test fails it.
 
 The gate is a ratchet. A finding fails a PR only if it is missing from
-`.github/gates/baselines/threat-model-test-evidence.txt` and the PR touches that threat model. On a
-push to `main`, on an unrelated PR, or if evidence cannot be read, it stays a warning or notice, so
+`.github/gates/baselines/threat-model-test-evidence.txt` and the PR adds or edits the row citing it. On a
+push to `main`, on a PR that leaves the row alone, or if evidence cannot be read, it stays a warning or notice, so
 it catches a claim being written against a test that does not run. It does not catch an existing
-green citation going red later: that surfaces as a warning.
+green citation going red later: that surfaces as a warning. The baseline may only shrink against the
+PR base: a PR adding a line fails, before any evidence is read.
 
 ## Evidence provenance and limits
 

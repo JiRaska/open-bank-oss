@@ -19,9 +19,12 @@ entrypoint only decides where evidence comes from and whether findings fail.
                       failed diff or an empty base fetches as before.
   --enforce           make every UNVERIFIED fail, baseline or not.
   --ratchet FILE      make UNVERIFIED fail only if it is absent from FILE AND --pr-base shows this
-                      diff touching that finding's threat model. Scheduled evidence describes an
+                      diff adding or editing the row that cites it. Scheduled evidence describes an
                       earlier commit, so a test going red on main is not the fault of an unrelated
-                      PR, and a push to main has no author to fail: both stay warnings.
+                      PR, a red citation in a row the PR left alone is not either, and a push to main
+                      has no author to fail: all stay warnings. FILE may only shrink against
+                      --pr-base; that is checked before any evidence is read, so an unreadable
+                      envelope cannot hide a line added to pass a PR.
 
 Evidence comes from Services CI plus, for openbank-admin-ui, the deployed session lane. If that lane
 cannot be read, admin-ui is dropped from the audit (unknown, not a verdict).
@@ -56,28 +59,75 @@ def finding_key(svc: str, rid: str, detail: str) -> str:
     return f"{svc}|{rid}|{cited.group(1) if cited else detail}"
 
 
+def _baseline_lines(text: str) -> list[str]:
+    return [s for s in (line.split("#", 1)[0].strip() for line in text.splitlines()) if s]
+
+
 def load_baseline(path: pathlib.Path) -> set[str]:
-    return {s for s in (line.split("#", 1)[0].strip() for line in path.read_text().splitlines()) if s}
+    return set(_baseline_lines(path.read_text()))
 
 
-def changed_models(base: str, root: pathlib.Path, run=subprocess.run) -> set[str] | None:
-    """Model stems this diff touches, or None when there is no diff to attribute a finding to."""
+def show_at(base: str, root: pathlib.Path, rel: str, run=subprocess.run) -> str | None:
+    """A file's text at the PR's merge-base, or None when it did not exist there. Raises if unreadable."""
+    point = run(["git", "-C", str(root), "merge-base", base, "HEAD"],
+                capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+    tree = run(["git", "-C", str(root), "ls-tree", "--name-only", point, "--", f":/{rel}"],
+               capture_output=True, text=True, timeout=60, check=True).stdout
+    if not tree.strip():
+        return None
+    return run(["git", "-C", str(root), "show", f"{point}:{rel}"],
+               capture_output=True, text=True, timeout=60, check=True).stdout
+
+
+def touched_rows(base: str, root: pathlib.Path, parse, run=subprocess.run) -> dict[str, set[tuple[str, str]]] | None:
+    """(row id, mitigation) this diff adds or edits, per model; None when nothing can be attributed."""
     if not base:
         return None
     try:
         diff = run(["git", "-C", str(root), "diff", "--name-only", f"{base}...HEAD"],
                    capture_output=True, text=True, timeout=60, check=True).stdout
+        rows: dict[str, set[tuple[str, str]]] = {}
+        for line in diff.splitlines():
+            path = root / line
+            if not (line.startswith("docs/threat-models/") and line.endswith(".md")) or not path.exists():
+                continue
+            before = show_at(base, root, line, run)
+            old = {tuple(c[:3]) for c in parse(before)} if before is not None else set()
+            # Prose units carry no row id; the audit does not judge them either.
+            rows[line[len("docs/threat-models/"):-len(".md")]] = {
+                (c[0], c[2]) for c in parse(path.read_text(encoding="utf-8"))
+                if c[3] != "prose" and tuple(c[:3]) not in old}
     except (OSError, subprocess.SubprocessError):
         return None
-    return {line[len("docs/threat-models/"):-len(".md")] for line in diff.splitlines()
-            if line.startswith("docs/threat-models/") and line.endswith(".md")}
+    return rows
 
 
-def ratchet_failures(findings: list, baseline: set[str], changed: set[str] | None) -> list:
-    if changed is None:
+def blames_row(finding: tuple, rows: set[tuple[str, str]]) -> bool:
+    """Is this finding about a citation in a row the diff touched? Row ids repeat across tables."""
+    _kind, _svc, rid, detail = finding
+    cited = re.search(r"`([^`]+)`", detail)
+    return any(row == rid and (not cited or cited.group(1) in mitigation
+                               or cited.group(1).startswith("verifies:") and cited.group(1).endswith(f"/{rid}"))
+               for row, mitigation in rows)
+
+
+def ratchet_failures(findings: list, baseline: set[str], touched: dict[str, set[tuple[str, str]]] | None) -> list:
+    if touched is None:
         return []
     return [f for f in findings
-            if f[1] in changed and finding_key(f[1], f[2], f[3]) not in baseline]
+            if blames_row(f, touched.get(f[1], set())) and finding_key(f[1], f[2], f[3]) not in baseline]
+
+
+def baseline_growth(base: str, root: pathlib.Path, ratchet: pathlib.Path, run=subprocess.run) -> list[str] | None:
+    """Lines the diff adds to the baseline; [] when it introduces the file, None when it cannot tell."""
+    if not base:
+        return None
+    current = set(_baseline_lines(ratchet.read_text()))
+    try:
+        before = show_at(base, root, ratchet.resolve().relative_to(root).as_posix(), run)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return [] if before is None else sorted(current - set(_baseline_lines(before)))
 
 
 def merge_deployed(evidence: dict, deployed: dict) -> None:
@@ -141,10 +191,17 @@ def ratchet_self_test() -> int:
     merge_deployed(kept, ev)
     popped = dict(ev)
     merge_deployed(popped, {})
+    edited = {"m": {("T1", "`SkippedGuardTest` asserts it")}}
+    unrelated_edit = {"m": {("T9", "`AnotherTest` asserts it")}}
+    same_id_other_table = {"m": {("T1", "`AnotherTest` asserts it")}}
+    declared = ("UNVERIFIED", "m", "T1", "`verifies:m/T1` ran but not green (failed)")
     cases = [
-        ("new finding in a touched model fails", ratchet_failures([new], base, {"m"}), [new]),
-        ("baselined finding passes", ratchet_failures([old], base, {"m"}), []),
-        ("a model this PR did not touch cannot fail it", ratchet_failures([other], base, {"m"}), []),
+        ("new finding in a touched row fails", ratchet_failures([new], base, edited), [new]),
+        ("baselined finding passes", ratchet_failures([old], base, {"m": {("T2", "`OldTest`")}}), []),
+        ("a model this PR did not touch cannot fail it", ratchet_failures([other], base, edited), []),
+        ("another row of the same model cannot fail it", ratchet_failures([new], base, unrelated_edit), []),
+        ("a same-id row citing something else cannot fail it", ratchet_failures([new], base, same_id_other_table), []),
+        ("a touched row's declared verifies id fails", ratchet_failures([declared], base, same_id_other_table), [declared]),
         ("no diff (a push to main) cannot fail", ratchet_failures([new], base, None), []),
         ("key ignores the wording of the verdict", finding_key("m", "T2", old[3]), "m|T2|OldTest"),
         ("skipped in one lane survives a pass in the other", kept[DEPLOYED_COMPONENT]["verifies"]["a/b"], {"passed", "skipped"}),
@@ -152,6 +209,50 @@ def ratchet_self_test() -> int:
     ]
     bad = [name for name, got, want in cases if got != want]
     print(f"ratchet self-test: {len(cases)} cases, failed={bad}")
+    return 1 if bad else 0
+
+
+def git_ratchet_self_test(parse) -> int:
+    """Real git, so the merge-base reads, the renamed-away file and the growth check are all exercised."""
+    def git(*args):
+        subprocess.run(["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t",
+                        "-c", "commit.gpgsign=false", *args], check=True, capture_output=True, text=True)
+
+    table = "| ID | Threat | Mitigation |\n|---|---|---|\n"
+    with tempfile.TemporaryDirectory() as scratch:
+        root = pathlib.Path(scratch).resolve()
+        git("init", "-q")
+        model = root / "docs/threat-models/m.md"
+        model.parent.mkdir(parents=True)
+        model.write_text(table + "| T1 | Replay | `RedTest` asserts it |\n| T2 | Spoof | `OtherTest` asserts it |\n")
+        ratchet = root / "baseline.txt"
+        ratchet.write_text("# header\nm|T1|RedTest\n")
+        git("add", "."); git("commit", "-qm", "base")
+        git("branch", "base")
+        cases = [("unchanged baseline does not grow", baseline_growth("base", root, ratchet), []),
+                 ("no base cannot tell", baseline_growth("", root, ratchet), None),
+                 ("an unknown base cannot tell", baseline_growth("no-such-ref", root, ratchet), None)]
+
+        model.write_text(table + "| T1 | Replay | `RedTest` asserts it |\n| T2 | Spoof | `OtherTest` and `NewTest` |\n")
+        ratchet.write_text("# header reworded\nm|T1|RedTest\nm|T3|PassMePleaseTest\n")
+        git("add", "."); git("commit", "-qm", "edit")
+        cases += [
+            ("an added baseline line is growth", baseline_growth("base", root, ratchet), ["m|T3|PassMePleaseTest"]),
+            ("only the edited row is touched", touched_rows("base", root, parse), {"m": {("T2", "`OtherTest` and `NewTest`")}}),
+        ]
+        ratchet.write_text("")
+        git("add", "."); git("commit", "-qm", "shrink")
+        cases.append(("an emptied baseline does not grow", baseline_growth("base", root, ratchet), []))
+        fresh = root / "introduced.txt"
+        fresh.write_text("m|T1|RedTest\n")
+        git("add", "."); git("commit", "-qm", "new")
+        cases.append(("a baseline this PR introduces is not growth", baseline_growth("base", root, fresh), []))
+        new_model = root / "docs/threat-models/n.md"
+        new_model.write_text(table + "| T1 | Replay | `RedTest` asserts it |\n")
+        git("add", "."); git("commit", "-qm", "model")
+        cases.append(("every row of a new model is touched", touched_rows("base", root, parse)["n"], {("T1", "`RedTest` asserts it")}))
+    bad = [name for name, got, want in cases if got != want]
+    print(f"git ratchet self-test: {len(cases)} cases, failed={bad}")
     return 1 if bad else 0
 
 
@@ -176,10 +277,16 @@ def main() -> int:
     m = _claims_module()
     if a.self_test:
         # the evidence cases live in the claims self-test, beside the parser
-        return m.self_test() or fetch_needed_self_test() or ratchet_self_test()
+        return m.self_test() or fetch_needed_self_test() or ratchet_self_test() or git_ratchet_self_test(m.claims)
     root = pathlib.Path(a.root).resolve()
     services = m.subjects_all(root)
     print(f"SUBJECTS={len(services)}")
+    if a.ratchet:
+        grown = baseline_growth(a.pr_base, root, a.ratchet)
+        if grown:
+            print(f"::error file={a.ratchet},title=test evidence baseline grew::this PR adds {grown}. "
+                  "The baseline only shrinks: make the cited test run green or remove the citation.")
+            return 1
     if a.fetch_evidence and not fetch_needed(a.pr_base, root):
         print("::notice title=test evidence::NOT CHECKED on this PR — it touches no threat model and the "
               "evidence is main's, so main's own run reports the same answer. Not a pass.")
@@ -210,7 +317,7 @@ def main() -> int:
     baseline = load_baseline(a.ratchet) if a.ratchet else set()
     failing = findings if a.enforce else []
     if a.ratchet:
-        failing = ratchet_failures(findings, baseline, changed_models(a.pr_base, root))
+        failing = ratchet_failures(findings, baseline, touched_rows(a.pr_base, root, m.claims))
         stale = sorted(baseline - {finding_key(s, r, d) for _k, s, r, d in findings})
         if stale:
             print(f"::notice title=test evidence::{len(stale)} baseline entr(ies) no longer reported; remove: {stale}")

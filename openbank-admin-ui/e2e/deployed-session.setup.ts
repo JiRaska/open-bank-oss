@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { expect, test as setup, type Page } from '@playwright/test'
 import { OPERATOR_STATE, SESSION_STATE } from '../playwright.deployed-session.config'
+import { watchTraffic } from './deployed-session-guard'
 
 async function signIn(page: Page, origin: string, username: string | undefined, password: string | undefined, state: string) {
   // The workflow skips this lane with a visible notice when a secret is absent; reaching here
@@ -23,11 +24,17 @@ async function signIn(page: Page, origin: string, username: string | undefined, 
   // The real Keycloak form, on the identity provider's own origin.
   await page.locator('#username').waitFor({ state: 'visible' })
   expect(new URL(page.url()).origin).not.toBe(origin)
+  // Armed here, not earlier: starting the SSO redirect is the login page's own POST to /api/auth/.
+  // From this point the app is only reached by the callback and the post-login landing page.
+  const { writes } = watchTraffic(page)
   await page.locator('#username').fill(username!)
   await page.locator('#password').fill(password!)
   await page.locator('#kc-login').click()
 
   await page.waitForURL((url) => url.origin === origin && !url.pathname.startsWith('/auth/'))
+  await page.waitForLoadState('load')
+  await page.waitForTimeout(1_000) // a landing page may write from an effect, after load
+  expect(writes, 'the post-login landing page attempted a write').toEqual([])
 
   // Prove a session exists by effect, not by the URL alone.
   const session = await (await page.request.get('/api/auth/session')).json()
