@@ -29,6 +29,8 @@ class ServiceGradleProfileTest(unittest.TestCase):
                 "#!/usr/bin/env python3\nimport json, os, sys\n"
                 "from pathlib import Path\n"
                 "Path(os.environ['PROFILE_TEST_ARGS']).write_text(json.dumps(sys.argv[1:]))\n"
+                "Path(os.environ['OPENBANK_COVERAGE_TASK_PLAN']).write_text(\n"
+                "    json.dumps([':' + os.environ['SERVICE'] + ':test']))\n"
                 "print('fixture Gradle output')\n"
                 "sys.exit(int(os.environ['PROFILE_TEST_EXIT']))\n"
             )
@@ -44,7 +46,16 @@ class ServiceGradleProfileTest(unittest.TestCase):
             )
             self.assertEqual(exit_code, result.returncode, result.stderr)
             self.assertIn("fixture Gradle output", result.stdout)
-            return json.loads(arguments.read_text())
+            captured = json.loads(arguments.read_text())
+            init_index = captured.index("--init-script")
+            init_path = Path(captured[init_index + 1])
+            self.assertFalse(init_path.parent.exists(), "task discovery temporary directory must be cleaned")
+            plan = root / service / "build/kover/report-test-tasks.json"
+            if exit_code == 0:
+                self.assertEqual(json.loads(plan.read_text()), [f":{service}:test"])
+            else:
+                self.assertFalse(plan.exists(), "failed builds must not publish a task plan")
+            return captured[:init_index] + captured[init_index + 2:]
 
     def test_only_selected_services_add_profile_without_changing_build_recipe(self):
         for service in ("openbank-lending-service", "openbank-pension-service", "openbank-ledger-service"):
