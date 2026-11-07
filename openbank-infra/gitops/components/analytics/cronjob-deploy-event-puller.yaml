@@ -1,0 +1,238 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Deploy-event log for DORA (ADR-0061 Phase 2) on the ADR-0255 Tier 2 store: every 15
+# minutes, copy each Argo CD Application's `status.history` into
+# openbank_analytics.deploy_events.
+#
+# Why history and not a webhook: Argo keeps the last `revisionHistoryLimit` (10) syncs per
+# Application with `deployedAt`, `deployStartedAt` and the applied `revision`, which is
+# exactly the record ADR-0061 says it lacks. Reading it needs only the in-cluster API, so
+# this adds no inbound path and no internet egress — the shape ADR-0255 chose over a push
+# into analytics. 10 entries per 15 min loses data only for an Application that syncs more
+# than 10 times in 15 minutes, which the 2026-11-03 history (max 10, oldest days old) is
+# nowhere near.
+#
+# Read-only: one Role in `argocd` granting get/list on applications, nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deploy-event-puller
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-event-puller-read-applications
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["applications"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-event-puller-read-applications
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: deploy-event-puller-read-applications
+subjects:
+  - kind: ServiceAccount
+    name: deploy-event-puller
+    namespace: analytics
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deploy-event-puller-script
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+data:
+  pull_deploys.py: |
+    #!/usr/bin/env python3
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    """Copy Argo CD Application sync history into openbank_analytics.deploy_events.
+
+    Stdlib only, like pull.py. Exits non-zero when the API returns no Applications at all:
+    a cluster with 114 Applications answering zero is a permission or wiring fault, and
+    inserting nothing would report it as a quiet success (ADR-0253).
+    """
+    import base64
+    import json
+    import os
+    import ssl
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+    K8S = os.environ.get("KUBERNETES_API_URL", "https://kubernetes.default.svc")
+    CLICKHOUSE_URL = os.environ["CLICKHOUSE_URL"]
+    CLICKHOUSE_USER = os.environ["CLICKHOUSE_USER"]
+    CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
+    LOG = "[deploy-event-puller]"
+
+
+    def applications():
+        with open(f"{SA}/token", encoding="ascii") as fh:
+            token = fh.read().strip()
+        ctx = ssl.create_default_context(cafile=f"{SA}/ca.crt")
+        req = urllib.request.Request(
+            f"{K8S}/apis/argoproj.io/v1alpha1/namespaces/argocd/applications",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as resp:
+            return json.loads(resp.read()).get("items", [])
+
+
+    def ch_time(iso_z):
+        return iso_z.rstrip("Z").replace("T", " ") if iso_z else None
+
+
+    def rows_for(app):
+        name = app["metadata"]["name"]
+        out = []
+        for h in (app.get("status") or {}).get("history") or []:
+            if "id" not in h or not h.get("deployedAt"):
+                continue
+            # Multi-source Applications (ADR-0358) carry `revisions`/`sources` instead of
+            # the singular fields. Join them so neither shape is silently dropped.
+            revision = h.get("revision") or ",".join(h.get("revisions") or [])
+            sources = [h["source"]] if h.get("source") else (h.get("sources") or [])
+            out.append({
+                "app": name,
+                "history_id": h["id"],
+                "revision": revision,
+                "source_path": ",".join(s.get("path") or s.get("chart") or "" for s in sources),
+                "deploy_started_at": ch_time(h.get("deployStartedAt")),
+                "deployed_at": ch_time(h["deployedAt"]),
+                "automated": bool((h.get("initiatedBy") or {}).get("automated")),
+            })
+        return out
+
+
+    def insert(rows):
+        body = "\n".join(json.dumps(r) for r in rows).encode("utf-8")
+        url = f"{CLICKHOUSE_URL}/?query=" + urllib.parse.quote(
+            "INSERT INTO openbank_analytics.deploy_events FORMAT JSONEachRow"
+        )
+        req = urllib.request.Request(url, data=body, method="POST")
+        auth = f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode("ascii")
+        req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("ascii"))
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise SystemExit(f"ClickHouse insert failed (HTTP {exc.code}): {detail}")
+
+
+    def main():
+        apps = applications()
+        if not apps:
+            raise SystemExit("0 Applications visible — RBAC or API wiring fault, not an empty cluster")
+        rows = [r for a in apps for r in rows_for(a)]
+        print(f"{LOG} {len(apps)} application(s), {len(rows)} history row(s)")
+        if rows:
+            insert(rows)
+            print(f"{LOG} inserted {len(rows)} row(s)")
+
+
+    if __name__ == "__main__":
+        main()
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: deploy-event-puller
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/15 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "3600"
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: ci-gate-observability
+            app.kubernetes.io/name: deploy-event-puller
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: deploy-event-puller
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: puller
+              image: docker.io/library/python:3.14.8-slim
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: CLICKHOUSE_URL
+                  value: http://clickhouse.analytics.svc:8123
+                - name: CLICKHOUSE_USER
+                  value: analytics
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-auth
+                      key: password
+              command:
+                - python3
+                - /scripts/pull_deploys.py
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: scripts
+              configMap:
+                name: deploy-event-puller-script
+                defaultMode: 0555

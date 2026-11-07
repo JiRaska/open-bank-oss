@@ -1,8 +1,8 @@
 # API
 
-The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.17.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
+The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.18.1**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
 
-Two version axes apply (ADR-0048): the release version (`version.txt` = `1.27.4`) and the API-contract version (`openapi.yaml: info.version` = `1.17.0`, `openbank.api.version = "1"`). They are independent.
+Two version axes apply (ADR-0048): the release version (`version.txt`) and the API-contract version (`openapi.yaml: info.version` = `1.18.1`, `openbank.api.version = "1"`). They are independent.
 
 ## Surfaces
 
@@ -26,6 +26,19 @@ A single JSON-RPC 2.0 dispatcher. The `method` field selects the operation. Noti
 | `tools/list` | Enumerate the available tools (name, description, JSON-Schema `inputSchema`). |
 | `tools/call` | Invoke a named tool with `arguments`. The call is authorized by the policy gate **before** execution; a denial returns a `ToolCallResult` with `isError=true` and the policy reason. |
 | `ping` | Liveness — returns `{ "pong": true }`. |
+
+### Business ownership metadata
+
+Each `tools/list` entry retains its downstream `service` identity. Its `domain` label is
+read from the same per-module `governance.yaml` and canonical domain taxonomy packaged
+into the service image during resource processing. External infrastructure without a
+declaration is `Unclassified`; known banking tools must resolve a declared owner.
+The historical `sepa-instant-service` tool identity resolves `openbank-sepa-instant`
+ownership without renaming tools or changing their target.
+
+The admin MCP relay overlays reviewed published ownership on successful `tools/list`
+responses when that metadata advances before the agent image. The tool set, charter
+filtering, capabilities, input schemas and `tools/call` responses remain unchanged.
 
 ### Tool catalogue (all read-only)
 
@@ -150,3 +163,28 @@ released/expired rows without releasing funds. The consumer Pact covers an activ
 result and propagation of a missing-identity 401; its canonical contract test is discovered by
 Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
 production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.
+
+## Product as Code authoring tools (ADR-0352 §12)
+
+Five MCP tools let the `product-author` charter draft and check Product IR v1. They run in-process
+over `ProductToolkit` (openbank-libs-domain), the exact functions the `obp` CLI calls, and return
+the toolkit's canonical JSON unchanged — so the CLI and MCP surfaces yield identical bytes for the
+same document (gate `product-ir-authoring-parity`). None of them calls another service.
+
+| Tool | Capability | Tier | Arguments | Effect |
+|---|---|---|---|---|
+| `product_lint` | `product.lint` | read | `ir` | schema, run limits, `ruleId` uniqueness; `{ok:false, problems}` for an invalid document |
+| `product_compile` | `product.compile` | read | `ir` | canonical IR and `revisionHash` |
+| `product_simulate` | `product.simulate` | read | `ir`, `portfolio`, `from?`, `to?` | replays a portfolio fixture through the pure interpreter; posts nothing |
+| `product_explain` | `product.explain` | read | `ir`, `ruleId` or `instruction` | the rule's JSON pointer in the canonical IR |
+| `product_propose` | `product.propose` | write_proposal | `ir`, `offeringId`, `schemaId`, `schemaVersion`, `rationale` | records the DRAFT-revision plan as a HITL proposal; writes nothing to the catalog |
+
+There is no publish, sign or approve tool. `product.publish` and `product.sign` are in
+`tool_tiers.deny` (agents.yaml) and a unit test fails the build if any registered tool name contains
+`publish`, `sign` or `approve`. Publishing stays a human, four-eyes catalog action (ADR-0259) and
+the identity-bound signature belongs to the catalog publish path (ADR-0352 §4). JSON-text arguments
+are capped at 256 KiB, the proposal `rationale` at 4 KiB.
+
+A tool result is `isError = true` exactly when `obp` would exit non-zero for the same input — an
+invalid IR (`{ok:false, problems}`, the same bytes obp prints on stderr), an unknown `ruleId`, or a
+foreign instruction — so an agent that reads only `isError` never takes a failed check for success.

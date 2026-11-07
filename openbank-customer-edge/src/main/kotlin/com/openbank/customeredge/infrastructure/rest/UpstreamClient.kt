@@ -578,6 +578,28 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** POST with an isolated service authority, caller-derived path and encoded query values. */
+    fun postToServiceWithQuery(
+        baseUrl: String,
+        path: String,
+        query: Map<String, String>,
+        partyId: String,
+        body: String,
+    ): Response = try {
+        val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
+        val values = linkedMapOf<String, Any>()
+        query.entries.forEachIndexed { index, (name, value) ->
+            val parameter = "query$index"
+            builder.queryParam(name, "{$parameter}")
+            values[parameter] = value
+        }
+        post(builder.buildFromMap(values), partyId, body, null)
+    } catch (e: Exception) {
+        Log.error("upstream call to $baseUrl failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     // POST with the M2M token + party header plus caller-supplied extra headers (e.g. the
     // X-Operator-Id that card-issuance requires for an audit trail). Body may be empty. The
     // extra headers are applied last so a real value is never silently dropped.

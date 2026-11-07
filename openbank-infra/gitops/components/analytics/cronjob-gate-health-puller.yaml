@@ -35,7 +35,7 @@ spec:
       # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
       # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
       ttlSecondsAfterFinished: 172800
-      activeDeadlineSeconds: 300
+      activeDeadlineSeconds: 420
       template:
         metadata:
           labels:
@@ -103,6 +103,55 @@ spec:
                 limits:
                   cpu: 250m
                   memory: 128Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+            # Every-workflow run and job history (pull_runs.py). A second container, not a
+            # second CronJob: it needs exactly this pod's token, egress allow-list and
+            # ClickHouse credentials, and a separate workload would duplicate all three.
+            # Separate container so a failure in one pull never masks the other's.
+            - name: runs
+              image: docker.io/library/python:3.14.8-slim
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: GITHUB_REPOSITORY
+                  value: JiRaska/open-bank-oss
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-health-puller-github-token
+                      key: token
+                - name: CLICKHOUSE_URL
+                  value: http://clickhouse.analytics.svc:8123
+                - name: CLICKHOUSE_USER
+                  value: analytics
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-auth
+                      key: password
+              command:
+                - python3
+                - /scripts/pull_runs.py
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
               volumeMounts:
                 - name: tmp
                   mountPath: /tmp

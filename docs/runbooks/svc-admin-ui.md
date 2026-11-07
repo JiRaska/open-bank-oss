@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-admin-ui
 
-> Operational runbook for the `admin-ui` service. Data domain **platform**,
+> Operational runbook for the `admin-ui` service. Data domain **channels**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-admin-ui` |
 | HTTP port | `?` |
-| Data domain | platform |
+| Data domain | channels |
 | Datastore | PostgreSQL (database `—`) |
 | Classification | internal |
 | Retention | transient |

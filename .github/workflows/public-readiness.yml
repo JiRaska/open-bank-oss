@@ -20,6 +20,27 @@ name: Public readiness
 
 on:
   pull_request:
+    # Only the inputs the audit reads (public-readiness-audit.sh + the two secret-literal
+    # scripts): root policy files, threat models, the money-path list, workflow/dependabot
+    # config, GitOps manifests, and the two src trees the `changeme` grep covers. A service
+    # change touches none of these, so it no longer spends a hosted slot here. Measured
+    # 2026-11-04: this ran on every one of 29 PR pushes. The weekly sweep below is unfiltered.
+    paths:
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
+      - ".github/scripts/public-readiness-audit.sh"
+      - ".github/scripts/check-manifest-secret-literals.py"
+      - ".github/scripts/test-manifest-secret-literals.py"
+      - "openbank-infra/**"
+      - "openbank-admin-ui/src/**"
+      - "openbank-libs/src/**"
+      - "openbank-libs/governance/rules.yaml"
+      - "docs/threat-models/**"
+      - "SECURITY.md"
+      - "LICENSE"
+      - "CODEOWNERS"
+      - "CODE_OF_CONDUCT.md"
+      - "CONTRIBUTING.md"
   # Belt-and-braces full sweep (includes the full-history gitleaks leg).
   schedule:
     - cron: "0 5 * * 1"  # weekly Monday 05:00 UTC (after secret-scan at 04:00)
