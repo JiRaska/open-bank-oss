@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import com.openbank.buildlogic.buildFactsInputs
+import com.openbank.buildlogic.pactBrokerSystemProperties
 import java.nio.file.Path
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -53,6 +54,17 @@ class TestProvenanceTest {
         assertEquals(normalized, buildFactsInputs(listOf(directory), true))
         properties.delete()
         assertNotEquals(normalized, buildFactsInputs(listOf(directory), true))
+    }
+
+    @Test
+    fun `every forwarded pact broker key disables source-only reuse`() {
+        val forwarded = setOf(
+            "pactbroker.url", "pactbroker.auth.username", "pactbroker.auth.password",
+            "pactbroker.enablePending", "pactbroker.providerBranch", "pact.verifier.publishResults",
+            "pact.provider.version", "pact.provider.branch", "pact.provider.tag",
+            "pact.filter.pacturl", "pact.filter.consumers",
+        )
+        assertEquals(forwarded, pactBrokerSystemProperties.toSet())
     }
 
     @Test
@@ -112,19 +124,28 @@ class TestProvenanceTest {
         }
         dependency(metadata(first))
         dependency(metadata(first), "zip")
+        var executingCommit = first
         fun runner(vararg extra: String) = GradleRunner.create().withProjectDir(project)
+            .withEnvironment(System.getenv() + ("GITHUB_SHA" to executingCommit))
             .withPluginClasspath().withTestKitDir(java.io.File(System.getProperty("fixture.testkit.dir")))
             .withArguments("test", "--offline", "--build-cache", "--console=plain", "--max-workers=2", "--no-watch-fs", *extra)
+        val marker = project.resolve("build/test-task-outcome/test.properties")
         assertEquals(TaskOutcome.SUCCESS, runner().build().task(":test")!!.outcome)
+        assertEquals("executedCommit=$first", marker.readText().trim())
         assertEquals(TaskOutcome.SUCCESS, runner("providerPactTest").build().task(":providerPactTest")!!.outcome)
         facts.writeText(metadata(second))
         resources.resolve("openbank-service-build.properties").writeText("git.commit=$second\n")
+        executingCommit = second
         assertEquals(TaskOutcome.UP_TO_DATE, runner().build().task(":test")!!.outcome)
+        // Reused outputs must not be stamped as this commit's execution (collector reads this).
+        assertEquals("executedCommit=$first", marker.readText().trim())
         assertEquals(TaskOutcome.SUCCESS, runner("providerPactTest").build().task(":providerPactTest")!!.outcome)
         project.resolve("build/test-results/test").deleteRecursively()
         assertEquals(TaskOutcome.FROM_CACHE, runner().build().task(":test")!!.outcome)
+        assertEquals("executedCommit=$first", marker.readText().trim())
         facts.writeText(metadata(second, "2.0"))
         assertEquals(TaskOutcome.SUCCESS, runner().build().task(":test")!!.outcome)
+        assertEquals("executedCommit=$second", marker.readText().trim())
         facts.writeText(facts.readText().replace("| API version | `1` |", "| API version | `2` |"))
         assertEquals(TaskOutcome.SUCCESS, runner().build().task(":test")!!.outcome)
         facts.appendText("authored additional guidance\n")

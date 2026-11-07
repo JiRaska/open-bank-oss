@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import com.openbank.buildlogic.buildFactsInputs
+import com.openbank.buildlogic.pactBrokerSystemProperties
 import io.quarkus.gradle.tasks.QuarkusBuildTask
 import io.quarkus.gradle.tasks.QuarkusApplicationModelTask
 import io.quarkus.gradle.tooling.ProjectDescriptorBuilder
@@ -355,19 +356,7 @@ tasks.withType<Test>().configureEach {
     // Set on the test JVM fork, not the Gradle daemon — System.setProperty at config time would
     // not propagate into the forked test process.
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-        "pact.filter.pacturl",
-        "pact.filter.consumers",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 // Consumer contracts compile independently of the full service test suite.

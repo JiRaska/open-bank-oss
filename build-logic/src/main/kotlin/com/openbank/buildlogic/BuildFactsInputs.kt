@@ -5,6 +5,23 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 
+// Pact Broker inputs forwarded to the test JVM by openbank.quarkus-service. The SAME list
+// decides (openbank.test-provenance) that a broker-configured test keeps full metadata, so
+// a new broker key cannot be forwarded without also disabling source-only reuse.
+val pactBrokerSystemProperties: List<String> = listOf(
+    "pactbroker.url",
+    "pactbroker.auth.username",
+    "pactbroker.auth.password",
+    "pactbroker.enablePending",
+    "pactbroker.providerBranch",
+    "pact.verifier.publishResults",
+    "pact.provider.version",
+    "pact.provider.branch",
+    "pact.provider.tag",
+    "pact.filter.pacturl",
+    "pact.filter.consumers",
+)
+
 private val buildFactsPaths = listOf("docs/00-build.md", "openbank-service-build.properties")
 private val markdownCommit = Regex("(?m)^(\\| Source commit \\| `)[0-9a-fA-F]{40}(` \\|)$")
 private val propertiesCommit = Regex("(?m)^(git\\.commit=)[0-9a-fA-F]{40}$")
