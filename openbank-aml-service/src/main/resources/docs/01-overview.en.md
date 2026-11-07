@@ -50,6 +50,7 @@
 - **admin-ui** (via Keycloak token) — compliance analysts and MLRO open cases and record decisions through the compliance cockpit.
 - **payment services** (sepa-payment, sepa-instant, domestic-payment, swift-service) — open a screening case as part of their payment-screening gate (declared upstream `api` lineage in `governance.yaml`).
 - **party-service** (Kafka) — emits `PARTY_CREATED` to trigger onboarding screening; consumes `aml.case.status_changed.v1` for the AML key of its KYC+AML two-key activation gate.
+- **domestic-payment** (Kafka) — consumes `aml.case.status_changed.v1` for `FRAUD_REVIEW` cases, reading `transactionId` and `alertCode`: CLEARED releases the held payment, BLOCKED rejects it (#4403, off by default).
 - **kyc-service / sanctions-service** (Kafka, declared `topic` lineage) — trigger / feed screening signals.
 
 ## Dependencies

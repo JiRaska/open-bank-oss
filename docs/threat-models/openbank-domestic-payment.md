@@ -119,6 +119,30 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-11-06** — **Fraud holds get a release path (#4403, still default off).** New consumer
+  `fraud-hold-resolution-in` reads `openbank.aml.events`; `aml.case.status_changed.v1` gains additive
+  `transactionId` and `alertCode`. For a `FRAUD_REVIEW` case CLEARED signals RELEASE and BLOCKED signals
+  REJECT; every other status, code or a missing transaction id does nothing, so the hold still times
+  out into rejection. **STRIDE**: new elevation path, since whoever may write the AML case decision or
+  produce to that topic can release a held payment. Writes to the topic are limited to aml-service by
+  ACL; `PUT /api/v1/aml/cases/{id}/decision` needs ROLE_OPERATOR, ROLE_ADMIN or ROLE_COMPLIANCE and has
+  no separate four-eyes check on a release, an accepted gap while the flag is sandbox only. **Who can
+  create a case**: any caller of `POST /api/v1/aml/cases` (the same three roles, plus internal
+  producers such as the onboarding consumer and every payment rail), and `alertCode` and
+  `transactionId` are free text it chooses. So neither proves which case a decision belongs to.
+  **Binding enforced**: `aml.case.status_changed.v1` also carries the case's `idempotencyKey`; the
+  consumer acts only when it equals `aml-<paymentId>-FRAUD_REVIEW`, the key the rail opens its case
+  with, and the workflow checks that key again. The workflow also accepts a decision only while it is
+  actually holding: a signal before the hold, after it ended, already decided, or for another case is
+  ignored and counted (`openbank_domestic_fraud_hold_signal_ignored{reason}`), so a RELEASE cannot be
+  pre-armed. **Residual**: a case creator who learns a payment id before the hold opens could create
+  a case under that exact key first; the rail's own create then fails on the key and is swallowed, so
+  that case is the one an analyst decides. Bounded by the decision itself needing the decision roles,
+  and the payment id being server-generated. Tampering is bounded because a signal can only choose
+  between the two outcomes of a waiting run, first answer wins, and sanctions screening has already
+  passed. Known limit: a run re-driven by the screening sweep
+  has a suffixed workflow id, so a decision misses it (`delivery="NOT_WAITING"`) and it fails closed.
+
 - **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
   New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
   runs started earlier replay the shadow-only step) call a `fraudGate` activity that returns

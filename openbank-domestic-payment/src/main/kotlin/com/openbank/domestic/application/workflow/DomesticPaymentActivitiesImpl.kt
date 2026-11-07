@@ -301,6 +301,9 @@ open class DomesticPaymentActivitiesImpl(
             )
         }
         if (action == FraudGateAction.HOLD) {
+            fraudEnforcementMetrics.recordHold(
+                if (outcome.synthetic) FraudHoldBasis.SCORING_UNAVAILABLE else FraudHoldBasis.VERDICT,
+            )
             // The review case an analyst works from (the existing case store, as ADR-0084 §4.2
             // used before #4221). A failure to open it is swallowed: the hold then times out into
             // REJECT, so a missing case can delay a payment but never pass one.

@@ -186,6 +186,6 @@ class DomesticPaymentServiceTemporalTest {
     /** No-op workflow so the dispatch has a registered type on the queue; behaviour is tested elsewhere. */
     class NoOpDomesticPaymentWorkflow : DomesticPaymentWorkflow {
         override fun process(paymentId: UUID): DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED
-        override fun resolveFraudHold(decision: FraudReviewDecision) = Unit
+        override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) = Unit
     }
 }
