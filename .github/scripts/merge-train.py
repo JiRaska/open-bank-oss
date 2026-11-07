@@ -3918,10 +3918,23 @@ def workflow_texts() -> dict[str, str]:
     return {f.name: f.read_text() for f in sorted(d.glob("*.y*ml"))} if d.is_dir() else {}
 
 
+BRANCH_UPDATER_ENV = "merge-train-branch-update"
+
+
 def branch_updater_spread_errors(texts: dict[str, str]) -> list[str]:
-    """The branch-updater App key (workflows: write) may be referenced by merge-train.yml ONLY."""
-    return [f"{name} references {BRANCH_UPDATER_MARK}* — that key belongs to merge-train.yml's settle job alone"
-            for name, text in sorted(texts.items()) if name != WORKFLOW.name and BRANCH_UPDATER_MARK in text]
+    """The branch-updater App key (workflows: write) may be reached from merge-train.yml ONLY.
+    Its secrets are environment-scoped, so `secrets: inherit` or `toJSON(secrets)` cannot hand them to
+    another job: only a job that declares the environment receives them. Two ways in, both checked —
+    naming the secret, or declaring the environment (which yields it under any spelling)."""
+    out = []
+    for name, text in sorted(texts.items()):
+        if name == WORKFLOW.name:
+            continue
+        if BRANCH_UPDATER_MARK in text:
+            out.append(f"{name} references {BRANCH_UPDATER_MARK}* — that key belongs to merge-train.yml's settle job alone")
+        if BRANCH_UPDATER_ENV in text:
+            out.append(f"{name} names the {BRANCH_UPDATER_ENV} environment — a job declaring it receives the branch-updater key")
+    return out
 
 
 def check_declaration() -> int:
@@ -4667,6 +4680,10 @@ def branch_updater_self_test(check) -> None:
           branch_updater_spread_errors({"merge-train.yml": wf, "ci.yml": "jobs: {}\n"}) == [])
     check("key spread: BRANCH_UPDATER_ in another workflow fails (must-fail)",
           len(branch_updater_spread_errors({"merge-train.yml": wf, "deploy.yml": wf})) == 1)
+    check("key spread: another workflow declaring the environment fails, under any secret spelling",
+          len(branch_updater_spread_errors({"merge-train.yml": wf,
+                                            "x.yml": "jobs:\n  j:\n    environment: merge-train-branch-update\n"
+                                                     "    steps:\n      - run: echo '${{ toJSON(secrets) }}'\n"})) == 1)
     check("key spread: the real tree is clean", branch_updater_spread_errors(workflow_texts()) == [],
           str(branch_updater_spread_errors(workflow_texts())))
 
