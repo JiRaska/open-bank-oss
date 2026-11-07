@@ -12,6 +12,7 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { CommandPalette } from '@/components/search/CommandPalette'
 
 const push = vi.fn()
+vi.mock('next-auth/react', () => ({ useSession: () => ({ data: { user: { id: 'test-operator', roles: ['ROLE_ADMIN'] } } }) }))
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push }),
@@ -57,7 +58,7 @@ describe('CommandPalette (ADR-0228 D3)', () => {
   })
 
   it('does not query below 2 chars — shows recents instead', async () => {
-    sessionStorage.setItem('ob.palette.recents', JSON.stringify([PARTY]))
+    sessionStorage.setItem('ob.palette.recents.test-operator', JSON.stringify([PARTY]))
     const user = userEvent.setup()
     renderPalette()
     await user.type(screen.getByRole('textbox'), 'n')
@@ -107,7 +108,7 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     fireEvent.keyDown(window, { key: 'ArrowDown' })
     fireEvent.keyDown(window, { key: 'Enter' })
     expect(push).toHaveBeenCalledWith('/accounts/a-9')
-    const recents = JSON.parse(sessionStorage.getItem('ob.palette.recents') ?? '[]')
+    const recents = JSON.parse(sessionStorage.getItem('ob.palette.recents.test-operator') ?? '[]')
     expect(recents[0].id).toBe('a-9')
   })
 
@@ -159,7 +160,7 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     const { rerender } = renderPalette(true, onClose)
     await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
     await user.tab({ shift: true })
-    expect(screen.getByRole('button', { name: /zavřít|close/i })).toHaveFocus()
+    expect(screen.getByRole('button', { name: /záznamy|records/i })).toHaveFocus()
     await user.tab()
     expect(screen.getByRole('textbox')).toHaveFocus()
     rerender(<LanguageProvider><CommandPalette open={false} onClose={onClose} /></LanguageProvider>)

@@ -83,7 +83,7 @@ describe('workspaceFor / personaLabel', () => {
 describe('workspace links resolve to a real nav destination', () => {
   it('every persona href appears in the sidebar nav', async () => {
     const { readFileSync } = await import('node:fs')
-    const nav = readFileSync('src/components/layout/Sidebar.tsx', 'utf8')
+    const nav = readFileSync('src/lib/navigation/catalog.ts', 'utf8')
     const navHrefs = new Set([...nav.matchAll(/href: '([^']+)'/g)].map(m => m[1]))
     expect(navHrefs.size).toBeGreaterThan(10)
     for (const persona of ['backoffice', 'payments', 'compliance', 'supervisor', 'platform'] as const) {
