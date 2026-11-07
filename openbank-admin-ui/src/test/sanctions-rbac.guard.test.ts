@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 const root = resolve(__dirname, '..')
 const page = readFileSync(resolve(root, 'app/sanctions/page.tsx'), 'utf8')
 const roles = readFileSync(resolve(root, 'lib/auth/roles.ts'), 'utf8')
-const sidebar = readFileSync(resolve(root, 'components/layout/Sidebar.tsx'), 'utf8')
+const sidebar = readFileSync(resolve(root, 'lib/navigation/catalog.ts'), 'utf8')
 
 describe('sanctions UI permissions mirror sanctions-service', () => {
   it('keeps route/read access to backend viewer-tier roles', () => {

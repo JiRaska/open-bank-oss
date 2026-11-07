@@ -22,7 +22,7 @@ describe('payment rail consoles mirror backend read roles', () => {
     expect(permissionForPath('/swift')).toBe('payment-rails:view')
     expect(permissionForPath('/clearing')).toBe('payment-rails:view')
     expect(permissionForPath('/sdd')).toBe('payment-rails:view')
-    const sidebar = read('components/layout/Sidebar.tsx')
+    const sidebar = read('lib/navigation/catalog.ts')
     expect(sidebar).toMatch(/href: '\/swift'[\s\S]*permission: 'payment-rails:view'/)
     expect(sidebar).toMatch(/href: '\/clearing'[\s\S]*permission: 'payment-rails:view'/)
     expect(sidebar).toMatch(/href: '\/sdd'[\s\S]*permission: 'payment-rails:view'/)
