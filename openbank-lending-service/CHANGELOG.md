@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.3...lending-service-v0.44.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **lending:** read the product catalog as openbank-lending, not the shared client ([#14828](https://github.com/JiRaska/open-bank-oss/issues/14828)) ([975d9d6](https://github.com/JiRaska/open-bank-oss/commit/975d9d693377b657e1dfdb90e453ace8c8fb570c))
+
 ## [0.44.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.2...lending-service-v0.44.3) (2026-11-02)
 
 

@@ -6,10 +6,13 @@
 package com.openbank.devops.infrastructure.adapter
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.devops.application.port.out.GitHubReadBudget
 import com.openbank.devops.infrastructure.config.DevOpsConfig
 import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -24,6 +27,9 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Optional
 
 /**
@@ -42,6 +48,8 @@ class GitHubMetricsAdapterTest {
     private var body = "{}"
 
     private lateinit var config: DevOpsConfig
+    private val budget = mockk<GitHubReadBudget>()
+    private val now = Instant.parse("2026-01-01T00:00:00Z")
 
     private fun respond(exchange: HttpExchange) {
         paths += exchange.requestURI.toString()
@@ -57,14 +65,38 @@ class GitHubMetricsAdapterTest {
         every { ConfigProvider.getConfig() } returns cfg
     }
 
-    private fun adapter() = GitHubMetricsAdapter(config).also {
+    private fun adapter() = GitHubMetricsAdapter(config, budget, Clock.fixed(now, ZoneOffset.UTC)).also {
         it.objectMapper = ObjectMapper()
         it.allowedHosts = listOf("stub.test:${server.address.port};http;private")
         it.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
     }
 
+    @Test
+    fun `exhausted budget makes no HTTP request`(): Unit = runBlocking {
+        coEvery { budget.reserve(any()) } returns false
+        assertThat(adapter().ciFailureRate()).isNull()
+        assertThat(paths).isEmpty()
+    }
+
+    @Test
+    fun `rate limited response persists shared backoff without retry`(): Unit = runBlocking {
+        status = 429
+        assertThat(adapter().ciFailureRate()).isNull()
+        assertThat(paths).hasSize(1)
+        coVerify(exactly = 1) { budget.deferUntil(now.plusSeconds(900)) }
+    }
+
+    @Test
+    fun `unavailable budget storage fails closed without HTTP`(): Unit = runBlocking {
+        coEvery { budget.reserve(any()) } throws IllegalStateException("storage unavailable")
+        assertThat(adapter().ciFailureRate()).isNull()
+        assertThat(paths).isEmpty()
+    }
+
     @BeforeEach
     fun setUp() {
+        coEvery { budget.reserve(any()) } returns true
+        coEvery { budget.deferUntil(any()) } returns Unit
         server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
         server.createContext("/") { respond(it) }
         server.start()
@@ -173,5 +205,16 @@ class GitHubMetricsAdapterTest {
         adapter().openFleetHealthIssues()
 
         assertThat(paths.single()).doesNotContain("//")
+    }
+
+    @Test
+    fun `delivery reads reuse authenticated GET and do not call GitHub without credentials`(): Unit = runBlocking {
+        body = "{}"
+        assertThat(adapter().deliveryPage("/actions/runs?per_page=100")).isEqualTo(body)
+        assertThat(paths).containsExactly("/repos/JiRaska/open-bank/actions/runs?per_page=100")
+        paths.clear()
+        token("")
+        assertThat(adapter().deliveryPage("/actions/runs")).isNull()
+        assertThat(paths).isEmpty()
     }
 }

@@ -85,14 +85,14 @@ test('detail renders contract facts, cooling-off notice, holdings and transactio
   await expect(page.getByText(/cooling-off period has ended and the first contribution/)).toBeVisible()
 
   // Fund-side reads: holdings table resolves fund names, totals the values and counts pending orders.
-  const holdings = page.locator('section', { hasText: 'Unit holdings' })
+  const holdings = page.getByRole('main').locator('section', { has: page.getByRole('heading', { name: 'Unit holdings', exact: true }) })
   await expect(holdings).toContainText('Conservative Fund')
   await expect(holdings).toContainText('152.40 CZK')
   await expect(holdings.getByText('no NAV')).toBeVisible()
   await expect(holdings).toContainText('1 orders awaiting NAV')
 
   // Transactions render priced rows with resolved fund names.
-  const txs = page.locator('section', { hasText: 'Unit transactions' })
+  const txs = page.getByRole('main').locator('section', { has: page.getByRole('heading', { name: 'Unit transactions', exact: true }) })
   await expect(txs.getByRole('row', { name: /SUBSCRIPTION/ })).toContainText('Conservative Fund')
   await expect(txs.getByRole('row', { name: /SUBSCRIPTION/ })).toContainText('123.4567')
 })
@@ -121,10 +121,10 @@ test('a failed fund-side read degrades the section, never the contract header', 
   await expect(page.getByRole('heading', { name: 'Pension contract' })).toBeVisible()
   await expect(page.getByText('DPS · CZ')).toBeVisible()
   // Only the holdings section reports the outage; transactions still render.
-  const holdings = page.locator('section', { hasText: 'Unit holdings' })
+  const holdings = page.getByRole('main').locator('section', { has: page.getByRole('heading', { name: 'Unit holdings', exact: true }) })
   await expect(holdings.getByText(/Failed to load|not responding|is not deployed/)).toBeVisible()
   await expect(holdings.getByText('No data yet')).toHaveCount(0)
-  const txs = page.locator('section', { hasText: 'Unit transactions' })
+  const txs = page.getByRole('main').locator('section', { has: page.getByRole('heading', { name: 'Unit transactions', exact: true }) })
   await expect(txs.getByRole('row', { name: /SUBSCRIPTION/ })).toBeVisible()
 })
 

@@ -56,6 +56,9 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         const val FRAUD_ENFORCEMENT_CHANGE_ID = "fraud-enforcement"
         private const val FRAUD_ENFORCEMENT_VERSION = 1
 
+        /** A fraud-hold signal the run refused (not holding, another case, already decided). */
+        const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
+
         /** A held payment with no analyst decision by then is REJECTED, never released. */
         val FRAUD_HOLD_TIMEOUT: Duration = Duration.ofHours(48)
         private const val UNLIMITED_ATTEMPTS = 0
@@ -75,12 +78,35 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
 
     private var fraudReviewDecision: FraudReviewDecision? = null
 
-    override fun resolveFraudHold(decision: FraudReviewDecision) {
-        // First answer wins; a late or duplicate signal cannot overturn a decision already taken.
-        if (fraudReviewDecision == null) fraudReviewDecision = decision
+    /** True only between the HOLD and its end; a decision outside that window is not a decision. */
+    private var awaitingFraudReview = false
+    private var expectedFraudCaseKey: String? = null
+
+    override fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?) {
+        // Deterministic: the flag is set by workflow code right before the await, and signal order
+        // is recorded in history, so a replay accepts and ignores exactly the same signals.
+        val ignoredBecause = when {
+            !awaitingFraudReview -> "not_holding"
+            caseIdempotencyKey == null || caseIdempotencyKey != expectedFraudCaseKey -> "case_mismatch"
+            // First answer wins; a late or duplicate signal cannot overturn a decision already taken.
+            fraudReviewDecision != null -> "already_decided"
+            else -> null
+        }
+        if (ignoredBecause == null) {
+            fraudReviewDecision = decision
+            return
+        }
+        Workflow.getLogger(DomesticPaymentWorkflowImpl::class.java)
+            .warn("Ignored fraud hold signal $decision: $ignoredBecause")
+        Workflow.getMetricsScope()
+            .tagged(mapOf("reason" to ignoredBecause))
+            .counter(IGNORED_FRAUD_SIGNAL_METRIC)
+            .inc(1)
     }
 
     override fun process(paymentId: UUID): DomesticPaymentStatus {
+        // Known from the start, so the case binding and the holding window are independent guards.
+        expectedFraudCaseKey = fraudReviewCaseKey(paymentId)
         val decision = activities.screenPayment(paymentId)
 
         return when (decision) {
@@ -141,7 +167,9 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         FraudGateAction.PROCEED -> null
         FraudGateAction.REJECT -> FraudRejectCause.DECLINED
         FraudGateAction.HOLD -> {
+            awaitingFraudReview = true
             val answered = Workflow.await(FRAUD_HOLD_TIMEOUT) { fraudReviewDecision != null }
+            awaitingFraudReview = false
             when {
                 !answered -> FraudRejectCause.HOLD_TIMED_OUT
                 fraudReviewDecision == FraudReviewDecision.RELEASE -> null

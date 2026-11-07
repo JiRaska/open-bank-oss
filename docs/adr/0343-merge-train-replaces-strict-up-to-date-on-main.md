@@ -533,9 +533,131 @@ The code carried one exception to "a verified green carrier merges first" that t
 
 The exception now applies only to a holder that did NOT defer to the carrier — no `merge-train/strict-deferral` on its head. A holder that deferred keeps the promise the deferral amendment makes: the one carrier built under its CI may merge past it. The holder is then behind main, is update-branched at once (the pre-empted-head rule above), and inherits the record through the first parent, so no further carrier is built under it and it merges within two of its own CI cycles — the bound this ADR already states. The holder-first exception stays for the case it was measured on: a green holder that a green carrier did not ride, where the carrier's rebuild costs it nothing it had been promised.
 
+### Amendment (2026-11-05) — the strict carrier: green strict-lane PRs ride one execution-free batch
+
+**Context.** The strict lane serialises on main by construction: one update-branch, one full CI on the
+combined head, one merge, then the next PR — a slot of about 2.4 h measured from reservation start to
+merge (update-branch, CI restarted from zero, the stall and ceiling bounds). A strict PR's OWN CI, by
+contrast, takes 3-25 min (a workflow or gate-script change does not rebuild the fleet). Measured over
+the design window: 0.41 strict merges/h with 37 strict-lane PRs queued, so the queue was growing by
+construction, and the train and fast lanes, which do not serialise, were starved of their turns by the
+reservations in between (ADR-0360). Re-measured 2026-11-04T14:52Z..2026-11-05T14:52Z with the query
+under *Measurement*: 32 merges to main, 14 of them strict (0.58/h), 9 train, 9 fast; 36 armed PRs open,
+16 of them touching an executable `.github/` path.
+
+**Decision.** Settle batches green, behind-main strict-lane PRs into ONE strict carrier over live main
+and judges it exactly like one strict PR:
+
+- **Built execution-free, by settle, with git only.** Each member's verified head is applied with
+  `git merge-tree --write-tree` onto settle's own chain over live main and committed with
+  `git commit-tree` and the train's member message (`merge-train: member #N`, `PR-Number`, `PR-Head`),
+  so `parse_own_chain` and `merge_train_carrier` read it as they read a train. There is no build job, no
+  generator run, no regeneration commit and no checkout of anything from a PR. The chain is pushed to
+  `train/strict-<run_id>-<attempt>`, its tree recorded as the App's `merge-train/record` status, and a
+  draft carrier PR labelled `merge-train` opened, so the ordinary PR CI runs on the combined head.
+- **Judged like one strict PR.** On a later tick, the carrier's exact head must carry the record, be a
+  chain of settle's own member commits only, and start at live main. Every required context and every
+  declared extra gate green: the members merge individually, in order, each pinned to its verified head
+  (`--match-head-commit`), with the `merge-train` status `strict lane: verified on strict carrier #N over
+  main <sha>`; source intent and head are re-read before each merge, and a foreign merge stops the run.
+  Red of N > 1: `bisect size N/2` on every member, nobody blamed; red of one (a member mid-bisect may
+  ride alone): the culprit, with the fixed comment. Inconclusive (cancelled, a gate over budget or not
+  evaluated): re-run once, then closed with no verdict. Red only on a context main is red on: no verdict.
+  Main moved: rejected and rebuilt in the same tick. Pending holds the strict reservation (no
+  update-branch, no fast merge, no train build) until the carrier head's CI stalls or passes the ceiling
+  (`reservation_expired` on the head settle committed); then it closes with no verdict, nobody is blamed,
+  and each member head leaves the carrier lane (`merge-train/strict-released`) for the update-branch
+  path — so a member that removed the producer of a required context pends forever on the carrier and
+  then meets the existing stall/ceiling/cooldown bounds, never a merge.
+- **What never rides a strict carrier.** A member that needs regeneration — it touches a regen-inventory
+  input or a declared derived output — because two members each regenerated for their own change are
+  jointly stale: red together, green alone, forever. A member whose tree adds a symlink or gitlink, or
+  whose path carries a control character (neither enters the strict list, and the builder refuses the
+  tree as well). A member that conflicts with main (told once, as in the strict lane) or with the members
+  ahead of it (dropped from this carrier without a notice; the next one takes it). A main-red fix (served
+  alone). A member changing anything under `.github/workflows`, read from the merged trees and not the PR's
+  file list: GitHub refuses a push of such a commit from an App token without the `workflows` permission,
+  so it can only take the update-branch path. A refused push of any kind leaves the tick running and no
+  carrier open. The cap is `STRICT_BATCH_CAP` (default 8).
+- **No carrier overtakes the first in line.** The strict list is in serving order (expedited, then oldest).
+  When its first eligible member can only take the update-branch path (a workflow change, a regeneration, a
+  head released from a timed-out carrier), no carrier is built that tick and that member is served; behind
+  members already applied it is simply skipped. Otherwise carriers would pass it until the eligible set
+  ran out, and `merge-priority:expedite` would mean nothing for a workflow PR.
+- **A judge member rides alone — the inverse rule, fail closed.** A strict member may be batched only
+  when EVERY file it touches is under `.github/scripts/` AND is named by no workflow, action or
+  `gates.yaml` entry on main — by full path or by bare basename (a script run as `"$DIR/name.sh"`),
+  derived by two execution-free `git grep`s over main (`referenced_scripts`, memoised per base sha; a
+  grep error is a sentinel that batches nothing). Everything else is a JUDGE path and rides ALONE: a
+  strict carrier of one, verified exactly as today's update-branch head is, so it can never turn a
+  co-member green — every workflow and action (editing `ci.yml` or a reusable workflow can neuter a
+  required check), `gates.yaml`, `rules.yaml`, `CODEOWNERS`, the privileged and train code, and every
+  script anything invokes (`run-gates.py`, which runs every gate, `agent-admission.py`, a dependency
+  provisioner). Oldest first: a judge member that is the oldest eligible one is the whole carrier,
+  otherwise it waits. **Measured honestly 2026-11-05 on `origin/main`:** 540 script paths and 780 bare
+  basenames are referenced; **96 of 637** files under `.github/scripts/` are unreferenced and so
+  batchable; of the live queue (33 armed, 12 strict-lane) **0 are batchable** — every queued strict PR
+  touches a workflow, a gate declaration or an invoked script and rides alone. Under this rule the
+  carrier's gain on today's queue is therefore nil; what it buys is the mechanism (and a one-member
+  carrier judged over live main instead of an update-branch commit) and the batching of the
+  unreferenced-script tail when it queues. Widening the batchable set is a separate decision, to be
+  taken against this measurement, not assumed.
+- **Residual, documented.** `gates.yaml` entries whose `selftest:` is a `unittest discover`-style
+  glob run every matching test on the COMBINED head, including a batched unreferenced test: the same
+  trust as a batched `check-*.py` (ADR amendment 2026-10-24) — judged with the code it judges, and
+  able only to make a verdict redder. And when a member touches `gates.yaml`, the merged file's `- id:` set (a
+  line scan, no YAML parse under `python3 -I -S`) must equal the union of main's and every member's; a
+  gate id lost in the merge would retire a gate for the members riding with it, so that member is
+  skipped (it takes today's update-branch path, where main's own gates judge it) and the rest ride.
+- **Members merge sequentially, pinned; a stop lands a verified prefix.** Each member is squash-merged in
+  carrier order with its head pinned; source intent, head and "main is still where the last merge left
+  it" are re-read before each one. A stop mid-loop (a member pushed or disarmed, a foreign merge, a
+  refused merge) leaves main at a PREFIX of the carrier — every merged member was verified in that prefix
+  by the carrier's CI (the carrier tree at step k contains exactly members 1..k) — and the rest are
+  rebatched over the new main. The carrier was built with `merge-tree` over the member heads and main
+  moves by GitHub's squash of the same heads; the two are assumed to agree, and after the last member
+  settle checks it: main's tree must equal the carrier's tree, else it is told and no further strict
+  carrier is built that tick (the next tick reads main afresh). A mismatch blames nobody — every merged
+  member was verified — it only withdraws the base assumption for the next batch.
+- **Lane semantics unchanged.** The member status starts with `strict lane:`, so `last_merge_was_strict`
+  still opens the train's and the fast lane's turns after it (TRAIN_TURN_S, FAST_TURN_S). No carrier of
+  either kind is built while a strict carrier is open; the strict carrier is not built while a holder,
+  a train carrier, a main-red context, an owed turn or a green current strict PR exists. Settle and
+  publish keep running `origin/main`'s script. `--check-declaration` now requires settle to carry the
+  cap and to name the carrier from its own run id and attempt.
+
+**Security.** The invariant is unchanged: the App token never shares a runner with PR data being
+processed by code, and the privileged job acts only on trees it derived with execution-free git. A
+strict carrier is derived by exactly the operations publish already uses to re-derive a train
+(merge-tree, commit-tree) and, having no regeneration commit, needs none of the generator argument. The
+members are judged on the combined head by the same CI, pinned by the same chain and record, and merged
+by the same pinned merge as before. What changes is only the observation window between merges: before,
+each strict PR was observed alone on a head that contained main; now up to `STRICT_BATCH_CAP` are
+observed together — and no member that can change what judges them (a judge path) is ever among them:
+it rides alone. A member's effect on a co-member's verdict is therefore content only, resolved by bisect,
+with the gates.yaml id-union guard as defence in depth. A member that could not be judged in isolation before (symlink, control
+character, a code path in the generator runner) still cannot ride.
+
+**Rollback.** `MERGE_TRAIN_STRICT_BATCH_CAP: "1"` in `merge-train.yml` (or `--strict-batch-cap 1`): no
+strict carrier is built and the strict lane behaves exactly as before this amendment; an open strict
+carrier is still judged and closed by the next settle.
+
+**Measurement.** Strict merges per hour, pinned:
+`gh pr list -R JiRaska/open-bank-oss --state merged --search "merged:>=<ISO-Z> base:main" --limit 200
+--json number,headRefOid` and, per head, `gh api repos/JiRaska/open-bank-oss/commits/<head>/statuses
+--jq '[.[]|select(.context=="merge-train")][0].description'` counted by prefix (`strict lane:`,
+`verified on train`, `fast lane`), divided by the window in hours (24 h above). Queue: `gh pr list
+--state open --base main --json number,autoMergeRequest,isDraft,files`, armed and non-draft, with a file
+under `.github/{workflows,actions,scripts,gates}/` (the `files` field caps at 100 per PR, so this is a
+lower bound). Success is strict merges/h rising above the 0.41-0.58/h baseline with the queue falling,
+and `strict_batch` sizes in the settle logs above 1; a strict carrier closed `expired` or `rejected`
+more often than merged is the signal to read the logs before touching the cap.
+
 ### Amendment (2026-10-24) — reviewed gate code rides a train, never with a regeneration commit (#13400)
 
 `.github/scripts/check-*.py` and `.github/scripts/check-*.sh` leave the strict lane (allow-list `GATE_CODE_GLOBS`; any other `.github/` path stays strict). `.github/gates/gates.yaml` was in that list and left it again (#13837): it declares every gate's `run`, `selftest`, `mode`, `when` and `budget_seconds`, so a PR could retire a privileged gate by editing its declaration rather than its script. Separating a privileged entry's edit from an ordinary one needs a YAML parse, which the privileged jobs cannot do under `python3 -I -S` without a hand-rolled parser, so every `gates.yaml` change takes the strict lane. A carrier's CI runs the combined head, so a gate change is judged with the code it judges, as in the strict lane, and bisect isolates a culprit. The one strict-lane property a train lacked is that main's gates prove the regeneration commit, so a train carrying gate code carries no regeneration commit: build keeps the oldest member's class and defers the other without a notice, and publish rejects the mix. Check scripts that prove a derived output, run in the pinned extra gate's workflow, or judge a carrier or the merge contract stay strict (`PRIVILEGED_GATE_CODE`, re-derived from the tree by the self-test). Gate code next to a symlink or gitlink never rides; generators see main's copy of gate code during regeneration; and scanner suppression files (`.gitleaksignore`, `.gitleaks.toml`, `.trivyignore`, `.semgrep*`) take the strict lane.
+
+Addendum (2026-11-05, #14888): test code under `.github/` — a Python file whose BASENAME is test-shaped (`test-*.py`, `test_*.py`, `*_test.py`), never under workflows, actions or agent prompts — rides a train as gate code, under every gate-code rule above. The basename is the whole rule: there is deliberately no directory-wide `tests/` rule, because a non-test helper under such a directory (`conftest.py`, `__init__.py`, a helper module) can be imported by a privileged gate script or run by the extra-gate workflow and must stay strict (security review). A gate's `selftest:` runs a test on the combined head exactly as it runs a check script, and a test can only make a verdict redder. A test that ANY workflow or `gates.yaml` on main runs by name stays strict — it executes with that workflow's or gate's permissions — and that set is DERIVED, not hand-kept: one execution-free `git grep` over main's `.github/workflows/` and `gates.yaml` (`referenced_tests`, 67 paths on 2026-11-05; unreadable = every test-shaped path strict), consulted by `Untrainable` in settle and build. Tests that exercise the train, a carrier, the merge policy or the ruleset, or that a privileged script names or imports, are pinned in `PRIVILEGED_GATE_CODE` as well; the self-test's drift guard reads every workflow, `gates.yaml`, the test scripts and the privileged scripts' own references, and fails when any of that kind would ride.
 
 ## Rollout
 
