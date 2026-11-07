@@ -329,6 +329,18 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  - id: issue-kind-classifier-self-test
+    name: "issue kind classifier flags zero and several kinds (rules.yaml: issues.kinds, enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 11   # classifier fixture cases
+    rationale: "issue-kind.yml removes needs-kind wherever the classifier says ok; a classifier that cannot go red would silently clear the backlog's only kind-debt signal. Its fixtures hold missing, ambiguous, exempt and ok cases, and the real rules.yaml kind set must parse."
+    review_after: "2027-05-03"
+    selftest_exempt: "is-a-test-suite — the run is issue-kind.py --selftest"
+    run: |
+      python3 .github/scripts/issue-kind.py --selftest
+
   # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
   # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
   # to fail until every libs-runtime consumer has been rebuilt and deployed.
@@ -3311,7 +3323,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    budget_seconds: 180   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s), 180 = ~1.7x
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test

@@ -111,7 +111,9 @@ def flush_candidates(prs: list[dict], now: int, last_deploy: int | None | dict[s
     # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
     if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
         return []
-    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
+    # An armed PR marked `stuck` (cannot merge: conflict or failed check, #14498) no longer holds
+    # its kind; stuck_armed() names it so the workflow disarms it before arming a successor.
+    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and not (p.get("armed") and p.get("stuck"))]
     armed_kinds = {_kind(p["head"]) for p in deploy if p.get("armed")}
     pending = sorted((p for p in deploy if not p.get("armed") and _kind(p["head"]) not in armed_kinds),
                      key=lambda p: (p["created_at"], p["number"]))
@@ -146,6 +148,25 @@ def flush(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | N
     """Return the first deferred PR to try, or None. prs: [{number, head, created_at, armed}]."""
     cands = flush_candidates(prs, now, last_deploy, window, manual_head)
     return cands[0] if cands else None
+
+
+# Only a definitive "cannot merge" counts (#14498 review): a merge conflict, or a check that
+# FAILED / TIMED_OUT. CANCELLED is deliberately excluded: a superseded or concurrency-cancelled
+# run is routine and would otherwise disarm a healthy deploy PR.
+STUCK_CONCLUSIONS = {"FAILURE", "TIMED_OUT"}
+
+
+def is_stuck(view: dict) -> bool:
+    """view: `gh pr view --json mergeStateStatus,statusCheckRollup`."""
+    if view.get("mergeStateStatus") == "DIRTY":
+        return True
+    return any(str(c.get("conclusion") or c.get("state") or "").upper() in STUCK_CONCLUSIONS
+               for c in view.get("statusCheckRollup") or [])
+
+
+def stuck_armed(prs: list[dict]) -> list[dict]:
+    """Armed deploy PRs that cannot merge; each freezes its kind until disarmed (#14498)."""
+    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("armed") and p.get("stuck")]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -405,6 +426,20 @@ def self_test() -> int:
     check("flush never arms a second PR of a kind while one of that kind is armed",
           flush([prs[1], {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}],
                 T, None, W) is None)
+    stuck = {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True, "stuck": True}
+    check("a stuck armed PR does not freeze the flush (#14498)",
+          (flush(prs + [stuck], T, T - W, W) or {}).get("number") == 11)
+    check("a stuck armed PR is named for disarming", [p["number"] for p in stuck_armed(prs + [stuck])] == [13])
+    roll = lambda *cs: {"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"conclusion": c} for c in cs]}
+    check("a merge conflict is stuck", is_stuck({"mergeStateStatus": "DIRTY", "statusCheckRollup": []}))
+    check("a FAILURE check is stuck", is_stuck(roll("SUCCESS", "FAILURE")))
+    check("a TIMED_OUT check is stuck", is_stuck(roll("TIMED_OUT")))
+    check("a single CANCELLED check is NOT stuck", not is_stuck(roll("SUCCESS", "CANCELLED")))
+    check("pending / green checks are NOT stuck", not is_stuck(roll(None, "SUCCESS")))
+    check("a failed commit status (state) is stuck",
+          is_stuck({"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"state": "FAILURE"}]}))
+    check("a healthy armed PR is never named for disarming",
+          stuck_armed(prs + [{**stuck, "stuck": False}]) == [])
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
               "state": "open", "repair_priority": True, "draft": True, "blocked": True}
     check("explicit open draft/blocked repair defers elapsed timer",
@@ -589,6 +624,7 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    sub.add_parser("stuck", help="stdin: gh pr view --json mergeStateStatus,statusCheckRollup; prints true/false")
     sel = sub.add_parser("select", help="arm-candidate fall-through: verify + supersede per kind")
     sel.add_argument("--root", default=".")
     sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
@@ -610,16 +646,25 @@ def main() -> int:
     if a.cmd == "flush":
         last = last_deploy_by_kind(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        cands = flush_candidates(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
+        prs = json.load(open(a.prs_json))
+        stuck = stuck_armed(prs)
+        for p in stuck:
+            print(f"::warning::deploy window: armed deploy PR #{p['number']} cannot merge; disarming it so its kind is not frozen (#14498)", file=sys.stderr)
+        cands = flush_candidates(prs, a.now, last, a.window, manual_head)
         print(f"arm={cands[0]['number'] if cands else ''}")
         print(f"arm_head={cands[0]['head'] if cands else ''}")
         # number:head pairs in order; the workflow falls through to the next on a hold refusal.
+        if stuck:
+            print(f"disarm={' '.join(str(p['number']) for p in stuck)}")
         print("candidates=" + " ".join(f"{p['number']}:{p['head']}" for p in cands))
         return 0
     if a.cmd == "carry":
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
                           lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
+        return 0
+    if a.cmd == "stuck":
+        print("true" if is_stuck(json.load(sys.stdin)) else "false")
         return 0
     if a.cmd == "select":
         repo = os.environ["GITHUB_REPOSITORY"]

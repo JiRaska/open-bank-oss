@@ -3,8 +3,9 @@
 'use client'
 
 import { useState } from 'react'
-import { PERMISSIONS, ROLES, type Permission } from '@/lib/auth/roles'
+import { PERMISSIONS, ROLES, type Permission, type Role } from '@/lib/auth/roles'
 import { PERMISSION_DESCRIPTIONS, ROLE_DESCRIPTIONS, matchesPermissionSearch } from '@/lib/auth/access-descriptions'
+import styles from './AccessPreview.module.css'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 /** UI policy projection only. Never use this component as an authorization decision. */
@@ -13,24 +14,42 @@ export function AccessPreview() {
   const [query, setQuery] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const roles = Object.values(ROLES)
-  const columns = roles.filter(role => !roleFilter || role === roleFilter)
-  const entries = (Object.entries(PERMISSIONS) as [Permission, readonly string[]][]).filter(([permission]) => matchesPermissionSearch(permission, query))
-  return <section className="card" style={{ marginTop: 24, padding: 20, minWidth: 0 }} aria-labelledby="access-preview-title">
+  const [selectedRoles, setSelectedRoles] = useState<Role[]>(roles)
+  const [showDescriptions, setShowDescriptions] = useState(false)
+  const [onlyGranted, setOnlyGranted] = useState(false)
+  const columns = roles.filter(role => selectedRoles.includes(role))
+  const entries = (Object.entries(PERMISSIONS) as [Permission, readonly string[]][]).filter(([permission, grants]) => matchesPermissionSearch(permission, query) && (!onlyGranted || columns.some(role => grants.includes(role))))
+  return <section className={`card ${styles.panel}`} aria-labelledby="access-preview-title">
     <h2 id="access-preview-title" style={{ marginTop: 0 }}>{t('Role a oprávnění', 'Roles and permissions')} · Preview</h2>
     <p>{t('Pouze pro čtení · Neúplný katalog pravidel admin UI, nikoli úplný seznam rolí a efektivních práv v bance.', 'Read only · Incomplete catalog of admin UI rules, not a complete inventory of bank roles and effective access.')}</p>
     <p style={{ color: 'var(--text-secondary)' }}>{t('✓ = role je uvedena v pravidle UI. — = v tomto pravidle uvedena není; neprokazuje zákaz na backendu. Keycloak spravuje role a jejich přiřazení. Backend, OPA, kontext a pravidla čtyř očí rozhodují o skutečném přístupu. Přehled neověřuje živou konfiguraci Keycloaku ani oprávnění konkrétních lidí.', '✓ = role is listed in the UI rule. — = not listed in this rule; this does not establish a backend denial. Keycloak manages roles and assignments. Backend, OPA, context and four-eyes rules determine actual access. This preview does not verify live Keycloak configuration or individual users’ access.')}</p>
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+    <div className={styles.toolbar}>
       <label className="field">{t('Hledat oprávnění', 'Find permission')}<input className="input" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('Např. schválení platby', 'E.g. approve payment')} /></label>
-      <label className="field">{t('Role', 'Role')}<select className="input" value={roleFilter} onChange={event => setRoleFilter(event.target.value)}><option value="">{t('Všechny role UI', 'All UI roles')}</option>{roles.map(role => <option key={role} value={role}>{t(ROLE_DESCRIPTIONS[role].name.cs, ROLE_DESCRIPTIONS[role].name.en)} · {role}</option>)}</select></label>
+      <label className="field">{t('Role', 'Role')}<select className="input" value={roleFilter} onChange={event => { setRoleFilter(event.target.value); setSelectedRoles(event.target.value ? [event.target.value as Role] : roles) }}><option value="">{t('Všechny role UI', 'All UI roles')}</option>{roleFilter === 'custom' && <option value="custom" disabled>{t('Vlastní výběr', 'Custom selection')}</option>}{roles.map(role => <option key={role} value={role}>{t(ROLE_DESCRIPTIONS[role].name.cs, ROLE_DESCRIPTIONS[role].name.en)} · {role}</option>)}</select></label>
+    </div>
+    <details className={styles.picker}>
+      <summary>{t('Vybrat role k porovnání', 'Choose roles to compare')} ({columns.length}/{roles.length})</summary>
+      <p>{t('Výběr mění pouze zobrazení matice, nikoli přidělená práva.', 'Selection changes only the matrix display, not assigned access.')}</p>
+      <div className={styles.roleActions}>
+        <button type="button" className="btn btn-secondary" onClick={() => { setSelectedRoles(roles); setRoleFilter('') }}>{t('Vybrat všechny role', 'Select all roles')}</button>
+        <button type="button" className="btn btn-secondary" onClick={() => { setSelectedRoles([]); setRoleFilter('custom') }}>{t('Zrušit výběr rolí', 'Clear role selection')}</button>
+      </div>
+      <div className={styles.roles}>{roles.map(role => <label key={role}><input type="checkbox" checked={selectedRoles.includes(role)} onChange={event => { setRoleFilter('custom'); setSelectedRoles(current => event.target.checked ? [...current, role] : current.filter(item => item !== role)) }} /><span>{t(ROLE_DESCRIPTIONS[role].name.cs, ROLE_DESCRIPTIONS[role].name.en)}<br /><code>{role}</code></span></label>)}</div>
+    </details>
+    <div className={styles.options}>
+      <label><input type="checkbox" checked={showDescriptions} onChange={event => setShowDescriptions(event.target.checked)} />{t('Zobrazit popisy', 'Show descriptions')}</label>
+      <label><input type="checkbox" checked={onlyGranted} onChange={event => setOnlyGranted(event.target.checked)} />{t('Jen oprávnění uvedená pro vybrané role', 'Only grants listed for selected roles')}</label>
     </div>
     <p aria-live="polite">{entries.length} {t('oprávnění', 'permissions')} · {columns.length} {t('rolí', 'roles')}</p>
-    <div role="region" aria-label={t('Matice přístupových pravidel UI', 'UI access rule matrix')} tabIndex={0} style={{ overflow: 'auto', maxHeight: 560 }}>
-      <table style={{ borderCollapse: 'separate', borderSpacing: 0, width: '100%', fontSize: 12 }}>
-        <caption style={{ textAlign: 'left', paddingBottom: 12 }}>{t('Zdroj: katalog admin UI (src/lib/auth/roles.ts) ve verzi této aplikace. Role bez grantů UI jsou také zahrnuty.', 'Source: admin UI catalog (src/lib/auth/roles.ts) bundled with this application. Roles without UI grants are included.')}</caption>
-        <thead><tr><th scope="col" style={{ position: 'sticky', top: 0, left: 0, background: 'var(--surface-1)', padding: 10, zIndex: 3 }}>{t('Oprávnění UI', 'UI permission')}</th>{columns.map(role => <th scope="col" key={role} style={{ position: 'sticky', top: 0, background: 'var(--surface-1)', padding: 10, minWidth: 220, maxWidth: 260, verticalAlign: 'top', zIndex: 2 }}><div>{t(ROLE_DESCRIPTIONS[role].name.cs, ROLE_DESCRIPTIONS[role].name.en)}</div><p style={{ fontWeight: 400, whiteSpace: 'normal', margin: '6px 0' }}>{t(ROLE_DESCRIPTIONS[role].description.cs, ROLE_DESCRIPTIONS[role].description.en)}</p><code style={{ fontWeight: 400, overflowWrap: 'anywhere' }}>{role}</code></th>)}</tr></thead>
-        <tbody>{entries.map(([permission, grants]) => <tr key={permission}><th scope="row" style={{ position: 'sticky', left: 0, background: 'var(--surface-1)', padding: 10, textAlign: 'left', minWidth: 280, maxWidth: 340, borderBottom: '1px solid var(--border)' }}><div>{t(PERMISSION_DESCRIPTIONS[permission].name.cs, PERMISSION_DESCRIPTIONS[permission].name.en)}</div><p style={{ fontWeight: 400, margin: '6px 0' }}>{t(PERMISSION_DESCRIPTIONS[permission].description.cs, PERMISSION_DESCRIPTIONS[permission].description.en)}</p><code style={{ fontWeight: 400, overflowWrap: 'anywhere' }}>{permission}</code></th>{columns.map(role => <td key={role} style={{ textAlign: 'center', padding: 10, borderBottom: '1px solid var(--border)' }}>{(grants as readonly string[]).includes(role) ? <span aria-label={t('Uvedeno v pravidle UI', 'Listed in UI rule')}>✓</span> : <span aria-label={t('Neuvedeno v pravidle UI', 'Not listed in UI rule')}>—</span>}</td>)}</tr>)}</tbody>
+    <p className={styles.source}>{t('Zdroj: katalog admin UI ve verzi této aplikace. Role bez grantů jsou zahrnuty.', 'Source: the admin UI catalog bundled with this application. Roles without grants are included.')}</p>
+    <div role="region" aria-label={t('Matice přístupových pravidel UI', 'UI access rule matrix')} tabIndex={0} className={styles.scroll}>
+      <table className={styles.table}>
+        <caption className="sr-only">{t('Zdroj: katalog admin UI (src/lib/auth/roles.ts) ve verzi této aplikace. Role bez grantů UI jsou také zahrnuty.', 'Source: admin UI catalog (src/lib/auth/roles.ts) bundled with this application. Roles without UI grants are included.')}</caption>
+        <thead><tr><th scope="col">{t('Oprávnění UI', 'UI permission')}</th>{columns.map(role => <th scope="col" key={role}><div>{t(ROLE_DESCRIPTIONS[role].name.cs, ROLE_DESCRIPTIONS[role].name.en)}</div><p className={styles.description} hidden={!showDescriptions}>{t(ROLE_DESCRIPTIONS[role].description.cs, ROLE_DESCRIPTIONS[role].description.en)}</p><code>{role}</code></th>)}</tr></thead>
+        <tbody>{entries.map(([permission, grants]) => <tr key={permission}><th scope="row"><div>{t(PERMISSION_DESCRIPTIONS[permission].name.cs, PERMISSION_DESCRIPTIONS[permission].name.en)}</div><p className={styles.description} hidden={!showDescriptions}>{t(PERMISSION_DESCRIPTIONS[permission].description.cs, PERMISSION_DESCRIPTIONS[permission].description.en)}</p><code>{permission}</code></th>{columns.map(role => <td key={role}>{(grants as readonly string[]).includes(role) ? <span className={styles.grant} aria-label={t('Uvedeno v pravidle UI', 'Listed in UI rule')}>✓</span> : <span aria-label={t('Neuvedeno v pravidle UI', 'Not listed in UI rule')}>—</span>}</td>)}</tr>)}</tbody>
       </table>
-      {entries.length === 0 && <p>{t('Žádné odpovídající oprávnění.', 'No matching permissions.')}</p>}
+      {columns.length === 0 && <p className={styles.empty}>{t('Vyberte alespoň jednu roli k porovnání.', 'Select at least one role to compare.')}</p>}
+      {entries.length === 0 && columns.length > 0 && <p className={styles.empty}>{t('Žádné odpovídající oprávnění.', 'No matching permissions.')}</p>}
     </div>
   </section>
 }
