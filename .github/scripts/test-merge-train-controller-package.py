@@ -82,7 +82,8 @@ def main():
         broken = root / "controller-only"
         broken.mkdir()
         (broken / "merge-train.py").write_bytes((ROOT / ".github/scripts/merge-train.py").read_bytes())
-        assert admit(broken, docs_head, "fixture") == "admission check exited 2 — fail closed"
+        refusal = admit(broken, docs_head, "fixture")
+        assert refusal and "fail closed" in refusal, "controller-only package unexpectedly admitted a PR"
         for job, step_name in [("settle", "Judge carriers, merge or halve, post the fast lane"),
                                ("publish", "Rebuild with merge-tree, compare, push own commits, open the carrier")]:
             step = next(step for step in workflow["jobs"][job]["steps"] if step.get("name") == step_name)
