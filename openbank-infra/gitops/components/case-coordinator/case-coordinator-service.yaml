@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: case-coordinator-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-b6494671@sha256:59b2ae4d7157da19466c99d67f0ccf0bf5a1cea98b8dbc013cc0c80ee2b9b633
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-80b8081f@sha256:f1ddafbbd07b15ec5cf1dde441591e9d46bb932e7367687dbb8e09d21c24e84b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-b6494671@sha256:e4c806adfd173930611113131caab7b3d34056a19263cc09901ff1cebb481135
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-80b8081f@sha256:6ac4c7b521a09d68f87f9a9c802986e80cc4e11f6b03a2d55b67361628b213f7
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }
