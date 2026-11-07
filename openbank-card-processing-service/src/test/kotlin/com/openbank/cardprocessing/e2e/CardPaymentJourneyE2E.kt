@@ -30,7 +30,6 @@ import java.net.InetSocketAddress
 import java.net.URI
 import java.sql.DriverManager
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -116,7 +115,7 @@ class CardPaymentJourneyE2E {
 
         // The acquirer retries: the first result is replayed, and neither the hold nor the books move.
         clear(authorization, 20_000, firstKey).statusCode(OK).body("heldAmountMinorUnits", equalTo(40_000))
-        assertThat(postingsFor(merchant)).hasSize(1)
+        assertThat(postingsFor(merchant)).describedAs("a replay sends nothing to the ledger").hasSize(1)
 
         // Same key, another amount: the key is a fingerprint, not a nonce.
         clear(authorization, 10_000, firstKey).statusCode(CONFLICT)
@@ -136,6 +135,7 @@ class CardPaymentJourneyE2E {
         assertThat(postings.map { it.path("amount").decimalValue() }.reduce(BigDecimal::add))
             .describedAs("the books received exactly the authorised money")
             .isEqualByComparingTo(BigDecimal("600.00"))
+        assertThat(postings).describedAs("one request per presentment").hasSize(2)
         assertThat(postings.map { it.path("idempotencyKey").asText() }.toSet()).hasSize(2)
 
         // Terminal: nothing more can be presented or released.
@@ -248,7 +248,6 @@ class CardPaymentJourneyE2E {
         override fun start(): Map<String, String> {
             val mapper = ObjectMapper()
             val postings = CopyOnWriteArrayList<JsonNode>()
-            val seenKeys = ConcurrentHashMap.newKeySet<String>()
             val http = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
             http.createContext("/api/v1/cards") { ex -> card(ex, mapper) }
             http.createContext("/api/v1/transactions") { ex ->
@@ -258,7 +257,9 @@ class CardPaymentJourneyE2E {
                         reply(ex, UNPROCESSABLE, """{"code":"INSUFFICIENT_FUNDS","message":"refused"}""")
 
                     else -> {
-                        if (seenKeys.add(posting.path("idempotencyKey").asText())) postings.add(posting)
+                        // Every request, duplicates included: de-duplicating by key here would hide
+                        // a re-post, and the count is how the retry assertion sees one.
+                        postings.add(posting)
                         reply(ex, CREATED, """{"id":"${UUID.randomUUID()}","status":"COMPLETED"}""")
                     }
                 }
