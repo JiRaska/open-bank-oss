@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
+
+
+### Bug Fixes
+
+* **delegation:** answer 503, not 500, when acting-for cannot be read ([#14773](https://github.com/JiRaska/open-bank-oss/issues/14773)) ([317407f](https://github.com/JiRaska/open-bank-oss/commit/317407fc60fc98b454f6efc80048c2ad32093de5))
+
 ## [0.23.4](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.3...delegation-service-v0.23.4) (2026-10-30)
 
 

@@ -4,6 +4,9 @@
 
 package com.openbank.delegation.integration
 
+import com.openbank.delegation.application.port.out.ActingForEntity
+import com.openbank.delegation.application.port.out.MandateDirectory
+import com.openbank.delegation.application.port.out.MandateDirectoryUnavailableException
 import com.openbank.delegation.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -397,6 +400,16 @@ class BusinessSigningApiIT {
     }
 
     @Test
+    fun `an unreadable acting-for register answers 503, not 500`() {
+        mandateSeam.delegate = object : MandateDirectory by register {
+            override suspend fun actingFor(humanPartyId: UUID): List<ActingForEntity> =
+                throw MandateDirectoryUnavailableException("acting-for could not be read")
+        }
+        RestAssured.given().get("/api/v1/parties/$bob/approval-requests/pending")
+            .then().statusCode(HTTP_UNAVAILABLE)
+    }
+
+    @Test
     fun `a SOLE register derives a one-signature policy`() {
         register.sole(entity, alice, bob)
         val policy = policy()
@@ -653,6 +666,7 @@ class BusinessSigningApiIT {
         const val HTTP_FORBIDDEN = 403
         const val SO_MINOR = 150_000L
         const val HTTP_CONFLICT = 409
+        const val HTTP_UNAVAILABLE = 503
         const val SHA_LENGTH = 64
         const val RACERS = 8
         const val BARRIER_SECONDS = 10L

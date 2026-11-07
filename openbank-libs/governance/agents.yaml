@@ -185,6 +185,10 @@ tool_tiers:
     - query.account.readonly      # PSD2 consent-scoped account list (openbank-mcp-service, ADR-0181)
     - query.consent.readonly      # the PSD2 consents the acting agent holds (openbank-mcp-service, ADR-0181)
     - verify.mandate              # bank-side AP2 mandate verification (openbank-ap2-service, ADR-0193) — evidence only, moves no funds
+    - product.lint                # Product IR lint, in-process ProductToolkit (openbank-agent-service, ADR-0352 §12)
+    - product.compile             # canonical IR + revisionHash, in-process (ADR-0352 §12)
+    - product.simulate            # portfolio replay through the pure interpreter; posts nothing (ADR-0352 §12)
+    - product.explain             # ruleId / instruction -> IR path (ADR-0352 §12)
   write_proposal: # produces a reviewable artifact, never a direct effect
     - draft.ticket
     - gh.pr.open
@@ -192,12 +196,15 @@ tool_tiers:
     - git.branch
     - git.commit.signed
     - run.skill            # constrained to the agent's `skills` allowlist
+    - product.propose      # DRAFT catalog revision as a HITL proposal; never publishes (ADR-0352 §12)
   deny:           # hard-forbidden for ALL agents -- not registrable
     - money.transfer
     - money.post.ledger
     - gh.pr.merge
     - gh.pr.approve
     - secrets.read.raw
+    - product.publish      # ADR-0259: publishing a product revision is a human decision, never an agent's
+    - product.sign         # ADR-0352 §4: the identity-bound signature belongs to the catalog publish path
 
 # ---------------------------------------------------------------------------------------
 # Case classes for agent swarm coordination (ADR-0244). A case is one long-running
@@ -324,6 +331,24 @@ agents:
       # ADR-0031 D4); the assistant itself only reads.
       - every: proposal
     limits: { tokens_per_run: 100000, runs_per_day: 500 }
+
+  - id: product-author
+    plane: control
+    model: llama-3.3-70b-versatile
+    charter: "The AI Author of ADR-0352 §12. Drafts and checks Product IR with the same toolkit the obp CLI runs (lint, compile, simulate, explain) and proposes a DRAFT catalog revision for a human; it never signs, approves or publishes."
+    data_scope:
+      read: [catalog]
+      pii: none
+    tools:
+      # Exactly the five MCP product tools. product.sign / product.publish are tool_tiers.deny for
+      # every agent; they are restated here so the charter reads complete on its own.
+      allow: [product.lint, product.compile, product.simulate, product.explain, product.propose]
+      deny:  [product.publish, product.sign, "money.*", "gh.pr.*", "*.write", secrets.read.raw]
+    requires_human:
+      # product.propose lands in the admin-ui approval queue; publishing stays four-eyes in the catalog.
+      - every: proposal
+      - approver_must_differ_from: author
+    limits: { tokens_per_run: 150000, runs_per_day: 100 }
 
   - id: rca-investigator
     plane: control

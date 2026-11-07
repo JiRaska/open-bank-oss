@@ -65,6 +65,77 @@ class TemporaryDirectoryCleanupTests(unittest.TestCase):
         sleep.assert_not_called()
 
 
+class PushPreservesNewerPinTest(unittest.TestCase):
+    """A push-event deploy never moves a pin BACKWARD: if main already carries a descendant of this
+    run's source for a service, that pin is preserved (union of newer pins, the no-downgrade CI/CD invariant (#14702)).
+
+    Measured on #14579: a deploy PR for an older source rewrote 22 newer pins. These cases were
+    written before the rule and FAIL on the old `decision()`, which publishes every push."""
+
+    def setUp(self):
+        clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        isolated = patch.dict(os.environ, clean_env, clear=True)
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.previous = Path.cwd()
+        os.chdir(self.tmp.name)
+        self.addCleanup(cleanup_temporary_directory, self.tmp)
+        self.addCleanup(os.chdir, self.previous)
+        self.git('init', '-q', '-b', 'main')
+        self.git('config', 'user.email', 'test@example.com')
+        self.git('config', 'user.name', 'test')
+        self.git('config', 'commit.gpgsign', 'false')
+        # c1 -> c2 -> c3 on main; side diverges from c1.
+        self.write('f.txt', '1\n'); self.c1 = self.commit()
+        self.write('f.txt', '2\n'); self.c2 = self.commit()
+        self.write('f.txt', '3\n'); self.c3 = self.commit()
+        self.git('checkout', '-q', '-b', 'side', self.c1)
+        self.write('g.txt', 's\n'); self.side = self.commit()
+        self.git('checkout', '-q', 'main')
+
+    def git(self, *args):
+        result = subprocess.run(['git', *args], capture_output=True, text=True, check=False)
+        if result.returncode:
+            raise RuntimeError(f'fixture git {args!r} failed: {result.stderr or result.stdout}')
+        return result.stdout.strip()
+
+    def write(self, path, value):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(value)
+
+    def commit(self):
+        paths = self.git('ls-files', '--others', '--modified', '--exclude-standard').splitlines()
+        self.git('add', '--', *paths)
+        self.git('commit', '-qm', 'fixture')
+        return self.git('rev-parse', 'HEAD')
+
+    def decide(self, current, source, initial=None):
+        tag = lambda sha: 'sandbox-' + sha[:8]
+        return publication.decision('push', '', tag(initial or self.c1), tag(current), tag(source), source)
+
+    def test_push_preserves_a_pin_main_already_moved_past_this_source(self):
+        # Built c2; main already pins c3 (a descendant): rewriting would roll the service back.
+        self.assertEqual('preserve', self.decide(current=self.c3, source=self.c2))
+
+    def test_push_publishes_when_this_source_is_newer_than_main_pin(self):
+        self.assertEqual('publish', self.decide(current=self.c2, source=self.c3))
+
+    def test_push_publishes_when_main_pin_is_unchanged_since_source(self):
+        self.assertEqual('publish', self.decide(current=self.c1, source=self.c2, initial=self.c1))
+
+    def test_push_publishes_a_same_source_refresh(self):
+        self.assertEqual('publish', self.decide(current=self.c2, source=self.c2))
+
+    def test_push_fails_closed_on_a_diverged_main_pin(self):
+        with self.assertRaises(ValueError):
+            self.decide(current=self.side, source=self.c2)
+
+    def test_push_fails_closed_on_an_unresolvable_main_pin(self):
+        with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+            publication.decision('push', '', 'sandbox-' + self.c1[:8], 'sandbox-deadbeef', 'sandbox-' + self.c2[:8], self.c2)
+
+
 class PublicationTest(unittest.TestCase):
     def setUp(self):
         # Gate runners provide a scratch index for the checkout; fixtures need their own.
