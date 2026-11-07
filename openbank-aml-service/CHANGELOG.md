@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.8...aml-service-v0.14.0) (2026-11-07)
+
+
+### Features
+
+* **domestic-payment:** release fraud holds from the analyst's AML case decision ([#15060](https://github.com/JiRaska/open-bank-oss/issues/15060)) ([4e7636d](https://github.com/JiRaska/open-bank-oss/commit/4e7636dbc48dcb1aa3df75f9d13df5b85223356e))
+
 ## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.7...aml-service-v0.13.8) (2026-10-29)
 
 
