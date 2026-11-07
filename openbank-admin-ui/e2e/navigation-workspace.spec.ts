@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator, signInWithRoles } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
@@ -12,6 +13,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
 
 test('finds menu destinations immediately during a record-search outage and navigates by keyboard', async ({ page }) => {
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   await page.getByRole('button', { name: /Quick search|Rychlé hledání/ }).click()
   const dialog = page.getByRole('dialog', { name: /Quick search|Rychlé hledání/ })
   await dialog.getByRole('textbox').fill('transakce')
@@ -27,6 +29,7 @@ test('finds menu destinations immediately during a record-search outage and navi
 
 test('switches areas, saves preferences and restores a named filtered view after reload', async ({ page }, testInfo) => {
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   const sidebar = page.locator('#admin-sidebar')
   await sidebar.getByRole('button', { name: /Workspace area|Pracovní oblast/ }).click()
   await page.locator('#navigation-areas').getByRole('button', { name: /Documentation|Dokumentace/ }).click()
@@ -40,6 +43,7 @@ test('switches areas, saves preferences and restores a named filtered view after
   await pinDialog.getByRole('button', { name: /^(Pin|Připnout)$/ }).click()
   await expect(sidebar.getByRole('link', { name: 'Active account workspace' })).toBeVisible()
   await page.reload()
+  await waitForSettledShell(page)
   await expect(page.getByLabel(/Filter by account status|Filtrovat podle stavu účtu/)).toHaveValue('ACTIVE')
   await expect(sidebar.getByRole('button', { name: /Compact menu|Kompaktní menu/ })).toHaveAttribute('aria-pressed', 'true')
   await expect(sidebar.getByRole('slider')).toHaveValue('320')
@@ -64,6 +68,7 @@ test('hands an explicit question to the assistant with visible context and requi
     await route.fulfill({ json: { reply: 'Account states describe the lifecycle.', toolCalls: [] } })
   })
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   await page.getByRole('button', { name: /Quick search|Rychlé hledání/ }).click()
   const dialog = page.getByRole('dialog', { name: /Quick search|Rychlé hledání/ })
   await dialog.getByRole('textbox').fill('Explain account states')
@@ -82,6 +87,7 @@ test('hands an explicit question to the assistant with visible context and requi
 test('keeps inaccessible destinations out of search for a restricted persona', async ({ context, baseURL, page }) => {
   await signInWithRoles(context, baseURL!, ['ROLE_VIEWER'])
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   await page.getByRole('button', { name: /Quick search|Rychlé hledání/ }).click()
   const dialog = page.getByRole('dialog', { name: /Quick search|Rychlé hledání/ })
   await dialog.getByRole('button', { name: /^(Pages|Stránky)$/ }).click()
@@ -92,6 +98,7 @@ test('keeps inaccessible destinations out of search for a restricted persona', a
 
 test('switches between saved filters on the same route and clears them on a plain-page link', async ({ page }) => {
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   const sidebar = page.locator('#admin-sidebar')
   for (const status of ['ACTIVE', 'CLOSED']) {
     await page.getByLabel(/Filter by account status|Filtrovat podle stavu účtu/).selectOption(status)
@@ -114,6 +121,7 @@ test('uses a selected record as assistant context without navigating away', asyn
   ] } }))
   await page.route('**/api/agent/chat', route => route.fulfill({ json: { default: '', models: [] } }))
   await page.goto('/accounts')
+  await waitForSettledShell(page)
   await page.getByRole('button', { name: /Quick search|Rychlé hledání/ }).click()
   const dialog = page.getByRole('dialog', { name: /Quick search|Rychlé hledání/ })
   await dialog.getByRole('textbox').fill('example')
@@ -133,6 +141,7 @@ test('accepts an area selection before the client session request resolves', asy
   await page.route('**/api/auth/session', async route => { await held; await route.continue() })
   try {
     await page.goto('/accounts')
+    await waitForSettledShell(page, { waitForSession: false })
     const sidebar = page.locator('#admin-sidebar')
     await sidebar.getByRole('button', { name: /Workspace area|Pracovní oblast/ }).click()
     await page.locator('#navigation-areas').getByRole('button', { name: /^(Documentation|Dokumentace)$/ }).click()
