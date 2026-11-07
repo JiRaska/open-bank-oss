@@ -12,8 +12,8 @@ import com.openbank.domestic.application.workflow.FraudGateAction
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudRejectCause
 import com.openbank.domestic.application.workflow.FraudReviewDecision
-import com.openbank.domestic.application.workflow.ScreeningDecision
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.libs.fincrime.ScreeningDecision
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify

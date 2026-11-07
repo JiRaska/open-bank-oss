@@ -38,7 +38,7 @@ class FraudHoldResolutionConsumerTest {
     }
 
     @Test
-    fun `nothing else on the shared topic can release a payment`() = runBlocking {
+    fun `nothing else on the shared topic can release a payment`(): Unit = runBlocking {
         consumer.consume(event("ESCALATED"))
         consumer.consume(event("UNDER_REVIEW"))
         consumer.consume(event("CLEARED", alert = "SANCTIONS_HIT"))
