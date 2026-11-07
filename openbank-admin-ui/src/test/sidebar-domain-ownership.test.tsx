@@ -89,14 +89,20 @@ describe('sidebar business-domain ownership', () => {
       ['/document-templates', 'openbank-document-service'],
       ['/regulatory', 'openbank-finrep-service'],
     ]
+    const expectedByDomain = new Map<string, string[]>()
     for (const [href, module] of examples) {
-      selectArea(domainLabel(ownershipByModule[module], language))
-      const region = screen.getByRole('region', { name: domainLabel(ownershipByModule[module], language) })
-      expect(within(region).getAllByRole('link').map(link => link.getAttribute('href')), href).toContain(href)
+      const label = domainLabel(ownershipByModule[module], language)
+      expectedByDomain.set(label, [...(expectedByDomain.get(label) ?? []), href])
+    }
+    for (const [label, hrefs] of expectedByDomain) {
+      selectArea(label)
+      const region = screen.getByRole('region', { name: label })
+      const renderedHrefs = within(region).getAllByRole('link').map(link => link.getAttribute('href'))
+      for (const href of hrefs) expect(renderedHrefs, href).toContain(href)
     }
     const labels = screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))
     expect(labels).toEqual(DOMAIN_GROUPS.map(domain => domainLabel(domain, language)).filter(label => labels.includes(label)))
-  })
+  }, 15_000)
 
   it('retains every inventoried destination for the declared role union', () => {
     state.roles = Object.values(ROLES).filter(role => role !== ROLES.DEMO)

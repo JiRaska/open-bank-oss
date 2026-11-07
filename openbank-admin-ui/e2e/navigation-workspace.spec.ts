@@ -25,7 +25,7 @@ test('finds menu destinations immediately during a record-search outage and navi
   await expect(page.locator('#admin-sidebar a[aria-current="page"]')).toHaveCount(1)
 })
 
-test('switches areas, saves preferences and restores a named filtered view after reload', async ({ page }) => {
+test('switches areas, saves preferences and restores a named filtered view after reload', async ({ page }, testInfo) => {
   await page.goto('/accounts')
   const sidebar = page.locator('#admin-sidebar')
   await sidebar.getByRole('button', { name: /Workspace area|Pracovní oblast/ }).click()
@@ -50,7 +50,7 @@ test('switches areas, saves preferences and restores a named filtered view after
   await page.keyboard.press('Escape')
   const a11y = await new AxeBuilder({ page }).include('#admin-sidebar').analyze()
   expect(a11y.violations).toEqual([])
-  await page.screenshot({ path: '/private/tmp/openbank-navigation-workspace.png', fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath('navigation-workspace.png'), fullPage: true })
 })
 
 test('hands an explicit question to the assistant with visible context and requires sending', async ({ page }) => {
@@ -108,7 +108,7 @@ test('switches between saved filters on the same route and clears them on a plai
   await expect(page.getByLabel(/Filter by account status|Filtrovat podle stavu účtu/)).toHaveValue('')
 })
 
-test('uses a selected record as assistant context without navigating away', async ({ page }) => {
+test('uses a selected record as assistant context without navigating away', async ({ page }, testInfo) => {
   await page.route('**/api/entities/resolve?**', route => route.fulfill({ json: { results: [
     { type: 'party', id: 'party-fixture', label: 'Example Company', route: '/parties/party-fixture' },
   ] } }))
@@ -121,7 +121,7 @@ test('uses a selected record as assistant context without navigating away', asyn
   await expect(dialog.getByRole('option', { name: /Example Company/ })).toHaveAttribute('aria-selected', 'true')
   const a11y = await new AxeBuilder({ page }).include('[role="dialog"]').analyze()
   expect(a11y.violations).toEqual([])
-  await page.screenshot({ path: '/private/tmp/openbank-navigation-search.png' })
+  await page.screenshot({ path: testInfo.outputPath('navigation-search.png') })
   await dialog.getByRole('button', { name: /Ask about result|Zeptat se k výsledku/ }).click()
   await expect(page.getByRole('region', { name: /assistant panel|Panel asistenta/ })).toContainText('Example Company')
   await expect(page).toHaveURL(/\/accounts$/)
