@@ -1,0 +1,656 @@
+# SPDX-License-Identifier: Apache-2.0
+# Artifact producer only: no GitOps writer, deploy signal or deployment recorder.
+# A distinct workflow name intentionally excludes Deploy window flush workflow_run triggers.
+name: Communication image evidence only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: communication-image-evidence
+  cancel-in-progress: false
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      any: 'true'
+      services: '["openbank-communication-service"]'
+      source_commit: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  build-push:
+    name: Build + push
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
+    # Native arm64 GitHub-hosted runner (free on public repos) — the runtime images
+    # are linux/arm64, so buildx builds natively with no QEMU. ECR push + KMS cosign
+    # authenticate via the same GitHub-OIDC role as before (it trusts repo:*, not a
+    # runner identity). The in-cluster Gradle remote cache / Reposilite mirror are
+    # simply absent here (their probes fall through to Maven Central — free egress
+    # on hosted runners, unlike the NAT-metered VPC).
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
+      actions: read   # exact-SHA main-push build artifact; no PR artifacts are accepted
+    timeout-minutes: 120
+    env:
+      SELF_BUILT_SERVICES: ""
+      SOURCE_COMMIT: ${{ needs.changes.outputs.source_commit }}
+      # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
+      # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
+      # `gradle.properties` — the obvious place, and the one the issue named first — changes
+      # nothing here. It also silently dropped the file's `-XX:MaxMetaspaceSize`, which is why the
+      # two observed exhaustion modes (Java heap space, Metaspace) came from different lanes.
+      #
+      # 6g on a 4-core/16 GB arm runner, against `--parallel --max-workers=4`: the fleet build runs
+      # several `quarkusGenerateAppModel` tasks at once, each holding a full application model in
+      # the daemon's heap, and one service exhausting it strands every service in the wave.
+      # Metaspace is capped explicitly rather than left unbounded — an unbounded metaspace does not
+      # remove the limit, it moves the failure to a container OOM kill with no Java stack to read.
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+      # amazon-ecr-login (+ trivy's ECR pull) resolve the region from the
+      # environment. The ARC runner now authenticates via EKS Pod Identity, which
+      # — unlike the old IRSA webhook — does NOT inject AWS_REGION/AWS_DEFAULT_REGION
+      # into the pod. Without these the ECR login step fails "Region is missing",
+      # which is why every post-2026-06-12 main merge built no image and the gitops
+      # tags went stale (party/account-service stuck pre-#894). Mirrors _service-ci.yml.
+      AWS_REGION: eu-north-1
+      AWS_DEFAULT_REGION: eu-north-1
+      # Non-Gradle images built from their OWN multi-stage Dockerfile instead of the fast-jar
+      # template (the SELF_BUILT set in check-dockerfile-no-build-stage.py). They skip the Gradle
+      # step and share every later step: ECR push, cosign sign, CVE gate, SBOM attest, gitops PR.
+    outputs:
+      # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
+      image_tags: ${{ steps.collect.outputs.image_tags }}
+      image_digests: ${{ steps.collect.outputs.image_digests }}
+      image_tag: ${{ steps.build.outputs.tag }}
+      # Only the services whose image actually reached the registry. Everything after
+      # the push keys off this, never off the changed set (#9714).
+      pushed_services: ${{ steps.push.outputs.pushed }}
+      failed_services: ${{ steps.push.outputs.failed }}
+      # What survived BOTH the push and the CVE gate. `deployable` is the set the gitops PR
+      # and can-i-deploy must use; `pushed` is only "the image exists in the registry".
+      deployable_services: ${{ steps.scan.outputs.deployable }}
+      cve_blocked_services: ${{ steps.scan.outputs.cve_blocked }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.changes.outputs.source_commit }}
+
+      # Requires the separately reviewed optional ARTIFACT_SOURCE_SHA support in
+      # build-slsa-provenance.py. Fail before obtaining credentials or pushing images
+      # if an older producer checkout cannot distinguish source from workflow SHA.
+      - name: Verify handoff provenance before any image side effect
+        run: |
+          set -euo pipefail
+          ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" python3 openbank-infra/scripts/lib/build-slsa-provenance.py |
+            jq -e --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
+              '.materials[0].digest.sha1 == $source and .invocation.configSource.digest.sha1 == $workflow' >/dev/null
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: false   # deploy jobs update the cache too
+
+      # AWS auth via GitHub OIDC — webhook-independent. The EKS Pod Identity webhook
+      # (failurePolicy: Ignore, 10s timeout) intermittently fails to inject the credential env
+      # into a freshly-scheduled ARC runner pod, leaving it with NO AWS creds, so ECR login fails
+      # "Could not load credentials from any providers". GitHub OIDC mints a token this job
+      # exchanges for the build runner role directly via STS (the role trusts
+      # token.actions.githubusercontent.com for repo:JiRaska/open-bank-oss:*) — no per-pod webhook
+      # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
+      - name: Configure AWS credentials (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: &build-aws-credentials
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+          unset-current-credentials: true
+
+      - name: Clear stale ECR credentials (macOS keychain)
+        if: runner.os == 'macOS'
+        run: |
+          docker logout "$ECR_REGISTRY" 2>/dev/null || true
+          # docker logout clears ~/.docker/config.json but leaves the osxkeychain entry;
+          # the subsequent docker login then fails with "already exists in the keychain".
+          security delete-internet-password -s "$ECR_REGISTRY" 2>/dev/null || true
+          # Remove credsStore=osxkeychain from Docker config so amazon-ecr-login stores
+          # credentials in the config file rather than the macOS Keychain. The Keychain
+          # requires interactive unlocking (-25308: errSecInteractionNotAllowed) which
+          # fails in non-interactive CI sessions. File-based credentials are safe here:
+          # the runner is ephemeral per-job and ECR tokens expire in 12 h anyway.
+          python3 -c "import json,pathlib; p=pathlib.Path.home()/'.docker'/'config.json'; d=json.loads(p.read_text()) if p.exists() else {}; d.pop('credsStore',None); p.parent.mkdir(parents=True,exist_ok=True); p.write_text(json.dumps(d))"
+
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Restore verified context build when available
+        id: context_build
+        if: contains(fromJSON(needs.changes.outputs.services), 'openbank-context-service')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 .github/scripts/service-build-artifact.py restore \
+            --repo "$GITHUB_REPOSITORY" --service openbank-context-service \
+            --sha "$SOURCE_COMMIT" --destination "$GITHUB_WORKSPACE"
+
+      - name: Build fast-jars (parallel)
+        id: build
+        # analytics-sink selects its AnalyticsSink binding with @IfBuildProperty, which Quarkus
+        # resolves at AUGMENTATION time — the runtime env var the gitops manifest sets cannot
+        # reach it. Without this the image ships the @Default LoggingAnalyticsSink, which logs
+        # every event and writes none, so ClickHouse silently stays empty while the consumer
+        # looks perfectly healthy. Harmless for the other services: only this module reads it.
+        env:
+          ANALYTICS_SINK_TYPE: clickhouse
+          # agent-service selects its NonceStore binding with @IfBuildProperty (same trap as
+          # analytics-sink above — resolved at AUGMENTATION time, so a runtime env var cannot
+          # reach it). Without this the image ships the @Default InMemoryNonceStore, and the PoP
+          # replay guard silently weakens to per-pod once replicas > 1 (issue #4728).
+          AGENT_SVID_NONCE_STORE: redis
+          CONTEXT_BUILD_RESTORED: ${{ steps.context_build.outputs.restored }}
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          SHA="${SOURCE_COMMIT::8}"
+          TAG="sandbox-${SHA}"
+          FAILED=0
+
+          # Build all services in a SINGLE Gradle invocation with --parallel.
+          # Gradle manages its internal dependency graph: shared tasks
+          # (openbank-libs:compileKotlin, :jandex, :jar) execute exactly ONCE
+          # before any service-specific tasks, completely eliminating the race
+          # conditions that caused jandex/ZipException/Kotlin-daemon failures
+          # when multiple concurrent `./gradlew` processes wrote to the same
+          # openbank-libs/build/ directory or Gradle build-cache entries.
+          # --max-workers=4 limits JVM workers to fit the 16 GB Docker budget.
+          # --continue reports all failures before exiting non-zero.
+          TASKS=()
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) continue ;; esac
+            if [ "$svc" = openbank-context-service ] && [ "$CONTEXT_BUILD_RESTORED" = true ]; then
+              echo "Using verified exact-source context fast-jar and SBOM."
+              continue
+            fi
+            # Build then verify original library bytes against the generated SBOM.
+            # This does not replace image provenance or runtime rollout checks.
+            TASKS+=(":${svc}:verifyPackagedLibrarySbom")
+          done
+
+          echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
+          if [ "${#TASKS[@]}" -gt 0 ] && ! ./gradlew "${TASKS[@]}" \
+                -Dquarkus.package.jar.type=fast-jar \
+                --parallel --max-workers=4 \
+                --build-cache --console=plain \
+                --continue 2>&1; then
+            FAILED=1
+          fi
+
+          [ "$FAILED" -eq 0 ] || { echo "One or more builds failed"; exit 1; }
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker push (parallel)
+        id: push
+        run: |
+          set -euo pipefail
+          SERVICES='${{ needs.changes.outputs.services }}'
+          TAG="${{ steps.build.outputs.tag }}"
+          FAILED=0
+          PUSHED=(); FAILED_SVCS=()
+
+          docker buildx create --use --name ob-deploy-builder \
+            --driver docker-container >/dev/null 2>&1 || \
+            docker buildx use ob-deploy-builder
+
+          push_one() {
+            local svc="$1"
+            local metadata="${RUNNER_TEMP}/buildx-metadata-${svc}.json"
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*)
+              bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
+                2>&1 | sed "s/^/[${svc}] /" || return 1
+              echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
+              docker buildx build --platform linux/arm64 --provenance=false --sbom=false \
+                --metadata-file "$metadata" -f "${svc}/Dockerfile" \
+                -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
+                "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+              jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' \
+                "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
+              return 0 ;;
+            esac
+            local qa="${svc}/build/quarkus-app"
+            [ -f "${qa}/quarkus-run.jar" ] || \
+              { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
+
+            local port
+            # One source for the port: quarkus.http.port (service-port.py header).
+            port="$(python3 "${GITHUB_WORKSPACE}/.github/scripts/service-port.py" "${svc}")"
+
+            local image="${ECR_REGISTRY}/${svc}:${TAG}"
+            local ctx; ctx="$(mktemp -d)"
+            trap 'rm -rf "$ctx"' RETURN
+            python3 .github/scripts/verify-packaged-library-sbom.py \
+              --sbom "${svc}/build/reports/bom.json" \
+              --receipt "${svc}/build/reports/library-artifacts/verification.json" \
+              --quarkus-app "$qa" > /dev/null || return 1
+            cp -r "$qa" "${ctx}/quarkus-app"
+            # Gradle sets quarkus-app/lib/ files to 600 (owner-read-only). The
+            # container runs as non-root user `openbank` → ClassNotFoundException
+            # (QuarkusEntryPoint not loadable). Fix: PR #2141 pattern.
+            chmod -R a+r "${ctx}/quarkus-app"
+
+            # Dockerfile template lives in .github/workflows/Dockerfile.deploy to
+            # keep the heredoc out of the YAML (yamllint syntax-checks block scalars
+            # and treats zero-indented heredoc lines as invalid YAML nodes).
+            cp "${GITHUB_WORKSPACE}/.github/workflows/Dockerfile.deploy" \
+              "${ctx}/Dockerfile"
+            # Bake the SBOM just validated against the packaged original libraries.
+            # The live endpoint serves inventory, not deployment attestation.
+            if [ -f "${svc}/build/reports/bom.json" ]; then
+              mkdir -p "${ctx}/sbom"
+              cp "${svc}/build/reports/bom.json" "${ctx}/sbom/bom.json"
+              chmod a+r "${ctx}/sbom/bom.json"
+              echo "COPY sbom/bom.json /app/sbom/bom.json" >> "${ctx}/Dockerfile"
+              echo "ENV OPENBANK_SBOM_PATH=/app/sbom/bom.json" >> "${ctx}/Dockerfile"
+            fi
+            # EXPOSE is written dynamically after the static COPY/ENTRYPOINT lines.
+            echo "EXPOSE ${port}" >> "${ctx}/Dockerfile"
+
+            # A new service's ECR repository is declared nowhere, so its first build
+            # compiles and then dies here (#3423). Fails OPEN when it cannot observe the
+            # registry, so it is inert until the IAM grant applies. Reasoning lives in the
+            # script header, not in this run: block — prose here costs the whole workflow
+            # (#3135).
+            bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
+              2>&1 | sed "s/^/[${svc}] /" || return 1
+
+            # ldd every bundled linux .so inside the real runtime base before pushing (#3354).
+            # No-op for a service shipping none. Reasoning is in the script header, not here
+            # — prose in a run: block costs the whole workflow (#3135).
+            python3 "${GITHUB_WORKSPACE}/.github/scripts/verify-image-native-libs.py" \
+              "${ctx}/quarkus-app/lib" --arch arm64 2>&1 | sed "s/^/[${svc}] /" || return 1
+
+            echo "==> [${svc}] docker push → ${image}"
+            docker buildx build \
+              --platform linux/arm64 \
+              --provenance=false \
+              --sbom=false \
+              --metadata-file "$metadata" \
+              -t "${image}" \
+              --push \
+              "${ctx}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+            jq -er '.["containerimage.digest"] | select(test("^sha256:[0-9a-f]{64}$"))' \
+              "$metadata" > "${RUNNER_TEMP}/image-digest-${svc}" || return 1
+          }
+
+          MAX_PARALLEL=3   # limit concurrent buildx to avoid OOM on 16GB Docker host
+          RUNNING=0; PIDS=(); SVCS=()
+
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            push_one "$svc" &
+            PIDS+=($!); SVCS+=("$svc"); RUNNING=$(( RUNNING + 1 ))
+            if [ "$RUNNING" -ge "$MAX_PARALLEL" ]; then
+              if wait "${PIDS[0]}"; then
+                if [ -f "${RUNNER_TEMP}/image-digest-${SVCS[0]}" ]; then
+                  PUSHED+=("${SVCS[0]}")
+                else
+                  echo "SKIP: ${SVCS[0]} did not produce a pushed image"
+                fi
+              else
+                echo "FAIL: ${SVCS[0]}"; FAILED_SVCS+=("${SVCS[0]}"); FAILED=1
+              fi
+              PIDS=("${PIDS[@]:1}"); SVCS=("${SVCS[@]:1}"); RUNNING=$(( RUNNING - 1 ))
+            fi
+          done
+          for idx in "${!PIDS[@]}"; do
+            if wait "${PIDS[$idx]}"; then
+              if [ -f "${RUNNER_TEMP}/image-digest-${SVCS[$idx]}" ]; then
+                PUSHED+=("${SVCS[$idx]}")
+              else
+                echo "SKIP: ${SVCS[$idx]} did not produce a pushed image"
+              fi
+            else
+              echo "FAIL: ${SVCS[$idx]}"; FAILED_SVCS+=("${SVCS[$idx]}"); FAILED=1
+            fi
+          done
+
+          # A push that fails for ONE service must not strand the deploy of every other
+          # service in the same run. It used to: this line exited 1, so `Gitops PR`,
+          # `can-i-deploy` and `Deploy signal` were skipped as job dependents. Measured
+          # 2026-09-11 — openbank-communication-service had no ECR repository (its gitops
+          # image pin exists, so ecr-service-repositories.tf derives one, but
+          # platform-tofu.yml applies on workflow_dispatch only and had not been run) and
+          # auto-deploy failed EVERY run for 2.5 days: last success 2026-09-09T05:48Z, 76 of
+          # the following 100 runs red, nothing deployed fleet-wide (#9714).
+          #
+          # The run still goes red, and still names what failed — the `push-failures` job
+          # does that. What changes is WHEN: after the services that pushed cleanly have
+          # been signed, scanned, attested and deployed. One service's failure stops being
+          # everyone else's.
+          printf '%s\n' ${PUSHED[@]+"${PUSHED[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/pushed.json"
+          printf '%s\n' ${FAILED_SVCS[@]+"${FAILED_SVCS[@]}"} | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/failed.json"
+          DIGESTS='{}'
+          for svc in "${PUSHED[@]}"; do
+            digest="$(cat "${RUNNER_TEMP}/image-digest-${svc}")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::invalid buildx digest for ${svc}"; exit 1; }
+            DIGESTS="$(jq -cn --argjson old "$DIGESTS" --arg k "$svc" --arg v "$digest" '$old + {($k): $v}')"
+          done
+          echo "digests=${DIGESTS}" >> "$GITHUB_OUTPUT"
+          {
+            echo "pushed=$(cat "$RUNNER_TEMP/pushed.json")"
+            echo "failed=$(cat "$RUNNER_TEMP/failed.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> pushed: $(cat "$RUNNER_TEMP/pushed.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
+
+      # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
+      # verify-openbank-image-sbom-attestation-cel (Deny) also verifies the image signature
+      # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
+      # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
+      # used to push without signing, which is the other half of why deploys never landed.
+      # cosign v2 is pinned on purpose: kyverno 3.2.6 finds only the legacy sha256-<digest>.sig
+      # tag scheme; cosign v3 writes OCI-referrer sigs it cannot read (see #770).
+      - name: Refresh AWS credentials before image signing
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
+      - name: Sign images (cosign v2 + KMS)
+        run: |
+          set -uo pipefail
+          SERVICES='${{ steps.push.outputs.pushed }}'
+          # `resolve_cosign_v2` and the v2 pin live in the shared helper — this step used to
+          # carry its own copy of both. Sign and attest stay two steps because the trivy CVE
+          # gate runs between them, so this uses the resolver directly rather than
+          # `cosign_sign_and_attest`.
+          . openbank-infra/scripts/lib/cosign-attest.sh
+          bin="$(resolve_cosign_v2 || true)"
+          if [ -z "$bin" ]; then
+            echo "::error::cosign v2 unavailable — images would be pushed UNSIGNED and kyverno would reject them"
+            exit 1
+          fi
+          rc=0
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; rc=1; continue; }
+            img="${ECR_REGISTRY}/${svc}@${digest}"
+            # Refuse an OCI index before it is signed (#11573) — the helper's guard.
+            assert_single_image_manifest "$img" || { echo "::error::${svc} was pushed as an OCI index"; rc=1; continue; }
+            echo "==> cosign sign ${img}"
+            COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$img" || { echo "::error::cosign sign failed for ${svc}"; rc=1; }
+          done
+          [ "$rc" -eq 0 ] || { echo "One or more image signatures failed — kyverno would reject these"; exit 1; }
+
+      # Scan the images that were actually pushed — the trivy fs scan in
+      # security.yml covers lockfiles in the repo, NOT the packaged jars + OS
+      # layer of the runtime image (base-image CVEs slip through it). Gate on
+      # fixable CRITICALs: vuln_management SLA is 7 days for critical, so
+      # deploying a known-fixable CRITICAL is pointless churn. HIGH is reported
+      # advisory. A failed gate fails this job → the gitops PR never opens →
+      # the vulnerable tag is never referenced by a manifest.
+      # This job runs on a GitHub-hosted runner (ubuntu-24.04-arm, not ARC), which
+      # never has trivy pre-baked — the old "ARC bakes it" fast path always missed
+      # here and fell through to an unauthenticated raw.githubusercontent.com curl,
+      # which is rate-limited on the shared hosted-runner IP pool and started
+      # failing every build-push run. Use the same maintained, commit-pinned setup
+      # action the `trivy` job in security.yml already relies on for this exact
+      # hosted-runner scenario.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
+      - name: Prune Docker build cache before scan
+        run: |
+          # Remove buildx builder, stopped containers, dangling images, and build cache
+          # accumulated during the push phase. Without this, the node accumulates multiple
+          # ARM64 image layers + buildx volumes and hits DiskPressure or OOM during the
+          # Trivy scan when it pulls the ECR images again for analysis. The pushed images
+          # are already in ECR; we only need disk space for Trivy to re-pull and scan them.
+          docker buildx rm ob-deploy-builder 2>/dev/null || true
+          docker system prune -f --volumes 2>/dev/null || true
+          df -h /
+
+      - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
+        id: scan
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          SERVICES='${{ steps.push.outputs.pushed }}'
+          DIGESTS='${{ steps.push.outputs.digests }}'
+          FAILED=0
+          DEPLOYABLE=(); BLOCKED=()
+
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            # Mirror push_one's skip: no fast-jar → nothing was pushed.
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$DIGESTS")"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; FAILED=1; BLOCKED+=("$svc"); continue; }
+            image="${ECR_REGISTRY}/${svc}@${digest}"
+
+            echo "==> [${svc}] trivy image ${image}"
+            # Advisory report — full HIGH+CRITICAL table in the job log.
+            # `|| true`: --exit-code 0 covers vuln-found, but trivy still exits
+            # non-zero on infra errors; blocking is the gate run's job below,
+            # which reports them cleanly instead of an opaque set -e abort.
+            trivy image --scanners vuln --severity CRITICAL,HIGH \
+              --ignore-unfixed --format table --exit-code 0 "${image}" \
+              2>&1 | sed "s/^/[${svc}] /" || true
+
+            # Gate — fixable CRITICALs (or a scan error) block the deploy.
+            if ! trivy image --scanners vuln --severity CRITICAL \
+                 --ignore-unfixed --quiet --exit-code 1 "${image}" \
+                 2>&1 | sed "s/^/[${svc}] /"; then
+              echo "[${svc}] fixable CRITICAL CVEs (or scan error) — blocking deploy"
+              BLOCKED+=("$svc"); FAILED=1
+            else
+              DEPLOYABLE+=("$svc")
+            fi
+          done
+
+          # Same shape as the push step, one stage later (#9715, #9714). A CVE in ONE service
+          # must block THAT service's deploy — which is the gate working — and must not skip
+          # `Gitops PR` and `Deploy signal` for every other service in the run. Measured
+          # 2026-09-11: openbank-kyb-service had fixable CRITICALs, so this line exited 1 and
+          # a run in which every other image had been built, pushed and scanned cleanly
+          # deployed nothing at all.
+          #
+          # The blocked service simply does not reach `collect`, so no gitops manifest is
+          # repinned to its new tag and it keeps running the image it was already running.
+          # That is the correct outcome for a vulnerable image: not deployed, not silently
+          # deployed anyway, and not a reason to freeze the fleet.
+          printf '%s\n' ${DEPLOYABLE[@]+"${DEPLOYABLE[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/deployable.json"
+          printf '%s\n' ${BLOCKED[@]+"${BLOCKED[@]}"} \
+            | jq -Rsc 'split("\n")|map(select(length>0))' > "$RUNNER_TEMP/cve-blocked.json"
+          {
+            echo "deployable=$(cat "$RUNNER_TEMP/deployable.json")"
+            echo "cve_blocked=$(cat "$RUNNER_TEMP/cve-blocked.json")"
+          } >> "$GITHUB_OUTPUT"
+          echo "==> deployable after the CVE gate: $(cat "$RUNNER_TEMP/deployable.json")"
+          [ "$FAILED" -eq 0 ] || \
+            echo "::warning::fixable CRITICAL CVEs blocked $(cat "$RUNNER_TEMP/cve-blocked.json") — the run fails in push-failures; the rest of the fleet deploys"
+
+      # Deploy-time provenance: attach a signed CycloneDX SBOM ATTESTATION to each pushed
+      # image (ADR-0030 D4), complementing the release-time bundle (release-please.yml) and
+      # the image SIGNATURE above. trivy generates the image SBOM (OS layer + jars, which a
+      # source scan misses); cosign attest binds it to the image digest with the same KMS key.
+      #
+      # FATAL as of 2026-07-16. The two comments this step used to carry — "kyverno enforces
+      # the signature, not (yet) the attestation" and "an attest hiccup must never block a
+      # deploy" — were both false once verify-openbank-image-sbom-attestation (now -cel) graduated to
+      # Enforce on 2026-07-12. They were the entire bug: `trivy image` was missing --platform
+      # (it defaults to linux/amd64 on REMOTE scans; these images are arm64-only), so the scan
+      # failed with "no child with platform linux/amd64 in index" on EVERY image, the failure
+      # became a ::warning, continue-on-error swallowed it, and the deploy proceeded green with
+      # an unattested image. Nothing noticed until a pod rescheduled days later and could not
+      # be re-admitted.
+      #
+      # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
+      # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
+      - name: Refresh AWS credentials before image attestations
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build-aws-credentials
+
+      - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
+        # A full-fleet docs rebuild attests every pushed image in sequence. The
+        # previous 15-minute cap stopped after successful image pushes, leaving
+        # the remaining images unattested and preventing the GitOps rollout.
+        timeout-minutes: 30
+        run: |
+          set -uo pipefail
+          SERVICES='${{ steps.scan.outputs.deployable }}'
+          DIGESTS='${{ steps.push.outputs.digests }}'
+          # The trivy invocation, the cosign-v2 pin, the mandatory --platform and the
+          # post-attest proof all live in the shared helper, which every build-push-*.sh
+          # already uses. This step carried its own copy and so missed the hardening added
+          # in #1197: `cosign attest` APPENDS to the .att tag, and a bare
+          # `verify-attestation` passes if ANY envelope verifies — so it could not tell that
+          # THIS run's SBOM landed, only that some envelope on the image was good. The helper
+          # sanity-checks the SBOM (parses, bomFormat, non-zero components) and binds the
+          # verify to the CycloneDX serialNumber trivy mints per run.
+          . openbank-infra/scripts/lib/cosign-attest.sh
+          rc=0
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$DIGESTS")"
+            [ -n "$digest" ] || { echo "::error::missing pushed digest for ${svc}"; rc=1; continue; }
+            image="${ECR_REGISTRY}/${svc}@${digest}"
+            # Per-service rc rather than an early exit: report EVERY broken image in one run,
+            # so a second failure is not hidden behind the first.
+            if ! cosign_attest_sbom "$image" "linux/arm64"; then
+              echo "::error::[${svc}] SBOM attestation failed — image UNATTESTED and undeployable"
+              rc=1; continue
+            fi
+            # SLSA build provenance (ADR-0030 D4, #8590 #14): binds the image to the repo/commit/
+            # workflow/run that built it — the claim neither the signature nor the SBOM attestation
+            # carries. Fatal in CI even though no admission policy checks SLSA right now: the
+            # kyverno SLSA policy was removed from admission (#9805 item 4 — v1.12.5 lets any
+            # verify policy's verdict overwrite the others per image) and returns once Kyverno
+            # scopes verdicts per policy, so an image built without provenance today is the
+            # redeploy worklist on that day. 12 such images existed when it was removed.
+            if ! ARTIFACT_SOURCE_SHA="$SOURCE_COMMIT" cosign_attest_slsa_provenance "$image"; then
+              echo "::error::[${svc}] SLSA provenance attestation failed"
+              rc=1; continue
+            fi
+            echo "    [${svc}] attested + verified (SBOM + SLSA provenance)"
+          done
+          [ "$rc" -eq 0 ] || {
+            echo "::error::One or more images are UNATTESTED. kyverno (verify-openbank-image-sbom-attestation-cel, Deny) will DENY their pods on the next reschedule."
+            exit 1
+          }
+
+      # Fleet SBOM attestation — the gate that binds the deploy (issue #2947).
+      #
+      # `fleet-attestation.yml` runs exactly this check on gitops PRs, and it is not one of the
+      # five required contexts — it cannot be, being `paths:`-filtered, since GitHub holds a
+      # path-filtered required context as permanently "Expected". So the auto-deploy snapshot PR
+      # auto-merged without waiting for it: measured, 8 of the last 10 merged 24-65 s BEFORE the
+      # gate finished. All eight passed, which is luck about timing rather than a property of the
+      # process.
+      #
+      # What that risks is not a red deploy. Kyverno verifies at ADMISSION, not continuously, so
+      # an unattested image whose pods are already running keeps running, and is denied the next
+      # time anything reschedules it — a deploy that looks fine for days and then cannot come
+      # back. That is the admin-ui outage of 2026-07-09.
+      #
+      # HERE rather than in `Validate manifests`: this is the earliest point at which the answer
+      # can be known, and the PR then cannot exist for an unattested fleet at all. It also needs
+      # no new permission — this job already holds `id-token: write` and an ECR login for the
+      # push and the attestation above — whereas the required-check placement would have put
+      # `id-token: write` on a job that runs on every PR in the repo.
+      #
+      # AFTER the attestation step, never racing it: #1226 is exactly what a cancellation between
+      # `Docker push` and `Attest image SBOMs` costs. The images built by THIS run are already
+      # proven by that step (it binds the verify to the serialNumber trivy minted per image); what
+      # this adds is every OTHER image the fleet still declares, which is where a latent gap
+      # actually hides. A failure here fails `build-push`, and `gitops-pr` needs it — so no
+      # manifest PR is opened.
+      #
+      # The daily schedule on `fleet-attestation.yml` stays, and is not made redundant: a latent
+      # gap can appear with no deploy at all (a registry lifecycle rule, a hand-pushed image).
+      #
+      # Exit 2 ("the probe could not run", #1915) also fails this step, deliberately: on the
+      # deploy path an unchecked fleet must not open a gitops PR. The distinction still
+      # matters for the OPERATOR — a 2 is a registry/credential problem to re-run, never an
+      # image to rebuild — and the script says which one it is in its own last two lines.
+      - name: Fleet SBOM attestation gate (issue #2947)
+        timeout-minutes: 20  # measured max 198s on the same check in fleet-attestation.yml
+        run: bash .github/scripts/check-fleet-attestations.sh
+
+      - name: Collect image tags
+        id: collect
+        run: |
+          set -euo pipefail
+          # The CVE-gate survivors, NOT everything that pushed: this map is what repins the
+          # gitops manifests, so a service blocked by a fixable CRITICAL must not appear in it
+          # — otherwise the vulnerable tag deploys anyway and the gate was decorative (#9714).
+          SERVICES='${{ steps.scan.outputs.deployable }}'
+          TAG="${{ steps.build.outputs.tag }}"
+
+          # Emit { "openbank-account-service": "sandbox-abc1234", … }
+          # -c (compact) is required: a pretty-printed (multi-line) jq value breaks the
+          # `key=value` $GITHUB_OUTPUT format ("Invalid format") — this step never ran
+          # before the credentials fix let the pipeline reach it.
+          MAP="{}"
+          DIGEST_MAP="{}"
+          for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            MAP="$(echo "$MAP" | jq -c --arg k "$svc" --arg v "$TAG" '. + {($k): $v}')"
+            digest="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< '${{ steps.push.outputs.digests }}')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::missing or invalid pushed digest for ${svc}"; exit 1; }
+            DIGEST_MAP="$(echo "$DIGEST_MAP" | jq -c --arg k "$svc" --arg v "$digest" '. + {($k): $v}')"
+          done
+          echo "image_tags=${MAP}" >> "$GITHUB_OUTPUT"
+          echo "image_digests=${DIGEST_MAP}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Require complete target evidence
+        env:
+          PUSHED: ${{ steps.push.outputs.pushed }}
+          FAILED: ${{ steps.push.outputs.failed }}
+          QUALIFIED: ${{ steps.scan.outputs.deployable }}
+          BLOCKED: ${{ steps.scan.outputs.cve_blocked }}
+          DIGESTS: ${{ steps.collect.outputs.image_digests }}
+        run: |
+          set -euo pipefail
+          jq -e 'sort == ["openbank-communication-service"]' <<< "$PUSHED"
+          jq -e 'length == 0' <<< "$FAILED"
+          jq -e 'length == 0' <<< "$BLOCKED"
+          jq -e 'sort == ["openbank-communication-service"]' <<< "$QUALIFIED"
+          digest=$(jq -er '."openbank-communication-service"' <<< "$DIGESTS")
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          mkdir -p image-evidence
+          trivy image --platform linux/arm64 --scanners vuln --format json \
+            --output image-evidence/scan.json "${ECR_REGISTRY}/openbank-communication-service@${digest}"
+          jq -n --arg source "$SOURCE_COMMIT" --arg workflow "$GITHUB_SHA" \
+            --arg digest "$digest" --arg run "$GITHUB_RUN_ID" \
+            '{source:$source,workflow:$workflow,digest:$digest,run:$run,contractQualification:"separate-required-verdict",deploymentPerformed:false}' \
+            > image-evidence/identity.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: communication-image-evidence-${{ github.run_id }}
+          path: image-evidence/
+          if-no-files-found: error
