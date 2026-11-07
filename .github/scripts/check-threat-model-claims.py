@@ -913,14 +913,29 @@ def fetch_latest_evidence(dest: pathlib.Path) -> tuple[list[pathlib.Path], dict 
             capture_output=True, text=True, timeout=120, check=True)
         from concurrent.futures import ThreadPoolExecutor
 
-        def pull(name: str) -> None:
-            if not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name):
-                raise ValueError("invalid artifact name")
-            subprocess.run(["gh", "run", "download", str(run["id"]), "-R", repo, "-n", name,
-                            "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
+        names = listing.stdout.split()
+        if len(set(names)) != len(names) or any(
+                not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name) for name in names):
+            raise ValueError("invalid or duplicate artifact name")
+
+        def pull(batch: list[str]) -> None:
+            # Each gh invocation lists the run's artifacts again. Partition the exact names
+            # among at most eight downloaders instead of repeating that listing per artifact.
+            # gh extracts multi-name downloads into name directories, single-name ones directly
+            # into -D. Preserve the original tree and the eight-transfer concurrency ceiling.
+            directory = dest / batch[0] if len(batch) == 1 else dest
+            command = ["gh", "run", "download", str(run["id"]), "-R", repo, "-D", str(directory)]
+            for name in batch:
+                command.extend(["-n", name])
+            subprocess.run(command, capture_output=True, text=True, timeout=120 * len(batch), check=True)
+            # gh can succeed when only some requested names remain available. An expired or
+            # missing artifact must invalidate the whole fetch, just as a failed individual pull.
+            if any(not (dest / name).is_dir() for name in batch):
+                raise ValueError("incomplete artifact download")
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(pull, listing.stdout.split()))
+            workers = min(8, len(names))
+            list(pool.map(pull, [names[i::workers] for i in range(workers)]))
     except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError, TypeError, AttributeError):
         return [], None
     return [dest], run
@@ -1317,6 +1332,52 @@ def self_test() -> int:
                     "repository": {"full_name": "JiRaska/open-bank-oss"},
                     "head_repository": {"full_name": "JiRaska/open-bank-oss"},
                     "html_url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "status": "completed"}
+        # Exact-name batching must preserve completeness, failure and provenance semantics.
+        for count, fault in [(0, ""), (1, ""), (7, ""), (9, ""), (86, ""),
+                             (9, "missing"), (9, "download"), (9, "listing"),
+                             (9, "invalid"), (9, "duplicate"), (9, "pending")]:
+            names = [f"test-intelligence-run-{i}" for i in range(count)]
+            downloaded = []
+            selected = {**_trusted, "status": "in_progress"} if fault == "pending" else _trusted
+            with tempfile.TemporaryDirectory() as scratch:
+                destination = pathlib.Path(scratch)
+
+                def fake_gh(command, *, selected=selected, fault=fault, names=names,
+                            downloaded=downloaded, **kwargs):
+                    if command[1] == "api":
+                        if "workflows/" in command[2]:
+                            body = json.dumps({"workflow_runs": [selected]})
+                        else:
+                            if fault == "listing":
+                                raise subprocess.CalledProcessError(1, command)
+                            listed = names + (["../escape"] if fault == "invalid" else [])
+                            if fault == "duplicate":
+                                listed += names[:1]
+                            body = "\n".join(listed)
+                        return subprocess.CompletedProcess(command, 0, stdout=body)
+                    batch = [command[i + 1] for i, value in enumerate(command) if value == "-n"]
+                    downloaded.append(batch)
+                    if fault == "download":
+                        raise subprocess.CalledProcessError(1, command)
+                    target = pathlib.Path(command[command.index("-D") + 1])
+                    for name in batch:
+                        if fault == "missing" and name == names[0]:
+                            continue  # gh may exit zero on a partial name match
+                        (target / name if len(batch) > 1 else target).mkdir(parents=True, exist_ok=True)
+                    return subprocess.CompletedProcess(command, 0, stdout="")
+
+                with patch("subprocess.run", side_effect=fake_gh):
+                    fetched, metadata = fetch_latest_evidence(destination)
+                label = f"fetch batching: {count} artifacts {fault or 'complete'}"
+                if fault:
+                    case(label + " stays unresolved", (fetched, metadata), ([], None))
+                    if fault in {"listing", "invalid", "duplicate", "pending"}:
+                        case(label + " never downloads", downloaded, [])
+                else:
+                    case(label + " retains trusted run", (fetched, metadata), ([destination], _trusted))
+                    case(label + " fetches every exact name once",
+                         sorted(n for batch in downloaded for n in batch), sorted(names))
+                    case(label + " bounds listing repetitions", len(downloaded), min(8, count))
         def _env(seen, cases):
             return {"schemaVersion": 1, "component": "openbank-x", "run": {
                 "id": "1", "attempt": 1, "commit": "a" * 40, "branch": "main", "workflow": "Services CI",
