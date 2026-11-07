@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: admin-ui-referral-ca
+  namespace: admin-ui
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: admin-ui-referral-ca
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - admin-ui.admin-ui.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

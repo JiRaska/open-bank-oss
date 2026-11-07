@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0324 Phase 2, step 1 of 2 — the grants and the certificate for admin.open-bank.tech on
+# the shared Gateway, landed BEFORE anything references them.
+#
+# WHY A SEPARATE, EARLIER CHANGE. The Gateway (envoy-gateway-config) and this namespace
+# (admin-ui) are different Argo apps with no ordering between them. Phase 1 switched
+# langfuse's listener in the same sync that created its ReferenceGrant and the listener was
+# left RefNotPermitted (2026-10-03). So this file lands and syncs first; the listener that
+# names `admin-edge-tls`, the tool HTTPRoutes and their SecurityPolicies follow in the next
+# change (feat/gateway-api-phase-2).
+#
+# WHY ITS OWN CERTIFICATE and not `admin-ui-tls`. cert-manager runs with
+# --enable-certificate-owner-ref, so `admin-ui-tls` is owned by its Ingress-shim Certificate,
+# which is owned by the `admin-ui` Ingress: deleting that Ingress after the cutover would
+# garbage-collect the Secret a Gateway listener served. No key pinning exists for this host,
+# so a fresh key is harmless. Same shape as pact-edge-tls / langfuse-edge-tls.
+#
+# Nothing here changes traffic: no listener names these yet, and the nginx Ingresses keep
+# serving admin.open-bank.tech from `admin-ui-tls`.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: admin-edge-tls
+  namespace: admin-ui
+spec:
+  secretName: admin-edge-tls
+  dnsNames:
+    - admin.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+# The Gateway may read the edge certificate. `admin-ui-tls` is admitted too, so a rollback of
+# the listener to the Ingress-owned Secret needs no grant change while that Secret exists.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: edge-gateway-tls
+  namespace: admin-ui
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: admin-ui-tls
+    - group: ""
+      kind: Secret
+      name: admin-edge-tls
+---
+# The identity-aware gate (ADR-0234) on the Gateway: a SecurityPolicy in `observability`, next
+# to the tool HTTPRoutes it gates, names the admin-ui Service as its extAuth backend. A
+# cross-namespace backendRef needs this grant, and it admits that one Service only — not the
+# namespace — so no other policy in `observability` can point anything else at admin-ui.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: tools-gate-extauth
+  namespace: admin-ui
+spec:
+  from:
+    - group: gateway.envoyproxy.io
+      kind: SecurityPolicy
+      namespace: observability
+  to:
+    - group: ""
+      kind: Service
+      name: admin-ui
