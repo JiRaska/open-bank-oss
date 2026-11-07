@@ -83,6 +83,28 @@ MARSHAL_VERSION = 4
 _parse_cache: dict[str, list] = {}
 
 
+def hermetic_git_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    """An environment in which `git init` / `git commit` behave identically on a Mac and on the runner.
+
+    A fixture that commits with no identity works on macOS (git derives one from the account) and
+    fails on ubuntu-latest with "Please tell me who you are" (#14697); a fixture that does not
+    neutralise signing fails the other way round for anyone whose global config signs commits.
+    This sets a fixed identity, points the global and system config at /dev/null (so no
+    `commit.gpgsign`, hook path, or credential helper leaks in), and refuses terminal prompts.
+    `check-git-fixture-hermetic.py` accepts its name as proof on both counts."""
+    env = dict(os.environ if base is None else base)
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_INDEX_FILE", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.update({
+        "GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+        "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid",
+        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return env
+
+
 def _disk_dir() -> pathlib.Path | None:
     d = os.environ.get(CACHE_DIR_ENV)
     if not d:

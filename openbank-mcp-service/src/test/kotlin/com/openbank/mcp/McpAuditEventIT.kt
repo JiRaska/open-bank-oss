@@ -5,6 +5,7 @@ package com.openbank.mcp
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.mcp.application.McpToolRegistry
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -39,6 +40,9 @@ class McpAuditEventIT {
 
     @Inject
     lateinit var recorder: RecordingAuditEventPublisher
+
+    @Inject
+    lateinit var registry: McpToolRegistry
 
     @BeforeEach
     fun reset() = recorder.clear()
@@ -125,6 +129,57 @@ class McpAuditEventIT {
         assertThat(event.result).isEqualTo(AuditResult.DENIED)
         assertThat(event.payload["reason"]).isEqualTo("caller authentication failed")
         assertThat(event.payload["tools_total"]).isEqualTo(8)
+    }
+
+    @Test
+    @TestSecurity(user = "agent:domain-metadata")
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "agent:domain-metadata"),
+            Claim(key = "consent_id", value = TEST_CONSENT_ID),
+        ],
+    )
+    fun `served tool discovery retains policy filtering and advertises canonical ownership`() {
+        // All eight real CDI registrations carry canonical ownership. The existing test PDP
+        // deliberately advertises only list_accounts; metadata must not expand that permission.
+        val expectedDomains = mapOf(
+            "list_accounts" to "Accounts & deposits",
+            "get_balance" to "Accounts & deposits",
+            "list_transactions" to "Financial accounting",
+            "list_consents" to "Open banking",
+            "get_statement" to "Accounts & deposits",
+            "get_payment_confirmation" to "Payments",
+            "count_marketing_consents" to "Open banking",
+            "propose_payment" to "Channels",
+        )
+        assertThat(registry.tools.associate { it.name to it.domain })
+            .containsExactlyInAnyOrderEntriesOf(expectedDomains)
+        val expectedServices = mapOf(
+            "list_accounts" to "openbank-account-service",
+            "get_balance" to "openbank-balance-service",
+            "list_transactions" to "openbank-transaction-service",
+            "list_consents" to "openbank-consent-service",
+            "get_statement" to "openbank-statement-service",
+            "get_payment_confirmation" to null,
+            "count_marketing_consents" to "openbank-consent-service",
+            "propose_payment" to "openbank-mcp-service",
+        )
+        assertThat(registry.tools.associate { it.name to it.service })
+            .containsExactlyInAnyOrderEntriesOf(expectedServices)
+
+        val body = given()
+            .contentType(ContentType.JSON)
+            .body("""{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}""")
+            .post("/mcp")
+            .then()
+            .statusCode(200)
+            .extract()
+            .jsonPath()
+        assertThat(body.getList<String>("result.tools.name")).containsExactly("list_accounts")
+        assertThat(body.getString("result.tools[0].domain")).isEqualTo("Accounts & deposits")
+        assertThat(body.getString("result.tools[0].service")).isEqualTo("openbank-account-service")
+        assertThat(body.getString("result.tools[0].inputSchema.type")).isEqualTo("object")
+        assertThat(singleEvent().result).isEqualTo(AuditResult.SUCCESS)
     }
 
     // ADR-0195 step 4 (BLOCKER #2206): a tools/call with NO agent token must be denied, never

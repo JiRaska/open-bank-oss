@@ -371,6 +371,10 @@ class RuntimeResourceInputsTest(unittest.TestCase):
                 path = f"{service}/{name}"
                 if path in snapshot.modes:
                     self.assertTrue(triggered(path), f"runtime consumer build declaration is not triggered: {path}")
+        for service in ("openbank-agent-service", "openbank-mcp-service"):
+            self.assertIn(service, consumers, f"{service}: MCP ownership must be an image runtime input")
+            self.assertTrue({"openbank-*/governance.yaml", "openbank-libs/governance/domain-taxonomy.json"}
+                            <= set(working.patterns(service)), service)
         self.assertTrue(consumers, "real source corpus unexpectedly contains no resource consumers")
         self.assertTrue(covered_inputs, "real source corpus unexpectedly contains no tracked runtime inputs")
 

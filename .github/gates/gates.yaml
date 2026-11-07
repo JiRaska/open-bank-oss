@@ -2126,6 +2126,26 @@ gates:
   # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
   # is required while dependency-submission is not. Their wrapper-download retry keeps
   # a transient transport reset from turning into an unrelated governance failure.
+  # A fixture that commits with no identity works on a Mac (git derives one) and fails on the
+  # runner (#14697); one that does not neutralise signing fails the other way for anyone whose
+  # global config signs. Measured 2026-11-03: 38 git fixtures under .github/scripts, 37 with an
+  # identity in the file or through merge-train.py's Git helper, 28 with signing neutralised.
+  # gatelib.hermetic_git_env() is the shared form for new fixtures; migration is not required.
+  - id: git-fixture-hermetic
+    name: "a git fixture under .github/scripts names its identity and neutralises signing"
+    group: lint
+    mode: enforced
+    rationale: "test-check-deploy-source-freshness.py committed with no git identity: green on every Mac, red the first time the runner ran it (#14697). The scanner proves a fixture names the settings — the decidable half, and the half that was missing."
+    review_after: "2027-05-03"
+    budget_seconds: 15
+    min_subjects: 30   # 38 fixtures on 2026-11-03
+    selftest_inputs: [".github/scripts/check-git-fixture-hermetic.py"]
+    selftest: |
+      python3 .github/scripts/check-git-fixture-hermetic.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-git-fixture-hermetic.py --root .
+
   - id: governance-script-unit-tests
     selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
