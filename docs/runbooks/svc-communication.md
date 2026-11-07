@@ -8,15 +8,6 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `communication` service. Data domain **engagement**,
 > classification **internal**, datastore **PostgreSQL**.
 
-## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
-
-**GitOps deliberately declares zero replicas for this workload.** This is not a live
-service and does not authorize a replica increase, restart, log inspection, traffic claim,
-or metrics/health assertion. Activation remains the separately reviewed step after the
-pinned image, GitOps sync, and live cluster-health evidence are available. After that
-step, health must be checked on the management endpoint `:8086`;
-the public HTTP port is not a health-evidence substitute.
-
 ## Service identity
 
 | Field | Value |
@@ -37,13 +28,24 @@ the public HTTP port is not a health-evidence substitute.
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `communication`.
 
-## Runtime operations — DEFERRED
+## Activation and verification
 
-Do not increase replicas, restart, or use log/metrics commands to activate this staged
-workload. The reviewed activation procedure must first establish the signed image,
-GitOps sync, and actual cluster health. The declared probes are:
+This change proposes one replica; it is not evidence of a running workload. Keep the
+activation PR draft with auto-merge disabled until the final reviewed head has explicit
+operator approval and the standard deployment-window prerequisites pass.
 
-- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
+Before approval, retain evidence for the exact pinned image: vulnerability verdict,
+signature, SBOM and provenance, source freshness, real customer-edge consumer publication,
+provider verification and the strict deployment contract verdict. Manifest checks alone
+cannot qualify the workload. Preserve independent deployment holds.
+
+After the approved GitOps rollout, verify the actual running image digest and readiness
+on the management endpoint `:8086/q/health/ready`, then customer-edge app-copy and the
+authenticated admin editor flow. Do not publish customer content as a health probe.
+A Healthy Application with zero replicas is not workload health evidence.
+
+Rollback through a reviewed GitOps change restoring replicas to zero, retaining the
+database and published copy. Do not use manual scaling or restarts to bypass this process.
 
 ## Common failure modes
 
