@@ -1593,7 +1593,8 @@ def api_stats_line(mode: str) -> str:
             f"resource={API_STATS['resource'] or '?'}")
 
 
-def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
+def api(method: str, path: str, body: dict | None = None, token: str | None = None) -> tuple[int, object]:
+    """`token` overrides GH_TOKEN for this one call (only update_branch passes one)."""
     data = json.dumps(body).encode() if body is not None else None
     memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
             and GET_MEMO_RE.match(path) is not None)
@@ -1606,7 +1607,7 @@ def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
         req = urllib.request.Request(API + path, method=method, data=data)
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("X-GitHub-Api-Version", "2022-11-28")
-        req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+        req.add_header("Authorization", f"Bearer {token or os.environ['GH_TOKEN']}")
         API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
@@ -2075,8 +2076,15 @@ class GitHub:
         return data if isinstance(data, list) else None
 
     def update_branch(self, n: int, head: str) -> bool:
-        """Merge main into the PR branch, pinned to the head the strict lane judged."""
-        code, detail = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
+        """Merge main into the PR branch, pinned to the head the strict lane judged.
+
+        Uses UPDATE_BRANCH_TOKEN (a dedicated App holding `workflows: write`) when settle minted one: the
+        GitOps App lacks that permission, so GitHub refuses with 403 whenever main changed a workflow file
+        since the PR's base. Empty (mint failed / key unset) falls back to GH_TOKEN — today's behaviour."""
+        override = os.environ.get("UPDATE_BRANCH_TOKEN", "")
+        log(f"#{n:>6} update-branch credential: {'branch-updater App' if override else 'GH_TOKEN (GitOps App)'}")
+        code, detail = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head},
+                           token=override or None)
         if code != 202:
             log(f"#{n:>6} update-branch answered {code}: {json.dumps(detail)[:300]}")
         return code == 202
@@ -3842,12 +3850,23 @@ JOB_MUST = {
                                                            # the carrier branch from its own run and carries the cap.
                                                            ("settle names the strict carrier from its run id", '--run-id "${{ github.run_id }}"'),
                                                            ("settle names the strict carrier from its attempt", '--attempt "${{ github.run_attempt }}"'),
-                                                           ("settle carries the strict batch cap", "STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}")],
+                                                           ("settle carries the strict batch cap", "STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}"),
+                                                           # update-branch credential: a dedicated App with workflows: write,
+                                                           # held in a main-only environment, narrowed at mint, optional.
+                                                           ("settle runs in the main-only branch-update environment", "environment: merge-train-branch-update"),
+                                                           ("settle mints the branch-updater token", "app-id: ${{ secrets.BRANCH_UPDATER_APP_ID }}"),
+                                                           ("branch-updater token narrowed: contents", "permission-contents: write"),
+                                                           ("branch-updater token narrowed: pull requests", "permission-pull-requests: write"),
+                                                           ("branch-updater token narrowed: workflows", "permission-workflows: write"),
+                                                           ("a failed branch-updater mint degrades, never fails settle", "continue-on-error: true"),
+                                                           ("settle hands the branch-updater token to update-branch", "UPDATE_BRANCH_TOKEN: ${{ steps.branch_updater_token.outputs.token }}")],
 }
 JOB_FORBID = {
-    "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_")],
+    "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_"),
+              ("build must not see the branch-updater key", "BRANCH_UPDATER_"), ("build never gets UPDATE_BRANCH_TOKEN", "UPDATE_BRANCH_TOKEN")],
     "publish": [("publish runs no repo script", "python3 .github/"), ("publish runs no generator", "regen-derived.sh"),
-                ("publish installs no opa", "openpolicyagent.org"), ("publish installs no pyyaml", "install-pyyaml")],
+                ("publish installs no opa", "openpolicyagent.org"), ("publish installs no pyyaml", "install-pyyaml"),
+                ("publish must not see the branch-updater key", "BRANCH_UPDATER_"), ("publish never gets UPDATE_BRANCH_TOKEN", "UPDATE_BRANCH_TOKEN")],
     "settle": [("settle runs no repo script", "python3 .github/"), ("settle runs no generator", "regen-derived.sh"),
                ("settle takes no artifact", "download-artifact"), ("settle installs no opa", "openpolicyagent.org")],
 }
@@ -3891,6 +3910,20 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
     return errors
 
 
+BRANCH_UPDATER_MARK = "BRANCH_UPDATER_"
+
+
+def workflow_texts() -> dict[str, str]:
+    d = WORKFLOW.parent
+    return {f.name: f.read_text() for f in sorted(d.glob("*.y*ml"))} if d.is_dir() else {}
+
+
+def branch_updater_spread_errors(texts: dict[str, str]) -> list[str]:
+    """The branch-updater App key (workflows: write) may be referenced by merge-train.yml ONLY."""
+    return [f"{name} references {BRANCH_UPDATER_MARK}* — that key belongs to merge-train.yml's settle job alone"
+            for name, text in sorted(texts.items()) if name != WORKFLOW.name and BRANCH_UPDATER_MARK in text]
+
+
 def check_declaration() -> int:
     if not WORKFLOW.exists():
         print(f"::error::{WORKFLOW} missing")
@@ -3915,7 +3948,8 @@ def check_declaration() -> int:
         fails.append("no job may read the event payload (github.event.* / github.head_ref): triggers carry no authority")
     if code.count("actions/checkout@") != len(re.findall(r"^\s+ref: main\s*$", code, re.MULTILINE)):
         fails.append("every actions/checkout must pin `ref: main` (pull_request_target/workflow_run run with secrets)")
-    if "contents: write" in code:
+    # Line-anchored: the branch-updater mint's `permission-contents: write` narrows an App token, not GITHUB_TOKEN.
+    if re.search(r"^\s*contents:\s*write\b", code, re.MULTILINE):
         fails.append("GITHUB_TOKEN must stay read-only (writes use the App token)")
     for job in JOB_MUST:
         sec = jobs.get(job)
@@ -3927,10 +3961,11 @@ def check_declaration() -> int:
     rules = pathlib.Path(RULES_FILE)
     if not parse_extra_gates(rules.read_text() if rules.exists() else ""):
         fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
+    fails += branch_updater_spread_errors(workflow_texts())
     fails += owner_approval_declaration_errors(OWNER_APPROVAL_WORKFLOW.read_text() if OWNER_APPROVAL_WORKFLOW.exists() else "")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(TOP) + 7 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
+    n = len(TOP) + 8 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0
@@ -3966,7 +4001,8 @@ SYN_GENERATOR_SRC = (
     "os.makedirs('derived',exist_ok=True)\n"
     "pathlib.Path('derived/index.txt').write_text('\\n'.join(sorted(os.listdir('services')))+'\\n')\n"
     "pathlib.Path(os.environ.get('PROBE_OUT') or os.devnull).write_text("
-    "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'keys': sorted(os.environ)}))\n"
+    "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'UPDATE_BRANCH_TOKEN': os.environ.get('UPDATE_BRANCH_TOKEN',''), "
+    "'keys': sorted(os.environ)}))\n"
     # Like regen-derived.sh's run_bundles: execute every bundle generator, at ANY depth.
     "import fnmatch,subprocess\n"
     "for r,_,fs in os.walk('openbank-infra/gitops'):\n"
@@ -4590,6 +4626,51 @@ def retry_planner_self_test(check) -> None:
 SELF_TEST_SPAWN_CEILING = 16200
 
 
+
+def branch_updater_self_test(check) -> None:
+    """update-branch credential choice (dedicated App with `workflows`, else GH_TOKEN) and the key-spread guard."""
+    saved = (globals()["_http_open"], os.environ.get("GH_TOKEN"), os.environ.get("UPDATE_BRANCH_TOKEN"), dict(_GET_MEMO))
+    seen: list[tuple[str, str]] = []
+
+    def fake_open(req, timeout):
+        seen.append((req.get_method(), req.get_header("Authorization") or ""))
+        return 202, b"{}", {}
+    globals()["_http_open"] = fake_open
+    try:
+        gh = GitHub("o/r", "main", "")
+        os.environ["GH_TOKEN"] = "ghs_GITOPS_FIXTURE"
+        os.environ["UPDATE_BRANCH_TOKEN"] = "ghs_UPDATER_FIXTURE"
+        ok = gh.update_branch(7, "a" * 40)
+        check("update-branch: the dedicated branch-updater token is used when set",
+              ok and seen[-1:] == [("PUT", "Bearer ghs_UPDATER_FIXTURE")], str(seen))
+        os.environ["UPDATE_BRANCH_TOKEN"] = ""
+        ok = gh.update_branch(7, "a" * 40)
+        check("update-branch: an empty branch-updater token (mint failed) falls back to GH_TOKEN",
+              ok and seen[-1:] == [("PUT", "Bearer ghs_GITOPS_FIXTURE")], str(seen))
+        os.environ["UPDATE_BRANCH_TOKEN"] = "ghs_UPDATER_FIXTURE"
+        api("GET", "/repos/o/r/pulls/7")
+        check("update-branch token: no other call carries it", seen[-1:] == [("GET", "Bearer ghs_GITOPS_FIXTURE")], str(seen))
+        env = generator_env()
+        check("generator env: UPDATE_BRANCH_TOKEN is stripped like GH_TOKEN",
+              "UPDATE_BRANCH_TOKEN" not in env and not any("TOKEN" in k for k in env), str(sorted(env)))
+    finally:
+        globals()["_http_open"] = saved[0]
+        for k, v in (("GH_TOKEN", saved[1]), ("UPDATE_BRANCH_TOKEN", saved[2])):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[3])
+    wf = "jobs:\n  settle:\n    steps:\n      - with:\n          app-id: ${{ secrets.BRANCH_UPDATER_APP_ID }}\n"
+    check("key spread: BRANCH_UPDATER_ only in merge-train.yml is clean",
+          branch_updater_spread_errors({"merge-train.yml": wf, "ci.yml": "jobs: {}\n"}) == [])
+    check("key spread: BRANCH_UPDATER_ in another workflow fails (must-fail)",
+          len(branch_updater_spread_errors({"merge-train.yml": wf, "deploy.yml": wf})) == 1)
+    check("key spread: the real tree is clean", branch_updater_spread_errors(workflow_texts()) == [],
+          str(branch_updater_spread_errors(workflow_texts())))
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -4601,6 +4682,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    branch_updater_self_test(check)
     git_memo_self_test(check)
 
     freshness = subprocess.run(
@@ -5182,8 +5264,9 @@ def self_test() -> int:
             check(f"admission (real gate): {label} -> {'admit' if want else 'refuse'}", (got is None) == want, str(got))
 
     # ---- real git, real ticks ----------------------------------------------------------------
-    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}
-    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "RUNNER_TEMP": "/runner/temp"})
+    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP", "UPDATE_BRANCH_TOKEN")}
+    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "RUNNER_TEMP": "/runner/temp",
+                       "UPDATE_BRANCH_TOKEN": "ghs_UPDATER_MUST_NOT_LEAK"})
     try:
         env = generator_env()
         check("generator env: no *TOKEN*, no RUNNER_TEMP, isolated git config",
@@ -5620,6 +5703,8 @@ def self_test() -> int:
             rec = json.loads(pathlib.Path(probe).read_text())
             check("exfiltration probe: the generator saw no GH_TOKEN and no *TOKEN* key",
                   rec["GH_TOKEN"] == "" and not any("TOKEN" in k for k in rec["keys"]), str(rec)[:160])
+            check("exfiltration probe: the generator saw no UPDATE_BRANCH_TOKEN (branch-updater App, workflows: write)",
+                  rec.get("UPDATE_BRANCH_TOKEN", "missing") == "", str(rec)[:160])
             reset()
 
             # A baseline edit under a generator overlay root: the overlay puts main's GENERATORS
