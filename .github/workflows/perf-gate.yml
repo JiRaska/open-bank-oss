@@ -355,13 +355,22 @@ jobs:
             --performance-summary "perf-reports/${{ matrix.service }}-summary.json" \
             --out "perf-reports/${{ matrix.service }}-run.json"
 
-      - name: Upload perf reports
+      # Preserve the summary/envelope and issue renderer's diagnostic filenames,
+      # but keep boot/k6 log tails bounded before constructing the report artifact.
+      - name: Stage bounded perf reports
+        id: stage-perf-reports
         if: always()
+        run: |
+          python3 .github/scripts/stage-perf-gate-report.py --service "${{ matrix.service }}"
+
+      - name: Upload perf reports
+        if: always() && steps.stage-perf-reports.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-reports-${{ matrix.service }}
-          path: perf-reports/
+          path: perf-upload/
           retention-days: 30
+          if-no-files-found: error
 
       # The Admin UI deploy collector intentionally reads only immutable, provenance-complete
       # `test-intelligence-run-*` artifacts. Keep the human-facing report bundle above, but
