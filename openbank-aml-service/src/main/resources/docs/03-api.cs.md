@@ -151,7 +151,7 @@ Odchozí topic: `openbank.aml.events` (JSON; partition key = aggregate id příp
 | Typ události | Spouštěč | Payload (klíčová pole) |
 |---|---|---|
 | `aml.case.created.v1` | `POST /aml/cases` nebo onboarding konzument | caseId, idempotencyKey, partyId, accountId, transactionId, customerReference, screeningType, riskLevel, status, alertCode, matchedEntity, occurredAt |
-| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt |
+| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt, transactionId, alertCode |
 
 Příchozí topic: `openbank.party.events` — konzumace `PARTY_CREATED` (skupina `openbank-aml-service`, `auto.offset.reset=earliest`).
 
