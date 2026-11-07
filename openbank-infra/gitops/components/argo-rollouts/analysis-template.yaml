@@ -15,10 +15,11 @@
 #             fieldPath: metadata.namespace
 #       - name: canary-hash
 #         valueFrom:
-#           podTemplateHashValue: Canary
+#           podTemplateHashValue: Latest
 #
 # Gate: both metrics must pass for the analysis to succeed. If either fails the
 # Rollout is automatically aborted and traffic is sent back to the stable replica set.
+# Empty/idle data is inconclusive: it cannot establish latency or error-rate health.
 #
 # Prometheus label note: kube-prometheus-stack PodMonitor relabeling propagates
 # the rollouts-pod-template-hash pod label onto the scraped time series so the
@@ -41,41 +42,32 @@ spec:
       # gives canary pods time to warm up (JVM/Quarkus lazy init, JDBC pool
       # stabilisation) and lets at least some real traffic accumulate so the
       # rate() window is non-empty. Without this the first measurement window
-      # often returns NaN → auto-success, hiding real early failures.
+      # can return NaN. This remains inconclusive until request data can support a verdict.
       initialDelay: 2m
       interval: 30s
-      # Require at least 2 consecutive successes before promoting.
-      successCondition: "len(result) == 0 || isNaN(result[0]) || result[0] < 0.01"
+      # Missing traffic or metric coverage is inconclusive, never a successful measurement.
+      successCondition: "len(result) == 1 && !isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] < 0.01"
       failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.05"
       count: 5
       failureLimit: 1
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          # An absent 5xx series is zero only when the same canary has request traffic.
+          # Filtering the denominator excludes idle/missing counters instead of fabricating a rate.
           query: |
-            sum(
-              rate(
-                http_server_requests_seconds_count{
-                  namespace="{{ args.namespace }}",
-                  rollouts_pod_template_hash="{{ args.canary-hash }}",
-                  status=~"5.."
-                }[2m]
-              )
+            (
+              sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!="", status=~"5.."}[2m]))
+              or
+              (0 * sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!=""}[2m])))
             )
             /
-            sum(
-              rate(
-                http_server_requests_seconds_count{
-                  namespace="{{ args.namespace }}",
-                  rollouts_pod_template_hash="{{ args.canary-hash }}"
-                }[2m]
-              )
-            )
+            (sum(rate(http_server_requests_seconds_count{namespace="{{ args.namespace }}", rollouts_pod_template_hash="{{ args.canary-hash }}", rollouts_pod_template_hash!=""}[2m])) > 0)
     - name: p95-latency
       initialDelay: 2m
       interval: 30s
       # 500 ms p95 gate — money-path SLO (ADR-0061).
-      successCondition: "len(result) == 0 || isNaN(result[0]) || result[0] < 0.5"
+      successCondition: "len(result) == 1 && !isNaN(result[0]) && !isInf(result[0]) && result[0] >= 0 && result[0] < 0.5"
       failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 1.0"
       count: 5
       failureLimit: 1
@@ -89,7 +81,8 @@ spec:
                 rate(
                   http_server_requests_seconds_bucket{
                     namespace="{{ args.namespace }}",
-                    rollouts_pod_template_hash="{{ args.canary-hash }}"
+                    rollouts_pod_template_hash="{{ args.canary-hash }}",
+                    rollouts_pod_template_hash!=""
                   }[2m]
                 )
               ) by (le)
