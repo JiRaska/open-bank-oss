@@ -1,5 +1,25 @@
 # Changelog
 
+## [4.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.2.0...admin-ui-v4.3.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** explain access preview roles and permissions in Czech and English ([#14997](https://github.com/JiRaska/open-bank-oss/issues/14997)) ([fe9b4d1](https://github.com/JiRaska/open-bank-oss/commit/fe9b4d17dd3ec06cbf5012ba752811279d8b523d))
+
+## [4.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.1.0...admin-ui-v4.2.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** preview role and permission catalog in settings ([#14980](https://github.com/JiRaska/open-bank-oss/issues/14980)) ([e1530f5](https://github.com/JiRaska/open-bank-oss/commit/e1530f5b31a0bde3b73064c42c6f45d08bcc8b7f))
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
 ## [4.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.0.0...admin-ui-v4.1.0) (2026-11-06)
 
 
