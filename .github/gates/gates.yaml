@@ -5267,6 +5267,7 @@ gates:
     budget_seconds: 300   # 40 selector runs over the real module tree
     min_subjects: 40
     run: |
+      python3 .github/scripts/test-communication-image-only.py
       python3 .github/scripts/test-service-ci-path-selection.py
 
   - id: gitops-image-pin-only
