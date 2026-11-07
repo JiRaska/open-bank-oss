@@ -146,7 +146,7 @@ spec:
               value: "false"
             # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
             # The OpenBao address is declared here so gen-network-policies.py derives the
-            # accounts -> vault:8200 egress. The MODE stays at the application default `disabled`
+            # accounts -> vault:8203 egress. The MODE stays at the application default `disabled`
             # (publish-ir answers 409, nothing is signed) until the Transit key `product-ir-publish`
             # and this service's kubernetes-auth role are provisioned; then set
             # CATALOG_IR_SIGNING_MODE=openbao here. `hmac` refuses to boot in this launch mode.

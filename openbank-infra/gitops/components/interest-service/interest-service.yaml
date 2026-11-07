@@ -83,7 +83,7 @@ spec:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
-            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8200 edge.
+            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8203 edge.
             # Verification stays at the application default `disabled` (nothing compared, counted) until
             # interest's verify-only role exists; then set INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
             # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
