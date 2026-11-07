@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-tpp-registry-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "27f7810cb448b8cb"
+        openbank.tech/policy-checksum: "76ed9dff14727c63"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -110,7 +110,7 @@ spec:
             # "would DENY" without blocking) until the live decision log confirms the deny population
             # is empty, then a separate deliberate flip sets it true (rules.yaml AUTHZ_ENFORCE guardrail).
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management

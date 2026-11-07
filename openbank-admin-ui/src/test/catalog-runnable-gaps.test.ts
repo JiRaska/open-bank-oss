@@ -12,7 +12,7 @@ const roots: string[] = []
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 
 describe('catalog evidence gaps for runnable apps', () => {
-  it('reports missing version, release registration, and governance for a suffixless runnable app', () => {
+  it('rejects absent ownership, then reports release gaps independently for a suffixless runnable app', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'catalog-runnable-gaps-'))
     roots.push(repo)
     const moduleDir = path.join(repo, 'openbank-analytics-sink')
@@ -24,12 +24,16 @@ describe('catalog evidence gaps for runnable apps', () => {
     writeFileSync(path.join(repo, 'release-please-config.json'), '{"packages":{}}\n')
     writeFileSync(path.join(repo, '.release-please-manifest.json'), '{}\n')
     const output = path.join(repo, 'catalog.json')
-    execFileSync('node', [generator, '--repo', repo, '--out', output], { stdio: 'pipe' })
+    const generate = () => execFileSync('node', [generator, '--repo', repo, '--out', output], { stdio: 'pipe' })
+    expect(generate).toThrow(/missing domain ownership/)
+    writeFileSync(path.join(moduleDir, 'governance.yaml'), 'dataDomain: platform\n')
+    generate()
     const catalog = JSON.parse(readFileSync(output, 'utf8'))
     const app = catalog.services.find((service: { name: string }) => service.name === 'openbank-analytics-sink')
     expect(app.runnable).toBe(true)
     expect(app.gaps).toContain('missing version.txt')
     expect(app.gaps).toContain('runnable backend component is not release-registered')
-    expect(app.gaps).toContain('runnable backend component has no governance.yaml')
+    expect(app.dataDomain).toBe('platform')
+    expect(app.gaps).not.toContain('runnable backend component has no governance.yaml')
   })
 })

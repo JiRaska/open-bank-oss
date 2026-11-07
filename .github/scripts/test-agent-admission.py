@@ -98,7 +98,7 @@ class AdmissionTest(unittest.TestCase):
 
     def test_code_ci_runs_only_for_code_events_with_trusted_pr_admission(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
-        steps = workflow['jobs']['agent-admission']['steps']
+        steps = [s for s in workflow['jobs']['agent-admission']['steps'] if not s.get('name', '').startswith('quota-meter')]
         checkout = steps[0]
         admission = steps[1]
         triggers = workflow.get('on', workflow.get(True))
@@ -111,7 +111,7 @@ class AdmissionTest(unittest.TestCase):
 
     def test_services_ci_admission_reads_current_trusted_base(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())
-        steps = workflow['jobs']['changes']['steps']
+        steps = [s for s in workflow['jobs']['changes']['steps'] if not s.get('name', '').startswith('quota-meter')]
         checkout = steps[0]
         admission = steps[1]
         self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')

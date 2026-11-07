@@ -1,0 +1,33 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+.panel { margin-top: 24px; padding: 20px; min-width: 0; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; margin: 20px 0 12px; }
+.toolbar > label { flex: 1 1 240px; min-width: 0; }
+.options { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+.options label, .roles label { display: flex; gap: 8px; align-items: baseline; }
+.picker { border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+.picker summary { cursor: pointer; font-weight: 600; }
+.roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; margin-top: 12px; }
+.roleActions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.scroll { overflow: auto; max-height: 65vh; border: 1px solid var(--border); border-radius: 8px; }
+.table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; }
+.table th, .table td { padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.table thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-2); min-width: 170px; max-width: 210px; vertical-align: top; box-shadow: 0 1px 0 var(--border); }
+.table thead th:first-child { left: 0; z-index: 4; text-align: left; }
+.table tbody th { position: sticky; left: 0; z-index: 1; text-align: left; }
+.table th:first-child { min-width: 260px; max-width: 320px; }
+.table tbody tr { background: var(--surface-1); }
+.table tbody tr:nth-child(even) { background: var(--surface-2); }
+.table tbody th { background: inherit; }
+.table tbody tr:hover { background: var(--surface-3); }
+.table td { text-align: center; border-left: 1px solid var(--border); }
+.table code { display: block; font-size: 10px; font-weight: 400; overflow-wrap: anywhere; margin-top: 4px; color: var(--text-secondary); }
+.description { font-weight: 400; white-space: normal; margin: 6px 0; color: var(--text-secondary); }
+.grant { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; background: var(--surface-3); }
+.source { font-size: 12px; color: var(--text-secondary); }
+.empty { padding: 16px; }
+@media (max-width: 600px) {
+  .panel { padding: 12px; }
+  .table th:first-child { min-width: 165px; max-width: 180px; }
+  .table thead th { min-width: 140px; }
+  .table th, .table td { padding: 8px; }
+}

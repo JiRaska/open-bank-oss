@@ -174,15 +174,33 @@ describe('sanctions list routes relay the bearer too (#3336 leftovers)', () => {
     expect(headersOf(lastFetchCall()[1]).Authorization).toBe('Bearer operator-token')
   })
 
-  it('POST /lists/[id]/refresh sends Authorization', async () => {
-    global.fetch = respond({ imported: 12 })
+  it('POST /lists/[id]/refresh queues on the v2 trigger with a bearer and an Idempotency-Key (#14780)', async () => {
+    global.fetch = respond({ requested: 'OFAC_SDN' }, 202)
     const { POST } = await import('../app/api/sanctions/lists/[id]/refresh/route')
 
-    await POST(
+    const res = await POST(
       new NextRequest('http://localhost/api/sanctions/lists/OFAC_SDN/refresh', { method: 'POST' }),
       { params: Promise.resolve({ id: 'OFAC_SDN' }) },
     )
 
-    expect(headersOf(lastFetchCall()[1]).Authorization).toBe('Bearer operator-token')
+    expect(res.status).toBe(202)
+    const [url, init] = lastFetchCall()
+    // v1 imported in-request and timed out on large feeds; only v2 answers 202 and queues.
+    expect(url).toBe('http://openbank-sanctions-service:8123/api/v2/sanctions/lists/OFAC_SDN/refresh')
+    expect(init.method).toBe('POST')
+    expect(headersOf(init).Authorization).toBe('Bearer operator-token')
+    expect(headersOf(init)['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('POST /lists/[id]/refresh keeps the 422 for a paused list so the page can explain it', async () => {
+    global.fetch = respond({ message: 'disabled' }, 422)
+    const { POST } = await import('../app/api/sanctions/lists/[id]/refresh/route')
+
+    const res = await POST(
+      new NextRequest('http://localhost/api/sanctions/lists/HM_TREASURY/refresh', { method: 'POST' }),
+      { params: Promise.resolve({ id: 'HM_TREASURY' }) },
+    )
+
+    expect(res.status).toBe(422)
   })
 })

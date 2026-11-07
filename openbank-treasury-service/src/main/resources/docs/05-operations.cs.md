@@ -8,7 +8,7 @@ Treasury zpracovává nedůvěryhodné soubory camt.053 pomocí `SecureXml`. Jeh
 
 Před opakováním akce přečtěte obchod a jeho poslední přechod přes autentizované treasury API. Čekající schválení stále vyžaduje jiného lidského schvalovatele; zamítnutý produktový mandát nelze odstranit seniorní výjimkou pro limit protistrany. U zaúčtovaného obchodu bez očekávaného finančního efektu porovnejte přechod v treasury, doručení outboxu a výsledek idempotentního žurnálu ledgeru. Slepé opakování stejného přechodu může skrýt chybu na hranici účtování nebo doručení události.
 
-Při párování výpisů sledujte výsledek reconciliace a otevřené rozdíly. Úspěšný import XML sám nedokazuje vypořádání obchodu. Repoziční runbook `docs/runbooks/svc-treasury.md` popisuje zdraví služby a obnovu; konfigurace nasazení zůstává v GitOps.
+Při párování výpisů sledujte výsledek reconciliace a otevřené rozdíly. Úspěšný import XML sám nedokazuje vypořádání obchodu. Hodinový průchod rozdílů znovu odsouhlasí každý výpis z posledních 31 dnů a k tomu až 50 starších výpisů, které ještě mají otevřený rozdíl; ty prochází postupně dokola, takže dojde na každý. Pozdní zaúčtování v hlavní knize tak rozdíl uzavře bez ohledu na stáří výpisu. Rozdíl uzavře jen odpovídající odsouhlasení; cesta k odpisu neexistuje. Repoziční runbook `docs/runbooks/svc-treasury.md` popisuje zdraví služby a obnovu; konfigurace nasazení zůstává v GitOps.
 
 ## Nasazení účetních tříd v ledgeru (ADR-0341 D3)
 

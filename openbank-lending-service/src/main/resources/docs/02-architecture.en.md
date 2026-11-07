@@ -110,3 +110,12 @@ Emitted event types: `loan.disbursed`, `loan.interest_accrued`, `loan.written_of
 
 - Ledger calls go through `LedgerCallGuard` with SmallRye Fault Tolerance; REST client timeouts: connect 2s, read 3s.
 - OpenTelemetry tracing + Micrometer/Prometheus metrics via libs.
+
+## Product-catalog reads use this service's own identity
+
+The published loan revision read (`ProductCatalogLoanClient`, `GET /api/v2/products/{offeringId}`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-lending` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
