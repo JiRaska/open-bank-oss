@@ -29,7 +29,7 @@ requests, but the irreversible action lives downstream.
 ```
 
 - **External entities:** TPPs (AISP/PISP), the eIDAS trust chain, downstream consent/transaction/account services.
-- **Trust boundaries:** Internet↔service (eIDAS QWAC mTLS + TPP-registry authorisation); service↔internal services (cluster mTLS+OIDC+OPA).
+- **Trust boundaries:** Internet↔service (eIDAS QWAC mTLS + TPP-registry authorisation); service↔internal services (OIDC/OPA where configured; the deployed consent and TPP-registry URLs use HTTP, without mesh mTLS, #1914).
 - **Assets:** consents, account/transaction data, **payment instructions** (debtor/creditor/amount), TPP identity.
 
 ## 3. Authn/Authz

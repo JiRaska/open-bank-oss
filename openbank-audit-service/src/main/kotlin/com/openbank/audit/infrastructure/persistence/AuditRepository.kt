@@ -136,7 +136,7 @@ class AuditEntryEntity : PanacheEntityBase {
     @Column(name = "act_chain", columnDefinition = "TEXT")
     var actChain: String? = null
 
-    @Column(name = "session_id", length = 100)
+    @Column(name = "session_id", length = 512)
     var sessionId: String? = null
 
     // ── Delegated-action correlation (ADR-0232 D5): same rule as the V9 columns above — the

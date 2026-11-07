@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-balance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ff3a7a195258a6cb"
+        openbank.tech/policy-checksum: "06219c3ed1bdffa1"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,7 +45,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: balance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-48a6da90@sha256:01abc08cebdca2f23051089cdbe3c06cd418449d7560e9b298970ccea0b630a9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-balance-service:sandbox-b6494671@sha256:5c659a13f3f59274b65ac1d214bcbe7f0d86792e31ddad1b5c204a0683e7d628
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

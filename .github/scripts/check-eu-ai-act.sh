@@ -38,7 +38,7 @@ PYGEN
     printf '%s' "$com" > "$d/docs/compliance/eu-ai-act.md"
     git -C "$d" init -q 2>/dev/null
     git -C "$d" add -A >/dev/null 2>&1
-    git -C "$d" -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1
+    git -C "$d" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm fixture >/dev/null 2>&1
     return 0
   }
   expect() { # expect <label> <dir> <want-rc> [substring]

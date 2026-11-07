@@ -174,4 +174,15 @@ class GitHubMetricsAdapterTest {
 
         assertThat(paths.single()).doesNotContain("//")
     }
+
+    @Test
+    fun `delivery reads reuse authenticated GET and do not call GitHub without credentials`(): Unit = runBlocking {
+        body = "{}"
+        assertThat(adapter().deliveryPage("/actions/runs?per_page=100")).isEqualTo(body)
+        assertThat(paths).containsExactly("/repos/JiRaska/open-bank/actions/runs?per_page=100")
+        paths.clear()
+        token("")
+        assertThat(adapter().deliveryPage("/actions/runs")).isNull()
+        assertThat(paths).isEmpty()
+    }
 }

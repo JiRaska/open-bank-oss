@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-copilot-service
 
-> Operational runbook for the `copilot` service. Data domain **platform**,
+> Operational runbook for the `copilot` service. Data domain **channels**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-copilot-service` |
 | HTTP port | `8131` |
-| Data domain | platform |
+| Data domain | channels |
 | Datastore | PostgreSQL (database `openbank_copilots`) |
 | Classification | confidential |
 | Retention | 1 year |

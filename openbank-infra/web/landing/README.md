@@ -67,13 +67,17 @@ uses Node and `yaml`), then run:
 ```sh
 python3 openbank-infra/web/generate-public-catalog.py
 python3 openbank-infra/web/generate-public-catalog.py --check
+python3 -m unittest discover -s openbank-infra/web/tests -p 'test_public_catalog.py'
 node --test openbank-infra/web/tests/*.test.cjs
 ```
 
 The updater invokes `openbank-admin-ui/scripts/generate-catalog.mjs`; it does not create
-another inventory definition. `AREAS` in the updater is an editorial navigation mapping,
-not the governance `dataDomain` taxonomy. Every module appears once. New/unmapped modules
-remain visible in Shared libraries & delivery. The source revision and date are explicit.
+another inventory definition. Module ownership is read from `catalog.dataDomain`, derived
+from per-module `governance.yaml`; labels and descriptions come from
+`openbank-libs/governance/domain-taxonomy.json`. Every module appears once. Modules without
+a declaration remain explicitly visible as Unclassified modules, never implicitly assigned
+to the technical platform. Unknown non-null domains fail generation. The source revision
+and date include the governance and taxonomy inputs.
 Regenerate after catalog input changes; deployment does this before contacting AWS.
 
 ## TestFlight: preserve the integration

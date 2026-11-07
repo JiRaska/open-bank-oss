@@ -19,5 +19,8 @@ class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance()
 
     override val clientId = "openbank-billing"
 
-    override val namedClients: List<Class<*>> = listOf(AccountRestClient::class.java)
+    override val namedClients: List<Class<*>> = listOf(
+        AccountRestClient::class.java,
+        ProductCatalogRestClient::class.java,
+    )
 }

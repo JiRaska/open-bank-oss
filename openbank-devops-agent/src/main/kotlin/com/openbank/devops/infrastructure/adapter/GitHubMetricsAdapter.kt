@@ -90,7 +90,18 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
         }
     }
 
-    internal suspend fun get(path: String): String? = withContext(Dispatchers.IO) {
+    private val deliveryHttp: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(DELIVERY_CONNECT_TIMEOUT_S),
+            callTimeout = Duration.ofSeconds(DELIVERY_REQUEST_TIMEOUT_S),
+        )
+    }
+
+    internal suspend fun deliveryPage(path: String): String? = if (token.isBlank()) null else get(path, deliveryHttp)
+
+    internal suspend fun get(path: String, client: SafeHttpClient = http): String? = withContext(Dispatchers.IO) {
         val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
         val request = EgressRequest(
             method = "GET",
@@ -102,7 +113,7 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
             ),
             body = null,
         )
-        val resp = http.send(request)
+        val resp = client.send(request)
         if (resp.status !in OK_RANGE) {
             log.warnf("GitHub API %s returned HTTP %d", path, resp.status)
             null
@@ -112,6 +123,8 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
     }
 
     private companion object {
+        const val DELIVERY_CONNECT_TIMEOUT_S = 2L
+        const val DELIVERY_REQUEST_TIMEOUT_S = 3L
         const val CONNECT_TIMEOUT_S = 10L
         const val REQUEST_TIMEOUT_S = 30L
         const val RUNS_SAMPLE = 50
