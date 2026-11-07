@@ -66,7 +66,7 @@ class ProductShadowWiring(
     private val hmacSecret: Optional<String>,
     @ConfigProperty(
         name = "openbank.interest.product-shadow.verification.openbao.address",
-        defaultValue = "https://openbao.vault.svc:8200",
+        defaultValue = "https://openbao.vault.svc:8203",
     )
     private val baoAddress: String,
     @ConfigProperty(

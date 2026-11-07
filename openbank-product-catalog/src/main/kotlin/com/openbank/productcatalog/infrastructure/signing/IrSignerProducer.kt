@@ -69,7 +69,7 @@ class IrSignerProducer(
     private val hmacSecret: Optional<String>,
     @ConfigProperty(
         name = "openbank.catalog.ir-signing.openbao.address",
-        defaultValue = "https://openbao.vault.svc:8200",
+        defaultValue = "https://openbao.vault.svc:8203",
     )
     private val baoAddress: String,
     @ConfigProperty(name = "openbank.catalog.ir-signing.openbao.transit-mount", defaultValue = "transit")
