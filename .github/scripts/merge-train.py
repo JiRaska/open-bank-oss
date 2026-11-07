@@ -205,6 +205,21 @@ CONFLICT_COMMENT = ("merge-train: this PR conflicts with main, so every train le
 REFUSED_COMMENT = ("merge-train: GitHub refused to update this branch with main (update-branch), so the strict "
                    "lane cannot serve it. Merge main into the branch and push; the new head is picked up on its "
                    "own. It stays armed.")
+# GitHub lets an App without the `workflows` permission update a branch only while every workflow file
+# in the merge equals one parent. A file changed on BOTH sides merges into a blob the App would be
+# creating, and update-branch answers non-202 although `git merge` is clean. Measured 2026-11-05 over 13
+# strict-lane requests: refused 6 of 6 with such a blob, requested 7 of 7 without, including 3 with
+# workflow edits on both sides in DIFFERENT files. The credential is the fix, so the train says so.
+WORKFLOW_DIR = ".github/workflows"
+WORKFLOW_REFUSED_COMMENT = ("merge-train: this branch and main both changed the same workflow file, so merging them "
+                            "creates workflow content the train's App may not write and GitHub refuses update-branch "
+                            "although the merge is clean. Merge main into the branch and push with your own "
+                            "credentials; the new head is picked up on its own. It stays armed.")
+# Past this age an armed PR's notice stops being news for its author and becomes a stalled queue entry
+# for the owner: one tracking issue (STUCK_LABEL), rewritten only when its content changes, closed when empty.
+STUCK_AFTER_S = 4 * 3600
+STUCK_LABEL = "merge-train-stuck"
+STUCK_TITLE = "merge-train: armed PRs stuck behind main"
 STRICT_CONFLICT_COMMENT = ("merge-train: conflict — this strict-lane PR conflicts with main, so it cannot be "
                            "update-branched and holds no reservation: the strict queue moves on without it. Merge "
                            "main into the branch (or rebase), resolve the conflict and push; the new head is picked "
@@ -2061,8 +2076,31 @@ class GitHub:
 
     def update_branch(self, n: int, head: str) -> bool:
         """Merge main into the PR branch, pinned to the head the strict lane judged."""
-        code, _ = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
+        code, detail = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
+        if code != 202:
+            log(f"#{n:>6} update-branch answered {code}: {json.dumps(detail)[:300]}")
         return code == 202
+
+    def notice_since(self, sha: str) -> str | None:
+        return notice_since(paginate(f"/repos/{self.repo}/commits/{sha}/statuses"))
+
+    def stuck_issue(self) -> tuple[int | None, str | None]:
+        code, data = api("GET", f"/repos/{self.repo}/issues?state=open&labels={STUCK_LABEL}&per_page=1")
+        if code != 200 or not isinstance(data, list) or not data:
+            return None, None
+        return data[0]["number"], data[0].get("body")
+
+    def save_stuck_issue(self, number: int | None, body: str) -> None:
+        code, detail = (api("PATCH", f"/repos/{self.repo}/issues/{int(number)}", {"body": body}) if number else
+                        api("POST", f"/repos/{self.repo}/issues",
+                            {"title": STUCK_TITLE, "body": body, "labels": [STUCK_LABEL]}))
+        if code not in (200, 201):
+            log(f"::error::merge train: tracking issue not written ({code}): {json.dumps(detail)[:200]}")
+
+    def close_stuck_issue(self, number: int) -> None:
+        code, detail = api("PATCH", f"/repos/{self.repo}/issues/{int(number)}", {"state": "closed"})
+        if code != 200:
+            log(f"::error::merge train: tracking issue #{number} not closed ({code}): {json.dumps(detail)[:200]}")
 
     def create_carrier(self, branch: str) -> int | None:
         assert_train_branch(branch)
@@ -2377,14 +2415,82 @@ def conflict_paths(git, base: str, head: str) -> list[str] | None:
     return sorted({f for f in r.stdout.split("\0")[1:] if f})
 
 
-def notice_text(message: str, paths: list[str] | None) -> str:
+def workflow_merge_blobs(git, base: str, head: str) -> list[str]:
+    """Workflow files whose clean merge of `head` into `base` equals NEITHER parent; [] when the merge
+    conflicts or undecidable. Execution-free, like conflict_paths."""
+    r = git("merge-tree", "--write-tree", base, head, check=False)
+    if r.returncode != 0:
+        return []
+    def blobs(rev: str) -> dict[str, str]:
+        out = git("ls-tree", "-r", "-z", rev, "--", WORKFLOW_DIR, check=False).stdout
+        return {e.split("\t", 1)[1]: e.split("\t", 1)[0] for e in out.split("\0") if e}
+    ours, theirs = blobs(base), blobs(head)
+    return sorted(f for f, b in blobs(r.stdout.split()[0]).items() if b not in (ours.get(f), theirs.get(f)))
+
+
+def notice_since(rows: list) -> str | None:
+    """created_at of the App's latest notice on a head, while `merge-train` has not gone green since."""
+    latest: dict[str, dict] = {}
+    for st in sorted(rows, key=lambda r: r["id"]):
+        if (st.get("creator") or {}).get("login") == BOT_LOGIN:
+            latest[st["context"]] = st
+    if NOTICE_CONTEXT not in latest or latest.get(STATUS_CONTEXT, {}).get("state") == "success":
+        return None
+    return latest[NOTICE_CONTEXT].get("created_at")
+
+
+def stuck_body(stuck: list[tuple[int, str, str]]) -> str:
+    """The issue's whole content. Stable across ticks (no clock), so an unchanged set writes nothing."""
+    return ("Armed PRs the merge train cannot serve until someone acts; each has its own comment saying what "
+            f"to do. Closed by the train when the list is empty. Threshold: {STUCK_AFTER_S // 3600} h.\n\n"
+            + "".join(f"- #{n}: since {since} ({why})\n" for n, since, why in stuck))
+
+
+def stuck_prs(gh, repo: str, now: float | None = None) -> list[tuple[int, str, str]]:
+    """Armed PRs told of a conflict or refusal more than STUCK_AFTER_S ago, on their current head.
+    Called inside settle_view's planning scope, so its status reads are the ones already memoised."""
+    now = time.time() if now is None else now
+    stuck: list[tuple[int, str, str]] = []
+    for p in gh.open_prs():
+        if not p.get("auto_merge") or is_carrier(p, repo):
+            continue
+        since = gh.notice_since(p["head"]["sha"])
+        if not since:
+            continue
+        try:
+            t = datetime.datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+        if now - t >= STUCK_AFTER_S:
+            why = gh.app_statuses(p["head"]["sha"]).get(NOTICE_CONTEXT, ("", ""))[1]
+            stuck.append((int(p["number"]), since, why))
+    return sorted(stuck)
+
+
+def report_stuck(gh, shadow: bool, summary: dict, stuck: list[tuple[int, str, str]]) -> None:
+    """Summary, ::error and tracking issue. A failed issue write never costs the tick: the settle log's
+    ::error says the same thing."""
+    summary["stuck"] = [n for n, _, _ in stuck]
+    if stuck:
+        log(f"::error::merge train: {len(stuck)} armed PR(s) stuck over {STUCK_AFTER_S // 3600} h: "
+            f"{', '.join(f'#{n}' for n, _, _ in stuck)}")
+    if shadow:
+        return
+    number, body = gh.stuck_issue()
+    if stuck and body != stuck_body(stuck):
+        gh.save_stuck_issue(number, stuck_body(stuck))
+    elif not stuck and number:
+        gh.close_stuck_issue(number)
+
+
+def notice_text(message: str, paths: list[str] | None, heading: str = "Conflicting paths") -> str:
     """Fixed text plus the conflicting paths as inline code. A path that could break out of the code
     span or the line (control character, backtick) is counted, never printed."""
     shown = [f for f in (paths or []) if not unsafe_path(f) and "`" not in f][:NOTICE_PATH_CAP]
     if not paths:
         return message
     more = len(paths) - len(shown)
-    return message + "\n\nConflicting paths:\n" + "".join(f"- `{f}`\n" for f in shown) + (
+    return message + f"\n\n{heading}:\n" + "".join(f"- `{f}`\n" for f in shown) + (
         f"- ... and {more} more\n" if more else "")
 
 
@@ -2538,7 +2644,8 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     carrier_in_flight = False
     # Read the strict lane BEFORE settling any carrier: a reservation holds train merges as well as the
     # fast lane, or main moves under the reserved head's CI and it is re-updated forever (#13456).
-    base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+    stuck: list = []
+    base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
     if defer_recovered_main_red(gh, base, main_red, summary):
         return summary
     holder, timed_out = strict_reservation(git, base, strict, shadow,
@@ -2728,7 +2835,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if TRAIN_BRANCH_RE.fullmatch(branch):
             Pusher(git, branch, gh.remote).delete()
     if acted:  # a carrier was judged: main or member statuses may have changed — read everything again
-        base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required)
+        base, regen_text, strict, red, cands, apps, main_red, main_cache = settle_view(gh, git, repo, required, stuck)
         holder, timed_out = strict_reservation(git, base, strict, shadow,
                                                fixes=strict_fixes(gh, git, base, strict, main_red, main_cache),
                                            activity=gh.ci_activity)
@@ -2824,6 +2931,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                            source_number=m.number)
         summary["fast"].append(m.number)
     stale_red_refresh(gh, git, base, red, shadow, summary)
+    report_stuck(gh, shadow, summary, stuck)
     return summary
 
 
@@ -2848,11 +2956,14 @@ def halve_without_verdict(gh, git, branch: str, sha: str) -> list[int]:
     return [n for n, _ in chain[1]]
 
 
-def settle_view(gh, git, repo: str, required: list[str]):
+def settle_view(gh, git, repo: str, required: list[str], stuck: list | None = None):
     """Live main and every armed PR judged against it: (base, regen_text, strict, red, cands, apps).
     Planning only, so its reads are memoised; every write acts on a live re-read (deciding)."""
     with planning_reads():
-        return _settle_view(gh, git, repo, required)
+        view = _settle_view(gh, git, repo, required)
+        if stuck is not None:
+            stuck[:] = stuck_prs(gh, repo)
+        return view
 
 
 def _settle_view(gh, git, repo: str, required: list[str]):
@@ -3331,6 +3442,7 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 # so asking again can only be refused again. A new head or a moved main asks again.
                 log(f"#{n:>6} strict    behind main {base[:12]}: update-branch already refused for this head "
                     f"over this main — not asked again, next strict PR served")
+                summary.setdefault("refused", []).append(n)
                 continue
             clash = conflict_paths(git, base, head)
             if clash and NOTICE_CONTEXT in (view.get("app") or {}):
@@ -3354,8 +3466,11 @@ def strict_lane(gh, git, base: str, strict: list, carrier_in_flight: bool, shado
                 summary["in_flight"] = True  # the reservation starts now: no train is built under it
                 summary["updated"].append(n)
             else:
+                summary.setdefault("refused", []).append(n)
+                workflows = workflow_merge_blobs(git, base, head)
                 notice_once(gh, n, head, f"{REFUSED_PREFIX}{base[:12]}: merge main into the branch",
-                            notice_text(REFUSED_COMMENT, conflict_paths(git, base, head)))
+                            notice_text(WORKFLOW_REFUSED_COMMENT, workflows, "Workflow files changed on both sides")
+                            if workflows else notice_text(REFUSED_COMMENT, conflict_paths(git, base, head)))
             continue
         if carrier_in_flight:
             log(f"#{n:>6} strict    green, but a train is in flight over main — next tick")
@@ -3894,6 +4009,9 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
+        self.notice_times: dict[str, str] = {}   # head -> when its notice was posted (statuses here have no clock)
+        self.stuck_open: tuple = (None, None)    # the tracking issue: (number, body)
+        self.stuck_writes: list = []             # tracking-issue writes; None is a close
         self.carrier_override: dict = {}         # carrier (train head) check overrides, e.g. cancelled
         self.main_override: dict = {}            # main tip check overrides, kept apart from carriers
         self.reruns: list[tuple[str, list[str]]] = []
@@ -4040,6 +4158,20 @@ class FakeGitHub:
         p["head"]["ref"], p["head"]["sha"] = br, self.g("rev-parse", br).stdout.strip()
         self.updates.append(n)
         return True
+
+    def notice_since(self, sha):
+        return self.notice_times.get(sha)
+
+    def stuck_issue(self):
+        return self.stuck_open
+
+    def save_stuck_issue(self, number, body):
+        self.stuck_writes.append(body)
+        self.stuck_open = (number or 777, body)
+
+    def close_stuck_issue(self, number):
+        self.stuck_writes.append(None)
+        self.stuck_open = (None, None)
 
     def create_carrier(self, branch):
         n = 9000 + len(self.carriers)
@@ -7771,6 +7903,79 @@ def self_test() -> int:
                   len(told) == 1 and mt_status(35)[1].startswith(REFUSED_PREFIX)
                   and len([x for x in gh.statuses.get(head35, []) if x[0] == STATUS_CONTEXT]) == 1
                   and NOTICE_CONTEXT in gh.app_statuses(head35), f"{gh.comments} {gh.statuses.get(head35)}")
+            check("notice: a refused head is reported in every settle summary, not only the tick it was told",
+                  35 in settle_once().get("refused", []), "not in the summary")
+            # Stuck reporting: the clock is the notice's; the negative cases are the ones that stay silent.
+            gh.notice_times[head35] = "2026-11-05T00:00:00Z"
+            t0 = datetime.datetime(2026, 11, 5, tzinfo=datetime.timezone.utc).timestamp()
+            quiet: dict = {}
+            report_stuck(gh, False, quiet, stuck_prs(gh, "o/r", now=t0 + STUCK_AFTER_S - 1))
+            check("stuck: a notice younger than the threshold opens no issue",
+                  quiet["stuck"] == [] and gh.stuck_writes == [], f"{quiet} {gh.stuck_writes}")
+            loud: dict = {}
+            report_stuck(gh, True, loud, stuck_prs(gh, "o/r", now=t0 + STUCK_AFTER_S))
+            check("stuck: shadow reports in the summary and writes nothing",
+                  loud["stuck"] == [35] and gh.stuck_writes == [], f"{loud} {gh.stuck_writes}")
+            for _ in range(3):
+                report_stuck(gh, False, loud, stuck_prs(gh, "o/r", now=t0 + STUCK_AFTER_S + 60))
+            check("stuck: an aged notice opens ONE issue naming the PR, and later ticks do not rewrite it",
+                  len(gh.stuck_writes) == 1 and "#35:" in gh.stuck_writes[0], f"{gh.stuck_writes}")
+            gh.prs[35]["auto_merge"] = None
+            report_stuck(gh, False, loud, stuck_prs(gh, "o/r", now=t0 + STUCK_AFTER_S + 60))
+            check("stuck: a disarmed PR is not stuck, and the emptied issue is closed",
+                  gh.stuck_writes[-1] is None and gh.stuck_open == (None, None), f"{gh.stuck_writes}")
+            bot = {"login": BOT_LOGIN}
+            row = lambda i, ctx, state, who=bot: {"id": i, "context": ctx, "state": state, "creator": who,
+                                                  "created_at": f"t{i}"}
+            check("stuck: notice_since reads the App's notice, and only while merge-train has not gone green",
+                  notice_since([row(1, STATUS_CONTEXT, "failure"), row(2, NOTICE_CONTEXT, "failure")]) == "t2"
+                  and notice_since([row(2, NOTICE_CONTEXT, "failure"), row(3, STATUS_CONTEXT, "success")]) is None
+                  and notice_since([row(1, NOTICE_CONTEXT, "failure", {"login": "someone"})]) is None, "")
+            # Workflow refusal: real git. Three of the 2026-11-05 shapes; only the first creates a new blob.
+            wg = Git(clone("wf"))
+            wfp = pathlib.Path(wg.workdir, ".github/workflows/both.yml")
+            wfp.parent.mkdir(parents=True, exist_ok=True)
+            wfp.write_text("a\n\n\n\n\n\nz\n")
+            pathlib.Path(wg.workdir, ".github/workflows/one.yml").write_text("x\n")
+            ident = ("-c", "user.name=t", "-c", "user.email=t@t")
+            def wf_commit(name, *edits):
+                for f, text in edits:
+                    pathlib.Path(wg.workdir, f).write_text(text)
+                wg(*ident, "add", "-A")
+                wg(*ident, "commit", "-q", "-m", name)
+                return wg("rev-parse", "HEAD").stdout.strip()
+            w0 = wf_commit("wf base")
+            both, one = ".github/workflows/both.yml", ".github/workflows/one.yml"
+            wmain = wf_commit("main", (both, "A\n\n\n\n\n\nz\n"))
+            wg("checkout", "-q", w0)
+            wsame = wf_commit("same file, other hunk", (both, "a\n\n\n\n\n\nZ\n"))
+            wg("checkout", "-q", w0)
+            wother = wf_commit("different workflow file", (one, "y\n"))
+            wg("checkout", "-q", w0)
+            wclash = wf_commit("same line", (both, "B\n\n\n\n\n\nz\n"))
+            check("workflow refusal: the same file edited on both sides is a blob the App would create",
+                  workflow_merge_blobs(wg, wmain, wsame) == [both], f"{workflow_merge_blobs(wg, wmain, wsame)}")
+            check("workflow refusal: different workflow files on each side create none (these were served)",
+                  workflow_merge_blobs(wg, wmain, wother) == [], f"{workflow_merge_blobs(wg, wmain, wother)}")
+            check("workflow refusal: a real conflict is not this class",
+                  workflow_merge_blobs(wg, wmain, wclash) == [], f"{workflow_merge_blobs(wg, wmain, wclash)}")
+            # The comment names the cause: a refused head whose merge creates a workflow blob.
+            reset()
+            pathlib.Path(origin, "main-moves-again.txt").write_text("x\n")
+            gh.g("add", "-A")
+            gh.g("commit", "-q", "-m", "main moves again")
+            open_only("pW")
+            saved_blobs = globals()["workflow_merge_blobs"]
+            globals()["workflow_merge_blobs"] = lambda *_: [both]
+            gh.update_branch = lambda n, head: False
+            try:
+                settle_once()
+            finally:
+                del gh.update_branch
+                globals()["workflow_merge_blobs"] = saved_blobs
+            told = [t for n, t in gh.comments if t.startswith(WORKFLOW_REFUSED_COMMENT)]
+            check("notice: a workflow refusal says so and names the file, not the generic refusal text",
+                  len(told) == 1 and f"`{both}`" in told[0], f"{gh.comments[-1:]}")
             gh.updates.clear()
             reset()
             # ---- GitHub API (#13400): transient failures never kill a tick's carrier; quota is not burnt ----

@@ -21,7 +21,7 @@ test.describe('/docs/cluster — semantic theme', () => {
       }, theme)
       await page.waitForTimeout(300)
 
-      await expect(page.getByText(/domain isolation|doménová izolace/i).first()).toBeVisible()
+      await expect(page.getByText(/technical separation of workloads|technické oddělení služeb/i).first()).toBeVisible()
       const adminNamespace = page.getByRole('button', { name: /admin-ui/i })
       await adminNamespace.click()
       await expect(adminNamespace).toHaveAttribute('aria-expanded', 'true')

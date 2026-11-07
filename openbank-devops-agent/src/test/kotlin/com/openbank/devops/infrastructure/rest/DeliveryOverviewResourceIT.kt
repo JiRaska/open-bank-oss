@@ -27,6 +27,12 @@ import java.time.Instant
 @TestProfile(DeliveryOverviewResourceIT.Profile::class)
 class DeliveryOverviewResourceIT {
     class Profile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.devops.delivery-shadow-enabled" to "true",
+            "openbank.devops.delivery-shadow-cron" to "*/1 * * * * ?",
+            "openbank.devops.github-owner" to "example",
+            "openbank.devops.github-repo" to "repo",
+        )
         override fun getEnabledAlternatives(): Set<Class<*>> = setOf(FixtureEvidence::class.java)
     }
 
