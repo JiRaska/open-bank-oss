@@ -10,6 +10,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 export interface SanctionsList {
   id: string; listType: string; displayName: string; sourceUrl: string
   enabled: boolean; lastUpdatedAt?: string; lastEntryCount?: number
+  /** #14780: set while a requested refresh waits for the scheduler; cleared when it imports. */
+  refreshRequestedAt?: string | null
   cronHour: number; cronMinute: number; cronDays: string
 }
 

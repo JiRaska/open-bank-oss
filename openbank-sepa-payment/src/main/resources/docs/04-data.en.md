@@ -71,7 +71,7 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start: true`):
 | `V3__create_sepa_payment_outbox.sql` | Table `sepa_payment_outbox` (transactional outbox) + indexes | `DROP TABLE sepa_payment_outbox` |
 | `V4__hibernate_sequences.sql` | `sepa_payments_seq`, `sepa_payment_outbox_seq` (INCREMENT BY 50) — required by Hibernate Reactive + Panache (schema generation `none`) | `DROP SEQUENCE sepa_payments_seq, sepa_payment_outbox_seq` |
 
-> V4 fixes a runtime defect: BIGSERIAL only creates `<table>_id_seq`, but Hibernate allocates ids from `<table>_seq`. Guarded by `HibernateSequenceGuardTest`. Never rewrite a migration once applied (checksum mismatch → startup fail; use `QUARKUS_FLYWAY_REPAIR_AT_START` if a live DB is affected).
+> V4 fixes a runtime defect: BIGSERIAL only creates `<table>_id_seq`, but Hibernate allocates ids from `<table>_seq`. Guarded by the CI gate `hibernate-sequence-guard`. Never rewrite a migration once applied (checksum mismatch → startup fail; use `QUARKUS_FLYWAY_REPAIR_AT_START` if a live DB is affected).
 
 ## Indexes
 

@@ -25,6 +25,8 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // Parse the same bundled governance declarations as the catalog; already supplied by Quarkus YAML.
+    implementation("org.yaml:snakeyaml")
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
@@ -36,6 +38,10 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0352 §12: the MCP product tools run ProductToolkit (libs-domain) with the production
+    // FinanceProductArithmetic, in-process. Never openbank-products: that module carries
+    // libs-testing, which must not reach a service's production classpath.
+    implementation(project(":openbank-libs-finance"))
 
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
@@ -49,6 +55,9 @@ dependencies {
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))
+    // ADR-0352 gate product-ir-authoring-parity: ProductIrAuthoringParityTest drives the `obp` CLI
+    // and the MCP handler over one fixture. Test scope only (the module carries libs-testing).
+    testImplementation(project(":openbank-products"))
     // D3b SVID tests build an EC CA + leaf cert at runtime (no committed private keys → gitleaks-clean).
     // Declared directly (not via the shared catalog) so this one-service test dep does not trigger a
     // full-fleet rebuild on the shared libs.versions.toml.
@@ -70,6 +79,15 @@ dependencies {
 // agent load their system prompts from the registered files at runtime instead of inline constants.
 // This copy is derived from openbank-libs/governance/prompts/ — never hand-edit it here.
 tasks.named<Copy>("processResources") {
+    // Image-pinned MCP metadata is derived from source ownership, never a second domain table.
+    from(rootProject.file(".")) {
+        include("openbank-*/governance.yaml")
+        into("business-domains")
+    }
+    from(rootProject.file("openbank-libs/governance/domain-taxonomy.json")) {
+        into("business-domains")
+        rename { "taxonomy.json" }
+    }
     from(rootProject.file("openbank-libs/governance/prompts/compliance-officer")) {
         include("oversight.v1.md")
         into("governance-prompts/compliance-officer")

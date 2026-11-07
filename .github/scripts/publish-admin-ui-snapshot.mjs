@@ -156,7 +156,8 @@ export function publishEvidenceSnapshot({
   if (typeof bucket !== 'string' || !bucket.trim()) throw new Error('EVIDENCE_BUCKET is required')
   const safePrefix = validatePrefix(prefix)
   // Only reviewed repository content contains the bounded Markdown corpora.
-  const maxInputBytes = safePrefix === 'admin-ui/content' ? 8 * 1024 * 1024 : MAX_INPUT_BYTES
+  const maxInputBytes = ['admin-ui/content', 'admin-ui/content/domains-v1'].includes(safePrefix)
+    ? 8 * 1024 * 1024 : MAX_INPUT_BYTES
   const sourceSha = env.EVIDENCE_SOURCE_SHA ?? env.GITHUB_SHA
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('publication source SHA must be a full 40-character lowercase SHA')
   const runId = parsePositiveInteger(env.GITHUB_RUN_ID, 'GITHUB_RUN_ID')

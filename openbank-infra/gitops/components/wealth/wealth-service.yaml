@@ -32,7 +32,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-wealth-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a9cd2ded2dac1499"
+        openbank.tech/policy-checksum: "1a17e5e7fc057890"
       labels:
         app.kubernetes.io/name: wealth-service
         app.kubernetes.io/part-of: wealth
@@ -48,7 +48,7 @@ spec:
         - name: wealth-service
           # First build lands via auto-deploy on the merge that adds openbank-wealth-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-wealth-service:sandbox-a212613e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-wealth-service:sandbox-11c6d7de@sha256:e81aa14209b2dd612e58d0207f1724241e583844a4fe07ce919d86f080c8ecac
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8154 and management 8090 — both read off the service's own application.yaml

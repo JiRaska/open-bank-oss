@@ -13,7 +13,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Priorities
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerRequestFilter
-import jakarta.ws.rs.core.Response
+import jakarta.ws.rs.container.PreMatching
 import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
@@ -45,13 +45,23 @@ import java.util.Optional
  *
  * ## Response shape
  *
- * 404 with no body — deliberately indistinguishable from "route does not exist". A 403 or a
- * clever error would confirm to the prober that the path is special, which is the one thing
- * a honeypot must never do. The detection happens out-of-band: [SecurityTelemetry.HONEYTOKEN_HITS]
- * counter (tag `path` = the **configured** honey path, low cardinality) plus a WARN log line
- * with a sanitized path and the remote address when available.
+ * The filter answers nothing itself: it counts, logs, and lets the request continue, so the
+ * caller gets exactly the platform's own "no such route" 404 (the `NOT_FOUND` JSON envelope from
+ * libs-runtime). An earlier version aborted with an empty-bodied 404, which differed from every
+ * real 404 and so told the prober the path was special. The detection happens out-of-band:
+ * [SecurityTelemetry.HONEYTOKEN_HITS] counter (tag `path` = the **configured** honey path, low
+ * cardinality) plus a WARN log line with a sanitized path and the remote address when available.
+ *
+ * ## Why `@PreMatching`
+ *
+ * A post-matching request filter runs only after JAX-RS has matched a resource method, and a
+ * honey path by definition has none: RESTEasy answers its own 404 first and the filter is never
+ * called. Measured 2026-10-31 (customer-edge `HoneyEndpointIT`): without `@PreMatching` a hit on
+ * a configured honey path returned the routing 404 and the counter stayed absent — which is why
+ * this filter had never once counted anything in any service (ADR-0357).
  */
 @Provider
+@PreMatching
 @ApplicationScoped
 @Priority(HoneytokenFilter.PRIORITY)
 class HoneytokenFilter @Inject constructor(
@@ -86,7 +96,6 @@ class HoneytokenFilter @Inject constructor(
             sanitizeForLog(matched),
             sanitizeForLog(requestContext.getHeaderString("X-Forwarded-For") ?: "unknown"),
         )
-        requestContext.abortWith(Response.status(Response.Status.NOT_FOUND).build())
     }
 
     companion object {
