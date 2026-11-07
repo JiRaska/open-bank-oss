@@ -425,10 +425,7 @@ jobs:
             CANDIDATES="$REQUESTED"
             DEPLOYABLE=()
             for svc in $CANDIDATES; do
-              if ! [[ "$svc" =~ ^openbank-[a-z0-9-]+$ ]] || ! grep -qxF "$svc" <<< "${ALL_SERVICES// /$'\n'}"; then
-                echo "::error::requested service is not a known fleet service"
-                exit 1
-              fi
+              case " $ALL_SERVICES " in *" $svc "*) ;; *) echo "::error::not a fleet service"; exit 1 ;; esac
               if grep -rlq "${svc}:sandbox-" openbank-infra/gitops/components 2>/dev/null; then
                 DEPLOYABLE+=("$svc")
               else
