@@ -110,3 +110,12 @@ Emitované typy událostí: `loan.disbursed`, `loan.interest_accrued`, `loan.wri
 
 - Volání ledgeru jdou přes `LedgerCallGuard` se SmallRye Fault Tolerance; timeouty REST klienta: connect 2s, read 3s.
 - OpenTelemetry tracing + Micrometer/Prometheus metriky přes libs.
+
+## Čtení produktového katalogu vlastní identitou služby
+
+Čtení publikované revize úvěrového produktu (`ProductCatalogLoanClient`, `GET /api/v2/products/{offeringId}`) se odesílá s pojmenovaným OIDC klientem `m2m`, který se autentizuje jako `openbank-lending` (ROLE_API a
+scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-catalog uděluje
+`catalog.read` této identitě jménem (`service-named-catalog-read`); sdílenému klientovi se samotnou
+ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
+zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
+`M2mOidcClientIdentityWiringTest`.

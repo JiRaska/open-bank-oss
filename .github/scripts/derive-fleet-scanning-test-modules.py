@@ -32,10 +32,32 @@ import sys
 import tempfile
 from pathlib import Path
 
+from runtime_resource_inputs import path_matches, resource_patterns
+
 ROOT_READ = re.compile(r'(?:File|Path\.of|Paths\.get)\(\s*"\.\."\s*\)')
 PREFIX_FILTER = re.compile(r'startsWith\(\s*"openbank-"\s*\)')
 PINNED = re.compile(r'(?:File\(\s*"\.\./|Path\.of\(\s*"\.\.",\s*"|Paths\.get\(\s*"\.\.",\s*")(openbank-[a-z0-9-]+)')
 DIRECT_FILE = re.compile(r'File\(\s*"\.\./(openbank-[^"]+)"\s*\)')
+# Any string literal that names a repository path OUTSIDE the test's own module, however the
+# test joins it: `File("../openbank-infra/gitops/components/pension/pension-service.yaml")`,
+# `File(repoRoot(), "docs/adr/0039-ledger-as-golden-source-balance-as-projection.md")` after a
+# parentFile walk, `Path.of("..", "openbank-contracts", ...)` — all carry the path as a literal.
+# A bare top-level NON-module directory ("openbank-infra", "pacts", "docs") is a whole-tree read.
+# A bare MODULE name is a service identifier, not a path, and is ignored; module trees are
+# covered by PINNED edges and by the `^<module>/` fan-out. Measured 2026-11-04: without this,
+# every change under openbank-infra/, docs/ or .github/ fell to the full-fleet fallback — about
+# 20 PR branches with 86 queued builds each — while the tests that read those trees number 2-5.
+REPO_PATH_LITERAL = re.compile(r'"((?:\.\./)*[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)*)"')
+# `Path.of("..", "openbank-infra", "gitops", "x.yaml")` carries the path as SEGMENTS: joined
+# here, so the read is attributed to x.yaml and not to the whole openbank-infra tree.
+SEGMENTED_PATH = re.compile(r'(?:Path\.of|Paths\.get|File)\(\s*((?:"[^"]*"\s*,\s*)+"[^"]*")\s*\)')
+# `File(dir, "openbank-infra").isDirectory` probes for the repo root; it reads nothing.
+EXISTENCE_PROBE = re.compile(r'"[A-Za-z0-9_.-]+"\s*\)\s*\.(?:isDirectory|isFile|exists\(\))')
+# A bare top-level DIRECTORY name is a whole-tree read only as the argument of a filesystem
+# call: `File(root, "openbank-infra").walkTopDown()`. Elsewhere it is an identifier —
+# `consumer = "openbank-admin-ui"` names a Pact party, and treating it as a path made every
+# admin-ui PR build 22 JVM modules. A bare ROOT FILE name ("README.md") stays a read anywhere.
+TREE_READ = re.compile(r'(?:File|Path\.of|Paths\.get|resolve)\(\s*(?:[^",()]+,\s*)?"([A-Za-z0-9_.-]+)"\s*\)')
 MAIN_TREE_WALK = re.compile(r'File\(\s*module\s*,\s*"src/main/kotlin"\s*\)\.walkTopDown\(\)')
 TEST_SOURCE = re.compile(r"^openbank-[^/]+/src/test/")
 
@@ -44,12 +66,50 @@ def is_module(root: Path, name: str) -> bool:
     return (root / name / "build.gradle.kts").is_file() or (root / name / "build.gradle").is_file()
 
 
+def external_tops(root: Path) -> tuple[set[str], set[str]]:
+    """Top-level directories that are NOT Gradle modules, and root-level files."""
+    dirs = {p.name for p in root.iterdir() if p.is_dir() and p.name != ".git" and not is_module(root, p.name)}
+    files = {p.name for p in root.iterdir() if p.is_file()}
+    return dirs, files
+
+
+def external_paths(text: str, module: str, tops: set[str], root_files: set[str], root: Path) -> set[str]:
+    """Repository paths a source file references by literal, excluding its own module."""
+    found: set[str] = set()
+    literals: list[str] = []
+    for m in SEGMENTED_PATH.finditer(text):
+        literals.append("/".join(seg.strip().strip('"') for seg in m.group(1).split(",")))
+    rest = SEGMENTED_PATH.sub(" ", text)
+    rest = EXISTENCE_PROBE.sub(" ", rest)
+    tree_reads = set(TREE_READ.findall(rest))
+    literals += REPO_PATH_LITERAL.findall(rest)
+    for lit in literals:
+        rel = re.sub(r"^(\.\./)+", "", lit).rstrip("/")
+        top = rel.split("/", 1)[0]
+        if top == module:
+            continue
+        if rel in root_files or (top in tops and ("/" in rel or rel in tree_reads)):
+            found.add(rel)
+        elif "/" in rel and is_module(root, top):
+            found.add(rel)          # a file or directory inside another module
+    return found
+
+
 def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]], bool]:
     fleet: set[str] = set()
     edges: set[tuple[str, str]] = set()
     direct: set[tuple[str, str]] = set()
     main_tree_only = True
+    tops, root_files = external_tops(root)
     for mod in sorted(p for p in root.iterdir() if p.is_dir() and is_module(root, p.name)):
+        # Gradle copies external files into a module's resources (prompts, shared fixtures).
+        for build in (mod / "build.gradle.kts", mod / "build.gradle"):
+            if build.is_file():
+                btext = build.read_text(encoding="utf-8", errors="replace")
+                for path in external_paths(btext, mod.name, tops, root_files, root):
+                    direct.add((mod.name, path))
+                for pattern in resource_patterns(btext):
+                    direct.add((mod.name, pattern))
         test_dir = mod / "src" / "test"
         if not test_dir.is_dir():
             continue
@@ -67,6 +127,8 @@ def scan(root: Path) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str
                     edges.add((mod.name, target))
             for path in DIRECT_FILE.findall(text):
                 direct.add((mod.name, path))
+            for path in external_paths(text, mod.name, tops, root_files, root):
+                direct.add((mod.name, path))
     return fleet, edges, direct, main_tree_only
 
 
@@ -79,7 +141,7 @@ def has_module_input(root: Path, paths: list[str], main_tree_only: bool = False)
 def direct_readers(direct: set[tuple[str, str]], paths: list[str]) -> set[str]:
     return {
         reader for reader, watched in direct
-        if any(path == watched or path.startswith(watched.rstrip("/") + "/") for path in paths)
+        if any(path_matches(path, watched.rstrip("/")) for path in paths)
     }
 
 
@@ -103,6 +165,26 @@ def self_test() -> int:
               'val z = File("src/main/kotlin/X.kt"); val s = "openbank-x".startsWith("openbank-")')
         write("openbank-infra-reader", "d/InfraTest.kt",
               'val i = File("../openbank-infra/gitops/x.yaml")')  # openbank-infra is not a module here
+        (r / "openbank-infra" / "gitops").mkdir(parents=True)
+        (r / "docs" / "adr").mkdir(parents=True)
+        (r / "README.md").write_text("")
+        write("openbank-walker", "e/WalkTest.kt",
+              'val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "settings.gradle.kts").isFile }; '
+              'val adr = File(root, "docs/adr/0001-x.md"); val readme = File(root, "README.md"); '
+              'val name = "openbank-target"')  # a bare module NAME is not a path
+        write("openbank-treewalker", "f/TreeTest.kt",
+              'val tree = File(root, "openbank-infra").walkTopDown()')  # bare non-module dir = whole tree
+        write("openbank-namer", "h/NameTest.kt",
+              'val consumer = "openbank-infra"; val pact = "pacts/openbank-infra-openbank-namer.json"')  # identifiers, not reads
+        write("openbank-segmenter", "g/SegTest.kt",
+              'val y = Path.of("..", "openbank-infra", "gitops", "seg.yaml"); '
+              'val marker = generateSequence(File("")) { it.parentFile }.first { File(it, "openbank-infra").isDirectory }')
+        (r / "openbank-copier").mkdir()
+        (r / "openbank-copier" / "build.gradle.kts").write_text('from(rootProject.file("docs/prompts/x")) {}')
+        (r / "openbank-resource-copier").mkdir()
+        (r / "openbank-resource-copier" / "build.gradle.kts").write_text(
+            'tasks.named<Copy>("processResources") { '
+            'from(rootProject.file(".")) { include("openbank-*/governance.yaml") } }')
         fleet, edges, direct, main_tree_only = scan(r)
         ok = True
         if fleet != {"openbank-scanner"}:
@@ -117,11 +199,41 @@ def self_test() -> int:
         if ("openbank-infra-reader", "openbank-infra/gitops/x.yaml") not in direct:
             print("FAIL: direct GitOps input was not discovered")
             ok = False
-        if direct_readers(direct, ["openbank-infra/gitops/x.yaml"]) != {"openbank-infra-reader"}:
-            print("FAIL: GitOps-only change did not select its direct test reader")
+        if direct_readers(direct, ["openbank-infra/gitops/x.yaml"]) != {"openbank-infra-reader", "openbank-treewalker"}:
+            print("FAIL: GitOps-only change must select its direct reader and the whole-tree reader, nothing else")
             ok = False
-        if direct_readers(direct, ["openbank-infra/gitops/unrelated.yaml"]):
-            print("FAIL: unrelated GitOps change selected a direct test reader")
+        if direct_readers(direct, ["openbank-infra/gitops/unrelated.yaml"]) != {"openbank-treewalker"}:
+            print("FAIL: unrelated GitOps change must select only the whole-tree reader")
+            ok = False
+        if direct_readers(direct, ["docs/adr/0001-x.md"]) != {"openbank-walker"}:
+            print(f"FAIL: parentFile-walk reader of docs/adr was not discovered: {sorted(direct_readers(direct, ['docs/adr/0001-x.md']))}")
+            ok = False
+        if direct_readers(direct, ["openbank-infra/gitops/seg.yaml"]) != {"openbank-segmenter", "openbank-treewalker"}:
+            print(f"FAIL: segmented Path.of read was not attributed to its file: {sorted(direct_readers(direct, ['openbank-infra/gitops/seg.yaml']))}")
+            ok = False
+        if "openbank-segmenter" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
+            print("FAIL: a repo-root existence probe was read as a whole-tree read")
+            ok = False
+        if "openbank-namer" in direct_readers(direct, ["openbank-infra/aws/main.tf"]):
+            print("FAIL: a bare directory name used as an identifier was read as a whole-tree read")
+            ok = False
+        if direct_readers(direct, ["README.md"]) != {"openbank-walker"}:
+            print("FAIL: root-file reader was not discovered")
+            ok = False
+        if direct_readers(direct, ["docs/prompts/x/a.md"]) != {"openbank-copier"}:
+            print("FAIL: build.gradle.kts resource copy was not discovered as a reader")
+            ok = False
+        if "openbank-resource-copier" not in direct_readers(direct, ["openbank-target/governance.yaml"]):
+            print("FAIL: declared processResources glob did not select its image consumer")
+            ok = False
+        if "openbank-resource-copier" in direct_readers(direct, ["openbank-target/src/test/Unrelated.kt"]):
+            print("FAIL: packaged-resource declaration selected an unrelated test input")
+            ok = False
+        if direct_readers(direct, [".github/scripts/check-x.py", "SECURITY.md", "docs/runbook.md"]):
+            print("FAIL: a path no test names selected a reader")
+            ok = False
+        if any(t == "openbank-target" for _, t in edges if _ == "openbank-walker") or ("openbank-walker", "openbank-target") in direct:
+            print("FAIL: a bare module name literal was read as a path")
             ok = False
         cases = [
             ([], False),

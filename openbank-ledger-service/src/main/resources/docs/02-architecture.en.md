@@ -69,7 +69,7 @@ com.openbank.ledger/
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               LedgerPorts (LedgerUseCase), FxRevaluationPorts
 │   ├── port/out/              GlAccountRepository, JournalRepository,
-│   │                          LedgerOutboxPort, CnbRateProvider
+│   │                          LedgerOutboxRepository, CnbRateProvider
 │   └── usecase/               LedgerService, FxRevaluationService
 │
 └── infrastructure/            ◄── adapters
@@ -92,7 +92,7 @@ com.openbank.ledger/
 | `FxRevaluationUseCase` (in) | `FxRevaluationService` | daily mark-to-ČNB revaluation |
 | `JournalRepository` (out) | `PanacheJournalRepository` | persist/read journal entries + lines |
 | `GlAccountRepository` (out) | `PanacheGlAccountRepository` | chart-of-accounts lookups by code/id |
-| `LedgerOutboxPort` (out) | `LedgerOutboxRepositoryImpl` | enqueue + claim outbox rows |
+| `LedgerOutboxRepository` (out) | `LedgerOutboxRepositoryImpl` | enqueue + claim outbox rows |
 | `CnbRateProvider` (out) | `FxServiceCnbRateAdapter` (→ `FxServiceClient`) | statutory ČNB FX fixing |
 
 ## Outbox flow

@@ -189,12 +189,13 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "961a102d86eb27fb",
-      "count": 21,
+      "sha256": "386fa234bc117e2a",
+      "count": 22,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
         "ui-assistant",
+        "product-author",
         "rca-investigator",
         "customer-copilot",
         "mcp-anonymous",
@@ -215,7 +216,7 @@
         "business-copilot"
       ],
       "byPlane": {
-        "control": 14,
+        "control": 15,
         "development": 2,
         "customer": 3,
         "business": 2
@@ -227,11 +228,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "1f19f69a5384ad89",
+      "sha256": "e234b0a1950b0c30",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 5,
+        "pending": 6,
         "registered": 12
       },
       "idsByStatus": {
@@ -244,6 +245,7 @@
           "ap2-anonymous"
         ],
         "pending": [
+          "product-author",
           "card-scheme-bulletin-agent",
           "card-dispute-evidence-agent",
           "treasury-dealing-assistant",
@@ -289,6 +291,7 @@
           "system.v2",
           "system.v3"
         ],
+        "product-author": [],
         "rca-investigator": [],
         "ledger-domain-engineer": [],
         "card-scheme-bulletin-agent": [],
