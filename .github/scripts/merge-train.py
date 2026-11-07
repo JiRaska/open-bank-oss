@@ -261,6 +261,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/check-deploy-pin-monotonic.py",        # judges a carrier by its members' deploy-revert labels
 )
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
