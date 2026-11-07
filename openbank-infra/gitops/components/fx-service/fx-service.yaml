@@ -32,7 +32,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-45b874d6@sha256:f6b4901e4da9b98e89b0f223ed532bebbe5a11e5cf50b47a7a1ff431c5443b7e
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
