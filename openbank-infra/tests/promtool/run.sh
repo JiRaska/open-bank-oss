@@ -47,6 +47,28 @@ for doc in yaml.safe_load_all(billing.read_text()):
         (dst / billing.name).write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
 PY
 
+# Enumerated label values: a matcher on a value the exporter never emits is a rule that can
+# never fire, and a fixture copied from the rule agrees with it (RolloutAnalysisAborted matched
+# "Aborted" twice over, #4584 and #15101). Values read live with
+# `label/phase/values?match[]=rollout_phase` (Argo Rollouts v1.10). Fails on any other value.
+python3 - "$WORK" <<'PY'
+import pathlib, re, sys
+work = pathlib.Path(sys.argv[1])
+KNOWN = {"rollout_phase": ("phase", {"Progressing", "Paused", "Completed", "Error", "Abort", "Timeout"})}
+bad, files = [], sorted(work.glob("*.yaml"))
+for f in files:
+    text = f.read_text()
+    for metric, (label, allowed) in KNOWN.items():
+        for m in re.finditer(metric + r"\{([^}]*)\}", text):
+            for v in re.findall(label + r'\s*=~?\s*"([^"]*)"', m.group(1)):
+                for alt in v.split("|"):
+                    if alt not in allowed:
+                        bad.append(f"{f.name}: {metric}{{{label}=\"{alt}\"}}; the exporter emits only {sorted(allowed)}")
+if bad:
+    sys.exit("rule matches a label value that is never emitted:\n  " + "\n  ".join(bad))
+print(f"label-value check: {len(files)} rule files, known metrics {sorted(KNOWN)}")
+PY
+
 # Sanity: promtool must accept every unwrapped file before any test runs. A test that
 # "passes" against a rule file promtool could not parse would be testing nothing.
 promtool check rules "$WORK"/*.yaml >/dev/null
