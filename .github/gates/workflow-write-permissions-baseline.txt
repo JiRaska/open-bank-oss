@@ -271,3 +271,6 @@ vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
 test-evidence-reconcile.yml|job:reconcile|id-token
 merge-train-wake.yml|job:wake|actions
+
+# Communication artifact producer: OIDC authenticates registry push and KMS attestations only.
+communication-image-only.yml|job:build-push|id-token
