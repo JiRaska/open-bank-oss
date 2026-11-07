@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0352: billing-service's leg to OpenBao's TLS listener (openbao.vault.svc:8203). Billing has
+# no other private-CA certificate, so this one exists for its `ca.crt` — the openbank-ca root the
+# product-IR shadow's OpenBao client trusts (and nothing else). The leaf itself is a client
+# identity that OpenBao does not currently require (kubernetes-auth authenticates the call).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: billing-openbao-client-tls
+  namespace: billing
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: billing-openbao-client-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: billing-service.billing.svc
+  dnsNames:
+    - billing-service.billing.svc
+  usages:
+    - digital signature
+    - client auth
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -73,6 +73,9 @@ spec:
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "506daeb487b943fc"
     spec:
+      # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
+      # workload, not to every pod running as `default` in the namespace.
+      serviceAccountName: product-catalog
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -148,8 +151,13 @@ spec:
             # and this service's kubernetes-auth role are provisioned; then set
             # CATALOG_IR_SIGNING_MODE=openbao here. `hmac` refuses to boot in this launch mode.
             # Consumers (phase 3) get verify-only roles.
+            # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
+            # ESO and the in-namespace jobs. The CA is the one in this pod's own internal-tls
+            # Secret — same ClusterIssuer — and the client trusts ONLY it for this leg.
             - name: CATALOG_IR_SIGNING_OPENBAO_ADDRESS
-              value: https://openbao.vault.svc:8200
+              value: https://openbao.vault.svc:8203
+            - name: OPENBANK_CATALOG_IR_SIGNING_OPENBAO_CA_FILE
+              value: /mnt/internal-tls/ca.crt
           startupProbe:
             httpGet:
               path: /q/health/ready
@@ -279,6 +287,14 @@ spec:
         - name: opa-bundle
           configMap:
             name: product-catalog-opa-bundle
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: product-catalog
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: product-catalog
 ---
 apiVersion: v1
 kind: Service

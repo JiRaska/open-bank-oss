@@ -79,12 +79,18 @@ class ProductShadowWiring(
         defaultValue = "/var/run/secrets/kubernetes.io/serviceaccount/token",
     )
     private val saTokenPath: String,
+    /** PEM of the private CA behind OpenBao's TLS listener; absent = the JVM default trust store. */
+    @ConfigProperty(name = "openbank.interest.product-shadow.verification.openbao.ca-file")
+    private val caFile: Optional<String>,
 ) {
     /** Null when verification is disabled: the service then compares nothing and says so. */
     fun verifier(): IrSignatureVerifierPort? = when (IrVerificationMode.parse(mode)) {
         IrVerificationMode.DISABLED -> null
         IrVerificationMode.OPENBAO -> {
-            val transport = OpenBaoTransport(URI.create(baoAddress))
+            val transport = OpenBaoTransport(
+                URI.create(baoAddress),
+                caFile.map { OpenBaoTransport.pemTrustSslContext(Path.of(it)) }.orElse(null),
+            )
             OpenBaoTransitIrSigner(
                 transport,
                 keyId,
