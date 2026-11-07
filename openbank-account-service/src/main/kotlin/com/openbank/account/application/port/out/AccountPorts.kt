@@ -8,6 +8,7 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.CurrencyPocket
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.event.DomainEvent
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -51,6 +52,12 @@ interface AccountRepository {
         primaryPocket: CurrencyPocket,
         idempotencyKey: String,
         requestHash: String?,
+        /**
+         * Builds the AccountCreated event from the row as persisted; the implementation writes it to
+         * the account outbox in the SAME transaction, so an account never commits without its event
+         * and a rolled-back duplicate never emits one.
+         */
+        createdEvent: (Account) -> DomainEvent,
     ): Account
 
     /** The account opened under this idempotency key, or null if the key is unused. */

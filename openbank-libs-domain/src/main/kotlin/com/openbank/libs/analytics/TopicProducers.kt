@@ -38,6 +38,8 @@ object TopicProducers {
     private val TOPIC_TO_SERVICE = mapOf(
         "openbank.settlement.events" to "settlement-service",
         "openbank.accounts.account.created" to "account-service",
+        "openbank.accounts.account.status-changed" to "account-service",
+        "openbank.accounts.savings-withdrawal.approved" to "account-service",
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
         "openbank.party.events" to "party-service",
@@ -53,6 +55,9 @@ object TopicProducers {
         "openbank.sepa.payment.events" to "sepa-payment",
         "openbank.statement.event" to "statement-service",
         "openbank.sanctions.screening.event" to "sanctions-service",
+        // Both producers stamp a required sourceService in every valid trigger. Never guess one of
+        // them from this shared topic if a malformed record omits that producer declaration.
+        "openbank.oversight-triggers" to "multiple-producers",
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
         "openbank.fx.fixing.published" to "fx-service",
@@ -63,6 +68,9 @@ object TopicProducers {
         // (swift-institution-transfers-out). The payload carries no sourceService field.
         "openbank.swift.institution-transfers" to "swift-service",
         "openbank.lending.events" to "lending-service",
+        // #13177: TPP register changes (TPP_REGISTERED / TPP_BLACKLISTED), tpp-registry-service's
+        // outbox (tpp-events-out). The payload carries no sourceService field.
+        "openbank.tpp.registry.event" to "tpp-registry-service",
         // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
         // this table and application.yaml's topics list), so SCA device enrollment
         // (DEVICE_ENROLLED) was never audited — a real PSD2/SCA gap, since sca-service is

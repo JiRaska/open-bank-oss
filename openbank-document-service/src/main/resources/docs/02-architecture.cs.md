@@ -70,7 +70,7 @@ reaktivní a JDBC čtení z migrované databáze a HTTP 401 při chybějící M2
 
 Vlastní databáze `openbank_documents`, `generation: none`, Flyway V1..V3. Pouze outbox entita rozšiřuje
 `PanacheOutboxEntity` (Hibernate sekvence `document_outbox_seq`, vytvořená ve V3 — hlídá
-`HibernateSequenceGuardTest`); ostatní entity používají aplikačně přidělená UUID/String id.
+CI gate `hibernate-sequence-guard`); ostatní entity používají aplikačně přidělená UUID/String id.
 
 ## Seedované penzijní šablony
 
@@ -85,3 +85,12 @@ Ostré renderování odmítá také dříve publikovanou šablonu obsahující `
 ## Propagace trace přes outbox
 
 Řádek outboxu ukládá W3C `traceparent` požadavku, který ho zapsal (`document_outbox.trace_context`, migrace `V16`, nullable). Dispatcher publikuje záznam s hlavičkou `traceparent` a producer span navazuje na uložený kontext, takže span konzumenta se propojí s původním požadavkem místo toho, aby trace začínala na vlákně plánovače. Řádky zapsané mimo jakýkoli span hodnotu nenesou a publikují se jako dříve.
+
+## Čtení produktového katalogu vlastní identitou služby
+
+Čtení produktu (`ProductCatalogClient.getById`) se odesílá s pojmenovaným OIDC klientem `m2m`, který se autentizuje jako `openbank-document` (ROLE_API a
+scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-catalog uděluje
+`catalog.read` této identitě jménem (`service-named-catalog-read`); sdílenému klientovi se samotnou
+ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
+zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
+`M2mOidcClientIdentityWiringTest`.

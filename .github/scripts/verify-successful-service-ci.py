@@ -11,7 +11,9 @@ build and contract child jobs. Every API or schema failure is a refusal.
 
 from __future__ import annotations
 
+import functools
 import hashlib
+from http.client import IncompleteRead
 import json
 import os
 import re
@@ -21,6 +23,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
@@ -28,7 +31,10 @@ from urllib.request import Request, urlopen
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MAX_API_PAGES = 20
+JOBS_PER_PAGE = 20
+API_READ_ATTEMPTS = 3
 RECONCILE_RESOLUTION_SECONDS = 420
+CANDIDATE_WORKERS = 8
 
 
 def _require_time_remaining(deadline: float | None) -> None:
@@ -47,6 +53,69 @@ class VerificationError(Exception):
     pass
 
 
+def _read_backoff(attempt: int, deadline: float | None) -> None:
+    delay = 2 ** attempt
+    if deadline is not None and time.monotonic() + delay >= deadline:
+        raise VerificationError("reconcile source resolution exceeded its time budget")
+    time.sleep(delay)
+
+
+def _read_json_page(request: Request, deadline: float | None) -> tuple[dict, str]:
+    """Retry only transient GET failures; never consume a partial response as evidence."""
+    for attempt in range(API_READ_ATTEMPTS):
+        try:
+            timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
+            if timeout <= 0:
+                raise VerificationError(
+                    "reconcile source resolution exceeded its time budget"
+                )
+            with urlopen(request, timeout=timeout) as response:
+                body = json.loads(response.read())
+                link_header = response.headers.get("Link", "")
+            return body, link_header
+        except HTTPError as exc:
+            if (
+                request.get_method() == "GET"
+                and exc.code in {500, 502, 503, 504}
+                and (not exc.headers or exc.headers.get("X-RateLimit-Remaining") != "0")
+                and attempt + 1 < API_READ_ATTEMPTS
+            ):
+                exc.close()
+                _read_backoff(attempt, deadline)
+                continue
+            # Request headers and response bodies may contain credentials or untrusted
+            # text. Report only the endpoint path, status and numeric quota hints.
+            endpoint = urlsplit(request.full_url).path
+            details = [f"HTTP {exc.code}"]
+            for header, label in (
+                ("X-RateLimit-Remaining", "rate-limit-remaining"),
+                ("X-RateLimit-Reset", "rate-limit-reset"),
+                ("Retry-After", "retry-after"),
+            ):
+                value = exc.headers.get(header) if exc.headers else None
+                if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
+                    details.append(f"{label}={value}")
+            raise VerificationError(
+                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
+            ) from None
+        except IncompleteRead:
+            if request.get_method() != "GET" or attempt + 1 == API_READ_ATTEMPTS:
+                raise VerificationError(
+                    "GitHub Actions API request failed: IncompleteRead"
+                ) from None
+            _read_backoff(attempt, deadline)
+            continue
+        except (
+            URLError,
+            TimeoutError,
+            OSError,
+            json.JSONDecodeError,
+        ) as exc:
+            raise VerificationError(
+                f"GitHub Actions API request failed: {type(exc).__name__}"
+            ) from exc
+
+
 def _iter_json_pages(
     url: str, token: str, *, deadline: float | None = None
 ) -> Iterator[list[dict]]:
@@ -54,12 +123,18 @@ def _iter_json_pages(
     next_url: str | None = url
     origin = urlsplit(url)[:2]
     visited: set[str] = set()
+    # Preserve the existing 2,000-row ceiling for jobs with smaller responses.
+    max_pages = (
+        MAX_API_PAGES * (100 // JOBS_PER_PAGE)
+        if urlsplit(url).path.endswith("/jobs")
+        else MAX_API_PAGES
+    )
     while next_url:
         if next_url in visited:
             raise VerificationError("GitHub Actions API pagination repeated a page URL")
-        if len(visited) >= MAX_API_PAGES:
+        if len(visited) >= max_pages:
             raise VerificationError(
-                f"GitHub Actions API pagination exceeded {MAX_API_PAGES} pages"
+                f"GitHub Actions API pagination exceeded {max_pages} pages"
             )
         visited.add(next_url)
         _require_time_remaining(deadline)
@@ -73,40 +148,7 @@ def _iter_json_pages(
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        try:
-            timeout = 20 if deadline is None else min(20, deadline - time.monotonic())
-            if timeout <= 0:
-                raise VerificationError(
-                    "reconcile source resolution exceeded its time budget"
-                )
-            with urlopen(request, timeout=timeout) as response:
-                body = json.loads(response.read())
-                link_header = response.headers.get("Link", "")
-        except HTTPError as exc:
-            # Request headers and response bodies may contain credentials or untrusted
-            # text. Report only the endpoint path, status and numeric quota hints.
-            endpoint = urlsplit(next_url).path
-            details = [f"HTTP {exc.code}"]
-            for header, label in (
-                ("X-RateLimit-Remaining", "rate-limit-remaining"),
-                ("X-RateLimit-Reset", "rate-limit-reset"),
-                ("Retry-After", "retry-after"),
-            ):
-                value = exc.headers.get(header) if exc.headers else None
-                if value is not None and re.fullmatch(r"[0-9]{1,12}", str(value)):
-                    details.append(f"{label}={value}")
-            raise VerificationError(
-                f"GitHub Actions API {endpoint} failed ({'; '.join(details)})"
-            ) from None
-        except (
-            URLError,
-            TimeoutError,
-            OSError,
-            json.JSONDecodeError,
-        ) as exc:
-            raise VerificationError(
-                f"GitHub Actions API request failed: {type(exc).__name__}"
-            ) from exc
+        body, link_header = _read_json_page(request, deadline)
         if not isinstance(body, dict):
             raise VerificationError("GitHub Actions API returned a non-object response")
         # Run endpoints wrap results in workflow_runs; job endpoints use jobs.
@@ -178,7 +220,7 @@ def verify_successful_service_ci(
     for run in candidates:
         run_id = run["id"]
         attempt = run["run_attempt"]
-        jobs_query = urlencode({"per_page": 100})
+        jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
         jobs_url = urljoin(
             base,
             f"repos/{encoded_repo}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",
@@ -213,7 +255,7 @@ def _jobs_prove_services(
     if not isinstance(run_id, int) or not isinstance(attempt, int) or attempt < 1:
         return set()
     base = api_url.rstrip("/") + "/"
-    jobs_query = urlencode({"per_page": 100})
+    jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
     jobs_url = urljoin(
         base,
         f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",
@@ -451,6 +493,68 @@ def _expected_verification_jobs(
         return None
 
 
+@functools.lru_cache(maxsize=1)
+def _global_input_dirs() -> list[str]:
+    """The directories every Gradle service's equivalence proof requires byte-equal.
+
+    Read from the comparator itself so the two cannot drift; unreadable means no
+    prefilter (the full proof still runs), never a guess.
+    """
+    try:
+        text = Path(SCRIPT_DIR, "pact-version-tree-equivalent.sh").read_text()
+    except OSError:
+        return []
+    match = re.search(r"(?m)^GLOBAL_IN_SCOPE_DIRS=\(([^)]*)\)", text)
+    return match.group(1).split() if match else []
+
+
+def _tree_ids(rev: str, dirs: list[str], deadline: float | None) -> list[str] | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "-q", *[f"{rev}:{d}" for d in dirs]],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=_bounded_timeout(deadline, 30),
+    )
+    ids = result.stdout.split()
+    return ids if result.returncode == 0 and len(ids) == len(dirs) else None
+
+
+def _global_build_inputs_differ(
+    source_sha: str, target_sha: str, *, deadline: float | None = None
+) -> bool:
+    """True only when both trees are readable and a shared Gradle build input differs.
+
+    pact-version-tree-equivalent.sh refuses any Gradle service whose build-logic, gradle
+    or config tree differs, so one cheap rev-parse per run replaces a ~1 s comparator
+    process per (run, service). Anything unreadable returns False: run the full proof.
+    """
+    dirs = _global_input_dirs()
+    if not dirs:
+        return False
+    try:
+        old = _tree_ids(source_sha, dirs, deadline)
+        new = _tree_ids(target_sha, dirs, deadline)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return old is not None and new is not None and old != new
+
+
+def _is_gradle_module(service: str, sha: str, *, deadline: float | None = None) -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["git", "cat-file", "-e", f"{sha}:{service}/build.gradle.kts"],
+                check=False,
+                capture_output=True,
+                timeout=_bounded_timeout(deadline, 30),
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return True  # unknown: do not take the shortcut
+
+
 def _is_ancestor(
     source_sha: str, target_sha: str, *, deadline: float | None = None
 ) -> bool:
@@ -544,6 +648,53 @@ def _exact_pact_exists(
     return result.returncode == 0 and result.stdout.strip() == "yes"
 
 
+def _candidate_service(
+    service: str,
+    sha: str,
+    tip_sha: str,
+    is_push: bool,
+    deadline: float | None,
+    skip_gradle: bool = False,
+    gradle_cache: dict[str, bool] | None = None,
+) -> bool:
+    if skip_gradle:
+        # A shared Gradle build input differs, so the comparator would refuse every
+        # Gradle module: skip the ~1 s process per (run, service).
+        cache = gradle_cache if gradle_cache is not None else {}
+        if service not in cache:
+            cache[service] = _is_gradle_module(service, tip_sha, deadline=deadline)
+        if cache[service]:
+            return False
+    if is_push and not _push_might_build_service(service, sha, deadline=deadline):
+        return False
+    return _tree_equivalent(service, sha, tip_sha, deadline=deadline)
+
+
+def _candidate_services(
+    services: list[str],
+    sha: str,
+    tip_sha: str,
+    is_push: bool,
+    deadline: float | None,
+    skip_gradle: bool = False,
+    gradle_cache: dict[str, bool] | None = None,
+) -> set[str]:
+    """Run the per-service git comparators for one run concurrently.
+
+    Each comparator is an independent read-only git subprocess costing seconds, and a
+    reconcile batch evaluates a dozen services per candidate run; done serially that
+    exceeded RECONCILE_RESOLUTION_SECONDS (#13587). The verdict per service is unchanged.
+    """
+    with ThreadPoolExecutor(max_workers=CANDIDATE_WORKERS) as pool:
+        verdicts = pool.map(
+            lambda service: _candidate_service(
+                service, sha, tip_sha, is_push, deadline, skip_gradle, gradle_cache
+            ),
+            services,
+        )
+        return {service for service, ok in zip(services, verdicts, strict=True) if ok}
+
+
 def resolve_reconcile_service_source(
     service: str, tip_sha: str, repository: str, token: str, api_url: str
 ) -> tuple[str, str, int]:
@@ -593,6 +744,7 @@ def resolve_reconcile_service_sources(
     pending = set(services)
     resolved: dict[str, dict[str, str | int]] = {}
     ancestor_cache: dict[str, bool] = {}
+    gradle_cache: dict[str, bool] = {}
     newest_seen: str | None = None
     for page in _iter_json_pages(runs_url, token, deadline=deadline):
         for run in page:
@@ -620,15 +772,16 @@ def resolve_reconcile_service_sources(
                 ancestor_cache[sha] = _is_ancestor(sha, tip_sha, deadline=deadline)
             if not ancestor_cache[sha]:
                 continue
-            candidates: set[str] = set()
-            for service in pending:
-                _require_time_remaining(deadline)
-                if run.get("event") == "push" and not _push_might_build_service(
-                    service, sha, deadline=deadline
-                ):
-                    continue
-                if _tree_equivalent(service, sha, tip_sha, deadline=deadline):
-                    candidates.add(service)
+            _require_time_remaining(deadline)
+            candidates = _candidate_services(
+                sorted(pending),
+                sha,
+                tip_sha,
+                run.get("event") == "push",
+                deadline,
+                skip_gradle=_global_build_inputs_differ(sha, tip_sha, deadline=deadline),
+                gradle_cache=gradle_cache,
+            )
             if not candidates:
                 continue
             successful = _jobs_prove_services(

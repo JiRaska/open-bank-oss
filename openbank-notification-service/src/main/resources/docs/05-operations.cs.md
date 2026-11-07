@@ -84,6 +84,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 1. Je výprava zastavená? `GET /api/v1/ops/dispatch` — pokud `state=HALTED`, operátor sáhl po break-glass. Obnovte přes four-eyes (`/resume/propose` + *jiný* aktér `/approve`).
 2. Zkontrolujte consumer lag na `openbank.notification.requests`; zkontrolujte logy `NotificationConsumer` na parse/processing chyby.
 3. EMAIL zaseknutý v `PENDING`/`FAILED`? Ověřte SMTP (`quarkus.mailer.*`); v dev je mailer mockovaný.
+   Který kanál drží řádky bez výsledku, ukáže `openbank_notification_pending_stale_by_channel{channel=...}`: řádky PENDING starší než 15 minut rozdělené podle kanálu (`EMAIL`, `PUSH`, `INBOX`). Součet kanálů odpovídá `openbank_notification_pending_stale`. Hodnota `-1` znamená, že dotaz selhal, ne nula řádků. Čtení produkční tabulky není potřeba.
 4. PUSH `FAILED` s "no active devices"? Party nemá žádné ACTIVE `device_tokens`, nebo jsou FCM/APNs adaptéry vypnuté (pak je push no-op SENT).
 
 ### Zastavení / obnovení výpravy (break-glass)

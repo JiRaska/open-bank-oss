@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.44.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.3...lending-service-v0.44.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **lending:** read the product catalog as openbank-lending, not the shared client ([#14828](https://github.com/JiRaska/open-bank-oss/issues/14828)) ([975d9d6](https://github.com/JiRaska/open-bank-oss/commit/975d9d693377b657e1dfdb90e453ace8c8fb570c))
+
+## [0.44.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.2...lending-service-v0.44.3) (2026-11-02)
+
+
+### Bug Fixes
+
+* **lending:** align outbox id default with the pooled sequence; origination journey E2E ([#14551](https://github.com/JiRaska/open-bank-oss/issues/14551)) ([3f72999](https://github.com/JiRaska/open-bank-oss/commit/3f7299937869f150c26c3d28ab3508c9d88ac451)), closes [#14366](https://github.com/JiRaska/open-bank-oss/issues/14366)
+
+## [0.44.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.1...lending-service-v0.44.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **lending:** align response Money schemas with the shipped wire shape ([#14265](https://github.com/JiRaska/open-bank-oss/issues/14265)) ([3ce683e](https://github.com/JiRaska/open-bank-oss/commit/3ce683e74337bc1ec5de8db195cfb5310987ea1d))
+
 ## [0.44.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.0...lending-service-v0.44.1) (2026-10-28)
 
 

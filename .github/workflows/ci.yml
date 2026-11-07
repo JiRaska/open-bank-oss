@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  pull_request_review:
-    types: [submitted, dismissed, edited]
 
 permissions:
   contents: read
@@ -18,8 +16,7 @@ concurrency:
   # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
   # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
   # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # Review events have their own lane: a review must not cancel the PR push run that
-  # provides required checks (including service builds from a separate workflow).
+  # Review submissions do not change build inputs and do not trigger code CI.
   # The key stays O(1) — a sha or event name, never a list (#3082).
   group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || github.event_name }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
@@ -32,7 +29,17 @@ jobs:
     outputs:
       proceed: ${{ steps.admit.outputs.proceed }}
     steps:
-      - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
+      - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # base.sha is frozen on older PRs; admission reads policy and pinned requirements
@@ -53,6 +60,17 @@ jobs:
           "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
           gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
           "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   # ---------------------------------------------------------------------------
   # JVM / Kotlin / Gradle builds moved to services-ci.yml, which builds every
@@ -61,7 +79,8 @@ jobs:
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
-  # Admin UI — path-scoped: runs when openbank-admin-ui/** changes, OR when a file
+  # Admin UI — path-scoped: runs when openbank-admin-ui/** or the static developer
+  # portal changes, OR when a file
   # the ADR-0071 governance gate READS changes. That gate lives in this job but
   # validates every openbank-*/governance.yaml in the fleet, so scoping the job to
   # admin-ui files alone let a backend PR add a service and never reach it: the job
@@ -86,6 +105,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify committed cluster topology snapshot
+        run: node openbank-admin-ui/scripts/generate-cluster-topology.mjs --check
       - id: check
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -94,6 +115,7 @@ jobs:
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
           python3 .github/scripts/test-ci-ui-verdict.py
           python3 .github/scripts/test-ci-latency-report.py
+          python3 .github/scripts/test-packaged-library-sbom.py
           python3 .github/scripts/test-service-build-artifact.py
           python3 .github/scripts/test-prepare-test-priority.py
           python3 .github/scripts/test-context-deploy-handoff.py
@@ -115,10 +137,12 @@ jobs:
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
                   openbank-product-catalog/src/main/resources/openapi.yaml \
+                  openbank-developer-portal/ \
                   '*/governance.yaml' \
-                  openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
+                  openbank-libs/governance/governance.schema.json \
+                  openbank-libs/governance/domain-taxonomy.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
-            echo "Admin UI or governance files changed: $N"
+            echo "Admin UI, developer portal or governance files changed: $N"
             # Derive cross-package guard inputs from literal backend paths.
             # Backend-only RBAC changes get a focused test lane; UI changes run
             # the full UI suite above. A missing/dynamic input fails detection.
@@ -244,6 +268,9 @@ jobs:
         timeout-minutes: 5
         continue-on-error: true
 
+      # check-admin-ui-a11y-route-coverage.py is declared in gates.yaml (admin-ui-a11y-route-coverage),
+      # not here: this job is conditional, so a gate inside it silently narrows (#3629).
+
       - name: E2E tests (Playwright)
         id: browser_e2e
         run: npm run test:e2e
@@ -264,6 +291,31 @@ jobs:
           OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
+      # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
+      # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
+      # renders inside the pinned Playwright image (scripts/visual.sh), the environment the
+      # baselines are made in, so a host font or arch change cannot read as a diff. ADVISORY until
+      # its flake rate is measured over 10 consecutive runs: continue-on-error keeps the job green
+      # while the envelope below still records a failed `visual` verdict for Test Intelligence.
+      - name: Visual regression (Playwright baselines)
+        id: visual
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 15
+        run: bash scripts/visual.sh
+
+      - name: Retain visual diff images
+        # actual / expected / diff PNG per failed comparison plus the HTML report that shows them
+        # side by side. continue-on-error above makes `outcome` the honest signal here.
+        if: always() && steps.visual.outcome == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: |
+            openbank-admin-ui/build/visual-results/artifacts/
+            openbank-admin-ui/build/visual-results/report/
+          retention-days: 14
+
       - name: Build Admin UI Test Intelligence envelope
         if: always()
         continue-on-error: true
@@ -271,6 +323,10 @@ jobs:
           DIAGNOSTIC_ARGS=()
           if [[ "${{ steps.browser_e2e.outcome }}" == "failure" ]]; then
             DIAGNOSTIC_ARGS+=(--browser-report-dir playwright-report)
+          fi
+          if [[ "${{ steps.visual.outcome }}" == "success" || "${{ steps.visual.outcome }}" == "failure" ]]; then
+            DIAGNOSTIC_ARGS+=(--visual-report build/visual-results/visual.xml
+              --visual-diff-artifact "visual-diff-${{ github.run_id }}-a${{ github.run_attempt }}")
           fi
           python3 ../.github/scripts/collect-test-run-evidence.py \
             --service . --component openbank-admin-ui --out build/test-intelligence/run.json \
@@ -338,7 +394,7 @@ jobs:
     name: Admin UI
     needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - &admin-ui-verdict
@@ -419,7 +475,7 @@ jobs:
     needs: agent-admission
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 65
     permissions:
       actions: read
     outputs:
@@ -434,7 +490,11 @@ jobs:
           script: |
             const path = '.github/workflows/ruleset-bypass-evidence.yml';
             const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
-            const deadline = Date.now() + 30 * 60 * 1000;
+            // GITHUB_TOKEN quota is 1000/h per REPOSITORY, shared by every job. A proven
+            // exhaustion may extend the wait to the hourly reset, never past the hard cap.
+            const started = Date.now();
+            const hardCap = started + 62 * 60 * 1000;
+            let deadline = started + 30 * 60 * 1000;
             const exhausted = () => new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
             const pause = async milliseconds => {
               const remaining = deadline - Date.now();
@@ -455,12 +515,16 @@ jobs:
                   const reset = Number(headers['x-ratelimit-reset']);
                   if (error.status !== 403 || headers['x-ratelimit-remaining'] !== '0' ||
                       !Number.isFinite(reset) || reset <= 0 || quotaRetries++ >= 3) throw error;
-                  await pause(Math.max(1000, reset * 1000 - Date.now() + 1000));
+                  const resume = Math.max(Date.now() + 1000, reset * 1000 + 1000);
+                  if (resume > hardCap) throw exhausted();
+                  deadline = Math.min(hardCap, Math.max(deadline, resume + 60 * 1000));
+                  await pause(resume - Date.now());
                 }
               }
               throw exhausted();
             };
             let workflow;
+            let artifactCache;
             let poll = 0;
             while (Date.now() < deadline) {
               if (!workflow) {
@@ -468,9 +532,36 @@ jobs:
                   ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
                 })));
               }
-              const {data} = await read(timeout => github.rest.actions.listArtifactsForRepo({
-                ...context.repo, name, per_page: 100, request: {timeout}
-              }));
+              // Keep the existing exact-name, first-page (100) scope. Cache only this
+              // receiver invocation's valid response, never a snapshot or producer verdict.
+              const query = {...context.repo, name, per_page: 100};
+              const key = JSON.stringify([query.owner, query.repo, query.name, query.per_page]);
+              let response;
+              try {
+                response = await read(timeout => github.rest.actions.listArtifactsForRepo({
+                  ...query,
+                  ...(artifactCache?.key === key ? {headers: {'if-none-match': artifactCache.etag}} : {}),
+                  request: {timeout}
+                }));
+              } catch (error) {
+                if (error.status !== 304) throw error;
+                response = {status: 304};
+              }
+              if (Date.now() >= deadline) throw exhausted();
+              let data;
+              if (response.status === 304) {
+                if (!artifactCache || artifactCache.key !== key) {
+                  throw new Error('Conditional artifact response has no matching body; NOT_EVALUATED');
+                }
+                data = artifactCache.data;
+              } else {
+                data = response.data;
+                if (response.status !== 200 || !data || !Array.isArray(data.artifacts)) {
+                  throw new Error('Invalid artifact-list response; NOT_EVALUATED');
+                }
+                const etag = response.headers?.etag;
+                artifactCache = typeof etag === 'string' && etag.trim() ? {key, etag, data} : undefined;
+              }
               for (const artifact of data.artifacts) {
                 if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
                 const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
@@ -521,6 +612,10 @@ jobs:
 
   gates:
     name: gates (${{ matrix.slug }})
+    permissions:
+      actions: read       # readiness R8 verifies the exact api-fuzz run artifact
+      contents: read
+      pull-requests: read
     needs: [agent-admission, ruleset-evidence]
     # Missing evidence must produce NOT_EVALUATED in the gate report while the
     # independent governance checks still run. Admission refusal still blocks all.
@@ -671,7 +766,7 @@ jobs:
       # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
       # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
-        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -759,7 +854,7 @@ jobs:
     name: Validate manifests
     needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     timeout-minutes: 2
     steps:
       - name: Verify agent PR admission
@@ -819,6 +914,16 @@ jobs:
     env:
       APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -956,6 +1061,17 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body: payload })
             }
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
 
   # ---------------------------------------------------------------------------
   # Issue hygiene (ADR-0052) moved to issue-hygiene.yml so it also runs on the

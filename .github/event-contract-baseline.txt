@@ -11,7 +11,6 @@
 # Regenerate deliberately, never as a way to make a red build green.
 openbank-account-service:openbank.accounts.account.created
 openbank-account-service:openbank.notification.requests
-openbank-aml-service:openbank.aml.events
 openbank-card-issuance-service:openbank.cards.events
 openbank-clearing-service:openbank.clearing.batch.event
 openbank-consent-service:openbank.consent.events
@@ -24,7 +23,6 @@ openbank-lending-service:openbank.lending.events
 openbank-party-service:openbank.party.events
 openbank-pid-service:openbank.pid.events
 openbank-pid-service:party.events
-openbank-sanctions-service:openbank.sanctions.screening.event
 openbank-sdd-service:openbank.sdd.event
 openbank-security-scanner:openbank.security.ict.incident
 openbank-sepa-instant:openbank.sepa.instant.events

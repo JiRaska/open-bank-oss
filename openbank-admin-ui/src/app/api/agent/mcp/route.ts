@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { mintSvidHeaders } from '@/lib/agent/svidMint'
+import { canonicalToolDomains } from '@/lib/agent/toolDomains'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,6 +61,11 @@ export async function POST(req: NextRequest) {
       )
     }
     const data = await res.json()
+    // Published ownership may advance ahead of the agent image. Only list metadata is projected;
+    // tool identities, arguments, charter filtering and execution responses pass through unchanged.
+    if (body?.method === 'tools/list' && !data?.error && Array.isArray(data?.result?.tools)) {
+      data.result.tools = await canonicalToolDomains(data.result.tools)
+    }
     return NextResponse.json(data, { status: res.status })
   } catch {
     return NextResponse.json(

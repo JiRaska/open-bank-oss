@@ -12,6 +12,7 @@
 | **PSD2 (EU 2015/2366)** | Execution of payment transactions | Sanctions check is a mandatory gate before payment execution (ADR-0032) |
 | **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | `FATF_HIGH_RISK` list flags transfers to/from high-risk countries |
 | **Act No. 1/2023 Coll.** | Czech national sanctions list kept by MZV | `CNB_DOMESTIC` list (imported from `cz_national_sanctions`) |
+| **Regulation No. 210/2008 Coll.** | Czech anti-terrorism designations; a separate legal regime from the national sanctions list | `CZ_TERRORISTS` list imported from official e-Sbírka SPARQL open data, never the commercially licensed OpenSanctions mirror |
 | **GDPR (EU 2016/679)** | PII in screening requests (name, DoB, identifiers) | PII masked in logs; Art. 6(1)(c) legal obligation basis; erasure overridden by AMLD |
 | **DORA (EU 2022/2554)** | Operational resilience for financial services | Health probes, audit events, outbox guarantee, SLO, runbooks |
 

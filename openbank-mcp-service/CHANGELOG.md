@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.6...mcp-service-v0.17.7) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui,mcp-service:** align remaining domain consumers ([#15040](https://github.com/JiRaska/open-bank-oss/issues/15040)) ([7e5b6d5](https://github.com/JiRaska/open-bank-oss/commit/7e5b6d552d94dd952dc1e5e0a549439e87896a18))
+
 ## [0.17.6](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.5...mcp-service-v0.17.6) (2026-10-16)
 
 

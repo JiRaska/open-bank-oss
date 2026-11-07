@@ -21,6 +21,7 @@ import java.time.Duration
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tax_reporting_scheduler_it")],
+    restrictToAnnotatedClass = true,
 )
 @QuarkusTestResource(StatutoryReturnMessagingTestResource::class)
 @TestProfile(StatutoryReturnDeadlineSchedulerIT.FastDeadlineProfile::class)
@@ -48,6 +49,11 @@ class StatutoryReturnDeadlineSchedulerIT {
         assertThat(recorded)
             .describedAs("a real cron tick must finish its reactive repository query and record success")
             .isEqualTo(1.0)
+        assertThat(
+            registry.find("openbank_workflow_unconfigured")
+                .tag("workflow", "statutory-return-deadline-check")
+                .gauge()?.value(),
+        ).describedAs("a configured deployment must not report itself unconfigured").isEqualTo(0.0)
     }
 
     private fun successRecorded(): Double? = registry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)

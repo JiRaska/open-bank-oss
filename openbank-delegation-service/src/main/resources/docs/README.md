@@ -12,9 +12,19 @@ Signing an expired approval request returns HTTP 409 with code `EXPIRED`, includ
 
 Podpis expirovaného požadavku na schválení vrací HTTP 409 s kódem `EXPIRED`, a to i poté, co úloha expirace uložila stav `EXPIRED`. Pokus odmítnutý úvodní kontrolou již expirovaného požadavku nespotřebuje SCA výzvu spolupodepisujícího ani nepřidá podpis nebo událost. Spotřeba SCA před následnou kontrolou zamčeného stavu se nemění; nejde o atomickou záruku pro souběžné změny stavu. Ostatní uzavřené stavy, včetně `REJECTED`, při pokusu o podpis po uplynutí lhůty nadále vracejí `NOT_PENDING`.
 
+## Pending approvals when the mandate register is unreachable / Čekající schválení při nedostupném registru mandátů
+
+`GET /api/v1/parties/{humanId}/approval-requests/pending` first reads, from party-service, the entities the human can currently sign for. When that acting-for read fails, the endpoint returns HTTP 503 with code `MANDATES_UNAVAILABLE`, the same answer as every other mandate read in business signing. It never returns 500, and never an empty list, which would falsely tell the signer that nothing waits for them.
+
+`GET /api/v1/parties/{humanId}/approval-requests/pending` nejprve načte z party-service subjekty, za které může člověk právě podepisovat. Selže-li toto čtení, endpoint vrátí HTTP 503 s kódem `MANDATES_UNAVAILABLE`, stejně jako každé jiné čtení mandátů při podepisování za firmu. Nikdy nevrací 500 ani prázdný seznam, který by podepisujícímu mylně sdělil, že na něj nic nečeká.
+
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Consumer contract verification
+
+Consumer Pact tests exercise delegation-service's outbound REST interactions, including calls to SCA, PID, account, and card-issuance services. Their expected paths are literal values kept separate from the client annotations used to form requests, so an incorrect client route can fail the contract test. Run them with `./gradlew :openbank-delegation-service:consumerPactTest`.
 
 ## Customer recertification caller
 
@@ -27,3 +37,7 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Owner portfolio path parameter
+
+`GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.

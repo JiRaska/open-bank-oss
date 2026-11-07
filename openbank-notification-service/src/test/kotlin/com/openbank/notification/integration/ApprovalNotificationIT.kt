@@ -5,6 +5,7 @@ package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.entity.NotificationPreferenceEntity
@@ -44,7 +45,7 @@ import java.util.function.Supplier
  */
 @QuarkusTest
 @QuarkusTestResource(ApprovalNotificationIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 class ApprovalNotificationIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {

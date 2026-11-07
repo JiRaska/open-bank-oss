@@ -1,0 +1,242 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Edge deception layer (ADR-0357): decoy paths answered by Envoy itself.
+#
+# WHY HERE. ADR-0279 WS2 shipped a per-service HoneytokenFilter that no service ever
+# configured, so the estate had a honey-endpoint ALERT and no honey endpoint. A decoy that
+# lives on the shared Gateway (ADR-0324) exists for a hostname the moment this route is
+# admitted: no backend, no service config, no release. Envoy writes the route name into
+# every access-log line (`route_name`), and loki-rules-edge-deception.yaml reads that —
+# so the tier of a decoy is the ROUTE it sits on, never a value anything has to parse.
+# check-edge-decoy-rule-parity.py keeps the two files paired.
+#
+# TWO ROUTES, TWO TIERS.
+#   edge-decoys-commodity  — paths internet scanners try on every host. Answer 200 with a
+#                            harmless body so the scanner records a hit and keeps going.
+#                            Telemetry only (recording rule + SOC panel); never an alert,
+#                            because these arrive daily.
+#   edge-decoys-targeted   — OpenBank-shaped paths no client, doc or link ever names.
+#                            Answer 401 JSON: reveals nothing, looks like a real surface.
+#                            Any hit is reconnaissance by construction -> EdgeDecoyTargetedHit.
+#
+# PRECEDENCE. Gateway API ranks an Exact path match above a PathPrefix match across every
+# route attached to the listener, so these decoys win over admin-ui's `/` prefix route on
+# the same hostname without touching it. The listener `https-admin` admits routes from
+# `observability` (gateway.yaml), which is why the routes live here.
+#
+# KYVERNO. require-gated-or-declared-tool-httproute-cel requires every HTTPRoute in this
+# namespace to be extAuth-gated or to declare its ungated callers. A decoy MUST be ungated —
+# its whole purpose is to be reachable by anyone — so each route declares that, with the
+# path list narrowed to the decoys and nothing else.
+#
+# BODIES. Nothing in a decoy body is real: no hostname, no key, no account identifier. The
+# `.env` body is a placeholder shape, not a credential; a canary token in that slot is a
+# follow-up (#14163) and lands via ExternalSecret, never in this file.
+#
+# COST. No pod, no Service, no NetworkPolicy, no load balancer. The only recurring cost is
+# the access-log lines the decoys attract (a few dozen a day in the 2026-10-29 sample).
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: edge-decoy-commodity-env
+  namespace: observability
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: |
+        # Generated — do not edit by hand
+        APP_ENV=production
+        APP_DEBUG=false
+        DB_CONNECTION=pgsql
+        DB_HOST=127.0.0.1
+        DB_PORT=5432
+        CACHE_DRIVER=redis
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: edge-decoy-commodity-text
+  namespace: observability
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: "ref: refs/heads/main\n"
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: edge-decoy-commodity-html
+  namespace: observability
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: text/html
+    body:
+      type: Inline
+      inline: "<!DOCTYPE html><html><head><title>Log In</title></head><body><form method=\"post\"><input name=\"log\"><input name=\"pwd\" type=\"password\"><button>Log In</button></form></body></html>"
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: edge-decoy-commodity-json
+  namespace: observability
+spec:
+  directResponse:
+    statusCode: 200
+    contentType: application/json
+    body:
+      type: Inline
+      inline: '{"propertySources":[]}'
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: edge-decoy-targeted-unauthorized
+  namespace: observability
+spec:
+  directResponse:
+    statusCode: 401
+    contentType: application/json
+    body:
+      type: Inline
+      inline: '{"error":"unauthorized","message":"Bearer token required"}'
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: edge-decoys-commodity
+  namespace: observability
+  annotations:
+    # ADR-0234 declaration: a decoy is reachable by anyone by design; these paths serve no
+    # tool UI and carry no data. The path list below IS the declared surface.
+    openbank.io/ungated-machine-callers: >-
+      ADR-0357 commodity decoys: internet scanners probing /.env, /.git/HEAD, /wp-login.php,
+      /phpinfo.php, /actuator/env and /actuator/heapdump; answered by Envoy directResponse,
+      no backend.
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /.env
+        - path:
+            type: Exact
+            value: /.env.production
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: edge-decoy-commodity-env
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+    - matches:
+        - path:
+            type: Exact
+            value: /.git/HEAD
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: edge-decoy-commodity-text
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+    - matches:
+        - path:
+            type: Exact
+            value: /wp-login.php
+        - path:
+            type: Exact
+            value: /phpinfo.php
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: edge-decoy-commodity-html
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+    - matches:
+        - path:
+            type: Exact
+            value: /actuator/env
+        - path:
+            type: Exact
+            value: /actuator/heapdump
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: edge-decoy-commodity-json
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: edge-decoys-targeted
+  namespace: observability
+  annotations:
+    openbank.io/ungated-machine-callers: >-
+      ADR-0357 targeted decoys: /api/v1/internal/ledger/export, /api/v1/admin/backup and
+      /api/v0/accounts exist nowhere else; any caller is reconnaissance. Answered 401 by Envoy
+      directResponse, no backend, no data.
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /api/v1/internal/ledger/export
+        - path:
+            type: Exact
+            value: /api/v1/admin/backup
+        - path:
+            type: Exact
+            value: /api/v0/accounts
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: edge-decoy-targeted-unauthorized
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+              - name: WWW-Authenticate
+                value: Bearer

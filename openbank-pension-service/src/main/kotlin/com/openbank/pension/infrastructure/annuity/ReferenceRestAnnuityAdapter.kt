@@ -21,8 +21,10 @@ import com.openbank.pension.domain.annuity.AnnuityOffer
 import com.openbank.pension.domain.annuity.AnnuityType
 import com.openbank.pension.domain.annuity.ApprovedPartner
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.future.await
 import org.eclipse.microprofile.config.ConfigProvider
+import java.io.IOException
 import java.math.BigDecimal
 import java.net.URI
 import java.net.URLEncoder
@@ -33,6 +35,7 @@ import java.nio.charset.StandardCharsets
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.util.concurrent.atomic.AtomicInteger
 
 /** The partner's credential, from CONFIGURATION keyed by partner id — never from the registry. */
 fun interface PartnerCredentials {
@@ -148,7 +151,35 @@ class ReferenceRestAnnuityAdapter internal constructor(
                 JSON,
             ).method(method, HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(body)))
         }
-        val response = http.sendAsync(builder.build(), HttpResponse.BodyHandlers.ofString()).await()
+        val status = AtomicInteger()
+        val exchange = http.sendAsync(
+            builder.build(),
+            HttpResponse.BodyHandler<String> { info ->
+                status.set(info.statusCode())
+                if (info.statusCode() in HTTP_OK_RANGE) {
+                    HttpResponse.BodyHandlers.ofString().apply(info)
+                } else {
+                    // Error bodies are never interpreted: close without collecting the body or waiting for EOF.
+                    HttpResponse.BodySubscribers.mapping(HttpResponse.BodySubscribers.ofInputStream()) { stream ->
+                        stream.close()
+                        ""
+                    }
+                }
+            },
+        )
+        val response = try {
+            // await cancels with false; retain the original exchange for transport cancellation.
+            exchange.copy().await()
+        } catch (cancelled: CancellationException) {
+            exchange.cancel(true)
+            throw cancelled
+        } catch (failure: IOException) {
+            // Closing a chunked error body may race the JDK body reader. Preserve status semantics.
+            check(status.get() == 0 || status.get() in HTTP_OK_RANGE) {
+                "partner ${provider.partnerId} answered HTTP ${status.get()} on $method $path"
+            }
+            throw failure
+        }
         check(response.statusCode() in HTTP_OK_RANGE) {
             "partner ${provider.partnerId} answered HTTP ${response.statusCode()} on $method $path"
         }

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "fraud.reasons",
+  "revision": 1,
+  "domain": "fraud",
+  "purpose": "synthetic",
+  "provenance": "fixture-v1",
+  "effectiveFrom": "2026-01-01T00:00:00Z",
+  "effectiveUntil": "2027-01-01T00:00:00Z",
+  "entries": [
+    {
+      "code": "BURST",
+      "label": "Synthetic",
+      "meaning": "Synthetic observation only",
+      "rank": null
+    }
+  ]
+}

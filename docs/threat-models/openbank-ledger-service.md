@@ -248,6 +248,15 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-10-28** — **Journal-approval OPA grants restored (#12906).** `ledger.approval.read` and
+  `ledger.approval.decide` now admit only HUMAN operators/admins whose principal is not a service
+  account. An explicit machine prohibition also overrides the base operator-read rule, so a
+  client-credentials identity carrying `ROLE_OPERATOR` can neither read checker queues nor decide
+  approvals. This repairs the deny-by-default outage without weakening the four-eyes boundary;
+  maker≠checker remains enforced by `ApprovalStore.decide`. Rego tests cover operator grants,
+  wrong-role denial and service-account denial for both actions. Rollback: revert the extension
+  and regenerate the bundle; approval endpoints return to deny-by-default.
+
 - **2026-10-17** — **Day-close participants (ADR-0342, #13167).** New inbound surface
   `/api/v1/ledger/accounting-days/{date}/participants`: `PUT …/{participant}` (product service
   reports RAN / SKIPPED / REFUSED for a day), `PUT …/{participant}/waiver` (operator), `GET` (read
@@ -733,6 +742,7 @@ set) apply equally to the new `ledger.approval.decide` action.
   has every non-interest declared participant report RAN, read from the live config, so its interest
   scenarios cannot turn vacuous as participants are added. Rollback: remove the entry.
 - **2026-10-23** — **`billing` declared as a day-close participant (#13167, ADR-0342 D2), with its own grant.** `openbank.ledger.close.participants.billing.principal = service-account-openbank-billing`, matching `rules.yaml: close_participants`. Billing holds no `ledger.create` on its own identity (its journals ride the shared `openbank-services` principal), and gets none: it is one more entry in `close_participant_accounts`, so its identity may perform `ledger.close.participate` for the participant `billing` and NOTHING else (review of #13709 replaced an earlier generic `ledger.create` grant). **STRIDE-E:** `opa eval` on the regenerated bundle: billing allowed `ledger.close.participate` for `billing`; denied it for `lending`; denied `ledger.create` and `ledger.read`; the shared client denied participation. Rego tests cover every journal action and turn red if billing is mapped to another participant. **STRIDE-S:** a `billing` report from any other principal, the shared one included, is 403. The mode stays `shadow`. Rollback: remove the entry and the rule, then regenerate the bundles.
+- **2026-10-25** — **`treasury` declared as a day-close participant (#13167, ADR-0342 D2).** `openbank.ledger.close.participants.treasury.principal = service-account-openbank-treasury`, matching `rules.yaml: close_participants`. Treasury reports on the identity it already posts journals with. It is one more entry in `close_participant_accounts`, so it gains `ledger.close.participate` for the participant `treasury` and nothing else; its existing `service-treasury-ledger-post` (`ledger.create`) and `service-treasury-ledger-read` rules are unchanged. **STRIDE-E:** `opa eval` on the regenerated bundle: treasury allowed for `treasury`, denied for `interest`, `lending` and `billing`; lending, billing, the shared client and another ROLE_API account denied for `treasury`; treasury still denied `ledger.reverse`. Rego tests turn red if the treasury entry or the resource binding is removed. **STRIDE-S:** a `treasury` report from any other principal is 403. **STRIDE-D:** under `enforce`, a treasury outage would hold every day in CUTOFF until it reports or an operator waives the day; the mode stays `shadow`. Rollback: remove the entry and the map key, then regenerate the bundles.
 
 ### Raw history snapshot boundary (ADR-0352 preparation)
 

@@ -4,6 +4,15 @@ Sdílená doménová API jsou v `openbank-libs-domain`; adaptéry Quarkus a HTTP
 
 Jak služby konzumují každý balíček libs. Příklady jsou zkrácené ale spustitelné.
 
+## Původ zadavatele při schvalování čtyř očí
+
+Čekající schválení rozlišuje ověřené agenty a konkrétní servisní účty od osob.
+`HUMAN` a `CUSTOMER_PARTY` vyžadují ověřený token osoby; příznaky klientských přihlašovacích
+údajů, chybějící nebo nečitelné údaje osoby a identity bez JWT se zaznamenají jako `UNKNOWN`.
+Zobrazované jméno ani zákaznická role samy původ osoby neprokazují. Klasifikace mění pouze
+záznam schválení; stávající typy principálů a vyhodnocení rolí v politikách zůstávají stejné.
+
+
 ## domain/money — Money + CurrencyCode
 
 ```kotlin
@@ -287,6 +296,17 @@ Factory automaticky doplní:
 | `GET /api/v1/info` | Service name, version, **`stack`** (Kotlin/Quarkus/JDK/Gradle/libs) — používá admin UI Tech Inventory |
 | `GET /api/v1/config` | Live snapshot rate-limit + circuit-breaker + retry + timeout config |
 
+## api.error — useknutá multipart těla
+
+Sdílený `GenericExceptionMapper` klasifikuje multipart tělo požadavku, které skončí před uzavírací
+hranicí, jako chybu klienta: 400 `VALIDATION_ERROR`, ne 500. Parser RESTEasy Reactive to hlásí jako
+obyčejnou `java.io.IOException` se zprávou "Connection terminated reading multipart data", proto ji
+mapper rozpozná jen tehdy, když se shoduje ZÁROVEŇ přesná zpráva i rámec, který ji vyhodil (balíček
+parseru `org.jboss.resteasy.reactive.server.core.multipart.`), kdekoli v prvních osmi článcích řetězu
+příčin. Každá jiná `IOException`, včetně chyb dočasného souboru nebo disku v samotném parseru, zůstává
+500. Dědí to každá služba s multipart uploadem; `PartyTruncatedMultipartIT` v party-service to ověřuje
+přes skutečné HTTP.
+
 ## util — BuildInfo
 
 ```kotlin
@@ -308,5 +328,7 @@ BuildInfo.maxHeapMib          // 3994
 
 BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 ```
+
+`buildTime` je okamžik, kdy `processResources` vygenerovalo `openbank-build-info.properties`. Záměrně není vstupem Gradle tasku, takže beze změny libs si artefakt ponechá původní časovou značku a jeho resources i navazující testovací classpath zůstávají cacheovatelné.
 
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.

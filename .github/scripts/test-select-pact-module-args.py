@@ -13,13 +13,13 @@ MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
 
 GROUP = ["--rerun", "--tests", "*.contract.*PactConsumerTest"]
-ALL = [":openbank-a-service:test", *GROUP, ":openbank-b-service:test", *GROUP, ":openbank-c-service:test", *GROUP]
+ALL = [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-b-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP]
 
 
 class SelectTest(unittest.TestCase):
     def test_selects_only_listed_modules_in_derived_order(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-c-service", "openbank-a-service"]),
-                         [":openbank-a-service:test", *GROUP, ":openbank-c-service:test", *GROUP])
+                         [":openbank-a-service:consumerPactTest", *GROUP, ":openbank-c-service:consumerPactTest", *GROUP])
 
     def test_module_without_consumer_test_selects_nothing(self):
         self.assertEqual(MODULE.select_args(ALL, ["openbank-z-service"]), [])
@@ -33,6 +33,16 @@ class SelectTest(unittest.TestCase):
             MODULE.select_args(ALL, ["openbank-a-service; rm -rf /"])
         with self.assertRaises(ValueError):
             MODULE.select_args([], ["openbank-a-service"])
+
+    def test_rejects_unknown_task_name(self):
+        # Must-fail negative: the retired `:test` task and arbitrary tasks stay rejected.
+        for bad in (":openbank-a-service:test", ":openbank-a-service:build", "openbank-a-service:consumerPactTest"):
+            with self.assertRaises(ValueError):
+                MODULE.select_args([bad, *GROUP], ["openbank-a-service"])
+
+    def test_derive_output_shape_is_accepted(self):
+        self.assertEqual(MODULE.select_args(ALL, ["openbank-b-service"]),
+                         [":openbank-b-service:consumerPactTest", *GROUP])
 
 
 if __name__ == "__main__":

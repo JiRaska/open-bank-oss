@@ -201,7 +201,7 @@ describe('contract detail', () => {
 describe('NAV four-eyes', () => {
   it('withholds publish on the viewer’s own NAV and offers it on someone else’s', async () => {
     router = url => {
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Balanced fund')])
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Balanced fund')])
       if (url.includes('/navs')) return json([nav('own', 'olga.operator'), nav('other', 'karel.operator')])
       return json({}, 404)
     }
@@ -213,7 +213,7 @@ describe('NAV four-eyes', () => {
   it('renders the service’s refusal readably when a publish is refused anyway', async () => {
     router = (url, init) => {
       if (url.includes('/navs/other/approve') && init?.method === 'POST') return json({ error: 'FOUR_EYES_VIOLATION' }, 409)
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Balanced fund')])
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Balanced fund')])
       if (url.includes('/navs')) return json([nav('other', 'karel.operator')])
       return json({}, 404)
     }
@@ -226,8 +226,8 @@ describe('NAV four-eyes', () => {
 describe('strategy change four-eyes', () => {
   beforeEach(() => {
     router = (url, init) => {
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Bond fund'), fund(FUND_B, 'Equity fund')])
-      if (url.endsWith('/api/v1/strategies')) {
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Bond fund'), fund(FUND_B, 'Equity fund')])
+      if (url.endsWith('/api/v2/strategies')) {
         return json([{ id: STRATEGY, name: 'Balanced', allocations: [{ fundId: FUND_A, weight: 0.5, lowerBand: 0.4, upperBand: 0.6 }, { fundId: FUND_B, weight: 0.5, lowerBand: 0.4, upperBand: 0.6 }], lifecycle: false, status: 'ACTIVE', version: 3 }])
       }
       if (url.endsWith('/changes') && init?.method === 'POST') return json(change('new', 'olga.operator'), 201)

@@ -8,6 +8,7 @@ import { useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
+import { useInitialRoles } from '@/components/auth/InitialRolesContext'
 import {
   Activity,
   FilePlus,
@@ -77,11 +78,14 @@ import {
   Zap,
   Building2,
   Gift,
+  Gamepad2,
   Undo2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DOMAIN_GROUPS, domainLabel } from '@/lib/governance/domains'
+import { useDomainOwnership } from '@/components/layout/DomainOwnershipContext'
 import styles from './Sidebar.module.css'
 
 // `external: true` marks a destination that is NOT a Next.js route — today the
@@ -95,111 +99,115 @@ import styles from './Sidebar.module.css'
 // tool shows as a disabled item with the demo-account tooltip instead of a live
 // link that 403s. A link that visibly fails reads as a broken platform, which for
 // the public demo account is the outcome worth avoiding.
-type NavItem = { nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
+/** owner references an existing ServiceEntry.id; fleet membership and domains come from the catalog. */
+type NavItem = { owner?: string; nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
 
+// Static inventory chunks support route auditing; they do not assign business domains.
+// Rendering groups ALL_NAV by each destination owner in reviewed governance.
 const coreNav: NavItem[] = [
   { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
-  { nameCs: 'Účty',         nameEn: 'Accounts',     href: '/accounts',     icon: CreditCard,      permission: 'accounts:view' },
-  { nameCs: 'Transakce',    nameEn: 'Transactions', href: '/transactions', icon: ArrowLeftRight,  permission: 'transactions:view' },
-  { nameCs: 'Hlavní kniha', nameEn: 'Ledger',       href: '/ledger',       icon: BookOpen,        permission: 'accounts:view' },
-  { nameCs: 'Závěrky',      nameEn: 'Closings',     href: '/day-end',      icon: Scale,           permission: 'accounts:view' },
+  { nameCs: 'Účty',         nameEn: 'Accounts',     href: '/accounts',     icon: CreditCard,      permission: 'accounts:view', owner: 'account' },
+  { nameCs: 'Transakce',    nameEn: 'Transactions', href: '/transactions', icon: ArrowLeftRight,  permission: 'transactions:view', owner: 'transaction' },
+  { nameCs: 'Hlavní kniha', nameEn: 'Ledger',       href: '/ledger',       icon: BookOpen,        permission: 'accounts:view', owner: 'ledger' },
+  { nameCs: 'Závěrky',      nameEn: 'Closings',     href: '/day-end',      icon: Scale,           permission: 'accounts:view', owner: 'ledger' },
 ]
 
 const revenueNav: NavItem[] = [
-  { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view' },
-  { nameCs: 'Kreditní riziko', nameEn: 'Credit risk', href: '/lending/risk', icon: ShieldAlert, permission: 'lending:risk:view' },
-  { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
+  { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view', owner: 'lending' },
+  { nameCs: 'Kreditní riziko', nameEn: 'Credit risk', href: '/lending/risk', icon: ShieldAlert, permission: 'lending:risk:view', owner: 'lending' },
+  { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view', owner: 'product-catalog' },
 ]
 
 // #10618: risk-engine snapshots/curves and the lending ledger backfill, for the risk and finance
 // departments. Each entry carries the permission of the page it opens (roles.ts).
 const balanceSheetNav: NavItem[] = [
-  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
-  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
-  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
-  { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view' },
+  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view', owner: 'risk-engine' },
+  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view', owner: 'risk-engine' },
+  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view', owner: 'lending' },
+  { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view', owner: 'lending' },
 ]
 
 // ADR-0334 / #12350: the pension back office — participant contracts and their queues
 // (openbank-pension-service) and fund administration (openbank-pension-fund-service).
 const pensionNav: NavItem[] = [
-  { nameCs: 'Penzijní smlouvy',     nameEn: 'Pension contracts',    href: '/pension',               icon: PiggyBank,  permission: 'pension:view' },
-  { nameCs: 'Sjednání a převody',   nameEn: 'Onboarding & transfers', href: '/pension/queues',      icon: Inbox,      permission: 'pension:view' },
-  { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view' },
-  { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view' },
-  { nameCs: 'Příkazy k úhradě',     nameEn: 'Contribution mandates', href: '/pension/mandates',    icon: Repeat,     permission: 'pension:view' },
-  { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view' },
-  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view' },
-  { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view' },
-  { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view' },
-  { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view' },
+  { nameCs: 'Penzijní smlouvy',     nameEn: 'Pension contracts',    href: '/pension',               icon: PiggyBank,  permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Sjednání a převody',   nameEn: 'Onboarding & transfers', href: '/pension/queues',      icon: Inbox,      permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Příkazy k úhradě',     nameEn: 'Contribution mandates', href: '/pension/mandates',    icon: Repeat,     permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view', owner: 'pension' },
+  { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view', owner: 'pension-fund' },
+  { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view', owner: 'pension-fund' },
+  { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view', owner: 'pension-fund' },
 ]
 
 // ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
 // permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
 const treasuryNav: NavItem[] = [
-  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view' },
-  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create' },
-  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve' },
-  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view' },
-  { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view' },
-  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
-  { nameCs: 'Nostro rekonciliace', nameEn: 'Nostro reconciliation', href: '/treasury/nostro',  icon: FileSearch, permission: 'treasury:nostro:read' },
+  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view', owner: 'treasury' },
+  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create', owner: 'treasury' },
+  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve', owner: 'treasury' },
+  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view', owner: 'treasury' },
+  { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view', owner: 'treasury' },
+  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view', owner: 'treasury' },
+  { nameCs: 'Nostro rekonciliace', nameEn: 'Nostro reconciliation', href: '/treasury/nostro',  icon: FileSearch, permission: 'treasury:nostro:read', owner: 'treasury' },
 ]
 
 const customerNav: NavItem[] = [
-  { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view' },
-  { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
-  { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
-  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
-  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view' },
-  { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
+  { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view', owner: 'party' },
+  { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view', owner: 'kyc' },
+  { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view', owner: 'onboarding' },
+  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view', owner: 'pid' },
+  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view', owner: 'kyb' },
+  { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view', owner: 'delegation' },
 ]
 
 const paymentsNav: NavItem[] = [
-  { nameCs: 'Katalog produktů',  nameEn: 'Product Catalog',  href: '/product-catalog',   icon: Package,   permission: 'payments:view' },
-  { nameCs: 'Produktové studio', nameEn: 'Product Studio',   href: '/product-studio',    icon: Boxes,     permission: 'catalog:read' },
-  { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view' },
-  { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view' },
-  { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view' },
-  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view' },
-  { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
-  { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view' },
-  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
-  { nameCs: 'Obchodníci',        nameEn: 'Merchants',        href: '/merchants',         icon: Store,     permission: 'transactions:view' },
-  { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payment-rails:view' },
-  { nameCs: 'Stav settlementu',  nameEn: 'Settlement status', href: '/settlements',     icon: Layers,    permission: 'settlements:view' },
-  { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view' },
-  { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
+  { nameCs: 'Katalog produktů',  nameEn: 'Product Catalog',  href: '/product-catalog',   icon: Package,   permission: 'payments:view', owner: 'product-catalog' },
+  { nameCs: 'Produktové studio', nameEn: 'Product Studio',   href: '/product-studio',    icon: Boxes,     permission: 'catalog:read', owner: 'product-catalog' },
+  { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view', owner: 'loyalty' },
+  { nameCs: 'Lví stezka — správa hry', nameEn: 'Lion Quest — game management', href: '/loyalty/game', icon: Gamepad2, permission: 'game:view', owner: 'loyalty' },
+  { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view', owner: 'sepa-payment' },
+  { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view', owner: 'standing-order' },
+  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view', owner: 'sdd' },
+  { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view', owner: 'fx' },
+  { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view', owner: 'swift' },
+  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view', owner: 'card-issuance' },
+  { nameCs: 'Obchodníci',        nameEn: 'Merchants',        href: '/merchants',         icon: Store,     permission: 'transactions:view', owner: 'transaction' },
+  { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payment-rails:view', owner: 'clearing' },
+  { nameCs: 'Stav settlementu',  nameEn: 'Settlement status', href: '/settlements',     icon: Layers,    permission: 'settlements:view', owner: 'settlement' },
+  { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view', owner: 'interest' },
+  { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view', owner: 'document' },
 
 ]
 
 const complianceNav: NavItem[] = [
-  { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view' },
-  { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view' },
-  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view' },
-  { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
+  { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view', owner: 'aml' },
+  { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view', owner: 'fraud' },
+  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view', owner: 'sanctions' },
+  { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view', owner: 'dispute' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
-  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view' },
-  { nameCs: 'MGM programy',        nameEn: 'MGM Programs',     href: '/campaigns/referrals', icon: Gift,                  permission: 'campaign:view' },
-  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view' },
-  { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
-  // ADR-0212 D4: four-eyes activation of the jurisdictional credit compliance packs. Filed under
-  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
-  { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
-  { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
+  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view', owner: 'campaign' },
+  { nameCs: 'MGM programy',        nameEn: 'MGM Programs',     href: '/campaigns/referrals', icon: Gift,                  permission: 'campaign:view', owner: 'referral' },
+  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view', owner: 'campaign' },
+  { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view', owner: 'consent' },
+  // ADR-0212 D4: four-eyes activation of jurisdictional credit compliance packs in lending.
+  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view', owner: 'lending' },
+  { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view', owner: 'audit' },
+  { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view', owner: 'finrep' },
   // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
   { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
 ]
 
 const opsNav: NavItem[] = [
-  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view' },
-  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
-  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Filed under Ops beside
-  // Notifications (what we send) rather than under the agent cockpit: the audience is the
-  // contact centre and back-office, not agent operators.
-  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
-  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view' },
+  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view', owner: 'pid' },
+  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view', owner: 'notification' },
+  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Inventory entries beside
+  // Notifications (what we send): both resolve to customer engagement through governance.
+  // The audience is the contact centre and back-office, not agent operators.
+  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view', owner: 'communication' },
+  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view', owner: 'notification' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
@@ -273,8 +281,15 @@ const ALL_NAV: NavItem[] = [
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session } = useSession()
+  const initialRoles = useInitialRoles()
+  const ownership = useDomainOwnership()
   const { t, language } = useLanguage()
-  const roles: string[] = session?.user?.roles ?? []
+  // The server already rendered this shell with the operator's roles (RootLayout reads
+  // the session cookie); until the client useSession() round-trip resolves, derive the
+  // SAME roles so hydration matches and the nav never re-paints under the user (the
+  // admin-operator-access journey measured a stable 0.12+ workspace CLS from that
+  // re-paint). When the session lands with identical roles the re-render is a no-op.
+  const roles: string[] = session?.user?.roles ?? initialRoles ?? []
   const roleSignature = roles.join('\u0000')
   const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
   const isLocked = (item: NavItem) =>
@@ -285,7 +300,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
     .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
-  // is untouched. Each link inherits its permission from the same destination's nav entry.
+  // follows canonical business ownership. Each link inherits its permission from the same destination's nav entry.
   const persona = personaForRoles(roles)
   // A workspace link inherits its permission from the nav entry with the same href. A link with
   // NO matching entry would inherit `permission: undefined` and so render for every role — so a
@@ -401,36 +416,20 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
         <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
-        <NavSection items={filter(coreNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
-        <NavSection items={filter(revenueNav)} currentHref={currentHref} />
-        {filter(balanceSheetNav).length > 0 && (
-          <>
-            <SectionLabel>{t('Rozvaha a riziko', 'Balance sheet & risk')}</SectionLabel>
-            <NavSection items={filter(balanceSheetNav)} currentHref={currentHref} />
-          </>
-        )}
-        {filter(treasuryNav).length > 0 && (
-          <>
-            <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
-            <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
-          </>
-        )}
-        {filter(pensionNav).length > 0 && (
-          <>
-            <SectionLabel>{t('Penze', 'Pensions')}</SectionLabel>
-            <NavSection items={filter(pensionNav)} currentHref={currentHref} />
-          </>
-        )}
-        <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
-        <NavSection items={filter(customerNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>
-        <NavSection items={filter(paymentsNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Compliance', 'Compliance')}</SectionLabel>
-        <NavSection items={filter(complianceNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Operace', 'Operations')}</SectionLabel>
-        <NavSection items={filter(opsNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Platforma', 'Platform')}</SectionLabel>
+        <NavSection items={filter(coreNav.filter(item => !item.owner))} currentHref={currentHref} />
+        {DOMAIN_GROUPS.map(domain => {
+          const items = filter(ALL_NAV.filter(item => item.owner && (ownership[item.owner] ?? 'unclassified') === domain))
+          if (!items.length) return null
+          return (
+            <section key={domain} aria-label={domainLabel(domain, language === 'cs' ? 'cs' : 'en')}>
+              <SectionLabel>{domainLabel(domain, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
+              <NavSection items={items} currentHref={currentHref} />
+            </section>
+          )
+        })}
+        <SectionLabel>{t('Průřezové přehledy a operace', 'Cross-domain views & operations')}</SectionLabel>
+        <NavSection items={filter([...complianceNav, ...opsNav].filter(item => !item.owner))} currentHref={currentHref} />
+        <SectionLabel>{t('Řízení platformy', 'Platform operations')}</SectionLabel>
         <NavSection items={filter(platformNav)} currentHref={currentHref} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
         <NavSection items={filter(docsNav)} currentHref={currentHref} />

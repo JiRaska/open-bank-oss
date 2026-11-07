@@ -4,6 +4,7 @@
 package com.openbank.notification.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_FALLBACK_EMAIL_BODY
 import com.openbank.notification.application.NotificationConsumer.Companion.GENERIC_PUSH_BODY
 import com.openbank.notification.application.port.out.PushMessage
@@ -66,7 +67,7 @@ import java.util.function.Supplier
  */
 @QuarkusTest
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @Suppress("LargeClass") // One real-DB consumer fixture keeps all ack, persistence, and delivery assertions together.
 class NotificationConsumerIT {
 
@@ -427,6 +428,9 @@ class NotificationConsumerIT {
         val notificationId = UUID.randomUUID()
         val cutoff = Instant.now().minusSeconds(15 * 60)
         val staleBefore = VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) }
+        val pushStaleBefore = VertxContextSupport.subscribeAndAwait {
+            repository.countStalePendingByChannel(cutoff)
+        }["PUSH"] ?: 0L
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
@@ -464,6 +468,8 @@ class NotificationConsumerIT {
         assertThat(outcomeRowsFor(notificationId)).isEmpty()
         assertThat(VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) })
             .isEqualTo(staleBefore + 1)
+        assertThat(VertxContextSupport.subscribeAndAwait { repository.countStalePendingByChannel(cutoff) }["PUSH"])
+            .isEqualTo(pushStaleBefore + 1)
     }
 
     /**

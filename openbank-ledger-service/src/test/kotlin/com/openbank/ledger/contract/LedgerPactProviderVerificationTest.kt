@@ -53,7 +53,7 @@ import javax.sql.DataSource
 // Excludes the negative-auth state: a class-level @TestSecurity authenticates every request it
 // makes, which would turn the "no valid M2M identity" 401 interactions into 200s. Verified instead
 // by LedgerNegativeAuthProviderVerificationTest, which carries no @TestSecurity at all (same split as
-// TransactionPactFolderProviderVerificationTest / TransactionNegativeAuthPactVerificationTest).
+// TransactionPactFolderProviderVerificationTest / TransactionNegativeAuthProviderVerificationTest).
 // pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match
 // Java regex), so the negative lookahead holds.
 @PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
@@ -89,7 +89,13 @@ class LedgerPactProviderVerificationTest {
      * which still satisfies the contract shape (type matchers, not value matchers).
      */
     @State("ledger has frozen monthly trial balance for the reporting date")
-    fun stateWithFrozenMonthlyTrialBalance() = FinrepFrozenMonthPactSeed.seed(dataSource)
+    fun stateWithFrozenMonthlyTrialBalance(parameters: Map<String, Any>) {
+        FinrepFrozenMonthPactSeed.validateStateParameters(
+            FinrepFrozenMonthPactSeed.REPORTING_MONTH to true,
+            parameters,
+        )
+        FinrepFrozenMonthPactSeed.seed(dataSource)
+    }
 
     /**
      * Backward-compatible state for balance-service's live `/journals/trial-balance` pact.

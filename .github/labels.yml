@@ -23,6 +23,9 @@ labels:
   - name: merge-train
     color: "0e8a16"
     description: "Merge-train carrier PR (ADR-0343): verifies a batch as one tree; auto-closed, never merge."
+  - name: merge-train-stuck
+    color: "b60205"
+    description: "Tracking issue the merge train keeps: armed PRs it cannot serve until someone acts (ADR-0343)."
   # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
   - name: vex-triage
     color: "b60205"
@@ -65,6 +68,9 @@ labels:
   - name: tech-debt
     color: "fbca04"
     description: "Refactor / cleanup with no user-facing behavior change."
+  - name: needs-kind
+    color: "e99695"
+    description: "Zero or several kind labels; needs exactly one. Set and cleared by issue-kind.yml."
   - name: docs
     color: "0075ca"
     description: "Documentation, ADRs, runbooks, process specs."
@@ -97,6 +103,9 @@ labels:
   - name: blocked
     color: "b60205"
     description: "Cannot proceed — waiting on a dependency, a decision, or another issue."
+  - name: deploy-revert
+    color: "b60205"
+    description: "Explicit rollback: moves a GitOps image pin BACKWARD on purpose (gate deploy-pin-monotonic)."
   - name: good-first-issue
     color: "7057ff"
     description: "Small, well-scoped, good entry point for a new contributor."
@@ -156,6 +165,10 @@ labels:
   - name: deps-freshness
     color: "0e8a16"
     description: "Standing dependency-freshness report issue (ADR-0279 #15), bot-maintained."
+
+  - name: "merge-priority:expedite"
+    color: "b60205"
+    description: "Owner-applied only: the merge train serves this PR first in its lane. Agents never apply it."
 
   - name: "merge-priority:repair"
     color: "d93f0b"

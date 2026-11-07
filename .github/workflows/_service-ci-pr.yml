@@ -18,6 +18,16 @@ name: _service-ci-pr
         required: false
         default: ''
         type: string
+      consumer:
+        description: Optional consumer name; blank verifies every consumer.
+        required: false
+        default: ''
+        type: string
+      historical_admin_ui_version:
+        description: Validated one-off admin-ui version for product-catalog; blank keeps normal selection.
+        required: false
+        default: ''
+        type: string
       require_provider_pact_test:
         description: Fail when this targeted verification has no providerPactTest.
         required: false
@@ -37,8 +47,12 @@ jobs:
   build:
     name: ${{ inputs.service }} (build)
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
-      && inputs.ref == '' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+      && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
+      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini'
+      || 'ubuntu-latest') }}
     timeout-minutes: 45
+    environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      && inputs.ref == '' && 'gradle-cache-writer' || '' }}
     permissions:
       contents: read
       actions: read
@@ -62,6 +76,8 @@ jobs:
 
         chmod 600 "$helper_dir/"*.sh
 
+        bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"
+
         echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
 
         '
@@ -77,21 +93,23 @@ jobs:
         \ main\nresolved_ref=\"$(bash .github/scripts/resolve-historical-service-ref.sh \"$REF\")\"\ngit merge-base --is-ancestor\
         \ \"$resolved_ref\" origin/main || {\n  echo '::error::Historical provider ref is not on main.'\n  exit 1\n}\ngit\
         \ checkout --detach --quiet \"$resolved_ref\"\nfor helper in retry-testcontainers-ebusy.sh retry-gradle-verification-cache.sh\
-        \ heal-gradle-verification-failure.sh; do\n  cp \"${RUNNER_TEMP}/${helper}\" \".github/scripts/${helper}\"\ndone\n"
+        \ heal-gradle-verification-failure.sh; do\n  cp \"${RUNNER_TEMP}/${helper}\" \".github/scripts/${helper}\"\ndone\n\
+        bash \"$SERVICE_CI_HELPERS/diagnostic-actions.sh\" restore \"$SERVICE_CI_HELPERS\"\n"
     - name: Resolve GRADLE_USER_HOME
       run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
+    - name: Remote build cache
+      env:
+        W: ${{ secrets.GRADLE_CACHE_WRITE_PASSWORD }}
+        R: ${{ vars.GRADLE_CACHE_READ_PASSWORD }}
+        U: ${{ vars.GRADLE_CACHE_URL }}
+        H: ${{ inputs.ref }}
+      run: bash -e "$SERVICE_CI_HELPERS/remote-build-cache.sh"
     - name: Normalize DOCKER_HOST for Testcontainers (#873)
-      run: "if [ -z \"${DOCKER_HOST:-}\" ] || [ \"${DOCKER_HOST:-}\" = \"tcp://localhost:2375\" ]; then\n  echo \"DOCKER_HOST=unix:///var/run/docker.sock\"\
-        \ >> \"$GITHUB_ENV\"\n  echo \"normalized DOCKER_HOST -> unix:///var/run/docker.sock\"\nelse\n  echo \"DOCKER_HOST\
-        \ left as: ${DOCKER_HOST}\"\nfi\n"
+      run: bash -e "$SERVICE_CI_HELPERS/normalize-docker-host.sh"
     - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
       continue-on-error: true
       timeout-minutes: 1
-      run: "cur=$(cat /proc/sys/fs/aio-max-nr 2>/dev/null || echo 0)\nif [ \"${cur:-0}\" -lt 1048576 ]; then\n  if sudo -n\
-        \ sysctl -w fs.aio-max-nr=1048576 >/dev/null 2>&1; then\n    echo \"raised fs.aio-max-nr: ${cur} -> 1048576\"\n  else\n\
-        \    echo \"::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO\
-        \ pool on this runner (no passwordless sudo?)\"\n  fi\nelse\n  echo \"fs.aio-max-nr already ${cur} (>= 1048576)\"\n\
-        fi\n"
+      run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
     - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
       with:
         distribution: temurin
@@ -113,15 +131,19 @@ jobs:
       continue-on-error: true
       env:
         GH_TOKEN: ${{ github.token }}
-      run: "python3 .github/scripts/prepare-test-priority.py \\\n  --repo \"$GITHUB_REPOSITORY\" --component openbank-context-service\
-        \ \\\n  --out \"$RUNNER_TEMP/context-test-priority.json\"\necho \"OPENBANK_TEST_PRIORITY_FILE=$RUNNER_TEMP/context-test-priority.json\"\
-        \ >> \"$GITHUB_ENV\"\n"
+      run: bash -e "$SERVICE_CI_HELPERS/prepare-context-test-ordering.sh"
     - name: Build + test (:${{ inputs.service }})
       env:
         SERVICE: ${{ inputs.service }}
         DEPLOY_ARTIFACT_PILOT: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref
           == 'refs/heads/main' && inputs.ref == '' }}
       run: bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+    - name: Retain Gradle task profile
+      if: always() && (inputs.service == 'openbank-lending-service' || inputs.service == 'openbank-pension-service')
+      continue-on-error: true
+      uses: ./.github/actions/service-ci-gradle-profile
+      env:
+        SERVICE: ${{ inputs.service }}
     - name: Package verified context deployment build
       id: deploy_bundle
       continue-on-error: true
@@ -130,8 +152,7 @@ jobs:
       env:
         ANALYTICS_SINK_TYPE: clickhouse
         AGENT_SVID_NONCE_STORE: redis
-      run: "python3 .github/scripts/service-build-artifact.py pack \\\n  --service openbank-context-service --sha \"$GITHUB_SHA\"\
-        \ \\\n  --run-id \"$GITHUB_RUN_ID\" --attempt \"$GITHUB_RUN_ATTEMPT\" \\\n  --out \"$RUNNER_TEMP/deploy-build\"\n"
+      run: bash -e "$SERVICE_CI_HELPERS/package-context-deployment.sh"
     - name: Retain verified context deployment build
       if: steps.deploy_bundle.outcome == 'success'
       continue-on-error: true
@@ -151,31 +172,19 @@ jobs:
         \ \\\n  --service \"${{ inputs.service }}\" \\\n  --generated \"${{ inputs.service }}/build/openapi-generated/openapi.yaml\"\
         \ \\\n  --enforce\n"
     - name: Generate Kover XML report
+      id: coverage_report
       continue-on-error: true
       env:
         SERVICE: ${{ inputs.service }}
       run: timeout --kill-after=10s 600s bash -e "$SERVICE_CI_HELPERS/render-coverage-report.sh"
-    - name: Build Test Intelligence run envelope
+    - name: Retain coverage and Test Intelligence evidence
       if: always()
       continue-on-error: true
-      run: "python3 .github/scripts/collect-test-run-evidence.py \\\n  --service \"${{ inputs.service }}\" \\\n  --out \"\
-        ${{ inputs.service }}/build/test-intelligence/run.json\"\n"
-    - name: Retain immutable Test Intelligence run envelope
-      if: always()
-      continue-on-error: true
-      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-      with:
-        name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
-        path: ${{ inputs.service }}/build/test-intelligence/run.json
-        if-no-files-found: error
-        retention-days: 30
-    - name: Upload coverage to Codecov
-      continue-on-error: true
-      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5
-      with:
-        files: ${{ inputs.service }}/build/reports/kover/report.xml
-        flags: ${{ inputs.service }}
-        fail_ci_if_error: false
+      uses: ./.github/actions/service-ci-coverage-evidence
+      env:
+        SERVICE: ${{ inputs.service }}
+        SERVICE_CI_JOB_STATUS: ${{ job.status }}
+        SERVICE_CI_REPORT_OUTCOME: ${{ steps.coverage_report.outcome }}
     - name: Collect consumer pacts for hand-off to the contract job
       run: 'set -euo pipefail
 
@@ -215,7 +224,8 @@ jobs:
         name: quality-evidence-${{ inputs.service }}-a${{ github.run_attempt }}
         path: '${{ inputs.service }}/build/test-results/**/*.xml
 
-          ${{ inputs.service }}/build/reports/kover/report.xml
+          ${{ steps.coverage_report.outcome == ''success'' && format(''{0}/build/reports/kover/report.xml'', inputs.service)
+          || '''' }}
 
           '
         if-no-files-found: ignore
@@ -226,10 +236,7 @@ jobs:
       env:
         SERVICE: ${{ inputs.service }}
         EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
-      run: "if python3 .github/scripts/check-test-intelligence-compatibility.py \\\n  \"${SERVICE}/build/test-intelligence/run.json\"\
-        \ \\\n  --component \"${SERVICE}\" \\\n  --commit \"${GITHUB_SHA}\" \\\n  --branch \"${EXPECTED_BRANCH}\" \\\n  --run-id\
-        \ \"${GITHUB_RUN_ID}\" \\\n  --attempt \"${GITHUB_RUN_ATTEMPT}\"; then\n  echo \"ready=true\" >> \"${GITHUB_OUTPUT}\"\
-        \nelse\n  echo \"::warning::Skipping incomplete Test Intelligence compatibility artifact\"\nfi\n"
+      run: bash -e "$SERVICE_CI_HELPERS/check-test-intelligence-compat.sh"
     - name: Upload Test Intelligence evidence
       if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
       continue-on-error: true
@@ -240,7 +247,8 @@ jobs:
 
           ${{ inputs.service }}/build/test-results/**/*.xml
 
-          ${{ inputs.service }}/build/reports/kover/report.xml
+          ${{ steps.coverage_report.outcome == ''success'' && format(''{0}/build/reports/kover/report.xml'', inputs.service)
+          || '''' }}
 
           '
         if-no-files-found: ignore

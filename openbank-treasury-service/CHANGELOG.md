@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.20.4](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.3...treasury-service-v0.20.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **treasury:** re-reconcile open nostro breaks past the lookback window ([#14824](https://github.com/JiRaska/open-bank-oss/issues/14824)) ([881ad6f](https://github.com/JiRaska/open-bank-oss/commit/881ad6fd854e213260c0ebce48e8f0caa417ee5b))
+
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.2...treasury-service-v0.20.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **treasury:** answer 400, not 500, for a null element in a reference import ([#14776](https://github.com/JiRaska/open-bank-oss/issues/14776)) ([cbb05c3](https://github.com/JiRaska/open-bank-oss/commit/cbb05c3be053bf5f0dc9e966175f877f55af2098))
+
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.1...treasury-service-v0.20.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **treasury-service:** document validation 400s as ProblemDetail ([#14490](https://github.com/JiRaska/open-bank-oss/issues/14490)) ([3be4283](https://github.com/JiRaska/open-bank-oss/commit/3be4283991e6d78b91b42f925a0e7c35bc4f1d3b))
+* **treasury:** bind the day-close Idempotency-Key to the request ([#14388](https://github.com/JiRaska/open-bank-oss/issues/14388)) ([d117fcd](https://github.com/JiRaska/open-bank-oss/commit/d117fcd608816ccc6f2a66b2bbd43ae9162020b9))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.0...treasury-service-v0.20.1) (2026-11-01)
+
+
+### Bug Fixes
+
+* **treasury:** alias SettlementRail to the iso20022 library enum ([#14381](https://github.com/JiRaska/open-bank-oss/issues/14381)) ([b2d7745](https://github.com/JiRaska/open-bank-oss/commit/b2d774577f4fb02619ef3483ad7f7d52d4f0f5f7))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.1...treasury-service-v0.20.0) (2026-10-30)
+
+
+### Features
+
+* **treasury:** posting matrix, credit exposure and day completion for every product ([#14182](https://github.com/JiRaska/open-bank-oss/issues/14182)) ([cd115b6](https://github.com/JiRaska/open-bank-oss/commit/cd115b635d8ac6d16c7fb33dd3bd4b276432ebd9))
+
+
+### Bug Fixes
+
+* **treasury:** record a posting intent before the ledger call ([#14220](https://github.com/JiRaska/open-bank-oss/issues/14220)) ([059840b](https://github.com/JiRaska/open-bank-oss/commit/059840b74eb1f495df083e12296842ad4dbd4d80))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.19.0...treasury-service-v0.19.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* **treasury:** compare nostro balances by value date ([#14218](https://github.com/JiRaska/open-bank-oss/issues/14218)) ([e46468b](https://github.com/JiRaska/open-bank-oss/commit/e46468bf92ef3ae2dcd98705bf9fe08708a78a42))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.18.0...treasury-service-v0.19.0) (2026-10-29)
+
+
+### Features
+
+* **treasury:** day-close participant - report the hourly accrual and the day's deal journals (ADR-0342) ([#13882](https://github.com/JiRaska/open-bank-oss/issues/13882)) ([8408b38](https://github.com/JiRaska/open-bank-oss/commit/8408b38cd8954afb0a55c623b18d933bc836eae8))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.17.1...treasury-service-v0.18.0) (2026-10-28)
 
 

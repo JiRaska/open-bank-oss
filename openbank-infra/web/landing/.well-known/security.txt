@@ -3,6 +3,6 @@
 
 Contact: mailto:security@open-bank.tech
 Expires: 2027-06-11T00:00:00.000Z
-Policy: https://github.com/JiRaska/open-bank-oss/blob/main/SECURITY.md
+Policy: https://github.com/JiRaska/open-bank-oss/blob/main/docs/security/vulnerability-disclosure-policy.md
 Preferred-Languages: cs, en
 Canonical: https://open-bank.tech/.well-known/security.txt

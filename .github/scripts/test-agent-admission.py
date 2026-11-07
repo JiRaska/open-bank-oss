@@ -96,19 +96,22 @@ class AdmissionTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     admission.load_exceptions(rules.name)
 
-    def test_review_events_use_the_same_ci_admission_as_pr_pushes(self):
+    def test_code_ci_runs_only_for_code_events_with_trusted_pr_admission(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
-        steps = workflow['jobs']['agent-admission']['steps']
+        steps = [s for s in workflow['jobs']['agent-admission']['steps'] if not s.get('name', '').startswith('quota-meter')]
         checkout = steps[0]
         admission = steps[1]
-        self.assertIn('pull_request_review', checkout['if'])
+        triggers = workflow.get('on', workflow.get(True))
+        self.assertEqual(set(triggers), {'push', 'pull_request'})
+        self.assertEqual(triggers['push']['branches'], ['main'])
+        self.assertEqual(checkout['if'], "github.event_name == 'pull_request'")
         self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
 
     def test_services_ci_admission_reads_current_trusted_base(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())
-        steps = workflow['jobs']['changes']['steps']
+        steps = [s for s in workflow['jobs']['changes']['steps'] if not s.get('name', '').startswith('quota-meter')]
         checkout = steps[0]
         admission = steps[1]
         self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')

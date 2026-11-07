@@ -74,7 +74,7 @@ class XbrlCsvPreflightServiceTest {
     }
 
     @Test
-    fun `blocks a return that contains a cell with an unverified datapoint id`(): Unit = runBlocking {
+    fun `allows a return whose emitted datapoint ids are verified`(): Unit = runBlocking {
         val mapped = F0101Mapper.map(
             TrialBalanceSnapshot(
                 lines = listOf(
@@ -92,9 +92,8 @@ class XbrlCsvPreflightServiceTest {
         val result = XbrlCsvPreflightService(finrepUseCase)
             .getPreflight(GetXbrlCsvPreflightQuery("F01.01", asOf))
 
-        assertThat(result.state).isEqualTo(XbrlCsvPreflightState.BLOCKED)
-        assertThat(result.blockers).extracting<String> { it.code }.containsExactly("UNVERIFIED_DATAPOINT_ID")
-        assertThat(result.blockers.single().reason).contains("F01.01/r0030/c0010")
+        assertThat(result.state).isEqualTo(XbrlCsvPreflightState.READY_FOR_RENDERING)
+        assertThat(result.blockers).isEmpty()
     }
 
     private fun template(

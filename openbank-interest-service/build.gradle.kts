@@ -32,6 +32,9 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0352 phase 3: the product-IR shadow evaluates the pinned revision with the pure interpreter;
+    // its interest arithmetic lives in libs-finance (FinanceProductArithmetic), never in this service.
+    implementation(project(":openbank-libs-finance"))
     // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
     implementation(project(":openbank-client-transaction"))
     testImplementation(libs.mockk)

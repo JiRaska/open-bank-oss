@@ -61,6 +61,8 @@ sealed interface VocabularyResolution {
  */
 class FincrimeVocabulary private constructor(
     val reference: VocabularyRef,
+    val domain: String,
+    val purpose: String,
     val canonicalJson: String,
     val entries: List<VocabularyEntry>,
     private val effectiveFrom: Instant,
@@ -102,6 +104,8 @@ class FincrimeVocabulary private constructor(
             val canonical = canonical(source, entries)
             return FincrimeVocabulary(
                 VocabularyRef(source.id, source.revision, AuditChain.sha256Hex(canonical)),
+                source.domain,
+                source.purpose,
                 canonical,
                 Collections.unmodifiableList(entries),
                 source.effectiveFrom,

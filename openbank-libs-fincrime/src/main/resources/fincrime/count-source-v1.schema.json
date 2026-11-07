@@ -1,0 +1,227 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Bounded financial-crime count source v1",
+  "description": "Structure only. The compiler also checks the 65536-byte source limit, duplicate keys, valid ordered instants, exact Long range, unique rule ids, consistent feature revisions, and independently supplied vocabulary pins/codes. A valid source does not establish authenticity, approval or activation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "revision",
+    "domain",
+    "purpose",
+    "effectiveFrom",
+    "effectiveUntil",
+    "reasons",
+    "severities",
+    "rules"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647
+    },
+    "domain": {
+      "enum": [
+        "AML",
+        "FRAUD"
+      ]
+    },
+    "purpose": {
+      "$ref": "#/$defs/identifier"
+    },
+    "effectiveFrom": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "effectiveUntil": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "reasons": {
+      "$ref": "#/$defs/pin"
+    },
+    "severities": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/pin"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "domain": {
+            "const": "AML"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "severities": {
+            "$ref": "#/$defs/pin"
+          },
+          "rules": {
+            "items": {
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/amlEffect"
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "severities": {
+            "type": "null"
+          },
+          "rules": {
+            "items": {
+              "properties": {
+                "effect": {
+                  "$ref": "#/$defs/fraudEffect"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,63}$"
+    },
+    "pin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "revision",
+        "hash"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "feature",
+        "operator",
+        "maxAgeSeconds",
+        "minimum",
+        "reason",
+        "effect"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "feature": {
+          "$ref": "#/$defs/pin"
+        },
+        "operator": {
+          "const": "COUNT_AT_LEAST"
+        },
+        "maxAgeSeconds": {
+          "type": "string",
+          "pattern": "^([1-9][0-9]{0,3}|[1-7][0-9]{4}|8[0-5][0-9]{3}|86[0-3][0-9]{2}|86400)$"
+        },
+        "minimum": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,18})$",
+          "description": "Exact nonnegative Long decimal; compiler rejects values above 9223372036854775807."
+        },
+        "reason": {
+          "$ref": "#/$defs/identifier"
+        },
+        "effect": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/amlEffect"
+            },
+            {
+              "$ref": "#/$defs/fraudEffect"
+            }
+          ]
+        }
+      }
+    },
+    "amlEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "severity"
+      ],
+      "properties": {
+        "type": {
+          "const": "AML_TRIAGE"
+        },
+        "severity": {
+          "$ref": "#/$defs/identifier"
+        }
+      }
+    },
+    "fraudEffect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "verdict"
+      ],
+      "properties": {
+        "type": {
+          "const": "FRAUD_ASSESSMENT"
+        },
+        "verdict": {
+          "enum": [
+            "ALLOW",
+            "CHALLENGE",
+            "REVIEW",
+            "DECLINE"
+          ]
+        }
+      }
+    }
+  }
+}

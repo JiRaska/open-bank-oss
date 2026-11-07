@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-party-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0af6ff35947c1093"
+        openbank.tech/policy-checksum: "329a071ca38081b2"
       labels:
         app.kubernetes.io/name: party-service
         app.kubernetes.io/part-of: party
@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: party-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-d159b245
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-party-service:sandbox-45b874d6@sha256:bd94f46dd5bae0dcdcdf253c5b4da37fda52feb360b3dedf4ab5d0b7765ca7c1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -173,7 +173,7 @@ spec:
             # rules.yaml four_eyes / AUTHZ_ENFORCE guardrail). The app default is `true`, so this
             # explicit `false` is load-bearing.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
             # Redis for the four-eyes ApprovalStore (ADR-0155), backing the `party.merge`
             # gate. Load-bearing: the ApprovalConfig bean resolves with or without this, so
             # a missing Redis does not make the interceptor fall back to its documented

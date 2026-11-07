@@ -10,11 +10,12 @@
 # (ADR-0080), and it exercises routing, parameter conversion and exception
 # mappers that unit tests skip.
 #
-# v1 scope is the UNAUTHENTICATED surface: endpoints behind @RolesAllowed
-# answer 401/403 (which also regression-tests that auth is uniformly enforced
-# — an endpoint that loses its annotation starts answering 2xx to anonymous
-# fuzz traffic and shows up here). Authenticated fuzzing (Keycloak dev-service
-# + token) is the tracked follow-up.
+# Two passes per service (fuzz-services.sh): authz ON proves every protected endpoint
+# answers 401/403 to anonymous traffic; authz OFF (dev-mode auth disabled) drives the
+# handlers behind that gate. Operations that answer only 401/403 in BOTH passes are
+# recorded as auth-blocked (not run) in fuzz-coverage.json, never as tested.
+# The separate Keycloak-token lane (api-fuzz-authenticated.yml) is KEPT: it is the only
+# lane that fuzzes with a real bearer token, so it covers what neither pass here can.
 #
 # SCOPE (2026-08-01, #2365): the money-path services are now in. Before this, the default list
 # was five services of which only consent-service was money-path — so eighteen of the twenty
@@ -135,6 +136,26 @@ jobs:
           path: fuzz-scope.json
           retention-days: 30
 
+  # The shared Schemathesis hook regression runs in its OWN job. It used to be a step in the
+  # first matrix shard, so a stale fixture failed that shard before its fuzz step and silently
+  # zeroed one service's coverage (ledger, run 41631915107). A red here now reds the run (via
+  # the aggregate's needs) without costing any service its fuzz pass.
+  harness-selftest:
+    name: schemathesis hook self-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install schemathesis
+        run: |
+          set -euo pipefail
+          python3 -m pip install --user --quiet --require-hashes \
+            -r .github/workflows/requirements/schemathesis.txt
+
+      - name: Verify Schemathesis response isolation
+        run: python3 .github/scripts/fuzz_tests/test_fuzz_response_isolation.py
+
   fuzz:
     name: "schemathesis (${{ matrix.service }})"
     needs: prepare
@@ -207,7 +228,7 @@ jobs:
   # record must capture (as no-evidence), so the aggregate runs on red runs too.
   aggregate:
     name: fuzz coverage record
-    needs: [prepare, fuzz]
+    needs: [prepare, fuzz, harness-selftest]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -247,3 +268,11 @@ jobs:
           path: fuzz-coverage.json
           retention-days: 90   # the KPI publisher reads the latest run's artifact; 90d
                                # covers a long stretch of red fuzz runs without losing it
+
+      - name: Fail the run if the harness self-test failed
+        if: needs.harness-selftest.result != 'success'
+        env:
+          SELFTEST_RESULT: ${{ needs.harness-selftest.result }}
+        run: |
+          echo "::error::schemathesis hook self-test result: ${SELFTEST_RESULT} — the fuzz legs ran, but the shared hook is unverified"
+          exit 1

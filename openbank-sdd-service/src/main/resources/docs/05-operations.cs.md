@@ -110,3 +110,11 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 Konzument inkasního debetu zaúčtovává debet přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319). Za odepsané se považuje jen čitelná transakce ve stavu COMPLETED; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 je idempotentní úspěch. Odmítnutí (400/422) vyhodí `SddDebitFailedException`, takže událost skončí v DLQ. Jakákoli jiná odpověď nebo ztracené spojení se vyhodí a zopakuje se se stejným idempotentním klíčem. Konfigurace se nezměnila.
 
 Před logováním opakovaných pokusů se u výjimek nejistého dokončení zachová pouze řízený stav a odstraní se příčiny dekódování těla, které mohou obsahovat odpověď poskytovatele. Počty pokusů a původní idempotentní klíče se nemění. Ostatní logování výjimek a sdílený logger zavírání odpovědi nejsou součástí této omezené záruky.
+
+## Minimální pokrytí testy
+
+`koverVerify` vynucuje minimální řádkové pokrytí 40 %, základ pro money-path služby v `rules.yaml: coverage.money_path_floor` (zvýšeno z 38 v #13144). Naměřené pokrytí k 31. 10. 2026 bylo 78.8% (472/599 lines). Hranici lze jen zvyšovat.
+
+## Identita API na mTLS listeneru
+
+V produkci `/api/*` přijímá pouze bearer autentizaci, a to na prostém HTTP listeneru i na mTLS listeneru s ověřením klienta, a vyžaduje přihlášeného volajícího. Důvěryhodný klientský certifikát je na mTLS listeneru podmínkou TLS spojení, ale slouží jen k autentizaci transportu: nenahrazuje OIDC bearer token volajícího, takže certifikát bez beareru dostane HTTP 401. `GET /api/v1/info` a `GET /api/v1/config` zůstávají veřejná metadata. Role endpointu a OPA nadále rozhodují, co smí přihlášený volající dělat. `SddListenerAuthParityIT` používá produkční podobu listenerů a přes skutečné HTTP ověřuje, že požadavek pouze s certifikátem dostane 401.

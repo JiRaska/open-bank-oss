@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-pension-service
 
-> Operational runbook for the `pension` service. Data domain **open-banking**,
+> Operational runbook for the `pension` service. Data domain **pensions**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-pension-service` |
 | HTTP port | `8171` |
-| Data domain | open-banking |
+| Data domain | pensions |
 | Datastore | PostgreSQL (database `openbank_pension`) |
 | Classification | confidential |
 | Retention | 10 years |

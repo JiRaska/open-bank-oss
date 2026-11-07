@@ -94,6 +94,7 @@ openbank-lending-service POST /api/v1/lending/ledger-backfill/requests/{id}/exec
 openbank-sanctions-service POST /api/v1/sanctions/lists/refresh-all  # creation POST with no idempotency key today — burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/lists/{listType}/refresh  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sanctions-service POST /api/v1/sanctions/review  # creation POST with no idempotency key today — burn-down #8351
+openbank-sanctions-service POST /api/v3/sanctions/review  # same review operation as v1, with no idempotency key today — burn-down #8351; v3 boundary #10760
 openbank-sca-service POST /api/v1/sca/challenges  # Idempotency-Key/X-Request-ID replay via store — ADR-0296, burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/decision  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-sca-service POST /api/v1/sca/challenges/{id}/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
@@ -118,6 +119,7 @@ openbank-treasury-service POST /api/v1/treasury/market-data/import  # creation P
 openbank-treasury-service POST /api/v1/treasury/market-data/imports/{batchId}/approve  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
 openbank-treasury-service POST /api/v1/treasury/market-data/imports/{batchId}/reject  # lifecycle/action endpoint on an addressed resource — replay guarded by batch state (PENDING only); burn-down #8351
 openbank-treasury-service POST /api/v1/treasury/deals/{id}/schedule-preview  # read-only preview; persists nothing, replay is harmless — ADR-0344 contract 8.1 exception
+openbank-treasury-service POST /api/v1/treasury/views/deal-filters  # per-user saved view, upsert by (user, name); not money-moving — ADR-0344 contract 8.2 exception
 openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 
 # card-issuance joined money_path_services in ADR-0283 phase 0 (#8808). Nothing about these seven
@@ -125,7 +127,7 @@ openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an 
 # an authorisation decision was being scored by the lenient rule. Burn-down: #8845.
 openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # documented exception #8845: read-only decision, not a command; CardAuthorizationReplayTest proves a retry rereads card/rules without writes and reflects a subsequent block rather than replaying a stale approval
 openbank-card-issuance-service POST /api/v1/cards/{id}/block  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
@@ -143,7 +145,6 @@ openbank-sca-service POST /api/v1/sca/challenges/{id}/consume  # lifecycle/actio
 # card-processing joined money_path_services with #11990's follow-up (its threat model always called it
 # money-path). Clearing and authorisation carry required keys; the reversal does not yet. Burn-down: #11995.
 openbank-card-processing-service POST /api/v1/card-authorizations/{id}/reversal  # lifecycle/action endpoint on an addressed resource — a sequential replay is refused by aggregate state (NOT_HOLDING_FUNDS, nothing released twice); a real DB-row key needs a Flyway version the card-processing namespace cannot take until #8864/#11990 land — burn-down #11995
-openbank-pension-fund-service POST /api/v1/funds  # natural-key 409 (funds.isin UNIQUE); creates no money movement — ADR-0334, burn-down #8351
 openbank-pension-fund-service POST /api/v1/funds/{fundId}/navs  # a second calculation for the same date is 409 while one awaits approval; publishes nothing — ADR-0334, burn-down #8351
 openbank-pension-fund-service POST /api/v1/navs/{navId}/approve  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334
 openbank-pension-fund-service POST /api/v1/navs/{navId}/reject  # lifecycle/action endpoint on an addressed resource — replay refused 409 by NavRecord state — ADR-0334

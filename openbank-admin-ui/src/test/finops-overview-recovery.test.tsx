@@ -49,6 +49,18 @@ function mount(handler?: (path: string) => Promise<Response> | Response | undefi
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('FinOps independent evidence sources', () => {
+  it('distinguishes AWS infrastructure categories from business-domain allocation', async () => {
+    mount(path => path.endsWith('/costs') ? json({ ...costs, services: [
+      { name: 'Amazon EC2', amount: 100, domain: 'Platform' },
+      { name: 'Unmapped AWS service', amount: 20, domain: 'Unclassified' },
+    ] }) : undefined)
+    expect(await screen.findByText('Cloud cost categories')).toBeInTheDocument()
+    expect(screen.getByText('Platform infrastructure')).toBeInTheDocument()
+    expect(screen.getByText('Unclassified')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'cost allocation', exact: true })).toHaveAttribute('href', '/finops/allocation')
+    expect(screen.queryByText('By domain (process / business view)')).not.toBeInTheDocument()
+  })
+
   it('shows only the five numerically newest EKS versions and keeps the current version highlighted', async () => {
     const version = (number: string, isCurrent = false) => ({
       version: number, eksRelease: `release-${number}`, standardSupportEnds: '2027-01-01',
@@ -137,6 +149,10 @@ describe('FinOps independent evidence sources', () => {
     let available = false
     mount(path => path.endsWith('/anomalies') ? json({ available, anomalies: [] }) : undefined)
     await screen.findByRole('button', { name: 'Retry Cost anomalies' })
+    expect(screen.getByText('Alertmanager is not responding')).toBeInTheDocument()
+    expect(screen.getByText('Langfuse → Prometheus bridge (ADR-0112) is not deployed in this environment')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Cost anomalies' })).queryByText(/An unexpected error occurred/)).not.toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'AI costs' })).queryByText(/An unexpected error occurred/)).not.toBeInTheDocument()
     expect(screen.queryByText(/No active cost anomalies/)).not.toBeInTheDocument()
     available = true
     fireEvent.click(screen.getByRole('button', { name: 'Retry Cost anomalies' }))

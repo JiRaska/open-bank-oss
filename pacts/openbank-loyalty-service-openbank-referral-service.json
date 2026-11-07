@@ -1,0 +1,129 @@
+{
+  "consumer": {
+    "name": "openbank-loyalty-service"
+  },
+  "messages": [
+    {
+      "contents": {
+        "eventId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "eventType": "Qualified",
+        "inviteId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "occurredAt": "2026-01-01T00:00:00Z",
+        "programId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "qualificationEventId": "string",
+        "refereePartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "referrerPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "sourceService": "referral-service"
+      },
+      "description": "a Qualified event for the qualified invite",
+      "generators": {
+        "body": {
+          "$.eventId": {
+            "type": "Uuid"
+          },
+          "$.inviteId": {
+            "type": "Uuid"
+          },
+          "$.programId": {
+            "type": "Uuid"
+          },
+          "$.qualificationEventId": {
+            "size": 20,
+            "type": "RandomString"
+          },
+          "$.refereePartyId": {
+            "type": "Uuid"
+          },
+          "$.referrerPartyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.eventId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.inviteId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.occurredAt": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "format": "yyyy-MM-dd'T'HH:mm:ssXXX",
+                "match": "timestamp"
+              }
+            ]
+          },
+          "$.programId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.qualificationEventId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.refereePartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.referrerPartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "a referral invite has been qualified"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-referral-service"
+  }
+}

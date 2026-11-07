@@ -119,9 +119,9 @@ GLOBAL_IN_SCOPE_DIRS=(gradle config build-logic)
 
 # Which subpaths of a DEPENDENCY module are compile inputs. Not a new opinion: this is the repo's
 # own definition, from libs-change-dependents.sh (`^<module>/(src/main|build.gradle.kts)` plus the
-# global `openbank-libs/gradle/` version catalog), and auto-deploy's own change detection excludes
-# `openbank-libs/governance/` in as many words — "data for CI checks + admin-ui, not a compile
-# input". Comparing the whole directory instead is not free caution: measured 2026-08-03, all 32
+# global `openbank-libs/gradle/` version catalog). Declared external resource copies are
+# compared independently below; governance data is otherwise outside the compile classpath.
+# Comparing the whole directory instead is not free caution: measured 2026-08-03, all 32
 # services with a main-tagged pact version were refused, and 12 of them ONLY because four files
 # under openbank-libs/governance/ had moved. The service's OWN directory is still compared whole.
 DEP_SUBPATHS=(src/main build.gradle.kts gradle)
@@ -199,6 +199,48 @@ own_scope() {
 }
 
 # ── the decision ───────────────────────────────────────────────────────────────────────
+# A SELF-BUILT service (auto-deploy.yml SELF_BUILT_SERVICES, e.g. the Python document-renderer)
+# is built by `docker buildx build -f <svc>/Dockerfile <svc>`: the build context IS the service
+# directory and nothing else reaches the image (no Gradle, no Dockerfile.deploy, no shared libs).
+# So it is equivalent exactly when that directory is the same git tree at both commits. Every
+# precondition below fails CLOSED: if the input set cannot be determined, the verdict is DIFFERENT.
+self_built_equivalent() {
+  local svc="$1" pact_sha="$2" dispatch_sha="$3" decl n a b df srcs src
+  decl="$(git show "$dispatch_sha:.github/workflows/auto-deploy.yml" 2>/dev/null \
+    | grep -E '^[[:space:]]+SELF_BUILT_SERVICES:[[:space:]]*' || true)"
+  n="$(printf '%s\n' "$decl" | grep -c . || true)"
+  [ "$n" -eq 1 ] \
+    || differs "${svc} is not a Gradle module and SELF_BUILT_SERVICES is not declared exactly once at ${dispatch_sha:0:8} — cannot derive what it is built from"
+  case " $(printf '%s' "$decl" | sed -E 's/^[^:]*:[[:space:]]*//; s/["'"'"']//g') " in
+    *" ${svc} "*) ;;
+    *) differs "${svc} is neither a Gradle module nor declared in SELF_BUILT_SERVICES — cannot derive what it is built from" ;;
+  esac
+  for b in "$pact_sha" "$dispatch_sha"; do
+    git cat-file -e "$b:$svc/Dockerfile" 2>/dev/null \
+      || differs "self-built ${svc} has no Dockerfile at ${b:0:8} — build input set cannot be determined"
+  done
+  # The context is the service directory, so a COPY/ADD source that leaves it (.., absolute,
+  # URL) would be an input this proof cannot see.
+  df="$(git show "$dispatch_sha:$svc/Dockerfile")"
+  srcs="$(printf '%s\n' "$df" | grep -iE '^[[:space:]]*(COPY|ADD)[[:space:]]' | grep -viE -- '--from=' || true)"
+  while IFS= read -r src; do
+    [ -n "$src" ] || continue
+    # Sources only: drop COPY/ADD, --flags and the final token (the in-image destination).
+    src="$(printf '%s\n' "$src" | awk '{n=0; for(i=2;i<=NF;i++) if($i !~ /^--/) t[++n]=$i; for(i=1;i<n;i++) printf "%s ", t[i]}')"
+    case " $src" in
+      *..*|*" /"*|*http://*|*https://*) differs "self-built ${svc} Dockerfile has a COPY/ADD source outside its own directory (${src}) — input set cannot be determined" ;;
+    esac
+  done <<< "$srcs"
+  a="$(obj_at "$pact_sha" "$svc")"; b="$(obj_at "$dispatch_sha" "$svc")"
+  [ "$a" != ABSENT ] && [ "$b" != ABSENT ] \
+    || differs "self-built ${svc} directory is absent at ${pact_sha:0:8} or ${dispatch_sha:0:8}"
+  [ "$a" = "$b" ] \
+    || differs "${svc} (self-built build context) differs between ${pact_sha:0:8} and ${dispatch_sha:0:8} (${a:0:8} vs ${b:0:8})"
+  verdict EQUIVALENT \
+    "self-built ${svc}: its whole build context directory is the same git tree at ${pact_sha:0:8} and ${dispatch_sha:0:8}, and ${pact_sha:0:8} is an ancestor"
+  exit 0
+}
+
 equivalent() {
   local svc="$1" pact_sha="$2" dispatch_sha="$3"
 
@@ -207,11 +249,13 @@ equivalent() {
   commit_exists "$dispatch_sha" \
     || differs "dispatch sha ${dispatch_sha} is not a commit in this checkout"
 
-  git cat-file -e "$dispatch_sha:$svc/build.gradle.kts" 2>/dev/null \
-    || differs "${svc} is not a Gradle module at ${dispatch_sha} — cannot derive what it is built from"
-
   git merge-base --is-ancestor "$pact_sha" "$dispatch_sha" 2>/dev/null \
     || differs "pact version ${pact_sha} is not an ancestor of ${dispatch_sha} — history diverged or was rewritten, so 'main moved forward without touching this service' is not what happened"
+
+  if ! git cat-file -e "$dispatch_sha:$svc/build.gradle.kts" 2>/dev/null; then
+    self_built_equivalent "$svc" "$pact_sha" "$dispatch_sha"
+    return
+  fi
 
   # These values are read by @IfBuildProperty during augmentation. Compare the values from
   # both workflow revisions rather than the whole workflow blob: orchestration-only edits do
@@ -233,6 +277,19 @@ equivalent() {
     || differs "cannot unambiguously read augmentation-time build properties from reconcile workflow"
   [ "$old_build_inputs" = "$new_build_inputs" ] \
     || differs "augmentation-time service build properties changed between ${pact_sha:0:8} and ${dispatch_sha:0:8}"
+
+  # External resources copied by processResources are image bytes too. Derive them
+  # from both revisions, including dependency modules, before classifying sibling data
+  # as irrelevant. No Gradle/PR code is evaluated and unknown resource syntax refuses.
+  local resource_helper resource_root resource_module resource_modules resource_result
+  local resource_args=()
+  resource_helper="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/runtime_resource_inputs.py"
+  resource_root="$(git rev-parse --show-toplevel)" || differs "cannot resolve resource input repository"
+  resource_modules="$( { in_scope_modules "$pact_sha" "$svc"; in_scope_modules "$dispatch_sha" "$svc"; } | sort -u)"
+  for resource_module in $resource_modules; do resource_args+=(--service "$resource_module"); done
+  resource_result="$(python3 "$resource_helper" --root "$resource_root" --compare \
+    "${resource_args[@]}" --base "$pact_sha" --head "$dispatch_sha" 2>&1)" \
+    || differs "packaged resource inputs changed or cannot be proven: ${resource_result}"
 
   # 1. Build the list of in-scope PATHS: this service whole, each dependency module's compile
   #    inputs, the global build directories, and the two `.github/` files that reach the image.
@@ -258,6 +315,10 @@ equivalent() {
     || differs "could not diff ${pact_sha} against ${dispatch_sha}"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
+    # The admin UI is an explicitly independent Node application, not a JVM build
+    # input. Its dynamic-route brackets must not invalidate a JVM tree proof.
+    # Keep the strict path handling below for JVM source and unknown directories.
+    case "$p" in openbank-admin-ui/*) continue ;; esac
     # `own_scope` and the scope comparison below use shell words. A changed path containing
     # whitespace or Git's C-quoted characters could be split into nonexistent paths, then fall
     # through the Gradle-module classifier as irrelevant. Refuse unhandled names until the whole
@@ -304,6 +365,8 @@ equivalent() {
 # mocked `git` would test the mock. Each case asserts the DIRECTION as well as the verdict — a
 # harness that only ever sees the equivalent case cannot notice the rule being deleted.
 selftest() {
+  # Fixture commits belong to a separate repo, not a caller's gate index or object store.
+  unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_COMMON_DIR
   local me tmp fail=0
   me="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   tmp="$(mktemp -d)"
@@ -467,6 +530,34 @@ selftest() {
   local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
   _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
+  local ui1 ui2
+  ui1="$(_commit 'openbank-admin-ui/src/app/communication/edit/[personaKey]/page.tsx' first)"
+  ui2="$(_commit 'openbank-admin-ui/src/app/communication/edit/[personaKey]/page.tsx' second)"
+  _expect "unrelated admin-ui dynamic route is irrelevant" EQUIVALENT svc-a "$ui1" "$ui2"
+
+  local unsafe1 unsafe2
+  unsafe1="$(_commit 'new-build-system/[input].txt' first)"
+  _expect "unknown bracketed path remains refused" DIFFERENT svc-a "$ui2" "$unsafe1"
+  unsafe2="$(_commit 'svc-a/src/main/[input].kt' changed)"
+  _expect "production bracketed path remains refused" DIFFERENT --own-test-overlay svc-a "$unsafe1" "$unsafe2"
+
+  # Self-built (non-Gradle) service: equivalent iff its whole build-context directory is equal.
+  local sb0 sb1 sb2 sb3 sb4
+  sb0="$(cd "$tmp" && git checkout -q "$s6c" && mkdir -p svc-py \
+      && printf 'FROM scratch\nCOPY app.py .\n' > svc-py/Dockerfile && printf 'x\n' > svc-py/app.py \
+      && printf 'env:\n  SELF_BUILT_SERVICES: "svc-py"\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: memory\n  OTHER_SETTING: two\n' > .github/workflows/auto-deploy.yml \
+      && git add -A && git commit -qm 'self-built base' >/dev/null && git rev-parse HEAD)"
+  _expect "self-built: identical" EQUIVALENT svc-py "$sb0" "$sb0"
+  sb1="$(_commit svc-b/src/main/B.kt unrelated-after-selfbuilt)"
+  _expect "self-built: unrelated service moved" EQUIVALENT svc-py "$sb0" "$sb1"
+  sb2="$(_commit svc-py/app.py changed)"
+  _expect "self-built: own source changed" DIFFERENT svc-py "$sb1" "$sb2"
+  sb3="$(_commit svc-py/tests/t.py new)"
+  _expect "self-built: own new file changed" DIFFERENT svc-py "$sb2" "$sb3"
+  _expect "self-built: undeclared non-gradle dir refused" DIFFERENT docs "$sb0" "$sb1"
+  sb4="$(cd "$tmp" && printf 'FROM scratch\nCOPY ../shared/x .\n' > svc-py/Dockerfile && git add -A && git commit -qm escape >/dev/null && git rev-parse HEAD)"
+  _expect "self-built: Dockerfile COPY escaping context fails closed" DIFFERENT svc-py "$sb4" "$sb4"
+
   # Keep the fail-closed workflow-input negatives last: each commit intentionally makes the
   # required inputs missing or ambiguous, so later known-positive cases must not inherit it.
   local s6d s6e s6f s6g
@@ -487,7 +578,7 @@ selftest() {
       && git rev-parse HEAD)"
   _expect "first augmentation-time build input fails closed when duplicated" DIFFERENT svc-a "$s6c" "$s6g"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 31 cases (23 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 40 cases (31 main + 3 admin/path regressions + 6 self-built) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 

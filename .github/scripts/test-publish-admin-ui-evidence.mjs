@@ -54,17 +54,18 @@ test('content dataset is bound to its reviewed-source collection time and SHA fi
   assert.equal(DATASETS.content.snapshotSourceSha({ sourceSha: sha }), sha)
 })
 
-test('content publication uses only the admin-ui/content prefix and preserves source provenance', async () => {
+test('content publication uses only the versioned content prefix and preserves source provenance', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha }).toString('utf8'))
   const h = harness(snapshot, { ...env, EVIDENCE_SOURCE_SHA: sourceSha })
   try {
     await h.publish('content', { now: () => Date.now() + 1_000 })
     assert.equal(h.puts.length, 2)
-    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
-    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.match(h.puts[0].key, /^admin-ui\/content\/domains-v1\/snapshots\/123-1-[a-f0-9]{64}\.json$/)
+    assert.equal(h.puts[1].key, 'admin-ui/content/domains-v1/current.json')
     assert.equal(h.puts[1].body.collectedAt, snapshot.collectedAt)
     assert.equal(h.puts[1].body.sourceSha, sourceSha)
+    assert.ok(h.puts.every(put => put.key !== 'admin-ui/content/current.json'), 'legacy reader pointer is untouched')
     assert.ok(h.puts.every(put => put.conditional === '*'))
   } finally { h.cleanup() }
 })
@@ -104,7 +105,7 @@ test('malformed data cannot publish into any dataset', async () => {
 })
 
 
-test('complete repository corpus above two MiB publishes only under the existing content prefix', async () => {
+test('complete repository corpus above two MiB publishes only under the versioned content prefix', async () => {
   const sourceSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   const snapshot = JSON.parse(collectAdminUiContent({ sourceSha, includeRepositoryDocumentation: true }))
   assert.ok(Buffer.byteLength(JSON.stringify(snapshot)) > 2 * 1024 * 1024)
@@ -112,8 +113,8 @@ test('complete repository corpus above two MiB publishes only under the existing
   try {
     await h.publish('content', { now: () => Date.now() + 1_000 })
     assert.equal(h.puts.length, 2)
-    assert.match(h.puts[0].key, /^admin-ui\/content\/snapshots\//)
-    assert.equal(h.puts[1].key, 'admin-ui/content/current.json')
+    assert.match(h.puts[0].key, /^admin-ui\/content\/domains-v1\/snapshots\//)
+    assert.equal(h.puts[1].key, 'admin-ui/content/domains-v1/current.json')
     assert.equal(h.puts[1].body.sourceSha, sourceSha)
   } finally { h.cleanup() }
 })

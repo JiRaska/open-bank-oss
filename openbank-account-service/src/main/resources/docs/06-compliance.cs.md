@@ -72,6 +72,16 @@ TPP → consent-service (validate consent)
 
 Account-service vidí standardní bearer token; **role `ROLE_SERVICE_PSD2`** authorizuje read-only přístup.
 
+## AML — opakované screenování při otevření účtu
+
+Při otevírání účtu posílá account-service `partyId` jako `subjectId` sankční službě, odděleně od
+replay klíče pokusu `account-open:<partyId>:<idempotencyKey>`. Každý nový klíč spustí čerstvé
+screenování aktuálních listin; starý `CLEAR` se pro nový pokus nikdy znovu nepoužije. Neexpirované
+rozhodnutí analytika `WHITELISTED` povolí pokus po dobu 90 dnů jen tehdy, když přezkum přesně
+pokrývá atributy subjektu a aktuální identity zásahů. Nový nepokrytý zásah, změněný subjekt nebo
+expirované clearance zůstávají blokující. Staré záznamy bez `subjectId` vyžadují nové screenování
+a přezkum (#11694).
+
 ## AML — freeze workflow
 
 ```mermaid
