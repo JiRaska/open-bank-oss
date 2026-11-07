@@ -12,6 +12,7 @@ import com.openbank.domestic.application.workflow.FraudGateAction
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudRejectCause
 import com.openbank.domestic.application.workflow.FraudReviewDecision
+import com.openbank.domestic.application.workflow.fraudReviewCaseKey
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.libs.fincrime.ScreeningDecision
 import io.mockk.every
@@ -66,7 +67,9 @@ class FraudHoldResolutionServiceTest {
         env.sleep(Duration.ofHours(1))
         verify(exactly = 0) { activities.submitScheme(any()) }
 
-        assertThat(service.resolve(paymentId, FraudReviewDecision.RELEASE)).isEqualTo(FraudHoldDelivery.DELIVERED)
+        assertThat(
+            service.resolve(paymentId, FraudReviewDecision.RELEASE, fraudReviewCaseKey(paymentId)),
+        ).isEqualTo(FraudHoldDelivery.DELIVERED)
 
         assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.VALIDATED)
         verify(exactly = 1) { activities.submitScheme(paymentId) }
@@ -81,12 +84,27 @@ class FraudHoldResolutionServiceTest {
         assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
         verify { activities.rejectForFraud(paymentId, FraudRejectCause.HOLD_TIMED_OUT) }
 
-        assertThat(service.resolve(paymentId, FraudReviewDecision.RELEASE)).isEqualTo(FraudHoldDelivery.NOT_WAITING)
+        assertThat(
+            service.resolve(paymentId, FraudReviewDecision.RELEASE, fraudReviewCaseKey(paymentId)),
+        ).isEqualTo(FraudHoldDelivery.NOT_WAITING)
 
         verify(exactly = 0) { activities.submitScheme(any()) }
         verify(exactly = 1) {
             metrics.recordHoldResolution(FraudReviewDecision.RELEASE, FraudHoldDelivery.NOT_WAITING)
         }
+    }
+
+    @Test
+    fun `a decision from a case the rail did not open does not release`() {
+        val run = startHeld()
+        env.sleep(Duration.ofHours(1))
+
+        // Same payment id and alert code, but someone else's case.
+        service.resolve(paymentId, FraudReviewDecision.RELEASE, "someone-elses-case")
+
+        assertThat(run.getResult(DomesticPaymentStatus::class.java)).isEqualTo(DomesticPaymentStatus.REJECTED)
+        verify { activities.rejectForFraud(paymentId, FraudRejectCause.HOLD_TIMED_OUT) }
+        verify(exactly = 0) { activities.submitScheme(any()) }
     }
 
     private companion object {

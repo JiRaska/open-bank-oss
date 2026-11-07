@@ -21,6 +21,10 @@ import java.util.UUID
  * re-drive under a suffixed id) is not an error: retrying could never help, so it is counted as
  * [FraudHoldDelivery.NOT_WAITING] and the hold's fail-closed outcome stands. Any other failure
  * propagates, so the record is retried and then dead-lettered.
+ *
+ * A signal is fire-and-forget: a run that is not yet holding, or that holds for a different case,
+ * ignores it and counts it in `openbank_domestic_fraud_hold_signal_ignored`; this service still
+ * records DELIVERED, meaning only that a run existed.
  */
 @ApplicationScoped
 class FraudHoldResolutionService(
@@ -29,11 +33,11 @@ class FraudHoldResolutionService(
 ) {
     private val log = Logger.getLogger(FraudHoldResolutionService::class.java)
 
-    fun resolve(paymentId: UUID, decision: FraudReviewDecision): FraudHoldDelivery {
+    fun resolve(paymentId: UUID, decision: FraudReviewDecision, caseIdempotencyKey: String): FraudHoldDelivery {
         val delivery = try {
             workflowClient
                 .newWorkflowStub(DomesticPaymentWorkflow::class.java, "domestic-payment-$paymentId")
-                .resolveFraudHold(decision)
+                .resolveFraudHold(decision, caseIdempotencyKey)
             FraudHoldDelivery.DELIVERED
         } catch (_: WorkflowNotFoundException) {
             FraudHoldDelivery.NOT_WAITING

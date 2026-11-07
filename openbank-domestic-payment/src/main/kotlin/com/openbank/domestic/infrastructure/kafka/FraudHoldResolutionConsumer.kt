@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudReviewDecision
+import com.openbank.domestic.application.workflow.fraudReviewCaseKey
 import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,10 @@ import java.util.UUID
  *
  * Only CLEARED and BLOCKED are decisions. ESCALATED and UNDER_REVIEW keep the payment waiting, and the
  * hold then ends by its own timeout, in rejection. Every other case on the shared topic is skipped.
+ *
+ * `alertCode` and `transactionId` are free text from whoever creates the case, so they alone prove
+ * nothing. The decision must come from the case the rail opened: its `idempotencyKey` must be exactly
+ * [fraudReviewCaseKey] for the payment, and the workflow checks the same key again before acting.
  * Unparseable input and a failed signal rethrow, which the channel's dead-letter strategy parks.
  */
 @ApplicationScoped
@@ -44,6 +49,15 @@ class FraudHoldResolutionConsumer(
             return
         }
         val paymentId = UUID.fromString(transactionId)
+        val caseKey = node.path("idempotencyKey").asText("")
+        if (caseKey != fraudReviewCaseKey(paymentId)) {
+            log.warnf(
+                "FRAUD_REVIEW case %s is not the rail's case for payment %s; ignored",
+                node.path("caseId").asText(),
+                paymentId,
+            )
+            return
+        }
         EventRetry.withRetry(
             log = log,
             what = "fraud hold resolution",
@@ -51,7 +65,7 @@ class FraudHoldResolutionConsumer(
             isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
         ) {
             // The Temporal client blocks, and this handler runs on the event loop.
-            withContext(Dispatchers.IO) { resolution.resolve(paymentId, decision) }
+            withContext(Dispatchers.IO) { resolution.resolve(paymentId, decision, caseKey) }
         }
     }
 

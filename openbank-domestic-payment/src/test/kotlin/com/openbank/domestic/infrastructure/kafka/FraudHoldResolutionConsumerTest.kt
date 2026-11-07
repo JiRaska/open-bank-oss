@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.usecase.FraudHoldResolutionService
 import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudReviewDecision
+import com.openbank.domestic.application.workflow.fraudReviewCaseKey
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -21,20 +22,32 @@ class FraudHoldResolutionConsumerTest {
     private val consumer = FraudHoldResolutionConsumer(ObjectMapper(), resolution)
     private val paymentId = UUID.randomUUID()
 
-    private fun event(status: String, alert: String? = "FRAUD_REVIEW", tx: String? = paymentId.toString()) =
-        ObjectMapper().writeValueAsString(
-            mapOf("caseId" to UUID.randomUUID(), "newStatus" to status, "alertCode" to alert, "transactionId" to tx),
-        )
+    private fun event(
+        status: String,
+        alert: String? = "FRAUD_REVIEW",
+        tx: String? = paymentId.toString(),
+        key: String? = fraudReviewCaseKey(paymentId),
+    ) = ObjectMapper().writeValueAsString(
+        mapOf(
+            "caseId" to UUID.randomUUID(),
+            "newStatus" to status,
+            "alertCode" to alert,
+            "transactionId" to tx,
+            "idempotencyKey" to key,
+        ),
+    )
 
     @Test
     fun `CLEARED releases and BLOCKED rejects`() {
-        every { resolution.resolve(any(), any()) } returns FraudHoldDelivery.DELIVERED
+        every { resolution.resolve(any(), any(), any()) } returns FraudHoldDelivery.DELIVERED
 
         runBlocking { consumer.consume(event("CLEARED")) }
-        verify(exactly = 1) { resolution.resolve(paymentId, FraudReviewDecision.RELEASE) }
+        verify(exactly = 1) {
+            resolution.resolve(paymentId, FraudReviewDecision.RELEASE, fraudReviewCaseKey(paymentId))
+        }
 
         runBlocking { consumer.consume(event("BLOCKED")) }
-        verify(exactly = 1) { resolution.resolve(paymentId, FraudReviewDecision.REJECT) }
+        verify(exactly = 1) { resolution.resolve(paymentId, FraudReviewDecision.REJECT, fraudReviewCaseKey(paymentId)) }
     }
 
     @Test
@@ -44,7 +57,15 @@ class FraudHoldResolutionConsumerTest {
         consumer.consume(event("CLEARED", alert = "SANCTIONS_HIT"))
         consumer.consume(event("CLEARED", alert = null))
         consumer.consume(event("CLEARED", tx = null))
-        verify(exactly = 0) { resolution.resolve(any(), any()) }
+        verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a case someone else created for the same payment cannot release it`(): Unit = runBlocking {
+        consumer.consume(event("CLEARED", key = "attacker-chosen-key"))
+        consumer.consume(event("CLEARED", key = null))
+        consumer.consume(event("CLEARED", key = fraudReviewCaseKey(UUID.randomUUID())))
+        verify(exactly = 0) { resolution.resolve(any(), any(), any()) }
     }
 
     @Test

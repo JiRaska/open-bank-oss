@@ -203,6 +203,11 @@ components:
         alertCode:
           type: [string, 'null']
           description: Additive (#4403). The case's alert code, so a consumer can act on one kind of case.
+        idempotencyKey:
+          type: [string, 'null']
+          description: >-
+            Additive (#4403). The key the case was created with. alertCode and transactionId are free
+            text any case creator sets, so a consumer binds a decision to the case it opened by this key.
 
     OversightTriggerPayload:
       type: object

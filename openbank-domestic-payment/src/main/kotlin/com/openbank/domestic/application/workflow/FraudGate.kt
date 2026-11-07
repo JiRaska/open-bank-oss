@@ -6,6 +6,7 @@ package com.openbank.domestic.application.workflow
 
 import com.openbank.domestic.application.port.out.FraudScoreOutcome
 import com.openbank.libs.fincrime.FraudVerdict
+import java.util.UUID
 
 /** What the workflow does with a scored payment (ADR-0084 §4.2, #4403). */
 enum class FraudGateAction { PROCEED, HOLD, REJECT }
@@ -15,6 +16,9 @@ enum class FraudRejectCause { DECLINED, REVIEW_REJECTED, HOLD_TIMED_OUT }
 
 /** An analyst's answer to a held payment, delivered by [DomesticPaymentWorkflow.resolveFraudHold]. */
 enum class FraudReviewDecision { RELEASE, REJECT }
+
+/** The idempotency key of the `FRAUD_REVIEW` case the rail opens for [paymentId]; binds a decision to it. */
+fun fraudReviewCaseKey(paymentId: UUID): String = "aml-$paymentId-FRAUD_REVIEW"
 
 /** Why a payment was held: a verdict that needs review, or no real verdict at all. */
 enum class FraudHoldBasis { VERDICT, SCORING_UNAVAILABLE }

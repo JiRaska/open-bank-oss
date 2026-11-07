@@ -151,7 +151,7 @@ Outbound topic: `openbank.aml.events` (JSON; partition key = case aggregate id; 
 | Event type | Trigger | Payload (key fields) |
 |---|---|---|
 | `aml.case.created.v1` | `POST /aml/cases` or onboarding consumer | caseId, idempotencyKey, partyId, accountId, transactionId, customerReference, screeningType, riskLevel, status, alertCode, matchedEntity, occurredAt |
-| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt, transactionId, alertCode |
+| `aml.case.status_changed.v1` | `PUT .../decision` | caseId, partyId, previousStatus, newStatus, decisionReason, assignedAnalyst, decidedBy, occurredAt, transactionId, alertCode, idempotencyKey |
 
 Inbound topic: `openbank.party.events` — consumed for `PARTY_CREATED` (group `openbank-aml-service`, `auto.offset.reset=earliest`).
 
