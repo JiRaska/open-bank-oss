@@ -410,22 +410,22 @@ class FixtureSeedTests(unittest.TestCase):
                 paths, ran = [], []
 
                 class BrokenPublication(PublicationTest):
-                    def test_body(self):
+                    def test_body(self, ran=ran):
                         ran.append(True)
 
-                def fail_seed(root, *args):
+                def fail_seed(root, *args, paths=paths):
                     paths.append(Path(root))
                     raise OSError('injected seed initialization failure')
 
-                def fail_copy(source, destination):
+                def fail_copy(source, destination, paths=paths):
                     paths.extend((Path(source), Path(destination).parent))
                     Path(destination).mkdir()
                     (Path(destination) / 'partial').write_text('partial copy')
                     raise OSError('injected partial copy failure')
 
-                def fail_chdir(path):
+                def fail_chdir(path, paths=paths, publication_class=BrokenPublication):
                     if Path(path) != previous:
-                        paths.extend((BrokenPublication._seed_path, Path(path).parent))
+                        paths.extend((publication_class._seed_path, Path(path).parent))
                         raise OSError('injected chdir failure')
                     return real_chdir(path)
 
