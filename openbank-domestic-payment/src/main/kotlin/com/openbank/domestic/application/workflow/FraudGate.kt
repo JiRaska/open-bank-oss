@@ -16,6 +16,12 @@ enum class FraudRejectCause { DECLINED, REVIEW_REJECTED, HOLD_TIMED_OUT }
 /** An analyst's answer to a held payment, delivered by [DomesticPaymentWorkflow.resolveFraudHold]. */
 enum class FraudReviewDecision { RELEASE, REJECT }
 
+/** Why a payment was held: a verdict that needs review, or no real verdict at all. */
+enum class FraudHoldBasis { VERDICT, SCORING_UNAVAILABLE }
+
+/** Whether an analyst decision found a waiting run, or arrived for one that no longer exists. */
+enum class FraudHoldDelivery { DELIVERED, NOT_WAITING }
+
 /**
  * The enforcement table, kept pure so every row is unit-testable and the workflow only branches on
  * its result.
