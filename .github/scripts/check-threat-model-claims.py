@@ -422,6 +422,11 @@ DOCISH = (".md", ".txt", ".adoc")
 CODEISH = (".kt", ".java", ".py", ".rego", ".sql", ".ts", ".tsx", ".sh", ".yaml", ".yml",
            ".json", ".gradle", ".kts", ".xml", ".properties", ".tf", ".conf")
 
+# These tokens have exactly the ASCII boundaries used by Corpus._word().
+IDENTIFIER = re.compile(r"[A-Za-z0-9_]+")
+# A lookahead preserves overlapping declarations, including declaration-shaped comments.
+DECLARATION = re.compile(r"(?=\b(?:class|object|interface|fun|val|var)\s+([A-Za-z0-9_]+)\b)")
+
 STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
@@ -603,8 +608,15 @@ class Corpus:
             self._memo[sym] = True
             return True
         needle = sym.rsplit(".", 1)[-1] if POLICYRULE.match(sym) else sym
-        pat = self._word(needle)
-        hit = any(pat.search(b) for b in self.code.values() if needle in b)
+        if IDENTIFIER.fullmatch(needle):
+            # Build once per immutable corpus, never once per citation. Non-identifiers keep
+            # the literal regex path, including dotted config keys and policy spellings.
+            if getattr(self, "_identifiers", None) is None:
+                self._identifiers = {word for b in self.code.values() for word in IDENTIFIER.findall(b)}
+            hit = needle in self._identifiers
+        else:
+            pat = self._word(needle)
+            hit = any(pat.search(b) for b in self.code.values() if needle in b)
         self._memo[sym] = hit
         return hit
 
@@ -622,17 +634,18 @@ class Corpus:
         """
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
-        return None
+        if getattr(self, "_stub_sites", None) is None:
+            self._stub_sites = {}
+            for f, b in self.main.items():
+                lines = b.splitlines()
+                for n, line in enumerate(lines):
+                    names = DECLARATION.findall(line)
+                    if names and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        for name in names:
+                            # Preserve raw source, file order and the FIRST stub site;
+                            # an earlier non-stub declaration must not hide a later stub.
+                            self._stub_sites.setdefault(name, f"{f}:{n + 1}")
+        return self._stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -1161,6 +1174,47 @@ def self_test() -> int:
         stub_corpus._stub_memo = {}
         case(label, stub_corpus.stub_site(symbol), expected)
         case(label + " on repeated lookup", stub_corpus.stub_site(symbol), expected)
+
+    # Differential checks against the original literal scans. The index must preserve both
+    # ASCII existence boundaries and Unicode declaration boundaries, not just ordinary Kotlin.
+    indexed = _FakeCorpus({"openbank-x/src/main/kotlin/Controls.kt":
+                           "// CommentOnlyControl\nclass RealControl\n"
+                           "val x = éUnicodeEdgeControlé + prefixSuffixControl + _HiddenControl\n"
+                           "val y = ASCII_Control + dotted.control.name + bracket[BracketControl]\n"})
+    for symbol in ["CommentOnlyControl", "RealControl", "UnicodeEdgeControl", "SuffixControl",
+                   "HiddenControl", "ASCII_Control", "dotted.control.name", "BracketControl",
+                   "AbsentControl", "éUnicodeEdgeControlé"]:
+        expected = any(Corpus._word(symbol).search(b) for b in indexed.code.values())
+        case("indexed existence matches literal scan: " + symbol, indexed.resolve(symbol), expected)
+
+    raw_sources = {
+        "first": "class RepeatedControl { }\n" + "\n" * STUB_WINDOW
+                 + "class RepeatedControl { // TODO\n}\n"
+                 + "// class CommentStubControl // FIXME\n"
+                 + "class fun OverlappingControl // not implemented\n"
+                 + "class UnicodeStubControlé // TODO\n"
+                 + "class OtherSuffixControl // TODO\n"
+                 + "class DottedControl.kt // TODO\n",
+        "second": "class RepeatedControl { // TODO\n}\nclass LaterControl // TODO\n",
+    }
+    indexed_stubs = Corpus.__new__(Corpus)
+    indexed_stubs.main, indexed_stubs._stub_memo = raw_sources, {}
+    for symbol in ["RepeatedControl", "CommentStubControl", "OverlappingControl",
+                   "UnicodeStubControl", "SuffixControl", "DottedControl.kt", "LaterControl",
+                   "MissingControl"]:
+        declaration = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(symbol) + r"\b")
+        expected_site = None
+        if CAMEL.match(symbol) or LOWERCAMEL.match(symbol):
+            for source, blob in raw_sources.items():
+                lines = blob.splitlines()
+                for n, line in enumerate(lines):
+                    if declaration.search(line) and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        expected_site = f"{source}:{n + 1}"
+                        break
+                if expected_site is not None:
+                    break
+        case("indexed stub matches literal scan: " + symbol,
+             indexed_stubs.stub_site(symbol), expected_site)
 
     # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
     #     red case has to come back clean, or the gate is a blanket and not a check.
