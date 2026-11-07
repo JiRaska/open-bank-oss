@@ -6,7 +6,7 @@ package com.openbank.cardissuance.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -22,13 +22,14 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * command carries `productCode`, not the catalog UUID), so it binds `/by-code/{code}` rather than
  * `/{id}`.
  *
- * product-catalog authenticates its readers (#743), hence the `openbank-services` M2M bearer from
- * [OidcClientRequestReactiveFilter]; without it every lookup 401s and silently degrades to the
- * permissive fallback.
+ * product-catalog authenticates its readers (#743). The bearer comes from this service's OWN named
+ * oidc-client `m2m` (`openbank-card-issuance`, ROLE_API plus `catalog:read`): product-catalog grants
+ * catalog.read to that identity by name and refuses the shared `openbank-services` principal.
+ * Without a bearer every lookup 401s and silently degrades to the permissive fallback.
  */
 @RegisterRestClient(configKey = "product-catalog-api")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("m2m")
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface ProductCatalogClient {

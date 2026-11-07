@@ -62,7 +62,7 @@ on:
       batch_size:
         description: "Maximum members per train"
         type: number
-        default: 8
+        default: 16
 
 permissions:
   contents: read
@@ -113,7 +113,11 @@ jobs:
           GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
+          # Admission runs the checklist gate from beside this script, so main's copy must be there too.
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
+          for f in check-security-checklist.py merge_train_carrier.py; do
+            git -c core.hooksPath=/dev/null show "origin/main:.github/scripts/$f" > "$RUNNER_TEMP/$f"
+          done
           # shellcheck disable=SC2086  # SHADOW is empty or a single flag
           python3 -I -S "$RUNNER_TEMP/merge-train.py" settle --repo "${GITHUB_REPOSITORY}" --branch main ${SHADOW}
 
@@ -168,7 +172,7 @@ jobs:
           # Read-only. The script strips it — and everything not on its allowlist — from the
           # environment the generators run in.
           GH_TOKEN: ${{ github.token }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
         run: |
           set -euo pipefail
           python3 .github/scripts/merge-train.py build \
@@ -219,7 +223,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 8 }}
+          TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
           # Isolated git config for THIS step only (see settle).
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_CONFIG_GLOBAL: /dev/null

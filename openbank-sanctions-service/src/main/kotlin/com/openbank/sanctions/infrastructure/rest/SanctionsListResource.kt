@@ -48,7 +48,10 @@ class SanctionsListResource(private val service: SanctionsListService) {
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "sanctions.trigger", resource = "#listType")
     suspend fun refresh(@PathParam("listType") listType: String): Response =
-        Response.ok(service.refresh(listType)).build()
+        // Contract unchanged (synchronous import, 200 + the refreshed list). Hardened (#14780): a
+        // second call while the same list is already refreshing is refused with 409 at once, so
+        // repeated calls cannot stack concurrent full imports of one feed.
+        Response.ok(service.refresh(listType, waitForOwner = false)).build()
 
     @POST
     @Path("/refresh-all")

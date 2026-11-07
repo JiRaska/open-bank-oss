@@ -74,7 +74,8 @@ class ProducerIsolationTests(unittest.TestCase):
                 git('config', 'user.name', 'test')
                 scripts = origin / '.github/scripts'
                 scripts.mkdir(parents=True)
-                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh'):
+                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh',
+                             'runtime_resource_inputs.py', 'library_dependency_graph.py'):
                     shutil.copyfile(ROOT / '.github/scripts' / name, scripts / name)
                 workflow = origin / '.github/workflows/auto-deploy.yml'
                 workflow.parent.mkdir()
@@ -110,7 +111,7 @@ class ProducerIsolationTests(unittest.TestCase):
                 diff.write_text('--- a/openbank-infra/gitops/test.yaml\n'
                                 '+++ b/openbank-infra/gitops/test.yaml\n'
                                 '-image: registry.invalid/openbank-test-service:sandbox-00000000\n'
-                                f'+image: registry.invalid/openbank-test-service:{tag}\n')
+                                f'+image: registry.invalid/openbank-test-service:{tag}@sha256:{"a" * 64}\n')
                 marker = directory / 'reads'
                 env = {**clean_env, 'PR_NUMBER': '1', 'GITHUB_REPOSITORY': 'example/repo',
                        'PROPOSAL_DIFF': str(diff), 'READ_MARKER': str(marker)}
@@ -201,13 +202,14 @@ class ProducerIsolationTests(unittest.TestCase):
                 git(directory, 'clone', '-q', '--no-tags', '--depth=100', origin.as_uri(), str(checkout))
                 if change == 'diverged':
                     git(checkout, 'fetch', '-q', 'origin', source)
-                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh'):
+                for name in ('deploy-window.py', 'pact-version-tree-equivalent.sh',
+                             'runtime_resource_inputs.py', 'library_dependency_graph.py'):
                     destination = checkout / '.github/scripts' / name
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copyfile(ROOT / '.github/scripts' / name, destination)
                 image = 'registry.invalid/openbank-example'
                 diff = (f'--- a/manifests.yaml\n+++ b/manifests.yaml\n'
-                        f'-image: {image}:sandbox-00000000\n+image: {image}:sandbox-{source[:8]}\n')
+                        f'-image: {image}:sandbox-00000000\n+image: {image}:sandbox-{source[:8]}@sha256:{"a" * 64}\n')
 
                 def check_pin(checkout=checkout, env=env, diff=diff):
                     return subprocess.run(['python3', '.github/scripts/deploy-window.py', 'verify'],

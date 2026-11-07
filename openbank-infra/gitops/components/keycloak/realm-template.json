@@ -1132,7 +1132,8 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__LENDING_CLIENT_SECRET__"
     },
@@ -1348,6 +1349,27 @@
       "secret": "__PENSION_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-pension-fund",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Pension Fund Service",
+      "description": "Per-service M2M client for pension-fund-service's pinned-revision catalog read (ADR-0341). Holds only the narrow catalog:read scope; OPA grants catalog.read to this identity alone.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "secret": "__PENSION_FUND_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-tax-reporting",
       "fullScopeAllowed": false,
       "name": "OpenBank Tax Reporting Service",
@@ -1419,7 +1441,8 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__BILLING_CLIENT_SECRET__"
     },
@@ -1438,7 +1461,8 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "profile",
-        "roles"
+        "roles",
+        "catalog:read"
       ],
       "secret": "__DOCUMENT_CLIENT_SECRET__"
     },
@@ -1610,6 +1634,26 @@
         "roles"
       ],
       "secret": "__STATEMENT_CLIENT_SECRET__"
+    },
+    {
+      "clientId": "openbank-card-issuance",
+      "fullScopeAllowed": false,
+      "name": "OpenBank Card Issuance Service",
+      "description": "Per-service M2M client for card-issuance-service's product configuration read (catalog.read by code). Holds ROLE_API and the narrow catalog:read scope; granted by identity in product_catalog_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "profile",
+        "roles",
+        "catalog:read"
+      ],
+      "secret": "__CARD_ISSUANCE_CLIENT_SECRET__"
     },
     {
       "clientId": "openbank-synthetic-catalog-read",
@@ -1896,6 +1940,7 @@
     { "client": "openbank-agent", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-mcp", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-statement", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
+    { "client": "openbank-card-issuance", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-grafana", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-glitchtip", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "argocd", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
@@ -2187,6 +2232,12 @@
       ]
     },
     {
+      "username": "service-account-openbank-pension-fund",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-pension-fund",
+      "realmRoles": []
+    },
+    {
       "username": "service-account-openbank-tax-reporting",
       "enabled": true,
       "serviceAccountClientId": "openbank-tax-reporting",
@@ -2276,6 +2327,14 @@
       "username": "service-account-openbank-statement",
       "enabled": true,
       "serviceAccountClientId": "openbank-statement",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-card-issuance",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-card-issuance",
       "realmRoles": [
         "ROLE_API"
       ]

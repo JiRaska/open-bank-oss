@@ -44,7 +44,7 @@ Tato služba **nepoužívá** cache `Idempotency-Key` na úrovni požadavku. Ide
 
 ## Error model
 
-Chyby používají sdílený `com.openbank.libs.api.error.ApiError` (`{ id, status, code, message }`). Chybějící případ vyvolá `KycCaseNotFoundException`, mapovaný `KycNotFoundMapper` na **HTTP 404** s `code = NOT_FOUND`. `GET /cases/party/{partyId}` vrací holé 404, když žádný případ neexistuje.
+Chyby používají sdílený `com.openbank.libs.api.error.ApiError` (`{ id, status, code, message }`). Chybějící případ vyvolá `KycCaseNotFoundException`, mapovaný sdíleným libs-runtime `ResourceNotFoundExceptionMapper` na **HTTP 404** s `code = NOT_FOUND`. `GET /cases/party/{partyId}` vrací holé 404, když žádný případ neexistuje.
 
 ## Auth
 

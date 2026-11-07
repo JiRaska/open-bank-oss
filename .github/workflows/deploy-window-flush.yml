@@ -80,6 +80,24 @@ jobs:
             --now "$(date -u +%s)" | tee "$d/selection" >> "$GITHUB_OUTPUT"
           echo "selected_main=$(cat "$d/main.sha")" >> "$GITHUB_OUTPUT"
 
+      # #14498: an armed deploy PR that cannot merge (conflict or failed check) would freeze its
+      # kind forever. Disarm it (never merge, never close) so the newest PR of that kind is armed
+      # and supersede-deploy-prs.sh may then close the now-unarmed predecessor.
+      - name: Disarm stuck armed deploy PRs
+        if: steps.pick.outputs.disarm != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          DISARM: ${{ steps.pick.outputs.disarm }}
+        run: |
+          set -euo pipefail
+          for n in $DISARM; do
+            id=$(gh pr view "$n" --repo "$GITHUB_REPOSITORY" --json id --jq .id)
+            # shellcheck disable=SC2016 # $id is a GraphQL variable, not a shell one
+            gh api graphql -f id="$id" \
+              -f query='mutation($id: ID!) { disablePullRequestAutoMerge(input: {pullRequestId: $id}) { clientMutationId } }' >/dev/null
+            echo "::warning::disarmed stuck deploy PR #$n (#14498)"
+          done
+
       - name: Install deploy-hold parser
         if: steps.pick.outputs.candidates != ''
         run: |

@@ -66,7 +66,7 @@ Flyway, neměnné historické skripty, forward-only (`migrate-at-start=true`):
 | `V4__hibernate_sequences.sql` | Sekvence `aml_cases_seq`, `aml_outbox_seq` (INCREMENT BY 50) — alokace id Panache při `generation:none` | `DROP SEQUENCE aml_cases_seq, aml_outbox_seq;` |
 | `V5__amount_check_constraints.sql` | CHECK `amount IS NULL OR amount > 0`; CHECK `match_score` v 0..100 | drop dvou constraintů |
 
-> Migrace sekvencí `V4` opravuje známý defekt alokace id Hibernate-Reactive + Panache (BIGSERIAL vytvoří jen `<table>_id_seq`, ale Panache očekává `<table>_seq`). Proti regresi hlídá `HibernateSequenceGuardTest`.
+> Migrace sekvencí `V4` opravuje známý defekt alokace id Hibernate-Reactive + Panache (BIGSERIAL vytvoří jen `<table>_id_seq`, ale Panache očekává `<table>_seq`). Proti regresi hlídá CI gate `hibernate-sequence-guard`.
 
 ## Indexy
 
