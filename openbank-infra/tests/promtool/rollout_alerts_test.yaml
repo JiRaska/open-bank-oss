@@ -28,9 +28,14 @@ tests:
       - series: 'rollout_info_replicas_available{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service"}'
         values: "0x40"
       # phase alerts: fx aborted, party degraded, sca stuck progressing; ledger healthy
-      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="fx", name="fx-service", phase="Aborted"}'
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="fx", name="fx-service", phase="Abort"}'
         values: "1x40"
-      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="party", name="party-service", phase="Degraded"}'
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="party", name="party-service", phase="Timeout"}'
+        values: "1x40"
+      # Values the controller never emits: a rule written against them must not be what fires.
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service", phase="Aborted"}'
+        values: "1x40"
+      - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="kyc", name="kyc-service", phase="Degraded"}'
         values: "1x40"
       - series: 'rollout_phase{namespace="argo-rollouts", exported_namespace="sca", name="sca-service", phase="Progressing"}'
         values: "1x40"
@@ -55,7 +60,7 @@ tests:
               namespace: fx
               name: fx-service
               exported_namespace: fx
-              phase: Aborted
+              phase: Abort
             exp_annotations:
               summary: "Rollout fx-service aborted in fx"
               description: "Canary analysis failed for fx-service (namespace fx). Traffic has been reverted to stable. Check AnalysisRun for failing metric (error-rate or p95-latency). Next deploy will restart the canary cycle."
@@ -67,7 +72,7 @@ tests:
               namespace: party
               name: party-service
               exported_namespace: party
-              phase: Degraded
+              phase: Timeout
             exp_annotations:
               summary: "Rollout party-service degraded in party"
               description: "Rollout party-service (namespace party) exceeded the 10-minute progress deadline — canary pods did not become healthy. Likely cause: OOMKilled, CrashLoopBackOff, missing secret/configmap, or image pull error. Traffic reverted to stable."
