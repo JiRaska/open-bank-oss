@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security-ops, observability, infrastructure, gitops]
-followup: "#14163 — layers 0-1 and the drill ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, Stratus Red Team cadence, GoAlert wiring and the fate of HoneytokenFilter are open"
+followup: "#14163 — layers 0-1, the manual and weekly drills and an armed HoneytokenFilter ship; regional EventBridge coverage, OpenBao/S3/Keycloak/DB lures, Slack/GoAlert delivery of the AWS signals and Stratus are open"
 summary: "Deception is a layered programme on existing telemetry: edge decoys, then cloud and cluster honeytokens whose any use is an alert, each mapped to ATT&CK, gated as wired and powerless, and proven by a timed drill. Under 1 USD/month."
 ---
 
@@ -113,8 +113,8 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 ## Alternatives considered
 
 - **Per-service honey paths (the ADR-0279 shape as built).** These sit inside the JAX-RS chain, so
-  they see only paths routed to a service that opted in, and no service ever did. Kept only as a
-  possible second layer behind authentication.
+  they see only paths routed to a service that opted in, and no service ever did. Kept as a
+  second layer, and armed in slice 2 (below), because it sees what Envoy cannot.
 - **Commercial canary platform.** The category leader is the
   benchmark for the "any interaction is a true positive" design this ADR copies. Hardware or
   virtual canaries are a recurring licence and a third-party data processor. The same tripwires
@@ -160,6 +160,46 @@ Nothing new runs: no pod, no load balancer, no instance, no added log ingestion.
 - Applying layer 1 is an owner step (`tofu apply` in `aws/envs/sandbox-substrate`, targeted to
   `deception.tf`'s resources; additive resources only) plus confirming
   the two SNS email subscriptions.
+
+### Slice 2 (2026-10-31): HoneytokenFilter armed, paging and cadence measured
+
+**HoneytokenFilter could never fire, in any service.** It was a post-matching
+`ContainerRequestFilter`, and JAX-RS calls those only after a resource method has matched; a
+decoy path has none, so RESTEasy answered its own routing 404 and the filter was skipped. Shown
+by `HoneyEndpointIT` in customer-edge: with the paths configured and the filter post-matching,
+the hit counter stayed at 0.0. It is now `@PreMatching`, and it no longer answers the request
+itself: it counts, logs and lets the platform's own `NOT_FOUND` 404 answer. The old empty-bodied
+404 differed from every real 404, which told a prober the path was special. customer-edge sets
+two honey paths under its public `/customer/v1` prefix. That is a signal the edge decoys cannot
+give: the request is seen inside the service's namespace whether it came through Envoy or from an
+in-cluster caller that skipped it. `honeytoken-wiring` now fails if `HoneyEndpointHit` exists
+while no workload sets `OPENBANK_SECURITY_HONEY_PATHS`, or if the filter loses `@PreMatching`.
+
+**Paging stays email (owner decision 2026-10-31).** GoAlert is cluster-internal (ADR-0056) and
+an SNS HTTPS subscription needs a public endpoint, so the alert topics reach a human by
+email. The estate's existing Slack path is Loki/Grafana -> Alertmanager, and it cannot see
+CloudTrail or CloudWatch: no CloudTrail data is ingested into Loki and Grafana has no CloudWatch
+datasource. Bridging them would be a new component (a managed chat integration, a function, an
+exporter pod or new log ingestion), and the rule for this programme is to reuse what already
+runs and add a component only when it is free or lowers cost, after a written evaluation and the
+owner's approval. A managed chat integration was built and withdrawn on that rule: it duplicated
+the Slack path and saved nothing. The in-cluster signals (`EdgeDecoyTargetedHit`,
+`HoneyEndpointHit`) already reach Slack through that path and stay `warning` until a drill hit
+has been seen there end to end.
+
+**Scheduled drill (owner decision 2026-10-31).** `.github/workflows/deception-drill.yml` runs
+weekly and on dispatch, never on a pull request, on a GitHub-hosted runner. It assumes
+`openbank-deception-drill`, trusted only for that file on main (`sub` and `job_workflow_ref`,
+both `StringEquals`; hosted runners always carry the claim, so no `IfExists`). The role can read
+the one decoy SSM parameter (decrypt only via SSM) and `GetMetricStatistics` in `AWS/Events` and
+`AWS/SNS`, nothing else. The drill fires the watched key and fails, posting on #14163, unless
+EventBridge matched it and the topic delivered it within ten minutes. The watched ServiceAccount
+and the Loki half of the decoy need cluster access this role deliberately lacks; they print
+`SKIPPED`, never `PASS`, and stay in the monthly manual drill. `deception-drill-selftest.sh`
+proves on the runner itself that silence exits 1 and a signal exits 0. Stratus Red Team is not
+run: every technique that adds coverage beyond our own lures needs rights to create or change
+AWS resources, which a role that reads a decoy credential must not hold. `honeytoken-wiring` fails if the trust
+loses either pin, gains `IfExists` or a wider `sub`, or if the workflow gains any other trigger.
 
 ### Delivery check
 

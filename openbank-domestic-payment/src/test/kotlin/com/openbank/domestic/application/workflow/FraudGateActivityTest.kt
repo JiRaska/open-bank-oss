@@ -120,6 +120,27 @@ class FraudGateActivityTest {
     }
 
     @Test
+    fun `an enforced hold records why it was held, and shadow records no hold`() {
+        fun holds(basis: String) = registry.counter(
+            FraudEnforcementMetrics.HOLDS_METRIC,
+            "service",
+            FraudEnforcementMetrics.SERVICE,
+            "basis",
+            basis,
+        ).count()
+
+        val real = scored(FraudVerdict.REVIEW, synthetic = false)
+        activities(enforcement = false).fraudGate(real)
+        assertThat(holds("VERDICT")).isEqualTo(0.0)
+        activities(enforcement = true).fraudGate(real)
+        assertThat(holds("VERDICT")).isEqualTo(1.0)
+
+        val unscored = scored(FraudVerdict.ALLOW, synthetic = true)
+        activities(enforcement = true).fraudGate(unscored)
+        assertThat(holds("SCORING_UNAVAILABLE")).isEqualTo(1.0)
+    }
+
+    @Test
     fun `the flag is what changes the outcome - the same DECLINE flips from PROCEED to REJECT`() {
         val id = scored(FraudVerdict.DECLINE, synthetic = false)
 

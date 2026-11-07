@@ -10,7 +10,7 @@ import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
@@ -26,7 +26,7 @@ import java.util.UUID
 
 @RegisterRestClient(configKey = "product-catalog")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@OidcClientFilter("m2m")
 @Produces(MediaType.APPLICATION_JSON)
 @Path("/api/v2")
 interface ProductCatalogLoanClient {

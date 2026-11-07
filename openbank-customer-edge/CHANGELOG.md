@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.1...customer-edge-v1.7.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
 ## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.0...customer-edge-v1.6.1) (2026-11-05)
 
 

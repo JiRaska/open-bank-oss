@@ -9,14 +9,10 @@ const source = readFileSync(path.resolve(__dirname, '../app/finops/page.tsx'), '
 const hexLiteral = /#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}(?![0-9a-fA-F])/g
 
 describe('FinOps theme colour contract', () => {
-  it('keeps raw colours only in the deliberate categorical domain palette', () => {
-    const palette = source.match(/const DOMAIN_COLOR: Record<string, string> = \{[\s\S]*?\n\s+\}/)?.[0]
-
-    expect(palette).toBeTruthy()
-    expect(palette?.match(hexLiteral)).toEqual([
-      '#6366f1', '#d97706', '#dc2626', '#0891b2', '#16a34a', '#94a3b8',
-    ])
-    expect(source.replace(palette!, '')).not.toMatch(hexLiteral)
+  it('uses semantic tokens for infrastructure cost categories', () => {
+    expect(source).toContain('const AWS_CATEGORY_COLOR: Record<string, string>')
+    expect(source).not.toMatch(hexLiteral)
     expect(source).not.toContain('rgba(')
+    expect(source).toContain("Unclassified: 'var(--text-tertiary)'")
   })
 })

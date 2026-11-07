@@ -37,6 +37,9 @@ db-backup-associations.yml|job:live-check|id-token
 dependabot-verification-metadata.yml|job:refresh-metadata|contents
 dependency-review.yml|job:dependency-review|pull-requests
 dependency-submission.yml|job:raise-issue|issues
+# ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
+deception-drill.yml|job:drill|id-token
+deception-drill.yml|job:drill|issues
 dependency-submission.yml|job:submit|contents
 deploy-code-lag-watch.yml|job:watch|issues
 deploy-drift-watch.yml|job:watch|issues
@@ -54,6 +57,8 @@ ghcr-publish.yml|job:publish|id-token
 ghcr-publish.yml|job:publish|packages
 governance-horizon-watch.yml|job:watch|issues
 image-rescan.yml|job:escalate|issues
+# Adds/removes only the needs-kind label (rules.yaml: issues.kinds).
+issue-kind.yml|job:kind|issues
 labels.yml|job:sync|issues
 main-red-watch.yml|job:reconcile|contents
 main-red-watch.yml|job:watch|contents
@@ -265,3 +270,4 @@ vex-hotfix.yml|job:vex-hotfix|issues
 vex-hotfix.yml|job:vex-hotfix|pull-requests
 vex-triage.yml|job:vex-triage|issues
 test-evidence-reconcile.yml|job:reconcile|id-token
+merge-train-wake.yml|job:wake|actions
