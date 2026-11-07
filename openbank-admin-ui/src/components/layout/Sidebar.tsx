@@ -78,6 +78,7 @@ import {
   Zap,
   Building2,
   Gift,
+  Gamepad2,
   Undo2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
@@ -166,6 +167,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Katalog produktů',  nameEn: 'Product Catalog',  href: '/product-catalog',   icon: Package,   permission: 'payments:view', owner: 'product-catalog' },
   { nameCs: 'Produktové studio', nameEn: 'Product Studio',   href: '/product-studio',    icon: Boxes,     permission: 'catalog:read', owner: 'product-catalog' },
   { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view', owner: 'loyalty' },
+  { nameCs: 'Lví stezka — správa hry', nameEn: 'Lion Quest — game management', href: '/loyalty/game', icon: Gamepad2, permission: 'game:view', owner: 'loyalty' },
   { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view', owner: 'sepa-payment' },
   { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view', owner: 'standing-order' },
   { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view', owner: 'sdd' },
