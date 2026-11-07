@@ -83,6 +83,10 @@ import merge_train_carrier as carrier_lib  # sibling module; scripts run as file
 
 PIN_RE = re.compile(r"^\s*(?:-\s*)?image:\s*['\"]?(?P<image>[^\s'\"@]+?):sandbox-(?P<sha>[0-9a-f]{7,40})"
                     r"(?P<rest>(?:-run[0-9]+)?(?:@sha256:[0-9a-f]{64})?)['\"]?\s*$")
+# A sandbox TAG anywhere on a line (any key syntax): `sandbox-` + hex, not part of a longer word,
+# so prose like an `openbank-sandbox-db-backups` bucket name is not one. Case-insensitive on purpose:
+# an upper-case sha the pin regex refuses must still be caught here, not skipped.
+SANDBOX_TAG_RE = re.compile(r"(?<![A-Za-z0-9_.-])sandbox-[0-9a-fA-F]{7,40}(?![0-9a-zA-Z])")
 IMAGE_LINE_RE = re.compile(r"^\s*(?:-\s*)?image:\s*['\"]?(?P<ref>[^\s'\"]*)")
 PIN_ROOT = "openbank-infra/gitops"
 REVERT_LABEL = "deploy-revert"
@@ -99,13 +103,20 @@ def git(root: str, *args: str, check: bool = True) -> subprocess.CompletedProces
     return subprocess.run(["git", "-C", root, *args], text=True, capture_output=True, check=check)
 
 
-def full_pins_in_text(text: str) -> dict[str, tuple[str, str]]:
-    """image name -> (source sha, the rest of the pin: `-run<n>` suffix and `@sha256:` digest)."""
-    out: dict[str, tuple[str, str]] = {}
+DUPLICATE = ("", "", "<duplicate>")   # one manifest pins the same image name to two different values
+
+
+def full_pins_in_text(text: str) -> dict[str, tuple[str, str, str]]:
+    """image name -> (source sha, rest of the pin: `-run<n>` + `@sha256:` digest, full repository path).
+    An image name pinned to two DIFFERENT values in one manifest maps to DUPLICATE, never to whichever
+    line came last — a dict that kept the last writer would let one line hide another."""
+    out: dict[str, tuple[str, str, str]] = {}
     for line in text.splitlines():
         m = PIN_RE.match(line)
         if m:
-            out[m.group("image").rsplit("/", 1)[-1]] = (m.group("sha"), m.group("rest"))
+            name = m.group("image").rsplit("/", 1)[-1]
+            val = (m.group("sha"), m.group("rest"), m.group("image"))
+            out[name] = val if out.get(name, val) == val else DUPLICATE
     return out
 
 
@@ -114,26 +125,13 @@ def pins_in_text(text: str) -> dict[str, str]:
     return {k: v[0] for k, v in full_pins_in_text(text).items()}
 
 
-def unparsed_image_lines(root: str, base: str, path: str, known: set[str]) -> list[str]:
-    """Lines the PR ADDED to `path` that set an image the pin regex cannot read, where that image is
-    a sandbox pin (its text says `sandbox-`, or it was a sandbox pin before). Skipping such a line
-    would let a deploy rewrite a pin in a shape the gate never judges, so it fails closed. Third-party
-    images (`opa:1.21.1`, …) are never sandbox pins and stay out of scope."""
+def added_lines(root: str, base: str, path: str) -> list[str]:
+    """Every line the PR added to `path` — the gate judges each of these, not a per-name summary."""
     diff = git(root, "diff", "-U0", f"{base}...HEAD", "--", path, check=False).stdout
-    out = []
-    for line in diff.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
-            continue
-        body = line[1:]
-        m = IMAGE_LINE_RE.match(body)
-        if not m or PIN_RE.match(body):
-            continue
-        if "sandbox-" in body or image_name(m.group("ref")) in known:
-            out.append(body.strip())
-    return out
+    return [ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++")]
 
 
-def full_pins_at(root: str, rev: str, path: str) -> dict[str, tuple[str, str]]:
+def full_pins_at(root: str, rev: str, path: str) -> dict[str, tuple[str, str, str]]:
     r = git(root, "show", f"{rev}:{path}", check=False)
     return full_pins_in_text(r.stdout) if r.returncode == 0 else {}
 
@@ -164,7 +162,7 @@ def live_ref(root: str, branch: str) -> str | None:
     return None
 
 
-def live_pins_api(repo: str, branch: str, path: str) -> dict[str, tuple[str, str]] | None:
+def live_pins_api(repo: str, branch: str, path: str) -> dict[str, tuple[str, str, str]] | None:
     try:
         r = subprocess.run(["gh", "api", "-H", "Accept: application/vnd.github.raw", f"repos/{repo}/contents/{path}?ref={branch}"],
                            text=True, capture_output=True, timeout=60)
@@ -277,37 +275,60 @@ def own_labels_allow(repo: str, number: str, labels_of: Callable[[str, str], set
 
 
 def judge(root: str, base: str, ancestry: Callable[[str, str], str],
-          live_pins: Callable[[str], dict[str, tuple[str, str]] | None]) -> list[tuple[str, str, str, str, str]]:
-    """(path, image, live sha, new sha, verdict) for every pin the PR moved, judged against LIVE main."""
+          live_pins: Callable[[str], dict[str, tuple[str, str, str]] | None]) -> list[tuple[str, str, str, str, str]]:
+    """(path, image, live pin, new pin, verdict) for every pin line the PR added, judged against LIVE main.
+
+    Each ADDED line is judged on its own: a line that sets a sandbox pin in any shape the pin regex
+    cannot read fails as UNPARSED (whatever its key syntax), the full repository path and digest are
+    part of the pin, a name pinned twice differently fails closed, and a sandbox pin the PR drops
+    from a manifest that still exists fails closed too."""
     out = []
     for path in changed_manifests(root, base):
         at_base, after = full_pins_at(root, base, path), full_pins_at(root, "HEAD", path)
         live = live_pins(path)
-        for line in unparsed_image_lines(root, base, path, set(at_base) | set(after) | set(live or {})):
-            out.append((path, line, "?", "?", UNPARSED))   # a pin the gate cannot read: fail closed
-        for image, (new, new_rest) in sorted(after.items()):
-            if at_base.get(image) == (new, new_rest):
-                continue   # the PR did not move this pin; a squash keeps main's value for it
+        known = set(at_base) | set(after) | set(live or {})
+        for body in added_lines(root, base, path):
+            if body.lstrip().startswith("#"):
+                continue   # a YAML comment sets nothing
+            m = PIN_RE.match(body)
+            if not m:
+                im = IMAGE_LINE_RE.match(body)
+                if SANDBOX_TAG_RE.search(body) or (im and image_name(im.group("ref")) in known):
+                    out.append((path, body.strip(), "?", "?", UNPARSED))   # a pin the gate cannot read
+                continue
+            image = m.group("image").rsplit("/", 1)[-1]
+            new = (m.group("sha"), m.group("rest"), m.group("image"))
+            if DUPLICATE in (after.get(image), (live or {}).get(image)):
+                out.append((path, image, "?", new[0], UNPARSED))   # two different pins for one name
+                continue
+            if at_base.get(image) == new:
+                continue   # this exact pin was already there at the merge-base; the PR did not move it
             if live is None:
-                out.append((path, image, "?", new, UNKNOWN))   # live main unreadable: fail closed
+                out.append((path, image, "?", new[0], UNKNOWN))   # live main unreadable: fail closed
                 continue
             if image not in live:
                 continue   # image new to main
-            old, old_rest = live[image]
-            if old == new or new.startswith(old) or old.startswith(new):
-                if old_rest != new_rest:
+            old = live[image]
+            if old[2] != new[2]:
+                out.append((path, image, old[2], new[2], REPINNED))   # another registry/repository
+                continue
+            if old[0] == new[0] or new[0].startswith(old[0]) or old[0].startswith(new[0]):
+                if old[1] != new[1]:
                     # same source commit, different digest/run: another image under an unchanged sha
-                    # cannot be placed in history, so it fails closed like any other unknown.
-                    out.append((path, image, old + old_rest, new + new_rest, REPINNED))
+                    # cannot be placed in history, so it fails closed.
+                    out.append((path, image, old[0] + old[1], new[0] + new[1], REPINNED))
                 continue   # already at this commit (another abbreviation)
-            out.append((path, image, old, new, ancestry(old, new)))
+            out.append((path, image, old[0], new[0], ancestry(old[0], new[0])))
+        if git(root, "cat-file", "-e", f"HEAD:{path}", check=False).returncode == 0:
+            for image in sorted(set(at_base) - set(after)):
+                out.append((path, image, at_base[image][0], "(removed)", UNPARSED))   # pin dropped or hidden
     return out
 
 
 def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event: str, branch: str = "main",
              ancestry: Callable[[str, str], str] | None = None,
              labels_of: Callable[[str, str], set[str] | None] = pr_labels,
-             live_pins: Callable[[str], dict[str, tuple[str, str]] | None] | None = None,
+             live_pins: Callable[[str], dict[str, tuple[str, str, str]] | None] | None = None,
              fetch_pr: Callable[[str, str], dict | None] = carrier_lib.gh_pr,
              fetch_record: Callable[[str, str], str | None] = carrier_lib.gh_record_tree) -> int:
     subjects = count_subjects(root)
@@ -327,7 +348,7 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
         ref = live_ref(root, branch)
         print(f"live {branch}: {ref or 'not fetchable; falling back to the contents API'}")
 
-        def live_pins(path: str) -> dict[str, str] | None:   # noqa: E306
+        def live_pins(path: str) -> dict[str, tuple[str, str, str]] | None:
             if ref is not None:
                 return full_pins_at(root, ref, path)
             return live_pins_api(repo, branch, path)
@@ -407,7 +428,7 @@ def self_test() -> int:
         with_label: Callable[[str, str], set[str] | None] = lambda _r, _n: {REVERT_LABEL}
         unreadable: Callable[[str, str], set[str] | None] = lambda _r, _n: None
 
-        def live_from(ref: str) -> Callable[[str], dict[str, tuple[str, str]] | None]:
+        def live_from(ref: str) -> Callable[[str], dict[str, tuple[str, str, str]] | None]:
             return lambda path: full_pins_at(root, ref, path)
 
         def gate(**kw) -> int:
@@ -438,6 +459,29 @@ def self_test() -> int:
         # BYPASS 2b: a changed sandbox image line the pin regex cannot parse is skipped, not judged.
         pr(c1[:8], raw_a="      image: registry.example/openbank-svc-a:sandbox-" + c1[:8] + "-evil\n")
         check("unparseable changed sandbox image line fails closed", gate() == 1)
+        # Review findings on the first fix: other key syntaxes, registry swap, last-writer-wins, dropped pin.
+        pr(c1[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n    - name: svc-a-sidecar\n" + '      "image": "registry.example/openbank-svc-a:sandbox-' + c1[:8] + '"\n')
+        check("sandbox pin in another key syntax (quoted key) fails closed", gate() == 1)
+        pr(c1[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n    - name: svc-a-sidecar\n" + "      newTag: sandbox-" + c1[:8] + "\n")
+        check("sandbox pin under a kustomize newTag key fails closed", gate() == 1)
+        pr(c2[:8], raw_a=f"      image: evil.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n")
+        check("same sha and digest from ANOTHER registry fails closed (repinned)", gate() == 1)
+        pr(c2[:8], raw_a=(f"      image: registry.example/openbank-svc-a:sandbox-{c1[:8]}@sha256:{'0' * 64}\n"
+                          f"    - name: svc-a2\n      image: registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n"))
+        check("a downgrade line hidden by a later line pinning the same name (last-writer-wins) fails", gate() == 1)
+        pr(c2[:8], raw_a=(f"      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n"
+                          f"    - name: svc-a2\n      image: registry.example/openbank-svc-a:sandbox-{c4[:8]}@sha256:{'0' * 64}\n"))
+        check("one name pinned to two DIFFERENT values in one manifest fails closed, even if both are forward", gate() == 1)
+        pr(c2[:8], raw_a="      name: svc-a-without-image\n")
+        check("a sandbox pin dropped from a manifest that still exists fails closed", gate() == 1)
+        pr(c3[:8], raw_a=f"      # was sandbox-{c1[:8]}\n      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n")
+        check("a comment mentioning sandbox- next to a forward pin still passes", gate() == 0)
+        pr(c2[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n"
+                          "      destinationPath: s3://openbank-sandbox-db-backups/x\n")
+        check("a non-pin line containing `sandbox-` (bucket name) is not a pin", gate() == 0)
+        pr(c2[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n"
+                          f"      tag: sandbox-{c1[:8].upper()}\n")
+        check("an upper-case sandbox tag the pin regex refuses fails closed", gate() == 1)
         pr(c2[:8], "cafe0002"); check("svc-b moves to an unresolvable sha: UNKNOWN fails closed (no API)",
                                       gate(ancestry=lambda o, n: UNKNOWN) == 1)
         pr(c1[:8]);   check("downgrade with the revert label passes", gate(labels_of=with_label) == 0)
