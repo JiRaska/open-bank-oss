@@ -286,6 +286,23 @@ gates:
 
   # The shell probes this repo keeps getting wrong, each held to a known-positive AND a
   # known-negative. The run: IS the self-test; the whole file is the falsification harness.
+  - id: ecr-live-tags-selftest
+    name: "deployed ECR images keep their live- lifecycle shield (enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      The service ECR lifecycle policy keeps the newest N builds and expires the rest, so a deployed
+      image ranked beyond N would be deleted under running pods and fail only at the next pull.
+      ecr-live-tags.py derives the deployed set from gitops and shields it with a live- tag; this
+      gate keeps its reference parser and its tag/untag planner falsified against a known positive
+      (an unprotected tag is removed, a protected digest is tagged) and a known negative (#14189).
+    review_after: '2027-04-30'
+    min_subjects: 4
+    budget_seconds: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the script's own --selftest"
+    run: |
+      python3 .github/scripts/ecr-live-tags.py --selftest
+
   - id: probe-lib-known-positive
     name: "shell probes are falsified against a known-positive (enforced)"
     group: lint
@@ -311,6 +328,18 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/run-gates.py --self-test
+
+  - id: issue-kind-classifier-self-test
+    name: "issue kind classifier flags zero and several kinds (rules.yaml: issues.kinds, enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 11   # classifier fixture cases
+    rationale: "issue-kind.yml removes needs-kind wherever the classifier says ok; a classifier that cannot go red would silently clear the backlog's only kind-debt signal. Its fixtures hold missing, ambiguous, exempt and ok cases, and the real rules.yaml kind set must parse."
+    review_after: "2027-05-03"
+    selftest_exempt: "is-a-test-suite — the run is issue-kind.py --selftest"
+    run: |
+      python3 .github/scripts/issue-kind.py --selftest
 
   # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
   # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
@@ -607,7 +636,7 @@ gates:
 
   # ==== gitops =========================================================
   - id: deploy-hold-image-pins
-    name: "held services cannot change GitOps image pins (issue #11503)"
+    name: "held services cannot change GitOps image pins or drift from approved_image (issue #11503)"
     group: gitops
     mode: enforced
     budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
@@ -659,6 +688,30 @@ gates:
   # so its own self-test is the only place its RED is reachable before it acts on real PRs. Case 1 is
   # the #6231 interleaving and must exit non-zero; case 2 is the ordinary supersede and must still
   # close the older PR, so a fail-everything script does not satisfy it either.
+  # Owner rule: no downgrades, ever. auto-deploy pins every selected service to its own source
+  # sha against whatever main holds, and builds do not finish in commit order — so a deploy PR cut
+  # before a newer deploy merged rewrites newer pins to older ones with no textual conflict and
+  # every job green. Measured 2026-11-03 on #14579: 34 pins moved, all forward against the PR's
+  # merge-base, 22 BACKWARD against live main. supersede-deploy-prs.sh compares open deploy PRs
+  # with each other, never with main's pins; this gate compares the PR's new pins with live main.
+  - id: deploy-pin-monotonic
+    name: "a GitOps image pin only moves forward along main's history unless the PR is labelled deploy-revert"
+    group: gitops
+    mode: enforced
+    rationale: "A deploy PR for an older source sha opened after a newer one merged rewrites main's newer pins to older ones with no conflict and every job green (#14579: 22 of 34 pins backward against live main); nothing before this compared a deploy PR's pins with the pins main holds now."
+    review_after: "2027-05-03"
+    budget_seconds: 60   # self-test builds one small git repo (~3 s); the gate itself is one diff + one fetch
+    min_subjects: 50   # 75 sandbox image pins under openbank-infra/gitops on 2026-11-03
+    needs_base: optional
+    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py"]
+    selftest: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --self-test
+    selftest_expect: pass
+    # ${PR_DIFF_BASE:-}: on a push to main there is no base and nothing to block; the checker
+    # counts its subjects and exits 0 there (GITHUB_EVENT_NAME=push), and exits 2 on a PR without one.
+    run: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --root . --base "${PR_DIFF_BASE:-}"
+
   - id: supersede-deploy-prs-ancestry
     selftest_exempt: "is-a-test-suite — the run: IS supersede-deploy-prs.sh --self-test"
     name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
@@ -687,7 +740,7 @@ gates:
       one making every open PR `behind` and restarting its checks. deploy-window.py decides when
       a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
       it must never introduce is a built image that nothing pins, or a pin that rewinds a
-      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service, or a new tag over the digest it replaced; the self-test proves all three (two pushes in one window -> one PR pins both, a moved
       service is not rewound, a matching manual deploy bypasses the time window without arming a
       second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
       against live PRs, so this is where it can go red before it acts.
@@ -697,22 +750,23 @@ gates:
       set -e
       python3 .github/scripts/deploy-window.py --self-test
       python3 .github/scripts/test-deploy-producer-isolation.py
+      python3 .github/scripts/test-check-deploy-source-freshness.py \
+        DeploySourceFreshnessTest.test_new_tag_over_the_replaced_digest_fails \
+        DeploySourceFreshnessTest.test_pin_without_a_digest_fails
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
     group: gitops
     mode: enforced
     rationale: >-
-      `rules.yaml: ci_runners` declares three ARC scale sets; the OpenTofu creates two.
-      `openbank-batch` is declared with an isolation_rationale and provisioned nowhere, and
-      `infra_apply.runner_routing` still routes the tofu plan lane to it — a job sent there
-      would sit `queued` forever, because "no runner has taken this yet" and "no runner will
-      ever exist" are the same state to every observer. The same gate carries the
-      `pr_jobs_allowed_pools` lint named verbatim in `ci_runners.blocked_on`: a pull_request
-      job must never reach the credential-carrying deploy pool. Declared capacity that does
-      not exist reads exactly like capacity that does.
+      `rules.yaml: ci_runners` declares four ARC scale sets, each with a matching OpenTofu
+      resource. The batch and DR scale sets and listeners were observed Ready for #6458;
+      this source gate cannot prove live job pickup or DR restore. It rejects workflow
+      labels without a declared and provisioned pool, and a pull_request job targeting a
+      pool outside `pr_jobs_allowed_pools`, including the credential-carrying deploy pool.
+      KNOWN_UNAPPLIED records declared resources still awaiting a read-only readiness check.
     review_after: "2027-08-30"
-    min_subjects: 5   # 3 declared pools + 4 self-hosted runs-on labels today (2026-08-30)
+    min_subjects: 5   # guards an empty parse; current scan finds 4 pools + 6 self-hosted labels
     selftest: python3 .github/scripts/check-ci-runner-pools.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-ci-runner-pools.py"]
@@ -1440,6 +1494,43 @@ gates:
     run: |
       python3 .github/scripts/check-edge-decoy-rule-parity.py
 
+  # ADR-0361 phase 1: a decoy credential fails silently two ways — unwired (renamed, tripwire
+  # still matching the old name) or armed (someone grants it permissions). ENFORCED.
+  - id: honeytoken-wiring
+    name: "every decoy credential is wired to a tripwire and holds no permission (ADR-0361, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 60  # byte-prefiltered YAML + HCL scan; first version took 44s on a hosted runner (2026-10-29)
+    rationale: >-
+      Decoy credentials are only safe because they are powerless, and only useful because a
+      tripwire names them. Neither property is visible at runtime: an unwired one produces
+      exactly the silence a quiet week produces, and an armed one is a real credential. The
+      gate finds them by shape, pairs each ServiceAccount with a CloudWatch metric filter,
+      forbids any binding to it, pins the watched IAM user to a single explicit Deny "*", and
+      requires the EventBridge rules to opt in to read-only management events so the first call
+      an intruder makes alerts. Since 2026-10-31 it also holds HoneyEndpointHit to a subject:
+      some workload must set OPENBANK_SECURITY_HONEY_PATHS, and HoneytokenFilter must stay
+      @PreMatching (a post-matching filter was never called for an unrouted path, which is why
+      it had never counted a hit). It also pins the scheduled-drill role to deception-drill.yml
+      on main (no IfExists, no PR trigger).
+    review_after: "2027-04-29"
+    min_subjects: 4   # token SA + watched IAM user + customer-edge decoy paths + drill role (2026-10-31)
+    selftest_inputs:
+      - ".github/scripts/check-honeytoken-wiring.py"
+      - "openbank-infra/gitops/components/platform/runner-token-serviceaccount.yaml"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception.tf"
+      - "openbank-infra/gitops/components/customer-edge/customer-edge.yaml"
+      - "openbank-libs-runtime/src/main/kotlin/com/openbank/libs/security/HoneytokenFilter.kt"
+      - "openbank-infra/aws/envs/sandbox-substrate/deception-delivery.tf"
+      - ".github/workflows/deception-drill.yml"
+      - "openbank-infra/scripts/deception-drill.sh"
+      - "openbank-infra/scripts/deception-drill-selftest.sh"
+    selftest: |
+      python3 .github/scripts/check-honeytoken-wiring.py --selftest
+      bash openbank-infra/scripts/deception-drill-selftest.sh
+    run: |
+      python3 .github/scripts/check-honeytoken-wiring.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -2007,6 +2098,23 @@ gates:
     run: |
       python3 .github/scripts/check-gradle-user-home-isolation.py
 
+  # ADR-0363: only a push to main may write the remote Gradle build cache. The real boundary is
+  # the `gradle-cache-writer` environment's branch policy plus the node rejecting writes from
+  # the read-only account; this keeps the workflow side from drifting onto those alone.
+  - id: remote-build-cache-write-scope
+    name: "remote Gradle build cache is written only from main (ADR-0363)"
+    group: supplychain
+    mode: enforced
+    rationale: "A cache entry written from pull-request code would be served to every later build on main, so the write path must stay main-only on the workflow side too."
+    review_after: "2027-05-03"
+    min_subjects: 80   # 97 workflow files observed 2026-11-03
+    budget_seconds: 20
+    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
+    selftest: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py --self-test
+    run: |
+      python3 .github/scripts/check-remote-build-cache-write-scope.py
+
   # The governance gates in this job (threat-model coverage + diff, network-policy
   # generation, authz-coverage) are stdlib Python with committed *_test.py suites that,
   # until now, no workflow ran — a gate whose own logic is untested silently rots. Run
@@ -2274,6 +2382,7 @@ gates:
     mode: enforced
     budget_seconds: 90   # builds 17 git trees
     run: |
+      python3 .github/scripts/test_runtime_resource_inputs.py
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
   # A provider's two verification twins must serve the SAME @State handlers, and the folder twin's
@@ -3258,11 +3367,12 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    budget_seconds: 180   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s), 180 = ~1.7x
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
       python3 .github/scripts/test-merge-train-owner-approval.py
+      python3 .github/scripts/test-merge-train-close-linked-issues.py
       python3 .github/scripts/e2e/merge-train-gates-yaml.test.py
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
@@ -4450,24 +4560,23 @@ gates:
     selftest_inputs: [".github/scripts/check-security-txt.py"]
     run: |
       python3 .github/scripts/check-security-txt.py
-  # End-of-support is DERIVED from SECURITY.md's policy and carried in every release's evidence
-  # bundle (#9881). The derivation has two ways to be quietly wrong — taking the build time instead
-  # of the release date, and inventing the "90 days after supersession" bound for a beta release
-  # that has no successor yet — and nothing else would ever notice either; this runs its table.
+  # End-of-support is DERIVED from SECURITY.md's policy and carried in each release's evidence
+  # bundle (#9881). The derivation must use release time, leave beta's supersession bound open,
+  # and render that same value on the public release page without replacing changelog text.
   - id: release-support-period-derivation
     selftest_exempt: "is-a-test-suite"
-    name: "release end-of-support is derived from the policy, not invented (#9881, enforced)"
+    name: "release support is derived and published from signed evidence (#9881, enforced)"
     group: supplychain
     mode: enforced
-    budget_seconds: 10   # pure date arithmetic over a fixture table
+    budget_seconds: 10   # pure date arithmetic and release-body fixtures
     rationale: >-
-      The end-of-support date in a release's evidence bundle is a public CRA commitment computed
-      by a script no other check reads; a wrong rule would publish wrong dates on every release
-      while every release still verified green.
+      The support date in a release's evidence bundle is a public CRA commitment; the release
+      page must render the signed value without inventing a beta end date or erasing changelog.
     review_after: 2027-03-13
     min_subjects: 6   # 8 derivation cases today (2026-09-13)
     run: |
       python3 .github/scripts/release_support_period.py --self-test
+      python3 .github/scripts/render-release-support.py --self-test
 
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
@@ -5086,6 +5195,39 @@ gates:
     min_subjects: 4
     run: |
       bash .github/scripts/service-ci-select-modules.sh --self-test
+
+  - id: service-ci-path-selection-scenarios
+    name: "Services CI selector replays real push/PR path sets against the real tree (#11560)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the test. It drives the extracted module selector with a
+      stubbed `git diff` for both events; falsified by making filter-lib-test-only-paths.py pass its
+      input through, or by making the fleet-scanner expansion ignore the changed paths (a shared
+      library test-only change then selects more than its owner).
+    rationale: "The scenario file existed but nothing ran it, so a shared-library test-only change that fanned out to cross-module readers or the full fleet could regress unseen (#11560)."
+    review_after: "2027-05-01"
+    budget_seconds: 300   # 40 selector runs over the real module tree
+    min_subjects: 40
+    run: |
+      python3 .github/scripts/test-service-ci-path-selection.py
+
+  - id: gitops-image-pin-only
+    name: "Services CI: image-pin-only GitOps diffs are inert, everything else relevant (enforced)"
+    group: gitops
+    mode: enforced
+    selftest_exempt: "is-a-test-suite"
+    rationale: "Deploy-pin PRs ran the full Services CI fleet (#14413). The comparator decides inertness structurally; this runs its end-to-end git cases and proves a comparator forced to 'equal' fails them."
+    review_after: "2027-04-30"
+    budget_seconds: 30
+    min_subjects: 21
+    run: |
+      python3 .github/scripts/gitops-image-pin-only.py --self-test
+      # Each guard disabled in turn must flip a named case, or the suite cannot see it.
+      out=$(python3 .github/scripts/gitops-image-pin-only.py --self-test --sabotage=comparator 2>&1) && exit 1
+      grep -q '^FAIL: repo swap:' <<< "$out" || { echo "comparator sabotage not detected" >&2; exit 1; }
+      out=$(python3 .github/scripts/gitops-image-pin-only.py --self-test --sabotage=filemeta 2>&1) && exit 1
+      grep -q '^FAIL: mode change:' <<< "$out" || { echo "raw/summary sabotage not detected" >&2; exit 1; }
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
@@ -5878,10 +6020,12 @@ gates:
   # latest scheduled main envelope. Advisory first (ADR-0144; rules.yaml: threat_model_test_evidence).
   # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
   # never becomes a red PR. The finding output, not the exit code, is the signal (advisory exits 0).
+  # --pr-base skips the ~90 gh calls on a PR that touches no threat model: the answer is main's anyway.
   - id: threat-model-test-evidence
     name: "threat-model cited tests ran green in the latest run (ADR-0144, advisory)"
     group: security
     mode: advisory
+    needs_base: optional
     verified: "2026-10-17 — self-test pins red, absent, skipped, stale-green-masking and no-envelope cases"
     min_subjects: 23
     budget_seconds: 180
@@ -5891,7 +6035,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
     run: |
-      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence
+      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}"
 
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
@@ -6028,16 +6172,21 @@ gates:
   #
   # ENFORCED (was advisory, #2392). It had 10 violations at introduction and the last two —
   # finrep-service and onboarding-service — were cleared in #2403, so `--enforce` exits 0 on a
-  # clean tree today. The advisory period had no deadline attached because the gate had no
+  # clean tree today. Also check the converse from #9105: an OPA sidecar with no enabled CDI
+  # PolicyDecisionPoint never receives a decision request (and enforcing endpoints fail closed).
+  # The advisory period had no deadline attached because the gate had no
   # rules.yaml rule at all, and its docstring cited an `authz_pdp_parity.target_enforce_date`
   # key that never existed (#2393): it read as governed while nothing watched it.
   - id: authz-enforce-pdp-sidecar-parity
     name: "authz-enforce ⇒ PDP sidecar parity (enforced, #1797)"
     group: security
     mode: enforced
-    selftest: python3 .github/scripts/check-authz-pdp-parity.py --self-test
+    selftest: |
+      set -e
+      python3 .github/scripts/check-authz-pdp-parity.py --self-test
+      python3 .github/scripts/check_authz_pdp_parity_test.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-authz-pdp-parity.py"]
+    selftest_inputs: [".github/scripts/check-authz-pdp-parity.py", ".github/scripts/check_authz_pdp_parity_test.py"]
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 
@@ -7136,6 +7285,20 @@ gates:
     run: |
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
+  - id: admin-ui-a11y-route-coverage
+    name: "Admin UI routes are covered by axe accessibility specs (enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "Route coverage by axe specs is only visible as an inventory; the gate keeps the literal-navigation evidence from silently disappearing."
+    review_after: "2027-02-28"
+    min_subjects: 50  # 171 page routes inventoried on 2026-11-04
+    budget_seconds: 30
+    selftest: python3 .github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-a11y-route-coverage.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-a11y-route-coverage.py
+
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
     group: supplychain
@@ -7277,18 +7440,19 @@ gates:
     run: |
       python3 .github/scripts/check-product-ir-run-limits.py --root . --enforce
 
-  # ADR-0352 §5, §11: the DSL is sugar and the committed IR JSON is the artifact. Two authoring
-  # paths exist today (the Kotlin DSL and raw JSON); MCP/Studio join in phases 5-6. This gate holds
-  # the static half of "every path yields the same canonical bytes": every committed ir/<name>.json
-  # has a DSL product of that name and ReferenceProductsTest (the JVM half, which compiles the DSL and
-  # compares canonical bytes with the committed file) exists, is not disabled and covers the set.
+  # ADR-0352 §5, §11, §12: the DSL is sugar and the committed IR JSON is the artifact. Every
+  # authoring path must yield the same canonical bytes: the static half here holds that each
+  # committed ir/<name>.json has a DSL product of that name and that both JVM halves exist, are not
+  # disabled and cover their set — ReferenceProductsTest (DSL == committed IR) and, since phase 5a,
+  # ProductIrAuthoringParityTest (obp CLI == MCP product_compile, byte for byte). The Studio form
+  # surface (phase 6) is not on main and is printed PENDING on every run.
   - id: product-ir-authoring-parity
-    name: "committed product IR equals the DSL that authored it, canonical byte for byte (ADR-0352, advisory)"
+    name: "committed product IR equals the DSL, and the CLI and MCP surfaces compile it to the same bytes (ADR-0352, advisory)"
     group: kotlin
     mode: advisory
-    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if the committed IR and the DSL that claims to author it diverge, two authoring tools yield two hashes for one product and the review approved neither. The JVM half is a test; this half keeps that test's scope equal to the committed files."
+    rationale: "A hash on origin/main is what the catalog may publish (ADR-0352 §7); if two authoring surfaces yield two hashes for one product, the review approved neither. The JVM halves are tests; this half keeps their scope equal to the committed files and the registered surfaces."
     review_after: "2027-03-31"
-    verified: "2026-10-23 — 3 committed reference IRs each have a DSL product and the parity test. STATIC half only: it reads comment-stripped Kotlin, so a token in a comment, an @Disabled annotation, a DSL product named only in a comment and a build that excludes the test each turn it red (--self-test, 17 cases; @Disabled added to the real ReferenceProductsTest turned the real tree red). The byte comparison itself is the JVM test in the module CI lane; this gate does not run it"
+    verified: "2026-10-29 — 3 committed reference IRs each have a DSL product and both parity tests. STATIC half: 23 --self-test cases (a missing, disabled, one-sided, comment-only or status-blind surface test each red). Surface half covers lint/compile/simulate/explain plus invalid-IR and unknown-rule failures on RAW bytes and isError==non-zero exit; proven red by perturbing the MCP handler in place (EUR->CZK bytes: 3/3 red; failures not flagged isError: 3/3 red), green on revert. Studio form surface PENDING (no draft-from-form path on main)"
     budget_seconds: 10
     min_subjects: 3   # three reference products at introduction (2026-10-23)
     selftest: python3 .github/scripts/check-product-ir-authoring-parity.py --self-test

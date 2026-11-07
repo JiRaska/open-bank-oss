@@ -111,3 +111,19 @@ interface PensionFundStore {
 interface MarketPricePort {
     suspend fun price(instrumentId: String, valuationDate: LocalDate, currency: String): BigDecimal?
 }
+
+/** The commercial terms of one published catalog revision, as a fund consumes them (ADR-0341). */
+data class PinnedFundTerms(
+    val revisionId: UUID,
+    /** Annual management fee as a fraction of net assets (the catalog stores a percent string). */
+    val managementFeeRate: BigDecimal,
+)
+
+/**
+ * Reads a fund's terms from an immutable published catalog revision, by id - never "whatever is
+ * currently published". Fails closed: a revision that is unknown, unpublished, or not a retirement
+ * product is an [IllegalArgumentException]; a catalog outage is not swallowed.
+ */
+interface FundTermsPort {
+    suspend fun resolve(revisionId: UUID): PinnedFundTerms
+}

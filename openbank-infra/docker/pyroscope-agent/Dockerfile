@@ -27,7 +27,7 @@ RUN apk add --no-cache curl \
 # ── Stage 2: minimal carrier. The init container runs `cp` out of this image ──
 # busybox provides /bin/cp; the jar is arch-agnostic (async-profiler natives for
 # both linux-x86-64 and linux-arm64 are bundled and self-extract at attach time).
-FROM busybox:1.38@sha256:fd7dc98638c8e305f4dc34e979f1c0fdfdcaeb0fbf8fcff77ae834b6da3d7e6e
+FROM busybox:1.38@sha256:a46257e06c82ad85242d0d38077d0a52d9896389ca60a1a59d3463db586e5fa4
 COPY --from=fetch /pyroscope.jar /pyroscope.jar
 # Documented, no entrypoint needed: the init container overrides command with
 #   ["/bin/cp", "/pyroscope.jar", "/opt/pyroscope/pyroscope.jar"]
