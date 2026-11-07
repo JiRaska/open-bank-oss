@@ -20,6 +20,7 @@ test('server-rendered navigation follows reviewed business ownership without cha
   }
   await expect(sidebar.getByRole('region', { name: 'Payments', exact: true }).locator('a[href="/product-catalog"]')).toHaveCount(0)
   await page.getByRole('button', { name: /Switch to Czech/ }).click()
-  await expect(sidebar.getByRole('region', { name: 'Finanční účetnictví', exact: true }).locator('a[href="/ledger"]')).toHaveCount(1)
-  await expect(sidebar.getByRole('region', { name: 'Penzijní produkty a fondy', exact: true }).locator('a[href="/pension/funds"]')).toHaveCount(1)
+  const czechSidebar = page.getByRole('complementary', { name: 'Hlavní navigace' })
+  await expect(czechSidebar.getByRole('region', { name: 'Finanční účetnictví', exact: true }).locator('a[href="/ledger"]')).toHaveCount(1)
+  await expect(czechSidebar.getByRole('region', { name: 'Penzijní produkty a fondy', exact: true }).locator('a[href="/pension/funds"]')).toHaveCount(1)
 })
