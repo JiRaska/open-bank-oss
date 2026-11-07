@@ -261,6 +261,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/check-deploy-pin-monotonic.py",        # judges a carrier by its members' deploy-revert labels
 )
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
@@ -1976,6 +1977,8 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
     if rc == 1:
         return ("security-checklist-money-path fails on the live body — tick the checklist, then re-run "
                 "Validate manifests; the train re-reads the body every tick")
+    if not CHECKLIST_GATE.is_file():
+        return f"admission gate missing at {CHECKLIST_GATE} — fail closed, this is a train wiring defect"
     return f"admission check exited {rc} — fail closed"
 
 
@@ -3215,9 +3218,11 @@ JOB_MUST = {
               ("build reports drops", "has_drops: ${{ steps.build.outputs.has_drops }}")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
                                                               ("publish runs publish", "\" publish"),
+                                                              ("publish copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                               ("publish also runs on drops alone (notices)",
                                                                "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
+                                                           ("settle copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                            ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}")],
 }
 JOB_FORBID = {
