@@ -52,6 +52,12 @@ interface DevOpsConfig {
     @WithDefault("https://api.github.com")
     fun githubApiUrl(): String
 
+    @WithDefault("false")
+    fun deliveryShadowEnabled(): Boolean
+
+    @WithDefault("0 */5 * * * ?")
+    fun deliveryShadowCron(): String
+
     @WithDefault("JiRaska")
     fun githubOwner(): String
 
