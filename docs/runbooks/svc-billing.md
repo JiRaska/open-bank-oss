@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-billing-service
 
-> Operational runbook for the `billing` service. Data domain **payments**,
+> Operational runbook for the `billing` service. Data domain **products**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-billing-service` |
 | HTTP port | `8132` |
-| Data domain | payments |
+| Data domain | products |
 | Datastore | PostgreSQL (database `openbank_billing`) |
 | Classification | internal |
 | Retention | 7 years |

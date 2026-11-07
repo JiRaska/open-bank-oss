@@ -199,6 +199,66 @@ class UpstreamClientTest {
     }
 
     @Test
+    fun `postToServiceWithQuery keeps query delimiters and braces inside query values`() {
+        withServer { client, baseUrl, requests ->
+            val opaque = "https://untrusted.invalid/path?partyId=other#{template}"
+            val response = client.postToServiceWithQuery(
+                baseUrl,
+                "/api/v1/game/levels/charles_bridge/completion",
+                mapOf("partyId" to "party-9", "proof" to opaque),
+                "party-9",
+                "{}",
+            )
+            assertThat(response.status).isEqualTo(200)
+            val request = requests.single()
+            assertThat(request.method).isEqualTo("POST")
+            assertThat(request.path).isEqualTo("/api/v1/game/levels/charles_bridge/completion")
+            assertThat(request.headers["x-customer-party-id"]).isEqualTo("party-9")
+            assertThat(request.body).isEqualTo("{}")
+            val query = request.rawQuery!!.split('&').associate {
+                val pair = it.split('=', limit = 2)
+                URLDecoder.decode(pair[0], StandardCharsets.UTF_8) to URLDecoder.decode(pair[1], StandardCharsets.UTF_8)
+            }
+            assertThat(query).containsExactlyInAnyOrderEntriesOf(mapOf("partyId" to "party-9", "proof" to opaque))
+        }
+    }
+
+    @Test
+    fun `postToServiceWithQuery with query rejects authority and path injection before fetching credentials`() {
+        withServer { client, baseUrl, requests ->
+            for ((base, path) in listOf(
+                "https://untrusted.invalid" to "/completion",
+                "$baseUrl@untrusted.invalid" to "/completion",
+                baseUrl to "//untrusted.invalid/completion",
+                baseUrl to "/completion?partyId=other",
+                baseUrl to "/completion#fragment",
+            )) {
+                assertThat(
+                    client.postToServiceWithQuery(base, path, mapOf("partyId" to "party-9"), "party-9", "{}").status,
+                )
+                    .isEqualTo(502)
+            }
+            assertThat(requests).isEmpty()
+            assertThat(tokenHits.get()).isZero()
+        }
+    }
+
+    @Test
+    fun `postToServiceWithQuery with query does not follow a redirect to another authority`() {
+        withServer(responseStatus = 302, responseHeaders = mapOf("Location" to "https://untrusted.invalid")) {
+                client,
+                baseUrl,
+                requests,
+            ->
+            assertThat(
+                client.postToServiceWithQuery(baseUrl, "/completion", mapOf("beta" to "true"), "party-9", "{}").status,
+            )
+                .isEqualTo(302)
+            assertThat(requests).hasSize(1)
+        }
+    }
+
+    @Test
     fun `getToService preserves opaque cursor bytes and isolates query delimiters from authority`() {
         val cursors = listOf(
             "a b+c/%2F%25",

@@ -5,18 +5,21 @@
 import { NextResponse } from 'next/server'
 import { discoverServicesSnapshot, prettyLabel } from '@/lib/discovery'
 import { getRegistry } from '@/lib/services/fleet'
+import { currentDomainOwnership } from '@/lib/services/domainOwnership'
 import type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
 export type { ServiceHealthEntry, ServiceStackEntry } from '@/lib/services/healthContract'
 
 // Off-cluster static probe list: DERIVED from the code-generated catalog (see
 // @/lib/services/fleet), never typed here. In-cluster the inventory comes from Kubernetes discovery.
-function staticServices(): Omit<ServiceHealthEntry, 'status' | 'reachable' | 'latencyMs'>[] {
-  return getRegistry().map(s => ({
+async function staticServices(): Promise<Omit<ServiceHealthEntry, 'status' | 'reachable' | 'latencyMs'>[]> {
+  const registry = getRegistry()
+  const ownership = await currentDomainOwnership(registry)
+  return registry.map(s => ({
     name: s.container.replace(/^openbank-/, ''),
     port: s.port,
     label: s.label,
-    group: s.group,
+    group: ownership.byModule.get(s.container) ?? s.group,
     container: s.container,
     healthPath: HEALTH_PATH,
   }))
@@ -229,7 +232,7 @@ async function fromDiscovery(): Promise<{ services: ServiceHealthEntry[] | null;
 
 export async function GET() {
   const discovery = await fromDiscovery()
-  const services = discovery.services ?? (await Promise.all(staticServices().map(probeService)))
+  const services = discovery.services ?? (await Promise.all((await staticServices()).map(probeService)))
   const source = discovery.status === 'static' ? 'static' : 'kubernetes'
 
   const byContainer: Record<string, ServiceHealthEntry> = {}

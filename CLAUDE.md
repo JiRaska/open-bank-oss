@@ -635,9 +635,10 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
   action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
   (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
-  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
-  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
-  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  of the audits was untrue until 2026-08-07, because `data.rules.shared_m2m_write_prohibition` was
+  nested under `change_requirements:`, so `gen-rules-opa-data.py` could not select it and the veto
+  never fired (it is now a top-level key, emitted into `rules-opa-data.yaml` and every bundle that
+  embeds it — the lesson is to check the derived subset, not `rules.yaml`); and `ledger.approve`, documented as
   "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
   live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
   it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
@@ -752,6 +753,10 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **`merge-priority:expedite` is the OWNER's lever — an agent never applies or removes it.** The merge
+  train serves a labelled, armed PR first in its lane (after a fix for a red main). Agents run under the
+  owner's token, so nothing technical stops an agent labelling its own PR; that is exactly why the rule
+  is absolute. To get a PR expedited, say so in the report and let the owner label it.
 - **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
   2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
   agents open roughly one PR every two minutes. What survives a drain is structural, not
