@@ -7720,3 +7720,25 @@ gates:
     selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
+
+  # Real cache mutations run for build-logic changes and all main pushes. The
+  # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).
+  - id: test-provenance-cache
+    rationale: "Source-only test cache normalization must preserve all non-SHA inputs and must never let Quarkus package a stale identity or broaden broker verification reuse."
+    review_after: "2027-02-06"
+    name: "test cache excludes only source SHA while artifact provenance remains exact"
+    group: kotlin
+    mode: enforced
+    budget_seconds: 120
+    run: python3 .github/scripts/check-test-provenance-cache.py
+    selftest: |
+      python3 .github/scripts/check-test-provenance-cache.py --self-test
+      ./gradlew -p build-logic test --build-cache --console=plain --max-workers=2
+    selftest_inputs:
+      - build-logic/
+      - openbank-libs/gradle/libs.versions.toml
+      - gradle/
+      - gradlew
+      - settings.gradle.kts
+      - .github/scripts/check-test-provenance-cache.py
+    min_subjects: 6
