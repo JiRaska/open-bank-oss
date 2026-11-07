@@ -165,6 +165,18 @@ class ReadinessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             gate.source_path(self.root, self.app)
 
+    def test_deploy_pin_source_maps_to_its_component(self) -> None:
+        pinned = {"spec": {"source": {"path": "pins/demo", "targetRevision": "deploy/sandbox"}}}
+        self.assertEqual(gate.source_path(self.root, pinned), self.component)
+        for revision in ("main", None):
+            other = {"spec": {"source": {"path": "pins/demo", "targetRevision": revision}}}
+            with self.assertRaisesRegex(ValueError, "unsafe/non-component"):
+                gate.source_path(self.root, other)
+        for bad in ("pins/../demo", "pins/demo/sub", "pins"):
+            other = {"spec": {"source": {"path": bad, "targetRevision": "deploy/sandbox"}}}
+            with self.assertRaises(ValueError):
+                gate.source_path(self.root, other)
+
     def test_effective_directory_excludes_staged_workload(self) -> None:
         # Two Applications share one directory; excluded files belong to the other App.
         staged = self.comp / "staged.yaml"

@@ -362,7 +362,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
 | [0356](0356-five-million-client-capacity-qualification.md) | Five-million-client capacity qualification for Czech current accounts | Proposed | Partial | capacity,payments,resilience,testing | — |
 | [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
-| [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
+| [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Partial | gitops,ci,supply-chain | — |
 | [0359](0359-visual-regression-lane-with-committed-container-rendered-baselines.md) | Visual regression lane with committed container-rendered baselines | Accepted | Partial | admin-ui,testing | — |
 | [0360](0360-fast-lane-gets-a-turn-whenever-a-strict-lane-reservation-ends.md) | Fast lane gets a turn whenever a strict-lane reservation ends | Proposed | Planned | ci,governance | — |
 | [0361](0361-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
