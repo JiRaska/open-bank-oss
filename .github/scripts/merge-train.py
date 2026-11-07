@@ -4177,7 +4177,7 @@ def _synthetic_origin(root: str) -> None:
     g("init", "-q", "-b", "main")
     # A fixture origin is cloned repeatedly while it is still being committed to. Git's detached auto-gc
     # (triggered by those commits) packs and prunes loose objects in the background, so a concurrent
-    # `git clone` copying them fails with "failed to copy file ... No such file or directory". Never gc.
+    # `git clone` copying them fails with "failed to copy file ... No such file or directory". Never auto-gc.
     g("config", "gc.auto", "0")
     g("config", "maintenance.auto", "false")
     w("services/s1.txt", "s1\n")
@@ -4267,6 +4267,112 @@ def _synthetic_origin(root: str) -> None:
     # Referenced scripts ride alone: named by path in a workflow, or by bare basename only.
     pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
     pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
+
+
+def _pack_synthetic_origin(root: str) -> None:
+    # Bootstrap once, before any clones exist. Keep even unreachable objects: later fixture
+    # mutations still use ordinary independent local clones, with auto-gc disabled throughout.
+    sh(["git", "repack", "-a", "-d", "--keep-unreachable", "--no-cruft", "--threads=1"],
+       cwd=root, env=base_env())
+
+
+def _clone_synthetic_origin(origin: str, destination: str) -> subprocess.CompletedProcess:
+    return sh(["git", "clone", "-q", "--branch", "main", origin, destination], env=base_env(), check=False)
+
+
+def packed_fixture_self_test(check) -> None:
+    """Packing changes representation only, including old packed unreachable objects."""
+    with tempfile.TemporaryDirectory() as root:
+        origin = os.path.join(root, "origin")
+        os.mkdir(origin)
+        git = Git(origin)
+        git("init", "-q", "-b", "main")
+        git("config", "gc.auto", "0")
+        git("config", "maintenance.auto", "false")
+        tracked = pathlib.Path(origin, "tracked.txt")
+        tracked.write_text("base\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "base")
+        payload = pathlib.Path(root, "unreachable.txt")
+        payload.write_text("packed unreachable\0payload\n")
+        packed = git("hash-object", "-w", str(payload)).stdout.strip()
+        git("update-ref", "refs/tags/fixture-blob", packed)
+        git("repack", "-a", "-d", "--no-cruft", "--threads=1")
+        git("update-ref", "-d", "refs/tags/fixture-blob")
+        objects = pathlib.Path(origin, ".git", "objects")
+        check("fixture pack: old unreachable blob starts packed-only",
+              not (objects / packed[:2] / packed[2:]).exists())
+        payload.write_text("loose unreachable\0payload\n")
+        loose = git("hash-object", "-w", str(payload)).stdout.strip()
+        check("fixture pack: new unreachable blob starts loose",
+              (objects / loose[:2] / loose[2:]).is_file())
+        tracked.write_text("reachable loose commit\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "reachable loose")
+
+        def inventory():
+            # Tree objects contain raw binary ids; compare the complete byte stream without decoding.
+            SPAWNS[0] += 1
+            return subprocess.run(["git", "cat-file", "--batch-all-objects", "--batch"],
+                                  cwd=origin, env=base_env(), capture_output=True, check=True).stdout
+
+        def state(directory):
+            d = pathlib.Path(directory)
+            return tuple((d / rel).read_bytes() for rel in (".git/HEAD", ".git/index", "tracked.txt"))
+
+        # Distinct staged and unstaged states must survive packing too.
+        tracked.write_text("staged only\n")
+        git("add", "tracked.txt")
+        tracked.write_text("unstaged only\n")
+        before_objects = inventory()
+        before_refs = git("for-each-ref", "--format=%(refname)%00%(objectname)").stdout
+        before_state = state(origin)
+        before_loose = len(list(objects.glob("[0-9a-f][0-9a-f]/*")))
+        _pack_synthetic_origin(origin)
+        check("fixture pack: all object ids, types, sizes and contents unchanged", inventory() == before_objects)
+        check("fixture pack: all refs unchanged",
+              git("for-each-ref", "--format=%(refname)%00%(objectname)").stdout == before_refs)
+        check("fixture pack: HEAD, index and worktree unchanged", state(origin) == before_state)
+        check("fixture pack: redundant loose copies removed and pack created",
+              len(list(objects.glob("[0-9a-f][0-9a-f]/*"))) < before_loose
+              and bool(list((objects / "pack").glob("*.pack"))))
+        for oid, expected in ((packed, "packed unreachable\0payload\n"),
+                              (loose, "loose unreachable\0payload\n")):
+            check("fixture pack: unreachable content retained " + oid[:8],
+                  git("cat-file", "blob", oid).stdout == expected)
+
+        first, peer = os.path.join(root, "first"), os.path.join(root, "peer")
+        for clone in (first, peer):
+            result = _clone_synthetic_origin(origin, clone)
+            if result.returncode:
+                raise RuntimeError("self-test packed fixture: clone failed: " + result.stderr[-400:])
+        first_git, peer_git = Git(first), Git(peer)
+        peer_state = state(peer)
+        origin_head = git("rev-parse", "HEAD").stdout.strip()
+        peer_head = peer_git("rev-parse", "HEAD").stdout.strip()
+        pathlib.Path(first, "tracked.txt").write_text("first clone only\n")
+        first_git("add", "tracked.txt"); first_git("commit", "-q", "-m", "first only")
+        first_head = first_git("rev-parse", "HEAD").stdout.strip()
+        check("fixture clone: peer and origin refs, index and worktree isolated",
+              git("rev-parse", "HEAD").stdout.strip() == origin_head
+              and peer_git("rev-parse", "HEAD").stdout.strip() == peer_head
+              and state(origin) == before_state and state(peer) == peer_state)
+        check("fixture clone: clone-only object absent from peer and origin",
+              git("cat-file", "-e", first_head, check=False).returncode != 0
+              and peer_git("cat-file", "-e", first_head, check=False).returncode != 0)
+        tracked.write_text("future origin only\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "future origin")
+        future = git("rev-parse", "HEAD").stdout.strip()
+        future_blob = git("rev-parse", "HEAD:tracked.txt").stdout.strip()
+        check("fixture clone: future origin commit and blob absent before fetch",
+              all(peer_git("cat-file", "-e", oid, check=False).returncode != 0 for oid in (future, future_blob))
+              and peer_git("rev-parse", "origin/main").stdout.strip() == origin_head)
+        peer_git("fetch", "-q", "origin", "main")
+        check("fixture clone: future objects arrive only after fetch",
+              all(peer_git("cat-file", "-e", oid, check=False).returncode == 0 for oid in (future, future_blob))
+              and peer_git("rev-parse", "origin/main").stdout.strip() == future)
+        check("fixture clone: fetch leaves local HEAD, index and worktree unchanged",
+              peer_git("rev-parse", "HEAD").stdout.strip() == peer_head and state(peer) == peer_state)
+        check("fixture clone: no alternates in origin or either clone",
+              not any(pathlib.Path(d, ".git/objects/info/alternates").exists() for d in (origin, first, peer)))
 
 
 def git_memo_self_test(check) -> None:
@@ -4470,6 +4576,7 @@ def self_test() -> int:
 
     retry_planner_self_test(check)
     git_memo_self_test(check)
+    packed_fixture_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -5059,6 +5166,7 @@ def self_test() -> int:
         with _synthetic_clock(), tempfile.TemporaryDirectory() as root:
             origin = os.path.join(root, "origin")
             _synthetic_origin(origin)
+            _pack_synthetic_origin(origin)
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
@@ -5070,7 +5178,7 @@ def self_test() -> int:
             def clone(tag):
                 counter[0] += 1
                 d = os.path.join(root, f"{tag}-{counter[0]}")
-                r = sh(["git", "clone", "-q", "--branch", "main", origin, d], env=base_env(), check=False)
+                r = _clone_synthetic_origin(origin, d)
                 if r.returncode != 0:
                     raise RuntimeError(f"self-test fixture: git clone failed: {r.stderr.strip()[-400:]}")
                 return d
