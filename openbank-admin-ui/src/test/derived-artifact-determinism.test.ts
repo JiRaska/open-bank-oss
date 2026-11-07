@@ -4,13 +4,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
 // @ts-expect-error - plain .mjs build script, no type declarations by design
-import { sourceDate } from '../../scripts/lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from '../../scripts/lib/source-date.mjs'
 
 // Regression guard for issue #2621.
 //
@@ -38,6 +38,116 @@ const COMMITTED_GENERATORS = [
 ]
 
 describe('committed derived artifacts are a pure function of their inputs (#2621)', () => {
+  it('rejects a missing or stale topology snapshot without rewriting it (#10154)', () => {
+    const generator = path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs')
+    const dir = mkdtempSync(path.join(tmpdir(), 'topology-freshness-'))
+    const output = path.join(dir, 'cluster-topology.json')
+    const run = (args: string[]) => execFileSync('node', [generator, '--repo', REPO, '--out', output, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    try {
+      expect(() => run(['--check'])).toThrow()
+      run([])
+      const current = readFileSync(output, 'utf8')
+      expect(() => run(['--check'])).not.toThrow()
+      const stale = current.replace('openbank.cluster-topology/v1', 'openbank.cluster-topology/stale')
+      writeFileSync(output, stale)
+      expect(() => run(['--check'])).toThrow()
+      expect(readFileSync(output, 'utf8')).toBe(stale)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores image-pin churn but detects changed declared topology facts (#10154)', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'topology-input-fingerprint-'))
+    const apps = path.join(dir, 'openbank-infra', 'gitops', 'apps')
+    const manifest = path.join(apps, 'example.yaml')
+    const components = path.join(dir, 'openbank-infra', 'gitops', 'components')
+    const deployment = path.join(components, 'example.yaml')
+    const output = path.join(dir, 'cluster-topology.json')
+    const generator = path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs')
+    const run = (args: string[]) => execFileSync('node', [generator, '--repo', dir, '--out', output, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const git = (args: string[], date: string) => execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+    })
+    try {
+      mkdirSync(apps, { recursive: true })
+      mkdirSync(components, { recursive: true })
+      writeFileSync(manifest, 'namespace: example\n')
+      writeFileSync(deployment, 'kind: Deployment\nimage: example:first\n')
+      git(['init', '-q'], '2024-01-01T00:00:00Z')
+      git(['add', manifest, deployment], '2024-01-01T00:00:00Z')
+      git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+        'commit', '-qm', 'initial topology'], '2024-01-01T00:00:00Z')
+      run([])
+      const original = readFileSync(output, 'utf8')
+      expect(() => run(['--check'])).not.toThrow()
+
+      writeFileSync(deployment, 'kind: Deployment\nimage: example:second\n')
+      git(['add', deployment], '2025-01-01T00:00:00Z')
+      git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+        'commit', '-qm', 'rotate image pin'], '2025-01-01T00:00:00Z')
+      expect(JSON.parse(original).generatedAt).toBe('2024-01-01T00:00:00.000Z')
+      expect(sourceDate(dir, ['openbank-infra/gitops'])).toBe('2025-01-01T00:00:00.000Z')
+      expect(() => run(['--check'])).not.toThrow()
+      expect(readFileSync(output, 'utf8')).toBe(original)
+      // The deploy build invokes the normal generator, not --check. A pin-only
+      // commit must therefore leave the bytes baked into the image unchanged.
+      run([])
+      expect(readFileSync(output, 'utf8')).toBe(original)
+
+      writeFileSync(deployment, 'kind: NetworkPolicy\nimage: example:second\n')
+      git(['add', deployment], '2026-01-01T00:00:00Z')
+      git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+        'commit', '-qm', 'declare network policy'], '2026-01-01T00:00:00Z')
+      expect(() => run(['--check'])).toThrow()
+      expect(readFileSync(output, 'utf8')).toBe(original)
+      run([])
+      const refreshed = JSON.parse(readFileSync(output, 'utf8'))
+      expect(refreshed.generatedAt).toBe('2026-01-01T00:00:00.000Z')
+      expect(refreshed.counts.networkPolicies).toBe(1)
+      expect(refreshed.inputFingerprint).not.toBe(JSON.parse(original).inputFingerprint)
+      expect(() => run(['--check'])).not.toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the committed topology snapshot aligned with GitOps and Dockerfile inputs (#10154)', () => {
+    expect(() => execFileSync('node', [
+      path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs'), '--repo', REPO, '--check',
+    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toThrow()
+  })
+
+  it('retains source-date provenance only while the baked facts remain identical', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'derived-provenance-'))
+    try {
+      for (const field of ['generatedAt']) {
+        const output = path.join(dir, `${field}.json`)
+        const old = { schema: 'example/v1', [field]: '2024-01-01T00:00:00.000Z', facts: [{ id: 'a', value: 1 }] }
+        writeFileSync(output, JSON.stringify(old))
+        const sameFacts = { ...old, [field]: '2025-01-01T00:00:00.000Z' }
+        expect(preserveDerivedTimestamp(output, sameFacts, field)).toEqual(old)
+        const changedFacts = { ...sameFacts, facts: [{ id: 'a', value: 2 }] }
+        expect(preserveDerivedTimestamp(output, changedFacts, field)).toEqual(changedFacts)
+        // monotonic: changed facts with an OLDER source date never move the stamp backwards
+        const olderChanged = { ...changedFacts, [field]: '2023-01-01T00:00:00.000Z' }
+        expect(preserveDerivedTimestamp(output, olderChanged, field)[field]).toBe(old[field])
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('scan-infra-vulns does not reuse a previous scannedAt (scan time, not source date)', () => {
+    const src = readFileSync(path.join(ADMIN_UI, 'scripts', 'scan-infra-vulns.mjs'), 'utf8')
+    expect(src).not.toContain('preserveDerivedTimestamp')
+  })
+
   it(
     'regenerating cluster-topology.json after real time passes yields byte-identical output',
     () => {

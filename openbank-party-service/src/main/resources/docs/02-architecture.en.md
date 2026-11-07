@@ -196,3 +196,9 @@ the target operation. Cancellation propagates instead of being reported as a fal
 PartyReactiveGuardIT verifies delayed Uni and CompletionStage allow/deny through real HTTP and CDI,
 including a heartbeat on a single event loop while the decision remains pending. No REST or event
 contract changes are introduced.
+
+`FlagdProducer` is created at boot (`@Startup`), not on first use. Its first caller evaluates a flag
+on a `Dispatchers.IO` worker whose class loader has no SmallRye config registered; created lazily
+there, its `@ConfigProperty` injection failed with `SRCFG00015` and every `GET /api/v1/parties` and
+`/api/v1/parties/search` answered 500. Built on the main thread at startup, the producer only reads
+already-resolved fields. PartyFuzzRegressionIT covers both routes on a freshly booted application.

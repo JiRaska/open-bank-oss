@@ -49,6 +49,18 @@ function mount(handler?: (path: string) => Promise<Response> | Response | undefi
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('FinOps independent evidence sources', () => {
+  it('distinguishes AWS infrastructure categories from business-domain allocation', async () => {
+    mount(path => path.endsWith('/costs') ? json({ ...costs, services: [
+      { name: 'Amazon EC2', amount: 100, domain: 'Platform' },
+      { name: 'Unmapped AWS service', amount: 20, domain: 'Unclassified' },
+    ] }) : undefined)
+    expect(await screen.findByText('Cloud cost categories')).toBeInTheDocument()
+    expect(screen.getByText('Platform infrastructure')).toBeInTheDocument()
+    expect(screen.getByText('Unclassified')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'cost allocation', exact: true })).toHaveAttribute('href', '/finops/allocation')
+    expect(screen.queryByText('By domain (process / business view)')).not.toBeInTheDocument()
+  })
+
   it('shows only the five numerically newest EKS versions and keeps the current version highlighted', async () => {
     const version = (number: string, isCurrent = false) => ({
       version: number, eksRelease: `release-${number}`, standardSupportEnds: '2027-01-01',

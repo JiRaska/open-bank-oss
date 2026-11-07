@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.2...fraud-service-v0.18.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **fraud:** reject a null rule entry in a threshold proposal with 400 ([#14783](https://github.com/JiRaska/open-bank-oss/issues/14783)) ([44c2739](https://github.com/JiRaska/open-bank-oss/commit/44c2739c9acde34be41eaa87d1ed8196b1efbcf9))
+
 ## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.1...fraud-service-v0.18.2) (2026-11-05)
 
 

@@ -130,3 +130,7 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Minimální pokrytí testy
 
 `koverVerify` vynucuje minimální řádkové pokrytí 40 %, základ pro money-path služby v `rules.yaml: coverage.money_path_floor` (zvýšeno z 34 v #13144). Naměřené pokrytí k 31. 10. 2026 bylo 86.1% (507/589 lines). Hranici lze jen zvyšovat.
+
+## Identita API na mTLS listeneru
+
+V produkci `/api/*` přijímá pouze bearer autentizaci, a to na prostém HTTP listeneru i na mTLS listeneru s ověřením klienta, a vyžaduje přihlášeného volajícího. Důvěryhodný klientský certifikát je na mTLS listeneru podmínkou TLS spojení, ale slouží jen k autentizaci transportu: nenahrazuje OIDC bearer token volajícího, takže certifikát bez beareru dostane HTTP 401. `GET /api/v1/info` a `GET /api/v1/config` zůstávají veřejná metadata. Role endpointu a OPA nadále rozhodují, co smí přihlášený volající dělat. `StandingOrderListenerAuthParityIT` používá produkční podobu listenerů a přes skutečné HTTP ověřuje, že požadavek pouze s certifikátem dostane 401.

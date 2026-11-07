@@ -488,7 +488,12 @@ spec:
                       container NAME — not index 0, several money-path pods run an OPA
                       sidecar that isn't consistently container[0] (confirmed live)."""
                       try:
-                          jsonpath = f'{{.items[0].status.containerStatuses[?(@.name=="{svc}")].image}}'
+                          # `.image` AND `.imageID`. For a digest-pinned spec (`repo:tag@sha256:X`)
+                          # the runtime reports `.image` as the local config id (`sha256:Y`), which
+                          # can never equal the declared ref — balance-service failed every run
+                          # that way. Only `.imageID` (`repo@sha256:X`) carries the repo digest.
+                          cs = f'.items[0].status.containerStatuses[?(@.name=="{svc}")]'
+                          jsonpath = f'{{{cs}.image}} {{{cs}.imageID}}'
                           out = subprocess.run(
                               ["kubectl", "get", "pods", "-n", ns,
                                "-l", f"app.kubernetes.io/name={svc}",
@@ -496,11 +501,26 @@ spec:
                                "-o", f"jsonpath={jsonpath}"],
                               capture_output=True, text=True, timeout=15,
                           )
-                          image = out.stdout.strip()
-                          return image or None
+                          parts = out.stdout.split()
+                          if not parts:
+                              return None
+                          return parts[0], (parts[1] if len(parts) > 1 else "")
                       except Exception as e:
                           print(f"  WARN: pod lookup failed for {ns}/{svc}: {e}")
                           return None
+
+                  def image_in_sync(running, running_id, declared):
+                      """True iff the running container is the declared image. A tag ref
+                      compares by string; a digest-pinned ref (`repo:tag@sha256:X`) compares
+                      by repo digest against imageID, the identity both sides share.
+                      Held by openbank-infra/scripts/sbom_drift_scanner_test.py."""
+                      if not declared:
+                          return False
+                      if running == declared:
+                          return True
+                      if "@sha256:" in declared:
+                          return (running_id or "").endswith("@" + declared.split("@", 1)[1])
+                      return False
 
                   def declared_image(svc, manifest_path):
                       """The image this service's container currently declares in the
@@ -523,13 +543,16 @@ spec:
                   results = {}
                   for svc, ns, manifest_path in COMPONENTS:
                       print(f"[{svc}] comparing running pod vs gitops...", flush=True)
-                      running = running_image(svc, ns)
-                      if not running:
+                      running_pair = running_image(svc, ns)
+                      if not running_pair:
                           print(f"  SKIP {svc}: no running pod found", flush=True)
                           results[svc] = {"status": "no-pod-found"}
                           continue
+                      running, running_id = running_pair
                       declared = declared_image(svc, manifest_path)
-                      in_sync = bool(declared) and running == declared
+                      in_sync = image_in_sync(running, running_id, declared)
+                      if declared and "@sha256:" in declared:
+                          running = running_id or running
                       print(f"  running={running} declared={declared} inSync={in_sync}", flush=True)
                       results[svc] = {
                           "status": "checked",

@@ -106,3 +106,16 @@ allowed_reasons contains "service-edge-card-details-read" if {
 	machine_named("service-account-openbank-edge")
 	input.action == "card.details.read"
 }
+
+# Read-only staff viewer on the card list and card detail (advisory would-DENY triage, 2026-11-04).
+# CardResource's @RolesAllowed admits ROLE_VIEWER on card.list / card.read, and admin-ui grants
+# `cards:view` to ADMIN/OPERATOR/VIEWER, so a viewer IS an intended consumer of /cards. Base
+# operator-read-any covers only OPERATOR/ADMIN, so the advisory log recorded would-DENY for the
+# seeded viewer users on both actions. Human principals only; card.details.read (the PAN) is NOT in
+# this set and stays machine-only.
+allowed_reasons contains "card-read-staff-viewer" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_VIEWER" in input.principal.roles
+	input.action in {"card.list", "card.read"}
+}
