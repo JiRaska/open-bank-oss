@@ -2,6 +2,7 @@
 'use client'
 
 import { useCallback, useSyncExternalStore } from 'react'
+import { useInitialOperatorId } from '@/components/auth/InitialRolesContext'
 import { useSession } from 'next-auth/react'
 import { ALL_NAV } from './catalog'
 
@@ -45,8 +46,10 @@ function subscribe(callback: () => void) {
   return () => { window.removeEventListener(EVENT, callback); window.removeEventListener('storage', callback) }
 }
 export function useNavigationPreferences() {
-  const { data: session } = useSession()
-  const key = session?.user?.id ? `ob.navigation.v1.${session.user.id}` : ''
+  const { data: session, status } = useSession()
+  const initialOperatorId = useInitialOperatorId()
+  const operatorId = session?.user?.id ?? (status === 'loading' ? initialOperatorId : null)
+  const key = operatorId ? `ob.navigation.v1.${operatorId}` : ''
   const getSnapshot = useCallback(() => read(key), [key])
   const value = useSyncExternalStore(subscribe, getSnapshot, () => DEFAULTS)
   const update = useCallback((change: (current: Preferences) => Preferences) => {
@@ -58,7 +61,7 @@ export function useNavigationPreferences() {
     window.dispatchEvent(new Event(EVENT))
   }, [key])
   return {
-    ...value,
+    ...value, operatorId,
     selectArea: (area: string) => update(current => current.area === area ? current : { ...current, area }),
     toggleCompact: () => update(current => ({ ...current, compact: !current.compact })),
     setWidth: (width: number) => update(current => ({ ...current, width })),

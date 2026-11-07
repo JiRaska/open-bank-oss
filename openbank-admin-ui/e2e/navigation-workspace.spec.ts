@@ -126,3 +126,20 @@ test('uses a selected record as assistant context without navigating away', asyn
   await expect(page.getByRole('region', { name: /assistant panel|Panel asistenta/ })).toContainText('Example Company')
   await expect(page).toHaveURL(/\/accounts$/)
 })
+
+test('accepts an area selection before the client session request resolves', async ({ page }) => {
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/auth/session', async route => { await held; await route.continue() })
+  try {
+    await page.goto('/accounts')
+    const sidebar = page.locator('#admin-sidebar')
+    await sidebar.getByRole('button', { name: /Workspace area|Pracovní oblast/ }).click()
+    await page.locator('#navigation-areas').getByRole('button', { name: /^(Documentation|Dokumentace)$/ }).click()
+    await expect(sidebar.getByRole('link', { name: /Service Docs|Dokumentace služeb/ })).toBeVisible()
+    const sessionResponse = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/session')
+    release()
+    await sessionResponse
+    await expect(sidebar.getByRole('link', { name: /Service Docs|Dokumentace služeb/ })).toBeVisible()
+  } finally { release() }
+})

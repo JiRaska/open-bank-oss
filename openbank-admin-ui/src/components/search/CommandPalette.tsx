@@ -72,7 +72,7 @@ function OpenCommandPalette({ onClose }: { onClose: () => void }) {
   const ownership = useDomainOwnership()
   const preferences = useNavigationPreferences()
   const [scope, setScope] = useState<'all' | 'pages' | 'records'>('all')
-  const recentsKey = session?.user?.id ? `${RECENTS_KEY}.${session.user.id}` : ''
+  const recentsKey = preferences.operatorId ? `${RECENTS_KEY}.${preferences.operatorId}` : ''
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<EntityRef[]>([])
   const [recents] = useState<EntityRef[]>(() => recentsKey ? loadRecents(recentsKey) : [])
