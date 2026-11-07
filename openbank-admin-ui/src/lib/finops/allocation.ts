@@ -96,7 +96,7 @@ export interface AllocationResult {
   byService: ServiceAllocation[]
   byDomain: DomainAllocation[]
   byFlow: FlowAllocation[]
-  /** Footprint services not found in the governance manifest (allocated under `platform`). */
+  /** Footprint services not found in the governance manifest (allocated under `unclassified`). */
   unmapped: string[]
   method: 'requests-weighted-showback'
   collectedAt: string | null

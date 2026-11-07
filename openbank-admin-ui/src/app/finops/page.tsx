@@ -361,7 +361,7 @@ function FinOpsContent() {
               label={t('Right-sizing: potenciál úspory', 'Right-sizing Savings Potential')}
               value={rightSizing?.available ? `${rightSizing.highSavingsCount}` : '—'}
               sub={rightSizing?.available
-                ? t(`služeb s vysokým potenciálem úspor podle dostupných metrik`, `services with high savings potential from available metrics`)
+                ? t(`namespaců s vysokým potenciálem úspor podle dostupných metrik`, `namespaces with high savings potential from available metrics`)
                 : t('Prometheus nedostupný', 'Prometheus unavailable')}
               color='var(--warning-text)'
               accent={Boolean(rightSizing?.available && rightSizing.highSavingsCount > 0)}
@@ -978,8 +978,8 @@ function FinOpsContent() {
             </div>
             <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 16px' }}>
               {t(
-                'Porovnání skutečného využití CPU/paměti s tím, co je nakonfigurováno v requests. VPA (ADR-0099, updateMode: Off) plní doporučení bez dotknutí se podů.',
-                'Actual CPU/memory usage vs. k8s requests. VPA (ADR-0099, updateMode: Off) fills recommendations without touching pods.',
+                'Porovnání skutečného využití CPU/paměti a requests po namespace, nikoli po obchodní doméně. VPA (ADR-0099, updateMode: Off) plní doporučení bez dotknutí se podů.',
+                'Actual CPU/memory usage vs. k8s requests per namespace, independently of business domains. VPA (ADR-0099, updateMode: Off) fills recommendations without touching pods.',
               )}
             </p>
 
