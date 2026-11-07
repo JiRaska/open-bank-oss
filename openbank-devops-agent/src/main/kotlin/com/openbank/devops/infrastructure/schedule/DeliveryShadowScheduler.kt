@@ -28,7 +28,7 @@ class DeliveryShadowScheduler(
     }
 
     private companion object {
-        val INTERVAL: Duration = Duration.ofMinutes(5)
+        val INTERVAL: Duration = Duration.ofMinutes(30)
     }
 
     @Scheduled(

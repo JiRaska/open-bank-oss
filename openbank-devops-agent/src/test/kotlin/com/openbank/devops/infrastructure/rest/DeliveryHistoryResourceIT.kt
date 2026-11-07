@@ -4,6 +4,7 @@ package com.openbank.devops.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.application.port.out.DeliveryHistoryRepository
+import com.openbank.devops.application.port.out.GitHubReadBudget
 import com.openbank.devops.domain.model.DeliveryEvidenceState
 import com.openbank.devops.domain.model.DeliveryObservation
 import com.openbank.devops.domain.model.DeliveryOverview
@@ -15,8 +16,12 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.MediaType
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
@@ -25,6 +30,8 @@ import java.sql.Connection
 import java.sql.DriverManager
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
 
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -36,6 +43,20 @@ class DeliveryHistoryResourceIT {
         @POST
         @RolesAllowed("ROLE_ADMIN")
         suspend fun save(observation: DeliveryObservation) = repository.save(observation)
+    }
+
+    @Path("/test/github-read-budget")
+    class BudgetFixture(private val budget: GitHubReadBudget) {
+        @POST
+        @RolesAllowed("ROLE_ADMIN")
+        suspend fun reserve(@QueryParam("observer") @DefaultValue("true") observer: Boolean): Boolean =
+            budget.reserve(observer)
+
+        @POST
+        @Path("/pause")
+        @Consumes(MediaType.TEXT_PLAIN)
+        @RolesAllowed("ROLE_ADMIN")
+        suspend fun pause(until: String) = budget.deferUntil(Instant.parse(until))
     }
 
     @Inject
@@ -192,5 +213,60 @@ class DeliveryHistoryResourceIT {
                 it.get("overview").get("repository").asText() == "example/repo"
             },
         ).isTrue()
+    }
+    private fun reserveBudget(observer: Boolean = true): Boolean = given()
+        .post(
+            "/test/github-read-budget?observer=$observer",
+        ).then().statusCode(200).extract().asString().toBooleanStrict()
+
+    @Test
+    @TestSecurity(user = "writer", roles = ["ROLE_ADMIN"])
+    fun `database budget is shared across concurrent sessions and preserves analysis capacity`() {
+        connection().use { c ->
+            c.createStatement().use { q ->
+                q.executeUpdate("DELETE FROM github_read_requests")
+                q.executeUpdate("UPDATE github_read_budget SET blocked_until = NULL")
+            }
+        }
+        val pool = Executors.newFixedThreadPool(6)
+        val results = try {
+            pool.invokeAll((1..24).map { Callable { reserveBudget() } }).map { it.get() }
+        } finally {
+            pool.shutdownNow()
+        }
+        assertThat(results.count { it }).isEqualTo(18)
+        assertThat(reserveBudget(false)).isTrue()
+        assertThat(reserveBudget(false)).isTrue()
+        assertThat(reserveBudget(false)).isFalse()
+        connection().use { c ->
+            c.createStatement().use { q ->
+                q.executeQuery("SELECT COUNT(*) FROM github_read_requests").use { rs ->
+                    rs.next()
+                    assertThat(rs.getInt(1)).isEqualTo(20)
+                }
+                q.executeUpdate(
+                    "UPDATE github_read_requests SET requested_at = CURRENT_TIMESTAMP - INTERVAL '61 minutes'",
+                )
+            }
+        }
+        assertThat(reserveBudget()).isTrue()
+        val until = Instant.now().plusSeconds(3600)
+        given().contentType("text/plain").body(until.toString()).post("/test/github-read-budget/pause")
+            .then().statusCode(204)
+        given().contentType(
+            "text/plain",
+        ).body(Instant.now().plusSeconds(60).toString()).post("/test/github-read-budget/pause")
+            .then().statusCode(204)
+        assertThat(reserveBudget(false)).isFalse()
+        connection().use { c ->
+            c.createStatement().use { q ->
+                q.executeQuery("SELECT blocked_until FROM github_read_budget WHERE id = 1").use { rs ->
+                    rs.next()
+                    assertThat(rs.getTimestamp(1).toInstant()).isAfter(until.minusSeconds(1))
+                }
+                q.executeUpdate("UPDATE github_read_budget SET blocked_until = CURRENT_TIMESTAMP - INTERVAL '1 second'")
+            }
+        }
+        assertThat(reserveBudget()).isTrue()
     }
 }

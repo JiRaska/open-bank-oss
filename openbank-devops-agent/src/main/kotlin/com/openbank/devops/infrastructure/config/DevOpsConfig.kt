@@ -55,7 +55,7 @@ interface DevOpsConfig {
     @WithDefault("false")
     fun deliveryShadowEnabled(): Boolean
 
-    @WithDefault("0 */5 * * * ?")
+    @WithDefault("0 */30 * * * ?")
     fun deliveryShadowCron(): String
 
     @WithDefault("JiRaska")

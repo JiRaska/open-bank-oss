@@ -95,7 +95,7 @@ openbank:
     analysis-cron: ${DEVOPS_ANALYSIS_CRON:0 30 3 * * ?}
     # Opt-in read-only sampling; no deployment or CI mutations.
     delivery-shadow-enabled: ${DEVOPS_DELIVERY_SHADOW_ENABLED:false}
-    delivery-shadow-cron: "0 */5 * * * ?"
+    delivery-shadow-cron: "0 */30 * * * ?"
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra + DeepSeek, same provider+model as the copilot
