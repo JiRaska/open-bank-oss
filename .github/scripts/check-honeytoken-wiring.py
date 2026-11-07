@@ -49,6 +49,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 TOFU = REPO / "openbank-infra" / "aws" / "envs" / "sandbox-substrate"
@@ -97,7 +99,7 @@ def service_accounts(gitops: Path) -> set[tuple[str, str]]:
     found = set()
     for path in _candidates(gitops, "ServiceAccount"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path, pure_python=True)
         except yaml.YAMLError:
             continue
         for d in docs:
@@ -116,7 +118,7 @@ def token_shaped_service_accounts(gitops: Path) -> set[tuple[str, str]]:
     found = set()
     for path in _candidates(gitops, "service-account-token"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path, pure_python=True)
         except yaml.YAMLError:
             continue
         for d in docs:
@@ -132,7 +134,7 @@ def bound_subjects(gitops: Path) -> set[tuple[str, str]]:
     found = set()
     for path in _candidates(gitops, "Binding"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path, pure_python=True)
         except yaml.YAMLError:
             continue
         for d in docs:
@@ -148,7 +150,7 @@ def honey_path_workloads(gitops: Path) -> list[str]:
     found = []
     for path in _candidates(gitops, HONEY_ENV):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path, pure_python=True)
         except yaml.YAMLError:
             continue
         for d in docs:
