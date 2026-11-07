@@ -1725,6 +1725,9 @@ def main() -> int:
     ap.add_argument("--enforce", action="store_true")
     ap.add_argument("--live-body", action="store_true",
                     help="Read the current PR body only if money-path files were changed")
+    ap.add_argument("--head", default="HEAD",
+                    help="judge <base>...<head> without checking it out (merge-train admission, #14684); "
+                         "an ordinary PR only, never a carrier")
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--coverage", action="store_true",
                     help=f"fail when a strong sensitive-code signal sits outside {DECL_KEY}")
@@ -1750,6 +1753,12 @@ def main() -> int:
             return None
         return result.stdout.strip()
 
+    if args.head != "HEAD":
+        # merge-train.py admission: the body is the one the train just listed, the tree is a fetched
+        # PR head. No carrier dispatch and no live-body fetch — the caller owns both.
+        if args.live_body or not re.fullmatch(r"[0-9a-f]{40}", args.head):
+            ap.error("--head takes a 40-hex sha and excludes --live-body")
+        return run(Path(args.root), body, args.base, args.enforce, head=args.head)
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     pr: dict | None = None
     if args.live_body:

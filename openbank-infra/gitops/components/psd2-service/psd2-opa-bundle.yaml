@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: psd2-service
     app.kubernetes.io/part-of: psd2
   annotations:
-    openbank.tech/policy-checksum: "24777ef9fc54568a"
+    openbank.tech/policy-checksum: "5153cad2e348a789"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -272,6 +272,14 @@ data:
     # machine caller; removing an action from that list re-opens it fleet-wide.
     operator_read_any_excluded(action) if {
     	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
+    }
+
+    # Chapter configuration is an administrator edit, never a machine or customer operation.
+    allowed_reasons contains "operator-game-catalog-write" if {
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        not principal_is_machine
+        input.action == "engagement.gameCatalog.write"
     }
 
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
@@ -590,7 +598,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
@@ -1213,6 +1221,10 @@ data:
       - query.account.readonly
       - query.consent.readonly
       - verify.mandate
+      - product.lint
+      - product.compile
+      - product.simulate
+      - product.explain
       write_proposal:
       - draft.ticket
       - gh.pr.open
@@ -1220,12 +1232,15 @@ data:
       - git.branch
       - git.commit.signed
       - run.skill
+      - product.propose
       deny:
       - money.transfer
       - money.post.ledger
       - gh.pr.merge
       - gh.pr.approve
       - secrets.read.raw
+      - product.publish
+      - product.sign
     agents:
     - id: compliance-officer
       tools:
@@ -1279,6 +1294,21 @@ data:
         - query.interest.readonly
         - query.disputes.readonly
         - query.observability.readonly
+    - id: product-author
+      tools:
+        allow:
+        - product.lint
+        - product.compile
+        - product.simulate
+        - product.explain
+        - product.propose
+        deny:
+        - product.publish
+        - product.sign
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
     - id: rca-investigator
       tools:
         allow:
@@ -2218,9 +2248,10 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
-        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+        # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+        # deliberately ONE read action rather than the role's full duty set. What is missing is
+        # missing on purpose:
         #
         #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -2239,10 +2270,10 @@ data:
         #   already, so this entry is a provable subset of today's effective grant and changes no
         #   decision — the same seeding property the matrix was built on.
         #
-        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-        # editor duty has no action name for the matrix to key on. Declaring the editor role here
-        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+        # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+        # name for the matrix to key on. A future single-source migration needs governed action
+        # names and must preserve the action-specific human-only write policy.
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read

@@ -59,7 +59,16 @@ abstract class QuarkusPackagingFileOperations {
 // implementation fingerprint, so previously contaminated cache entries are not reused.
 val packagingFileOperations = objects.newInstance<QuarkusPackagingFileOperations>()
 val quarkusGeneratedStaging = layout.buildDirectory.dir("quarkus-build/gen")
+// Schema export is an augmentation output, outside Quarkus's declared app directory.
+// Declare it only when requested so a cache hit restores the schema as well as the JAR.
 tasks.named("quarkusAppPartsBuild") {
+    val schemaExportProjectDirectory = layout.projectDirectory
+    val generatedOpenApiDirectory = providers.systemProperty("quarkus.smallrye-openapi.store-schema-directory")
+        .filter { it.isNotBlank() }
+        .map { schemaExportProjectDirectory.dir(it) }
+    if (generatedOpenApiDirectory.isPresent) {
+        outputs.dir(generatedOpenApiDirectory).withPropertyName("generatedOpenApiSchema")
+    }
     doFirst {
         packagingFileOperations.fileSystemOperations.delete {
             delete(quarkusGeneratedStaging.get().asFile)

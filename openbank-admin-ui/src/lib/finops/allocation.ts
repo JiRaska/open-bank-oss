@@ -20,6 +20,7 @@
 
 import { COST_GROUPS, domainForService, type CostGroup } from './costGroups'
 import type { DataDomain } from '@/lib/governance/manifest'
+import type { DomainGroup } from '@/lib/governance/domains'
 
 // CPU vs RAM cost split. OpenCost defaults to weighting the two request dimensions equally;
 // we mirror that. Tunable here if a measured node-cost breakdown ever justifies otherwise.
@@ -28,10 +29,10 @@ const RAM_WEIGHT = 0.5
 
 // Services with a resource footprint but unknown to the governance manifest (in-cluster
 // platform infra: keycloak, redis, external-dns, apicurio, admin-ui itself). They genuinely
-// consume compute, so we DO allocate to them — but under the `platform` domain, and we record
+// consume compute, so we DO allocate to them — but under the `unclassified` group, and we record
 // them in `unmapped` for transparency rather than silently folding their cost into business
 // services.
-const FALLBACK_DOMAIN: DataDomain = 'platform'
+const FALLBACK_DOMAIN: DomainGroup = 'unclassified'
 
 export interface CostLine {
   name: string
@@ -56,7 +57,7 @@ export interface ServiceFootprint {
 
 export interface ServiceAllocation {
   service: string
-  domain: DataDomain
+  domain: DomainGroup
   amount: number
   pct: number
   cpuMillis: number
@@ -64,7 +65,7 @@ export interface ServiceAllocation {
 }
 
 export interface DomainAllocation {
-  domain: DataDomain
+  domain: DomainGroup
   amount: number
   pct: number
   serviceCount: number
@@ -196,7 +197,7 @@ export function allocate(
     .sort((a, b) => b.amount - a.amount)
 
   // byDomain: roll up byService. Σ byDomain == Σ byService by construction.
-  const domainAcc = new Map<DataDomain, { amount: number; count: number }>()
+  const domainAcc = new Map<DomainGroup, { amount: number; count: number }>()
   for (const s of byService) {
     const cur = domainAcc.get(s.domain) ?? { amount: 0, count: 0 }
     domainAcc.set(s.domain, { amount: cur.amount + s.amount, count: cur.count + 1 })

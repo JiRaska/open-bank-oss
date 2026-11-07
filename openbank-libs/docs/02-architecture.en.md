@@ -62,6 +62,8 @@ Shared libraries and services use Quarkus **3.40.1.1 LTS** from the same catalog
 
 The shared `TopicProducers` table in `openbank-libs-domain` attributes `openbank.swift.institution-transfers` to swift-service, which is how audit-service labels the rows it reads from that topic.
 
+The same table attributes `openbank.tpp.registry.event` to tpp-registry-service, so audit-service can label the TPP register changes (registered, blacklisted) it records on the audit trail.
+
 ### Temporal worker pilot
 
 The version catalog exposes Temporal SDK/testing 1.40.0 for transaction-service's

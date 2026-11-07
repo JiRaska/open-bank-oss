@@ -6,6 +6,7 @@ package com.openbank.sanctions.infrastructure.persistence.repository
 
 import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.domain.model.SanctionsRefreshInProgress
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -40,9 +41,13 @@ class SanctionsImportPublicationFence private constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // Every failure must keep an incomplete refresh fenced.
-    suspend fun <T> duringRefresh(listType: SanctionsListType, refresh: suspend (SanctionsPublicationPermit) -> T): T {
+    suspend fun <T> duringRefresh(
+        listType: SanctionsListType,
+        waitForOwner: Boolean = true,
+        refresh: suspend (SanctionsPublicationPermit) -> T,
+    ): T {
         val (connection, generation, inheritedIncomplete) = withContext(NonCancellable + Dispatchers.IO) {
-            acquire(listType)
+            acquire(listType, waitForOwner)
         }
         val permit = SanctionsPublicationPermit(listType, generation, inheritedIncomplete)
         try {
@@ -59,7 +64,7 @@ class SanctionsImportPublicationFence private constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // JDBC cleanup must also run after an Error.
-    private fun acquire(listType: SanctionsListType): Triple<Connection, Long, Boolean> {
+    private fun acquire(listType: SanctionsListType, waitForOwner: Boolean): Triple<Connection, Long, Boolean> {
         val connection = dataSource.connection
         var locked = false
         try {
@@ -69,10 +74,7 @@ class SanctionsImportPublicationFence private constructor(
             connection.createStatement().use {
                 it.execute("SET LOCAL lock_timeout = '${lockTimeoutSeconds}s'")
             }
-            connection.prepareStatement("SELECT pg_advisory_lock(11492, hashtext(?))").use { statement ->
-                statement.setString(1, listType.name)
-                statement.execute()
-            }
+            lock(connection, listType, waitForOwner)
             locked = true
             // Read the prior durable state under the same row lock used to advance the
             // generation. A fallback/no-feed attempt cannot clear an earlier failed import.
@@ -130,6 +132,24 @@ class SanctionsImportPublicationFence private constructor(
                 connection.close()
             }
         }
+    }
+
+    /**
+     * Waits (bounded by `lock_timeout`) for the scheduler; an HTTP trigger (#14780) instead tries
+     * the same advisory key once and refuses with 409 rather than queueing behind a running refresh.
+     */
+    private fun lock(connection: Connection, listType: SanctionsListType, waitForOwner: Boolean) {
+        val sql = if (waitForOwner) {
+            "SELECT pg_advisory_lock(11492, hashtext(?))"
+        } else {
+            "SELECT pg_try_advisory_lock(11492, hashtext(?))"
+        }
+        val acquired = connection.prepareStatement(sql).use { statement ->
+            statement.setString(1, listType.name)
+            // pg_advisory_lock returns void (a null column); only the try form answers false.
+            statement.executeQuery().use { rows -> rows.next() && (waitForOwner || rows.getBoolean(1)) }
+        }
+        if (!acquired) throw SanctionsRefreshInProgress(listType.name)
     }
 
     private fun unlock(connection: Connection, listType: SanctionsListType) {
