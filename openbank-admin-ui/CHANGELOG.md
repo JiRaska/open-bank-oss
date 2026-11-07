@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.3.0...admin-ui-v4.4.0) (2026-11-07)
+
+
+### Features
+
+* **admin-ui:** make access matrix compact and compare selected roles ([#15032](https://github.com/JiRaska/open-bank-oss/issues/15032)) ([173c387](https://github.com/JiRaska/open-bank-oss/commit/173c3877b246b8a6710cb4536aeb87a466cea7d5))
+
+## [4.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.2.0...admin-ui-v4.3.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** explain access preview roles and permissions in Czech and English ([#14997](https://github.com/JiRaska/open-bank-oss/issues/14997)) ([fe9b4d1](https://github.com/JiRaska/open-bank-oss/commit/fe9b4d17dd3ec06cbf5012ba752811279d8b523d))
+
 ## [4.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.1.0...admin-ui-v4.2.0) (2026-11-06)
 
 

@@ -65,6 +65,9 @@ labels:
   - name: tech-debt
     color: "fbca04"
     description: "Refactor / cleanup with no user-facing behavior change."
+  - name: needs-kind
+    color: "e99695"
+    description: "Zero or several kind labels; needs exactly one. Set and cleared by issue-kind.yml."
   - name: docs
     color: "0075ca"
     description: "Documentation, ADRs, runbooks, process specs."
@@ -97,6 +100,9 @@ labels:
   - name: blocked
     color: "b60205"
     description: "Cannot proceed — waiting on a dependency, a decision, or another issue."
+  - name: deploy-revert
+    color: "b60205"
+    description: "Explicit rollback: moves a GitOps image pin BACKWARD on purpose (gate deploy-pin-monotonic)."
   - name: good-first-issue
     color: "7057ff"
     description: "Small, well-scoped, good entry point for a new contributor."

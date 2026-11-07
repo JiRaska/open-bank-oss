@@ -44,8 +44,42 @@ for (const language of ['cs', 'en'] as const) {
     await page.getByLabel(/Find permission|Hledat oprávnění/).fill('Approve payment')
     await page.getByRole('combobox', { name: /^(Role)$/ }).selectOption('ROLE_ADMIN')
     await expect(preview.getByRole('columnheader').last()).toContainText(language === 'cs' ? 'Administrátor' : 'Administrator')
+    await page.getByRole('checkbox', { name: /Show descriptions|Zobrazit popisy/ }).check()
     await expect(preview.getByRole('rowheader')).toContainText(language === 'cs' ? 'Schválení platby' : 'Approve payment')
     await expect(preview.getByRole('rowheader')).toContainText(language === 'cs' ? 'Rozhodnutí o platbě čekající na schválení.' : 'Decide on a payment awaiting approval.')
     await expect(preview.getByRole('cell')).toHaveText(['✓'])
   })
 }
+
+test('matrix compares a custom role selection and keeps labels pinned while scrolling', async ({ page, context, baseURL }) => {
+  await signInAsOperator(context, baseURL!)
+  await page.goto('/settings')
+  const matrix = page.getByRole('region', { name: /UI access rule matrix|Matice přístupových pravidel UI/ })
+  await expect(matrix).toBeVisible()
+  await page.getByText(/Choose roles to compare|Vybrat role k porovnání/).click()
+  await page.getByRole('button', { name: /Clear role selection|Zrušit výběr rolí/ }).click()
+  await expect(matrix.getByText(/Select at least one role|Vyberte alespoň jednu roli/)).toBeVisible()
+  await page.getByRole('checkbox', { name: /ROLE_ADMIN$/ }).check()
+  await page.getByRole('checkbox', { name: /ROLE_VIEWER$/ }).check()
+  await expect(matrix.getByRole('columnheader')).toHaveCount(3)
+  await page.getByLabel(/Find permission|Hledat oprávnění/).fill('payments:approve')
+  await expect(matrix.getByRole('cell')).toHaveText(['✓', '—'])
+  await page.getByRole('checkbox', { name: /ROLE_ADMIN$/ }).uncheck()
+  await page.getByRole('checkbox', { name: /Only grants listed|Jen oprávnění uvedená/ }).check()
+  await expect(matrix.getByText(/No matching permissions|Žádné odpovídající oprávnění/)).toBeVisible()
+  await page.getByRole('button', { name: /Select all roles|Vybrat všechny role/ }).click()
+  await page.getByRole('checkbox', { name: /Only grants listed|Jen oprávnění uvedená/ }).uncheck()
+  await page.getByLabel(/Find permission|Hledat oprávnění/).fill('')
+  const before = await matrix.evaluate(el => {
+    const first = el.querySelector('tbody th')!.getBoundingClientRect()
+    const header = el.querySelector('thead th')!.getBoundingClientRect()
+    el.scrollLeft = 600
+    el.scrollTop = 300
+    return { left: first.left, top: header.top }
+  })
+  const after = await matrix.evaluate(el => ({ left: el.querySelector('tbody th')!.getBoundingClientRect().left, top: el.querySelector('thead th')!.getBoundingClientRect().top }))
+  expect(after.left).toBeCloseTo(before.left, 0)
+  expect(after.top).toBeCloseTo(before.top, 0)
+  await page.setViewportSize({ width: 390, height: 844 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})

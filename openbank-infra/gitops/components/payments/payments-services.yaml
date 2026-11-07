@@ -1905,7 +1905,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-3b1311c5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-45b874d6@sha256:1fd4d559e598bb3579976eaf6ec2a677cfcf0693b77d555632278aa8392b656b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2787,7 +2787,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-45b874d6@sha256:c5c605b8ee6fa5aaad77c7b62aeae0e978ad0dfaae0174bad1323fa5ad6bfa18
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3581,7 +3581,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-5cc84e19
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-45b874d6@sha256:5d46370ffee9882df065927984586a45673b66b452742f18362b8472498f5814
 
           imagePullPolicy: IfNotPresent
           ports:
