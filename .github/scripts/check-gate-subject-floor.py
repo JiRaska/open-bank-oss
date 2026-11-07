@@ -68,6 +68,8 @@ NO_CORPUS = {
     "co-deploy-set-derivation-unit-test",
     "deploy-code-lag-report-unit-test",
     "deploy-window-decision",
+    "deploy-script-tests-previously-unreachable",
+    "ci-script-tests-previously-unreachable",
     "ensure-ecr-repository",
     "gate-runner-self-test",
     "pact-provider-version-proof-unit-test",
