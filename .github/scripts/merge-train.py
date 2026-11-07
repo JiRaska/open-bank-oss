@@ -1976,6 +1976,8 @@ def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
     if rc == 1:
         return ("security-checklist-money-path fails on the live body — tick the checklist, then re-run "
                 "Validate manifests; the train re-reads the body every tick")
+    if not CHECKLIST_GATE.is_file():
+        return f"admission gate missing at {CHECKLIST_GATE} — fail closed, this is a train wiring defect"
     return f"admission check exited {rc} — fail closed"
 
 
@@ -3218,6 +3220,7 @@ JOB_MUST = {
                                                               ("publish also runs on drops alone (notices)",
                                                                "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
+                                                           ("settle copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                            ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}")],
 }
 JOB_FORBID = {
