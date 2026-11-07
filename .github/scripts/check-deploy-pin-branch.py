@@ -437,6 +437,19 @@ def self_test():
             if not isinstance(error, PinError) or "outside pins/" not in str(error):
                 failures.append(f"check_range: wrong reason {error!r}")
 
+        # Pre-bootstrap: an absent branch is NOT_EVALUATED with a non-zero exit. Exit 0 with
+        # SUBJECTS=UNRESOLVED renders PASS in run-gates.py (the floor is skipped, rc stays 0).
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = main(["check", "--root", str(root), "--head", "refs/heads/absent-branch",
+                       "--allow-absent"])
+        lines = buf.getvalue().strip().splitlines()
+        if rc == 0 or not lines or lines[-1] != "GATE_VERDICT=NOT_EVALUATED":
+            failures.append(f"absent branch: rc={rc}, output {buf.getvalue().strip()!r} must end "
+                            f"GATE_VERDICT=NOT_EVALUATED with a non-zero exit")
+
     failures.extend(render_real_component())
     for failure in failures:
         print(f"SELF-TEST FAIL: {failure}")
@@ -540,7 +553,11 @@ def main(argv=None):
                 if args.allow_absent:
                     print(f"SUBJECTS=UNRESOLVED  # {args.head} does not exist yet (deploy/sandbox not "
                           f"bootstrapped by the owner); nothing to verify, which is not a pass")
-                    return 0
+                    # Exit 0 here would render PASS in run-gates.py (UNRESOLVED only skips the
+                    # floor). Same convention as check-ruleset-bypass-actors.py: NOT_EVALUATED
+                    # is a non-zero exit, so the gate stays red until the owner bootstraps.
+                    print("GATE_VERDICT=NOT_EVALUATED")
+                    return 1
                 raise PinError(f"{args.head} does not resolve")
             base = args.base
             if args.tip_only:
