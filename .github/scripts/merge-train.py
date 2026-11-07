@@ -92,6 +92,10 @@ EXCLUDED_BRANCH_PREFIXES = ("codex/",)
 OWNER_APPROVAL_CONTEXT = "merge-train/owner-approval"
 OWNER_APPROVAL_WORKFLOW = pathlib.Path(".github/workflows/merge-train-owner-approval.yml")
 CARRIER_LABEL = "merge-train"
+# Owner-applied ad-hoc priority: an armed PR carrying it is served first within its lane (after a
+# fix for a red main, which always goes first). Agents run under the owner's token, so this is a
+# policy, not an identity check: agents never apply it (CLAUDE.md, Multi-agent).
+EXPEDITE_LABEL = "merge-priority:expedite"
 TRAIN_BRANCH_RE = re.compile(r"^train/[0-9]+-[0-9]+$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 BUNDLE_FILE = "train.bundle"
@@ -130,7 +134,9 @@ GREEN_HOLDER_CAP_S = 2 * RESERVATION_CEILING_S
 TRAIN_TURN_S = 30 * 60
 # Green carrier first (#13400): a VERIFIED green carrier merges before any strict-lane PR is served in
 # the same tick — it is not voided by a strict merge. ONE exception, bounded to one tick per holder
-# head: a reservation holder that is itself GREEN on an up-to-date head merges first. Trade-off: the
+# head: a reservation holder that is itself GREEN on an up-to-date head AND did not defer to this
+# carrier (no DEFER_CONTEXT on its head) merges first; a holder that deferred keeps its promise, the
+# carrier built under its CI merges past it (2026-11-05: 9 carriers, 0 train merges). Trade-off: the
 # holder carries the oldest reservation and a full fleet CI (~1.5 h, restarted from zero if main moves),
 # while the carrier is cheap to rebuild from green heads; deploy/release PRs riding a carrier lose one
 # tick, not an hour (#14191/#14338, #14183/#14327). Original rule, measured 2026-10-24 08:00Z to
@@ -255,6 +261,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/check-deploy-pin-monotonic.py",        # judges a carrier by its members' deploy-revert labels
 )
 # Files that SUPPRESS security findings (scanner allowlists and rule sets). They were trainable as
 # plain data; a loosened one must take the owner's strict lane, wherever it lives.
@@ -781,8 +788,13 @@ def main_red_contexts(gh, git, required: list[str], base: str, cache: dict | Non
     return out
 
 
+def is_expedited(p: dict) -> bool:
+    return any((lb.get("name") if isinstance(lb, dict) else lb) == EXPEDITE_LABEL for lb in p.get("labels") or [])
+
+
 def order_candidates(prs: list[dict]) -> list[dict]:
-    return sorted(prs, key=lambda p: (p.get("created_at") or "", p["number"]))
+    """Expedited first, then oldest first. Every later ordering is a stable sort over this one."""
+    return sorted(prs, key=lambda p: (not is_expedited(p), p.get("created_at") or "", p["number"]))
 
 
 def is_protected(path: str, fragments: list[str]) -> str | None:
@@ -873,7 +885,15 @@ def assert_train_branch(name: str) -> None:
 
 
 # --------------------------------------------------------------------------- git
+# Every git/python spawn this process makes goes through here; the self-test asserts a CEILING on
+# the count (SELF_TEST_SPAWN_CEILING) because spawn time IS its wall time — measured 2026-11-03:
+# 18,534 spawns, 95 % of a 721 s loaded-Mac run and all of the 77-109 s on ubuntu-latest, where a
+# raised budget_seconds (#14685) was exceeded twice. Bounding the count is what keeps the budget.
+SPAWNS = [0]
+
+
 def sh(cmd: list[str], cwd: str | None = None, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
+    SPAWNS[0] += 1
     return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=check, env=env)
 
 
@@ -897,17 +917,70 @@ def generator_env() -> dict[str, str]:
 class Git:
     """Isolated git: no system/global config, no hooks, no fsmonitor; credentials only per call."""
 
+    # Read-only subcommands whose output, given FULL-sha arguments, is a pure function of the object
+    # store: content-addressed, so identical argv in the same clone answers identically until the
+    # store changes. Any other subcommand (fetch, checkout, merge, ...) may change the store or the
+    # worktree, so it clears the memo. A non-zero result is never memoised (a missing object becomes
+    # present after a fetch — which clears the memo anyway — and an error should be re-asked).
+    # Measured 2026-11-03: 7,125 of 18,291 git spawns in the self-test were exact (cwd, argv) repeats
+    # of such read-only commands; a ref name (`main`, `HEAD`, `origin/x`) is NEVER a memo key.
+    _MEMO_SUBCOMMANDS = frozenset({"rev-list", "rev-parse", "diff", "show", "merge-base", "log", "ls-tree",
+                                   "cat-file", "merge-tree", "diff-tree"})
+    _SHA_ARG = re.compile(r"^[0-9a-f]{40}(\^\{tree\}|\^\{commit\}|:[^\s]*|(\.\.|\.\.\.)[0-9a-f]{40})?$")
+
     def __init__(self, workdir: str, token: str | None = None):
         self.workdir, self.token = workdir, token
+        self._memo: dict[tuple, subprocess.CompletedProcess] = {}
+
+    # Subcommands that compare TWO revisions when given two, but read the WORKTREE or the INDEX when
+    # given one (`diff <sha>`), or when told to (`--cached`, `--staged`, `--no-index`, `--work-tree`).
+    # Neither is a function of the shas, so those shapes are never memoised (review on the first
+    # draft: a squash-merge or a generator run in the same workdir would otherwise be served a
+    # stale answer from a merge gate's own cache).
+    _TWO_REV_SUBCOMMANDS = frozenset({"diff", "diff-tree", "merge-base", "merge-tree"})
+    _NEVER_MEMO_FLAGS = frozenset({"--cached", "--staged", "--no-index", "--work-tree", "--index"})
+
+    def _memo_key(self, args: tuple[str, ...]) -> tuple | None:
+        """The argv if its output is a pure function of immutable shas, else None (never memoised).
+
+        Every positional must be a full 40-hex sha (optionally `^{tree}`, `^{commit}`, `:path`, or a
+        `..`/`...` range of two full shas); a `--` pathspec separator or anything after it, a symbolic
+        ref, an abbreviated sha, an index/worktree flag, or a single revision to a two-revision
+        subcommand all return None."""
+        sub = next((a for a in args if not a.startswith("-")), None)
+        if sub not in self._MEMO_SUBCOMMANDS:
+            return None
+        rest = args[args.index(sub) + 1:]
+        if "--" in rest or any(a.split("=", 1)[0] in self._NEVER_MEMO_FLAGS for a in rest):
+            return None
+        positional = [a for a in rest if not a.startswith("-")]
+        if not positional or not all(self._SHA_ARG.match(a) for a in positional):
+            return None
+        if sub in self._TWO_REV_SUBCOMMANDS:
+            revs = sum(2 if ".." in a else 1 for a in positional)
+            if revs < 2:
+                return None
+        return args
 
     def __call__(self, *args: str, check: bool = True, auth: bool = False) -> subprocess.CompletedProcess:
+        key = self._memo_key(args)
+        if key is None:
+            self._memo.clear()   # a write, or a read through a movable ref: nothing cached survives it
+        elif key in self._memo:
+            r = self._memo[key]
+            if check and r.returncode != 0:
+                raise subprocess.CalledProcessError(r.returncode, r.args, r.stdout, r.stderr)
+            return r
         env = base_env()
         if auth and self.token:
             basic = base64.b64encode(f"x-access-token:{self.token}".encode()).decode()
             env.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                         "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
-        return sh(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
-                  cwd=self.workdir, check=check, env=env)
+        r = sh(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", *args],
+               cwd=self.workdir, check=check, env=env)
+        if key is not None and r.returncode == 0:
+            self._memo[key] = r
+        return r
 
     def tree(self, rev: str) -> str:
         r = self("rev-parse", "--verify", "--quiet", f"{rev}^{{tree}}", check=False)
@@ -1488,6 +1561,51 @@ def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     log(f"owner decision: {decision} PR #{number} at {head}")
 
 
+LINKED_ISSUES_QUERY = ("query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
+                       "pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number state "
+                       "repository{nameWithOwner}}}}}}")
+
+
+def close_linked_issues(repo: str, n: int, sha: str) -> list[int]:
+    """Close the issues PR `n` links with `Closes #N` (#14510). GitHub records the link but emits no
+    close when an App merges, so the train does it. Same-repository, still-OPEN issues only (so a
+    re-run is a no-op); every failure is logged and swallowed — the merge already happened and must
+    never be reported as failed because of this. Returns the issue numbers it closed."""
+    closed: list[int] = []
+    try:
+        owner, name = repo.split("/", 1)
+        code, data = api("POST", "/graphql", {"query": LINKED_ISSUES_QUERY,
+                                              "variables": {"owner": owner, "name": name, "n": int(n)}})
+        nodes = (((((data or {}).get("data") or {}).get("repository") or {}).get("pullRequest") or {})
+                 .get("closingIssuesReferences") or {}).get("nodes") if code == 200 and isinstance(data, dict) else None
+        if nodes is None:
+            log(f"::warning::#{n}: could not read linked issues ({code}); none closed")
+            return closed
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("state") != "OPEN":
+                continue
+            if (node.get("repository") or {}).get("nameWithOwner") != repo or type(node.get("number")) is not int:
+                continue
+            i = node["number"]
+            try:
+                c, _ = api("POST", f"/repos/{repo}/issues/{i}/comments",
+                           {"body": f"Closed by #{int(n)} ({sha}) — merged by the merge train."})
+                if c != 201:
+                    log(f"::warning::#{n}: comment on issue #{i} -> {c} (needs issues:write); not closed")
+                    continue
+                c, _ = api("PATCH", f"/repos/{repo}/issues/{i}", {"state": "closed", "state_reason": "completed"})
+                if c == 200:
+                    closed.append(i)
+                    log(f"#{n}: closed linked issue #{i}")
+                else:
+                    log(f"::warning::#{n}: close issue #{i} -> {c} (needs issues:write)")
+            except Exception as e:  # noqa: BLE001 — never fail the merge job over an issue
+                log(f"::warning::#{n}: closing issue #{i} failed: {type(e).__name__}: {e}")
+    except Exception as e:  # noqa: BLE001
+        log(f"::warning::#{n}: linked-issue close skipped: {type(e).__name__}: {e}")
+    return closed
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -1651,7 +1769,10 @@ class GitHub:
             log(f"::notice::#{n} source intent or head changed — not merged")
             return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
-        return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        sha = data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        if sha:
+            close_linked_issues(self.repo, n, sha)
+        return sha
 
     def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
         """Retry once per run, including CI's attempt-bound evidence ancestor. The caller keeps the
@@ -1821,6 +1942,46 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
             "body": p.get("body") or "", "files": files}
 
 
+# Admission prerequisites judged on the PR OBJECT (#14684). `security-checklist-money-path` runs inside
+# the tree-dependent `Validate manifests` context, which a body edit does not re-run: an unticked
+# money-path PR sits red there, and every path that looks past a red context — fix-head masking,
+# stale-red refresh (an update-branch = a full CI run), strict-lane "waiting" — could still spend CI
+# or a reservation on a PR whose own gate will fail again. So the train runs the SAME gate script
+# (from its own trusted checkout, never the PR's) on the body it just listed, against the verified
+# head, before any lane. It can only REFUSE: a PR it passes still needs every required context
+# green. Draft and issue-hygiene need nothing here — draft is filtered before fetch, and
+# issue-hygiene is its own required context, re-run by GitHub on every body edit.
+CHECKLIST_GATE = pathlib.Path(__file__).resolve().parent / "check-security-checklist.py"
+
+
+def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
+    """None = admissible. Otherwise why not. Fail closed: anything but exit 0/1 refuses."""
+    head = view.get("head_sha") or ""
+    if not SHA_RE.fullmatch(head) or not SHA_RE.fullmatch(base or ""):
+        return "admission check: no verified head/base sha — fail closed"
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+        fh.write(view.get("body") or "")   # a file, never argv: the body is attacker-controlled text
+        body_file = fh.name
+    cmd = [sys.executable, "-I", str(CHECKLIST_GATE), "--body-file", body_file, "--base", base,
+           "--head", head, "--root", ".", "--enforce"]
+    try:
+        rc = (runner or (lambda c: subprocess.run(c, cwd=git.workdir, env=base_env(), capture_output=True,
+                                                   text=True, timeout=120).returncode))(cmd)
+    except Exception as exc:   # noqa: BLE001 — any failure to judge is a refusal
+        return f"admission check could not run ({type(exc).__name__}) — fail closed"
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(body_file)
+    if rc == 0:
+        return None
+    if rc == 1:
+        return ("security-checklist-money-path fails on the live body — tick the checklist, then re-run "
+                "Validate manifests; the train re-reads the body every tick")
+    if not CHECKLIST_GATE.is_file():
+        return f"admission gate missing at {CHECKLIST_GATE} — fail closed, this is a train wiring defect"
+    return f"admission check exited {rc} — fail closed"
+
+
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
                     red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
@@ -1893,6 +2054,11 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             if len(chain) > 1:   # an exact-head decision is already in `app`: no extra read
                 app = with_owner_decision(gh, app, chain)
         view["app"] = app                    # strict_lane reads the notice from it, no second read
+        refusal = admission_refusal(git, base, view)
+        if refusal:
+            # Before every lane AND the stale-red queue: no batch, no reservation, no update-branch.
+            log(f"#{n:>6} skip      {refusal}")
+            continue
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
@@ -2311,7 +2477,8 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
             hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
             if (hstate == "green" and not shadow
                     and git("merge-base", "--is-ancestor", live_main, hview["head_sha"], check=False).returncode == 0
-                    and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"):
+                    and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"
+                    and gh.app_statuses(hview["head_sha"]).get(DEFER_CONTEXT, ("", ""))[0] != "success"):
                 # Green holder first, ONE tick per holder head: the holder is green on a head that contains
                 # live main (re-checked against live main, since an earlier carrier of this tick may have
                 # moved it), so it merges in THIS tick's strict_lane. A carrier merging first would push it
@@ -2320,6 +2487,16 @@ def mode_settle(gh, git, repo: str, shadow: bool) -> dict:
                 # holder head so the wait is bounded: if the holder is still green and unmerged next tick
                 # (merge refused, source intent changed, a train in flight, main-red deferral) the carrier
                 # takes the green-carrier-first path below instead of stalling behind it.
+                # NOT for a holder that DEFERRED to this carrier (DEFER_CONTEXT on its head, recorded by
+                # publish under the bounded deferral): that record is the promise that the carrier built
+                # under its CI may merge past it. Honouring the holder first instead voided every such
+                # carrier — the holder's CI always starts before the carrier's (the carrier is built
+                # during it), so it goes green first, merges, and the carrier is rejected next tick as
+                # "main moved since publish"; the rebuilt carrier is then built under the NEXT reservation
+                # and loses again. Measured 2026-11-05 00:00-10:50Z: 9 carriers, 0 train merges, 22 strict
+                # PRs queued (#14860 lost to #14831 at 07:47Z, #14871 to #14562 at 10:35Z). The deferring
+                # holder keeps the ADR-0343 bound: pre-empted at most once, its update-branch inherits the
+                # record through the first parent and no further carrier is built under it.
                 gh.post_status(hview["head_sha"], "success", f"green carrier #{carrier} waited one tick for this head",
                                context=CARRIER_YIELD_CONTEXT)
                 log(f"carrier #{carrier}: green, but strict-lane #{holder} is green and up to date — it merges "
@@ -2666,9 +2843,10 @@ def deferral_state(gh, git, strict: list, holder: int) -> str | None:
     """Bounded deferral (ADR-0343, #13400) for the reservation holder: "open" — its CI is still
     RUNNING and it never yielded, so ONE carrier may be built under it; "granted" — a carrier was
     published under it (DEFER_CONTEXT on THIS head), so that green carrier may merge past it; None —
-    held. A VERIFIED green carrier is held only for a GREEN, up-to-date holder, and only one tick per
-    holder head (CARRIER_YIELD_CONTEXT): that holder merges first. Past a running holder, or a green
-    one that already had its tick, it merges before strict_lane runs (green carrier first, #13400). Its merge puts the head behind main and its
+    held. A VERIFIED green carrier is held only for a GREEN, up-to-date holder that did NOT defer to
+    it (no DEFER_CONTEXT on that head), and only one tick per holder head (CARRIER_YIELD_CONTEXT):
+    that holder merges first. Past a running holder, a "granted" one, or a green one that already had
+    its tick, it merges before strict_lane runs (green carrier first, #13400). Its merge puts the head behind main and its
     update-branch inherits the record through the first parent: after that one yield no further
     carrier is built under it, so the strict PR has priority until it merges or fails."""
     view = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
@@ -3040,9 +3218,11 @@ JOB_MUST = {
               ("build reports drops", "has_drops: ${{ steps.build.outputs.has_drops }}")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
                                                               ("publish runs publish", "\" publish"),
+                                                              ("publish copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                               ("publish also runs on drops alone (notices)",
                                                                "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
+                                                           ("settle copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                            ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}")],
 }
 JOB_FORBID = {
@@ -3171,7 +3351,8 @@ SYN_GENERATOR_SRC = (
     "    for f in fs:\n"
     "        if fnmatch.fnmatch(f,'gen-*opa-bundle*.sh'): subprocess.run(['bash',os.path.join(r,f)])\n"
 )
-SYN_RULES = "merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+SYN_RULES = ("merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+             "money_path_services:\n  - paysvc\n")
 SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
 # The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
 # them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
@@ -3223,7 +3404,11 @@ class FakeGitHub:
         return ruleset_guard([{"type": "required_status_checks", "parameters": {
             "strict_required_status_checks_policy": self.rs_strict, "required_status_checks": self.rs_checks}}], self.app_id)
 
+    _READS = frozenset({"rev-parse", "log", "show", "cat-file", "rev-list", "ls-tree", "merge-base", "diff"})
+
     def g(self, *a, check=True):
+        if next((x for x in a if not x.startswith("-")), None) not in self._READS:
+            self._main = None   # anything that can move main (update-ref, merge, reset, commit, checkout) drops the cache
         return sh(["git", "-c", "core.hooksPath=/dev/null", *a], cwd=self.origin, check=check, env=base_env())
 
     def add_pr(self, n: int, branch: str, created: str):
@@ -3234,7 +3419,13 @@ class FakeGitHub:
 
     def head_refspec(self, n): return f"refs/heads/{self.prs[n]['head']['ref']}"
     def required(self): return list(SYN_REQUIRED)
-    def main_sha(self): return self.g("rev-parse", "main").stdout.strip()
+    def main_sha(self):
+        # Semantically "live main NOW", re-read by production code before every merge; the fixture's
+        # main moves only through g() above, which drops the cache. 1,216 of the self-test's spawns
+        # were this one command (measured 2026-11-03).
+        if getattr(self, "_main", None) is None:
+            self._main = self.g("rev-parse", "main").stdout.strip()
+        return self._main
     def open_prs(self): return [p for p in list(self.prs.values()) + list(self.carriers.values()) if p["state"] == "open"]
     def pr(self, n): return self.prs[n]
 
@@ -3547,6 +3738,56 @@ def _synthetic_origin(root: str) -> None:
               "docs/d.md": "d\n"})
 
 
+def git_memo_self_test(check) -> None:
+    """The Git memo serves only answers that are pure functions of immutable shas.
+
+    Negative cases first: a worktree-reading `diff <sha>` must NOT be served from the memo after the
+    worktree changes, and index/worktree flags, pathspecs, symbolic refs and short shas never form a
+    key. Then the positive case, so a memo that quietly stopped caching is noticed too."""
+    with tempfile.TemporaryDirectory() as d:
+        git = Git(d)
+        git("init", "-q", "-b", "main")
+        pathlib.Path(d, "f.txt").write_text("one\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "one")
+        a = git("rev-parse", "HEAD").stdout.strip()
+        pathlib.Path(d, "f.txt").write_text("two\n")
+        git("add", "f.txt"); git("commit", "-q", "-m", "two")
+        b = git("rev-parse", "HEAD").stdout.strip()
+        # 1. diff <sha> reads the worktree: never memoised, so a worktree change is seen.
+        first = git("diff", a).stdout
+        pathlib.Path(d, "f.txt").write_text("three\n")
+        second = git("diff", a).stdout
+        check("git memo: `diff <sha>` (worktree) is re-read after the worktree changes", first != second,
+              "a worktree-reading diff was served from the memo")
+        check("git memo: `diff <sha>` forms no key", git._memo_key(("diff", a)) is None)
+        for shape in (("diff", "--cached", a, b), ("diff", "--staged", a, b), ("diff", "--no-index", a, b),
+                      ("diff", a, b, "--", "f.txt"), ("diff", a[:12], b), ("diff", "main", b), ("diff", a, "HEAD"),
+                      ("merge-base", a), ("diff-tree", a), ("rev-parse", "HEAD"), ("show", "main:f.txt"),
+                      ("log", "-1", "origin/main")):
+            check(f"git memo: {' '.join(shape)} forms no key", git._memo_key(shape) is None)
+        # 2. index-reading diff with two shas and --cached: still re-read after `git add`.
+        pathlib.Path(d, "f.txt").write_text("four\n")
+        before = git("diff", "--cached", a).stdout
+        git("add", "f.txt")
+        after = git("diff", "--cached", a).stdout
+        check("git memo: `diff --cached` is re-read after the index changes", before != after)
+        git("reset", "-q", "--hard", b)
+        # 3. pure shapes ARE memoised, and a write clears them.
+        for shape in (("diff", "--stat", a, b), ("diff", "--raw", "-z", f"{a}..{b}"), ("rev-list", f"{a}..{b}"),
+                      ("show", "-s", "--format=%H", b), ("rev-parse", f"{b}^{{tree}}"), ("merge-base", a, b),
+                      ("show", f"{b}:f.txt"), ("ls-tree", "-r", b), ("cat-file", "-e", f"{b}^{{commit}}")):
+            check(f"git memo: {' '.join(shape)} forms a key", git._memo_key(shape) is not None)
+        git("diff", "--stat", a, b)
+        n = SPAWNS[0]
+        git("diff", "--stat", a, b)
+        check("git memo: a pure two-sha diff is served from the memo (no spawn)", SPAWNS[0] == n)
+        git("checkout", "-q", "--detach", a)
+        git("diff", "--stat", a, b)
+        check("git memo: a write clears the memo (spawn again)", SPAWNS[0] == n + 2)
+        r = git("show", "-s", "--format=%H", "0" * 40, check=False)
+        check("git memo: a failing read is not cached", r.returncode != 0 and ("show", "-s", "--format=%H", "0" * 40) not in git._memo)
+
+
 def retry_planner_self_test(check) -> None:
     """Exercise the real GitHub adapter and HTTP transport scope, without live API access."""
     import copy
@@ -3673,6 +3914,13 @@ def retry_planner_self_test(check) -> None:
         _GET_MEMO.update(saved[4])
 
 
+# Measured 2026-11-03 with the Git memo and the fixture's main_sha cache: 12,792 spawns over 461 cases
+# (18,534 before). ~9 % headroom for the cases in flight (#14685 adds admission cases). A new case may
+# raise it, with its own `spawns=` measurement, in the same PR. The number is the control: it fails
+# before the shard's time budget does, and it fails the same way on a fast machine as on a slow one.
+SELF_TEST_SPAWN_CEILING = 14000
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -3684,6 +3932,7 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    git_memo_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -3895,6 +4144,12 @@ def self_test() -> int:
               qualifies(base_pr, req, green, {STATUS_CONTEXT: ("failure", desc)})[0])
     check("order: oldest first", [p["number"] for p in order_candidates(
         [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"}])] == [3, 9])
+    check("order: an expedited PR goes first, then oldest first", [p["number"] for p in order_candidates(
+        [{"number": 9, "created_at": "2026-02"}, {"number": 3, "created_at": "2026-01"},
+         {"number": 7, "created_at": "2026-03", "labels": [{"name": EXPEDITE_LABEL}]}])] == [7, 3, 9])
+    check("order: another label is not priority", [p["number"] for p in order_candidates(
+        [{"number": 9, "created_at": "2026-02", "labels": [{"name": "merge-priority:repair"}]},
+         {"number": 3, "created_at": "2026-01"}])] == [3, 9])
 
     # ---- paths / fast lane / batch ---------------------------------------------------------
     check("glob: `*` does not cross `/`", glob_match("a/*-opa-bundle.yaml", "a/x-opa-bundle.yaml")
@@ -4144,6 +4399,63 @@ def self_test() -> int:
           strict_lane_state(wf, req, {**green, "Trivy": "failure"}, None, U, [], {"Trivy": "c" * 40}, xg)[0] == "waiting")
     check("extra gates: strict lane reads a running Trivy as pending",
           strict_lane_state(wf, req, {**green, "Trivy": None}, None, U, [], None, xg)[0] == "pending")
+
+    # ---- admission prerequisites (#14684) -------------------------------------------------
+    # Unit: the exit-code contract, fail closed. Every must-FAIL case comes first.
+    av = {"head_sha": "a" * 40, "body": ""}
+    gd = type("G", (), {"workdir": "."})()
+    check("admission: gate exit 1 refuses", admission_refusal(gd, "b" * 40, av, lambda c: 1) is not None)
+    for rc in (2, 124, -9):
+        check(f"admission: gate exit {rc} refuses (fail closed)", admission_refusal(gd, "b" * 40, av, lambda c, rc=rc: rc) is not None)
+
+    def boom(c):
+        raise subprocess.TimeoutExpired(c, 120)
+    check("admission: a gate that cannot run refuses (fail closed)", admission_refusal(gd, "b" * 40, av, boom) is not None)
+    check("admission: no verified head refuses", admission_refusal(gd, "b" * 40, {"head_sha": "HEAD", "body": ""}, lambda c: 0) is not None)
+    seen: list = []
+    check("admission: exit 0 admits", admission_refusal(gd, "b" * 40, {**av, "body": "$(touch pwn) --self-test"},
+                                                        lambda c: seen.append(c) or 0) is None)
+    check("admission: the body never reaches argv", seen and not any("pwn" in a or a == "--self-test" for a in seen[0]), str(seen))
+    check("admission: runs the train's own gate script, not the PR's",
+          seen and seen[0][2] == str(CHECKLIST_GATE) and CHECKLIST_GATE.is_file(), str(seen))
+    # Integration: the REAL gate script over a real repository, money-path vs not, body unticked vs ticked.
+    with tempfile.TemporaryDirectory() as adm:
+        env = base_env()
+
+        def ag(*a):
+            return subprocess.run(["git", *a], cwd=adm, text=True, capture_output=True, check=True, env=env).stdout.strip()
+        ag("init", "-q", "-b", "main")
+        pathlib.Path(adm, RULES_FILE).parent.mkdir(parents=True)
+        pathlib.Path(adm, RULES_FILE).write_text(SYN_RULES)
+        pathlib.Path(adm, "paysvc/src/main").mkdir(parents=True)
+        pathlib.Path(adm, "paysvc/src/main/Pay.kt").write_text("class Pay\n")
+        ag("add", "-A")
+        ag("commit", "-q", "-m", "base")
+        abase = ag("rev-parse", "HEAD")
+        pathlib.Path(adm, "paysvc/src/main/Pay.kt").write_text("class Pay(val amount: Long)\n")
+        ag("commit", "-qam", "money")
+        money = ag("rev-parse", "HEAD")
+        ag("checkout", "-q", abase)
+        pathlib.Path(adm, "docs").mkdir()
+        pathlib.Path(adm, "docs/x.md").write_text("x\n")
+        ag("add", "-A")
+        ag("commit", "-q", "-m", "docs")
+        docs = ag("rev-parse", "HEAD")
+        tpl = pathlib.Path(__file__).resolve().parents[1] / "PULL_REQUEST_TEMPLATE.md"
+        section = re.search(r"## Security checklist\n.*?(?=\n## )", tpl.read_text(), re.S).group(0)
+        ticked = section.replace("- [ ]", "- [x]")
+        ga = Git(adm)
+        cases = [
+            ("money-path, no checklist section", money, "Refs #1", False),
+            ("money-path, template section unticked", money, "Refs #1\n\n" + section, False),
+            ("money-path, ticked boxes for the WRONG questions", money,
+             "## Security checklist\n- [x] looks fine\n- [x] trust me\n", False),
+            ("money-path, ticked", money, "Refs #1\n\n" + ticked, True),
+            ("not money-path, no checklist", docs, "Refs #1", True),
+        ]
+        for label, head, body, want in cases:
+            got = admission_refusal(ga, abase, {"head_sha": head, "body": body})
+            check(f"admission (real gate): {label} -> {'admit' if want else 'refuse'}", (got is None) == want, str(got))
 
     # ---- real git, real ticks ----------------------------------------------------------------
     saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}
@@ -5323,11 +5635,16 @@ def self_test() -> int:
             gh.head_checks.clear()
             reset()
 
-            # (3) GREEN HOLDER FIRST (#14191/#14338, #14183/#14327): the strict head and the carrier
-            # built under its CI are BOTH green in one tick. The holder is up to date, so it merges
-            # first; the carrier merging first would push it behind main and restart its full CI.
-            # The carrier merges nothing this tick (it is rebuilt over the new main later). This is
-            # the must-FAIL case: on code where the green carrier goes first, gh.merged == [1].
+            # (3) GRANTED DEFERRAL IS HONOURED (2026-11-05): the strict head and the carrier built under
+            # its CI are BOTH green in one tick. The holder yielded to THIS carrier at publish
+            # (DEFER_CONTEXT on its head), so the carrier merges first and the holder is not merged on
+            # this tick; it is update-branched and inherits the record, so no further carrier is built
+            # under it. This is the must-FAIL case: on code where a green holder pre-empts the carrier
+            # it deferred to, gh.merged == [35] and the carrier is voided by "main moved since publish".
+            # Measured 2026-11-05 00:00-10:50Z: 9 carriers published, 0 train merges; each green carrier
+            # (#14860 for #14831, #14871 for #14562, ...) waited one tick, lost main to the holder it had
+            # been built under, and was rejected on the next tick — with 22 strict PRs queued, every
+            # rebuilt carrier was built under the next reservation and lost again.
             gh.updates.clear()
             running_reservation_and_green_candidate()
             tick()
@@ -5336,12 +5653,33 @@ def self_test() -> int:
             s = settle_now()
             def yielded(sha):
                 return gh.app_statuses(sha).get(CARRIER_YIELD_CONTEXT, ("", ""))[0]
-            check("green holder first: green strict holder + green carrier -> the holder merges, the carrier does not",
+            check("granted deferral: green holder that yielded to this carrier + green carrier -> the carrier merges, the holder does not",
+                  gh.merged == [1] and 35 not in gh.merged and not s["rejected"] and deferral(pw_head) == "success",
+                  f"{s} merged={gh.merged} updates={gh.updates} defer={deferral(pw_head)!r}")
+            check("granted deferral: no one-tick yield is recorded on the holder head (it already yielded at publish)",
+                  yielded(pw_head) != "success", f"yielded={yielded(pw_head)!r}")
+            gh.updates.clear()
+            reset()
+
+            # (3-nd) GREEN HOLDER FIRST, only for a holder that did NOT defer (#14191/#14338, #14183/#14327):
+            # the same two green heads, but the holder's head carries no DEFER_CONTEXT (the carrier was not
+            # built under its reservation). The holder is up to date, so it merges first; the carrier
+            # merging first would push it behind main and restart its full CI. The carrier merges nothing
+            # this tick (it is rebuilt over the new main later). Must-FAIL case: on code where the green
+            # carrier goes first unconditionally, gh.merged == [1].
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.statuses[pw_head] = [r for r in gh.statuses.get(pw_head, []) if r[0] != DEFER_CONTEXT]
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            s = settle_now()
+            check("green holder first (no deferral): green strict holder + green carrier -> the holder merges, the carrier does not",
                   gh.merged == [35] and 1 not in gh.merged and gh.updates == [],
                   f"{s} merged={gh.merged} updates={gh.updates}")
-            check("green holder first: the holder was merged on its own, un-updated head",
+            check("green holder first (no deferral): the holder was merged on its own, un-updated head",
                   gh.prs[35]["head"]["sha"] == pw_head, "head moved")
-            check("green holder first: the carrier is left open and NOT in flight; the yield is recorded on the holder head",
+            check("green holder first (no deferral): the carrier is left open and NOT in flight; the yield is recorded on the holder head",
                   not s["in_flight"] and any(c["state"] == "open" for c in gh.carriers.values()) and yielded(pw_head) == "success",
                   f"{s} yielded={yielded(pw_head)!r}")
             gh.updates.clear()
@@ -5355,6 +5693,7 @@ def self_test() -> int:
             running_reservation_and_green_candidate()
             tick()
             pw_head = gh.prs[35]["head"]["sha"]
+            gh.statuses[pw_head] = [r for r in gh.statuses.get(pw_head, []) if r[0] != DEFER_CONTEXT]  # a holder that did not defer
             gh.post_status(pw_head, "success", "strict lane: left by a refused merge")   # a stale success
             gh.head_checks.clear()
             gh.refuse_merge = {35}
@@ -5368,6 +5707,21 @@ def self_test() -> int:
                   gh.app_statuses(pw_head).get(STATUS_CONTEXT, ("", ""))[0] != "success",
                   f"{gh.app_statuses(pw_head).get(STATUS_CONTEXT)}")
             gh.refuse_merge = set()
+            gh.updates.clear()
+            reset()
+
+            # (3b) THE ONE-YIELD BOUND under the granted deferral: the carrier merged past the holder that
+            # deferred to it (case 3). The holder is behind main, is update-branched once, its new head
+            # inherits the deferral record through the first parent, so no second carrier is built while
+            # its CI runs, and it merges after that one more CI cycle — the ADR-0343 bound.
+            gh.updates.clear()
+            running_reservation_and_green_candidate()
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.head_checks.clear()                     # pW goes green; the carrier is green as well
+            settle_now()                               # the carrier merges first (granted deferral)
+            check("one-yield bound: the carrier merged, the deferring holder was update-branched once",
+                  gh.merged == [1] and gh.updates == [35], f"merged={gh.merged} updates={gh.updates}")
             b_head = gh.prs[35]["head"]["sha"]
             if b_head == pw_head:
                 settle_now()
@@ -5377,7 +5731,7 @@ def self_test() -> int:
             _s2, st2 = tick()                          # its CI runs: no second carrier (deferral inherited)
             gh.head_checks.clear()
             s3 = settle_now()
-            check("green carrier first: strict PR is served next - updated once, merges after one more CI cycle",
+            check("one-yield bound: strict PR is served next - updated once, merges after one more CI cycle",
                   gh.updates == [35] and st2 == "in-flight" and 35 in s3["merged"] and 2 not in gh.merged,
                   f"st2={st2} s3={s3} merged={gh.merged} updates={gh.updates}")
             gh.updates.clear()
@@ -6678,8 +7032,13 @@ def self_test() -> int:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+    check(f"spawn budget: the self-test issued {SPAWNS[0]} subprocess spawns, ceiling {SELF_TEST_SPAWN_CEILING}",
+          SPAWNS[0] <= SELF_TEST_SPAWN_CEILING,
+          "spawn count is wall time on ubuntu-latest (~5 ms each); batch or memoise the new calls, or raise the "
+          "ceiling in the same PR with the measurement that justifies it")
     for f in fails:
         print(f"  [FAIL] {f}")
+    print(f"spawns={SPAWNS[0]}")
     print(f"SUBJECTS={len(ran)}")
     print(f"merge-train self-test: {len(ran)} cases, {len(fails)} failed")
     return 1 if fails else 0
@@ -6693,7 +7052,7 @@ def main() -> int:
     ap.add_argument("--check-declaration", action="store_true")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     ap.add_argument("--branch", default="main")
-    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "8")))
+    ap.add_argument("--batch-size", type=int, default=int(os.environ.get("TRAIN_BATCH_SIZE", "16")))
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
     ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
     ap.add_argument("--run-id", default="")

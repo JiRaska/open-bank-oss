@@ -59,7 +59,7 @@ select_modules() {
     # Unknown build inputs fall back to the full fleet below. Full history makes
     # HEAD~1 available on main (squash-merged pushes are single commits).
     DIFF_BASE=HEAD~1
-    FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
+    FILES=$(git diff --no-renames --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
     if admin_ui_pact_changed "$FILES"; then
       echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
     fi
@@ -187,7 +187,7 @@ select_modules() {
     # to BASE...HEAD but observable and robust to odd ref state.
     MB=$(git merge-base "$BASE" HEAD 2>/dev/null) || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
     DIFF_BASE="$MB"
-    FILES=$(git diff --name-only "$MB" HEAD)
+    FILES=$(git diff --no-renames --name-only "$MB" HEAD)
     echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
     echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 

@@ -363,3 +363,17 @@ describe('governance.schema.json is derived, not hand-written', () => {
     expect(JSON.parse(onDisk)).toEqual(jsonSchema())
   })
 })
+
+it('requires ownership for an unreleased runnable module independently of version registration', () => {
+  const repo = mkdtempSync(path.join(tmpdir(), 'gov-unreleased-'))
+  try {
+    const moduleDir = path.join(repo, 'openbank-example-service')
+    mkdirSync(path.join(moduleDir, 'src/main'), { recursive: true })
+    writeFileSync(path.join(moduleDir, 'build.gradle.kts'),
+      'plugins { id("openbank.quarkus-service") }\nimplementation(project(":openbank-libs-runtime"))\n')
+    expect(buildManifest(repo).gaps).toContain('openbank-example-service: missing governance.yaml')
+    writeFileSync(path.join(moduleDir, 'governance.yaml'), OWNS_NO_DB)
+    expect(buildManifest(repo).gaps).toEqual([])
+    expect(buildManifest(repo).services[0].dataDomain).toBe('payments')
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})

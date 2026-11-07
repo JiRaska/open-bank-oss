@@ -302,3 +302,28 @@ test_customer_edge_spoofed_name_cannot_list_or_read if {
 			with data.rules as b6_rules
 	}
 }
+
+# --- card-read-staff-viewer: viewers see the list/detail, never the PAN, machines never ---
+
+test_viewer_lists_and_reads_cards if {
+	every a in ["card.list", "card.read"] {
+		"card-read-staff-viewer" in rest.allowed_reasons with input as {
+			"principal": {"type": "HUMAN", "id": "u-view", "service_account": false, "roles": ["ROLE_VIEWER"]},
+			"action": a,
+		}
+	}
+}
+
+test_viewer_still_cannot_read_pan if {
+	not "card-read-staff-viewer" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "u-view", "service_account": false, "roles": ["ROLE_VIEWER"]},
+		"action": "card.details.read",
+	}
+}
+
+test_machine_viewer_not_granted_card_read if {
+	not "card-read-staff-viewer" in rest.allowed_reasons with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-x", "service_account": true, "roles": ["ROLE_VIEWER"]},
+		"action": "card.list",
+	}
+}

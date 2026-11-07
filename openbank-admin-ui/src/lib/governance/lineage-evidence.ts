@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export type LineageRole = 'producer' | 'consumer' | 'both' | 'internal'
-export type LineageDomain = 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
+import { DOMAIN_IDS, type DomainId } from './domains'
+export type LineageDomain = DomainId
 export type LineageRelation = 'api' | 'topic' | 'datastore' | 'unknown'
 export type LineageLink = { serviceName: string; relationType: LineageRelation; description?: string }
 export type GovernanceLineageService = {
@@ -19,7 +20,7 @@ export type GovernanceLineageEnvelope =
   | { available: false; services: [] }
   | { available: true; services: GovernanceLineageService[] }
 
-const DOMAINS = new Set<LineageDomain>(['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform'])
+const DOMAINS = new Set<LineageDomain>(DOMAIN_IDS)
 const ROLES = new Set<LineageRole>(['producer', 'consumer', 'both', 'internal'])
 const RELATIONS = new Set<LineageRelation>(['api', 'topic', 'datastore', 'unknown'])
 
