@@ -445,8 +445,10 @@ gates:
         find openbank-infra .github \( -name '*.yaml' -o -name '*.yml' \) -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
+      batch_size=$(( (${#files[@]} + 7) / 8 ))
+      if (( batch_size < 40 )); then batch_size=40; fi
       printf '%s\0' "${files[@]}" \
-        | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
+        | xargs -0 -P 4 -n "$batch_size" yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
     selftest_exempt: "third-party — shellcheck's own test suite is not ours to run"
