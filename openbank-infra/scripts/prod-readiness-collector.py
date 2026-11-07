@@ -33,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gitops_facts import (  # noqa: E402  (path must be set before the import)
     declared_datastore,
+    frozen_tree,
     is_stateless,
     module_dir,
     money_path_services,
@@ -634,11 +635,14 @@ def main():
         ap.error("give a service name or --all")
 
     results = []
-    for short in targets:
-        if not exists_dir(short):
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        results.append(collect(short, att, args.today))
+    # Scoring only reads the GitOps tree. Reuse its workload snapshot within this
+    # batch; the context restores fresh library reads before another invocation.
+    with frozen_tree():
+        for short in targets:
+            if not exists_dir(short):
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            results.append(collect(short, att, args.today))
 
     if args.table:
         render_table(results)

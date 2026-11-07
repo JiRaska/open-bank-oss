@@ -31,6 +31,7 @@ class FreshMainTests(unittest.TestCase):
             def merge_guard(self): return None
             def required(self): return [CTX, TRAIN.STATUS_CONTEXT]
             def open_prs(self): return []
+            def stuck_issue(self): return None, None
             def ci_activity(self, *_args): return None
             def main_sha(self): return 'main'
             def post_status(self, *args, **kwargs): self.writes.append(('status', args))

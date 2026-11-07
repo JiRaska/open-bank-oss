@@ -107,13 +107,18 @@ jobs:
                 sel="$(jq -c --arg c "$changed" '[.[] | . as $i | select(($c | split("\n")) | any(startswith($i.context + "/")))]' <<<"$ALL")"
               fi ;;
           esac
-          # Derive each tag from its Dockerfile's pinned ARG — the single source of truth.
+          # Derive each tag from its Dockerfile's pinned ARG — the single source of truth — plus
+          # the building commit. ECR tags are immutable, so a rebuild of an unchanged upstream
+          # version under the bare `<ver><suffix>` tag left that tag on the OLD digest and failed
+          # "Tag attested image" (#14333). The version stays the tag's leading component, which is
+          # what render-verify-keycloak-realm-import.sh reads.
+          build="${GITHUB_SHA::12}"
           out='[]'
           for row in $(jq -c '.[]' <<<"$sel"); do
             ctx="$(jq -r .context <<<"$row")"; arg="$(jq -r .version_arg <<<"$row")"
             ver="$(grep -m1 -oE "^ARG ${arg}=[A-Za-z0-9._-]+" "${ctx}/Dockerfile" | cut -d= -f2 || true)"
             [ -n "$ver" ] || { echo "::error::no 'ARG ${arg}=' in ${ctx}/Dockerfile"; exit 1; }
-            out="$(jq -c --argjson r "$row" --arg t "${ver}$(jq -r .suffix <<<"$row")" '. + [$r + {tag: $t}]' <<<"$out")"
+            out="$(jq -c --argjson r "$row" --arg t "${ver}$(jq -r .suffix <<<"$row")-${build}" '. + [$r + {tag: $t}]' <<<"$out")"
           done
           echo "matrix=$out" >> "$GITHUB_OUTPUT"
           echo "any=$(jq 'length > 0' <<<"$out")" >> "$GITHUB_OUTPUT"

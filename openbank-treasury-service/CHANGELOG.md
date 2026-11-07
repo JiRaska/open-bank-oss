@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.4](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.3...treasury-service-v0.20.4) (2026-11-06)
+
+
+### Bug Fixes
+
+* **treasury:** re-reconcile open nostro breaks past the lookback window ([#14824](https://github.com/JiRaska/open-bank-oss/issues/14824)) ([881ad6f](https://github.com/JiRaska/open-bank-oss/commit/881ad6fd854e213260c0ebce48e8f0caa417ee5b))
+
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.2...treasury-service-v0.20.3) (2026-11-06)
+
+
+### Bug Fixes
+
+* **treasury:** answer 400, not 500, for a null element in a reference import ([#14776](https://github.com/JiRaska/open-bank-oss/issues/14776)) ([cbb05c3](https://github.com/JiRaska/open-bank-oss/commit/cbb05c3be053bf5f0dc9e966175f877f55af2098))
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.1...treasury-service-v0.20.2) (2026-11-03)
 
 

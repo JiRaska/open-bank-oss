@@ -171,6 +171,7 @@ def self_test() -> int:
         g("init", "-q", "-b", "main")
         g("config", "user.email", "t@t")
         g("config", "user.name", "t")
+        g("config", "commit.gpgsign", "false")
         g("add", ".")
         g("commit", "-qm", "base")
         base = subprocess.run(["git", "-C", t, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
