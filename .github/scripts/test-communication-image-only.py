@@ -70,7 +70,7 @@ for expression, kind in expressions:
                 target = target[key]
             target[path[-1]] = 'wrong'
             verify(expression, value, False, 'reject wrong ' + name)
-        result = subprocess.run(['jq', '-e', '-s', expression], input='', text=True, capture_output=True)
+        result = subprocess.run(['jq', '-e', '-s', '--arg', 'digest', sha, '--arg', 'source', source, '--arg', 'workflow', workflow_sha, '--arg', 'invocation', invocation, expression], input='', text=True, capture_output=True)
         assert result.returncode != 0
         print('PASS reject absent provenance')
     else:
