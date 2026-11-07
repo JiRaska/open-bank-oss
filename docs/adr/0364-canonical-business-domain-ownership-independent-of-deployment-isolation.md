@@ -84,3 +84,26 @@ Required money-path review remains applicable to affected service governance dec
 - [Implementation and responsibility review](../architecture/domain-boundaries.md)
 - [Issue #14951](https://github.com/JiRaska/open-bank-oss/issues/14951)
 - ADR-0002, ADR-0051, ADR-0062, ADR-0071, ADR-0301, ADR-0315, ADR-0334 and ADR-0337.
+
+### Consumer boundaries
+
+Navigation destinations declare their owning service, not a second domain table. The server
+resolves those identities through the same reviewed ownership snapshot used by the fleet
+views and seeds the first render. Domain headings use canonical labels; role-specific shortcuts
+and cross-domain operational views remain separate. Permissions, upstream routes and operational
+allowlists do not derive from these presentation labels.
+
+FinOps business-domain showback joins service footprints to governance. AWS billing categories
+and namespace-level resource observations are independent dimensions: a shared namespace must
+not be attributed to one service or treated as one business domain. Application cost footprints include Deployments and Rollouts. Overlay duplicates represent
+one namespace/workload identity; distinct tenant namespaces contribute independently before
+rolling up to the owning service. Workload naming exceptions use the existing operational
+registry, not suffix guesses or another domain table. Cluster topology likewise
+shows physical application namespaces without claiming one namespace per business domain.
+
+Both MCP registries package the canonical taxonomy and service declarations as runtime inputs.
+A multi-service tool reports one business domain only when all declared source owners agree;
+unknown or conflicting ownership is explicitly unclassified. This metadata does not grant a
+capability, alter consent scope, or change execution. Customer analytics aggregate types and
+approval queue identifiers retain their contracts and use distinct labels rather than claiming
+to be business domains.

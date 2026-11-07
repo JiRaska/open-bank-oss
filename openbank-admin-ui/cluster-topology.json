@@ -1,23 +1,24 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-10-30T07:40:38.000Z",
+  "generatedAt": "2026-11-02T12:22:04.000Z",
+  "inputFingerprint": "sha256:89e5d7305cff8e14f517d37f629352884867de18892661ab79cce3c4652327a1",
   "counts": {
     "namespaces": 85,
-    "networkPolicies": 143,
-    "externalSecrets": 236,
+    "networkPolicies": 145,
+    "externalSecrets": 239,
     "clusterPolicies": 0
   },
   "groups": [
     {
       "id": "domain",
-      "label": "Byznys domény",
-      "labelEn": "Business domains",
+      "label": "Aplikační namespacy",
+      "labelEn": "Application namespaces",
       "color": "#326CE5",
       "icon": "bank",
       "blurb": {
-        "cs": "Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy.",
-        "en": "Every banking domain runs in its own sealed namespace — like a separate floor of the building."
+        "cs": "Namespacy seskupují služby a jejich instance pro jednotlivé právní entity. Obchodní domény eviduje katalog služeb nezávisle.",
+        "en": "Namespaces group services and their legal-entity instances. Business ownership is classified independently in the service catalog."
       }
     },
     {
@@ -855,17 +856,17 @@
         "en": "Network (segmentation)"
       },
       "icon": "network",
-      "status": "planned",
+      "status": "partial",
       "analogy": {
         "cs": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
         "en": "Locked doors between floors — without a pass you cannot move between departments."
       },
       "summary": {
-        "cs": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 143 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
-        "en": "The zero-trust ideal is deny-by-default between namespaces. Reality: only 143 NetworkPolicies declared → traffic between namespaces is largely open."
+        "cs": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 145 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
+        "en": "The zero-trust goal is deny-by-default between namespaces. GitOps declares 145 NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation."
       },
       "controls": [
-        "NetworkPolicy (143 / 85)",
+        "NetworkPolicy manifests (145)",
         "per-namespace deny-by-default (target)"
       ],
       "adr": [
@@ -967,12 +968,12 @@
         "en": "A time-locked vault — passwords never sit in the code."
       },
       "summary": {
-        "cs": "OpenBao drží tajemství; 236 ExternalSecret je sype do k8s. Žádný secret v gitu.",
-        "en": "OpenBao holds the secrets; 236 ExternalSecrets feed them into k8s. No secret in git."
+        "cs": "OpenBao drží tajemství; 239 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+        "en": "OpenBao holds the secrets; 239 ExternalSecrets feed them into k8s. No secret in git."
       },
       "controls": [
         "OpenBao",
-        "External Secrets (236)",
+        "External Secrets (239)",
         "KMS unseal"
       ],
       "adr": [
@@ -1110,8 +1111,8 @@
         "en": "Namespace segmentation"
       },
       "plan": {
-        "cs": "Doménová izolace, 1 ns / doména",
-        "en": "Domain isolation, 1 ns / domain"
+        "cs": "Technické oddělení služeb a právních entit",
+        "en": "Technical separation of workloads and legal entities"
       },
       "reality": {
         "cs": "85 namespaců",
@@ -1129,10 +1130,10 @@
         "en": "deny-by-default in every ns"
       },
       "reality": {
-        "cs": "143 / 85 ns má NetworkPolicy → většina provozu otevřená",
-        "en": "143 / 85 ns have a NetworkPolicy → most traffic open"
+        "cs": "145 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+        "en": "145 NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified"
       },
-      "status": "planned"
+      "status": "partial"
     },
     {
       "item": {
@@ -1159,8 +1160,8 @@
         "en": "OpenBao + ESO, nothing in git"
       },
       "reality": {
-        "cs": "236 ExternalSecret",
-        "en": "236 ExternalSecrets"
+        "cs": "239 ExternalSecret",
+        "en": "239 ExternalSecrets"
       },
       "status": "live"
     },
@@ -1189,10 +1190,10 @@
         "en": "a set of kyverno policies"
       },
       "reality": {
-        "cs": "0 ClusterPolicy (image-verify)",
-        "en": "0 ClusterPolicy (image-verify)"
+        "cs": "0 ClusterPolicy deklarovaných v GitOpsu; runtime stav neověřen",
+        "en": "0 ClusterPolicies declared in GitOps; runtime state unverified"
       },
-      "status": "partial"
+      "status": "planned"
     }
   ]
 }
