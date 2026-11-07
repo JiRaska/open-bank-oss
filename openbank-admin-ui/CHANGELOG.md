@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.2...admin-ui-v4.4.3) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose game management in loyalty navigation ([#15094](https://github.com/JiRaska/open-bank-oss/issues/15094)) ([af41e33](https://github.com/JiRaska/open-bank-oss/commit/af41e33c43e34e59ccbda5c0256cf901cfde1cdf))
+
 ## [4.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.1...admin-ui-v4.4.2) (2026-11-07)
 
 
