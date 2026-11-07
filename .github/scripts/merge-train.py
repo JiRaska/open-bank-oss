@@ -308,6 +308,13 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/test-rerun-flake-artifact.py",         # auto-retry-cancelled.yml
     ".github/scripts/test-admin-ui-request-trace.py",       # admin-ui-deploy.yml
     ".github/scripts/test-agent-admission.py",              # agent-issue-worker.yml, agent-pr-steward.yml
+    ".github/scripts/check-deploy-pin-monotonic.py",        # judges a carrier by its members' deploy-revert labels
+    # Tests gates.yaml runs by name (merge of main after #15045): part of the carrier's own verdict.
+    ".github/scripts/check_authz_pdp_parity_test.py",
+    ".github/scripts/test-check-deploy-source-freshness.py",
+    ".github/scripts/test-merge-train-close-linked-issues.py",
+    ".github/scripts/test-merge-train-publish-siblings.py",
+    ".github/scripts/test_runtime_resource_inputs.py",
 )
 # JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
 # workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
@@ -1704,6 +1711,51 @@ def mode_owner_approval(gh, number: int, head: str, decision: str) -> None:
     log(f"owner decision: {decision} PR #{number} at {head}")
 
 
+LINKED_ISSUES_QUERY = ("query($owner:String!,$name:String!,$n:Int!){repository(owner:$owner,name:$name){"
+                       "pullRequest(number:$n){closingIssuesReferences(first:50){nodes{number state "
+                       "repository{nameWithOwner}}}}}}")
+
+
+def close_linked_issues(repo: str, n: int, sha: str) -> list[int]:
+    """Close the issues PR `n` links with `Closes #N` (#14510). GitHub records the link but emits no
+    close when an App merges, so the train does it. Same-repository, still-OPEN issues only (so a
+    re-run is a no-op); every failure is logged and swallowed — the merge already happened and must
+    never be reported as failed because of this. Returns the issue numbers it closed."""
+    closed: list[int] = []
+    try:
+        owner, name = repo.split("/", 1)
+        code, data = api("POST", "/graphql", {"query": LINKED_ISSUES_QUERY,
+                                              "variables": {"owner": owner, "name": name, "n": int(n)}})
+        nodes = (((((data or {}).get("data") or {}).get("repository") or {}).get("pullRequest") or {})
+                 .get("closingIssuesReferences") or {}).get("nodes") if code == 200 and isinstance(data, dict) else None
+        if nodes is None:
+            log(f"::warning::#{n}: could not read linked issues ({code}); none closed")
+            return closed
+        for node in nodes:
+            if not isinstance(node, dict) or node.get("state") != "OPEN":
+                continue
+            if (node.get("repository") or {}).get("nameWithOwner") != repo or type(node.get("number")) is not int:
+                continue
+            i = node["number"]
+            try:
+                c, _ = api("POST", f"/repos/{repo}/issues/{i}/comments",
+                           {"body": f"Closed by #{int(n)} ({sha}) — merged by the merge train."})
+                if c != 201:
+                    log(f"::warning::#{n}: comment on issue #{i} -> {c} (needs issues:write); not closed")
+                    continue
+                c, _ = api("PATCH", f"/repos/{repo}/issues/{i}", {"state": "closed", "state_reason": "completed"})
+                if c == 200:
+                    closed.append(i)
+                    log(f"#{n}: closed linked issue #{i}")
+                else:
+                    log(f"::warning::#{n}: close issue #{i} -> {c} (needs issues:write)")
+            except Exception as e:  # noqa: BLE001 — never fail the merge job over an issue
+                log(f"::warning::#{n}: closing issue #{i} failed: {type(e).__name__}: {e}")
+    except Exception as e:  # noqa: BLE001
+        log(f"::warning::#{n}: linked-issue close skipped: {type(e).__name__}: {e}")
+    return closed
+
+
 class GitHub:
     """Every GitHub read and write. The self-test substitutes a fake with the same methods."""
 
@@ -1867,7 +1919,10 @@ class GitHub:
             log(f"::notice::#{n} source intent or head changed — not merged")
             return None
         code, data = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/merge", {"merge_method": "squash", "sha": head})
-        return data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        sha = data.get("sha") if code == 200 and isinstance(data, dict) and data.get("merged") else None
+        if sha:
+            close_linked_issues(self.repo, n, sha)
+        return sha
 
     def rerun_inconclusive(self, sha: str, contexts: list[str]) -> bool:
         """Retry once per run, including CI's attempt-bound evidence ancestor. The caller keeps the
@@ -2051,6 +2106,46 @@ def pr_view(repo: str, p: dict, files: list[str]) -> dict:
             "body": p.get("body") or "", "files": files}
 
 
+# Admission prerequisites judged on the PR OBJECT (#14684). `security-checklist-money-path` runs inside
+# the tree-dependent `Validate manifests` context, which a body edit does not re-run: an unticked
+# money-path PR sits red there, and every path that looks past a red context — fix-head masking,
+# stale-red refresh (an update-branch = a full CI run), strict-lane "waiting" — could still spend CI
+# or a reservation on a PR whose own gate will fail again. So the train runs the SAME gate script
+# (from its own trusted checkout, never the PR's) on the body it just listed, against the verified
+# head, before any lane. It can only REFUSE: a PR it passes still needs every required context
+# green. Draft and issue-hygiene need nothing here — draft is filtered before fetch, and
+# issue-hygiene is its own required context, re-run by GitHub on every body edit.
+CHECKLIST_GATE = pathlib.Path(__file__).resolve().parent / "check-security-checklist.py"
+
+
+def admission_refusal(git, base: str, view: dict, runner=None) -> str | None:
+    """None = admissible. Otherwise why not. Fail closed: anything but exit 0/1 refuses."""
+    head = view.get("head_sha") or ""
+    if not SHA_RE.fullmatch(head) or not SHA_RE.fullmatch(base or ""):
+        return "admission check: no verified head/base sha — fail closed"
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as fh:
+        fh.write(view.get("body") or "")   # a file, never argv: the body is attacker-controlled text
+        body_file = fh.name
+    cmd = [sys.executable, "-I", str(CHECKLIST_GATE), "--body-file", body_file, "--base", base,
+           "--head", head, "--root", ".", "--enforce"]
+    try:
+        rc = (runner or (lambda c: subprocess.run(c, cwd=git.workdir, env=base_env(), capture_output=True,
+                                                   text=True, timeout=120).returncode))(cmd)
+    except Exception as exc:   # noqa: BLE001 — any failure to judge is a refusal
+        return f"admission check could not run ({type(exc).__name__}) — fail closed"
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(body_file)
+    if rc == 0:
+        return None
+    if rc == 1:
+        return ("security-checklist-money-path fails on the live body — tick the checklist, then re-run "
+                "Validate manifests; the train re-reads the body every tick")
+    if not CHECKLIST_GATE.is_file():
+        return f"admission gate missing at {CHECKLIST_GATE} — fail closed, this is a train wiring defect"
+    return f"admission check exited {rc} — fail closed"
+
+
 def live_candidates(gh, git, repo: str, required: list[str], base: str, untrainable,
                     limit: int = 64, strict: list | None = None,
                     red: list | None = None, main_red: dict[str, str] | None = None) -> tuple[list[Member], dict[int, dict]]:
@@ -2123,6 +2218,11 @@ def live_candidates(gh, git, repo: str, required: list[str], base: str, untraina
             if len(chain) > 1:   # an exact-head decision is already in `app`: no extra read
                 app = with_owner_decision(gh, app, chain)
         view["app"] = app                    # strict_lane reads the notice from it, no second read
+        refusal = admission_refusal(git, base, view)
+        if refusal:
+            # Before every lane AND the stale-red queue: no batch, no reservation, no update-branch.
+            log(f"#{n:>6} skip      {refusal}")
+            continue
         checks = pinned_checks(gh, fetched, extra)
         ok, why = qualifies(view, member_required, checks, app, untrainable, extra=extra)
         log(f"#{n:>6} {'CANDIDATE' if ok else 'skip     '} {why}")
@@ -3617,9 +3717,11 @@ JOB_MUST = {
               ("build reports drops", "has_drops: ${{ steps.build.outputs.has_drops }}")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
                                                               ("publish runs publish", "\" publish"),
+                                                              ("publish copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                               ("publish also runs on drops alone (notices)",
                                                                "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
+                                                           ("settle copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                            ("settle gets the App id for the ruleset guard", "GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}"),
                                                            # Strict carrier (ADR-0343 amendment 2026-11-05): settle names
                                                            # the carrier branch from its own run and carries the cap.
@@ -3756,7 +3858,8 @@ SYN_GENERATOR_SRC = (
     "    for f in fs:\n"
     "        if fnmatch.fnmatch(f,'gen-*opa-bundle*.sh'): subprocess.run(['bash',os.path.join(r,f)])\n"
 )
-SYN_RULES = "merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+SYN_RULES = ("merge_train:\n  extra_gates:\n    - {workflow: .github/workflows/security.yml, check: Trivy}\n"
+             "money_path_services:\n  - paysvc\n")
 SYN_REQUIRED = ["gates (data)", "Validate manifests", "derived", "issue-hygiene", STATUS_CONTEXT]
 # The GENERATORS fragments make docs/, services/, count.txt and bad.txt protected, so PRs touching
 # them ride trains (as real inventory sources do) instead of the fast lane; svc/ stays fast-lane.
@@ -4888,6 +4991,63 @@ def self_test() -> int:
           strict_lane_state(wf, req, {**green, "Trivy": "failure"}, None, U, [], {"Trivy": "c" * 40}, xg)[0] == "waiting")
     check("extra gates: strict lane reads a running Trivy as pending",
           strict_lane_state(wf, req, {**green, "Trivy": None}, None, U, [], None, xg)[0] == "pending")
+
+    # ---- admission prerequisites (#14684) -------------------------------------------------
+    # Unit: the exit-code contract, fail closed. Every must-FAIL case comes first.
+    av = {"head_sha": "a" * 40, "body": ""}
+    gd = type("G", (), {"workdir": "."})()
+    check("admission: gate exit 1 refuses", admission_refusal(gd, "b" * 40, av, lambda c: 1) is not None)
+    for rc in (2, 124, -9):
+        check(f"admission: gate exit {rc} refuses (fail closed)", admission_refusal(gd, "b" * 40, av, lambda c, rc=rc: rc) is not None)
+
+    def boom(c):
+        raise subprocess.TimeoutExpired(c, 120)
+    check("admission: a gate that cannot run refuses (fail closed)", admission_refusal(gd, "b" * 40, av, boom) is not None)
+    check("admission: no verified head refuses", admission_refusal(gd, "b" * 40, {"head_sha": "HEAD", "body": ""}, lambda c: 0) is not None)
+    seen: list = []
+    check("admission: exit 0 admits", admission_refusal(gd, "b" * 40, {**av, "body": "$(touch pwn) --self-test"},
+                                                        lambda c: seen.append(c) or 0) is None)
+    check("admission: the body never reaches argv", seen and not any("pwn" in a or a == "--self-test" for a in seen[0]), str(seen))
+    check("admission: runs the train's own gate script, not the PR's",
+          seen and seen[0][2] == str(CHECKLIST_GATE) and CHECKLIST_GATE.is_file(), str(seen))
+    # Integration: the REAL gate script over a real repository, money-path vs not, body unticked vs ticked.
+    with tempfile.TemporaryDirectory() as adm:
+        env = base_env()
+
+        def ag(*a):
+            return subprocess.run(["git", *a], cwd=adm, text=True, capture_output=True, check=True, env=env).stdout.strip()
+        ag("init", "-q", "-b", "main")
+        pathlib.Path(adm, RULES_FILE).parent.mkdir(parents=True)
+        pathlib.Path(adm, RULES_FILE).write_text(SYN_RULES)
+        pathlib.Path(adm, "paysvc/src/main").mkdir(parents=True)
+        pathlib.Path(adm, "paysvc/src/main/Pay.kt").write_text("class Pay\n")
+        ag("add", "-A")
+        ag("commit", "-q", "-m", "base")
+        abase = ag("rev-parse", "HEAD")
+        pathlib.Path(adm, "paysvc/src/main/Pay.kt").write_text("class Pay(val amount: Long)\n")
+        ag("commit", "-qam", "money")
+        money = ag("rev-parse", "HEAD")
+        ag("checkout", "-q", abase)
+        pathlib.Path(adm, "docs").mkdir()
+        pathlib.Path(adm, "docs/x.md").write_text("x\n")
+        ag("add", "-A")
+        ag("commit", "-q", "-m", "docs")
+        docs = ag("rev-parse", "HEAD")
+        tpl = pathlib.Path(__file__).resolve().parents[1] / "PULL_REQUEST_TEMPLATE.md"
+        section = re.search(r"## Security checklist\n.*?(?=\n## )", tpl.read_text(), re.S).group(0)
+        ticked = section.replace("- [ ]", "- [x]")
+        ga = Git(adm)
+        cases = [
+            ("money-path, no checklist section", money, "Refs #1", False),
+            ("money-path, template section unticked", money, "Refs #1\n\n" + section, False),
+            ("money-path, ticked boxes for the WRONG questions", money,
+             "## Security checklist\n- [x] looks fine\n- [x] trust me\n", False),
+            ("money-path, ticked", money, "Refs #1\n\n" + ticked, True),
+            ("not money-path, no checklist", docs, "Refs #1", True),
+        ]
+        for label, head, body, want in cases:
+            got = admission_refusal(ga, abase, {"head_sha": head, "body": body})
+            check(f"admission (real gate): {label} -> {'admit' if want else 'refuse'}", (got is None) == want, str(got))
 
     # ---- real git, real ticks ----------------------------------------------------------------
     saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}

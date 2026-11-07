@@ -119,7 +119,11 @@ jobs:
           GIT_CONFIG_GLOBAL: /dev/null
         run: |
           set -euo pipefail
+          # Admission runs the checklist gate from beside this script, so main's copy must be there too.
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
+          for f in check-security-checklist.py merge_train_carrier.py; do
+            git -c core.hooksPath=/dev/null show "origin/main:.github/scripts/$f" > "$RUNNER_TEMP/$f"
+          done
           # shellcheck disable=SC2086  # SHADOW is empty or a single flag
           python3 -I -S "$RUNNER_TEMP/merge-train.py" settle --repo "${GITHUB_REPOSITORY}" --branch main ${SHADOW} \
             --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
@@ -233,6 +237,9 @@ jobs:
         run: |
           set -euo pipefail
           git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
+          for f in check-security-checklist.py merge_train_carrier.py; do
+            git -c core.hooksPath=/dev/null show "origin/main:.github/scripts/$f" > "$RUNNER_TEMP/$f"
+          done
           python3 -I -S "$RUNNER_TEMP/merge-train.py" publish --repo "${GITHUB_REPOSITORY}" --branch main \
             --batch-size "${TRAIN_BATCH_SIZE}" --bundle "${RUNNER_TEMP}/merge-train-bundle" \
             --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"

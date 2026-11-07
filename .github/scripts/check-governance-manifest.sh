@@ -145,6 +145,7 @@ databaseName: 12345'
 fi
 
 ensure_deps
+node "$UI_DIR/scripts/generate-domain-taxonomy.mjs" --check
 
 SCAN_REPO="${GOVERNANCE_REPO:-$REPO_ROOT}"
 # node's require() dispatches on the EXTENSION — a bare mktemp name is parsed as CommonJS
@@ -155,7 +156,7 @@ trap 'rm -rf "$OUT_DIR"' EXIT
 
 node "$UI_DIR/scripts/generate-governance.mjs" --repo "$SCAN_REPO" --out "$OUT"
 
-# The corpus this gate examined: released components (a directory with version.txt), which is
+# The corpus this gate examined: released components and explicit governance declarations,
 # exactly the set generate-governance.mjs enumerates. Printed for run-gates.py's min_subjects
 # floor — a gate whose corpus silently went to zero would otherwise pass everything (#4339).
 node -e "console.log('SUBJECTS=' + require(process.argv[1]).totals.modules)" "$OUT"

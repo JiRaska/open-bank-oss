@@ -2,7 +2,7 @@
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
-dataDomain: open-banking
+dataDomain: wealth
 primaryDatastore: PostgreSQL
 databaseName: openbank_wealth
 dataLineageRole: producer

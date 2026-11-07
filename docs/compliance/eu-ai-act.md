@@ -29,6 +29,7 @@ it can move past *Proposed*.
 | `compliance-officer` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ledger-domain-engineer` | development | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ui-assistant` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `product-author` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `rca-investigator` | control | Limited / minimal risk | — | an authorized human may persist its finding only to an incident-response SHADOW case; no autonomous remediation or banking-state effect. |
 | `customer-copilot` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `mcp-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
@@ -67,9 +68,9 @@ decisioning is the only entry that becomes high-risk, and it is unbuilt.
 
 ## Obligation coverage (Art. 9–15) for a high-risk system
 
-The controls below already exist and satisfy each obligation *in substance* for the day
-a high-risk system (credit decisioning) ships. What is open is the article-by-article
-*evidence*, not the mechanism.
+The controls below are current or planned. Each obligation needs article-by-article
+evidence before a high-risk system (credit decisioning) ships; Art. 15 still has an
+unbuilt workload-identity control (#1914).
 
 | Obligation | Existing control | Status |
 |---|---|---|
@@ -79,10 +80,10 @@ a high-risk system (credit decisioning) ships. What is open is the article-by-ar
 | Art. 12 Record-keeping / logging | AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain); ADR-0031 phase 3 adds the recorded-human-merge evidence (agent_merge_record + agent.pr.merged, attested per runbook 0018). | control exists; evidence pack open |
 | Art. 13 Transparency to deployers | Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable. | control exists; evidence pack open |
 | Art. 14 Human oversight | requires_human on every write; approver_must_differ_from author (segregation of duties). | control exists; evidence pack open |
-| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity. | control exists; evidence pack open |
+| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt. SPIFFE/SPIRE workload identity is deferred (#1914); no credit is taken for it. | partial; evidence pack open |
 
-> No high-risk system is declared today, so the obligations are pre-satisfied in
-> substance and tracked here in advance. The first `HIGH-RISK` row that appears in the
+> No high-risk system is declared today. The obligations are tracked in advance,
+> but Art. 15 is incomplete (#1914). The first `HIGH-RISK` row that appears in the
 > inventory above (via a new/changed charter) flips every status to APPLIES NOW.
 
 ## LLM provider egress (Art. 10 / GDPR data governance)
@@ -112,7 +113,7 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `961a102d86eb27fb…`, 21 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `386fa234bc117e2a…`, 22 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),
