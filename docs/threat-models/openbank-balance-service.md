@@ -49,13 +49,13 @@ Assets protected, in priority order:
                 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Trust boundaries: (1) caller → REST/port (mTLS + OIDC + OPA); (3) service → Postgres;
+Trust boundaries: (1) caller → REST/port (OIDC + OPA; no mesh mTLS, #1914); (3) service → Postgres;
 (4/5) service → Kafka / ledger-service REST.
 Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation math are unit-testable.
 
 ## 3. Authn / Authz
 
-- Service-to-service callers authenticated (mTLS + OIDC); OPA policy gates credit / debit / hold (ADR-0034).
+- Service-to-service callers present OIDC bearer tokens; OPA policy gates credit / debit / hold (ADR-0034). The configured REST hops use HTTP, without mesh mTLS (#1914).
 - Money-moving endpoints are role-gated: `@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)`
   on credit/debit/hold/initialize, supervisor/admin on overdraft-limit override; **no endpoint is
   `@PermitAll`** (locked by `BalanceSecurityContractTest`). On top of role gating, every endpoint now
@@ -76,7 +76,7 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
-| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Cannot distinguish the M2M callers that share the `openbank-services` client identity (see §3 residual risk) |
+| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | OIDC bearer JWT (Keycloak) rejects anonymous callers; role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Shared `openbank-services` client identity does not distinguish M2M callers; REST transport mTLS is not enforced (#1914) |
 | T1 | Cover check | **Tampering** — manipulated request authorizes an unfunded debit / negative balance | Server-side overdraft evaluation against stored limit; available = booked − holds + overdraft; optimistic locking / row versioning; per-currency rows; pure-domain, unit-tested | Low |
 | T2 | Balance rows | **Tampering** — direct DB mutation desynchronizes from ledger | App-only write path; DB creds in Vault (ADR-0017); **Phase A reconciliation** detects drift vs ledger deposit-control per currency | Drift detected, not prevented — by design (projection); Phase D cutover hardens |
 | R1 | Movements | **Repudiation** — actor denies a balance change it applied | AuditEvent per credit/debit/hold; movements carry origin/actor + idempotency key; outbox event with correlation id; reconciliation run timestamped/persisted | Strengthen with signed audit (ADR-0029) — *planned* |
@@ -84,7 +84,7 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 | I2 | Domain metrics | **Information disclosure** — domain metrics leak PII / enable per-account inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the outbox-backlog gauge (`openbank.outbox.backlog`) is tagged only by `service="balance"` — never an account id, IBAN, currency-pocket value, balance, or party id. The gauge reads a read-only `count(*)` of PENDING/FAILED outbox rows refreshed off the Prometheus scrape thread by a scheduled tick (no per-scrape reactive query); `/q/metrics` is cluster-internal | Low |
 | D1 | Reconciliation / writes | **DoS** — hold exhaustion / write storm / expensive tie-out scans | Rate limits; idempotency drops retries; per-currency aggregation; scheduled reconciliation cadence; reactive non-blocking stack | Gateway rate-limit — infra scope |
 | E1 | Roles | **Elevation** — read role triggers a debit / raises own overdraft | Deny-by-default; explicit role for money movement; cover check cannot mutate; OPA now enforced (a viewer/read-only reason never grants `balance.credit`/`balance.debit`) | Low |
-| T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Authenticated ledger-service inside trust mesh; reconciliation compares against ledger as golden source, flags mismatch | mTLS/service-identity hardening — infra scope |
+| T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Reconciliation compares against ledger as golden source and flags mismatch; the configured ledger REST URL uses HTTP, so this hop has no mesh-authenticated transport | mTLS/service-identity hardening — infra scope (#1914) |
 
 ## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
 
