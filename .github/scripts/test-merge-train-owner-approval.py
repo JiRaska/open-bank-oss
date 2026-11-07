@@ -161,8 +161,10 @@ class OwnerApprovalTest(unittest.TestCase):
             self.assertIsNone(gh.merge(7, self.sha))
             api.assert_not_called()
         # The live verdict re-read (cache safety, #13988) has its own tests in merge-train.py --self-test.
-        with patch.object(gh, "pr", return_value=pr), patch.object(gh, "app_statuses", return_value=self.approval), patch.object(gh, "unverified", return_value=None), patch.object(train, "api", return_value=(200, {"merged": True, "sha": "c" * 40})) as api:
+        with patch.object(gh, "pr", return_value=pr), patch.object(gh, "app_statuses", return_value=self.approval), patch.object(gh, "unverified", return_value=None), patch.object(train, "api", return_value=(200, {"merged": True, "sha": "c" * 40})) as api, \
+                patch.object(train, "close_linked_issues") as close:   # its own test: test-merge-train-close-linked-issues.py
             self.assertEqual("c" * 40, gh.merge(7, self.sha))
+            close.assert_called_once_with("owner/repo", 7, "c" * 40)
             api.assert_called_once_with("PUT", "/repos/owner/repo/pulls/7/merge", {"merge_method": "squash", "sha": self.sha})
 
     def test_summary_ignores_non_app_statuses_and_sanitizes(self):
@@ -234,6 +236,10 @@ class SourceIntentBoundaryTest(unittest.TestCase):
     """Real decision functions; only API, Git, and bundle transport are local stand-ins."""
 
     def setUp(self):
+        # The stuck-PR issue has its own tests; these count the API calls of the status boundary.
+        stuck = patch.object(train, "report_stuck")
+        stuck.start()
+        self.addCleanup(stuck.stop)
         self.head, self.base, self.tip = "a" * 40, "b" * 40, "c" * 40
         self.pr = {"number": 7, "state": "open", "draft": False, "auto_merge": {"enabled_by": "owner"},
                    "head": {"sha": self.head, "ref": "agent/example", "repo": {"full_name": "owner/repo"}},

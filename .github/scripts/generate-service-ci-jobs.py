@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = Path('.github/workflows/services-ci.yml')
 CALLERS = ('  # BEGIN GENERATED SERVICE CI CALLERS', '  # END GENERATED SERVICE CI CALLERS')
 NEEDS = ('    # BEGIN GENERATED SERVICE CI NEEDS', '    # END GENERATED SERVICE CI NEEDS')
-LANES = {'pr': 12, 'other': 8}
+LANES = {'pr': 16, 'other': 8}
 CALLEES = {'pr': '.github/workflows/_service-ci-pr.yml', 'other': '.github/workflows/_service-ci.yml'}
 
 

@@ -72,7 +72,7 @@ if [ "${1:-}" = "--self-test" ]; then
   # code, so every case would fail with 128 regardless of the rule under test. An empty repo
   # makes that grep find nothing, which is the intended condition here.
   git -C "$td" init -q 2>/dev/null
-  git -C "$td" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1
+  git -C "$td" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init >/dev/null 2>&1
 
   fm() { # fm <num> <title-num> [key=value overrides...]
     local num="$1" tnum="$2"; shift 2

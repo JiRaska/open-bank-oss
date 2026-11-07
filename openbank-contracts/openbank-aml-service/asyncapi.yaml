@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank AML Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     AML case lifecycle events on openbank.aml.events and minimal, non-PII oversight wake-ups
     for HIGH or CRITICAL case creation (ADR-0031 D9). Both are relayed from the durable outbox.
@@ -196,6 +196,18 @@ components:
         occurredAt:
           type: string
           format: date-time
+        transactionId:
+          type: [string, 'null']
+          format: uuid
+          description: Additive (#4403). The payment the case was opened for, when there is one.
+        alertCode:
+          type: [string, 'null']
+          description: Additive (#4403). The case's alert code, so a consumer can act on one kind of case.
+        idempotencyKey:
+          type: [string, 'null']
+          description: >-
+            Additive (#4403). The key the case was created with. alertCode and transactionId are free
+            text any case creator sets, so a consumer binds a decision to the case it opened by this key.
 
     OversightTriggerPayload:
       type: object

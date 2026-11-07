@@ -191,6 +191,22 @@ Authorization: Bearer <token>
 
 `listType` ∈ `OFAC_SDN | EU_CONSOLIDATED | UN_CONSOLIDATED | HM_TREASURY | FATF_HIGH_RISK | CNB_DOMESTIC | CZ_TERRORISTS`
 
+v1 imports the list inside the request and answers 200 with the refreshed list. If a refresh of the
+same list is already running (another request or the scheduler), it does not queue a second import:
+it answers **409** with `Retry-After: 30` at once.
+
+```http
+POST /api/v2/sanctions/lists/{listType}/refresh
+Authorization: Bearer <token>
+Idempotency-Key: <uuid>
+```
+
+v2 only flags the list and answers **202** `{"requested": "<listType>"}` without downloading
+anything; the import runs on the next scheduler tick, through the same fenced refresh. Progress
+shows as the list's `lastUpdatedAt` on `GET /api/v1/sanctions/lists`. A missing `Idempotency-Key`
+is 400, an unknown list 404, and a disabled list 422. Same roles (`ROLE_OPERATOR`, `ROLE_ADMIN`)
+and OPA action (`sanctions.trigger`) as v1. Prefer v2 for large feeds such as `PEP_GLOBAL`.
+
 ### Refresh all enabled lists
 
 ```http

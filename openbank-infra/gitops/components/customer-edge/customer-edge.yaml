@@ -76,7 +76,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-customer-edge-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "4f413df732897b9f"
+        openbank.tech/policy-checksum: "c86966c4177b527e"
     spec:
       # Dedicated SA so EKS Pod Identity can hand the edge (and ONLY the edge) the
       # feedback-screenshots S3 role — ADR-0192, openbank-infra/aws/envs/sandbox-platform/
@@ -108,7 +108,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: customer-edge
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-d6685693@sha256:15cd31c12637ad44fe3707adedfc3f85c44a6822952a8a3891a84d6507311ba8
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-customer-edge:sandbox-11c6d7de@sha256:12650fb62406b968d42f7dc3a8b9311316426404fd495cce101fb65f8e9a4303
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -127,6 +127,15 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0357 / ADR-0279 WS2: honey endpoints answered by HoneytokenFilter with a plain
+            # 404, counted in openbank_security_honeytoken_hits_total and logged for the Loki
+            # rule HoneyEndpointHit. Unlike the Envoy edge decoys these sit UNDER the real
+            # /customer/v1 prefix, so they are reached both from the internet and by an
+            # in-cluster caller that skips Envoy (lateral movement) — a signal Envoy cannot
+            # see. No real route lives under internal/ or admin/ here; check-honeytoken-wiring.py
+            # requires this variable to stay set while HoneyEndpointHit exists.
+            - name: OPENBANK_SECURITY_HONEY_PATHS
+              value: "/customer/v1/internal/debug,/customer/v1/admin/export"
             # ADR-0331 / ADR-0252: the only callers whose x-openbank-synthetic header this edge
             # honours. A bank-owned canary customer, never anyone else; the identity gate
             # (check-synthetic-customer-identity.py) holds this list to the declared
@@ -583,6 +592,9 @@ metadata:
   name: customer-edge
   namespace: customer-edge
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     # Mobile TLS pinning (ADR-0066 S3): the app pins this host's SPKI hash, so the
     # private key MUST survive certificate renewals. cert-manager >=1.18 defaults

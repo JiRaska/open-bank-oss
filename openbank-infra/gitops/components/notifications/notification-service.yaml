@@ -48,7 +48,7 @@ spec:
       annotations:
         # Rolls the Deployment when the OPA policy bundle changes (subPath mounts don't
         # hot-reload). Kept in sync by gen-notification-opa-bundle.sh.
-        openbank.tech/policy-checksum: "4f413df732897b9f"
+        openbank.tech/policy-checksum: "c86966c4177b527e"
       labels:
         app.kubernetes.io/name: notification-service
         app.kubernetes.io/part-of: notifications
@@ -66,7 +66,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: notification-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-bc453312
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-notification-service:sandbox-d5dbbfa9@sha256:16a9e89b1e43990bd4c00ac025d4d5254f13356e81a986ad5df1a70c1c8b0ae2
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
