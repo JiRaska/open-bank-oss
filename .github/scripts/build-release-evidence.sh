@@ -36,6 +36,20 @@ fi
 RUN_ID="${GITHUB_RUN_ID:-local}"
 RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
 WORKFLOW_REF="${SERVER}/${REPO}/.github/workflows/release-please.yml"
+# A repair caller supplies the actual producer workflow, never the historical tag's
+# workflow. Preserve ordinary/local behavior when no explicit producer is requested.
+if [ "${RELEASE_EVIDENCE_WORKFLOW_REF+x}" = x ]; then
+  PRODUCER_REF="$RELEASE_EVIDENCE_WORKFLOW_REF"
+  if [ "$PRODUCER_REF" != "${GITHUB_WORKFLOW_REF:-}" ] || [[ ! "${GITHUB_WORKFLOW_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+    echo "::error::explicit evidence producer differs from actual workflow context" >&2
+    exit 1
+  fi
+  case "$PRODUCER_REF" in
+    "$REPO/.github/workflows/backfill-release-evidence.yml@refs/heads/main"|"$REPO/.github/workflows/release-please.yml@refs/heads/main") ;;
+    *) echo "::error::unreviewed explicit evidence producer workflow" >&2; exit 1 ;;
+  esac
+  WORKFLOW_REF="${SERVER}/${PRODUCER_REF%@*}"
+fi
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
