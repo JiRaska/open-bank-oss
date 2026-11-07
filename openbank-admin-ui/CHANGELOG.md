@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.3.0...admin-ui-v4.4.0) (2026-11-07)
+
+
+### Features
+
+* **admin-ui:** make access matrix compact and compare selected roles ([#15032](https://github.com/JiRaska/open-bank-oss/issues/15032)) ([173c387](https://github.com/JiRaska/open-bank-oss/commit/173c3877b246b8a6710cb4536aeb87a466cea7d5))
+
 ## [4.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.2.0...admin-ui-v4.3.0) (2026-11-06)
 
 
