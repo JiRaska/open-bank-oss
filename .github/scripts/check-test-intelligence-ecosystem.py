@@ -205,7 +205,9 @@ def admin_ui_deploy_liveness_errors(root: Path) -> list[str]:
     expected_source_if = (
         "github.event_name!='workflow_run'||"
         "(github.event.workflow_run.conclusion=='success'&&"
-        "github.event.workflow_run.head_branch=='main')"
+        "github.event.workflow_run.head_branch=='main'&&"
+        "github.event.workflow_run.event=='push'&&"
+        "github.event.workflow_run.head_repository.full_name==github.repository)"
     )
     if normalize_condition(deploy_source_job.get("if")) != expected_source_if:
         errors.append("deploy-source job does not require successful main workflow_run evidence")
@@ -1479,7 +1481,9 @@ def self_test() -> int:
             "  deploy-source:\n"
             "    if: >-\n"
             "      github.event_name != 'workflow_run' ||\n"
-            "      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')\n"
+            "      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' &&\n"
+            "       github.event.workflow_run.event == 'push' &&\n"
+            "       github.event.workflow_run.head_repository.full_name == github.repository)\n"
             "    steps:\n"
             "      - id: source\n"
             "        run: bash .github/scripts/check-admin-ui-deploy-admission.sh source event\n"
@@ -1563,8 +1567,8 @@ def self_test() -> int:
         deploy_workflow.write_text(original_deploy)
 
         deploy_workflow.write_text(original_deploy.replace(
-            "(github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')",
-            "always() || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')"))
+            "(github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' &&",
+            "always() || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' &&"))
         if not any("does not require successful main workflow_run evidence" in error
                    for error in admin_ui_deploy_liveness_errors(root)):
             print("self-test failed: permissive deploy-source job condition was accepted")
