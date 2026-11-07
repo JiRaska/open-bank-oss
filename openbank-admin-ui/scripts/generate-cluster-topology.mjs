@@ -55,7 +55,7 @@ function declaredNamespaces() {
       for (const m of txt.matchAll(/namespace:\s*([a-z][a-z0-9-]+)/g)) set.add(m[1])
     }
   }
-  // exclude managed-platform namespaces we don't present as OpenBank domains
+  // Exclude managed control namespaces from this declared application inventory.
   for (const n of ['argocd', 'kube-system', 'kube-public', 'kube-node-lease']) set.delete(n)
   return [...set].sort()
 }
@@ -109,9 +109,10 @@ const L = (cs, en) => ({ cs, en })
 
 // ── curated: per-namespace role + group (declared facts) ──────────────────────────────────────
 const GROUPS = [
-  { id: 'domain', label: 'Byznys domény', labelEn: 'Business domains', color: '#326CE5', icon: 'bank',
-    blurb: L('Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy.',
-      'Every banking domain runs in its own sealed namespace — like a separate floor of the building.') },
+  // The historical wire ID remains stable; this is a physical workload group, not a business-domain ID.
+  { id: 'domain', label: 'Aplikační namespacy', labelEn: 'Application namespaces', color: '#326CE5', icon: 'bank',
+    blurb: L('Namespacy seskupují služby a jejich instance pro jednotlivé právní entity. Obchodní domény eviduje katalog služeb nezávisle.',
+      'Namespaces group services and their legal-entity instances. Business ownership is classified independently in the service catalog.') },
   { id: 'identity', label: 'Identita & tajemství', labelEn: 'Identity & secrets', color: '#8b5cf6', icon: 'lock',
     blurb: L('Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.',
       'Who signs in and where the keys live: Keycloak, OpenBao, secrets, certificates.') },
@@ -123,7 +124,7 @@ const GROUPS = [
       'The operating brain and factory: AI agent, runners, autoscaling, admission policy, scanners.') },
 ]
 const NS_MAP = {
-  // domain
+  // Application workload namespaces; membership does not assign business ownership.
   accounts: ['domain', L('Účty zákazníků', 'Customer accounts')], balances: ['domain', L('Zůstatky (projekce ledgeru)', 'Balances (ledger projection)')],
   ledger: ['domain', L('Hlavní kniha (double-entry GL)', 'General ledger (double-entry GL)')], payments: ['domain', L('Platby (SEPA/domácí/SCT Inst)', 'Payments (SEPA/domestic/SCT Inst)')],
   fx: ['domain', L('Směnárna / FX kurzy', 'Exchange / FX rates')], interest: ['domain', L('Úroky a kapitalizace', 'Interest and capitalisation')],
@@ -246,7 +247,7 @@ const imageAnatomy = {
 }
 
 const planVsReality = [
-  { item: L('Namespace segmentace', 'Namespace segmentation'), plan: L('Doménová izolace, 1 ns / doména', 'Domain isolation, 1 ns / domain'), reality: L(`${counts.namespaces} namespaců`, `${counts.namespaces} namespaces`), status: 'live' },
+  { item: L('Namespace segmentace', 'Namespace segmentation'), plan: L('Technické oddělení služeb a právních entit', 'Technical separation of workloads and legal entities'), reality: L(`${counts.namespaces} namespaců`, `${counts.namespaces} namespaces`), status: 'live' },
   { item: L('NetworkPolicy (east-west)', 'NetworkPolicy (east-west)'), plan: L('deny-by-default v každém ns', 'deny-by-default in every ns'), reality: L(`${counts.networkPolicies} NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny`, `${counts.networkPolicies} NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified`), status: counts.networkPolicies > 0 ? 'partial' : 'planned' },
   { item: L('Podpis image', 'Image signing'), plan: L('Enforce — blokovat nepodepsané', 'Enforce — block unsigned'), reality: L('Cosign podpis zapojen, kyverno zatím Audit', 'Cosign signing wired, kyverno still Audit'), status: 'partial' },
   { item: L('Tajemství', 'Secrets'), plan: L('OpenBao + ESO, nic v gitu', 'OpenBao + ESO, nothing in git'), reality: L(`${counts.externalSecrets} ExternalSecret`, `${counts.externalSecrets} ExternalSecrets`), status: 'live' },

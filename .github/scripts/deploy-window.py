@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Deploy window: at most one bot deploy commit lands on main per window.
+"""Deploy window: at most one bot deploy commit PER KIND (gitops / admin-ui) lands on main per window.
 
 WHY. `main-protection` requires PR branches to be up to date with main. Every bot deploy
 commit (`chore(gitops): auto-deploy ...`, `chore(admin-ui): deploy ...`) therefore makes every
@@ -14,7 +14,7 @@ moment a deploy PR's auto-merge is ARMED does:
                 never arm directly, because independent reads can both see no armed PR.
   * `flush`   — the sole auto-merge writer, called by deploy-window-flush.yml after either
                 deploy workflow completes and on a short recovery cron. Picks the OLDEST deferred
-                deploy PR once the window has elapsed and nothing is armed. The caller re-runs
+                deploy PR of each kind once that kind's window has elapsed and nothing of that kind is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
                 A successful manual producer run expedites only its matching PR.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
@@ -22,7 +22,9 @@ moment a deploy PR's auto-merge is ARMED does:
                 every pending service and supersede-deploy-prs.sh closes the older ones. That
                 is what turns "several pushes inside one window" into ONE commit. A pin is
                 carried only while main still holds the tag that PR replaced — if main moved
-                that service since, the old pin is stale and carrying it would rewind it. It is
+                that service since, the old pin is stale and carrying it would rewind it. A pin
+                is the pair tag@digest and moves as one: the kubelet pulls by digest, so a new
+                tag over the old digest runs the old image under the new label. It is
                 also refused when build inputs changed after that image's source commit.
   * `verify`  — before either deploy workflow arms a GitOps PR, proves every image in its diff
                 still represents the current main build inputs. Unknown sources fail closed.
@@ -47,7 +49,7 @@ from functools import lru_cache
 DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
 DEPLOY_SUBJECTS = ("chore(gitops): auto-deploy ", "chore(admin-ui): deploy ")
-PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)")
+PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)(?:@(?P<digest>sha256:[0-9a-f]{64}))?")
 
 
 def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, window: int) -> tuple[str, str]:
@@ -90,36 +92,81 @@ def manual_deploy_head(event: dict) -> str | None:
     return producer[1] + sha
 
 
-def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
-          manual_head: str | None = None) -> dict | None:
-    """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
+def _kind(head: str) -> str:
+    return next(x for x in DEPLOY_PREFIXES if head.startswith(x))
+
+
+def flush_candidates(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | None],
+                     window: int, manual_head: str | None = None) -> list[dict]:
+    """Deferred PRs the caller may try to arm, in order; it arms the first that supersede admits.
+
+    Each deploy kind (gitops / admin-ui) is its own LANE: its own window, measured from its own
+    last deploy commit, and its own single-armed-PR guard. One kind never waits on the other.
+    2026-10-24..30 a held, then stale, gitops PR refused the shared lane on every run and
+    admin-ui deployed 9 times in 10 days against 51 in the 19 before (#14238 follow-up).
+    `last_deploy` is either one epoch shared by both kinds (legacy callers, self-tests) or a
+    {prefix: epoch} map from last_deploy_by_kind.
+    """
     # Explicit maintainer intent outranks both the timer and manual producer completion.
     # Draft/blocked repairs also defer: only closing the PR or removing the label releases it.
     if any(p.get("repair_priority") and p.get("state", "open") == "open" for p in prs):
-        return None
-    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
-    if any(p.get("armed") for p in deploy):
-        return None
-    pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
+        return []
+    # An armed PR marked `stuck` (cannot merge: conflict or failed check, #14498) no longer holds
+    # its kind; stuck_armed() names it so the workflow disarms it before arming a successor.
+    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and not (p.get("armed") and p.get("stuck"))]
+    armed_kinds = {_kind(p["head"]) for p in deploy if p.get("armed")}
+    pending = sorted((p for p in deploy if not p.get("armed") and _kind(p["head"]) not in armed_kinds),
+                     key=lambda p: (p["created_at"], p["number"]))
     if not pending:
-        return None
+        return []
     if manual_head:
         manual = next((p for p in pending if p["head"] == manual_head), None)
         if manual:
             # A newer PR of the same kind may already supersede this run. Never expedite a
             # stale pin merely because its source workflow was manually dispatched.
-            kind = next(x for x in DEPLOY_PREFIXES if manual_head.startswith(x))
-            newest = [p for p in pending if p["head"].startswith(kind)][-1]
+            newest = [p for p in pending if p["head"].startswith(_kind(manual_head))][-1]
             if newest is manual:
-                return manual
-    verdict, _ = decide("flush", now, last_deploy, False, window)
-    if verdict != "ARM":
-        return None
-    # The kind (gitops / admin-ui) that has waited longest goes first, and within it the NEWEST
-    # PR is armed: it carries every older pin of its kind, so supersede-deploy-prs.sh closes the
-    # older ones. Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
-    prefix = next(x for x in DEPLOY_PREFIXES if pending[0]["head"].startswith(x))
-    return [p for p in pending if p["head"].startswith(prefix)][-1]
+                return [manual]
+
+    def lane_open(kind: str) -> bool:
+        last = last_deploy.get(kind) if isinstance(last_deploy, dict) else last_deploy
+        return decide("flush", now, last, False, window)[0] == "ARM"
+
+    # The kind that has waited longest goes first, and within each kind the NEWEST PR is offered:
+    # it carries every older pin of its kind, so supersede-deploy-prs.sh closes the older ones.
+    # Arming the oldest instead would hit supersede's STALE_KEEP refusal forever.
+    kinds = []
+    for p in pending:
+        kind = _kind(p["head"])
+        if kind not in kinds and lane_open(kind):
+            kinds.append(kind)
+    return [[p for p in pending if p["head"].startswith(k)][-1] for k in kinds]
+
+
+def flush(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | None], window: int,
+          manual_head: str | None = None) -> dict | None:
+    """Return the first deferred PR to try, or None. prs: [{number, head, created_at, armed}]."""
+    cands = flush_candidates(prs, now, last_deploy, window, manual_head)
+    return cands[0] if cands else None
+
+
+# Only a definitive "cannot merge" counts (#14498 review): a merge conflict, or a check that
+# FAILED / TIMED_OUT. CANCELLED is deliberately excluded: a superseded or concurrency-cancelled
+# run is routine and would otherwise disarm a healthy deploy PR.
+STUCK_CONCLUSIONS = {"FAILURE", "TIMED_OUT"}
+
+
+def is_stuck(view: dict) -> bool:
+    """view: `gh pr view --json mergeStateStatus,statusCheckRollup`."""
+    if view.get("mergeStateStatus") == "DIRTY":
+        return True
+    return any(str(c.get("conclusion") or c.get("state") or "").upper() in STUCK_CONCLUSIONS
+               for c in view.get("statusCheckRollup") or [])
+
+
+def stuck_armed(prs: list[dict]) -> list[dict]:
+    """Armed deploy PRs that cannot merge; each freezes its kind until disarmed (#14498)."""
+    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("armed") and p.get("stuck")]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -140,6 +187,56 @@ def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
                 if old and old != m["tag"]:
                     out.append((cur, m["image"], old, m["tag"]))
     return list(dict.fromkeys(out))
+
+
+@lru_cache(maxsize=128)
+def pin_transitions(diff: str) -> list[tuple[str, str, str, str | None, str, str | None]]:
+    """(file, image, old_tag, old_digest, new_tag, new_digest) for every retagged image."""
+    out, cur, removed = [], None, {}
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            cur = line[4:].removeprefix("b/")
+            removed = {}
+        elif line.startswith("--- "):
+            continue
+        elif line.startswith("-") and cur:
+            for m in PIN_RE.finditer(line):
+                removed.setdefault(m["image"], (m["tag"], m["digest"]))
+        elif line.startswith("+") and cur:
+            for m in PIN_RE.finditer(line):
+                old = removed.get(m["image"])
+                if old and old[0] != m["tag"]:
+                    out.append((cur, m["image"], old[0], old[1], m["tag"], m["digest"]))
+    return list(dict.fromkeys(out))
+
+
+def pin_identity_failures(diff: str, require_digest: bool = False) -> list[str]:
+    """Pins whose tag and digest cannot name the same image, decided from the diff alone.
+
+    A rebuild pushes a new image, so a new tag over the digest it replaced is a label moved
+    without the image, and a digest dropped by a retag loses the identity the kubelet pulls.
+    One tag naming two digests in one diff cannot be true of both lines. `require_digest` is
+    for gitops deploy PRs, whose producer always has the pushed digest; admin-ui pins by a
+    per-run tag and carries its digest as evidence on the run.
+    """
+    failures = []
+    for rel, image, old_tag, old_digest, new_tag, new_digest in pin_transitions(diff):
+        service = image.rsplit("/", 1)[-1]
+        if new_digest and new_digest == old_digest:
+            failures.append(f"{service}:{new_tag} in {rel} keeps the digest of {old_tag}")
+        elif old_digest and not new_digest:
+            failures.append(f"{service}:{new_tag} in {rel} drops the digest of {old_tag}")
+    seen: dict[tuple[str, str], str | None] = {}
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for m in PIN_RE.finditer(line):
+            service = m["image"].rsplit("/", 1)[-1]
+            if require_digest and not m["digest"]:
+                failures.append(f"{service}:{m['tag']} has no digest")
+            if seen.setdefault((m["image"], m["tag"]), m["digest"]) != m["digest"]:
+                failures.append(f"{service}:{m['tag']} names two digests")
+    return list(dict.fromkeys(failures))
 
 
 @lru_cache(maxsize=128)
@@ -178,25 +275,34 @@ def carry(root: str, diff: str, skip_images: set[str],
           fresh: Callable[[str, str], bool]) -> list[str]:
     """Apply an older PR's pins only when main and its image source remain equivalent."""
     carried = []
-    for rel, image, old, new in pins_from_diff(diff):
+    refused = set(pin_identity_failures(diff, require_digest=True))
+    for rel, image, old, old_digest, new, new_digest in pin_transitions(diff):
         if image in skip_images:
             continue  # this run pins it itself — the newer build wins
+        service = image.rsplit("/", 1)[-1]
+        if not new_digest or any(f.startswith(f"{service}:{new} ") for f in refused):
+            continue  # that PR's pin is not one image; repeating it would spread the false pair
         path = os.path.join(root, rel)
         if not os.path.isfile(path):
             continue
         text = open(path, encoding="utf-8").read()
-        cur = {m["tag"] for m in PIN_RE.finditer(text) if m["image"] == image}
-        if cur != {old}:
+        cur = {(m["tag"], m["digest"]) for m in PIN_RE.finditer(text) if m["image"] == image}
+        if cur != {(old, old_digest)}:
             continue  # main moved this service since that PR was cut: carrying would rewind it
         if not fresh(image, new):
             continue  # a newer build input changed; this image cannot be carried safely
-        open(path, "w", encoding="utf-8").write(text.replace(f"{image}:{old}", f"{image}:{new}"))
-        carried.append(f"{image}:{new} in {rel}")
+        old_ref = f"{image}:{old}" + (f"@{old_digest}" if old_digest else "")
+        open(path, "w", encoding="utf-8").write(text.replace(old_ref, f"{image}:{new}@{new_digest}"))
+        carried.append(f"{image}:{new}@{new_digest} in {rel}")
     return carried
 
 
-def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
+def verify_pins(diff: str, fresh: Callable[[str, str], bool],
+                require_digest: bool = False) -> list[str]:
     """Return the first stale or unverifiable pin; one is enough to refuse arming."""
+    identity = pin_identity_failures(diff, require_digest)
+    if identity:
+        return identity
     pins = pins_from_diff(diff)
     if not pins:
         return ["no image pins found in the GitOps diff"]
@@ -206,12 +312,44 @@ def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
     return []
 
 
+def select_candidate(cands: list[dict], verify: Callable[[dict], list[str]],
+                     supersede: Callable[[dict], int]) -> dict | None:
+    """First candidate that passes freshness verify and supersede, or None.
+
+    Any per-kind refusal falls through to the next kind: kinds are independent, and a refused
+    PR is never armed. 2026-10-24..29 an owner hold, and from 2026-10-30 a stale audit-service
+    pin, refused the gitops kind on every run while admin-ui was never tried.
+    """
+    for c in cands:
+        stale = verify(c) if c["head"].startswith(DEPLOY_PREFIXES[0]) else []
+        if stale:
+            for pin in stale:
+                print(f"::error::stale GitOps image pin in #{c['number']}: {pin}", file=sys.stderr)
+        else:
+            rc = supersede(c)
+            if rc == 0:
+                return c
+            print(f"::warning::supersede refused #{c['number']} (rc {rc})", file=sys.stderr)
+        print(f"::warning::deploy PR #{c['number']} not armable - trying the next deploy kind.", file=sys.stderr)
+    return None
+
+
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
     """commits: [{message, epoch}] newest-first, as the caller reads them from main."""
     for c in commits:
         if c["message"].startswith(DEPLOY_SUBJECTS):
             return int(c["epoch"])
     return None
+
+
+def last_deploy_by_kind(commits: list[dict]) -> dict[str, int | None]:
+    """{deploy-branch prefix: epoch of that kind's newest deploy commit}, per-lane windows."""
+    out: dict[str, int | None] = {p: None for p in DEPLOY_PREFIXES}
+    for c in commits:
+        for prefix, subject in zip(DEPLOY_PREFIXES, DEPLOY_SUBJECTS, strict=True):
+            if out[prefix] is None and c["message"].startswith(subject):
+                out[prefix] = int(c["epoch"])
+    return out
 
 
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
@@ -246,8 +384,62 @@ def self_test() -> int:
     prs2 = prs + [{"number": 14, "head": "chore/admin-ui-deploy-d", "created_at": "2026-09-30T10:09:00Z", "armed": False}]
     pick = flush(prs2, T, T - W, W)
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
-    check("flush never arms a second PR while one is armed",
-          flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
+    # Head-of-line blocking (2026-10-24..29): an owner hold refused the gitops kind on every run
+    # and admin-ui was never tried. A refused kind must leave the other kind as the next candidate.
+    cands = flush_candidates(prs2, T, T - W, W)
+    check("flush offers every kind, longest-waiting first, newest within each",
+          [p["number"] for p in cands] == [14, 12])
+    check("candidates are empty while the window is closed", flush_candidates(prs2, T, T - 60, W) == [])
+    check("flush() is the head of flush_candidates()", flush(prs2, T, T - W, W) is cands[0])
+    cand_g = {"number": 12, "head": DEPLOY_PREFIXES[0] + "b"}
+    cand_a = {"number": 11, "head": DEPLOY_PREFIXES[1] + "a"}
+    tried = []
+    def sup(rc_by_number):
+        return lambda c: (tried.append(c["number"]), rc_by_number.get(c["number"], 0))[1]
+    check("stale gitops pin falls through to admin-ui (never runs supersede on the stale PR)",
+          select_candidate([cand_g, cand_a], lambda c: ["openbank-audit-service:sandbox-x"], sup({}))
+          is cand_a and tried == [11])
+    check("owner-hold refusal falls through to admin-ui",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 3})) is cand_a)
+    check("any supersede refusal falls through (rollback rc 1)",
+          select_candidate([cand_g, cand_a], lambda c: [], sup({12: 1})) is cand_a)
+    check("every kind refused -> nothing armed",
+          select_candidate([cand_g, cand_a], lambda c: ["x"], sup({11: 1})) is None)
+    check("first armable candidate wins, later kinds untouched",
+          select_candidate([cand_a, cand_g], lambda c: ["x"], sup({})) is cand_a)
+    # Independent lanes: a kind's armed PR or recent deploy never holds the OTHER kind.
+    g_armed = {"number": 40, "head": DEPLOY_PREFIXES[0] + "x", "created_at": "2026-09-30T09:00:00Z", "armed": True}
+    check("armed gitops PR does not block admin-ui (lanes are independent)",
+          [p["number"] for p in flush_candidates(prs2 + [g_armed], T, T - W, W)] == [14])
+    lanes = {DEPLOY_PREFIXES[0]: T - 60, DEPLOY_PREFIXES[1]: T - W}
+    check("recent gitops deploy closes only the gitops window",
+          [p["number"] for p in flush_candidates(prs2, T, lanes, W)] == [14])
+    check("each lane is measured from its own last deploy commit",
+          last_deploy_by_kind([{"message": "chore(gitops): auto-deploy x", "epoch": 9},
+                               {"message": "fix(a): y", "epoch": 8},
+                               {"message": "chore(admin-ui): deploy z", "epoch": 7},
+                               {"message": "chore(gitops): auto-deploy w", "epoch": 6}])
+          == {DEPLOY_PREFIXES[0]: 9, DEPLOY_PREFIXES[1]: 7})
+    a_armed = {"number": 41, "head": DEPLOY_PREFIXES[1] + "y", "created_at": "2026-09-30T09:00:00Z", "armed": True}
+    check("a second PR of an ARMED kind is never offered",
+          [p["number"] for p in flush_candidates(prs2 + [a_armed], T, T - W, W)] == [12])
+    check("flush never arms a second PR of a kind while one of that kind is armed",
+          flush([prs[1], {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}],
+                T, None, W) is None)
+    stuck = {"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True, "stuck": True}
+    check("a stuck armed PR does not freeze the flush (#14498)",
+          (flush(prs + [stuck], T, T - W, W) or {}).get("number") == 11)
+    check("a stuck armed PR is named for disarming", [p["number"] for p in stuck_armed(prs + [stuck])] == [13])
+    roll = lambda *cs: {"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"conclusion": c} for c in cs]}
+    check("a merge conflict is stuck", is_stuck({"mergeStateStatus": "DIRTY", "statusCheckRollup": []}))
+    check("a FAILURE check is stuck", is_stuck(roll("SUCCESS", "FAILURE")))
+    check("a TIMED_OUT check is stuck", is_stuck(roll("TIMED_OUT")))
+    check("a single CANCELLED check is NOT stuck", not is_stuck(roll("SUCCESS", "CANCELLED")))
+    check("pending / green checks are NOT stuck", not is_stuck(roll(None, "SUCCESS")))
+    check("a failed commit status (state) is stuck",
+          is_stuck({"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"state": "FAILURE"}]}))
+    check("a healthy armed PR is never named for disarming",
+          stuck_armed(prs + [{**stuck, "stuck": False}]) == [])
     repair = {"number": 30, "head": "fix/repair", "created_at": "a", "armed": False,
               "state": "open", "repair_priority": True, "draft": True, "blocked": True}
     check("explicit open draft/blocked repair defers elapsed timer",
@@ -273,14 +465,24 @@ def self_test() -> int:
                                   "head_repository": {"full_name": "example/open-bank"}}}
         paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
         def run_fixture(prs_fixture, event_fixture):
-            for name, value in (("prs", prs_fixture), ("commits", [{"message": DEPLOY_SUBJECTS[0] + "old", "epoch": T - 60}]),
+            for name, value in (("prs", prs_fixture), ("commits", [{"message": s + "old", "epoch": T - 60} for s in DEPLOY_SUBJECTS]),
                                 ("event", event_fixture)):
                 with open(paths[name], "w", encoding="utf-8") as out:
                     json.dump(value, out)
             result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
                                      "--commits-json", paths["commits"], "--event-json", paths["event"],
                                      "--now", str(T), "--window", str(W)], capture_output=True, text=True)
-            return result.returncode, result.stdout
+            # The arm/arm_head lines are asserted exactly; the candidates line separately below.
+            return result.returncode, "".join(l for l in result.stdout.splitlines(True)
+                                              if not l.startswith("candidates="))
+        def fixture_candidates(prs_fixture, event_fixture):
+            run_fixture(prs_fixture, event_fixture)
+            result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
+                                     "--commits-json", paths["commits"], "--event-json", paths["event"],
+                                     "--now", str(T + W), "--window", str(W)], capture_output=True, text=True)
+            return [l for l in result.stdout.splitlines() if l.startswith("candidates=")]
+        check("CLI emits both kinds as candidates so a held kind cannot starve the other",
+              fixture_candidates(prs, {}) == ["candidates=11:chore/admin-ui-deploy-a 12:chore/gitops-auto-deploy-b"])
         check("manual producer completion expedites only its matching PR inside the window",
               run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
         sibling = {**manual_pr, "number": 22, "head": DEPLOY_PREFIXES[0] + sha + "-run102"}
@@ -332,6 +534,7 @@ def self_test() -> int:
 
     # 5. two pushes in one window -> ONE PR pins both (carry), and a moved service is not rewound
     reg = "123.dkr.ecr.eu-north-1.amazonaws.com"
+    dg = lambda c: f"@sha256:{c * 64}"
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "g"))
         for svc, tag in (("billing", "sandbox-aaa"), ("lending", "sandbox-bbb"), ("party", "sandbox-ccc")):
@@ -344,7 +547,7 @@ def self_test() -> int:
         # party has since moved on main (sandbox-ccc -> sandbox-999 by another merged deploy).
         open(os.path.join(d, "g", "party.yaml"), "w").write(f"image: {reg}/openbank-party:sandbox-999\n")
         older = "".join(
-            f"--- a/g/{s}.yaml\n+++ b/g/{s}.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-{s}:{o}\n+image: {reg}/openbank-{s}:sandbox-111\n"
+            f"--- a/g/{s}.yaml\n+++ b/g/{s}.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-{s}:{o}\n+image: {reg}/openbank-{s}:sandbox-111{dg('1')}\n"
             for s, o in (("billing", "sandbox-aaa"), ("lending", "sandbox-bbb"), ("party", "sandbox-ccc"))
         )
         got = carry(d, older, {f"{reg}/openbank-lending"}, lambda image, tag: True)
@@ -364,6 +567,39 @@ def self_test() -> int:
               and "sandbox-aaa" in read("billing"))
         check("verify refuses stale GitOps pins", len(verify_pins(older, lambda image, tag: False)) == 1)
         check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
+        check("carry moves tag and digest together",
+              carry(d, older, set(), lambda image, tag: True) != []
+              and f"openbank-billing:sandbox-111{dg('1')}\n" in read("billing"))
+        # The shape of #14905: a new tag over the digest of the tag it replaced.
+        def hunk(old, new):
+            return f"--- a/g/aml.yaml\n+++ b/g/aml.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-aml:{old}\n+image: {reg}/openbank-aml:{new}\n"
+        retag = hunk(f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('a')}")
+        rebuilt = hunk(f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('b')}")
+        always = lambda image, tag: True
+        check("a new tag over the old digest is refused", len(verify_pins(retag, always)) == 1)
+        check("a new tag with its own digest passes", verify_pins(rebuilt, always) == [])
+        check("a retag that drops the digest is refused",
+              len(verify_pins(hunk(f"sandbox-aaa{dg('a')}", "sandbox-bbb"), always)) == 1)
+        check("a gitops pin without a digest is refused",
+              verify_pins(hunk("sandbox-aaa", "sandbox-bbb"), always, require_digest=True) != [])
+        check("a per-run tag without a digest stays legal for admin-ui",
+              verify_pins(hunk("sandbox-aaa-run1", "sandbox-bbb-run2"), always) == [])
+        check("one tag naming two digests is refused",
+              pin_identity_failures(f"+++ b/g/a.yaml\n+image: {reg}/openbank-aml:sandbox-b{dg('a')}\n"
+                                    f"+image: {reg}/openbank-aml:sandbox-b{dg('b')}\n") != [])
+        aml = os.path.join(d, "g", "aml.yaml")
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('a')}\n")
+        check("carry refuses a donor whose pin is a false pair",
+              carry(d, retag, set(), always) == [] and "sandbox-aaa" in open(aml).read())
+        check("carry refuses a donor pin with no digest",
+              carry(d, hunk(f"sandbox-aaa{dg('a')}", "sandbox-bbb"), set(), always) == [])
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('c')}\n")
+        check("carry treats a moved digest under the same tag as moved",
+              carry(d, rebuilt, set(), always) == [])
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('a')}\n")
+        check("carry replaces the whole old reference, leaving no stale digest",
+              carry(d, rebuilt, set(), always) != []
+              and open(aml).read() == f"image: {reg}/openbank-aml:sandbox-bbb{dg('b')}\n")
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
     if fails:
@@ -388,8 +624,13 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    sub.add_parser("stuck", help="stdin: gh pr view --json mergeStateStatus,statusCheckRollup; prints true/false")
+    sel = sub.add_parser("select", help="arm-candidate fall-through: verify + supersede per kind")
+    sel.add_argument("--root", default=".")
+    sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    v.add_argument("--require-digest", action="store_true")
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -403,20 +644,64 @@ def main() -> int:
         print(f"::notice::deploy window: {verdict} — {why}", file=sys.stderr)
         return 0
     if a.cmd == "flush":
-        last = last_deploy_from_commits(json.load(open(a.commits_json)))
+        last = last_deploy_by_kind(json.load(open(a.commits_json)))
         manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
-        print(f"arm={pick['number'] if pick else ''}")
-        print(f"arm_head={pick['head'] if pick else ''}")
+        prs = json.load(open(a.prs_json))
+        stuck = stuck_armed(prs)
+        for p in stuck:
+            print(f"::warning::deploy window: armed deploy PR #{p['number']} cannot merge; disarming it so its kind is not frozen (#14498)", file=sys.stderr)
+        cands = flush_candidates(prs, a.now, last, a.window, manual_head)
+        print(f"arm={cands[0]['number'] if cands else ''}")
+        print(f"arm_head={cands[0]['head'] if cands else ''}")
+        # number:head pairs in order; the workflow falls through to the next on a hold refusal.
+        if stuck:
+            print(f"disarm={' '.join(str(p['number']) for p in stuck)}")
+        print("candidates=" + " ".join(f"{p['number']}:{p['head']}" for p in cands))
         return 0
     if a.cmd == "carry":
         for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
                           lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
         return 0
+    if a.cmd == "stuck":
+        print("true" if is_stuck(json.load(sys.stdin)) else "false")
+        return 0
+    if a.cmd == "select":
+        repo = os.environ["GITHUB_REPOSITORY"]
+        cands = []
+        for pair in a.candidates.split():
+            number, _, head = pair.partition(":")
+            if not number.isdigit() or not head.startswith(DEPLOY_PREFIXES):
+                print(f"::error::unexpected deploy candidate {pair}", file=sys.stderr)
+                return 1
+            cands.append({"number": int(number), "head": head})
+
+        def verify(c):
+            # An unreadable diff refuses THIS kind only; raising here would abort the
+            # fall-through and re-create the head-of-line block this command exists to remove.
+            read = subprocess.run(["gh", "pr", "diff", str(c["number"]), "--repo", repo],
+                                  capture_output=True, text=True)
+            if read.returncode != 0:
+                return [f"diff of #{c['number']} unreadable (gh rc {read.returncode})"]
+            diff = read.stdout
+            return verify_pins(diff, lambda image, tag: image_source_is_current(a.root, image, tag))
+
+        def supersede(c):
+            prefix = next(x for x in DEPLOY_PREFIXES if c["head"].startswith(x))
+            # stdout -> stderr: this command's own stdout is the step's GITHUB_OUTPUT.
+            return subprocess.run(["bash", ".github/scripts/supersede-deploy-prs.sh", prefix, str(c["number"])],
+                                  stdout=sys.stderr).returncode
+
+        pick = select_candidate(cands, verify, supersede)
+        if pick is None:
+            print("::error::every deploy kind was refused - nothing armed.", file=sys.stderr)
+            return 1
+        print(f"arm={pick['number']}")
+        return 0
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
-                            lambda image, tag: image_source_is_current(a.root, image, tag))
+                            lambda image, tag: image_source_is_current(a.root, image, tag),
+                            require_digest=a.require_digest)
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
         return 1 if stale else 0

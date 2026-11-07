@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.20.0...fx-service-v0.20.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **fx:** ingest the CNB fixing at boot, not only at the 14:40 cron ([#14777](https://github.com/JiRaska/open-bank-oss/issues/14777)) ([cf5f01c](https://github.com/JiRaska/open-bank-oss/commit/cf5f01c9c50f52dea53df9deae9d8f4aef71603d))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.19.0...fx-service-v0.20.0) (2026-10-17)
 
 

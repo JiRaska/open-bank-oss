@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.1...document-service-v1.1.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **document:** read the product catalog as openbank-document, not the shared client ([#14826](https://github.com/JiRaska/open-bank-oss/issues/14826)) ([421cbb0](https://github.com/JiRaska/open-bank-oss/commit/421cbb01d84785e3fe5ab8261921437eb39e30f4))
+
 ## [1.1.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v1.1.0...document-service-v1.1.1) (2026-10-26)
 
 

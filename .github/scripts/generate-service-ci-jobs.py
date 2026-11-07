@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = Path('.github/workflows/services-ci.yml')
 CALLERS = ('  # BEGIN GENERATED SERVICE CI CALLERS', '  # END GENERATED SERVICE CI CALLERS')
 NEEDS = ('    # BEGIN GENERATED SERVICE CI NEEDS', '    # END GENERATED SERVICE CI NEEDS')
-LANES = {'pr': 12, 'other': 8}
+LANES = {'pr': 16, 'other': 8}
 CALLEES = {'pr': '.github/workflows/_service-ci-pr.yml', 'other': '.github/workflows/_service-ci.yml'}
 
 
@@ -48,8 +48,21 @@ def caller_block(modules):
                      '    if: ' + expression(condition),
                      '    permissions:', '      contents: read', '      actions: read', '      id-token: write',
                      f'    uses: ./{CALLEES[lane]}',
-                     '    with:', f'      service: {module}', '    secrets:',
-                     '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']
+                     '    with:', f'      service: {module}']
+            # `secrets: inherit` on the non-PR lane ONLY. In a called reusable workflow an
+            # ENVIRONMENT secret (GRADLE_CACHE_WRITE_PASSWORD of `gradle-cache-writer`, ADR-0363)
+            # resolves to '' unless the caller inherits (actions/runner issue 4453): measured
+            # 2026-11-05, main pushes ran with an empty write password and never wrote the cache.
+            # Inherit adds nothing for non-main events: _service-ci.yml reads the write secret
+            # only inside the main-push environment and PACT_BROKER_PASSWORD only in its
+            # `contract` job, whose `if:` is the same main-only expression this map used.
+            # The PR lane keeps the explicit map, which yields '' on pull_request: PR code must
+            # never receive more secrets than it does today.
+            if lane == 'other':
+                rows += ['    secrets: inherit', '']
+            else:
+                rows += ['    secrets:',
+                         '      PACT_BROKER_PASSWORD: ' + expression("(github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && secrets.PACT_BROKER_PASSWORD || ''"), '']
     return '\n'.join(rows).rstrip()
 
 

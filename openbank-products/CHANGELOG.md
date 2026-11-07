@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.2...products-v0.4.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
+## [0.3.2](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.1...products-v0.3.2) (2026-11-03)
+
+
+### Bug Fixes
+
+* **libs:** refuse an early withdrawal whose penalty would overdraw the deposit ([#14208](https://github.com/JiRaska/open-bank-oss/issues/14208)) ([a47f366](https://github.com/JiRaska/open-bank-oss/commit/a47f36616049a7aa1c7a3dc00a780aee0d7bee00))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/products-v0.3.0...products-v0.3.1) (2026-11-02)
 
 

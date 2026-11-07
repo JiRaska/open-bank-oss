@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-referral-service
 
-> Operational runbook for the `referral` service. Data domain **open-banking**,
+> Operational runbook for the `referral` service. Data domain **engagement**,
 > classification **confidential**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-referral-service` |
 | HTTP port | `8155` |
-| Data domain | open-banking |
+| Data domain | engagement |
 | Datastore | PostgreSQL (database `openbank_referral`) |
 | Classification | confidential |
 | Retention | 13 months |

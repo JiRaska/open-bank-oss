@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.31.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.31.0...audit-service-v0.31.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **audit:** widen identity columns so long values reach the audit trail ([#15009](https://github.com/JiRaska/open-bank-oss/issues/15009)) ([1a07a70](https://github.com/JiRaska/open-bank-oss/commit/1a07a70d81a75fd22ddb69255451ed19e861fadf))
+
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.30.1...audit-service-v0.31.0) (2026-11-05)
+
+
+### Features
+
+* **audit:** record TPP register changes on the audit trail ([#14476](https://github.com/JiRaska/open-bank-oss/issues/14476)) ([76ba2bf](https://github.com/JiRaska/open-bank-oss/commit/76ba2bf1e930c9ba8d3719a8aaa98a4abf2c5661))
+
+## [0.30.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.30.0...audit-service-v0.30.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **audit:** prepare account status and withdrawal approval consumers ([#14606](https://github.com/JiRaska/open-bank-oss/issues/14606)) ([0f099f8](https://github.com/JiRaska/open-bank-oss/commit/0f099f8b98ec110cc48bf8735ddc6fb5c50c8e24))
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.29.2...audit-service-v0.30.0) (2026-10-30)
 
 
