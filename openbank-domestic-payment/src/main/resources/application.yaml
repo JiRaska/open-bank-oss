@@ -163,6 +163,26 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+      # #4403: an analyst's decision on a FRAUD_REVIEW case releases or rejects the held payment.
+      # Off until the activation PR, which turns it on with the enforcement flag. Nested keys, because
+      # a dotted leaf never reaches the connector. earliest is safe: the group is new, every other
+      # alert code is skipped, and a decision for a finished run is only counted.
+      fraud-hold-resolution-in:
+        enabled: ${DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED:false}
+        connector: smallrye-kafka
+        topic: openbank.aml.events
+        client:
+          id: domestic-payment-fraud-hold-resolution-${quarkus.uuid}
+        group:
+          id: domestic-payment-fraud-hold-resolution
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.domestic-payment.fraud-hold-resolution-in
 "%dev":
   quarkus:
     log:
