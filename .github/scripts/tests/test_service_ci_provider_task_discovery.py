@@ -220,7 +220,10 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
 
     def test_scoped_consumer_filter_reaches_test_jvm(self):
         import re
-        gradle = (ROOT / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts").read_text()
+        # The forwarded keys live in one shared list (pactBrokerSystemProperties) that both the
+        # quarkus-service plugin and test-provenance read; fall back to the plugin for older layouts.
+        gradle = (ROOT / "build-logic/src/main/kotlin/com/openbank/buildlogic/BuildFactsInputs.kt").read_text()
+        gradle += (ROOT / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts").read_text()
         forwarded = set(re.findall(r'^\s+"((?:pact|pactbroker)[\w.]*)",$', gradle, re.M))
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
