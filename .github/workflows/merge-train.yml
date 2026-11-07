@@ -114,7 +114,8 @@ jobs:
         run: |
           set -euo pipefail
           # Admission runs the checklist gate from beside this script, so main's copy must be there too.
-          for f in merge-train.py check-security-checklist.py merge_train_carrier.py; do
+          git -c core.hooksPath=/dev/null show origin/main:.github/scripts/merge-train.py > "$RUNNER_TEMP/merge-train.py"
+          for f in check-security-checklist.py merge_train_carrier.py; do
             git -c core.hooksPath=/dev/null show "origin/main:.github/scripts/$f" > "$RUNNER_TEMP/$f"
           done
           # shellcheck disable=SC2086  # SHADOW is empty or a single flag
