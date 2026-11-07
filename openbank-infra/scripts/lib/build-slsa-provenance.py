@@ -28,6 +28,8 @@ Deliberate honesty in the output (a predicate that overclaims is worse than none
 
 Usage:
   build-slsa-provenance.py --output predicate.json     # reads GITHUB_* env
+  # ARTIFACT_SOURCE_SHA optionally identifies promoted source material (exact 40 lowercase hex).
+  # GITHUB_WORKFLOW_SHA identifies workflow config; GITHUB_SHA remains its compatibility fallback.
   build-slsa-provenance.py --self-test                 # fixed-input golden check, exits non-zero on drift
 """
 from __future__ import annotations
@@ -35,6 +37,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 
 REPO_URL = "git+https://github.com/JiRaska/open-bank-oss"
@@ -59,6 +62,13 @@ def build_predicate(env: dict[str, str]) -> dict:
     if missing:
         raise SystemExit(f"build-slsa-provenance: missing required env: {', '.join(missing)}")
 
+    # Source material can come from a separately verified build. This hint never rewrites
+    # GitHub invocation identity or asserts that its caller verified an artifact digest.
+    artifact_sha = env.get("ARTIFACT_SOURCE_SHA", env["GITHUB_SHA"])
+    if "ARTIFACT_SOURCE_SHA" in env and re.fullmatch(r"[0-9a-f]{40}", artifact_sha) is None:
+        raise SystemExit("build-slsa-provenance: ARTIFACT_SOURCE_SHA must be exactly 40 lowercase hexadecimal characters")
+    workflow_sha = env.get("GITHUB_WORKFLOW_SHA") or env["GITHUB_SHA"]
+
     repo = env["GITHUB_REPOSITORY"]
     server = env["GITHUB_SERVER_URL"].rstrip("/")
     # GITHUB_WORKFLOW_REF is "<repo>/<workflow-path>@<ref>"; entryPoint is the path between.
@@ -82,7 +92,7 @@ def build_predicate(env: dict[str, str]) -> dict:
         "invocation": {
             "configSource": {
                 "uri": uri,
-                "digest": {"sha1": env["GITHUB_SHA"]},
+                "digest": {"sha1": workflow_sha},
                 "entryPoint": entry_point,
             },
             "parameters": {
@@ -90,7 +100,7 @@ def build_predicate(env: dict[str, str]) -> dict:
                 "event_name": env["GITHUB_EVENT_NAME"],
             },
         },
-        "materials": [{"uri": uri, "digest": {"sha1": env["GITHUB_SHA"]}}],
+        "materials": [{"uri": uri, "digest": {"sha1": artifact_sha}}],
         "metadata": {
             # The run URL doubles as the unique-per-run identity the post-attest verify binds to —
             # the same role the CycloneDX serialNumber plays for the SBOM attestation (an append-

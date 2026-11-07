@@ -156,3 +156,22 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ### Unsettled booking alert and re-drive (#13623)
 
 `DomesticPaymentBookingUnsettled` fires when the oldest open booking clock is older than 1h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, tested by `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal keeps retrying settlement every 5 minutes for 7 days under the same key, which heals a transient outage but never a deterministic answer. The operator remedy (query transaction-service by key, then reconcile, reverse or re-drive, including a reset of a workflow that has already failed) is `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+## Payment type on pacs.008 (#13663)
+
+The domestic adapter explicitly leaves the optional payment-type block absent. The EPC service
+level SEPA is not a domestic clearing-scheme code; introducing the shared library field does not
+make a domestic transfer a SEPA payment. The default no-block XML remains unchanged.
+`DomesticPaymentPriority.INSTANT` still has no corresponding scheme code on this wire: choosing
+the domestic scheme's service-level/local-instrument code remains unresolved. Do not interpret
+this compatibility decision as proof that instant priority is communicated to the scheme.
+
+## Fraud enforcement flag (#4403, ADR-0084 §4.2)
+
+`openbank.domestic.fraud.enforcement-enabled` (env `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED`) is **off by default**. While off, every payment proceeds exactly as before and the would-be decision is only counted in `openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`. Calibrate on that metric before turning the flag on.
+
+With the flag on, the `fraudGate` workflow activity fails closed: only a real ALLOW proceeds, DECLINE rejects the payment as `FRAUD_SUSPECTED`, and every other verdict (CHALLENGE, REVIEW, UNKNOWN, any synthetic verdict) holds the payment before scheme submission and opens a `FRAUD_REVIEW` case. A hold is released only by the `resolveFraudHold(RELEASE)` workflow signal; a REJECT signal, or no signal within 48 h, rejects the payment. Nothing sends the signal on case closure yet, so do not enable the flag until that wiring exists. The fraud reject path sends no customer notification (tipping-off). Rollback: set the flag to `false`; payments already waiting keep waiting for their signal or the timeout.
+
+## API identity on the mTLS listener
+
+In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `DomesticPaymentListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.

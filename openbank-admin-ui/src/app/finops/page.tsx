@@ -14,12 +14,20 @@ import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { SourceUnavailable } from '@/lib/services/useServiceResource'
+import type { BffFailure } from '@/lib/services/bff'
+
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { lifecycleSchema, resourcesSchema, costsSchema, rightSizingSchema, aiCostsSchema, anomaliesSchema, type FinOpsAnomaly, type DailyCost, type ServiceCost } from '@/lib/finops/overviewContracts'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge, type Tone } from '@/components/ui'
+
+function rejectUnavailable(raw: unknown, kind: BffFailure): unknown {
+  if (raw && typeof raw === 'object' && (raw as { available?: unknown }).available === false) throw new SourceUnavailable(kind)
+  return raw
+}
 
 // ── Helper components ─────────────────────────────────────────────────────────
 
@@ -224,8 +232,10 @@ function FinOpsContent() {
   const resourcesResource = useServiceResource('/api/finops/resources', { select: raw => resourcesSchema.parse(raw), maxWakeRetries: 0 })
   const costsResource = useServiceResource('/api/finops/costs', { select: raw => costsSchema.parse(raw), maxWakeRetries: 0 })
   const rightSizingResource = useServiceResource('/api/finops/right-sizing', { select: raw => rightSizingSchema.parse(raw), maxWakeRetries: 0 })
-  const aiCostsResource = useServiceResource('/api/finops/ai-costs', { select: raw => aiCostsSchema.parse(raw), maxWakeRetries: 0 })
-  const anomaliesResource = useServiceResource('/api/finops/anomalies', { select: raw => anomaliesSchema.parse(raw), maxWakeRetries: 0 })
+  // `{ available: false }` is the routes' explicit "upstream absent" answer. It must not read
+  // as a crash, and must not read as a verified empty result either.
+  const aiCostsResource = useServiceResource('/api/finops/ai-costs', { select: raw => aiCostsSchema.parse(rejectUnavailable(raw, 'not_deployed')), maxWakeRetries: 0 })
+  const anomaliesResource = useServiceResource('/api/finops/anomalies', { select: raw => anomaliesSchema.parse(rejectUnavailable(raw, 'unreachable')), maxWakeRetries: 0 })
   // A failed refresh must not make an old value look current. Each source renders independently.
   const lifecycle = lifecycleResource.unavailable ? null : lifecycleResource.data
   const resources = resourcesResource.unavailable ? null : resourcesResource.data
@@ -238,8 +248,8 @@ function FinOpsContent() {
     { name: t('Využití zdrojů', 'Resource utilisation'), resource: resourcesResource },
     { name: t('Cloudové náklady', 'Cloud costs'), resource: costsResource },
     { name: t('Dimenzování zdrojů', 'Right-sizing'), resource: rightSizingResource },
-    { name: t('AI náklady', 'AI costs'), resource: aiCostsResource },
-    { name: t('Nákladové anomálie', 'Cost anomalies'), resource: anomaliesResource },
+    { name: t('AI náklady', 'AI costs'), resource: aiCostsResource, service: t('Most Langfuse → Prometheus (ADR-0112)', 'Langfuse → Prometheus bridge (ADR-0112)') },
+    { name: t('Nákladové anomálie', 'Cost anomalies'), resource: anomaliesResource, service: 'Alertmanager' },
   ]
   const loading = sections.some(section => section.resource.loading)
   const [lastRefresh, setLastRefresh] = useState(() => new Date())
@@ -309,9 +319,9 @@ function FinOpsContent() {
       />
 
       <div aria-live="polite">
-        {sections.map(({ name, resource }) => resource.unavailable ? (
+        {sections.map(({ name, resource, service }: { name: string; resource: typeof sections[number]['resource']; service?: string }) => resource.unavailable ? (
           <section key={name} aria-label={name} className="mb-4">
-            <DataUnavailable kind={resource.unavailable.kind} feature={name} service="FinOps" lang={language} dense>
+            <DataUnavailable kind={resource.unavailable.kind} feature={name} service={service ?? 'FinOps'} lang={language} dense>
               <button type="button" onClick={resource.reload} className="btn-secondary" style={{ color: 'var(--text-primary)', background: 'var(--surface)' }} aria-label={t(`Zkusit znovu: ${name}`, `Retry ${name}`)}>{t('Zkusit znovu', 'Retry')}</button>
             </DataUnavailable>
           </section>
@@ -421,17 +431,27 @@ function FinOpsContent() {
                 </span>
               </div>
             ) : (() => {
-              const DOMAIN_COLOR: Record<string, string> = {
-                Platform: '#6366f1', Governance: '#d97706', Security: '#dc2626',
-                Observability: '#0891b2', FinOps: '#16a34a', Tax: '#94a3b8',
+              const AWS_CATEGORY_COLOR: Record<string, string> = {
+                Platform: 'var(--accent)', Governance: 'var(--warning)', Security: 'var(--danger)',
+                Observability: 'var(--info)', FinOps: 'var(--success)', Tax: 'var(--text-tertiary)',
+                Unclassified: 'var(--text-tertiary)',
               }
-              const domainTotals: Record<string, number> = {}
+              const awsCategoryLabel = (category: string) => ({
+                Platform: t('Platformní infrastruktura', 'Platform infrastructure'),
+                Governance: t('Cloudová governance', 'Cloud governance'),
+                Security: t('Zabezpečení cloudu', 'Cloud security'),
+                Observability: t('Pozorovatelnost', 'Observability'),
+                FinOps: t('Správa nákladů', 'Cost management'),
+                Tax: t('Daň', 'Tax'),
+                Unclassified: t('Nezařazeno', 'Unclassified'),
+              }[category] ?? category)
+              const categoryTotals: Record<string, number> = {}
               for (const s of costs.services) {
-                const d = (s as ServiceCost).domain ?? 'Platform'
-                domainTotals[d] = (domainTotals[d] ?? 0) + s.amount
+                const category = (s as ServiceCost).domain ?? 'Unclassified'
+                categoryTotals[category] = (categoryTotals[category] ?? 0) + s.amount
               }
-              const domains = Object.entries(domainTotals)
-                .map(([domain, amount]) => ({ domain, amount: Math.round(amount * 100) / 100 }))
+              const categories = Object.entries(categoryTotals)
+                .map(([category, amount]) => ({ category, amount: Math.round(amount * 100) / 100 }))
                 .sort((a, b) => b.amount - a.amount)
               const tax = costs.services.filter(s => (s as ServiceCost).domain === 'Tax').reduce((sum, s) => sum + s.amount, 0)
               const exTax = Math.round((costs.total - tax) * 100) / 100
@@ -492,18 +512,22 @@ function FinOpsContent() {
                   {/* DAILY SPEND TREND — the per-day series we otherwise only read in the console */}
                   <DailySpendTrend daily={costs.daily} currency={costs.currency} />
 
-                  {/* BY DOMAIN — process/business view */}
+                  {/* AWS cost categories are separate from canonical business-domain ownership. */}
                   <div style={{ marginBottom: '20px' }}>
                     <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                      {t('Rozpad po doménách (procesní pohled)', 'By domain (process / business view)')}
+                      {t('Kategorie cloudových nákladů', 'Cloud cost categories')}
                     </div>
+                    <p style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginBottom: '10px' }}>
+                      {t('Kategorie jsou odvozené z AWS služeb. Obchodní domény najdete v ', 'Categories are derived from AWS services. Business domains are shown in ')}
+                      <Link href="/finops/allocation" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>{t('alokaci nákladů', 'cost allocation')}</Link>.
+                    </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
-                      {domains.map(({ domain, amount }) => {
+                      {categories.map(({ category, amount }) => {
                         const pct = costs.total > 0 ? (amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[domain] ?? 'var(--accent)'
+                        const color = AWS_CATEGORY_COLOR[category] ?? 'var(--text-tertiary)'
                         return (
-                          <div key={domain} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '12px', fontWeight: 700, color, width: '110px', flexShrink: 0 }}>{domain}</span>
+                          <div key={category} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 700, color, width: '110px', flexShrink: 0 }}>{awsCategoryLabel(category)}</span>
                             <div style={{ flex: 1, height: '10px', background: 'var(--surface-3)', borderRadius: '5px', overflow: 'hidden' }}>
                               <div style={{ width: `${Math.max(pct, 0.5)}%`, height: '100%', background: color, borderRadius: '5px' }} />
                             </div>
@@ -525,7 +549,7 @@ function FinOpsContent() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '8px' }}>
                       {costs.services.map(svc => {
                         const pct = costs.total > 0 ? (svc.amount / costs.total) * 100 : 0
-                        const color = DOMAIN_COLOR[(svc as ServiceCost).domain ?? 'Platform'] ?? 'var(--accent)'
+                        const color = AWS_CATEGORY_COLOR[(svc as ServiceCost).domain ?? 'Unclassified'] ?? 'var(--text-tertiary)'
                         return (
                           <div key={svc.name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />

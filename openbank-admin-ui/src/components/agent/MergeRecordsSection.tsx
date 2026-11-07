@@ -158,12 +158,14 @@ export function MergeRecordsSection({ knownAgentIds }: MergeRecordsSectionProps)
                     </span>
                   </td>
                   <td style={{ padding: '10px 12px', verticalAlign: 'top', whiteSpace: 'nowrap' }}>
-                    {r.authorization ? (
+                    {(r.policyAuthorization ?? r.authorization) ? (
                       <>
-                        <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{r.authorization.approvedBy}</div>
-                        <a href={r.authorization.evidenceUrl} target="_blank" rel="noreferrer"
+                        <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{(r.policyAuthorization ?? r.authorization)?.approvedBy}</div>
+                        <a href={(r.policyAuthorization ?? r.authorization)?.evidenceUrl} target="_blank" rel="noreferrer"
                           style={{ color: 'var(--accent-text)', fontSize: '11px' }}>
-                          {r.authorization.scope === 'HEAD'
+                          {r.policyAuthorization
+                            ? t('Žádost pro PR podle tehdejších pravidel', 'PR request under the policy at merge time')
+                            : r.authorization?.scope === 'HEAD'
                             ? t('Schválení přesného HEAD', 'Exact-head approval')
                             : t('Historická žádost pro PR', 'Historical PR request')}
                         </a>

@@ -1,0 +1,258 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the check behind the sanctions_get_check tool",
+      "providerStates": [
+        {
+          "name": "a sanctions check exists for the pact agent probe"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sanctions/5d5d5d5d-5d5d-4d5d-8d5d-5d5d5d5d5d5d"
+      },
+      "response": {
+        "body": {
+          "checkedLists": [
+            "OFAC_SDN"
+          ],
+          "entityType": "INDIVIDUAL",
+          "id": "5d5d5d5d-5d5d-4d5d-8d5d-5d5d5d5d5d5d",
+          "idempotencyKey": "pact-agent-sanctions-001",
+          "matches": [
+
+          ],
+          "name": "Agent Pact Probe Person",
+          "overallScore": 0.9,
+          "status": "POTENTIAL_HIT"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.overallScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the check list behind the sanctions_list_checks tool",
+      "providerStates": [
+        {
+          "name": "a sanctions check exists for the pact agent probe"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sanctions"
+      },
+      "response": {
+        "body": [
+          {
+            "entityType": "string",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "name": "string",
+            "overallScore": 100.0,
+            "status": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].entityType": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].id": {
+              "type": "Uuid"
+            },
+            "$[*].name": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].overallScore": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].status": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].entityType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].overallScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the pending queue behind the sanctions_list_pending tool",
+      "providerStates": [
+        {
+          "name": "a sanctions check exists for the pact agent probe"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sanctions/pending"
+      },
+      "response": {
+        "body": [
+          {
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "name": "string",
+            "overallScore": 100.0,
+            "status": "POTENTIAL_HIT"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].id": {
+              "type": "Uuid"
+            },
+            "$[*].name": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].overallScore": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].overallScore": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a check sanctions-service does not hold, via the sanctions_get_check tool",
+      "providerStates": [
+        {
+          "name": "no sanctions check exists with the requested id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sanctions/6e6e6e6e-6e6e-4e6e-8e6e-6e6e6e6e6e6e"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sanctions-service"
+  }
+}

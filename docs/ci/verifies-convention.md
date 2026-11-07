@@ -72,3 +72,17 @@ belong to the executed JUnit class, including its nested class path; class tags 
 class and its nested tests.
 The annotation reader remains a conservative source convention, not a Kotlin compiler or proof
 that a test's assertions substantiate the threat-model mitigation.
+
+## Admin UI authenticated deployed lane (#13171)
+
+`openbank-admin-ui/e2e/deployed-session.spec.ts` (job `session-smoke` in
+`admin-ui-deployed-auth-gate.yml`) signs in through the real Keycloak login form as the
+least-privilege e2e operator and declares one id per money-path screen,
+`@verifies:admin-ui/E2E-<screen>`, plus `admin-ui/E2E-SSO` for the sign-in itself. Screens the
+operator's read-only roles do not admit are asserted to redirect to `/auth/forbidden`, so every
+listed screen has a verdict. The ids reach Test Intelligence through the lane's run envelope.
+
+`threat-model-test-evidence` stays **advisory**. No `docs/threat-models/admin-ui.md` register row
+cites these ids yet, so the gate has nothing of this lane's to judge, and
+`rules.yaml: threat_model_test_evidence` sets enforcement after a month of triaged advisory output
+(`target_enforce_date`). Promoting it now would enforce a verdict nobody has reviewed.

@@ -22,12 +22,11 @@ enum class ScreeningType {
     MANUAL_INVESTIGATION,
 }
 
-enum class AmlRiskLevel {
-    LOW,
-    MEDIUM,
-    HIGH,
-    CRITICAL,
-}
+/**
+ * aml-service's name for the shared AML case severity (ADR-0353 D3/D4): one enum, declared once in
+ * `openbank-libs-fincrime`, so the rails that open cases cannot drift from it.
+ */
+typealias AmlRiskLevel = com.openbank.libs.fincrime.AmlCaseSeverity
 
 data class AmlCase(
     val id: UUID,

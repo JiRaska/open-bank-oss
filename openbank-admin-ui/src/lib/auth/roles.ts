@@ -115,9 +115,11 @@ export const PERMISSIONS = {
   // (approve/reject/settle/mature/reverse) APPROVER only — ADMIN is deliberately NOT in either
   // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
   // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
-  // ADR-0344 (API 1.19.0) widens the class-level read set with the back-office and reference-editor
-  // roles.
-  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
+  // ADR-0344 (API 1.19.0) widens the class-level read set with the back-office role. The reference
+  // editor is NOT a reader of the book (least privilege, API 1.20.0): it reads reference data only,
+  // through `treasury:reference:read`, which mirrors ReferenceResource's class-level set.
+  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE],
+  "treasury:reference:read": [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER, ROLES.TREASURY_BACK_OFFICE, ROLES.TREASURY_REFERENCE_EDITOR],
   "treasury:deal:create":   [ROLES.TREASURY_DEALER],
   "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
   "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
@@ -144,6 +146,8 @@ export const PERMISSIONS = {
   // auditor is included deliberately — the programme's obligation and its cap are exactly what an
   // audit asks about.
   "loyalty:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
+  "game:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "game:manage":           [ROLES.ADMIN],
   "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
@@ -395,6 +399,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
     // its own permission at the BFF boundary — this prefix only gates the page shell.
     '/reporting',
   ]],
+  ['game:view', ['/loyalty/game']],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
   ['campaign:create', ['/segments/new']],

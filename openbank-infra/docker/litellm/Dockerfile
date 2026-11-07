@@ -29,6 +29,16 @@ FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}@sha256:625981c83410a3ea68eb06975
 # assertion below keeps the floor so a future base cannot silently regress below the fix.
 RUN /app/.venv/bin/python3 -c 'import jwt; v = tuple(int(x) for x in jwt.__version__.split(".")[:2]); assert v >= (2, 14), jwt.__version__'
 
+# v1.104.0 ships certifi 2026.04.22, which bundles the compromised emSign roots
+# (GHSA-6q48-6c7w-9gw2). Install the fixed wheel by hash into the active venv and
+# remove pip again so the runtime image does not gain a package manager.
+RUN python3 -m ensurepip --default-pip \
+    && printf '%s\n' 'certifi==2026.10.18 --hash=sha256:73191c47aaa79da394e8fee2dbc2ec827432cab56311122c9e47abf79e390f62' > /tmp/requirements.txt \
+    && python3 -m pip install --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /tmp/requirements.txt \
+    && /app/.venv/bin/python3 -c 'import certifi; assert certifi.__version__ == "2026.10.18", certifi.__version__' \
+    && python3 -m pip uninstall -y pip \
+    && rm /tmp/requirements.txt
+
 # The Prisma home for every process in this image. Root-owned and read-only to the runtime uid
 # on purpose: the engines are code, and a writable engine directory in the one pod with
 # 0.0.0.0/0:443 egress (ADR-0175 section 4) would be a place to swap one.

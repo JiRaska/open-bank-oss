@@ -89,8 +89,12 @@ mp:
         topic: openbank.agent.audit.events
         # #5745, same reasoning as `audit-events-in` below. This channel needs it MORE, not less:
         # it is the strict path — AgentAuditConsumer acknowledges only after append-only
-        # persistence succeeds, so it rethrows by design, and SmallRye's default `fail` would stop
+        # persistence succeeds and NACKs on failure, and SmallRye's default `fail` would stop
         # the D5 provenance stream on the first bad record. Explicit and NESTED (#686).
+        # (The handler NACKs in a catch rather than rethrowing: this method infers MANUAL
+        # acknowledgment, and a rethrown exception bypasses message.nack entirely — the stream
+        # cancels instead of parking the record. Verified against Redpanda in
+        # AgentAuditKafkaPersistenceIT, #12256.)
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.agent-audit-events-in
@@ -217,12 +221,20 @@ mp:
         # three topics added above carry `retention.ms: 604800000` (7 days) in their KafkaTopic
         # CRs, so the backfill is bounded at one week of history per topic -- a one-time
         # first-subscribe load spike worth knowing about, not an unbounded replay.
+        # Contract 9.2: openbank.swift.institution-transfers — money-path (bank-own transfers
+        # ACCEPTED/SENT/SETTLED/REJECTED), attributed to swift-service by TopicAttribution.
         # ADR-0315 (#10618): openbank.treasury.deal.events — money-path (treasury deals post GL
         # journals). New topic, no committed offset: read from its retention start on first
         # subscribe, which is the intended audit behaviour.
         # openbank.card.processing.events — ADR-0283 phase 1: card-processing-service. New
         # topic, no committed offset: same first-subscribe-from-retention-start behaviour.
-        topics: openbank.settlement.events,openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.fx.cnb-policy-rate.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.card.processing.events
+        # ADR-0344 contract 9.1: openbank.treasury.payments — bank-own payment releases, money-path,
+        # attributed to treasury-service by TopicProducers. New topic, read from retention start.
+        # #13177: openbank.tpp.registry.event — TPP_REGISTERED / TPP_BLACKLISTED from
+        # tpp-registry-service's outbox. The PSD2 TPP register is an access-control record, so its
+        # changes belong on the audit trail; attributed to tpp-registry-service by TopicProducers.
+        # New subscription, no committed offset: read from retention start on first subscribe.
+        topics: openbank.settlement.events,openbank.accounts.account.created,openbank.accounts.account.status-changed,openbank.accounts.savings-withdrawal.approved,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.fx.cnb-policy-rate.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.treasury.payments,openbank.card.processing.events,openbank.swift.institution-transfers,openbank.oversight-triggers,openbank.tpp.registry.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

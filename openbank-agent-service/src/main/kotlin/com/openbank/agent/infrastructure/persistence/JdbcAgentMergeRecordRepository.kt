@@ -39,8 +39,8 @@ class JdbcAgentMergeRecordRepository(private val dataSource: DataSource) : Agent
                   (id, agent_id, pr_number, pr_url, head_branch, merged_by, merged_at, title, proposal_id, recorded_at, source,
                    merged_by_type, merged_by_id, head_sha, merge_commit_sha, approved_by, approved_by_id, approved_at, authorization_evidence_url, authorization_status_id, authorization_workflow_run_id,
                    authorization_kind, authorization_scope, pull_request_node_id, merge_event_node_id,
-                   merge_event_at, authorization_observed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   merge_event_at, authorization_observed_at, policy_commit_sha, policy_blob_sha)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (pr_number) DO NOTHING
                 """.trimIndent(),
             ).use { ps ->
@@ -71,6 +71,8 @@ class JdbcAgentMergeRecordRepository(private val dataSource: DataSource) : Agent
                 ps.setString(25, record.authorization?.mergeEventNodeId)
                 ps.setTimestamp(26, record.authorization?.mergeEventAt?.let(Timestamp::from))
                 ps.setTimestamp(27, record.authorization?.observedAt?.let(Timestamp::from))
+                ps.setString(28, record.authorization?.policyCommitSha)
+                ps.setString(29, record.authorization?.policyBlobSha)
                 ps.executeUpdate()
             }
         }
@@ -132,6 +134,8 @@ class JdbcAgentMergeRecordRepository(private val dataSource: DataSource) : Agent
                 mergeEventNodeId = getString("merge_event_node_id"),
                 mergeEventAt = getTimestamp("merge_event_at")?.toInstant(),
                 observedAt = getTimestamp("authorization_observed_at")?.toInstant(),
+                policyCommitSha = getString("policy_commit_sha"),
+                policyBlobSha = getString("policy_blob_sha"),
             )
         },
     )

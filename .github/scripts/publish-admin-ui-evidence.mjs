@@ -26,7 +26,8 @@ export function publishDataset({ dataset, ...options }) {
         ...options,
         ...DATASETS.content,
         validateSnapshot: isAdminUiContentSnapshot,
-        prefix: 'admin-ui/content',
+        // New enums must not reach pre-taxonomy UI readers via their legacy pointer.
+        prefix: 'admin-ui/content/domains-v1',
       }))
   }
   return publishEvidenceSnapshot({ ...options, ...DATASETS[dataset], prefix: `admin-ui/${dataset}` })

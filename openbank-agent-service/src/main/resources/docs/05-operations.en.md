@@ -101,3 +101,16 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Kafka consumer group override
 
 The consumer group id and offset reset for this service's Kafka channels are not set as YAML keys in `application.yaml`, because SmallRye Config quotes dotted leaf keys and the connector never reads them. They are supplied by a properties-file override ConfigMap loaded through `QUARKUS_CONFIG_LOCATIONS`. The reference pattern for this is card-issuance-service's `party-events-in` channel; the `application.yaml` comments point at it. This is a documentation and comment change only. No configuration value or runtime behaviour changes.
+
+## PR policy evidence reconstruction
+
+Exact-head approval remains required for `codex/`. Other App merges can carry observed owner PR
+intent only under an explicitly reviewed immutable first-parent policy blob; an unknown blob
+requires source review and a normal PR, never a runtime exception. This is PR scope, not SHA
+approval or certification of all historical controls. The producer checks integer schema version
+2 plus `policyPrAuthorization: true` before using `/api/v1/agent-merge-records/app-policy` and
+independently reads `policyAuthorization` back. The old `authorization` slot stays null for this
+proof. Confirm the deployed backend, V8 migration and new UI before backfill; preserve original
+observation times, investigate 409 conflicts, and retain policy evidence during rollback. Release
+deployment holds only through their separately reviewed governance procedure after all conditions
+are evidenced. Do not treat a green recorder workflow as proof that old missing rows were repaired.

@@ -370,3 +370,10 @@ em{font-style:normal;color:var(--cyan-2)}
 }
 
 .archive-notice { padding: 16px; background: #fff4ce; color: #222; text-align: center; position: relative; z-index: 99; } .archive-notice a { color: #174da8; text-decoration: underline; }
+
+/* Current identity on the historical layout. */
+.nav-brand img{width:48px;height:auto;filter:none}
+.footer-brand img{width:48px;height:auto}
+.hero-logo{filter:none;animation:none}
+
+@media(max-width:680px){.proof-grid{grid-template-columns:minmax(0,1fr)}}

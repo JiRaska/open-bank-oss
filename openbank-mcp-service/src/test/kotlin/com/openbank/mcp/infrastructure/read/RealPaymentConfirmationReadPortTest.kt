@@ -30,7 +30,7 @@ class RealPaymentConfirmationReadPortTest {
     fun `finds a SEPA payment and tags it with its rail`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
         val sepa = FakeSepaPaymentServiceClient(mapOf(paymentId to sepaPaymentJson("CZ01")))
-        val accounts = FakeAccountServiceClient(byId = emptyMap())
+        val accounts = accountServiceStub(byId = emptyMap())
         val domestic = FakeDomesticPaymentServiceClient(emptyMap())
         val port = RealPaymentConfirmationReadPort(consent, accounts, sepa, domestic)
 
@@ -44,7 +44,7 @@ class RealPaymentConfirmationReadPortTest {
     fun `falls through to domestic when SEPA has never heard of the id, resolving the IBAN via account-service`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01"))
         val debtorAccountId = UUID.randomUUID()
-        val accounts = FakeAccountServiceClient(byId = mapOf(debtorAccountId to accountJson("CZ01")))
+        val accounts = accountServiceStub(byId = mapOf(debtorAccountId to accountJson("CZ01")))
         val domestic = FakeDomesticPaymentServiceClient(mapOf(paymentId to domesticPaymentJson(debtorAccountId)))
         val port =
             RealPaymentConfirmationReadPort(consent, accounts, FakeSepaPaymentServiceClient(emptyMap()), domestic)
@@ -58,7 +58,7 @@ class RealPaymentConfirmationReadPortTest {
     fun `neither rail knowing the id is reported as not found, not as a SEPA-specific 404`() {
         val port = RealPaymentConfirmationReadPort(
             FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ01")),
-            FakeAccountServiceClient(byId = emptyMap()),
+            accountServiceStub(byId = emptyMap()),
             FakeSepaPaymentServiceClient(emptyMap()),
             FakeDomesticPaymentServiceClient(emptyMap()),
         )
@@ -71,7 +71,7 @@ class RealPaymentConfirmationReadPortTest {
     fun `a malformed payment id is an invalid-argument error, not a lookup failure`() {
         val port = RealPaymentConfirmationReadPort(
             FakeConsentValidateClient(valid = true),
-            FakeAccountServiceClient(byId = emptyMap()),
+            accountServiceStub(byId = emptyMap()),
             FakeSepaPaymentServiceClient(emptyMap()),
             FakeDomesticPaymentServiceClient(emptyMap()),
         )
@@ -84,7 +84,7 @@ class RealPaymentConfirmationReadPortTest {
     fun `denies when the debtor account is not within the granted consent scope`() {
         val consent = FakeConsentValidateClient(valid = true, grantedAccounts = listOf("CZ99-different"))
         val sepa = FakeSepaPaymentServiceClient(mapOf(paymentId to sepaPaymentJson("CZ01")))
-        val accounts = FakeAccountServiceClient(byId = emptyMap())
+        val accounts = accountServiceStub(byId = emptyMap())
         val domestic = FakeDomesticPaymentServiceClient(emptyMap())
         val port = RealPaymentConfirmationReadPort(consent, accounts, sepa, domestic)
 
@@ -98,7 +98,7 @@ class RealPaymentConfirmationReadPortTest {
         val sepa = FakeSepaPaymentServiceClient(mapOf(paymentId to sepaPaymentJson("CZ01")))
         val port = RealPaymentConfirmationReadPort(
             FakeConsentValidateClient(valid = false),
-            FakeAccountServiceClient(byId = emptyMap()),
+            accountServiceStub(byId = emptyMap()),
             sepa,
             FakeDomesticPaymentServiceClient(emptyMap()),
         )

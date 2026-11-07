@@ -80,4 +80,20 @@ class BillingCycleServiceTest {
 
         assertThat(processed).isEqualTo(1)
     }
+
+    @Test
+    fun `monthly cycle outcome retains cadence while counting isolated failures`(): Unit = runBlocking {
+        val repository = mockk<BillingAssessmentRepository>()
+        coEvery { repository.findExisting("c1", "acc-bad", "CZK") } throws IllegalStateException("account unavailable")
+        coEvery { repository.findExisting("c1", "acc-good", "CZK") } returns null
+        val captured = mutableListOf<BillingAssessment>()
+        coEvery { repository.persistWithPostingIntent(capture(captured)) } answers { firstArg() }
+
+        val service = BillingCycleService(feeAssessmentService(), repository)
+        val outcome = service.runCycleWithOutcome("c1", listOf("acc-bad", "acc-good"), "CZK", "MONTHLY")
+
+        assertThat(outcome).isEqualTo(BillingCycleService.CycleOutcome(processed = 1, failed = 1))
+        assertThat(captured).hasSize(1)
+        assertThat(captured.single().shadowInput!!.scheduledCadence).isEqualTo("MONTHLY")
+    }
 }

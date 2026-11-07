@@ -326,20 +326,15 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   is mandatory at the gateway; revisit if the gateway becomes optional.
 - Reversal now has the four-eyes *mechanism* wired (§4a) but not enforced
   (`authz.four-eyes.enforce=false`) — a candidate for a follow-up rollout under issue #413.
-- **Temporal orchestration path (ADR-0120 Phase 1, flag-gated OFF).** When
-  `openbank.transaction.orchestration.temporal.enabled=true`, `initiateTransaction` drives the payment
-  through a durable `PaymentWorkflow` instead of `PaymentSagaOrchestrator`; activities wrap the **same**
-  ports with identical arguments, so the §4 money-direction and the ADR-0039 D-2 hold-release invariant
-  are preserved (success path never releases the hold; balance projection does). New trust surface: the
-  worker opens a synchronous gRPC connection to the Temporal frontend (`:7233`) at startup — a *boot*
-  failure if the `openbank-payments` Temporal namespace is unprovisioned or the NetworkPolicy blocks it
-  (the `payments` k8s namespace is already allowlisted in `temporal-platform-ingress`). Workflow history
-  becomes a second store of in-flight payment state (durable, replayable — a DORA Art. 17 positive); it
-  must be access-controlled like the saga table. The ledger idempotency key on the Temporal path is
-  `workflow-<txid>-ledger` (distinct from the saga path's `saga-<txid>-ledger`): safe because a
-  transaction is initiated under exactly one flag value, but the canary cutover (Phase 4) must not
-  re-initiate an in-flight saga transaction under the workflow path. Flag is OFF in all environments;
-  this change is inert until a separately-approved cutover.
+- **Temporal orchestration (ADR-0120 Phase 5: sole orchestrator).** `initiateTransaction` always
+  drives the payment through the durable `PaymentWorkflow`; `PaymentSagaOrchestrator` and the
+  orchestration enable flag were removed (`TransactionService.kt`
+  records this). Activities wrap the same ports, so the §4 money-direction and the ADR-0039 D-2
+  hold-release invariant are preserved (success path never releases the hold; balance projection
+  does). Trust surface: the worker's gRPC connection to the Temporal frontend (`:7233`, namespace
+  `openbank-payments`), which carries no transport authentication today (#6066). Workflow history is a
+  second store of in-flight payment state and must be access-controlled. The ledger idempotency key
+  is `workflow-<txid>-ledger`.
 
 ## 6. Change log
 
@@ -669,3 +664,25 @@ claim backfill. Retain claims through archival and application rollback. Disabli
 triggers or removing the registry requires separate approval and full write/retry
 quiescence. The existing reversal pre-action status update is outside this initiation
 race fix and is not an all-endpoint exactly-once guarantee.
+
+## Retained Temporal worker versions (ADR-0355)
+
+A mixed unversioned SDK rollout can hand a new history to an old worker that cannot
+interpret its SDK flags. Require versioned polling with an immutable identity before
+starting a new payment worker, preserve original-history replay, and retain previous
+workers independently of HTTP rollout completion. Payment executions are PINNED;
+routing rollback affects new starts and does not authorize moving incompatible
+histories or resetting completed financial effects.
+
+Retained workers inherit the reviewed environment pod template and existing secret
+references. They use distinct selectors, receive no API Service traffic, and admit
+only management traffic from observability. Schedulers and outbox dispatch/retention
+are disabled; API replicas remain responsible for dispatching committed outbox rows.
+The renderer writes no credentials and applies no resources. Environment-specific
+output stays private. Verify egress permissions, workload identity, policy mounts,
+management scraping and pollers before activating routing.
+
+Residual risk: manually deleting a retained image/Deployment can strand pinned
+executions. Require server-side drainage evidence before retirement, retain artifacts
+for recovery, and keep changes under the existing two-review money-path process.
+No new payment command, retry policy, API contract or schema is introduced.

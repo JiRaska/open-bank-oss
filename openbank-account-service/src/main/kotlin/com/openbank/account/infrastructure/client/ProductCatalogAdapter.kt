@@ -7,49 +7,98 @@ package com.openbank.account.infrastructure.client
 import com.openbank.account.application.port.out.CatalogProduct
 import com.openbank.account.application.port.out.ProductCatalogPort
 import com.openbank.account.application.port.out.ProductLookupResult
+import com.openbank.account.application.port.out.PublishedRevision
+import com.openbank.account.application.port.out.RevisionResolution
 import io.quarkus.logging.Log
-import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
-import jakarta.ws.rs.WebApplicationException
-import jakarta.ws.rs.core.Response
-import org.eclipse.microprofile.rest.client.inject.RestClient
+import java.time.Instant
 import java.util.UUID
 
 /**
- * **Fail-open** adapter over [ProductCatalogClient] (issue #668). Unlike [SanctionsScreeningAdapter]
- * (fails closed — a missing compliance screen is a regulatory risk), an unreachable product
- * catalogue must never block account opening: product-catalog is reference data, not money-path.
- * A confirmed 404 is NOT treated the same way as an outage: it maps to [ProductLookupResult.NotFound],
- * which the caller's validation DOES act on (an operator cannot open an account against a product
- * that does not exist).
+ * Adapter over [ResilientProductCatalogReads] (issue #668, ADR-0341 D1).
+ *
+ * It never throws for a catalog fault: every outage, timeout, open circuit, 5xx or refused 4xx is
+ * [ProductLookupResult.Unavailable] / [RevisionResolution.Unavailable], and the use case refuses the
+ * opening on it. Before V33 this adapter was deliberately FAIL-OPEN (the use case proceeded on
+ * `Unavailable`); it is fail-closed now because an account must carry a pin, and an unreachable
+ * catalog yields none. A confirmed 404 stays its own outcome (the caller's error, not an outage).
  */
 @ApplicationScoped
-class ProductCatalogAdapter : ProductCatalogPort {
+class ProductCatalogAdapter(private val reads: ResilientProductCatalogReads) : ProductCatalogPort {
 
-    @Inject
-    @RestClient
-    lateinit var client: ProductCatalogClient
-
-    // TooGenericExceptionCaught: deliberately fail-open on ANY fault (network error, timeout,
-    // unexpected 5xx) — see the class doc. Narrowing this would leave a class of faults
-    // unhandled and blocking account opening, exactly what this adapter exists to prevent.
+    // TooGenericExceptionCaught: the reads' own retry/timeout/circuit-breaker surface as a family of
+    // fault-tolerance exceptions plus whatever the transport throws; all of them mean "no answer".
     @Suppress("TooGenericExceptionCaught")
     override suspend fun findById(productId: UUID): ProductLookupResult = try {
-        val response = client.getById(productId.toString()).awaitSuspending()
-        ProductLookupResult.Found(
-            CatalogProduct(UUID.fromString(response.id), response.code, response.status, response.currency),
-        )
-    } catch (e: WebApplicationException) {
-        val status = e.response?.status ?: 0
-        if (status == Response.Status.NOT_FOUND.statusCode) {
-            ProductLookupResult.NotFound
-        } else {
-            Log.warnf("product-catalog returned HTTP %d for product %s; validation skipped", status, productId)
-            ProductLookupResult.Unavailable
+        when (val read = reads.product(productId)) {
+            is CatalogRead.Answered -> {
+                val id = UUID.fromString(read.body.id)
+                require(id == productId) { "catalog returned another product" }
+                require(read.body.code.isNotBlank()) { "catalog product code must not be blank" }
+                ProductLookupResult.Found(CatalogProduct(id, read.body.code, read.body.status, read.body.currency))
+            }
+            CatalogRead.NotFound -> ProductLookupResult.NotFound
+            is CatalogRead.Refused -> {
+                Log.warnf("product-catalog refused product %s with HTTP %d", productId, read.status)
+                ProductLookupResult.Unavailable
+            }
         }
     } catch (e: Exception) {
-        Log.warnf("product-catalog unavailable for %s; validation skipped: %s", productId, e.message)
+        Log.warnf("product-catalog unavailable for product %s: %s", productId, e.toString())
         ProductLookupResult.Unavailable
+    }
+
+    @Suppress("TooGenericExceptionCaught") // same reasoning as findById
+    override suspend fun resolvePublishedRevision(productId: UUID, effectiveAt: Instant): RevisionResolution = try {
+        when (val read = reads.publishedRevision(productId, effectiveAt)) {
+            is CatalogRead.Answered -> toResolution(productId, read.body)
+            CatalogRead.NotFound -> RevisionResolution.NoPublishedRevision
+            is CatalogRead.Refused -> {
+                Log.warnf("product-catalog refused the revision of %s with HTTP %d", productId, read.status)
+                RevisionResolution.Unavailable
+            }
+        }
+    } catch (e: Exception) {
+        Log.warnf("product-catalog unavailable for the revision of %s: %s", productId, e.toString())
+        RevisionResolution.Unavailable
+    }
+
+    /**
+     * The endpoint promises a PUBLISHED revision; this does not take that on trust. Anything else
+     * (a DRAFT, a SUPERSEDED one, a malformed id) is no pin, so the opening is refused.
+     */
+    private fun toResolution(productId: UUID, body: CatalogRevisionResponse): RevisionResolution {
+        if (body.state != PUBLISHED) {
+            Log.warnf("product-catalog answered revision %s of %s in state %s", body.id, productId, body.state)
+            return RevisionResolution.NoPublishedRevision
+        }
+        val irHash = body.irSignature?.revisionHash
+        val irVersion = body.content.behaviour?.irVersion
+        require(body.number >= 1) { "catalog revision number must be positive" }
+        body.contentHash?.let { require(HASH.matches(it)) { "invalid catalog content hash" } }
+        // publish rejects IR-bearing content; publish-ir stores its signature atomically.
+        // A partial response is unavailable, never silently downgraded to a revision without IR.
+        require((body.irSignature == null) == (body.content.behaviour == null)) {
+            "catalog IR and signature must travel together"
+        }
+        if (body.irSignature != null) {
+            require(irHash != null && HASH.matches(irHash)) { "invalid catalog IR hash" }
+            require(irVersion != null && irVersion >= 1) { "invalid catalog IR version" }
+        }
+        return RevisionResolution.Published(
+            PublishedRevision(
+                revisionId = UUID.fromString(body.id),
+                offeringId = UUID.fromString(body.offeringId),
+                number = body.number,
+                contentHash = body.contentHash,
+                irRevisionHash = irHash,
+                irVersion = irVersion,
+            ),
+        )
+    }
+
+    private companion object {
+        const val PUBLISHED = "PUBLISHED"
+        val HASH = Regex("^[0-9a-f]{64}$")
     }
 }

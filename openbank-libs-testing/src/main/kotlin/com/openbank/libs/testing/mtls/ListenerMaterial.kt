@@ -137,14 +137,25 @@ class ListenerMaterial : QuarkusTestResourceLifecycleManager {
         }
 
         /** An RS256 access token the service's OIDC mechanism accepts: right issuer, right key, not expired. */
-        fun bearer(roles: List<String> = listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")): String {
+        fun bearer(roles: List<String> = listOf("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")): String =
+            bearer(roles, "listener-parity-test")
+
+        /** Additional signed identity fixtures; preserves the original bearer JVM entry points. */
+        fun bearer(roles: List<String>, subject: String, clientId: String? = null, machine: Boolean = false): String {
             val now = Instant.now().epochSecond
             val header = """{"alg":"RS256","typ":"JWT","kid":"$KID"}"""
             val rolesJson = roles.joinToString(",") { "\"$it\"" }
+            // Values are fixed synthetic fixtures supplied by tests, never request input.
+            require(subject.matches(Regex("[a-zA-Z0-9-]+")))
+            require(clientId == null || clientId.matches(Regex("[a-zA-Z0-9-]+")))
+            val username = if (machine) "service-account-$clientId" else subject
+            require(!machine || clientId != null)
+            val clientClaims = clientId?.let { "\"azp\":\"$it\"," } ?: ""
+            val machineClaim = if (machine) "\"client_id\":\"$clientId\"," else ""
             val claims =
                 """{"iss":"${System.getProperty(
                     ISSUER_PROPERTY,
-                )}","sub":"listener-parity-test","preferred_username":"listener-parity-test",""" +
+                )}","sub":"$subject","preferred_username":"$username",$clientClaims$machineClaim""" +
                     """"iat":$now,"exp":${now + TOKEN_TTL_SECONDS},"realm_access":{"roles":[$rolesJson]},"groups":[$rolesJson]}"""
             val enc = Base64.getUrlEncoder().withoutPadding()
             val signingInput = enc.encodeToString(header.toByteArray()) + "." + enc.encodeToString(claims.toByteArray())

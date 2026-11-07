@@ -370,4 +370,27 @@ class FeeAssessmentServiceTest {
         serviceWith(FakeRevisions(listOf(fee("f1", "5")))).assess("c", "acc-3", "CZK")
         assertThat(meters.counter("openbank.billing.assessment.no_fee_identity").count()).isEqualTo(2.0)
     }
+
+    @Test
+    fun `assessment captures its own clock and actual opening without guessing a manual trigger`(): Unit = runBlocking {
+        val account = billing()
+        val at = java.time.Instant.parse("2026-05-01T23:30:00Z")
+        val clock = java.time.Clock.fixed(at, java.time.ZoneId.of("Europe/Prague"))
+        val assessed = FeeAssessmentService(
+            accounts(account),
+            FakeRevisions(listOf(fee("f1", "5"))),
+            pins,
+            meters,
+            clock,
+        )
+        val monthly = assessed.assess("2026-05", "acc-clock-monthly", "CZK", "MONTHLY").shadowInput!!
+        assertThat(monthly.evaluatedAt).isEqualTo(at)
+        assertThat(monthly.evaluationZone).isEqualTo("Europe/Prague")
+        assertThat(monthly.openedAt).isEqualTo(account.openedAt)
+        assertThat(monthly.scheduledCadence).isEqualTo("MONTHLY")
+        assertThat(monthly.scheduledTrigger).isNull()
+        val manual = assessed.assess("2026-05", "acc-clock-manual", "CZK").shadowInput!!
+        assertThat(manual.scheduledCadence).isNull()
+        assertThat(manual.scheduledTrigger).isNull()
+    }
 }

@@ -41,9 +41,28 @@ rejected XML. The existing namespace, XSD and external-entity rejection tests re
 mutations, typed status-reader failures and invalid-to-valid recovery on the same reader and
 validator instances.
 
+`Semt002Reader` (custodian statement of holdings) parses uploaded input through `SecureXml.parse`,
+so DOCTYPE and external entities are refused like every other reader here. It reads elements by
+local name; the vendored semt.002.001.11 XSD is a working subset validated only against the test
+fixtures. Its quantity dimension maps to `PortfolioQuantityBasis` in libs-domain, which treasury
+and tax-reporting share so neither infers a dimension from the CFI.
+
 The existing `Iso20022Bench.buildPacs008` workload measures the allocation effect. Compare results
 using the same JVM, heap, collector, workload and multiple forks. Allocation budgets are not raised
 to hide regressions; throughput and timing observations need comparable hardware and load.
+
+## Canonical JSON allocation and compatibility
+
+`CanonicalJson` sorts a copied array of object entry references instead of allocating a
+key/value pair for each property. Keys are validated as strings before sorting, and ordering
+still uses Kotlin/JVM string comparison (UTF-16 code units). Callers must keep the input map
+stable during serialization. Escaping, number formatting, nested values and invalid-key
+rejection remain unchanged, preserving the canonical bytes consumed by audit hashes and signatures.
+
+Validate allocation changes with the existing canonical JSON and audit-chain tests and compare
+before/after bytes and rejection messages. Run the existing allocation guard with unchanged
+budgets; compare repeated forks under the same JVM, heap, collector and workload. Workstation
+allocation measurements do not establish CI hardware performance or latency improvements.
 
 ## Fuzz findings become regression cases
 

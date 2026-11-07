@@ -16,6 +16,9 @@ dependencies {
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.kafka)
+    // Independent, opt-in shadow topology; Quarkus BOM keeps clients and Streams aligned.
+    implementation("org.apache.kafka:kafka-streams")
+    testImplementation("org.apache.kafka:kafka-streams-test-utils")
     implementation(libs.quarkus.redis.client)
     // ADR-0220 D3.5 fraud-hold signal: FraudOutboxDispatcher (outbox drain) and
     // FraudHoldService.sweepExpired (TTL expiry) both need @Scheduled — first use in this service.
@@ -30,6 +33,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: the financial-crime published language, declared once for producers and rails.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     // In-process ONNX Runtime serving (ADR-0139 phase-1b, OnnxFraudModel). Fraud-service-only for
     // now (single ML consumer) — kept out of the shared version catalog on purpose, same rationale

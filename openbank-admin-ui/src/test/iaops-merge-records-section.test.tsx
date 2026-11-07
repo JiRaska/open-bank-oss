@@ -143,6 +143,29 @@ describe('MergeRecordsSection', () => {
     expect(screen.queryByText('Direct human merge')).not.toBeInTheDocument()
   })
 
+  it('labels modern PR intent without claiming head approval or a human executor', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse([record({
+      mergedBy: 'openbank-gitops-bot[bot]', mergedByType: 'GITHUB_APP', mergedById: 200,
+      headSha: 'a'.repeat(40), mergeCommitSha: 'b'.repeat(40),
+      mergedAt: '2026-10-24T10:00:00Z', recordedAt: '2026-10-24T10:00:05Z', authorization: null,
+      policyAuthorization: {
+        kind: 'POLICY_PR_AUTO_MERGE', scope: 'PR', approvedBy: 'reviewer', approvedById: 100,
+        approvedAt: '2026-10-24T09:59:00Z', evidenceUrl: 'https://github.com/openbank/open-bank-oss/pull/123',
+        pullRequestNodeId: 'PR_synthetic', mergeEventNodeId: 'ME_synthetic',
+        mergeEventAt: '2026-10-24T10:00:01Z', observedAt: '2026-10-24T10:00:02Z',
+        policyCommitSha: 'c'.repeat(40), policyBlobSha: 'd'.repeat(40),
+      },
+    })])))
+    render(<MergeRecordsSection knownAgentIds={[]} />)
+    expect(await screen.findByText('openbank-gitops-bot[bot]')).toBeVisible()
+    expect(screen.getByText('reviewer')).toBeVisible()
+    expect(screen.getByRole('link', { name: 'PR request under the policy at merge time' }))
+      .toHaveAttribute('href', 'https://github.com/openbank/open-bank-oss/pull/123')
+    expect(screen.queryByText('Exact-head approval')).not.toBeInTheDocument()
+    expect(screen.queryByText('Historical PR request')).not.toBeInTheDocument()
+    expect(screen.queryByText('Direct human merge')).not.toBeInTheDocument()
+  })
+
   it('survives a network throw with the quiet warning', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED') }))
 

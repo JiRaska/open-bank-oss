@@ -141,8 +141,12 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
-validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
+Legacy v1 product-not-found responses retain `{ "error": "<message>" }` for existing Pacts.
+When banking compatibility is disabled, the six documented product detail, update, code lookup,
+activation, deactivation, and per-product fee 404 responses come from the shared mapper as
+`ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`). Those six responses accept both
+bodies. V2 returns `ApiError`; schema validation uses 422 with ordered
+`{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
@@ -163,8 +167,11 @@ shared parser in `openbank-libs-domain`; an invalid document never becomes a dra
 
 Publishing an IR-bearing revision is its own four-eyes action, `catalog.publish-ir`:
 `POST /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish-ir` validates the IR, computes
-its canonical `revisionHash`, obtains the publish-path signature over exactly that hash and stores
-the detached signature with the revision in the same transaction. A single-revision read
+its canonical `revisionHash`, obtains the publish-path signature over the revision identity
+envelope and stores the detached signature with the revision in the same transaction. The envelope
+is canonical JSON of `productCode`, `revisionId`, `revisionNumber`, `irVersion` and `revisionHash`
+under the domain tag `openbank.product-revision-signature.v1`, so a signature for one product or
+one revision can never verify under another's pin, even when two revisions carry identical IR. A single-revision read
 (`GET /api/v2/revisions/{id}`, `GET /api/v2/products/{offeringId}`) returns it as `irSignature`
 (`revisionHash`, `keyId`, `algorithm`, `signature`, `signedAt`), and so does every list of revisions; `null` means unsigned.
 The plain `publish` refuses a revision that carries `behaviour` (409), and `publish-ir` refuses one
@@ -176,5 +183,22 @@ answers 409 and nothing is signed), `openbao` (OpenBao Transit `sign` on a dedic
 deployment shape) or `hmac` (a shared-secret adapter accepted only in the dev and test launch modes;
 a production launch with it refuses to boot). Only a verified human may call `publish-ir`; the
 service checks this itself, independently of the OPA decision. A consumer verifies the signature with its own pinned-revision
-loader before evaluating a revision; the catalog is a publication authority, never a dependency on
+loader before evaluating a revision: it pins all five envelope fields, and any mismatch, missing
+copy or invalid signature fails closed (no evaluation, no posting), each counted as its own
+`outcome` of `openbank_product_revision_load_total` (`identity_mismatch` for a substituted
+revision); the catalog is a publication authority, never a dependency on
 the posting path. The API contract version is 2.9.0; the change is additive.
+
+### Linting a product IR (ADR-0352 phase 5b)
+
+`POST /api/v2/product-ir/lint` is the server-side dry run behind the Studio IR editor. The body is `{"ir": {...}}`, a Product IR v1 document exactly as it would be sent as a revision's `behaviour`. The endpoint applies the same trusted-profile bound and the same shared `ProductIrParser` as a revision write, so the editor cannot accept an IR the write would refuse, nor refuse one it would accept. It stores, signs and publishes nothing.
+
+- Roles: the same as any catalog authoring call (`@Authorize` action `catalog.author`): `OPERATOR`, `ADMIN`, or the catalog-scope role `CATALOG_SCOPE_AUTHOR`.
+- `200`: an invalid IR is still a 200, with `valid=false` and the parser's `problems` (each a JSON pointer `path` and a `message`), so an editor can show every problem at once. A valid IR returns `valid=true` with `productCode`, `irVersion`, `revisionHash` (SHA-256 of the canonical IR, the hash approvals bind to) and `canonicalIr` (the canonical JSON).
+- `400`: malformed request body, or a document that fails the trusted-profile bound.
+- `401`: unauthenticated.
+- `403`: the caller holds none of the roles above.
+
+The API contract version is 2.10.0; the change is additive.
+
+Catalog request bodies are decoded strictly: a body that repeats a JSON object key is rejected with `400` instead of the last value silently winning. The 1 MiB size and nesting-depth bounds on the IR lint body are unchanged.

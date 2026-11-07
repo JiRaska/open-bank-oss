@@ -4,8 +4,8 @@
 
 package com.openbank.fx.infrastructure.client
 
-import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
+import com.openbank.libs.fincrime.AmlCaseSeverity
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -29,7 +29,7 @@ class AmlCaseAdapterTest {
         partyId = UUID.randomUUID(),
         accountId = UUID.randomUUID(),
         customerReference = "party EUR->CZK 10000",
-        riskLevel = AmlCaseRiskLevel.CRITICAL,
+        riskLevel = AmlCaseSeverity.CRITICAL,
         alertCode = alertCode,
         alertDetail = "OFAC SDN match",
         matchedEntity = "OFAC SDN",

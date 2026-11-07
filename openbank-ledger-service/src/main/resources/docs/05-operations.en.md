@@ -135,3 +135,28 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Switching the Kafka producer off per instance
 
 `mp.messaging.outgoing.ledger-events-out.enabled` is backed by the `LEDGER_EVENTS_OUT_ENABLED` environment variable (default `true`). An instance with no Kafka bus, such as the pension co-instance, sets it to `false`, so no producer is built at boot; the `@Channel` emitter still injects. `lazy-client=true` does not achieve this, because the producer is still created at boot.
+
+## Day-close participants: authorization (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` authorizes as its own action,
+`ledger.close.participate`, never `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+maps each machine account to the ONE participant it may report for (interest, lending, billing, treasury); the use case
+then checks the verified caller against `openbank.ledger.close.participants.<name>.principal`. Adding a
+participant is therefore three edits that `check-close-participants.py` keeps in step: `rules.yaml:
+close_participants`, the ledger `application.yaml` map, and the rego map entry (then regenerate the
+bundles). Declared participants today: interest, lending, billing, treasury. Mode: `shadow`.
+
+Billing joins as a close participant for its monthly cycle. It reports on its own identity, the
+Keycloak client `openbank-billing` (`service-account-openbank-billing`), not on the shared
+`openbank-services` principal its journals post with. The scoped `ledger.close.participate` grant for
+`participants/billing` is that account's only ledger grant; it holds no `ledger.create` of its own.
+
+Treasury joins as a close participant for its hourly deal accrual and the day's deal journals. It
+reports on the identity it already posts journals with, the Keycloak client `openbank-treasury`
+(`service-account-openbank-treasury`). Its map entry adds `ledger.close.participate` for
+`participants/treasury` only; its existing `ledger.create` and nostro read grants are unchanged, and it
+cannot report for any other participant.
+
+## Offline historical FINREP replay
+
+The build defines an explicit `historicalFinrepPactTest` task that replays one validated historical FINREP Pact artifact locally against the ledger provider. It is not broker verification: it never changes broker selectors, never publishes results, and refuses to run unless the supplied provider commit is a 40-hex SHA that is an ancestor of `origin/main`. It is not part of the default build.

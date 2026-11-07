@@ -49,6 +49,17 @@ class CardReadCallerGuardTest {
     }
 
     @Test
+    fun `customer edge may list and read with its verified client but a spoofed name is denied`() {
+        val edge = identity("service-account-openbank-edge", "ROLE_API")
+        val impostor = jwtIdentity("openbank-unrelated", "service-account-openbank-edge", "ROLE_API")
+        listOf(CARD_READ_CALLERS, CARD_PARTY_LIST_CALLERS).forEach { allowed ->
+            assertThatCode { requireNamedCardReader(edge, allowed) }.doesNotThrowAnyException()
+            assertThatThrownBy { requireNamedCardReader(impostor, allowed) }
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+    }
+
+    @Test
     fun `staff role on an unrelated machine token cannot bypass client binding`() {
         val machine = jwtIdentity(
             "openbank-unrelated",

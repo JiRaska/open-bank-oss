@@ -16,13 +16,11 @@ import java.util.UUID
  * - [CHALLENGE] — require (re-)SCA / step-up before execution.
  * - [REVIEW]    — hold the payment, open an operator review case (four-eyes release, ADR-0068).
  * - [DECLINE]   — reject with a customer-safe reason code.
+ *
+ * Declared once in `openbank-libs-fincrime` (ADR-0353 D4), shared with the rails. Its consumer-only
+ * value `UNKNOWN` is never produced here and never put on the wire (FraudResource refuses it).
  */
-enum class FraudVerdict {
-    ALLOW,
-    CHALLENGE,
-    REVIEW,
-    DECLINE,
-}
+typealias FraudVerdict = com.openbank.libs.fincrime.FraudVerdict
 
 /**
  * Payment context handed to the scorer. Pure value object — the four payment surfaces populate it

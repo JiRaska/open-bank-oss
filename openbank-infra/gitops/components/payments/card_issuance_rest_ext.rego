@@ -77,17 +77,20 @@ allowed_reasons contains "compliance-card-block" if {
 # admits ROLE_API on exactly these two endpoints, and because card-issuance still runs
 # AUTHZ_ENFORCE=false a Kotlin named-caller check (CardReadCallerGuard.kt) enforces the same lists.
 # CardReadCallerGuardTest pins the Kotlin sets to these rules.
+#   customer-edge      authenticated customer list and card ownership/delegation checks
 #   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
 #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-delegation")
+	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge"}
+	machine_named(caller)
 	input.action == "card.read"
 }
 
 allowed_reasons contains "service-party-card-list" if {
 	input.principal.type == "HUMAN"
-	machine_named("service-account-openbank-party")
+	some caller in {"service-account-openbank-party", "service-account-openbank-edge"}
+	machine_named(caller)
 	input.action == "card.list"
 }
 
@@ -102,4 +105,17 @@ allowed_reasons contains "service-edge-card-details-read" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-edge")
 	input.action == "card.details.read"
+}
+
+# Read-only staff viewer on the card list and card detail (advisory would-DENY triage, 2026-11-04).
+# CardResource's @RolesAllowed admits ROLE_VIEWER on card.list / card.read, and admin-ui grants
+# `cards:view` to ADMIN/OPERATOR/VIEWER, so a viewer IS an intended consumer of /cards. Base
+# operator-read-any covers only OPERATOR/ADMIN, so the advisory log recorded would-DENY for the
+# seeded viewer users on both actions. Human principals only; card.details.read (the PAN) is NOT in
+# this set and stays machine-only.
+allowed_reasons contains "card-read-staff-viewer" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_VIEWER" in input.principal.roles
+	input.action in {"card.list", "card.read"}
 }

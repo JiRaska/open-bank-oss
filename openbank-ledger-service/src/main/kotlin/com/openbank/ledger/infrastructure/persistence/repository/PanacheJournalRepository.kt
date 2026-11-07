@@ -355,6 +355,12 @@ class PanacheJournalRepository(
         it.version = version
         it.reversalOf = reversalOf
         it.synthetic = synthetic
+        it.originKind = origin?.kind?.name
+        it.originRecordId = origin?.sourceRecordId
+        it.originSubmitter = origin?.authenticatedSubmitter
+        it.originRail = origin?.rail?.name
+        it.originInstructionType = origin?.instructionType?.name
+        it.originReversalOfTransactionId = origin?.reversalOfTransactionId
     }
 
     private fun JournalLine.toEntity() = JournalLineEntity().also {
@@ -385,6 +391,16 @@ class PanacheJournalRepository(
         version = version,
         reversalOf = reversalOf,
         synthetic = synthetic,
+        origin = originKind?.let { kind ->
+            com.openbank.ledger.domain.model.JournalOrigin(
+                com.openbank.ledger.domain.model.JournalOriginKind.valueOf(kind),
+                checkNotNull(originRecordId),
+                checkNotNull(originSubmitter),
+                originRail?.let(com.openbank.libs.domain.payment.PaymentRail::valueOf),
+                originInstructionType?.let(com.openbank.libs.domain.payment.InstructionType::valueOf),
+                originReversalOfTransactionId,
+            )
+        },
     )
 
     private fun JournalLineEntity.toDomainLine(): JournalLine = JournalLine(

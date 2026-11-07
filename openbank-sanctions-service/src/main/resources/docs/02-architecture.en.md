@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher sends to openbank.sanctions.screening.event
 audit-service + aml-service consume the event
 ```
 
+A `SanctionChecked` event that meets `SanctionsCheck.isHighRisk()` also fans out from the same durable outbox row to `openbank.oversight-triggers` (ADR-0031 D9). The trigger body contains only `sourceService` and `occurredAt`, with the original `ce-id`/`ce-type` headers for correlation. Screened names, identifiers, match details and list data are not copied to the oversight topic. CLEAR results, lower-scoring potential hits, reviews and list-change events stay on the domain topic only.
+
 ## Components from `openbank-libs`
 
 | Module | Use here |
@@ -169,3 +171,7 @@ audit-service + aml-service consume the event
 ## Scheduled-job heartbeat
 
 The 60-second sanctions-list refresh tick registers the fleet workflow-liveness heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, seeded at startup) and records a success only on its success path: a tick counts as a success only when no list failed in it, so a feed that fails every minute goes stale instead of reading healthy. `WorkflowLivenessStale` alerts when the age exceeds twice the expected interval.
+
+## Shared check status and block threshold (ADR-0353)
+
+`SanctionsCheckStatus` is a typealias of `ScreeningMatchStatus` from `openbank-libs-fincrime`, the type the payment rails read off the wire. `isHighRisk` reads the shared `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0.85), the same bound the rails block on. Persisted values (`@Enumerated(STRING)`) and the API spelling are unchanged.

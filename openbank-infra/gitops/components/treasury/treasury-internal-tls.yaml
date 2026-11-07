@@ -4,6 +4,11 @@
 # Private-CA client certificate for treasury-service's east-west mTLS call to ledger-service's
 # 8443 listener (client auth REQUIRED). ASVS V9.1 forbids a new plaintext inter-service edge, so
 # journal posting never uses the legacy HTTP/8101 port. Same shape as risk-internal-tls.
+#
+# Also the SERVER certificate of treasury-service's own 8443 listener: the image bakes
+# %prod quarkus.http.ssl.client-auth=required (the pension company's instance serves
+# tax-reporting over mTLS, ADR-0337), and Quarkus then refuses to start without a certificate —
+# so the bank's instance needs one too, though no NetworkPolicy admits anyone to its 8443.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -19,6 +24,13 @@ spec:
     algorithm: ECDSA
     size: 256
   commonName: treasury-service.treasury.svc
+  dnsNames:
+    - treasury-service.treasury.svc
+    - treasury-service.treasury.svc.cluster.local
+  usages:
+    - server auth
+    - client auth
+    - digital signature
   issuerRef:
     name: openbank-ca
     kind: ClusterIssuer

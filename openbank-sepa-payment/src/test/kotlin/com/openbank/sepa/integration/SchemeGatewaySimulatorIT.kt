@@ -37,10 +37,10 @@ class SchemeGatewaySimulatorIT {
     @Inject
     lateinit var schemeGateway: SchemeGatewayPort
 
-    private fun payment() = SepaPayment(
+    private fun payment(type: SepaPaymentType = SepaPaymentType.SCT, endToEndId: String = "E2E-IT-0001") = SepaPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "it-${UUID.randomUUID()}",
-        type = SepaPaymentType.SCT,
+        type = type,
         status = SepaPaymentStatus.VALIDATED,
         debtorAccountId = UUID.randomUUID(),
         debtorIban = "DE89370400440532013000",
@@ -50,7 +50,7 @@ class SchemeGatewaySimulatorIT {
         creditorBic = "BNPAFRPPXXX",
         amount = Money.of(BigDecimal("12.34"), "EUR"),
         remittanceInfo = "Invoice IT-1",
-        endToEndId = "E2E-IT-0001",
+        endToEndId = endToEndId,
         rejectReason = null,
         rejectDetail = null,
         submittedAt = Instant.now(),
@@ -83,5 +83,37 @@ class SchemeGatewaySimulatorIT {
 
         assertThat(outcome.accepted).isFalse()
         assertThat(outcome.reasonCode).isEqualTo("AC04")
+    }
+
+    // #13663: the payment type must reach the WIRE, not just the domain. Reads the body the real
+    // adapter posted, so a builder that drops PmtTpInf, or an adapter that stops setting it, is red.
+    private fun postedBody(endToEndId: String): String = ClearingSimulatorWireMockResource.server
+        .findAll(postRequestedFor(urlEqualTo(ClearingSimulatorWireMockResource.CREDIT_TRANSFERS_PATH)))
+        .map { it.bodyAsString }
+        .single { it.contains("<EndToEndId>$endToEndId</EndToEndId>") }
+
+    private fun pmtTpInf(body: String): String =
+        Regex("<PmtTpInf>.*?</PmtTpInf>", RegexOption.DOT_MATCHES_ALL).find(body)?.value
+            ?.replace(Regex("\\s+"), "")
+            ?: error("posted pacs.008 carries no PmtTpInf: $body")
+
+    @Test
+    fun `an SCT goes on the wire with service level SEPA and no local instrument`() {
+        ClearingSimulatorWireMockResource.stubSettle()
+
+        runBlocking { schemeGateway.submit(payment(SepaPaymentType.SCT, "E2E-IT-SCT-PTI")) }
+
+        assertThat(pmtTpInf(postedBody("E2E-IT-SCT-PTI")))
+            .isEqualTo("<PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl></PmtTpInf>")
+    }
+
+    @Test
+    fun `an SCT_INST goes on the wire with service level SEPA and local instrument INST`() {
+        ClearingSimulatorWireMockResource.stubSettle()
+
+        runBlocking { schemeGateway.submit(payment(SepaPaymentType.SCT_INST, "E2E-IT-INST-PTI")) }
+
+        assertThat(pmtTpInf(postedBody("E2E-IT-INST-PTI")))
+            .isEqualTo("<PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>INST</Cd></LclInstrm></PmtTpInf>")
     }
 }

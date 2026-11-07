@@ -48,7 +48,13 @@ data class IncidentImpact(
     val drilldownAvailable: Boolean,
     val projectionStatus: ImpactProjectionStatus,
 )
-data class Investigator(val id: String, val roles: List<String>)
+data class Investigator(
+    val id: String,
+    val roles: List<String>,
+    /** Verified by the request boundary; missing proof remains machine-classified. */
+    val serviceAccount: Boolean = true,
+    val clientId: String? = null,
+)
 data class InvestigationContext(
     val caseId: String,
     val purpose: String,

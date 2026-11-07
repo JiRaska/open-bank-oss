@@ -1,0 +1,149 @@
+{
+  "consumer": {
+    "name": "openbank-document-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the product a framework agreement and fee schedule render against",
+      "providerStates": [
+        {
+          "name": "a product with card configuration exists for code CURRENT_PERSONAL"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products/3f20a53e-5ea4-307a-8a0f-9605728381ba"
+      },
+      "response": {
+        "body": {
+          "code": "CURRENT_PERSONAL",
+          "currency": "EUR",
+          "fees": [
+            {
+              "amount": 3.99,
+              "currency": "EUR",
+              "frequency": "MONTHLY",
+              "name": "Monthly Fee"
+            }
+          ],
+          "id": "3f20a53e-5ea4-307a-8a0f-9605728381ba",
+          "name": "Personal Current Account",
+          "status": "ACTIVE",
+          "termsAndConditions": [
+            {
+
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.fees": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.fees[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.fees[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.fees[*].frequency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.fees[*].name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.name": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.termsAndConditions": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a product id the catalog does not hold",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000fff"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/products/00000000-0000-0000-0000-000000000fff"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

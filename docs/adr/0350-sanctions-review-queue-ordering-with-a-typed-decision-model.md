@@ -40,10 +40,11 @@ We will add an ordering signal to the sanctions review queue, and nothing else.
 computed per held check from the screened attributes (`name`, `aliases`, `dateOfBirth`,
 `nationality`, `entityType`) and each `SanctionsMatch`.
 
-**D2 — Ordering only.** The queue sorts by `P(LIKELY_TRUE_MATCH)` descending, with `ABSTAIN` treated
-as `P = 1.0` (an unassessed check goes to the top, never to the bottom). There is **no AUTO band**:
-the threshold policy for this use case is fixed at `autoAcceptAt = 1.0`, and the
-`typed-decision-thresholds` check rejects any other value for it. The model's output and probability
+**D2 — Ordering only.** The queue sorts by `P(LIKELY_TRUE_MATCH)` descending, with unassessed checks in a distinct high-priority lane (never assigned a fabricated
+probability). An aging/deadline bound overrides ranking to prevent starvation; replay must
+include an endless stream of high-ranked arrivals and prove bounded wait for older checks. There is **no AUTO band**:
+the policy is fixed at `mode = SUGGEST`, `autoEnabled = false`, and the planned
+`typed-decision-thresholds` check rejects AUTO for this use case, even at probability 1.0. The model's output and probability
 are shown to the analyst as context, labelled as a model estimate.
 
 **D3 — What it can never do.** It never changes `SanctionsCheckStatus`, never sets `reviewedBy`,
@@ -88,7 +89,7 @@ the adapter must be `self-hosted` or contractually EU-resident.
   to `docs/threat-models/openbank-sanctions-service.md` (ADR-0030).
 
 **Neutral**
-- Gate: `typed-decision-thresholds` (ADR-0348) carries a fixed `1.0` for this use case.
+- Gate: `typed-decision-thresholds` (ADR-0348) requires `autoEnabled: false` for this use case; implementation is #13778.
 
 ### Delivery check
 

@@ -7,8 +7,10 @@ package com.openbank.transaction.application.workflow
 import com.openbank.transaction.domain.saga.SagaState
 import io.temporal.activity.ActivityOptions
 import io.temporal.common.RetryOptions
+import io.temporal.common.VersioningBehavior
 import io.temporal.failure.ActivityFailure
 import io.temporal.workflow.Workflow
+import io.temporal.workflow.WorkflowVersioningBehavior
 import java.time.Duration
 import java.util.UUID
 
@@ -78,6 +80,7 @@ class PaymentWorkflowImpl : PaymentWorkflow {
     private val finalisation: PaymentActivities =
         Workflow.newActivityStub(PaymentActivities::class.java, finalisationOptions)
 
+    @WorkflowVersioningBehavior(VersioningBehavior.PINNED)
     override fun execute(transactionId: UUID): SagaState {
         var holdId: UUID = PaymentActivities.SENTINEL_HOLD
         var journalPosted = false

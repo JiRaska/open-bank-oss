@@ -73,7 +73,8 @@ data class UpdateContactRequest(
 
 data class UpdateKycRequest(
     val kycLevel: KycLevel,
-    val amlRiskScore: AmlRiskScore,
+    /** Deprecated (ADR-0353 D2): optional; absent leaves the stored value unchanged. */
+    val amlRiskScore: AmlRiskScore? = null,
     val pepFlag: Boolean = false,
     val sanctionsFlag: Boolean = false,
 )
@@ -188,7 +189,8 @@ data class KycAttributesResponse(
     val kycLevel: KycLevel,
     val kycCompletedAt: OffsetDateTime?,
     val kycExpiresAt: OffsetDateTime?,
-    val amlRiskScore: AmlRiskScore,
+    /** Deprecated (ADR-0353 D2): not a risk rating; `null` unless a caller stored one. */
+    val amlRiskScore: AmlRiskScore?,
     val pepFlag: Boolean,
     val sanctionsFlag: Boolean,
     val lastAmlReviewAt: OffsetDateTime?,

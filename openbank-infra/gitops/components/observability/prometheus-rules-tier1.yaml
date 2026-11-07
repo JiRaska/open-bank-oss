@@ -209,13 +209,15 @@ spec:
         # failed: error-rate ≥5% or p95 latency ≥1s). Rollout auto-reverts to
         # stable, but operators need to know so they can investigate the root
         # cause before the next deploy attempt (ADR-0098).
+        # NOTE: `namespace` on rollout_* is the CONTROLLER's namespace; the Rollout's own is
+        # `exported_namespace`, which the label_replace in each expression maps back.
         # NOTE: the argo-rollouts controller labels rollout_phase with `namespace` + `name`
         # (controller/metrics/prommetrics.go: namespaceNameLabels), NOT `rollout` — the
         # original `{{ $labels.rollout }}` here rendered EMPTY, so the page never said which
         # rollout aborted. Use $labels.name.
         - alert: RolloutAnalysisAborted
           expr: |
-            rollout_phase{phase="Aborted"} == 1
+            label_replace(rollout_phase{phase="Aborted"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
           for: 1m
           labels:
             severity: warning
@@ -231,7 +233,7 @@ spec:
         # abort = code/regression issue).
         - alert: RolloutProgressDeadlineExceeded
           expr: |
-            rollout_phase{phase="Degraded"} == 1
+            label_replace(rollout_phase{phase="Degraded"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
           for: 2m
           labels:
             severity: warning
@@ -251,7 +253,7 @@ spec:
         # read through the one signal that exposes it.
         - alert: RolloutStuckProgressing
           expr: |
-            rollout_phase{phase="Progressing"} == 1
+            label_replace(rollout_phase{phase="Progressing"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
           for: 30m
           labels:
             severity: warning

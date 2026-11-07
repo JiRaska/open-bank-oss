@@ -25,3 +25,9 @@ Tuto dokumentaci publikuje sama služba na management endpointu `/q/openbank/doc
 - **Idempotence:** hlavička `Idempotency-Key` → Redis (Valkey); navíc unikátní `idempotency_key` na řádku případu
 - **Auth:** Keycloak OIDC; mutace vyžadují `ROLE_OPERATOR`, `ROLE_ADMIN` nebo `ROLE_COMPLIANCE`; OPA sidecar autorizace (ADR-0034, ve výchozím stavu advisory)
 - **Money-path:** **Ne** — není v `rules.yaml: money_path_services` (1 schválení, bez povinného threat modelu). Je to compliance-screeningová služba ve FinOps skupině `compliance-screening`.
+
+## Consumer kontrakt vlastníka účtu
+
+`AmlAccountOwnershipPactConsumerTest` pokrývá dohledání vlastníka účtu po uložení případu: odpověď 200 dodá `partyId`, zatímco 404 se převede na `null`. Volá produkční wrapper `AccountServiceClient` přes anonymní testovací implementaci napojenou na Pact mock server. Neověřuje anotace cest produkčního REST klienta, OIDC/mTLS filtry, skutečný plánovaný sweep, uložení případu ani živou autorizaci. Obě interakce vyžadují samostatný provider replay; samotná mock odpověď není důkazem nasazené kompatibility.
+
+Kladný účet poskytuje existující provider fixture známé party. Folder i broker twin deklarují stejný stav neznámého účtu bez vytvoření řádku pro 404. Identifikátory jsou syntetické; produkční zákaznická data nejsou potřeba. Testovací Pact consumer závislost používá existující katalog verzí. Chybějící či přeskočený replay není úspěšně ověřený kontrakt.

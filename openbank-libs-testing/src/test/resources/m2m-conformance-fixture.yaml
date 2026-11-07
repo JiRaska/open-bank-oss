@@ -1,0 +1,9 @@
+quarkus:
+  oidc-client:
+    client-id: openbank-services
+    m2m:
+      client-id: openbank-fixture
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:changeme}
+      grant:
+        type: client

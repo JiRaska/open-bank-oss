@@ -19,6 +19,8 @@ private val CARD_READ_STAFF_ROLES = setOf("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_
 internal val CARD_READ_CALLERS = setOf(
     // delegation-service: resource-ownership check before a card-scoped mandate (CardIssuanceRestClient).
     "service-account-openbank-delegation",
+    // Customer edge checks ownership/delegation before returning card data.
+    "service-account-openbank-edge",
 )
 
 /**
@@ -28,6 +30,8 @@ internal val CARD_READ_CALLERS = setOf(
 internal val CARD_PARTY_LIST_CALLERS = setOf(
     // party-service: GDPR Art. 15 aggregation (CardServiceRestClient).
     "service-account-openbank-party",
+    // Customer edge derives the party from the authenticated customer.
+    "service-account-openbank-edge",
 )
 
 /**

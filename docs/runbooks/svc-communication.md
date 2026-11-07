@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-communication-service
 
-> Operational runbook for the `communication` service. Data domain **platform**,
+> Operational runbook for the `communication` service. Data domain **engagement**,
 > classification **internal**, datastore **PostgreSQL**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-communication-service` |
 | HTTP port | `8158` |
-| Data domain | platform |
+| Data domain | engagement |
 | Datastore | PostgreSQL (database `openbank_communication`) |
 | Classification | internal |
 | Retention | 3 years |
@@ -28,18 +28,24 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `communication`.
 
-## Health & probes
+## Activation and verification
 
-- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `communication`); dashboards in Grafana.
-- Logs: `kubectl logs -n communication deploy/communication-service -f`, or Loki
-  `{namespace="communication"}`.
+This change proposes one replica; it is not evidence of a running workload. Keep the
+activation PR draft with auto-merge disabled until the final reviewed head has explicit
+operator approval and the standard deployment-window prerequisites pass.
 
-## Routine operations
+Before approval, retain evidence for the exact pinned image: vulnerability verdict,
+signature, SBOM and provenance, source freshness, real customer-edge consumer publication,
+provider verification and the strict deployment contract verdict. Manifest checks alone
+cannot qualify the workload. Preserve independent deployment holds.
 
-- **Restart:** `kubectl rollout restart deploy/communication-service -n communication` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/communication-service -n communication --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
+After the approved GitOps rollout, verify the actual running image digest and readiness
+on the management endpoint `:8086/q/health/ready`, then customer-edge app-copy and the
+authenticated admin editor flow. Do not publish customer content as a health probe.
+A Healthy Application with zero replicas is not workload health evidence.
+
+Rollback through a reviewed GitOps change restoring replicas to zero, retaining the
+database and published copy. Do not use manual scaling or restarts to bypass this process.
 
 ## Common failure modes
 

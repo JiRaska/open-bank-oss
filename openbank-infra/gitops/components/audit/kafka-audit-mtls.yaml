@@ -77,6 +77,18 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.accounts.account.status-changed
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.accounts.savings-withdrawal.approved
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.transactions.transaction.initiated
           patternType: literal
         operations: [Read, Describe]
@@ -204,6 +216,20 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.swift.institution-transfers
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #13177: tpp-registry-service holds Write on this topic, so it is ACL-guarded and the
+      # audit trail needs an explicit Read grant to receive TPP register changes.
+      - resource:
+          type: topic
+          name: openbank.tpp.registry.event
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.sepa.instant.events
           patternType: literal
         operations: [Read, Describe]
@@ -319,6 +345,22 @@ spec:
       - resource:
           type: topic
           name: openbank.treasury.deal.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # components/treasury/kafka-topic.yaml -- ADR-0344 contract 9.1 bank-own payment releases.
+      # Money-path: each release is a transfer the rail executes, so the audit trail must see it.
+      - resource:
+          type: topic
+          name: openbank.treasury.payments
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # ADR-0031 D9: AML and sanctions oversight wake-ups carry their producer in sourceService.
+      # Read-only audit subscription; the shared topic is declared in components/agent/kafka-topic.yaml.
+      - resource:
+          type: topic
+          name: openbank.oversight-triggers
           patternType: literal
         operations: [Read, Describe]
         host: "*"

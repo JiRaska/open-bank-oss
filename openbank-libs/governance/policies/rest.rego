@@ -260,6 +260,14 @@ operator_read_any_excluded(action) if {
 	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
 }
 
+# Chapter configuration is an administrator edit, never a machine or customer operation.
+allowed_reasons contains "operator-game-catalog-write" if {
+    input.principal.type == "HUMAN"
+    "ROLE_ADMIN" in input.principal.roles
+    not principal_is_machine
+    input.action == "engagement.gameCatalog.write"
+}
+
 # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
 # are issued to the authenticated operator themselves (subject = principal), and revocation is
 # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
@@ -468,6 +476,16 @@ allowed_reasons contains "pension-catalog-m2m-read" if {
 	input.action == "catalog.read"
 }
 
+# Account opening reads a published revision with its verified account-owned identity only.
+allowed_reasons contains "account-catalog-m2m-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == true
+	machine_named("service-account-openbank-account")
+	"ROLE_API" in input.principal.roles
+	"CATALOG_SCOPE_READ" in input.principal.roles
+	input.action == "catalog.read"
+}
+
 allowed_reasons contains "pension-catalog-m2m-read-approval" if {
     input.principal.type == "HUMAN"
     input.principal.id == "service-account-openbank-pension"
@@ -566,7 +584,7 @@ allowed_reasons contains "edge-service-consent" if {
 allowed_reasons contains "edge-service-engagement" if {
 	input.principal.type == "HUMAN"
 	machine_named("service-account-openbank-edge")
-	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
 }
 
 # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log

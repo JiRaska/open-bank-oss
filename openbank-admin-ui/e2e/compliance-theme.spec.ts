@@ -20,6 +20,8 @@ test.describe('/docs/compliance — semantic theme', () => {
       const initialControlsResponse = await initialControlsResponsePromise
       expect(initialControlsResponse.ok()).toBeTruthy()
       await expect(page.getByRole('heading', { level: 1, name: /Compliance Report|Report compliance/i })).toBeVisible()
+      const main = page.getByRole('main')
+      await expect(main).toHaveCount(1)
 
       const themeButton = page.getByRole('button', { name: /Switch to the (light|dark) theme|Přepnout na (světlý|tmavý) motiv/ })
       const currentlyDark = await themeButton.getAttribute('aria-pressed') === 'true'
@@ -33,8 +35,12 @@ test.describe('/docs/compliance — semantic theme', () => {
       await expect(page.getByText('GDPR', { exact: true }).first()).toBeVisible()
       await expect(page.getByText('47', { exact: true }).first()).toBeVisible()
       await expect(page.getByText(/Without verified mapping|Bez ověřeného mapování/i).first()).toBeVisible()
-      await expect(page.getByText(/This page is an editorial inventory of topics. It does not establish legal compliance or operating effectiveness.|Tento přehled je redakční inventář oblastí. Neprokazuje právní shodu ani provozní účinnost kontrol./i)).toBeVisible()
-      await expect(page.getByText(/Manifest snapshot collected \d{4}-\d{2}-\d{2}T/)).toBeVisible()
+      const scopeNote = main.getByText(/This page is an editorial inventory of topics. It does not establish legal compliance or operating effectiveness.|Tento přehled je redakční inventář oblastí. Neprokazuje právní shodu ani provozní účinnost kontrol./i)
+      await expect(scopeNote).toHaveCount(1)
+      await expect(scopeNote).toBeVisible()
+      const manifest = main.getByText(/Manifest snapshot collected \d{4}-\d{2}-\d{2}T/)
+      await expect(manifest).toHaveCount(1)
+      await expect(manifest).toBeVisible()
       await expect(page.getByText('Compliant', { exact: true })).toHaveCount(0)
       await expect(page.getByText('Warnings', { exact: true })).toHaveCount(0)
 

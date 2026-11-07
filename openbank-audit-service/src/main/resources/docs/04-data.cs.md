@@ -70,3 +70,10 @@ Viz [06 — Compliance](./06-compliance.md) pro analýzu právního základu a v
 
 - **10 let**, vynucováno dvěma způsoby: per-row `retention_until = occurred_at + INTERVAL '10 years'` nastavené triggerem `trg_audit_retention`, a property služby `openbank.gdpr.audit-retention-days: 3650`.
 - Smazání před `retention_until` není jen politika — delete pravidlo na úrovni DB ho zcela blokuje. Purge po expiraci je provozní záležitost (samostatný auditovaný maintenance job), ne ad-hoc `DELETE`.
+
+
+## Stav vlastních převodů banky (ADR-0344, fáze 1b)
+
+audit-service čte také `openbank.swift.institution-transfers`, stav každého vlastního převodu banky ze swift-service. Je to money-path: každý stav popisuje převod, který kanál provedl. Záznamy se přiřazují `swift-service` přes sdílenou tabulku `TopicProducers` a KafkaUser auditu má na topik oprávnění Read (`kafka-audit-mtls.yaml`).
+
+audit-service odebírá také `openbank.accounts.account.status-changed` a `openbank.accounts.savings-withdrawal.approved` (#9073); `TopicProducers` je přiřazuje službě `account-service`. Odběr vzniká dřív, než account-service tyto události přesune z `openbank.accounts.account.created`, takže při přepnutí se žádná neztratí; KafkaUser auditu má na obou topicích Read.

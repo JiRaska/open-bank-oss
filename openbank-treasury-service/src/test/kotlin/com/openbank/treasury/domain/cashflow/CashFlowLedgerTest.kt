@@ -13,11 +13,13 @@ import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.DayCountConvention
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LegRate
 import com.openbank.treasury.domain.model.LegSpec
 import com.openbank.treasury.domain.model.LegacyLegs
 import com.openbank.treasury.domain.model.PayReceive
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.RateType
 import com.openbank.treasury.domain.model.RollDirection
@@ -175,9 +177,12 @@ class CashFlowLedgerTest {
         private val flows = ScheduleAdapter.generate(LegacyLegs.derive(DealFixtures.placement()), ctx())
         private val interest = flows.single { it.kind == CashFlowKind.INTEREST }
 
+        private val ok = OverrideEligibility(DealState.BOOKED, posted = false)
+
         private fun proposed(by: Actor = backOffice) = CashFlowOverride.propose(
             UUID.randomUUID(),
             interest,
+            ok,
             interest.paymentDate.plusDays(1),
             null,
             "holiday not modelled",
@@ -223,11 +228,11 @@ class CashFlowLedgerTest {
         @Test
         fun `an override needs a change and a reason, and a decided one is final`() {
             assertThatThrownBy {
-                CashFlowOverride.propose(UUID.randomUUID(), interest, null, null, "r", backOffice, now)
+                CashFlowOverride.propose(UUID.randomUUID(), interest, ok, null, null, "r", backOffice, now)
             }
                 .isInstanceOf(IllegalArgumentException::class.java)
             assertThatThrownBy {
-                CashFlowOverride.propose(UUID.randomUUID(), interest, null, BigDecimal.ONE, " ", backOffice, now)
+                CashFlowOverride.propose(UUID.randomUUID(), interest, ok, null, BigDecimal.ONE, " ", backOffice, now)
             }
                 .isInstanceOf(IllegalArgumentException::class.java)
             val decided = proposed().approve(approver, now)
@@ -237,11 +242,68 @@ class CashFlowLedgerTest {
         }
 
         @Test
+        fun `no override of a flow that moved on, is paid or posted, or whose deal ended`() {
+            val refusals = listOf(
+                interest.copy(state = CashFlowState.DUE) to ok,
+                interest.copy(state = CashFlowState.SETTLED) to ok,
+                interest.copy(paymentId = "P-1") to ok,
+                interest to OverrideEligibility(DealState.BOOKED, posted = true),
+                interest to OverrideEligibility(DealState.MATURED, posted = false),
+                interest to OverrideEligibility(DealState.CANCELLED, posted = false),
+                interest to OverrideEligibility(DealState.REVERSED, posted = false),
+            )
+            refusals.forEach { (flow, eligibility) ->
+                // At proposal...
+                assertThatThrownBy {
+                    CashFlowOverride.propose(
+                        UUID.randomUUID(),
+                        flow,
+                        eligibility,
+                        null,
+                        BigDecimal.ONE,
+                        "r",
+                        backOffice,
+                        now,
+                    )
+                }.isInstanceOf(FlowNotOverridableException::class.java)
+                // ...and at approval, on the flow as it stands then (proposed while eligible, refused now).
+                assertThatThrownBy { eligibility.require(flow) }.isInstanceOf(FlowNotOverridableException::class.java)
+            }
+            ok.require(interest)
+            ok.require(interest.copy(state = CashFlowState.FIXED))
+        }
+
+        @Test
+        fun `the journal rule matches only this flow's PAYMENT or AMORTISATION journal`() {
+            val id = interest.flowId
+            val d = interest.dealId
+            assertThat(
+                OverrideEligibility.isFlowPaymentJournal(PostingEvent.PAYMENT, "treasury:$d:payment:$id", id),
+            ).isTrue()
+            assertThat(
+                OverrideEligibility.isFlowPaymentJournal(PostingEvent.AMORTISATION, "treasury:$d:amortisation:$id", id),
+            )
+                .isTrue()
+            assertThat(
+                OverrideEligibility.isFlowPaymentJournal(PostingEvent.ACCRUAL, "treasury:$d:accrual:$id", id),
+            ).isFalse()
+            assertThat(
+                OverrideEligibility.isFlowPaymentJournal(
+                    PostingEvent.PAYMENT,
+                    "treasury:$d:payment:${UUID.randomUUID()}",
+                    id,
+                ),
+            )
+                .isFalse()
+        }
+
+        @Test
         fun `a DUE or later flow needs a correction, not an override`() {
             assertThatThrownBy {
                 CashFlowOverride.propose(
                     UUID.randomUUID(),
                     interest.copy(state = CashFlowState.DUE),
+                    ok,
                     null,
                     BigDecimal.ONE,
                     "r",

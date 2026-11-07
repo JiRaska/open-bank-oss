@@ -103,3 +103,13 @@ A waiver requires a verified human JWT even when OPA authorization is advisory; 
 ## Accounting-class map (ADR-0341 D3)
 
 Posters send an `accountingClass` and a role on each journal line and the ledger resolves the GL account from its own `accounting_class_gl_map` table (migration V31). The read side is `GET /api/v1/accounting-classes` and `GET /api/v1/accounting-classes/resolve`, for regulatory readers and reconciliations. There is deliberately no write endpoint: the map changes by reviewed migration, as the chart does.
+
+## Raw journal history snapshots
+
+`POST /api/v1/journals/history-snapshots` accepts an account, currency and inclusive booking-date window under the existing `ledger.list` read gate. It returns a fixed committed database view, an opening sum over attached journal lines, an ordered record count and SHA-256 digest. Stable pages use `GET /.../{snapshotId}/entries?afterOrdinal=...`; the digest covers exact `canonicalJson` strings joined by LF, not a client's reserialized JSON. A source-free result is inline (`persisted=false`), without a stored financial snapshot.
+
+The call requires an `Idempotency-Key` header (1–128 characters of `[A-Za-z0-9._:-]`, scoped to the caller and operation). A PostgreSQL replay binding commits atomically with the snapshot and expires 86,400 seconds after creation. Within that lifetime, the same key and body return the original result with `X-Idempotency-Replayed: true`; another body returns 409. Replay does not renew expiry. If the original snapshot's sources are erased or unavailable, replay returns 410 and does not silently create a new observation. After expiry the key can identify a fresh capture.
+
+The binding stores request/scope digests, result kind and an opaque source reference, not an independent financial response in Redis. An empty result retains only its original identifier, observation instant and database-view metadata. Expired bindings are removed on access and by minute maintenance; physical cleanup can lag while the service is stopped. Hashes and opaque identifiers are not asserted to be anonymous. These controls do not extend source-data retention or override legal holds.
+
+Coverage is **attached ledger journals only**, never proof of account lifetime, classified economic history or the absence of cash/card/transfer events. Direct balance mutations, detached source partitions, legacy missing origins and unverified origin assertions remain explicit limitations. Optional journal `origin` is an authenticated writer's raw assertion; its submitter is assigned by the ledger, not a request field. No EventKind or new posting authority is accepted.

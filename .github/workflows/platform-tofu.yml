@@ -160,7 +160,7 @@ jobs:
 
       - name: Setup Infracost
         if: steps.scope.outputs.run == 'true'
-        uses: infracost/actions/setup@fb736a8f219195d6efdca58682069b16fe1bc280 # v4.2.0
+        uses: infracost/actions/setup@a5783eb98adc93aa7a0049fce0abb06fdd30770a # v5.0.1
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
@@ -280,12 +280,17 @@ jobs:
             echo "::error::Unsupported apply scope."
             exit 1
           fi
-          tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan "${targets[@]}" 2>&1 | tee /tmp/apply-plan.txt
           if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
-            plan_json="$(mktemp "$RUNNER_TEMP/admin-ui-evidence-plan.XXXXXX.json")"
+            # The official plan UI stream includes each planned action and its final
+            # summary without decoding unrelated legacy provider state (tofu show
+            # -json can fail on such state after a targeted plan succeeds).
+            plan_json="$(mktemp "$RUNNER_TEMP/admin-ui-evidence-plan.XXXXXX.jsonl")"
             trap 'rm -f "$plan_json"' EXIT
-            tofu show -json tfplan > "$plan_json"
-            python3 "$GITHUB_WORKSPACE/.github/scripts/check-admin-ui-evidence-plan.py" "$plan_json"
+            tofu plan -input=false -lock-timeout=300s -json -out=tfplan "${targets[@]}" > "$plan_json"
+            sha256sum tfplan > tfplan.sha256
+            python3 "$GITHUB_WORKSPACE/.github/scripts/check-admin-ui-evidence-plan.py" --ui-stream "$plan_json" | tee /tmp/apply-plan.txt
+          else
+            tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan "${targets[@]}" 2>&1 | tee /tmp/apply-plan.txt
           fi
           {
             echo "### \`tofu apply\` plan — ${ENV_DIR}"
@@ -296,4 +301,8 @@ jobs:
 
       - name: tofu apply (saved plan)
         working-directory: ${{ env.ENV_DIR }}
-        run: tofu apply -input=false -no-color -lock-timeout=300s tfplan
+        run: |
+          if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
+            sha256sum --check tfplan.sha256
+          fi
+          tofu apply -input=false -no-color -lock-timeout=300s tfplan

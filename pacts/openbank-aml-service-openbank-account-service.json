@@ -1,0 +1,77 @@
+{
+  "consumer": {
+    "name": "openbank-aml-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the account whose owning party the AML sweep resolves",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555"
+      },
+      "response": {
+        "body": {
+          "id": "11111111-2222-4333-8444-555555555555",
+          "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET an account the AML sweep has no record of",
+      "providerStates": [
+        {
+          "name": "no account exists for the requested account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/7d7d7d7d-0000-4000-8000-7d7d7d7d7d7d"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

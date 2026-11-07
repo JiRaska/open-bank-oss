@@ -95,3 +95,22 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Platby treasury a vlastní převody banky v auditním proudu
+
+Konzument odebírá také `openbank.treasury.payments` (uvolnění vlastních plateb banky, připsané
+treasury-service) a `openbank.swift.institution-transfers` (stav vlastních převodů: ACCEPTED, SENT,
+SETTLED, REJECTED, připsané swift-service). Obě témata jsou na peněžní cestě. Nové téma nemá
+potvrzený offset, první odběr ho proto čte od začátku retence.
+
+## Změny registru TPP v auditním proudu
+
+Consumer odebírá také `openbank.tpp.registry.event` (`TPP_REGISTERED` / `TPP_BLACKLISTED`, připsané
+tpp-registry-service). Auditní KafkaUser má na topiku oprávnění Read. Nové odebírání nemá uložený offset,
+takže poprvé čte topik od začátku retence (#13177).
+
+## Proud provenience agentů (D5)
+
+Kanál `agent-audit-events-in` odebírá téma `openbank.agent.audit.events` s AI-atribučními událostmi z agent-service a připisuje je do auditního úložiště. Nasazený Deployment nastavuje `AUDIT_AGENT_AUDIT_KAFKA_ENABLED=true`; výchozí hodnota v `application.yaml` zůstává `false`, takže lokální běh a testy bez brokeru zůstávají fail-closed. Consumer group je `audit-service-agent-provenance` a offset reset `earliest`, obojí z override ConfigMapy.
+
+`AgentAuditConsumer` potvrdí záznam až po commitu do auditního úložiště. Při chybě dělá NACK místo rethrow, protože handler používá ruční potvrzování a vyhozená výjimka by zrušila Kafka zdroj místo zaparkování záznamu. Kanál používá `failure-strategy: dead-letter-queue` s tématem `openbank.dlq.audit.agent-audit-events-in`. Opakované doručení již uloženého id události se deduplikuje.

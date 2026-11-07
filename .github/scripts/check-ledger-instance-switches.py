@@ -53,6 +53,9 @@ CONTAINER = "ledger-service"
 # Schedulers that act only on the instance's OWN database and reach nothing outside it.
 # Key: "<ClassName>.<method>". A stale entry (method gone) is a finding.
 LOCAL_ONLY = {
+    "HistoryCaptureReceiptPurge.purge":
+        "deletes only expired history request metadata in the instance's own DB; no journals, "
+        "bank topics or outbound clients are touched; expiry cleanup applies to every instance",
     "JournalPartitionMaintainer.maintain":
         "creates next years' journal_entries partitions in the instance's own DB; retention is "
         "detach-only and dry-run by default (drop-enabled is checked false below)",
@@ -222,6 +225,7 @@ _SRC = {
     "Tie.kt": 'class Tie {\n  @Scheduled(cron = "{openbank.x.tie.cron:0 0 6 * * ?}")\n  suspend fun run() {}\n}\n',
     "Part.kt": 'class JournalPartitionMaintainer {\n  @Scheduled(every = "24h")\n  suspend fun maintain() {}\n}\n',
     "Gauge.kt": 'class LedgerOutboxBacklogGauge {\n  @Scheduled(every = "10s")\n  suspend fun refresh() {}\n}\n',
+    "Receipt.kt": 'class HistoryCaptureReceiptPurge {\n  @Scheduled(every = "{openbank.ledger.history-receipt-purge-every:1m}")\n  suspend fun purge() {}\n}\n',
     "Out.kt": 'class Out(@ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false") val e: Boolean)\n',
 }
 _APP = {"openbank": {"outbox": {"dispatch-enabled": True}},
@@ -261,6 +265,7 @@ def self_test() -> int:
         ("channel enabled flag not env-backed (the #13278 shape)", {"app": {**_APP, "mp": {"messaging": {"outgoing": {"ev-out": {"topic": "bank.topic"}}}}}}, 1),
         ("kafka bootstrap wired", {"env": {**_GOOD_ENV, "KAFKA_BOOTSTRAP_SERVERS": "bus:9093"}}, 1),
         ("bank REST dependency wired", {"env": {**_GOOD_ENV, "FX_URL": "http://fx"}}, 1),
+        ("stale receipt cleanup LOCAL_ONLY entry", {"src": {k: v for k, v in _SRC.items() if k != "Receipt.kt"}}, 1),
         ("stale LOCAL_ONLY entry", {"src": {k: v for k, v in _SRC.items() if k != "Gauge.kt"}}, 1),
         ("temporal worker", {"src": {**_SRC, "W.kt": "import io.temporal.worker.WorkerFactory\n"}}, 1),
     ]

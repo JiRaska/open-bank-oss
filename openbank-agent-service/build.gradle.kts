@@ -25,6 +25,8 @@ dependencies {
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // Parse the same bundled governance declarations as the catalog; already supplied by Quarkus YAML.
+    implementation("org.yaml:snakeyaml")
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
 
@@ -36,19 +38,26 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0352 §12: the MCP product tools run ProductToolkit (libs-domain) with the production
+    // FinanceProductArithmetic, in-process. Never openbank-products: that module carries
+    // libs-testing, which must not reach a service's production classpath.
+    implementation(project(":openbank-libs-finance"))
 
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
-    // Pact consumer: AgentBalanceHoldsPactConsumerTest pins the get_balance_holds read tool
-    // against balance-service — the contract test for the GET /{accountId}/holds endpoint this
-    // PR adds (ADR-0063).
-    // Pact consumer: AgentSepaInstantReadPactConsumerTest pins the assistant's SCT Inst read
-    // tools against sepa-instant (ADR-0063, evidence-matrix contract coverage).
+    // Pact consumers pin balance-holds, sanctions and SEPA Instant read tools against their
+    // providers (AgentBalanceHoldsPactConsumerTest, AgentSanctionsReadPactConsumerTest and
+    // AgentSepaInstantReadPactConsumerTest, ADR-0063).
+    // Pact consumers also cover account/transaction, FX, AML, Catalog and Ledger read tools.
+    // They drive read-adapter dispatch through mock-server clients, not live OIDC.
     testImplementation(libs.pact.consumer)
     // First fleet adopter of the shared OTel trace-contract kit. It keeps the agent's existing
     // span test coupled to an evidence-safe assertion surface reusable by E2E/synthetic tests.
     testImplementation(project(":openbank-libs-testing"))
+    // ADR-0352 gate product-ir-authoring-parity: ProductIrAuthoringParityTest drives the `obp` CLI
+    // and the MCP handler over one fixture. Test scope only (the module carries libs-testing).
+    testImplementation(project(":openbank-products"))
     // D3b SVID tests build an EC CA + leaf cert at runtime (no committed private keys → gitleaks-clean).
     // Declared directly (not via the shared catalog) so this one-service test dep does not trigger a
     // full-fleet rebuild on the shared libs.versions.toml.
@@ -70,6 +79,15 @@ dependencies {
 // agent load their system prompts from the registered files at runtime instead of inline constants.
 // This copy is derived from openbank-libs/governance/prompts/ — never hand-edit it here.
 tasks.named<Copy>("processResources") {
+    // Image-pinned MCP metadata is derived from source ownership, never a second domain table.
+    from(rootProject.file(".")) {
+        include("openbank-*/governance.yaml")
+        into("business-domains")
+    }
+    from(rootProject.file("openbank-libs/governance/domain-taxonomy.json")) {
+        into("business-domains")
+        rename { "taxonomy.json" }
+    }
     from(rootProject.file("openbank-libs/governance/prompts/compliance-officer")) {
         include("oversight.v1.md")
         into("governance-prompts/compliance-officer")
@@ -78,6 +96,61 @@ tasks.named<Copy>("processResources") {
         include("system.v3.md", "catalog-review.v1.md")
         into("governance-prompts/ui-assistant")
     }
+}
+
+// Forked test JVM heap — issue #9919, observed here 2026-10-28. The same intermittent
+// kover test.ic truncation that consent-service carries (#9919) now hits this module:
+// two consecutive Services CI runs of PR #14059 failed koverVerify with
+// `Failed to load coverage data ... java.io.EOFException` and coverage 60.08% / 86.24%
+// against this floor of 87, on a change that touches no agent-service source. The
+// incomplete report does not establish whether the JVM exited early, ran out of memory, or a
+// writer remained active. The 2g override is a per-module mitigation already used by
+// account-service / consent-service / kyc / domestic-payment. Not a fleet default —
+// see account-service's comment for why.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
+// DIAGNOSTIC, not a fix — issue #9919 (copied from consent-service, adapted for this
+// module). koverVerify intermittently reads a TRUNCATED test.ic here
+// (`Failed to load coverage data ... java.io.EOFException`), on ~10% of CI builds
+// including main, never locally. The EOF warning is also present in GREEN runs, so
+// truncation is routine and only sometimes costs enough to fail the floor. The
+// mechanism is not established, and the two live candidates need opposite fixes:
+//   (a) the test JVM exits before kover's shutdown hook finishes writing (the file is
+//       already short when Gradle moves on, and nothing writes it afterwards), or
+//   (b) something still holds and writes the file after `test` ends — a JVM that
+//       inherited the agent — so koverCachedVerify reads a file that is still growing.
+// Two readings help investigate them: size + mtime when `test` finishes, and again
+// immediately before koverCachedVerify reads it, plus any live process still carrying
+// the kover agent. Equal readings or a visible agent process are diagnostic clues, not proof
+// of a single mechanism or an out-of-memory exit. Remove this block once a failing run has
+// printed both lines and #9919 has its answer.
+val koverTestIc = layout.buildDirectory.file("kover/bin-reports/test.ic")
+fun describeKoverIc(moment: String, ic: File): String {
+    // Epoch millis, not java.time: inside a build script `java` resolves to the
+    // project's java extension, so `java.time.Instant` does not compile here.
+    val state = if (ic.isFile) "size=${ic.length()} mtimeMs=${ic.lastModified()}" else "absent"
+    // Only a JVM actually carrying the agent. A bare "kover" substring also matches
+    // the Gradle and Kotlin daemons (the plugin is on their classpath), which would
+    // report (b) on every run.
+    val self = ProcessHandle.current().pid()
+    val agentJvms = ProcessHandle.allProcesses()
+        .filter { it.pid() != self }
+        .filter {
+            val cmd = it.info().commandLine().orElse("")
+            cmd.contains("-javaagent:") && cmd.contains("kover-jvm-agent")
+        }
+        .map { it.pid() }
+        .toList()
+    return "[kover-ic #9919] $moment: test.ic $state; " +
+        "live kover-agent JVMs=$agentJvms; nowMs=${System.currentTimeMillis()}"
+}
+tasks.named<Test>("test") {
+    doLast { logger.lifecycle(describeKoverIc("after test", koverTestIc.get().asFile)) }
+}
+tasks.matching { it.name == "koverCachedVerify" }.configureEach {
+    doFirst { logger.lifecycle(describeKoverIc("before koverCachedVerify", koverTestIc.get().asFile)) }
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: was a placebo minValue = 0

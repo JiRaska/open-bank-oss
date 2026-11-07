@@ -156,3 +156,22 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ### Alarm nezaúčtované platby a re-drive (#13623)
 
 `DomesticPaymentBookingUnsettled` alarmuje, když jsou nejstarší otevřené hodiny bookingu starší než 1 h (`openbank-infra/gitops/components/payments/prometheus-rules-unsettled.yaml`, testy v `openbank-infra/tests/promtool/payment_unsettled_alerts_test.yaml`). Temporal opakuje settlement každých 5 minut po 7 dní se stejným klíčem; to zhojí přechodný výpadek, nikdy deterministickou odpověď. Postup operátora (dotaz do transaction-service podle klíče, pak reconcile, reverse nebo re-drive, včetně resetu již selhaného workflow) je v `docs/runbooks/0032-payment-rail-unsettled-booking.md`.
+
+## Typ platby v pacs.008 (#13663)
+
+Domácí adaptér výslovně ponechává volitelný blok typu platby nepřítomný. Úroveň služby SEPA je kód
+EPC, nikoli kód domácího clearingového schématu; nové pole sdílené knihovny z domácího převodu
+nedělá SEPA platbu. Výchozí XML bez bloku se nemění.
+`DomesticPaymentPriority.INSTANT` stále nemá odpovídající kód v této zprávě: volba úrovně služby
+a lokálního instrumentu domácího schématu zůstává nevyřešená. Toto zachování kompatibility
+nedokládá, že se okamžitá priorita předává schématu.
+
+## Příznak vynucování fraud rozhodnutí (#4403, ADR-0084 §4.2)
+
+`openbank.domestic.fraud.enforcement-enabled` (env `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED`) je ve výchozím stavu **vypnutý**. Dokud je vypnutý, každá platba pokračuje beze změny a případné rozhodnutí se pouze započítá do `openbank_fraud_enforcement_decisions_total{decision,mode="shadow"}`. Před zapnutím kalibrujte podle této metriky.
+
+Po zapnutí workflow aktivita `fraudGate` selhává uzavřeně: pokračuje jen skutečné ALLOW, DECLINE platbu zamítne jako `FRAUD_SUSPECTED` a každý jiný verdikt (CHALLENGE, REVIEW, UNKNOWN, jakýkoli syntetický) platbu před odesláním do schématu pozdrží a otevře případ `FRAUD_REVIEW`. Pozdržení uvolní jen signál workflow `resolveFraudHold(RELEASE)`; signál REJECT nebo žádný signál do 48 h platbu zamítne. Signál se při uzavření případu zatím neodesílá, proto příznak nezapínejte, dokud toto napojení neexistuje. Cesta zamítnutí neposílá zákazníkovi žádné oznámení (tipping-off). Rollback: nastavte příznak na `false`; již čekající platby dál čekají na signál nebo timeout.
+
+## Identita API na mTLS listeneru
+
+V produkci `/api/*` přijímá pouze bearer autentizaci, a to na prostém HTTP listeneru i na mTLS listeneru s ověřením klienta, a vyžaduje přihlášeného volajícího. Důvěryhodný klientský certifikát je na mTLS listeneru podmínkou TLS spojení, ale slouží jen k autentizaci transportu: nenahrazuje OIDC bearer token volajícího, takže certifikát bez beareru dostane HTTP 401. `GET /api/v1/info` a `GET /api/v1/config` zůstávají veřejná metadata. Role endpointu a OPA nadále rozhodují, co smí přihlášený volající dělat. `DomesticPaymentListenerAuthParityIT` používá produkční podobu listenerů a přes skutečné HTTP ověřuje, že požadavek pouze s certifikátem dostane 401.

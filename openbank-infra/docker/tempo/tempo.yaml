@@ -10,17 +10,17 @@ distributor:
         http:
           endpoint: 0.0.0.0:4318
 
-ingester:
-  max_block_duration: 5m
-  trace_idle_period: 10s
-  max_block_bytes: 1_000_000
+# Tempo 3 replaced the ingester and compactor with a live store and backend
+# scheduler/worker. Keep the local 48h retention in both compaction settings.
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 48h
 
-compactor:
+backend_worker:
   compaction:
     block_retention: 48h
-  ring:
-    kvstore:
-      store: inmemory
 
 # Span-metrics + service-graph generation (ADR-0082), remote-written to the dev
 # Prometheus so dev mirrors the k8s metrics-generator wiring.
@@ -33,8 +33,6 @@ metrics_generator:
     remote_write:
       - url: http://prometheus:9090/api/v1/write
         send_exemplars: true
-  traces_storage:
-    path: /tmp/tempo/generator/traces
 
 overrides:
   defaults:
@@ -54,10 +52,3 @@ storage:
 querier:
   frontend_worker:
     frontend_address: tempo:9095
-
-query_frontend:
-  search:
-    duration_slo: 5s
-    throughput_bytes_slo: 1.073741824e+09
-  trace_by_id:
-    duration_slo: 5s

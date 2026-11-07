@@ -8,8 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.networknt.schema.JsonSchemaFactory
 import com.networknt.schema.SpecVersion
-import com.openbank.agent.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
@@ -20,7 +21,11 @@ import java.io.File
 
 /** Validate native OpenAPI 3.1 null unions; 3.0's nullable flag is ignored by JSON Schema. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
+    initArgs = [ResourceArg(name = "db", value = "openbank_agent_it")],
+)
 class MergeProvenanceSchemaTest {
     private val mapper = ObjectMapper()
     private val document = Yaml().load<Map<String, Any>>(File("src/main/resources/openapi.yaml").readText())
@@ -133,5 +138,28 @@ class MergeProvenanceSchemaTest {
         given().contentType("application/json").body(app)
             .`when`().post("/api/v1/agent-merge-records/app")
             .then().statusCode(403)
+    }
+
+    @Test
+    fun `policy proof has its own additive schema without widening the old closed enum`() {
+        val proof = mapOf(
+            "kind" to "POLICY_PR_AUTO_MERGE", "scope" to "PR", "approvedBy" to "fixture-owner",
+            "approvedById" to 1234, "approvedAt" to "2026-10-24T11:59:00Z",
+            "evidenceUrl" to "https://github.com/JiRaska/open-bank-oss/pull/1",
+            "pullRequestNodeId" to "PR_fixture", "mergeEventNodeId" to "ME_fixture",
+            "mergeEventAt" to "2026-10-24T12:00:00Z", "observedAt" to "2026-10-24T12:00:01Z",
+            "policyCommitSha" to "c".repeat(40), "policyBlobSha" to "d".repeat(40),
+        )
+        val policyApp = (app - "authorization") + ("policyAuthorization" to proof)
+        val policySchema = schema("PolicyAppMergeRecordIngestRequest")
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp))).isEmpty()
+        assertThat(validate(app + ("authorization" to proof))).isNotEmpty()
+        assertThat(validate(app + ("policyAuthorization" to proof))).isNotEmpty()
+        assertThat(validate(app + ("policyAuthorization" to null))).isEmpty()
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp + ("authorization" to exactProof)))).isNotEmpty()
+        assertThat(policySchema.validate(mapper.valueToTree(policyApp - "policyAuthorization"))).isNotEmpty()
+        assertThat(
+            schema("PolicyMergeAuthorization").validate(mapper.valueToTree(proof - "policyBlobSha")),
+        ).isNotEmpty()
     }
 }

@@ -158,3 +158,13 @@ Datová klasifikace: `internal` (`governance.yaml: dataClassification`). Záznam
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
 - Signály: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total` a workflow liveness `outbox-sent-retention`.
 - Vypnutí: `openbank.outbox.retention.enabled=false` (při startu zaloguje WARN). Nesnižujte `sent-days` pod potřebu kteréhokoli čtenáře SENT řádků.
+
+## Potvrzení účetního zápisu kapitalizace
+
+Nenulová kapitalizace ukládá skutečné UUID potvrzeného účetního zápisu do existujícího pole `ledgerEntryId`, ve stejné lokální transakci jako kapitalizaci, srážku, outbox událost a změnu stavu naběhlých úroků. REST adaptér přijme potvrzení jen se stavem `POSTED` a identitou transakce odpovídající deterministickému požadavku kapitalizace. Původní obchodní idempotentní klíč zůstává zachován; získání potvrzení nevytváří druhý zápis. Nulová kapitalizace žádný zápis nemá a odkaz zůstává prázdný. Adaptér bez potvrzení ponechá odkaz výslovně neznámý.
+
+Odkaz dokládá potvrzenou odpověď na zaúčtování, nikoli úplnost historie účtu ani ověřené ekonomické zařazení libovolného původu zápisů. Historické prázdné odkazy se nedoplňují podle popisu nebo odhadnutého ID. Platí dosavadní pravidla retence a výmazu zdroje; odkaz nezavádí novou retenční lhůtu.
+
+## Stínové porovnání s produktovým IR (ADR-0352, fáze 3)
+
+Migrace V21 přidává dvě tabulky. Nic na cestě účtování je nečte ani do nich nezapisuje. `interest_product_shadow_input` je fronta stínového porovnání. Má jeden řádek na každý potvrzený řádek `interest_accruals` nebo `interest_capitalizations` (`source_kind`, `source_id`, dohromady unikátní). Komparátor řádky zařazuje až po potvrzení původní transakce, takže `InterestService` sám nic nového nezapisuje. Řádek skončí ve stavu `DONE` s výsledkem: `AGREED`, `DIVERGED`, `RULE_UNMAPPED`, `NO_PIN`, `NO_IR`, `VERIFICATION_DISABLED`, `VERIFICATION_FAILED`, `IR_EVALUATION_FAILED`, `SOURCE_MISSING` nebo důvod opakování s příponou `_EXHAUSTED`. Pokud k porovnání došlo, řádek uchová i `rule_id` z IR a obě částky (`legacy_amount`, `ir_amount`, scale 6), takže rozdíl lze přečíst bez opakovaného běhu. `interest_product_revision_ir` je neměnná lokální kopie produktového IR připnuté revize a jeho podpisu z publikační cesty. Zapisuje se jednou za revizi a chrání ji trigger; zaznamená se i revize bez IR. Rollback odstraní obě tabulky a funkci triggeru. Předchozí release je nečte ani do nich nezapisuje.

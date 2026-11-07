@@ -4,16 +4,22 @@
 
 package com.openbank.productcatalog.infrastructure.catalog
 
+import com.fasterxml.jackson.core.JsonParser
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.ObjectMapper
 import io.quarkus.jackson.ObjectMapperCustomizer
 import jakarta.inject.Singleton
 
-/** Preserve arbitrary-precision JSON numbers before they enter the framework-free catalog algebra. */
+/**
+ * Preserve arbitrary-precision JSON numbers before they enter the framework-free catalog algebra, and
+ * refuse duplicate object keys: Jackson otherwise keeps the last one, while the product IR parser
+ * (`obp lint`) rejects the document, so a last-wins body could lint and save an IR the CLI refuses.
+ */
 @Singleton
 class CatalogObjectMapperCustomizer : ObjectMapperCustomizer {
     override fun customize(mapper: ObjectMapper) {
         mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
         mapper.enable(DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
+        mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
     }
 }

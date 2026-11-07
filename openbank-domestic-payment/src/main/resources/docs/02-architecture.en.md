@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, status / priority / scope / reject enums,
 │   │                          transitionTo() + canTransitionTo() (the state machine)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (pure decision), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               DomesticPaymentUseCase + commands / queries

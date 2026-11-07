@@ -111,3 +111,21 @@ spec:
             summary: "billing-service is dropping a FEE price component that no v1 fee identifies (revenue not billed)"
             description: "A published revision tags a price component as FEE, but the v1 document it embeds derives no such code, so billing cannot give it a stable fee id and does not charge it. Every assessment under that revision misses the fee until the revision is corrected. Remedy (runbook): add the fee to the v1 document so its code is derived, or publish a revision without the embedded v1 document. Refs #13230."
             runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0031-billing-fee-not-in-legacy-document.md"
+        # #13167 / ADR-0342 D4. The ledger refused a fee charge with 409 ACCOUNTING_DAY_CLOSED: the day it
+        # was posted for no longer accepts postings. Retrying cannot succeed, so LedgerOutboxEventPublisher
+        # marks the fee FAILED at once and completes the outbox row - the customer is NOT charged and nothing
+        # re-posts it on its own. The cycle's day is reported REFUSED to the ledger (it holds the close), and
+        # this counter is the operational trace. Summed over all labels so a restart (counter reset) is
+        # absorbed by increase(). Warning: the recovery is a four-eyes re-bill (runbook 0033), not a wake-up.
+        - alert: BillingFeeRefusedIntoClosedDay
+          expr: sum(increase(openbank_billing_fee_post_closed_day_refusals_total[6h])) > 0
+          labels:
+            severity: warning
+            service: billing
+          annotations:
+            # Counted when the outbox dispatches a fee charge, i.e. after a billing-cycle sweep (at most once
+            # a day) or an operator re-bill. W [6h] < P: an any-increase detector with no `for:`.
+            subject_period: 1d
+            summary: "billing-service had a fee charge refused into a closed accounting day (fee not charged)"
+            description: "The ledger answered a fee posting with 409 ACCOUNTING_DAY_CLOSED. The fee is FAILED and will not post on its own; the cycle's day is reported REFUSED and holds the ledger's close. Recover by re-billing the fee into the next open day under a new, recorded key with four-eyes approval (runbook 0033), then let the reporter re-send the day. Refs #13167."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0033-billing-fee-refused-into-closed-day.md"

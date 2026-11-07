@@ -53,7 +53,7 @@ describe.each(['en', 'cs'] as const)('painted control names in %s', language => 
       imageAnatomy: { steps: [] }, planVsReality: [],
     }))))
     mount(<ClusterDossierPage />)
-    const label = status === 'live' ? 'Live' : status === 'partial' ? (language === 'en' ? 'Partial' : 'Částečně') : (language === 'en' ? 'Planned' : 'Plánováno')
+    const label = status === 'live' ? (language === 'en' ? 'Declared' : 'Deklarováno') : status === 'partial' ? (language === 'en' ? 'Partial' : 'Částečně') : (language === 'en' ? 'Planned' : 'Plánováno')
     const control = await screen.findByRole('button', { name: `1 Edge ${label}` })
     expect(control.textContent!.replace(/\s+/g, ' ').trim()).toBe(`1 Edge ${label}`)
     expect(control).toHaveAttribute('aria-expanded', 'true')

@@ -179,6 +179,13 @@ class RestProductRevisionPort(
             feeBearing = selection.feeBearing,
             droppedFeeComponents = selection.dropped.size,
             noFeeIdentityComponents = selection.noIdentity,
+            shadowRevision = RevisionIdentityMetadata.parse(
+                revision.id,
+                revision.number,
+                revision.content.behaviour,
+                revision.irSignature,
+                revision.state,
+            ),
         )
     }
 

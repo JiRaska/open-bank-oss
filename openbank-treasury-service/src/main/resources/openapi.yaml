@@ -36,10 +36,7 @@ info:
   # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
   #         principal and maximum tenor, declared in configuration. Enforced at submit and
   #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
-  # 1.19.0: additive — portfolio statements of holdings (ADR-0337 amendment): POST
-  #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
-  #         kept), GET /portfolio/statements?date= (the version trail) and GET
-  #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
+  # 1.19.0: skipped — it was reserved for the portfolio statements below, which landed in 1.22.0.
   # 1.20.0: additive — ADR-0344 slice 2: effective-dated four-eyes reference data
   #         (/reference/{kind}), deal v2 request/response fields (kind, bookId, legs, calendars,
   #         securities, regulatory terms; eleven more request products), the stored cash-flow
@@ -51,7 +48,27 @@ info:
   #         Slice 4 (same unreleased version): four-eyes corrections of a booked deal
   #         (/deals/{id}/corrections, ADR-0344 D7) with a preview of the new flows and the delta
   #         journals they post.
-  version: 1.19.0
+  # 1.21.0: the ReferenceKind RESPONSE schema becomes x-extensible-enum (requests keep the closed
+  #         ReferenceKindRequest); 409 DEAL_CHANGED (versioned deal saves) and 409
+  #         FLOW_NOT_OVERRIDABLE (override eligibility at proposal, approval and apply).
+  # 1.22.0: additive — portfolio statements of holdings (ADR-0337 amendment): POST
+  #         /portfolio/statements (custodian semt.002; a correction supersedes, the prior version is
+  #         kept), GET /portfolio/statements?date= (the version trail) and GET
+  #         /portfolio/period-end?date= (tax-reporting's PSP 34-12 PS source; 409 when no statement).
+  # 1.23.0: additive — ADR-0344 phase 2: every product is drafted and settles, accrues, pays and
+  #         matures through the posting-rule matrix (GET /posting-rules). Every product with
+  #         counterparty credit risk consumes its line by CreditExposure (derivatives |notional| x a
+  #         conversion factor, repos net of the collateral haircut): 422 CONVERSION_FACTOR_MISSING /
+  #         COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING when the measure has no effective
+  #         record or no ACTIVE market-data price of the collateral ISIN, and
+  #         COLLATERAL_PRICE_OUT_OF_TOLERANCE when the deal's own collateral price is too far from it
+  #         (collateral is always valued at the bank's price, never the deal's). GET
+  #         /day-completion/{date}, close-of-day position snapshots (/positions/close-of-day,
+  #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
+  # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
+  #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
+  # 1.26.0: correction — validation 400s from libs-runtime use ProblemDetail, not Error (#12078).
+  version: 1.26.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -218,7 +235,7 @@ paths:
         '400': { description: Invalid terms }
         '403': { description: Not permitted (another agent's draft) }
         '404': { description: No such deal }
-        '409': { description: The deal is not a DRAFT }
+        '409': { description: 'The deal is not a DRAFT (INVALID_STATE), or it changed since it was read (DEAL_CHANGED)' }
 
   /api/v1/treasury/deals/{id}/submit:
     post:
@@ -234,7 +251,13 @@ paths:
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
-          description: PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4)
+          description: >-
+            PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4);
+            CONVERSION_FACTOR_MISSING / COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING — a
+            derivative or repo whose credit measure has no effective reference record or collateral
+            price; COLLATERAL_PRICE_OUT_OF_TOLERANCE — the deal's collateral price is outside the
+            tolerance of the bank's own; LIMIT_BREACHED — the line moved past the
+            vetted headroom before the locked write
           content:
             application/json:
               schema:
@@ -256,8 +279,13 @@ paths:
         '422':
           description: >-
             FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
-            limit, not covered by a senior override) or PRODUCT_LIMIT_BREACHED (the deal is outside its
-            product limit as declared NOW — re-checked at approval; not overridable)
+            limit, not covered by a senior override; also when the line moved past the vetted headroom
+            before the locked write), PRODUCT_LIMIT_BREACHED (the deal is outside its product limit as
+            declared NOW — re-checked at approval; not overridable), or CONVERSION_FACTOR_MISSING /
+            COLLATERAL_HAIRCUT_MISSING / COLLATERAL_PRICE_MISSING (a derivative or repo whose credit
+            measure has no effective reference record or collateral price: refused, never measured as
+            zero), or COLLATERAL_PRICE_OUT_OF_TOLERANCE (the deal's collateral price is outside the
+            tolerance of the bank's own)
           content:
             application/json:
               schema:
@@ -404,6 +432,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/treasury/deals/{id}/posting-intent/close:
+    post:
+      tags: [Treasury]
+      operationId: closePostingIntent
+      summary: Close a deal's open posting intent that cannot complete (operator, audited)
+      description: >-
+        #13883. Settle, mature and reverse record a posting intent before posting to the ledger; an
+        OPEN intent holds its value day's close report. When it cannot complete, an operator closes
+        it with a reason (recorded with who closed it), which releases the hold. Same authority as
+        reversing the deal, and a person only.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per close decision, stable across retries (1..128 characters).
+            Recorded on the close's append-only history row with a fingerprint of the request
+            (deal, event, actor, reason, closed intent). A replay of the same close answers as
+            the close did (204; 409 if a re-issue has since reopened the intent); the same key
+            on a different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClosePostingIntentRequest'
+      responses:
+        '204':
+          description: The intent was closed
+        '400':
+          description: >-
+            Missing or invalid event or reason; missing or invalid Idempotency-Key; or the
+            Idempotency-Key was already used for a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: No OPEN posting intent for that event on the deal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: >-
+            POSTING_IN_FLIGHT. The intent may still be posting (younger than the grace period,
+            or claimed by the reconciler), or this is a replay of a close whose intent a re-issue
+            has since reopened; retry later.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: FOUR_EYES_VIOLATION (the posting's own actor or the deal's approver)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/counterparties:
     get:
       tags: [Treasury]
@@ -504,7 +594,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
         '503':
@@ -549,7 +639,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -589,7 +679,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -858,6 +948,36 @@ paths:
                 items: { $ref: '#/components/schemas/JournalRef' }
         '404': { description: No such deal }
 
+  /api/v1/treasury/posting-rules:
+    get:
+      tags: [Treasury]
+      operationId: listPostingRules
+      summary: 'The posting-rule matrix: (product, event, IFRS 9 category) to journal template (ADR-0344 D7)'
+      responses:
+        '200':
+          description: Every posting rule of every product, versioned
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 10000
+                items: { $ref: '#/components/schemas/PostingRule' }
+
+  /api/v1/treasury/day-completion/{date}:
+    get:
+      tags: [Treasury]
+      operationId: getDayCompletion
+      summary: "The treasury accounting day's completion record: every step with its last outcome (ADR-0344 D7)"
+      parameters:
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: Every step of the day; a step with no recorded run is PENDING
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DayCompletion' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/v1/treasury/reference/{kind}:
     get:
       tags: [Treasury]
@@ -1095,6 +1215,87 @@ paths:
         '409': { $ref: '#/components/responses/InvalidState' }
         '422': { description: FOUR_EYES_VIOLATION }
 
+  /api/v1/treasury/positions/close-of-day:
+    post:
+      tags: [Treasury]
+      operationId: closePositions
+      summary: Record a close-of-day position snapshot (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
+
+  /api/v1/treasury/positions/close-of-day/special:
+    post:
+      tags: [Treasury]
+      operationId: closePositionsSpecial
+      summary: Record a special (out-of-cycle or scenario) position close (ROLE_TREASURY_BACK_OFFICE)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PositionCloseRequest' }
+      responses:
+        '201':
+          description: The recorded close
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PositionClose' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'The Idempotency-Key was already used for a position close on another request (other date, book, scenario, endpoint or actor)' }
+
+  /api/v1/treasury/views/deal-filters:
+    get:
+      tags: [Treasury]
+      operationId: listDealFilters
+      summary: The caller's saved blotter filters
+      responses:
+        '200':
+          description: Saved filters
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SavedDealFilter' } }
+    post:
+      tags: [Treasury]
+      operationId: saveDealFilter
+      summary: Save (or replace by name) one of the caller's blotter filters
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SavedDealFilter' }
+      responses:
+        '201':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedDealFilter' }
+        '400': { description: Blank name or a filter that is not an object }
+
+  /api/v1/treasury/views/deal-filters/{name}:
+    delete:
+      tags: [Treasury]
+      operationId: deleteDealFilter
+      summary: Delete one of the caller's saved filters
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        '204': { description: Deleted }
+        '404': { description: No such filter for the caller }
+
   /api/v1/treasury/calendar:
     get:
       tags: [Treasury]
@@ -1199,6 +1400,323 @@ paths:
                     description: { type: string }
                     installedOn: { type: string, format: date-time }
 
+  /api/v1/treasury/fixings:
+    get:
+      tags: [Treasury]
+      operationId: listFixings
+      summary: The fixings of one date (ADR-0344 D5) — DUE, FIXED or BLOCKED by the market-data quality gate
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+        - { name: status, in: query, required: false, schema: { type: string, enum: [DUE, FIXED, BLOCKED] } }
+      responses:
+        '200':
+          description: One row per (index, fixing date)
+          content:
+            application/json:
+              schema: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
+        '400': { description: Missing or malformed date or status }
+
+  /api/v1/treasury/fixings/run:
+    post:
+      tags: [Treasury]
+      operationId: runFixings
+      summary: Fix every due index of the date that passes the quality gate; block (and open a case for) the rest
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  fixedFlows: { type: integer, minimum: 0 }
+                  fixedIndices: { type: array, maxItems: 500, items: { type: string } }
+                  blocked: { type: array, maxItems: 500, items: { $ref: '#/components/schemas/Fixing' } }
+                  failures: { type: integer, minimum: 0 }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual:
+    post:
+      tags: [Treasury]
+      operationId: proposeManualFixing
+      summary: Propose a manual fixing — PENDING until a different human approves (never an AI agent)
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string, maxLength: 32 } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rate, reason, source]
+              properties:
+                rate: { type: number, description: Percent, within ±100, at most 8 decimals }
+                reason: { type: string, minLength: 1, maxLength: 900 }
+                source: { type: string, minLength: 1, maxLength: 64 }
+      responses:
+        '201': { description: The PENDING batch, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '400': { description: Invalid rate, reason or source }
+        '422': { description: The index is not effective on that date }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveManualFixing
+      summary: Approve a manual fixing (422 FOUR_EYES_VIOLATION for its proposer, 403 for a non-human)
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: APPROVED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '403': { description: Not a human approver }
+        '409': { description: Not PENDING, or an ACTIVE value already exists for that index-date }
+        '422': { description: Four-eyes violation }
+
+  /api/v1/treasury/fixings/{index}/{date}/manual/{batchId}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectManualFixing
+      summary: Reject a manual fixing
+      parameters:
+        - { name: index, in: path, required: true, schema: { type: string } }
+        - { name: date, in: path, required: true, schema: { type: string, format: date } }
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 1000 } } } } }
+      responses:
+        '200': { description: REJECTED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+
+  /api/v1/treasury/market-data/factors:
+    get:
+      tags: [Treasury]
+      operationId: listMarketFactors
+      summary: ACTIVE index observations (factor history), optionally of one index
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: index, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200':
+          description: Observations
+          content:
+            application/json:
+              schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/IndexObservation' } }
+
+  /api/v1/treasury/market-data/export:
+    get:
+      tags: [Treasury]
+      operationId: exportMarketData
+      summary: CSV export of ACTIVE observations; every cell quoted and formula-leading cells neutralised
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date } }
+        - { name: index, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: CSV, content: { text/csv: { schema: { type: string } } } }
+
+  /api/v1/treasury/market-data/import:
+    post:
+      tags: [Treasury]
+      operationId: importMarketData
+      summary: Import observations (CSV index,date,value or a JSON array) as one PENDING four-eyes batch; at most 1 MiB and 5000 rows
+      parameters:
+        - { name: reason, in: query, required: true, schema: { type: string, maxLength: 1000 } }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string, maxLength: 1048576 } }
+          application/json:
+            schema:
+              type: array
+              maxItems: 5000
+              items: { type: object, properties: { index: { type: string }, date: { type: string, format: date }, value: { type: number } } }
+      responses:
+        '201': { description: The PENDING batch, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '400': { description: A bad row (the whole file is refused), or over the size or row bounds }
+
+  /api/v1/treasury/market-data/imports:
+    get:
+      tags: [Treasury]
+      operationId: listMarketDataBatches
+      summary: Market-data batches (imports and manual fixings), newest first
+      parameters:
+        - { name: status, in: query, required: false, schema: { type: string, enum: [PENDING, APPROVED, REJECTED] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 5000, default: 500 } }
+      responses:
+        '200':
+          description: Batches
+          content:
+            application/json:
+              schema: { type: array, maxItems: 5000, items: { $ref: '#/components/schemas/MarketDataBatch' } }
+
+  /api/v1/treasury/market-data/imports/{batchId}/approve:
+    post:
+      tags: [Treasury]
+      operationId: approveMarketDataImport
+      summary: Approve an import — its observations become ACTIVE (four-eyes, human only)
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: APPROVED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+        '403': { description: Not a human approver }
+        '404': { description: No such batch }
+        '409': { description: Not PENDING, or an ACTIVE value already exists for one of its index-dates }
+        '422': { description: Four-eyes violation }
+
+  /api/v1/treasury/market-data/imports/{batchId}/reject:
+    post:
+      tags: [Treasury]
+      operationId: rejectMarketDataImport
+      summary: Reject an import
+      parameters:
+        - { name: batchId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string, maxLength: 1000 } } } } }
+      responses:
+        '200': { description: REJECTED, content: { application/json: { schema: { $ref: '#/components/schemas/MarketDataBatch' } } } }
+
+  /api/v1/treasury/market-data/quality:
+    get:
+      tags: [Treasury]
+      operationId: getMarketDataQuality
+      summary: Suspicious (stale, jump) and missing values for the indices due on a date
+      parameters:
+        - { name: date, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        '200':
+          description: The quality report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  suspicious:
+                    type: array
+                    maxItems: 500
+                    items:
+                      type: object
+                      properties:
+                        index: { type: string }
+                        date: { type: string, format: date }
+                        value: { type: [number, 'null'] }
+                        previous: { type: [number, 'null'] }
+                        jumpBp: { type: [integer, 'null'] }
+                        staleDays: { type: [integer, 'null'] }
+                        reason: { type: [string, 'null'] }
+                  missing:
+                    type: array
+                    maxItems: 500
+                    items: { type: object, properties: { index: { type: string }, date: { type: string, format: date }, dealCount: { type: integer } } }
+
+  /api/v1/treasury/portfolio/statements:
+    post:
+      tags: [Portfolio]
+      operationId: uploadPortfolioStatement
+      summary: Upload a custodian's semt.002 period-end statement of holdings
+      description: |
+        ADR-0337 amendment. One complete page (`Pgntn` page 1, last page) of a complete (`UpdTp`
+        COMP) semt.002 for a configured safekeeping account of this deployment's entity. Every
+        holding needs an ISIN, a quantity, a valuation in the account base currency (one currency
+        for the whole statement) and a CFI the configured prefix mapping covers — an unmapped or
+        missing CFI refuses the WHOLE statement, naming every unclassifiable ISIN. DOCTYPE is
+        refused. Nothing is posted.
+        Idempotent: the same Idempotency-Key with the same bytes, or the same bytes as the date's
+        current version under any key, returns the stored version. Different bytes for an account and date that
+        already has a statement are a CORRECTION: stored as the next version, which supersedes the
+        current one; the superseded version is kept. The key reused on other bytes is 409.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+          text/xml:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The stored version (or the existing one on an idempotent re-ingestion)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortfolioStatement'
+        '400':
+          description: Missing Idempotency-Key, malformed or partial semt.002, unmapped CFI, unconfigured account or no portfolio entity on this deployment, mixed valuation currencies, or a figure the store cannot hold exactly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+    get:
+      tags: [Portfolio]
+      operationId: listPortfolioStatementVersions
+      summary: Every account version stored for a statement date, oldest first (the correction trail)
+      parameters:
+        - $ref: '#/components/parameters/PortfolioDate'
+      responses:
+        '200':
+          description: The versions, oldest first (empty when none is stored)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/PortfolioStatement'}
+        '400':
+          description: Missing or malformed date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/treasury/portfolio/period-end:
+    get:
+      tags: [Portfolio]
+      operationId: getPeriodEndPortfolio
+      summary: The portfolio at exactly that date (tax-reporting's PSP 34-12 PS source)
+      description: |
+        The complete entity portfolio from CURRENT statements for every configured account at exactly `date`.
+        If any configured account lacks that date's statement, the answer is 409 `PORTFOLIO_SNAPSHOT_MISSING` — never an empty list: an
+        empty portfolio (a statement with no holdings, 200 with `positions: []`) and a missing
+        statement must not look the same. Decimals are strings.
+      parameters:
+        - $ref: '#/components/parameters/PortfolioDate'
+      responses:
+        '200':
+          description: The portfolio at that date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodEndPortfolio'
+        '400':
+          description: Missing or malformed date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A configured account lacks a statement, or stored positions have unknown quantity dimensions or unsupported reporting classes requiring an explicit correction
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1253,7 +1771,7 @@ components:
       name: kind
       in: path
       required: true
-      schema: { $ref: '#/components/schemas/ReferenceKind' }
+      schema: { $ref: '#/components/schemas/ReferenceKindRequest' }
     ReferenceKey:
       name: key
       in: path
@@ -1280,13 +1798,55 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     InvalidState:
-      description: INVALID_STATE — the transition is not allowed from the deal's current state or date
+      description: >-
+        INVALID_STATE — the transition is not allowed from the deal's current state or date; DEAL_CHANGED —
+        the deal row changed since this command read it (reload and retry); FLOW_NOT_OVERRIDABLE — on a
+        cash-flow override, the flow is past FIXED, on a payment, posted, or its deal has ended (a correction)
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
 
   schemas:
+    MarketDataBatch:
+      type: object
+      properties:
+        batchId: { type: string, format: uuid }
+        kind: { type: string, enum: [IMPORT, MANUAL_FIXING, FEED] }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        reason: { type: string }
+        fileSha256: { type: [string, 'null'] }
+        rowCount: { type: integer }
+        rows: { type: array, maxItems: 100, items: { $ref: '#/components/schemas/IndexObservation' } }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: [string, 'null'] }
+        decidedAt: { type: [string, 'null'], format: date-time }
+        decisionReason: { type: [string, 'null'] }
+    IndexObservation:
+      type: object
+      properties:
+        index: { type: string }
+        date: { type: string, format: date }
+        value: { type: number, description: Percent }
+        source: { type: string, enum: [IMPORT, MANUAL, FEED] }
+        status: { type: string, enum: [PENDING, ACTIVE, REJECTED] }
+        batchId: { type: string, format: uuid }
+        sha256: { type: string, description: 'SHA-256 of index|date|value|source' }
+    Fixing:
+      type: object
+      properties:
+        index: { type: string }
+        fixingDate: { type: string, format: date }
+        status: { type: string, enum: [DUE, FIXED, BLOCKED] }
+        rate: { type: [number, 'null'] }
+        source: { type: [string, 'null'] }
+        dealCount: { type: integer }
+        flowIds: { type: array, maxItems: 10000, items: { type: string, format: uuid } }
+        blockReason: { type: [string, 'null'] }
+        staleDays: { type: [integer, 'null'] }
+        jumpBp: { type: [integer, 'null'] }
+        missing: { type: boolean }
     ProductType:
       type: string
       # x-extensible-enum, not enum (1.8.0, #10896): products GROW as ADR-0315 D2 lands them
@@ -1309,7 +1869,10 @@ components:
           type: string
           description: >-
             FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
-            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE
+            INVALID_STATE, NOT_FOUND, REFERENCE_NOT_EFFECTIVE, REFERENCE_BACKDATED, SENIOR_APPROVAL_REQUIRED, SCHEDULE_ENGINE_UNAVAILABLE,
+            DEAL_CHANGED, FLOW_NOT_OVERRIDABLE, FLOW_ALREADY_IN_PAYMENT, FLOW_CHANGED,
+            CONVERSION_FACTOR_MISSING, COLLATERAL_HAIRCUT_MISSING, COLLATERAL_PRICE_MISSING,
+            COLLATERAL_PRICE_OUT_OF_TOLERANCE
         message:
           type: [string, 'null']
         breaches:
@@ -1328,6 +1891,51 @@ components:
           type: array
           description: REFERENCE_NOT_EFFECTIVE only — each `kind:key` with no ACTIVE version on the trade date.
           items: { type: string }
+    ProblemDetail:
+      type: object
+      description: >-
+        Shared libs-runtime validation body. ApiError always has the five required fields;
+        the ADR-0326 problem form may add the RFC 9457 fields below. Unlike the treasury
+        business Error body, validation responses have no `error` member.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        code: { type: string }
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue:
+          description: Always null; rejected input is not echoed.
     DraftDealRequest:
       type: object
       required: [product, counterpartyId, principal, rate]
@@ -1443,6 +2051,12 @@ components:
           type: [string, 'null']
           maxLength: 200
           description: The counterparty's confirmation reference, recorded on the deal's timeline.
+    ClosePostingIntentRequest:
+      type: object
+      required: [event, reason]
+      properties:
+        event: { type: string, enum: [SETTLED, MATURED, REVERSED] }
+        reason: { type: string, minLength: 1 }
     ReasonRequest:
       type: object
       required: [reason]
@@ -1987,6 +2601,19 @@ components:
           items: { type: string }
     ReferenceKind:
       type: string
+      # x-extensible-enum, not enum (1.20.0): reference kinds GROW as ADR-0344 phases land them. A
+      # client must tolerate an unknown kind in a RESPONSE; a closed set would make every new kind a
+      # breaking response-enum addition. What a client may SEND is the closed ReferenceKindRequest.
+      x-extensible-enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code,
+             party-group, party-type, country, document-type, account, settlement-place, product-type,
+             loan-type, communication-channel, market-factor, own-capital-item, period-length, scenario,
+             behavioural-scenario, calculation-settings, limit-settings, derivative-conversion-factor,
+             collateral-haircut, portfolio-group, accounting-settings, balance-sheet-side, dealing-filter,
+             internal-rate-sheet]
+    ReferenceKindRequest:
+      # What a client may SEND (the path parameter): closed, so the server's validation is what the
+      # document says. A new kind widens it (additive for a request).
+      type: string
       enum: [calendar, index, counterparty, ssi, netting, security, book, bucket-set, regulatory-code,
              party-group, party-type, country, document-type, account, settlement-place, product-type,
              loan-type, communication-channel, market-factor, own-capital-item, period-length, scenario,
@@ -2236,6 +2863,81 @@ components:
       properties:
         period: { type: string, pattern: '^[0-9]+x[0-9]+$', examples: ['3x6'] }
         settlementConvention: { type: string, enum: [ADVANCE_DISCOUNTED, ARREARS] }
+    PostingRule:
+      type: object
+      required: [product, event, recognition, lines, version]
+      properties:
+        product: { $ref: '#/components/schemas/ProductType' }
+        event:
+          type: string
+          x-extensible-enum: [SETTLED, ACCRUED, MATURED, REVERSED, TRADE, SETTLEMENT, ACCRUAL, FIXING, PAYMENT,
+                              AMORTISATION, REVALUATION, MATURITY, EARLY_TERMINATION, CORRECTION]
+        ifrs9Category: { type: [string, 'null'], enum: [AMORTISED_COST, FVOCI, FVTPL, null], description: 'null = every category' }
+        recognition: { type: string, enum: [TRADE_DATE, SETTLEMENT_DATE] }
+        flowKind: { type: [string, 'null'], description: 'the flow kind the row applies to; null = any' }
+        flowDirection: { type: [string, 'null'], enum: [IN, OUT, null] }
+        lines:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            properties:
+              side: { type: string, enum: [DEBIT, CREDIT] }
+              accountingClass: { type: string, maxLength: 64, description: 'ledger accounting class (ADR-0341 D3); DEBT_SECURITY resolves by the book''s IFRS 9 category. The ledger maps class + role + currency to a GL account.' }
+              accountingRole: { type: string, maxLength: 32 }
+              amountExpression: { type: string }
+        version: { type: integer }
+    PositionCloseRequest:
+      type: object
+      required: [date]
+      properties:
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+    PositionClose:
+      type: object
+      properties:
+        snapshotId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        bookId: { type: [string, 'null'] }
+        scenario: { type: [string, 'null'] }
+        special: { type: boolean }
+        closedBy: { type: string }
+        closedAt: { type: string, format: date-time }
+        positions: { type: array, items: { type: object, additionalProperties: true } }
+    SavedDealFilter:
+      type: object
+      required: [name, filter]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        filter: { type: object, additionalProperties: true, description: The GET /deals query parameters }
+        updatedAt: { type: string, format: date-time }
+    DayCompletion:
+      type: object
+      required: [date, steps]
+      properties:
+        date: { type: string, format: date }
+        steps:
+          type: array
+          maxItems: 16
+          items:
+            type: object
+            required: [step, status, journals, refused]
+            properties:
+              step:
+                type: string
+                x-extensible-enum: [FIXINGS, ACCRUALS, PAYMENTS, REVALUATION, CORRECTIONS, MATURITIES]
+              status:
+                type: string
+                description: >-
+                  DONE; REFUSED (the only failures were the ledger refusing a closed accounting day,
+                  409 ACCOUNTING_DAY_CLOSED); FAILED (any other failure); PENDING (no run recorded)
+                x-extensible-enum: [DONE, SKIPPED, FAILED, REFUSED, PENDING]
+              count: { type: [integer, 'null'], minimum: 0 }
+              journals: { type: integer, minimum: 0 }
+              refused: { type: integer, minimum: 0 }
+              detail: { type: [string, 'null'], maxLength: 500 }
+              at: { type: [string, 'null'], format: date-time }
     TreasuryEvent:
       type: object
       required: [date, type, description, dealId]
@@ -2267,3 +2969,61 @@ components:
         id: { type: string }
         name: { type: string }
       additionalProperties: true
+    PortfolioPosition:
+      type: object
+      required: [instrumentClass, isin, cfi, quantity, quantityBasis, valuation, valuationCurrency]
+      properties:
+        instrumentClass:
+          type: string
+          enum: [GOVERNMENT_BOND, CORPORATE_BOND, EQUITY, FUND_UNITS, MONEY_MARKET, DEPOSIT]
+          description: Reporting-contract class; debt requires an explicit portfolio-local ISIN classification, other instruments use declared CFI prefixes
+        isin: {type: string, pattern: '^[A-Z]{2}[A-Z0-9]{9}[0-9]$'}
+        cfi: {type: string, pattern: '^[A-Z]{6}$'}
+        quantity: {type: string, description: 'Quantity in quantityBasis, as stated (decimal string)'}
+        quantityBasis:
+          type: string
+          enum: [UNIT, FACE_AMOUNT, AMORTISED_VALUE]
+          description: Custodian-stated quantity dimension; never inferred from CFI. Unknown legacy dimensions refuse the report.
+        valuation: {type: string, description: 'Holding value in valuationCurrency (decimal string)'}
+        valuationCurrency: {type: string}
+    PeriodEndPortfolio:
+      type: object
+      required: [asOf, entity, currency, sourceStatements, positions]
+      properties:
+        asOf: {type: string, format: date}
+        entity: {type: string}
+        currency: {type: string}
+        sourceStatements:
+          type: array
+          minItems: 1
+          description: Current statement for every configured safekeeping account; sorted by account.
+          items: {$ref: '#/components/schemas/PortfolioSourceStatement'}
+        positions:
+          type: array
+          items: {$ref: '#/components/schemas/PortfolioPosition'}
+    PortfolioSourceStatement:
+      type: object
+      required: [safekeepingAccount, statementUuid, version]
+      properties:
+        safekeepingAccount: {type: string}
+        statementUuid: {type: string, format: uuid}
+        statementId: {type: [string, 'null']}
+        version: {type: integer, minimum: 1}
+    PortfolioStatement:
+      type: object
+      required: [id, entity, safekeepingAccount, statementDate, currency, version, positionCount, sha256, uploadedBy, uploadedAt]
+      properties:
+        id: {type: string, format: uuid}
+        entity: {type: string}
+        statementId: {type: [string, 'null']}
+        safekeepingAccount: {type: string}
+        statementDate: {type: string, format: date}
+        currency: {type: string}
+        version: {type: integer, minimum: 1}
+        supersedes: {type: [string, 'null'], format: uuid}
+        supersededBy: {type: [string, 'null'], format: uuid}
+        supersededAt: {type: [string, 'null'], format: date-time}
+        positionCount: {type: integer}
+        sha256: {type: string}
+        uploadedBy: {type: string}
+        uploadedAt: {type: string, format: date-time}

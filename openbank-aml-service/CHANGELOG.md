@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.8](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.7...aml-service-v0.13.8) (2026-10-29)
+
+
+### Bug Fixes
+
+* **aml:** publish high-risk oversight triggers ([#14151](https://github.com/JiRaska/open-bank-oss/issues/14151)) ([f7d1363](https://github.com/JiRaska/open-bank-oss/commit/f7d1363da164ac94e18dcc044be210b3d50a7ff5))
+
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.6...aml-service-v0.13.7) (2026-10-26)
+
+
+### Bug Fixes
+
+* **fraud:** share the financial-crime vocabulary in openbank-libs-fincrime ([#13770](https://github.com/JiRaska/open-bank-oss/issues/13770)) ([bc45331](https://github.com/JiRaska/open-bank-oss/commit/bc4533123a2d8b52ba0b5e3bdfefaa91a712d6f2))
+
 ## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.5...aml-service-v0.13.6) (2026-10-14)
 
 

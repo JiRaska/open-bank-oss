@@ -42,7 +42,7 @@ class ContextQueryServiceTest {
         "openbank-cz",
         1,
     )
-    private val actor = Investigator("operator-7", listOf("ROLE_COMPLIANCE"))
+    private val actor = Investigator("operator-7", listOf("ROLE_COMPLIANCE"), serviceAccount = false)
     private val context = InvestigationContext("case-42", "PAYMENT_COMPLAINT", now)
 
     @Test
@@ -105,7 +105,9 @@ class ContextQueryServiceTest {
         coVerify {
             pdp.allow(
                 match {
-                    it.attributes["assignmentVerified"] == true &&
+                    !it.principal.serviceAccount &&
+                        it.principal.clientId == null &&
+                        it.attributes["assignmentVerified"] == true &&
                         it.attributes["purpose"] == "PAYMENT_COMPLAINT" &&
                         it.attributes["bankScope"] == "openbank-cz"
                 },
@@ -119,6 +121,19 @@ class ContextQueryServiceTest {
                 },
             )
         }
+    }
+
+    @Test
+    fun `custom policy input retains machine classification and verified client binding`(): Unit = runBlocking {
+        val machine = Investigator("service-account-fixture", listOf("ROLE_COMPLIANCE"), true, "fixture")
+        coEvery { assignments.isAssignedToRoot(any(), any(), any(), any(), any()) } returns true
+        coEvery { pdp.allow(any()) } returns AuthzDecision(false)
+        assertThatThrownBy { runBlocking { service.complaint("cmp-1", machine, context) } }
+            .isInstanceOf(ContextAccessDenied::class.java)
+        coVerify {
+            pdp.allow(match { it.principal.serviceAccount && it.principal.clientId == "fixture" })
+        }
+        coVerify(exactly = 0) { graph.neighborhood(any(), any(), any(), any(), any()) }
     }
 
     @Test

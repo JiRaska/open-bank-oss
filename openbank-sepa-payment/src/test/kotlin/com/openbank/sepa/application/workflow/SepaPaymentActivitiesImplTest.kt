@@ -6,11 +6,15 @@ package com.openbank.sepa.application.workflow
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.FraudScoreOutcome
 import com.openbank.sepa.application.port.out.FraudScoringPort
-import com.openbank.sepa.application.port.out.FraudVerdict
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
@@ -26,10 +30,6 @@ import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
 import com.openbank.sepa.domain.model.SepaRejectReason
-import com.openbank.sepa.domain.screening.ScreeningDecision
-import com.openbank.sepa.domain.screening.ScreeningMatchStatus
-import com.openbank.sepa.domain.screening.ScreeningResult
-import com.openbank.sepa.domain.screening.ScreeningRole
 import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coJustRun

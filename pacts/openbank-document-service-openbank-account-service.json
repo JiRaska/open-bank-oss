@@ -1,0 +1,103 @@
+{
+  "consumer": {
+    "name": "openbank-document-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party's accounts to name the payment account in a contract",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountNumber": "CZ6508000000192000145399",
+              "accountType": "CURRENT",
+              "id": "11111111-2222-4333-8444-555555555555",
+              "productId": "99999999-8888-4777-8666-555555555555",
+              "status": "ACTIVE"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].productId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a party's accounts with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

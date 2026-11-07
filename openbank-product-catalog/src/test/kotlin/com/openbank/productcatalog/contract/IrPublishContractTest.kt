@@ -11,6 +11,7 @@ import com.openbank.libs.productrevision.HmacIrSigner
 import com.openbank.libs.productrevision.IrSignature
 import com.openbank.libs.productrevision.PinnedRevisionLoader
 import com.openbank.libs.productrevision.PinnedRevisionUnavailableException
+import com.openbank.libs.productrevision.RevisionIdentity
 import com.openbank.libs.productrevision.RevisionLoadOutcome
 import com.openbank.libs.productrevision.SignedRevisionCopy
 import com.openbank.libs.testing.containers.PostgresTestResource
@@ -96,19 +97,23 @@ class IrPublishContractTest {
 
         // A consumer sees nothing but this response: the IR as served and the detached signature.
         val copy = signedCopyFromResponse(getRevision(revisionId))
-        val loader = PinnedRevisionLoader({ hash -> copy.takeIf { hash == expectedHash } }, testVerifier)
-        val loaded = loader.load(expectedHash)
+        val pin = RevisionIdentity("SAV-FIXED", revisionId, 1, 1, expectedHash)
+        assertThat(copy.identity).isEqualTo(pin)
+        val loader = PinnedRevisionLoader({ p -> copy.takeIf { p == pin } }, testVerifier)
+        val loaded = loader.load(pin)
         assertThat(loaded.productCode).isEqualTo("SAV-FIXED")
         assertThat(ProductIrCanonical.revisionHash(loaded)).isEqualTo(expectedHash)
 
         // A copy edited after signing does not load, whatever its signature says.
         val edited = copy.copy(irJson = copy.irJson.replace("0.0250", "0.0350"))
-        assertThatThrownBy { PinnedRevisionLoader({ edited }, testVerifier).load(expectedHash) }
+        assertThatThrownBy { PinnedRevisionLoader({ edited }, testVerifier).load(pin) }
             .isInstanceOf(PinnedRevisionUnavailableException::class.java)
             .extracting { (it as PinnedRevisionUnavailableException).outcome }
             .isEqualTo(RevisionLoadOutcome.HASH_MISMATCH)
-        // A signature over another hash does not verify.
-        assertThat(testVerifier.verify("0".repeat(64), copy.signature)).isFalse()
+        // A signature over another hash, or for another revision of the same IR, does not verify.
+        assertThat(testVerifier.verify(pin.copy(revisionHash = "0".repeat(64)), copy.signature)).isFalse()
+        assertThat(testVerifier.verify(pin.copy(revisionId = UUID.randomUUID()), copy.signature)).isFalse()
+        assertThat(testVerifier.verify(pin.copy(revisionNumber = 2), copy.signature)).isFalse()
 
         // Every read carries the signature, list included (null means unsigned, never "not loaded").
         Given { this } When { get("/api/v2/products/$offeringId") } Then {
@@ -276,8 +281,17 @@ class IrPublishContractTest {
     private fun signedCopyFromResponse(body: String): SignedRevisionCopy {
         val node = mapper.readTree(body)
         val sig = node.get("irSignature")
+        val irJson = node.get("content").get("behaviour").toString()
+        val ir = ProductIrParser.parse(irJson)
         return SignedRevisionCopy(
-            irJson = node.get("content").get("behaviour").toString(),
+            irJson = irJson,
+            identity = RevisionIdentity(
+                productCode = ir.productCode,
+                revisionId = UUID.fromString(node.get("id").asText()),
+                revisionNumber = node.get("number").asLong(),
+                irVersion = ir.irVersion,
+                revisionHash = sig.get("revisionHash").asText(),
+            ),
             signature = IrSignature(
                 sig.get("keyId").asText(),
                 sig.get("algorithm").asText(),

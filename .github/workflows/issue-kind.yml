@@ -1,0 +1,65 @@
+name: Issue kind
+
+# Every open issue carries EXACTLY ONE kind label (rules.yaml: issues.kinds). This repository is
+# user-owned, so GitHub's native issue types are unavailable and the kind is a label — which has
+# no cardinality. An issue with no kind (unless a generator owns it) or with several gets
+# `needs-kind`, and loses it once fixed; `label:needs-kind` is the queryable debt.
+#
+# Two triggers, because one is not enough: `issues` events cover a human or agent editing labels,
+# but an issue opened by a workflow's GITHUB_TOKEN emits no event that starts another workflow,
+# so the daily sweep is what reaches bot-opened issues. The label this job writes is written with
+# GITHUB_TOKEN too, so it never re-triggers itself.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report only, mutate nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-kind-${{ github.event.issue.number || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  kind:
+    permissions:
+      contents: read
+      issues: write  # add/remove the needs-kind label
+    name: issue-kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        run: bash .github/scripts/install-pyyaml-hash-pinned.sh
+
+      # Falsify the classifier before trusting its verdict: if it cannot flag a known-bad label
+      # set, it must not be allowed to remove `needs-kind` from anything.
+      - name: Self-test
+        run: python3 .github/scripts/issue-kind.py --selftest
+
+      - name: Classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "${DRY_RUN}" = "true" ]; then flags+=(--dry-run); fi
+          if [ "${GITHUB_EVENT_NAME}" = "issues" ]; then
+            python3 .github/scripts/issue-kind.py --event "${GITHUB_EVENT_PATH}" "${flags[@]}"
+          else
+            python3 .github/scripts/issue-kind.py --sweep "${flags[@]}"
+          fi

@@ -22,6 +22,7 @@ import com.openbank.party.application.port.`in`.PartyAmlProfileUseCase
 import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AccountPurpose
+import com.openbank.party.domain.model.Address
 import com.openbank.party.domain.model.AmlProfileDeclaration
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.ExpectedMonthlyTurnover
@@ -450,6 +451,47 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    /**
+     * The document-service render leg: RAMCOVA_SMLOUVA's `{{party.address}}` placeholder is filled
+     * from this response, so the pact requires a full postal address (line1, city, postalCode,
+     * countryCode). Seeded as a COMPANY — a legal-entity counterparty is the realistic contract
+     * render, and it keeps the row clear of the individuals the KYC-expiry and tax-profile states
+     * insert. A dedicated id: adding an address to [VOP_NAME_PARTY_ID] would leak a new field into
+     * vop's replayed response, which its matchers do not forbid but also did not ask for.
+     */
+    @State("a party exists with a registered address")
+    fun partyExistsWithRegisteredAddress() = runOnVertxContext {
+        // Idempotent for the same reason as the states above: pact-jvm 4.7.3 invokes each @State
+        // setup callback twice per interaction, and this one inserts with a fixed id.
+        if (partyRepository.findById(DOCUMENT_ADDRESS_PARTY_ID) != null) return@runOnVertxContext
+        partyRepository.save(
+            Party(
+                id = DOCUMENT_ADDRESS_PARTY_ID,
+                partyType = PartyType.COMPANY,
+                status = PartyStatus.ACTIVE,
+                legalName = "Pact Verify Address Company a.s.",
+                tradingName = null,
+                dateOfBirth = null,
+                nationality = null,
+                taxId = null,
+                registrationNumber = null,
+                email = "pact-verify-address@example.com",
+                phone = null,
+                address = Address(
+                    line1 = "Pact Avenue 12",
+                    line2 = null,
+                    city = "Prague",
+                    postalCode = "110 00",
+                    countryCode = "CZ",
+                ),
+                kycStatus = KycStatus.APPROVED,
+                createdAt = Instant.now(),
+                updatedAt = Instant.now(),
+                amlStatus = AmlStatus.NOT_SCREENED,
+            ),
+        )
+    }
+
     @State("an active human mandate exists for an active company")
     fun activeHumanMandateExistsForActiveCompany() {
         partyExistsWithLegalAndTradingName()
@@ -491,6 +533,8 @@ class PartyEventPactProviderVerificationTest {
     }
 
     companion object {
+        /** Must equal DocumentPartyPactConsumerTest.PACT_PARTY_ID and the folder twin. */
+        private val DOCUMENT_ADDRESS_PARTY_ID = UUID.fromString("e2e2e2e2-f3f3-4a4a-9b5b-c6c6c6c6c6c6")
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */

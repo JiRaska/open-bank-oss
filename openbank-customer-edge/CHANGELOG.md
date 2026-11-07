@@ -1,5 +1,62 @@
 # Changelog
 
+## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.1...customer-edge-v1.7.0) (2026-11-06)
+
+
+### Features
+
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+## [1.6.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.0...customer-edge-v1.6.1) (2026-11-05)
+
+
+### Bug Fixes
+
+* **admin-ui:** tolerate slow fleet documentation probes and discover agent namespaces ([#14168](https://github.com/JiRaska/open-bank-oss/issues/14168)) ([7280f51](https://github.com/JiRaska/open-bank-oss/commit/7280f51d45c53706cbd910f78fc881c25c11290e))
+* **customer-edge:** answer a refused pension read as access denied, not a change refusal ([#14649](https://github.com/JiRaska/open-bank-oss/issues/14649)) ([4d94d31](https://github.com/JiRaska/open-bank-oss/commit/4d94d31f3530e5a5b79aef1b21777fe8a3b8b04d))
+
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.2...customer-edge-v1.6.0) (2026-11-03)
+
+
+### Features
+
+* **customer-edge:** page the unified notification inbox by keyset cursor ([#14622](https://github.com/JiRaska/open-bank-oss/issues/14622)) ([fab74b5](https://github.com/JiRaska/open-bank-oss/commit/fab74b50dc95032b074bd1c8ecc387b47c889c46)), closes [#12260](https://github.com/JiRaska/open-bank-oss/issues/12260)
+
+## [1.5.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.1...customer-edge-v1.5.2) (2026-10-30)
+
+
+### Bug Fixes
+
+* **customer-edge:** describe the personal notification page contract ([#14240](https://github.com/JiRaska/open-bank-oss/issues/14240)) ([b47e460](https://github.com/JiRaska/open-bank-oss/commit/b47e460c73f4dd67c659c8011cd45f8ff6c02c95))
+
+## [1.5.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.5.0...customer-edge-v1.5.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **customer-edge:** name the subject when passkey token-exchange fails ([#14234](https://github.com/JiRaska/open-bank-oss/issues/14234)) ([be9b211](https://github.com/JiRaska/open-bank-oss/commit/be9b211f74c4b07b291e84e4c2b109203d9522e2))
+
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.4...customer-edge-v1.5.0) (2026-10-26)
+
+
+### Features
+
+* **customer-edge:** add measured runtime resilience pilots ([#13891](https://github.com/JiRaska/open-bank-oss/issues/13891)) ([c0c19be](https://github.com/JiRaska/open-bank-oss/commit/c0c19be26b70b4d06433138e1f5f5016db31888b))
+
+## [1.4.4](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.3...customer-edge-v1.4.4) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** list delegated accounts in the account-service page shape ([#13881](https://github.com/JiRaska/open-bank-oss/issues/13881)) ([c9dbd16](https://github.com/JiRaska/open-bank-oss/commit/c9dbd16083be4151087cabab9f51e7b3f9a8ac5b))
+
+## [1.4.3](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.2...customer-edge-v1.4.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **customer-edge:** document the balances wire as {balances: [...]} and pin the spec to it ([#13710](https://github.com/JiRaska/open-bank-oss/issues/13710)) ([28515d1](https://github.com/JiRaska/open-bank-oss/commit/28515d16e7d3df5aed9884337c0a79593f219bc7))
+
 ## [1.4.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.4.1...customer-edge-v1.4.2) (2026-10-21)
 
 

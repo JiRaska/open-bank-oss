@@ -164,10 +164,17 @@ mp:
         transaction-signal:
           connector: smallrye-kafka
           enabled: false
+      outgoing:
+        fraud-outbox-out:
+          enabled: false
   openbank:
     outbox:
       dispatch-enabled: false
 openbank:
+  fraud:
+    streams-shadow:
+      enabled: false
+      partitions: 1
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.6.3...clearing-simulator-v0.7.0) (2026-10-26)
+
+
+### Features
+
+* **swift:** bank-own institution transfers over the clearing rails ([#13904](https://github.com/JiRaska/open-bank-oss/issues/13904)) ([71a4532](https://github.com/JiRaska/open-bank-oss/commit/71a4532011239330fd12f6387777b5f2a6657864))
+
 ## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.6.2...clearing-simulator-v0.6.3) (2026-10-14)
 
 

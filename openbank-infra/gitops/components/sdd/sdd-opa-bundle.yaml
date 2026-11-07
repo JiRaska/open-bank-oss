@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd
   annotations:
-    openbank.tech/policy-checksum: "81f6b4d817acf851"
+    openbank.tech/policy-checksum: "40cf570d7ea73d65"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -274,6 +274,14 @@ data:
     	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
     }
 
+    # Chapter configuration is an administrator edit, never a machine or customer operation.
+    allowed_reasons contains "operator-game-catalog-write" if {
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        not principal_is_machine
+        input.action == "engagement.gameCatalog.write"
+    }
+
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
     # are issued to the authenticated operator themselves (subject = principal), and revocation is
     # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
@@ -482,6 +490,16 @@ data:
     	input.action == "catalog.read"
     }
 
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
     allowed_reasons contains "pension-catalog-m2m-read-approval" if {
         input.principal.type == "HUMAN"
         input.principal.id == "service-account-openbank-pension"
@@ -580,7 +598,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
@@ -1202,6 +1220,10 @@ data:
       - query.account.readonly
       - query.consent.readonly
       - verify.mandate
+      - product.lint
+      - product.compile
+      - product.simulate
+      - product.explain
       write_proposal:
       - draft.ticket
       - gh.pr.open
@@ -1209,12 +1231,15 @@ data:
       - git.branch
       - git.commit.signed
       - run.skill
+      - product.propose
       deny:
       - money.transfer
       - money.post.ledger
       - gh.pr.merge
       - gh.pr.approve
       - secrets.read.raw
+      - product.publish
+      - product.sign
     agents:
     - id: compliance-officer
       tools:
@@ -1268,6 +1293,21 @@ data:
         - query.interest.readonly
         - query.disputes.readonly
         - query.observability.readonly
+    - id: product-author
+      tools:
+        allow:
+        - product.lint
+        - product.compile
+        - product.simulate
+        - product.explain
+        - product.propose
+        deny:
+        - product.publish
+        - product.sign
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
     - id: rca-investigator
       tools:
         allow:
@@ -1363,6 +1403,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
@@ -2206,9 +2247,10 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
-        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+        # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+        # deliberately ONE read action rather than the role's full duty set. What is missing is
+        # missing on purpose:
         #
         #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -2227,10 +2269,10 @@ data:
         #   already, so this entry is a provable subset of today's effective grant and changes no
         #   decision — the same seeding property the matrix was built on.
         #
-        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-        # editor duty has no action name for the matrix to key on. Declaring the editor role here
-        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+        # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+        # name for the matrix to key on. A future single-source migration needs governed action
+        # names and must preserve the action-specific human-only write policy.
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
@@ -2238,18 +2280,23 @@ data:
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
+        # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
+        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
         ROLE_RISK:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

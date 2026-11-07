@@ -55,7 +55,7 @@ The existing `GET /api/v1/parties/by-external-id` implementation currently reads
 }
 ```
 
-On create the service sets `status=ACTIVE`, `kycLevel=BASIC`, `amlRiskScore=LOW`, opens a `PID_VERIFICATION` case (`status=OPEN`), and emits `PartyCreated`, `case.created`, `RelationshipAdded`.
+On create the service sets `status=ACTIVE`, `kycLevel=BASIC`, no `amlRiskScore` (deprecated, ADR-0353 — the customer risk rating is kyc-service's), opens a `PID_VERIFICATION` case (`status=OPEN`), and emits `PartyCreated`, `case.created`, `RelationshipAdded`.
 
 ### `PartyResponse` (returned everywhere)
 
@@ -64,7 +64,7 @@ Nested object with `id`, `partyType`, `status`, `externalIds[]`, `coreAttributes
 ### `UpdateKycRequest` (PUT /kyc)
 
 ```json
-{ "kycLevel": "ENHANCED", "amlRiskScore": "MEDIUM", "pepFlag": false, "sanctionsFlag": false }
+{ "kycLevel": "ENHANCED", "pepFlag": false, "sanctionsFlag": false }
 ```
 
 ### `TransitionCaseRequest` (PATCH /case)
@@ -86,9 +86,9 @@ Errors use `openbank-libs`' uniform `ApiError` body:
 | HTTP | `code` | When | Source |
 |---|---|---|---|
 | `400` | `VALIDATION_ERROR` | illegal PID case transition | `InvalidPartyCaseTransitionMapper` |
-| `404` | `NOT_FOUND` | party / relationship / external id not found | `PartyNotFoundMapper` |
-| `409` | `CONFLICT` | duplicate bankID sub on create | `PartyAlreadyExistsMapper` |
-| `409` | `CONFLICT` | party already has the active role | `RelationshipAlreadyExistsMapper` |
+| `404` | `NOT_FOUND` | party / relationship / external id not found | libs `ResourceNotFoundExceptionMapper` |
+| `409` | `CONFLICT` | duplicate bankID sub on create | libs `ResourceConflictExceptionMapper` |
+| `409` | `CONFLICT` | party already has the active role | libs `ResourceConflictExceptionMapper` |
 | `401`/`403` | — | missing token / wrong role | Quarkus security (`@RolesAllowed`) |
 
 ## Events emitted (Kafka topic `party.events`)

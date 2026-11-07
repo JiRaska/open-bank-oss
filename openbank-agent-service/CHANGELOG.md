@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.0...agent-service-v1.32.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
+## [1.32.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.5...agent-service-v1.32.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
+## [1.31.5](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.4...agent-service-v1.31.5) (2026-10-28)
+
+
+### Bug Fixes
+
+* **ledger:** carry the synthetic taint on the CDI request context into suspended resources ([#14059](https://github.com/JiRaska/open-bank-oss/issues/14059)) ([df3ce04](https://github.com/JiRaska/open-bank-oss/commit/df3ce048f294d17a912ddbdda45f90ff41ce0fe7))
+
+## [1.31.4](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.3...agent-service-v1.31.4) (2026-10-27)
+
+
+### Bug Fixes
+
+* **sanctions:** preserve JSONB payloads in reactive persistence ([#13084](https://github.com/JiRaska/open-bank-oss/issues/13084)) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+* **sanctions:** src/main touched -&gt; patch release. Refs [#11948](https://github.com/JiRaska/open-bank-oss/issues/11948) ([acc9f60](https://github.com/JiRaska/open-bank-oss/commit/acc9f60c8bed588c2a611436473e13abbf7fc1c2))
+
+## [1.31.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.2...agent-service-v1.31.3) (2026-10-26)
+
+
+### Bug Fixes
+
+* **agent-service:** preserve PR-scoped owner intent under reviewed policy ([#13798](https://github.com/JiRaska/open-bank-oss/issues/13798)) ([e9a5401](https://github.com/JiRaska/open-bank-oss/commit/e9a540196e0aa6181194adf8f3181386357ddc57))
+
 ## [1.31.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.31.1...agent-service-v1.31.2) (2026-10-24)
 
 

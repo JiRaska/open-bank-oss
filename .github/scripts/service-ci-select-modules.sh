@@ -19,6 +19,18 @@
 #   service-ci-select-modules.sh --self-test # prove it can select, and can fail to
 set -euo pipefail
 
+# Root-level prose and licence files: no Gradle input, read by tests only via literal path
+# (README.md has one reader today), which --expand attributes. Root GRADLE files are global
+# inputs and are classified before this is ever consulted.
+is_root_prose_path() {
+  case "$1" in
+    */) return 1 ;;
+    */*) return 1 ;;
+    *.md|LICENSE|NOTICE|CODEOWNERS|CITATION.cff|REUSE.toml|codecov.yml|.gitignore|.gitattributes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 select_modules() {
   # Canonical Gradle module list — DISCOVERED from the tree exactly like
   # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
@@ -47,7 +59,7 @@ select_modules() {
     # Unknown build inputs fall back to the full fleet below. Full history makes
     # HEAD~1 available on main (squash-merged pushes are single commits).
     DIFF_BASE=HEAD~1
-    FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
+    FILES=$(git diff --no-renames --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
     if admin_ui_pact_changed "$FILES"; then
       echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
     fi
@@ -62,8 +74,10 @@ select_modules() {
     done <<< "$FILES"
     RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
     if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
-      echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build nothing."
-      CHANGED=""
+      # Inert for the fleet, but a test may still read one of these files by literal path
+      # (docs-truth-agent reads README.md and docs/adr): build exactly those readers.
+      CHANGED="$(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "" --input-paths-stdin <<< "$FILES" | tr '\n' ' ')"
+      echo "Decision: push changed only inert paths (release/docs/admin-ui/infra/external workflows) -> build only their derived readers: ${CHANGED:-<none>}"
     else
       # Scope the main-push build instead of always full-fleeting (#1208/#2039). Full-fleet
       # on ANY build-relevant change is ~30 jobs and, on the 6-runner pool, wedges the queue
@@ -103,11 +117,17 @@ select_modules() {
                 if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
               done <<< "$modules" ;;
             openbank-libs/governance/*) : ;;
-            .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/workflows/_service-ci-pr.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-select-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
+            # Trees no module compiles against. The tests that read files in them do so by
+            # literal path, and derive-fleet-scanning-test-modules.py --expand (below) adds
+            # exactly those readers, so these never need the full-fleet fallback. Measured
+            # 2026-11-04: openbank-libs/governance/rules.yaml has 5 readers, a payments GitOps
+            # manifest 5, a root README 1, a .github script 0 — the fallback built 86 for each.
+            openbank-infra/*|openbank-contracts/*|docs/*|LICENSES/*) : ;;
             openbank-*/*)
               m="${f%%/*}"
               if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
-            *) SCOPE_OK=0 ;;
+            *)
+              if is_service_ci_recipe_path "$f" || is_root_prose_path "$f"; then :; else SCOPE_OK=0; fi ;;
           esac
         done <<< "$RELEVANT"
         if [ "$SCOPE_OK" -eq 0 ]; then
@@ -134,9 +154,15 @@ select_modules() {
              && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
             CHANGED="$CHANGED openbank-client-transaction"
           fi
-          # Recipe-only change -> one canary (same as the PR path).
-          if [ -z "${CHANGED// /}" ] \
-             && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-select-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+          if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+             && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+            CHANGED="$CHANGED openbank-client-account"
+          fi
+          # Preserve readers of filtered cross-module fixtures on main as well as PRs.
+        CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+          --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
+        # Recipe-only change -> one canary (same as the PR path).
+          if [ -z "${CHANGED// /}" ] && recipe_path_changed "$FILES"; then
             CHANGED="openbank-libs"
           fi
           echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
@@ -161,7 +187,7 @@ select_modules() {
     # to BASE...HEAD but observable and robust to odd ref state.
     MB=$(git merge-base "$BASE" HEAD 2>/dev/null) || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
     DIFF_BASE="$MB"
-    FILES=$(git diff --name-only "$MB" HEAD)
+    FILES=$(git diff --no-renames --name-only "$MB" HEAD)
     echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
     echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
@@ -281,11 +307,14 @@ select_modules() {
          && ! grep -qE '(^| )openbank-client-transaction( |$)' <<< " $CHANGED "; then
         CHANGED="$CHANGED openbank-client-transaction"
       fi
+      if grep -qE '(^| )openbank-account-service( |$)' <<< " $CHANGED " \
+         && ! grep -qE '(^| )openbank-client-account( |$)' <<< " $CHANGED "; then
+        CHANGED="$CHANGED openbank-client-account"
+      fi
       # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
       # Derived from test sources; rationale in the script header.
-      if [ -n "${CHANGED// /}" ]; then
-        CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
-      fi
+      CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py \
+        --expand "$CHANGED" --input-paths-stdin <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES")")"
       # A change to the CI recipe itself (services-ci / _service-ci) can NOT
       # alter any service's compile/test inputs, so it does NOT warrant a
       # 28-module fan-out -- that is what turned the trivial #547 cache-flag
@@ -296,12 +325,37 @@ select_modules() {
       # step left to exercise) -- exercising the entire recipe on a single job.
       # Skip the canary if a real service is already in the matrix (it validates
       # the recipe too).
-      if [ -z "${CHANGED// /}" ] \
-         && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-select-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+      if [ -z "${CHANGED// /}" ] && recipe_path_changed "$FILES"; then
         echo "Decision: recipe-only change -> build canary openbank-libs."
         CHANGED="openbank-libs"
       fi
     fi
+  fi
+
+  # PRs must retain the same conservative unknown-path fallback as main.
+  if [ "$EVENT_NAME" = "pull_request" ]; then
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      is_inert_service_path "$f" && continue
+      # pull_request only: the main push keeps its full-fleet run so every deployed SHA has
+      # a green Services CI of its own.
+      if gitops_image_pin_only_change "$f" "$DIFF_BASE"; then
+        echo "Decision: $f changes only container image pins -> inert."
+        continue
+      fi
+      case "$f" in
+        openbank-libs/governance/*|pacts/*.json) continue ;;
+        # Same owned trees as the push path: readers are derived, never the full fleet.
+        openbank-infra/*|openbank-contracts/*|docs/*|LICENSES/*) continue ;;
+        openbank-*/*)
+          m="${f%%/*}"
+          if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then continue; fi ;;
+      esac
+      if is_service_ci_recipe_path "$f" || is_root_prose_path "$f"; then continue; fi
+      CHANGED="$ALL"
+      echo "Decision: unowned PR input ($f) -> full-fleet."
+      break
+    done <<< "$FILES"
   fi
 
   mkdir -p "$SELECT_OUT"

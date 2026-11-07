@@ -7,6 +7,7 @@ import { parse as parseYaml } from 'yaml'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotReaderOptions } from './publishedSnapshot.ts'
 import { parseBcpPolicy } from '../bcp/continuityModel.ts'
 import { BpmnProcessSchema } from '../docs/bpmn/schema.ts'
+import { isDomainId } from '../governance/domains.ts'
 
 export interface AdminUiContentSnapshot {
   schemaVersion: 1
@@ -19,6 +20,8 @@ export interface AdminUiContentSnapshot {
     serviceGraph: Record<string, unknown>
     governance: Record<string, unknown>
     securityGraph: Record<string, unknown>
+    /** Optional for compatibility with schemaVersion 1 snapshots published before this field. */
+    clusterTopology?: Record<string, unknown>
     bcpPolicyMarkdown: string
     complianceControlsYaml: string
     bpmnManifests: Array<{ slug: string; yaml: string }>
@@ -44,7 +47,7 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 }
 
 function validContentKeys(value: Record<string, unknown>): boolean {
-  const optional = ['platformVersions', 'repositoryDocumentation'].filter(key => Object.hasOwn(value, key))
+  const optional = ['platformVersions', 'repositoryDocumentation', 'clusterTopology'].filter(key => Object.hasOwn(value, key))
   return hasExactKeys(value, [...CONTENT_KEYS, ...optional])
 }
 
@@ -62,6 +65,19 @@ function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
 }
 
+// User-visible topology copy is bilingual since #14277 ({ cs, en }); snapshots published
+// before that carry a plain string. Both shapes stay valid so older published content reads.
+function text(value: unknown): value is string | { cs: string; en: string } {
+  return nonEmptyString(value)
+    || (record(value) && nonEmptyString(value.cs) && nonEmptyString(value.en))
+}
+
+function validDetailRoute(value: unknown): boolean {
+  if (typeof value !== 'string' || /[\\\u0000-\u001f]/.test(value)) return false
+  if (value.startsWith('#')) return /^#[A-Za-z][A-Za-z0-9_-]*$/.test(value)
+  return value.startsWith('/') && !value.startsWith('//')
+}
+
 function nonNegativeInt(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0
 }
@@ -72,7 +88,8 @@ function hasBaseGeneratedShape(value: unknown, schema: string): value is Record<
 }
 
 function validCatalog(value: unknown): value is Record<string, unknown> {
-  if (!hasBaseGeneratedShape(value, 'openbank.catalog/v1') || !Array.isArray(value.services)
+  if (!hasBaseGeneratedShape(value, 'openbank.catalog/v1')
+    || value.domainTaxonomy !== 'openbank.domain-taxonomy/v1' || !Array.isArray(value.services)
     || value.services.length === 0 || value.services.length > 500) return false
   const totals = value.totals as Record<string, unknown>
   if (!['modules', 'services', 'withOpenapi', 'moneyPath', 'withGaps'].every(key => nonNegativeInt(totals[key]))) return false
@@ -86,6 +103,7 @@ function validCatalog(value: unknown): value is Record<string, unknown> {
     if (!record(row) || !nonEmptyString(row.name) || !nonEmptyString(row.short) || names.has(row.name)
       || !['ui', 'library', 'service', 'component'].includes(String(row.kind))
       || typeof row.runnable !== 'boolean'
+      || !(isDomainId(row.dataDomain) || (row.runnable === false && row.dataDomain === null))
       || !(row.port === null || (Number.isInteger(row.port) && (row.port as number) >= 1 && (row.port as number) <= 65535))
       || !(row.mgmtPort === null || (Number.isInteger(row.mgmtPort) && (row.mgmtPort as number) >= 1 && (row.mgmtPort as number) <= 65535))
       || !(row.releaseVersion === null || nonEmptyString(row.releaseVersion))
@@ -162,7 +180,8 @@ function validServiceGraph(value: unknown): value is Record<string, unknown> {
 }
 
 function validGovernance(value: unknown): value is Record<string, unknown> {
-  if (!hasBaseGeneratedShape(value, 'openbank.governance/v1') || !Array.isArray(value.services)
+  if (!hasBaseGeneratedShape(value, 'openbank.governance/v1')
+    || value.domainTaxonomy !== 'openbank.domain-taxonomy/v1' || !Array.isArray(value.services)
     || value.services.length === 0 || value.services.length > 500 || !Array.isArray(value.gaps)
     || value.gaps.length > 20_000 || !value.gaps.every(nonEmptyString)) return false
   const totals = value.totals as Record<string, unknown>
@@ -171,6 +190,7 @@ function validGovernance(value: unknown): value is Record<string, unknown> {
   const names = new Set<string>()
   for (const row of value.services) {
     if (!record(row) || !nonEmptyString(row.serviceName) || names.has(row.serviceName)
+      || !isDomainId(row.dataDomain)
       || !['dataDomain', 'primaryDatastore', 'databaseName', 'dataLineageRole', 'flywayDeclaredVersion']
         .every(key => row[key] === undefined || row[key] === null || typeof row[key] === 'string')
       || ![row.ownsNoDatabase, row.evidenceExported].every(item => item === undefined || typeof item === 'boolean')
@@ -183,6 +203,18 @@ function validGovernance(value: unknown): value is Record<string, unknown> {
   return totals.withLineage === services.filter(row => record(row) && Boolean(row.lineage)).length
     && totals.evidenceExported === services.filter(row => record(row) && row.evidenceExported === true).length
     && totals.unverifiedDatabaseNames === services.filter(row => record(row) && row.databaseNameEvidence === 'declared-only').length
+}
+
+/** A source bundle must not publish competing ownership for the same module. */
+function matchingDomainOwnership(catalog: Record<string, unknown>, governance: Record<string, unknown>): boolean {
+  const canonicalName = (name: string) => name.replace(/^openbank-/, '')
+  const modules = catalog.services as Array<{ name: string; dataDomain: string | null }>
+  const declarations = governance.services as Array<{ serviceName: string; dataDomain: string }>
+  const owners = new Map(declarations.map(row => [canonicalName(row.serviceName), row.dataDomain]))
+  if (owners.size !== declarations.length) return false
+  const knownModules = new Map(modules.map(row => [canonicalName(row.name), row.dataDomain]))
+  return modules.every(row => row.dataDomain === null || owners.get(canonicalName(row.name)) === row.dataDomain)
+    && declarations.every(row => knownModules.get(canonicalName(row.serviceName)) === row.dataDomain)
 }
 
 function validSecurityGraph(value: unknown): value is Record<string, unknown> {
@@ -217,6 +249,64 @@ function validSecurityGraph(value: unknown): value is Record<string, unknown> {
     || !(supply.imagePattern === null || nonEmptyString(supply.imagePattern))
     || !(supply.rekor === null || nonEmptyString(supply.rekor)))) return false
   return value.available === Boolean(network.available || supply.available)
+}
+
+function validClusterTopology(value: unknown, nowMs = Date.now()): value is Record<string, unknown> {
+  if (!record(value) || value.schema !== 'openbank.cluster-topology/v1' || !nonEmptyString(value.source)
+    || !(value.generatedAt === null || (typeof value.generatedAt === 'string'
+      && Number.isFinite(Date.parse(value.generatedAt)) && Date.parse(value.generatedAt) <= nowMs + 5 * 60_000))
+    || !record(value.counts) || !Array.isArray(value.groups) || value.groups.length === 0 || value.groups.length > 64
+    || !Array.isArray(value.namespaces) || value.namespaces.length === 0 || value.namespaces.length > 500
+    || !Array.isArray(value.securityLayers) || value.securityLayers.length === 0 || value.securityLayers.length > 64
+    || !record(value.imageAnatomy) || !Array.isArray(value.imageAnatomy.steps) || value.imageAnatomy.steps.length === 0
+    || value.imageAnatomy.steps.length > 64 || !Array.isArray(value.planVsReality) || value.planVsReality.length > 128) return false
+  const countKeys = ['namespaces', 'networkPolicies', 'externalSecrets', 'clusterPolicies']
+  const counts = value.counts as Record<string, unknown>
+  if (!countKeys.every(key => nonNegativeInt(counts[key]))) return false
+  const optionalImageString = (item: unknown) => item === null || nonEmptyString(item)
+  if (!(value.imageAnatomy.multiStage === null || value.imageAnatomy.multiStage === undefined || typeof value.imageAnatomy.multiStage === 'boolean')
+    || !(value.imageAnatomy.buildBase === undefined || optionalImageString(value.imageAnatomy.buildBase))
+    || !(value.imageAnatomy.runtimeBase === undefined || optionalImageString(value.imageAnatomy.runtimeBase))) return false
+  const groupIds = new Set<string>()
+  for (const group of value.groups) {
+    if (!record(group) || !nonEmptyString(group.id) || groupIds.has(group.id)
+      || !nonEmptyString(group.label) || !nonEmptyString(group.labelEn) || !nonEmptyString(group.color)
+      || !nonEmptyString(group.icon) || !text(group.blurb)) return false
+    groupIds.add(group.id)
+  }
+  const namespaceNames = new Set<string>()
+  for (const namespace of value.namespaces) {
+    if (!record(namespace) || !nonEmptyString(namespace.name) || namespaceNames.has(namespace.name)
+      || typeof namespace.group !== 'string' || !groupIds.has(namespace.group) || !text(namespace.role)
+      || typeof namespace.declared !== 'boolean') return false
+    namespaceNames.add(namespace.name)
+  }
+  const validStatus = (status: unknown) => typeof status === 'string' && ['live', 'partial', 'planned'].includes(status)
+  const layerIds = new Set<string>()
+  for (const layer of value.securityLayers) {
+    if (!record(layer) || !nonEmptyString(layer.id) || !text(layer.label) || !validStatus(layer.status)
+      || layerIds.has(layer.id) || !nonEmptyString(layer.icon) || !text(layer.analogy) || !text(layer.summary)
+      || !Array.isArray(layer.controls) || !layer.controls.every(nonEmptyString)
+      || !Array.isArray(layer.adr) || !layer.adr.every(nonEmptyString)
+      || !(layer.detailRoute === undefined || validDetailRoute(layer.detailRoute))) return false
+    layerIds.add(layer.id)
+  }
+  const stepIds = new Set<string>()
+  for (const step of value.imageAnatomy.steps) {
+    if (!record(step) || !nonEmptyString(step.id) || !text(step.label) || !validStatus(step.status)
+      || stepIds.has(step.id) || !text(step.detail)
+      || !Array.isArray(step.adr) || !step.adr.every(nonEmptyString)) return false
+    stepIds.add(step.id)
+  }
+  const planItems = new Set<string>()
+  for (const row of value.planVsReality) {
+    // Bilingual item names key on the Czech text — it is the unique identifier in the curated data.
+    const itemKey = typeof row.item === 'string' ? row.item : row.item.cs
+    if (!record(row) || !text(row.item) || planItems.has(itemKey)
+      || !text(row.plan) || !text(row.reality) || !validStatus(row.status)) return false
+    planItems.add(itemKey)
+  }
+  return counts.namespaces === value.namespaces.length
 }
 
 function validComplianceYaml(raw: string): boolean {
@@ -290,7 +380,9 @@ export function isAdminUiContentSnapshot(value: unknown, nowMs = Date.now()): va
     || !validCatalog(content.catalog)
     || !validServiceGraph(content.serviceGraph)
     || !validGovernance(content.governance)
+    || !matchingDomainOwnership(content.catalog, content.governance)
     || !validSecurityGraph(content.securityGraph)
+    || (content.clusterTopology !== undefined && !validClusterTopology(content.clusterTopology, nowMs))
     || typeof content.bcpPolicyMarkdown !== 'string' || Buffer.byteLength(content.bcpPolicyMarkdown, 'utf8') > MAX_FILE_BYTES
     || parseBcpPolicy(content.bcpPolicyMarkdown) === null
     || typeof content.complianceControlsYaml !== 'string' || Buffer.byteLength(content.complianceControlsYaml, 'utf8') > MAX_FILE_BYTES
@@ -317,7 +409,7 @@ export function adminUiContentCollectedAt(snapshot: AdminUiContentSnapshot): str
 export function adminUiContentSnapshotBaseUrl(): string | undefined {
   if (process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL !== undefined) return process.env.OPENBANK_ADMIN_UI_CONTENT_SNAPSHOT_URL
   const base = process.env.OPENBANK_EVIDENCE_STORE_URL
-  return base ? `${base.replace(/\/+$/, '')}/admin-ui/content` : undefined
+  return base ? `${base.replace(/\/+$/, '')}/admin-ui/content/domains-v1` : undefined
 }
 
 export function createAdminUiContentSnapshotReader(

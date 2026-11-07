@@ -24,7 +24,7 @@ Pure Kotlin, no Quarkus.
 
 - `model/SctInstPayment` — the aggregate (data class) and `SctInstStatus` enum (`PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED`).
 - `event/SctInstEvents` — sealed `SctInstEvent` hierarchy: `SctInstPaymentSubmitted`, `SctInstPaymentSettled`, `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`.
-- `screening/ScreeningPolicy` — the pure decision object. `decide(results)` returns `BLOCK > REVIEW > CLEAR`:
+- `ScreeningPolicy` (openbank-libs-fincrime, ADR-0353) — the pure decision object. `decide(results)` returns `BLOCK > REVIEW > CLEAR`:
   - **BLOCK** — any `HIT`, any `ESCALATED`, or a `POTENTIAL_HIT` strictly above `POTENTIAL_HIT_BLOCK_THRESHOLD = 0.85`.
   - **REVIEW** — any sub-threshold `POTENTIAL_HIT` (false-positive candidate → human review).
   - **CLEAR** — everything else (`CLEAR` / `WHITELISTED`, including an empty result set).
@@ -34,7 +34,7 @@ Pure Kotlin, no Quarkus.
 Use-cases and ports.
 
 - **Inbound ports** (`port/in`): `SubmitSctInstPaymentUseCase`, `GetSctInstPaymentUseCase`, `RecallSctInstPaymentUseCase` + `SubmitSctInstCommand`.
-- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseRiskLevel`).
+- **Outbound ports** (`port/out`): `SctInstPaymentRepository`, `SctInstOutboxRepository`, `SanctionsScreeningPort` (+ `ScreeningUnavailableException`), `AmlCasePort` (+ `OpenAmlCaseCommand`, `AmlCaseSeverity`).
 - `usecase/SctInstPaymentService` — orchestrates the screening gate (see flow below).
 
 ### Adapters (`infrastructure/`)

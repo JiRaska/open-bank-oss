@@ -6,6 +6,7 @@ package com.openbank.account.infrastructure.client
 
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -25,10 +26,22 @@ class SanctionsScreeningAdapterTest {
     }
 
     @Test
+    fun `request carries party identity separately from the screening key`() {
+        val request = slot<SanctionsScreenRequest>()
+        every { client.screen(capture(request)) } returns
+            Uni.createFrom().item(SanctionsScreenResponse(status = "CLEAR", overallScore = 0.0))
+
+        runBlocking { adapter.screen("Jan Novak", "key-1", "party-1") }
+
+        assertThat(request.captured.idempotencyKey).isEqualTo("key-1")
+        assertThat(request.captured.subjectId).isEqualTo("party-1")
+    }
+
+    @Test
     fun `a response with no status is UNKNOWN and does not permit opening`() {
         answer(SanctionsScreenResponse(status = null, overallScore = null))
 
-        val result = runBlocking { adapter.screen("Jan Novak", "key-1") }
+        val result = runBlocking { adapter.screen("Jan Novak", "key-1", "party-1") }
 
         assertThat(result.status).isEqualTo("UNKNOWN")
         assertThat(result.permitsOpening).isFalse()
@@ -38,7 +51,7 @@ class SanctionsScreeningAdapterTest {
     fun `sanctions-service's own statuses pass through, and only CLEAR and WHITELISTED permit opening`() {
         val permitted = listOf("CLEAR", "HIT", "POTENTIAL_HIT", "WHITELISTED", "ESCALATED").associateWith { status ->
             answer(SanctionsScreenResponse(status = status, overallScore = 0.7))
-            runBlocking { adapter.screen("Jan Novak", "key-$status") }.permitsOpening
+            runBlocking { adapter.screen("Jan Novak", "key-$status", "party-1") }.permitsOpening
         }
 
         assertThat(permitted).containsExactlyInAnyOrderEntriesOf(
@@ -56,6 +69,6 @@ class SanctionsScreeningAdapterTest {
     fun `a lower-case status is normalised before the allow-list reads it`() {
         answer(SanctionsScreenResponse(status = "clear", overallScore = 0.0))
 
-        assertThat(runBlocking { adapter.screen("Jan Novak", "key-lc") }.permitsOpening).isTrue()
+        assertThat(runBlocking { adapter.screen("Jan Novak", "key-lc", "party-1") }.permitsOpening).isTrue()
     }
 }

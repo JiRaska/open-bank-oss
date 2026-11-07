@@ -91,7 +91,8 @@ data class UpdateContactCommand(
 data class UpdateKycCommand(
     val partyId: UUID,
     val kycLevel: KycLevel,
-    val amlRiskScore: AmlRiskScore,
+    /** Deprecated (ADR-0353 D2); `null` leaves the stored value unchanged. */
+    val amlRiskScore: AmlRiskScore? = null,
     val pepFlag: Boolean,
     val sanctionsFlag: Boolean,
 )

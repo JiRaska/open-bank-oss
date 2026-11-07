@@ -22,7 +22,7 @@ import java.util.Base64
  * produces one from its own `src/main`; a consumer that only verifies produces one whose token is
  * granted `verify` and nothing else.
  *
- * - The signed input is the 64-hex `revisionHash` as ASCII bytes, base64-encoded for Transit, with
+ * - The signed input is the [RevisionIdentity.signingInput] envelope, base64-encoded for Transit, with
  *   `hash_algorithm=sha2-256`; Transit's own `vault:v<N>:…` signature string is stored verbatim as
  *   [IrSignature.signature], so key rotation keeps older revisions verifiable by their version.
  * - **Policy.** The PUBLISH identity gets `update` on `transit/sign/<key>`; every consumer gets
@@ -47,9 +47,8 @@ class OpenBaoTransitIrSigner(
         require(PATH_SEGMENT.matches(transitMount)) { "invalid Transit mount" }
     }
 
-    override fun sign(revisionHash: String): IrSignature {
-        requireHash(revisionHash)
-        val data = exchange("sign", mapOf("input" to input(revisionHash), "hash_algorithm" to HASH_ALGORITHM))
+    override fun sign(identity: RevisionIdentity): IrSignature {
+        val data = exchange("sign", mapOf("input" to input(identity), "hash_algorithm" to HASH_ALGORITHM))
         val sig = data["signature"]?.takeIf { it.isTextual }?.asText()
             ?: throw IrSigningException("Transit sign for key '$keyName' returned no signature")
         if (!TRANSIT_SIGNATURE.matches(sig)) {
@@ -58,13 +57,13 @@ class OpenBaoTransitIrSigner(
         return IrSignature(keyName, ALGORITHM, sig)
     }
 
-    override fun verify(revisionHash: String, signature: IrSignature): Boolean {
+    override fun verify(identity: RevisionIdentity, signature: IrSignature): Boolean {
         if (signature.algorithm != ALGORITHM || signature.keyId != keyName) return false
-        if (!HASH_PATTERN.matches(revisionHash) || !TRANSIT_SIGNATURE.matches(signature.signature)) return false
+        if (!TRANSIT_SIGNATURE.matches(signature.signature)) return false
         val data = exchange(
             "verify",
             mapOf(
-                "input" to input(revisionHash),
+                "input" to input(identity),
                 "signature" to signature.signature,
                 "hash_algorithm" to HASH_ALGORITHM,
             ),
@@ -76,8 +75,7 @@ class OpenBaoTransitIrSigner(
         return valid.asBoolean()
     }
 
-    private fun input(revisionHash: String): String =
-        Base64.getEncoder().encodeToString(revisionHash.toByteArray(Charsets.US_ASCII))
+    private fun input(identity: RevisionIdentity): String = Base64.getEncoder().encodeToString(identity.signingInput())
 
     private fun exchange(operation: String, fields: Map<String, String>): JsonNode {
         val body = objectMapper.writeValueAsString(fields)

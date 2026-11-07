@@ -29,6 +29,8 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    // ADR-0353: screening, AML case severity and fraud verdict, shared with aml/sanctions/fraud.
+    implementation(project(":openbank-libs-fincrime"))
     implementation(project(":openbank-libs-runtime"))
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
     implementation(project(":openbank-libs-temporal"))

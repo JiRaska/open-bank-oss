@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.1...sepa-instant-v0.12.2) (2026-10-26)
+
+
+### Bug Fixes
+
+* **sepa-payment:** send EPC PmtTpInf on pacs.008 for SCT and SCT Inst ([#13771](https://github.com/JiRaska/open-bank-oss/issues/13771)) ([f7ce734](https://github.com/JiRaska/open-bank-oss/commit/f7ce73471d1c7d26ab266b33f974e02607c1afc3))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.12.0...sepa-instant-v0.12.1) (2026-10-20)
 
 

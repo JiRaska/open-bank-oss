@@ -23,7 +23,12 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(scenarios).toContain('id: money-path-smoke')
     expect(scenarios).toContain('execution_mode: planned-read-only-sandbox')
     expect(scenarios).toContain('blocker: No isolated money-path target, dedicated runner, and verified least-privilege read identity')
-    expect(workflow).toContain('DECLARED = ["openbank-product-catalog", "openbank-flaky-test-hunter"]')
+    // The declared scope is a living list (money-path read lanes join it); pin the two v1
+    // members rather than the exact literal so a scope addition does not rewrite this guard.
+    const declared = workflow.match(/DECLARED = \[([\s\S]*?)\]/)
+    expect(declared).not.toBeNull()
+    expect(declared![1]).toContain('"openbank-product-catalog"')
+    expect(declared![1]).toContain('"openbank-flaky-test-hunter"')
   })
 
   it('refuses to turn an authorization rejection into money-path latency evidence', () => {

@@ -156,7 +156,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: |
@@ -188,6 +188,12 @@ jobs:
           python3 -m pip install --user --quiet --require-hashes \
             -r .github/workflows/requirements/schemathesis.txt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Shared tool regression: run once in the existing first selected shard, using
+      # its installed locked package, rather than repeat it for every service.
+      - name: Verify Schemathesis response isolation
+        if: matrix.service == fromJSON(needs.prepare.outputs.services)[0]
+        run: python3 .github/scripts/fuzz_tests/test_fuzz_response_isolation.py
 
       - name: Fuzz services
         run: .github/scripts/fuzz-services.sh

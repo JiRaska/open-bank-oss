@@ -55,7 +55,9 @@ import io.mockk.CapturingSlot
 import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import io.mockk.slot
+import io.mockk.unmockkStatic
 import io.mockk.verify
 import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
@@ -81,8 +83,80 @@ class LendingServiceTest {
     private val riskParameters = mockk<RiskParameterSource>()
     private val events = mockk<LoanEventEmitter>()
 
+    private val preparedAccruals = mutableMapOf<String, LedgerPosting>()
+    private val intents = mutableMapOf<UUID, com.openbank.lending.application.port.out.AccrualIntent>()
+    private val intentSources = mutableMapOf<UUID, LoanInstallment>()
+    private var accrualRuns: com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns? = null
+
     @org.junit.jupiter.api.BeforeEach
     fun stubEventEmitter() {
+        every { ledger.prepareAccrual(any()) } answers {
+            val p = firstArg<LedgerPosting>()
+            preparedAccruals[p.reference] = p
+            com.openbank.lending.application.port.out.PreparedAccrualPosting(
+                p.reference,
+                UUID.nameUUIDFromBytes(p.reference.toByteArray(Charsets.UTF_8)),
+                p.accountingDate!!,
+                p.reference,
+            )
+        }
+        every { ledger.postPreparedAccrual(any()) } answers {
+            val p = firstArg<com.openbank.lending.application.port.out.PreparedAccrualPosting>()
+            ledger.post(preparedAccruals.getValue(p.reference)).map {
+                com.openbank.lending.application.port.out.AccrualPostingReceipt(
+                    UUID.nameUUIDFromBytes((p.reference + ":journal").toByteArray()),
+                    p.transactionId,
+                    p.accountingDate,
+                )
+            }
+        }
+        service.accrualProgress = object : com.openbank.lending.application.port.out.AccrualProgressPort {
+            override fun begin(
+                i: LoanInstallment,
+                day: LocalDate,
+                prepare: () -> com.openbank.lending.application.port.out.PreparedAccrualPosting?,
+            ): Uni<com.openbank.lending.application.port.out.AccrualIntent> {
+                intentSources[i.id] = i
+                return Uni.createFrom().item(
+                    intents.getOrPut(i.id) {
+                        com.openbank.lending.application.port.out.AccrualIntent(i.id, day, prepare(), false)
+                    },
+                )
+            }
+            override fun complete(
+                i: com.openbank.lending.application.port.out.AccrualIntent,
+                receipt: com.openbank.lending.application.port.out.AccrualPostingReceipt?,
+                at: OffsetDateTime,
+            ): Uni<Unit> {
+                if (intents.getValue(i.installmentId).completed) return Uni.createFrom().item(Unit)
+                val source = intentSources.getValue(i.installmentId)
+                return installments.markAccrued(i.installmentId, at).flatMap {
+                    if (receipt == null) {
+                        Uni.createFrom().item(Unit)
+                    } else {
+                        events.emit(
+                            LendingOutboxMessage(
+                                aggregateId = source.loanId.value,
+                                eventType = "loan.interest_accrued",
+                                payload = """{"aggregateType":"LOAN","aggregateId":"${source.loanId.value}",""" +
+                                    """"loanId":"${source.loanId.value}","installment":${source.number},""" +
+                                    """"interest":"${source.interest}","dueDate":"${source.dueDate}",""" +
+                                    """"occurredAt":"${at.toInstant()}","sourceService":"lending"}""",
+                            ),
+                        )
+                    }
+                }.invoke { _ ->
+                    intents[i.installmentId] = i.copy(completed = true)
+                    accrualRuns?.let { runs ->
+                        val key =
+                            i.businessDate to com.openbank.lending.infrastructure.servicing.LendingCloseJobs.ACCRUAL
+                        runs.pendingItems[key] = (runs.pendingItems[key] ?: 0) + 1
+                        if (receipt != null) runs.addJournals(receipt.accountingDate, key.second, 1)
+                    }
+                }
+            }
+        }
+
         every { loans.withLocked<Any>(any(), any()) } answers {
             loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
         }
@@ -109,7 +183,13 @@ class LendingServiceTest {
             }
         }
     }
-    private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
+    private class MutableAccrualClock(var now: Instant) : Clock() {
+        override fun instant(): Instant = now
+        override fun getZone(): java.time.ZoneId = ZoneOffset.UTC
+        override fun withZone(zone: java.time.ZoneId): Clock = Clock.fixed(now, zone)
+    }
+
+    private val clock = MutableAccrualClock(Instant.parse("2024-01-01T00:00:00Z"))
     private val provisioning = mockk<ProvisioningRepository>()
     private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
     private val borrowerCredit = mockk<BorrowerCreditPort>()
@@ -734,6 +814,87 @@ class LendingServiceTest {
 
     // --- Servicing posting loop: interest accrual ---------------------------------------------------
 
+    private fun runCloseAccrual(runs: com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns) {
+        accrualRuns = runs
+        val metrics = com.openbank.libs.observability.DomainMetrics().apply {
+            registryInstance = mockk<jakarta.enterprise.inject.Instance<io.micrometer.core.instrument.MeterRegistry>> {
+                every { isResolvable } returns false
+            }
+        }
+        mockkStatic(io.quarkus.hibernate.reactive.panache.Panache::class)
+        try {
+            every {
+                io.quarkus.hibernate.reactive.panache.Panache.withSession(any<java.util.function.Supplier<Uni<Void>>>())
+            } answers { firstArg<java.util.function.Supplier<Uni<Void>>>().get() }
+            com.openbank.lending.infrastructure.servicing.InterestAccrualScheduler(service, 500, clock, metrics, runs)
+                .runAccrualPass().await().indefinitely()
+        } finally {
+            unmockkStatic(io.quarkus.hibernate.reactive.panache.Panache::class)
+        }
+    }
+
+    @Test
+    fun `day close keeps each journal in its actual booking day across midnight`() {
+        clock.now = Instant.parse("2026-10-02T21:59:59Z")
+        val day = LocalDate.of(2026, 10, 2)
+        val loan = LoanId.random()
+        val first = unpaidInstallment(loan, UUID.randomUUID()).copy(number = 1, dueDate = day)
+        val second = first.copy(id = UUID.randomUUID(), number = 2)
+        val posted = mutableListOf<LedgerPosting>()
+        every { installments.findAccruable(day, 501) } returns Uni.createFrom().item(listOf(first, second))
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+        every { ledger.post(any()) } answers {
+            posted += firstArg<LedgerPosting>()
+            clock.now = Instant.parse("2026-10-02T22:00:01Z")
+            Uni.createFrom().item(Unit)
+        }
+        val runs = com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns()
+        runCloseAccrual(runs)
+        assertThat(posted.map { it.accountingDate }).containsExactly(day, day.plusDays(1))
+        val job = com.openbank.lending.infrastructure.servicing.LendingCloseJobs.ACCRUAL
+        assertThat(runs.runs.getValue(day to job).journalsPosted).isEqualTo(1)
+        assertThat(runs.pendingJournals[day.plusDays(1) to job]).isEqualTo(1)
+    }
+
+    @Test
+    fun `day close retains committed prefix after a later installment fails and retry succeeds`() {
+        clock.now = Instant.parse("2026-10-02T12:00:00Z")
+        val day = LocalDate.of(2026, 10, 2)
+        val loan = LoanId.random()
+        val first = unpaidInstallment(loan, UUID.randomUUID()).copy(number = 1, dueDate = day)
+        val second = first.copy(id = UUID.randomUUID(), number = 2)
+        val committed = mutableSetOf<UUID>()
+        val posted = mutableListOf<LedgerPosting>()
+        var failSecond = true
+        every { installments.findAccruable(day, 501) } answers {
+            Uni.createFrom().item(listOf(first, second).filter { it.id !in committed })
+        }
+        every { installments.markAccrued(any(), any()) } answers {
+            committed += firstArg<UUID>()
+            Uni.createFrom().item(1)
+        }
+        every { ledger.post(any()) } answers {
+            val posting = firstArg<LedgerPosting>()
+            if (posting.reference.endsWith(":2:accrual") && failSecond) {
+                failSecond = false
+                Uni.createFrom().failure(IllegalStateException("second posting unavailable"))
+            } else {
+                posted += posting
+                Uni.createFrom().item(Unit)
+            }
+        }
+        val runs = com.openbank.lending.infrastructure.servicing.RecordingCloseJobRuns()
+        runCatching { runCloseAccrual(runs) }
+        val job = com.openbank.lending.infrastructure.servicing.LendingCloseJobs.ACCRUAL
+        assertThat(committed).containsExactly(first.id)
+        assertThat(runs.runs.getValue(day to job).refused).isEqualTo(1)
+        runCloseAccrual(runs)
+        assertThat(posted).hasSize(2)
+        assertThat(runs.runs.getValue(day to job).refused).isZero()
+        assertThat(runs.runs.getValue(day to job).journalsPosted).isEqualTo(2)
+        assertThat(runs.runs.getValue(day to job).itemsProcessed).isEqualTo(2)
+    }
+
     @Test
     fun `accrual posts an INTEREST_ACCRUAL per due installment and flags each as accrued`() {
         val loanId = LoanId.random()
@@ -787,6 +948,9 @@ class LendingServiceTest {
         // Income is recognized at due date as an accrual (no cash leg), for each installment's interest.
         assertThat(postings.map { it.kind }.toSet()).containsExactly(PostingKind.INTEREST_ACCRUAL)
         assertThat(postings.map { it.amount }).containsExactly(eur("120.00"), eur("110.54"))
+        // ADR-0342: dated in the OPEN Prague accounting day, never left for the adapter's UTC fallback.
+        assertThat(postings.map { it.accountingDate })
+            .containsOnly(com.openbank.libs.domain.calendar.AccountingClock.bank(clock).today())
         verify(exactly = 2) { installments.markAccrued(any(), any()) }
         verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
     }
@@ -815,6 +979,62 @@ class LendingServiceTest {
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 1) { installments.markAccrued(any(), any()) }
         verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    // #13708 review: the drain budget is checked INSIDE a batch, not only between batches.
+    @Test
+    fun `accrual stops inside a batch once the deadline has passed and reports the pass truncated`() {
+        val loanId = LoanId.random()
+        val due = (1..3).map { n ->
+            LoanInstallment(
+                loanId = loanId,
+                number = n,
+                dueDate = LocalDate.parse("2026-07-01"),
+                openingBalance = eur("100.00"),
+                principal = eur("100.00"),
+                interest = eur("0.00"),
+                payment = eur("100.00"),
+                closingBalance = eur("0.00"),
+            )
+        }
+        every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+
+        val stopped = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500, clock.instant())
+            .await().indefinitely()
+
+        assertThat(stopped.installmentsAccrued).isZero()
+        assertThat(stopped.truncated).isTrue()
+        verify(exactly = 0) { installments.markAccrued(any(), any()) }
+    }
+
+    // ADR-0342: a pass the batch cap cut short must say so, or it is recorded RAN over unbooked interest.
+    @Test
+    fun `accrual probes one row past the batch and reports a truncated pass`() {
+        val loanId = LoanId.random()
+        fun zeroInterest(n: Int) = LoanInstallment(
+            loanId = loanId,
+            number = n,
+            dueDate = LocalDate.parse("2026-07-01"),
+            openingBalance = eur("100.00"),
+            principal = eur("100.00"),
+            interest = eur("0.00"),
+            payment = eur("100.00"),
+            closingBalance = eur("0.00"),
+        )
+        every { installments.findAccruable(any(), 3) } returns
+            Uni.createFrom().item(listOf(zeroInterest(1), zeroInterest(2), zeroInterest(3)))
+        every { installments.findAccruable(any(), 4) } returns
+            Uni.createFrom().item(listOf(zeroInterest(1), zeroInterest(2), zeroInterest(3)))
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+
+        val capped = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 2).await().indefinitely()
+        assertThat(capped.installmentsAccrued).isEqualTo(2)
+        assertThat(capped.truncated).isTrue()
+
+        val complete = service.accrueDueInterest(LocalDate.parse("2026-08-01"), 3).await().indefinitely()
+        assertThat(complete.installmentsAccrued).isEqualTo(3)
+        assertThat(complete.truncated).isFalse()
     }
 
     @Test

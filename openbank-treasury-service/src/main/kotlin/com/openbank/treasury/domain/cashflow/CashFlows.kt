@@ -7,7 +7,9 @@ package com.openbank.treasury.domain.cashflow
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.ActorType
+import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FourEyesViolationException
+import com.openbank.treasury.domain.model.PostingEvent
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -104,8 +106,47 @@ data class CashFlow(
     }
 }
 
+/** A flow that may no longer be overridden (it moved on, is posted, or its deal ended): 409 FLOW_NOT_OVERRIDABLE. */
+open class FlowNotOverridableException(message: String) : IllegalStateException(message)
+
 /** ADR-0344 D6: a flow already on a (non-cancelled) payment is never overridden: 409 FLOW_ALREADY_IN_PAYMENT. */
-class FlowAlreadyInPaymentException(flowId: UUID) : IllegalStateException("flow $flowId is already on a payment")
+class FlowAlreadyInPaymentException(flowId: UUID) : FlowNotOverridableException("flow $flowId is already on a payment")
+
+/**
+ * ADR-0344 D4: when a flow may still be overridden. ONE rule, evaluated at proposal, at approval,
+ * and again by the store under the flow-row lock on the STORED state, so a flow that moved on
+ * between the approver's read and the write is refused rather than overwritten. Only a PROJECTED
+ * or FIXED flow, on no payment, with no PAYMENT or AMORTISATION journal recorded for it, of a deal
+ * that has not ended (MATURED, CANCELLED, REVERSED). Anything else is a correction, not an override.
+ */
+data class OverrideEligibility(
+    val dealState: DealState,
+    /** A PAYMENT or AMORTISATION journal of this flow is recorded on the deal. */
+    val posted: Boolean,
+) {
+    fun require(flow: CashFlow) {
+        if (flow.paymentId != null) throw FlowAlreadyInPaymentException(flow.flowId)
+        val why = when {
+            dealState in TERMINAL_DEAL_STATES -> "its deal is $dealState"
+            flow.state !in OVERRIDABLE_STATES -> "it is ${flow.state}"
+            posted -> "its payment journal is already posted"
+            else -> null
+        }
+        why?.let {
+            throw FlowNotOverridableException("flow ${flow.flowId} cannot be overridden: $it; it needs a correction")
+        }
+    }
+
+    companion object {
+        val OVERRIDABLE_STATES = setOf(CashFlowState.PROJECTED, CashFlowState.FIXED)
+        val TERMINAL_DEAL_STATES = setOf(DealState.MATURED, DealState.CANCELLED, DealState.REVERSED)
+
+        /** The journal keys are `treasury:<dealId>:<event>:<flowId|date>` (ADR-0344 D7). */
+        fun isFlowPaymentJournal(event: PostingEvent, idempotencyKey: String, flowId: UUID): Boolean =
+            (event == PostingEvent.PAYMENT || event == PostingEvent.AMORTISATION) &&
+                idempotencyKey.substringAfterLast(':') == flowId.toString()
+    }
+}
 
 enum class OverrideStatus { PENDING, APPROVED, REJECTED, CONFLICT }
 
@@ -165,13 +206,14 @@ data class CashFlowOverride(
         private const val MAX_REASON = 1000
 
         /**
-         * Only a PROJECTED or FIXED flow can be overridden in this slice: once a flow is DUE or beyond,
-         * a payment or a journal may exist, and changing it is a correction (a later slice), not an override.
+         * Only a flow [OverrideEligibility] admits can be overridden: once a flow is DUE or beyond,
+         * paid or posted, or its deal ended, changing it is a correction (a later slice), not an override.
          */
         @Suppress("LongParameterList")
         fun propose(
             id: UUID,
             flow: CashFlow,
+            eligibility: OverrideEligibility,
             paymentDate: LocalDate?,
             amount: BigDecimal?,
             reason: String,
@@ -181,10 +223,7 @@ data class CashFlowOverride(
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not propose a cash-flow override")
             }
-            if (flow.paymentId != null) throw FlowAlreadyInPaymentException(flow.flowId)
-            check(flow.state == CashFlowState.PROJECTED || flow.state == CashFlowState.FIXED) {
-                "a ${flow.state} flow cannot be overridden; it needs a correction"
-            }
+            eligibility.require(flow)
             require(amount == null || flow.amount != null || flow.state == CashFlowState.PROJECTED) {
                 "this flow has no amount to override"
             }

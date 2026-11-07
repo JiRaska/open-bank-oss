@@ -129,3 +129,27 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Účastníci uzávěrky dne: autorizace (#13167)
+
+`PUT /api/v1/ledger/accounting-days/{date}/participants/{participant}` se autorizuje vlastní akcí
+`ledger.close.participate`, nikdy `ledger.create`. `ledger_rest_ext.rego: close_participant_accounts`
+přiřazuje každému strojovému účtu JEDINÉHO účastníka, za kterého smí hlásit (interest, lending, billing, treasury); use
+case pak ověří volajícího proti `openbank.ledger.close.participants.<name>.principal`. Přidání
+účastníka jsou tedy tři úpravy: `rules.yaml: close_participants`, mapa v `application.yaml` ledgeru a
+položka v rego mapě (pak přegenerovat bundly). Deklarovaní účastníci: interest, lending, billing, treasury. Režim: `shadow`.
+
+Billing se připojuje jako účastník uzávěrky pro svůj měsíční cyklus. Hlásí na vlastní identitě,
+klientovi Keycloak `openbank-billing` (`service-account-openbank-billing`), nikoli pod sdíleným
+principalem `openbank-services`, kterým účtuje své žurnály. Vymezený grant `ledger.close.participate`
+pro `participants/billing` je jediným ledger grantem tohoto účtu; vlastní `ledger.create` nemá.
+
+Treasury se připojuje jako účastník uzávěrky pro hodinové časové rozlišení úroků z obchodů a pro
+žurnály obchodů daného dne. Hlásí na identitě, kterou už účtuje žurnály, klientovi Keycloak
+`openbank-treasury` (`service-account-openbank-treasury`). Jeho položka v mapě přidává
+`ledger.close.participate` jen pro `participants/treasury`; stávající granty `ledger.create` a čtení pro
+nostro se nemění a za jiného účastníka hlásit nemůže.
+
+## Offline přehrání historického FINREP
+
+Sestavení definuje explicitní úlohu `historicalFinrepPactTest`, která lokálně přehraje jeden ověřený historický artefakt FINREP Pact proti poskytovateli ledger. Nejde o ověření přes broker: nikdy nemění selektory brokeru, nepublikuje výsledky a odmítne běžet, pokud zadaný commit poskytovatele není 40místné hex SHA, které je předkem `origin/main`. Není součástí výchozího sestavení.

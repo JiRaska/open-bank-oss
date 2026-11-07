@@ -126,6 +126,11 @@ class ArchiveFreshnessTest(unittest.TestCase):
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('Admin UI JVM Pact producers did not complete: failure', r.stdout)
             r = self.run_step('Require the selected JVM Pact scope to succeed', root, tmp,
+                              step_env={'SCOPE_RESULT': 'success', 'SCOPE_MODE': 'modules',
+                                        'FULL_RESULT': 'failure'})
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn('Module-scoped JVM Pact producers did not complete: failure', r.stdout)
+            r = self.run_step('Require the selected JVM Pact scope to succeed', root, tmp,
                               step_env={'SCOPE_RESULT': 'failure', 'SCOPE_MODE': 'ui-only',
                                         'FULL_RESULT': 'success'})
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

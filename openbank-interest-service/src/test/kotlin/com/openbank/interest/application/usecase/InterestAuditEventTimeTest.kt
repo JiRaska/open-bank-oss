@@ -93,7 +93,7 @@ class InterestAuditEventTimeTest {
         every { accrualRepo.findClaimedForCapitalization(any(), any()) } returns Uni.createFrom().item(emptyList())
         every { accrualRepo.claimForCapitalization(any(), any(), any()) } returns Uni.createFrom().item(Unit)
         every { taxProfilePort.resolve(any()) } returns Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
-        every { ledgerPostingPort.post(any<CapitalizationPosting>()) } returns Uni.createFrom().item(Unit)
+        every { ledgerPostingPort.postWithReceipt(any<CapitalizationPosting>()) } returns Uni.createFrom().nullItem()
         every {
             capitalizationRepo.saveWithOutbox(any(), capture(whtSlot), capture(eventSlot), any(), any())
         } answers { Uni.createFrom().item(firstArg<InterestCapitalization>()) }

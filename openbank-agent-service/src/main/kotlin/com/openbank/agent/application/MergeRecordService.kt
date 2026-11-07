@@ -133,6 +133,8 @@ class MergeRecordService(
                         "mergeEventNodeId" to it.mergeEventNodeId,
                         "mergeEventAt" to it.mergeEventAt?.toString(),
                         "observedAt" to it.observedAt?.toString(),
+                        "policyCommitSha" to it.policyCommitSha,
+                        "policyBlobSha" to it.policyBlobSha,
                     ),
                 )
             }

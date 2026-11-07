@@ -73,7 +73,7 @@ com.openbank.sepa/
 ├── domain/                    ◄── jádro — žádné framework závislosti
 │   ├── model/                 SepaPayment, SepaPaymentStatus, SepaPaymentType, SepaRejectReason
 │   ├── event/                 SepaPaymentCreatedEvent, SepaPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy, ScreeningResult, ScreeningDecision (čisté)
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── orchestrace use casů
 │   ├── port/in/               SepaPaymentUseCase + commands/queries

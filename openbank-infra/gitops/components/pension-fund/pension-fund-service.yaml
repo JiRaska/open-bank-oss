@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-pension-fund-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "982286e203ef1945"
+        openbank.tech/policy-checksum: "c49c3b28fe8a4c3e"
       labels:
         app.kubernetes.io/name: pension-fund-service
         app.kubernetes.io/part-of: pension-fund
@@ -47,7 +47,7 @@ spec:
         - name: pension-fund-service
           # Placeholder pin (fleet-attestation-placeholders.txt): no image is built until the merge
           # that adds openbank-pension-fund-service to ALL_SERVICES; auto-deploy rewrites it.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-7f966f31
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-d6685693
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8162 and management 8090 — both read off the service's own application.yaml
@@ -103,6 +103,18 @@ spec:
                 secretKeyRef:
                   name: pension-fund-service-oidc
                   key: OIDC_CLIENT_SECRET
+            # ADR-0341: a fund's management fee is read from its pinned catalog revision over
+            # product-catalog's private-CA mTLS listener (8443, client auth REQUIRED; client cert
+            # pension-fund-service-client-tls, %prod TLS bucket catalog-authority) with this
+            # service's OWN client token (Keycloak openbank-pension-fund, catalog:read only).
+            - name: PRODUCT_CATALOG_SERVICE_URL
+              value: https://product-catalog.accounts.svc:8443
+            - name: OIDC_PENSION_FUND_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: pension-fund-service-m2m-oidc
+                  key: OIDC_PENSION_FUND_CLIENT_SECRET
+                  optional: true
             # OPA sidecar enforced from the first rollout: pension_fund_rest_ext.rego grants fund
             # administration to real staff only; no service-account reaches a write by any rule.
             - name: AUTHZ_ENFORCE
@@ -135,6 +147,9 @@ spec:
           volumeMounts:
             - name: internal-tls
               mountPath: /mnt/internal-tls
+              readOnly: true
+            - name: catalog-tls
+              mountPath: /mnt/catalog-tls
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -217,6 +232,9 @@ spec:
         - name: internal-tls
           secret:
             secretName: pension-fund-service-internal-tls
+        - name: catalog-tls
+          secret:
+            secretName: pension-fund-service-client-tls
         - name: tmp
           emptyDir: {}
         - name: opa-tmp

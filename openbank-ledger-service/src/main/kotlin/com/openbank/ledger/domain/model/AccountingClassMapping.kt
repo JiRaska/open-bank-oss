@@ -17,6 +17,17 @@ enum class AccountingRole {
     INTEREST_INCOME,
     INTEREST_EXPENSE,
     FEE_INCOME,
+
+    // ADR-0344 D7 (V35): the instrument roles of the treasury posting-rule matrix.
+    PREMIUM_DISCOUNT,
+    FAIR_VALUE,
+    REVALUATION_RESERVE,
+    REALISED_GAIN,
+    REALISED_LOSS,
+    UNREALISED_GAIN,
+    UNREALISED_LOSS,
+    MEMO,
+    MEMO_CONTRA,
 }
 
 /** One row of the ledger-owned accountingClass -> GL account map (ADR-0341 D3). */

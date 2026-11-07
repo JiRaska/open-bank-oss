@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "360adeb49302a6c0"
+    openbank.tech/policy-checksum: "81bf691f73d1e8e1"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -274,6 +274,14 @@ data:
     	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
     }
 
+    # Chapter configuration is an administrator edit, never a machine or customer operation.
+    allowed_reasons contains "operator-game-catalog-write" if {
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        not principal_is_machine
+        input.action == "engagement.gameCatalog.write"
+    }
+
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
     # are issued to the authenticated operator themselves (subject = principal), and revocation is
     # live-checked by the OBO resolver, so this grant only ever reaches the caller's own sessions.
@@ -482,6 +490,16 @@ data:
     	input.action == "catalog.read"
     }
 
+    # Account opening reads a published revision with its verified account-owned identity only.
+    allowed_reasons contains "account-catalog-m2m-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.service_account == true
+    	machine_named("service-account-openbank-account")
+    	"ROLE_API" in input.principal.roles
+    	"CATALOG_SCOPE_READ" in input.principal.roles
+    	input.action == "catalog.read"
+    }
+
     allowed_reasons contains "pension-catalog-m2m-read-approval" if {
         input.principal.type == "HUMAN"
         input.principal.id == "service-account-openbank-pension"
@@ -580,7 +598,7 @@ data:
     allowed_reasons contains "edge-service-engagement" if {
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-edge")
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent", "engagement.game.read", "engagement.game.complete"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
@@ -812,16 +830,29 @@ data:
     #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
     #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
     #   treasury.reference.read, treasury.cashflow.read, treasury.calendar.read — treasury staff (ADR-0344)
+    #   treasury.reference.read (ONLY)            — ROLE_TREASURY_REFERENCE_EDITOR (least privilege)
     #   treasury.reference.propose, .import       — ROLE_TREASURY_REFERENCE_EDITOR or ROLE_TREASURY_BACK_OFFICE
     #   treasury.reference.approve                — ROLE_TREASURY_APPROVER; for kind `counterparty` (limits)
     #                                               ROLE_TREASURY_SENIOR_APPROVER only
     #   treasury.reference.reject, .verify        — ROLE_TREASURY_APPROVER
-    #   treasury.cashflow.override.propose        — ROLE_TREASURY_BACK_OFFICE
+    #   treasury.cashflow.override.propose, treasury.position.close — ROLE_TREASURY_BACK_OFFICE
     #   treasury.cashflow.override.approve/.reject — ROLE_TREASURY_APPROVER
     #   treasury.deal.send-confirmation           — ROLE_TREASURY_BACK_OFFICE or ROLE_TREASURY_APPROVER
     #   treasury.deal.preview                     — ROLE_TREASURY_DEALER or ROLE_TREASURY_BACK_OFFICE
+    #   treasury.fixing.read, treasury.marketdata.read — treasury staff (ADR-0344 D5)
+    #   treasury.marketdata.import, treasury.fixing.manual, treasury.fixing.run — ROLE_TREASURY_BACK_OFFICE
+    #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
     #                                               balance; it is still back-office evidence, #10896)
+    #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
+    #                                               tax-reporting's OWN client (ADR-0337 amendment)
+    #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
+    #
+    # treasury.portfolio.inspect is the one treasury read a MACHINE reaches, so it deliberately does not
+    # end in `.read`: base rest.rego's operator-read-any and compliance-read-any grant every `.read` to
+    # any HUMAN-classified principal holding ROLE_OPERATOR / ROLE_COMPLIANCE, which the shared
+    # service-account does in at least one realm. A non-read verb is served ONLY by the identity-scoped
+    # rules below (the fleet convention since pension-fund.holding.inspect, #12481).
     #
     # Four-eyes (approver != creator) is enforced in the domain (ADR-0315 D3); these rules decide only
     # WHO may attempt each step. Dealer and approver are separate roles on purpose: a dealer cannot
@@ -862,7 +893,7 @@ data:
     	treasury_staff
     	some role in {
     		"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER",
-    		"ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR",
+    		"ROLE_TREASURY_BACK_OFFICE",
     		"ROLE_ADMIN",
     	}
     	role in input.principal.roles
@@ -871,13 +902,27 @@ data:
     		"treasury.counterparty.read",
     		"treasury.position.read",
     		"treasury.nostro.read",
+    		# ADR-0337 amendment: the custodian's period-end statement of holdings.
+    		"treasury.portfolio.inspect",
     		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
     		"treasury.quote.read",
     		# ADR-0344: reference data, the cash-flow ledger and the event calendar.
     		"treasury.reference.read",
     		"treasury.cashflow.read",
     		"treasury.calendar.read",
+    		# ADR-0344 D5: fixings and market data (factor history, quality, batches).
+    		"treasury.fixing.read",
+    		"treasury.marketdata.read",
     	}
+    }
+
+    # Least privilege: the reference editor maintains code lists, so its ONLY read is reference data.
+    # It must not reach deals, counterparty exposure, positions, nostro, quotes, the cash-flow ledger
+    # or the event calendar — those describe the bank's book, not the lists the editor keeps.
+    allowed_reasons contains "treasury-reference-read" if {
+    	treasury_staff
+    	"ROLE_TREASURY_REFERENCE_EDITOR" in input.principal.roles
+    	input.action == "treasury.reference.read"
     }
 
     allowed_reasons contains "treasury-dealer-write" if {
@@ -903,6 +948,16 @@ data:
     		"treasury.deal.mature",
     		"treasury.deal.reverse",
     	}
+    }
+
+    # #13883: closing a deal's stuck posting intent releases its value day's close hold although the
+    # ledger may hold a journal under its key. Its own action so it can be granted, audited and denied
+    # apart from reversing a deal; approvers only. The domain additionally refuses a non-person, the
+    # posting's own actor and the deal's approver.
+    allowed_reasons contains "treasury-posting-intent-close" if {
+    	treasury_staff
+    	"ROLE_TREASURY_APPROVER" in input.principal.roles
+    	input.action == "treasury.posting-intent.close"
     }
 
     # ADR-0315 D4: a counterparty-limit breach blocks booking unless a SENIOR approver records an
@@ -980,6 +1035,7 @@ data:
     	input.action in {
     		"treasury.cashflow.override.propose",
     		"treasury.deal.send-confirmation",
+    		"treasury.position.close",
     	}
     }
 
@@ -1000,6 +1056,44 @@ data:
     	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_BACK_OFFICE"}
     	role in input.principal.roles
     	input.action == "treasury.deal.preview"
+    }
+
+    # ADR-0344 D5: back office imports observations, proposes manual fixings and runs the fixing pass;
+    # an approver (a different human, checked in the domain and the database) activates them. No role
+    # both writes and activates market data; machines and AI agents get nothing from this file.
+    allowed_reasons contains "treasury-back-office-market-data" if {
+    	treasury_staff
+    	"ROLE_TREASURY_BACK_OFFICE" in input.principal.roles
+    	input.action in {"treasury.marketdata.import", "treasury.fixing.manual", "treasury.fixing.run"}
+    }
+
+    allowed_reasons contains "treasury-approver-market-data" if {
+    	treasury_staff
+    	some role in {"ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER"}
+    	role in input.principal.roles
+    	input.action == "treasury.marketdata.approve"
+    }
+
+    # ADR-0337 amendment: the custodian's semt.002 is the source of record for PSP 34-12 PS, so only a
+    # back-office approver supplies it — the same rule, and the same reason, as the nostro camt.053.
+    allowed_reasons contains "treasury-portfolio-upload" if {
+    	treasury_staff
+    	"ROLE_TREASURY_APPROVER" in input.principal.roles
+    	input.action == "treasury.portfolio.upload"
+    }
+
+    # tax-reporting, and ONLY tax-reporting, reads the period-end portfolio for PSP 34-12 PS. Gated on
+    # its own identity (Keycloak service-account-<clientId>), never on a role every machine may hold;
+    # its whole grant here is this one read — never the upload, never any other treasury action.
+    treasury_portfolio_reader_account := "service-account-openbank-tax-reporting"
+
+    allowed_reasons contains "service-tax-reporting-portfolio-read" if {
+    	input.principal.type == "HUMAN"
+    	machine_named(treasury_portfolio_reader_account)
+    	# Undefined is legacy; explicit null is not a verified or absent marker.
+    	not input.principal.service_account == null
+    	"ROLE_API" in input.principal.roles
+    	input.action == "treasury.portfolio.inspect"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1277,6 +1371,10 @@ data:
       - query.account.readonly
       - query.consent.readonly
       - verify.mandate
+      - product.lint
+      - product.compile
+      - product.simulate
+      - product.explain
       write_proposal:
       - draft.ticket
       - gh.pr.open
@@ -1284,12 +1382,15 @@ data:
       - git.branch
       - git.commit.signed
       - run.skill
+      - product.propose
       deny:
       - money.transfer
       - money.post.ledger
       - gh.pr.merge
       - gh.pr.approve
       - secrets.read.raw
+      - product.publish
+      - product.sign
     agents:
     - id: compliance-officer
       tools:
@@ -1343,6 +1444,21 @@ data:
         - query.interest.readonly
         - query.disputes.readonly
         - query.observability.readonly
+    - id: product-author
+      tools:
+        allow:
+        - product.lint
+        - product.compile
+        - product.simulate
+        - product.explain
+        - product.propose
+        deny:
+        - product.publish
+        - product.sign
+        - money.*
+        - gh.pr.*
+        - '*.write'
+        - secrets.read.raw
     - id: rca-investigator
       tools:
         allow:
@@ -1438,6 +1554,7 @@ data:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close
         - treasury.deal.override-limit
         - treasury.nostro.*
         - money.*
@@ -2281,9 +2398,10 @@ data:
             - lending.collateralDecide
             - lending.approval.read
             - lending.approval.decide
-        # ADR-0285 D6 — the Communication Studio checker role. D6 says the comms roles are declared
-        # here rather than only in the realm; this is that declaration, and it is deliberately ONE
-        # read action rather than the role's full duty set. What is missing is missing on purpose:
+        # ADR-0285 D6 — the Communication Studio checker role. Until ADR-0229 provides a safe
+        # single-source role pipeline, realm-template.json owns role membership; this matrix carries
+        # deliberately ONE read action rather than the role's full duty set. What is missing is
+        # missing on purpose:
         #
         #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
         #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
@@ -2302,10 +2420,10 @@ data:
         #   already, so this entry is a provable subset of today's effective grant and changes no
         #   decision — the same seeding property the matrix was built on.
         #
-        # ROLE_COMMS_EDITOR has no entry at all, and cannot have one yet: the maker endpoints
-        # (draft, submit, golden-set edits) carry `@RolesAllowed` only and no `@Authorize`, so the
-        # editor duty has no action name for the matrix to key on. Declaring the editor role here
-        # needs those endpoints to get `@Authorize` actions first — tracked on #9703.
+        # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
+        # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
+        # name for the matrix to key on. A future single-source migration needs governed action
+        # names and must preserve the action-specific human-only write policy.
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
@@ -2313,18 +2431,23 @@ data:
         # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
         # service's own *_rest_ext.rego with `not principal_is_machine` (the verified input.principal.service_account flag).
-        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # The risk-engine curve-set list reuses `.read` (resource ""). The snapshot LIST and the
+        # per-snapshot VALUATION carry their own actions (risk.snapshot.list, risk.valuation.read,
+        # ADR-0344 D8) so a named machine can be granted exactly those two paths and nothing else. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
         # here on purpose: every treasury action, the reads included, is granted in
         # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
         # treasury depends on this matrix.
         ROLE_RISK:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
+            - risk.snapshot.list
+            - risk.valuation.read
             - risk.curve-set.read
 
     shared_m2m_write_prohibition:

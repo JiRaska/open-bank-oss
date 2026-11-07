@@ -88,6 +88,15 @@ class CashFlowEntity : PanacheEntity() {
     @Column(name = "payment_id")
     var paymentId: String? = null
 
+    @Column(name = "fixing_source")
+    var fixingSource: String? = null
+
+    @Column(name = "fixing_sha256")
+    var fixingSha256: String? = null
+
+    @Column(name = "fixed_at")
+    var fixedAt: java.time.Instant? = null
+
     /** Optimistic lock (V19): a stale copy of the row fails at flush instead of overwriting it. */
     @Version
     @Column(name = "row_version", nullable = false)
@@ -216,4 +225,51 @@ class DealVersionEntity : PanacheEntity() {
 
     @Column(name = "changes", columnDefinition = "TEXT")
     var changes: String? = null
+}
+
+@Entity
+@Table(name = "position_closes")
+class PositionCloseEntity : PanacheEntity() {
+    @Column(name = "snapshot_id", nullable = false, unique = true)
+    lateinit var snapshotId: UUID
+
+    @Column(name = "close_date", nullable = false)
+    lateinit var closeDate: LocalDate
+
+    @Column(name = "book_id")
+    var bookId: String? = null
+
+    @Column(name = "scenario")
+    var scenario: String? = null
+
+    @Column(name = "special", nullable = false)
+    var special: Boolean = false
+
+    @Column(name = "closed_by", nullable = false)
+    lateinit var closedBy: String
+
+    @Column(name = "closed_at", nullable = false)
+    lateinit var closedAt: Instant
+
+    @Column(name = "positions_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var positionsJson: String
+
+    @Column(name = "command_key", nullable = false, unique = true)
+    lateinit var commandKey: String
+}
+
+@Entity
+@Table(name = "deal_filters")
+class DealFilterEntity : PanacheEntity() {
+    @Column(name = "owner", nullable = false)
+    lateinit var owner: String
+
+    @Column(name = "name", nullable = false)
+    lateinit var name: String
+
+    @Column(name = "filter_json", nullable = false, columnDefinition = "TEXT")
+    lateinit var filterJson: String
+
+    @Column(name = "updated_at", nullable = false)
+    lateinit var updatedAt: Instant
 }

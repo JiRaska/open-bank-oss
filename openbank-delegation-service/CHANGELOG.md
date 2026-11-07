@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
+
+
+### Bug Fixes
+
+* **delegation:** answer 503, not 500, when acting-for cannot be read ([#14773](https://github.com/JiRaska/open-bank-oss/issues/14773)) ([317407f](https://github.com/JiRaska/open-bank-oss/commit/317407fc60fc98b454f6efc80048c2ad32093de5))
+
+## [0.23.4](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.3...delegation-service-v0.23.4) (2026-10-30)
+
+
+### Bug Fixes
+
+* **delegation:** align owner portfolio OpenAPI path parameter ([#14235](https://github.com/JiRaska/open-bank-oss/issues/14235)) ([c33021d](https://github.com/JiRaska/open-bank-oss/commit/c33021d3a183784d89b104b006496fc7022be9a5))
+
 ## [0.23.3](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.2...delegation-service-v0.23.3) (2026-10-19)
 
 

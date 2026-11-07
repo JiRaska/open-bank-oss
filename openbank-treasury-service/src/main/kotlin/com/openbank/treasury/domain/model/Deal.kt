@@ -61,6 +61,18 @@ enum class ProductType(
 
     /** ADR-0344 D2: the products whose legs the client must send (no flat-field derivation). */
     val legsRequired: Boolean get() = !legacy
+
+    companion object {
+        /**
+         * ADR-0344 delivery phases: the products a dealer may draft today. Phase 0 delivered the five
+         * legacy products, phase 1a added IRS and FRA (cash flows and fixings), phase 2 delivers every
+         * product: each one settles, accrues, pays and matures through the posting-rule matrix and
+         * consumes its counterparty line through [CreditExposure]. The widening and the credit measure
+         * ship together, so no product is ever bookable without its limit consumption. Mirrored by the
+         * parity gate's REQUIRED_PRODUCTS.
+         */
+        val DELIVERED: Set<ProductType> = entries.toSet()
+    }
 }
 
 /** The bank's side of an FX spot deal, on the FOREIGN currency: BUY = the bank buys it and pays CZK. */
@@ -209,6 +221,12 @@ data class Deal(
     /** 0 until the first cash-flow ledger is generated at submission (ADR-0344 D4). */
     val scheduleVersion: Int = 0,
     val scheduleHash: String? = null,
+    /**
+     * The stored row's optimistic-lock version as this copy was read (null before the first save).
+     * Persistence only: the whole-row save compares it under the row lock, so a copy older than the
+     * row is refused (409 DEAL_CHANGED) and no write can overwrite a change it never saw.
+     */
+    val rowVersion: Long? = null,
 ) {
     init {
         require(currency in SUPPORTED_CURRENCIES) { "currency must be one of $SUPPORTED_CURRENCIES" }
@@ -324,16 +342,15 @@ data class Deal(
         }
     }
 
-    /** The currency whose counterparty limit this deal consumes: CZK for an FX spot (its CZK equivalent). */
-    val limitCurrency: String get() = if (product == ProductType.FX_SPOT) CZK else currency
+    /** The currency whose counterparty limit this deal consumes: CZK for FX products (their CZK leg). */
+    val limitCurrency: String get() = CreditExposure.limitCurrency(product, currency)
 
-    /** What the deal adds to the limit: principal for an asset, the CZK leg for FX spot, else zero. */
+    /**
+     * What the deal adds to the limit when no reference data is needed to measure it ([CreditExposure]
+     * with no terms): a derivative or a collateralised repo refuses here rather than count as zero.
+     */
     val limitAmount: BigDecimal
-        get() = when {
-            product == ProductType.FX_SPOT -> checkNotNull(fx).counterAmount
-            product.isAsset -> principal
-            else -> BigDecimal.ZERO
-        }
+        get() = CreditExposure.of(this, tradeDate, CreditTerms.NONE)
 
     /**
      * Record the tolerance check of the dealer's rate against [mid] (#10896). Flags, never blocks:
@@ -431,6 +448,7 @@ data class Deal(
             createdAt = createdAt,
             updatedAt = at,
             version = version + 1,
+            rowVersion = rowVersion,
             history =
             history +
                 DealTransition(
@@ -649,14 +667,14 @@ data class Deal(
 
     /** Whether this product, live and ACTUAL, consumes a counterparty limit (what a correction re-checks). */
     val consumesLimitWhenLive: Boolean
-        get() = kind == DealKind.ACTUAL && (product.isAsset || product == ProductType.FX_SPOT)
+        get() = kind == DealKind.ACTUAL && CreditMeasure.of(product) != CreditMeasure.NONE
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
         get() = kind == DealKind.ACTUAL &&
             when (product) {
                 ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
-                else -> product.isAsset && state in LIMIT_CONSUMING_STATES
+                else -> CreditMeasure.of(product) != CreditMeasure.NONE && state in LIMIT_CONSUMING_STATES
             }
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(

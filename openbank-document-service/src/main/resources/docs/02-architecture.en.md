@@ -60,9 +60,17 @@ concurrent decisions on the same ceremony conflict loudly (422) instead of lost-
 
 ## Persistence
 
+Repositories use Hibernate Reactive. The JDBC datasource remains available for Flyway startup migrations,
+while `quarkus.hibernate-orm.blocking=false` prevents an unused blocking Hibernate factory from starting.
+This keeps migration access separate from reactive session creation. Do not disable the JDBC datasource
+or Hibernate Reactive to achieve this separation.
+
+`DocumentPersistenceModeProviderVerificationTest` checks the absence of a blocking factory, matching
+reactive/JDBC reads from the migrated database, and HTTP 401 when an M2M identity is missing.
+
 Dedicated database `openbank_documents`, `generation: none`, Flyway V1..V3. Only the outbox entity
 extends `PanacheOutboxEntity` (Hibernate sequence `document_outbox_seq`, created in V3 — guarded by
-`HibernateSequenceGuardTest`); all other entities use application-assigned UUID/String ids.
+the CI gate `hibernate-sequence-guard`); all other entities use application-assigned UUID/String ids.
 
 ## Seeded pension templates
 
@@ -77,3 +85,12 @@ Live rendering also refuses any previously published template containing `LEGAL-
 ## Outbox trace propagation
 
 The outbox row stores the W3C `traceparent` of the request that wrote it (`document_outbox.trace_context`, migration `V16`, nullable). The dispatcher publishes the record with that `traceparent` header and parents its producer span on the stored context, so a consumer span links to the originating request instead of starting a trace at the scheduler thread. Rows written outside any span carry no value and are published as before.
+
+## Product-catalog reads use this service's own identity
+
+The product read (`ProductCatalogClient.getById`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-document` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.

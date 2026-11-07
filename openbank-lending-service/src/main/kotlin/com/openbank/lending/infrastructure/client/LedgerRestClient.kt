@@ -65,4 +65,10 @@ data class JournalLineRequest(
     val baseCurrencyCode: String,
 )
 
-data class JournalResponse(val id: UUID, val transactionId: UUID, val status: String)
+data class JournalResponse(
+    val id: UUID,
+    val transactionId: UUID,
+    val status: String,
+    // Already present in the ledger's JournalEntryResponse/OpenAPI; absent older replies are unproven.
+    val entryDate: String? = null,
+)

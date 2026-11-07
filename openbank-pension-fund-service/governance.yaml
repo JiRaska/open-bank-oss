@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Per-service governance manifest (ADR-0071). Declarative, curatorial facts only.
 # Schema: openbank-libs/governance/governance.schema.json
-dataDomain: open-banking
+dataDomain: pensions
 primaryDatastore: PostgreSQL
 databaseName: openbank_pension_fund
 dataLineageRole: producer

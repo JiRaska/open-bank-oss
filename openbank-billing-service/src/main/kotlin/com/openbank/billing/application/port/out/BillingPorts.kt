@@ -71,6 +71,8 @@ data class RevisionTerms(
      * (`openbank.billing.assessment.no_fee_identity`) so a v2 product whose fees are all unidentified is visible.
      */
     val noFeeIdentityComponents: Int = 0,
+    /** Optional shadow metadata from this same immutable terms response; it never gates legacy fees. */
+    val shadowRevision: com.openbank.billing.domain.ShadowRevisionIdentity? = null,
 )
 
 /**

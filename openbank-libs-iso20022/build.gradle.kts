@@ -30,7 +30,8 @@ repositories {
 
 dependencies {
     api(libs.kotlin.stdlib)
-    implementation(project(":openbank-libs-domain"))
+    // SecuritiesHolding exposes the canonical portfolio quantity basis from libs-domain.
+    api(project(":openbank-libs-domain"))
 
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 

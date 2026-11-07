@@ -16,6 +16,29 @@ referenced from ADR-0084.
   ADR-0065 (customer edge — device/IP context source), ADR-0067 (feature flags, four-eyes
   on money-path flips), ADR-0077 (DomainMetrics), ADR-0009 (Postgres-per-service)
 
+## Kafka Streams shadow amendment (2026-10-25, #13888)
+
+The opt-in velocity projection adds a Kafka source → local RocksDB/changelog →
+versioned shadow-topic boundary. It is disabled by default and no verdict or Redis
+feature-store adapter consumes its output. A dedicated TLS identity can read the
+transaction-initiated source and write only shadow/internal topics. Internal topics
+are pre-created; Delete is scoped to the one repartition topic for consumed-record
+cleanup. The identity has no Create grant or write permission on the source.
+
+The parser checks event type, identifiers, synthetic markers and business event time
+before advancing stream time. Original source coordinates survive account
+repartition; bounded event-ID state handles outbox redelivery separately from Kafka
+transactional offset/state/output commits. Broker-backed tests exercise fresh-state
+restoration and redelivery under read-committed observation. These are implementation
+proofs, not a claim of human security review or production rollout.
+
+Residual risks: CPU, heap, native memory and disk remain shared with the service;
+degraded shadow metrics do not provide process isolation. Promotion requires measured
+resource budgets. Account-derived output, changelogs and local state inherit the
+retention/erasure obligations in ADR-0118. Bucket snapshots cannot answer arbitrary
+historical point-in-time feature queries and must not be wired into a verdict until
+the separate serving design and parity evidence are reviewed (ADR-0140 amendment).
+
 ## 0. Phase-1 posture (read first)
 
 This is a **skeleton**. The rule engine holds a single deterministic **always-ALLOW** baseline
@@ -95,7 +118,7 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | R1 | Scoring decision | **Repudiation** — dispute over what verdict was returned for a payment | Every decision persisted immutably (`fraud_scores`: request context + verdict + `score` + `reasons` + `rule_version` + `threshold_set_version` + `created_at`); threshold-set rows record maker, checker, times, reason and content hash | Wire signed audit / evidence bundle (ADR-0029) — *planned* |
 | I1 | Verdict reasons | **Information disclosure** — reason codes / score leak the rule logic to an attacker probing the boundary | Reason strings are coarse, non-PII (`baseline-allow`); endpoint role-gated to service/operator/admin, never customer-facing; customer-safe decline reason mapping is a surface concern | Reason-code taxonomy reviewed as Phase-2 rules land — *open* |
 | I3 | Analyst review queue | **Information disclosure** — automated callers read staff investigation material | The fraud-specific policy prohibits machine principals on `fraud.review.read`, using the phase-two verified service-account classifier (absent or invalid markers are not staff). Human operator, administrator and compliance access remains subject to existing staff grants. Scoring and other services' read policies are unchanged | Policy source and generated bundle are covered by allow/deny regressions; deployment and runtime enforcement require separate verification |
-| I2 | Metrics / persisted columns | **Information disclosure** — high-cardinality labels or audit columns enable per-customer inference / leak PII | DomainMetrics deferred (Phase 1) — when added (#850 follow-up), `openbank_fraud_scores_total` is tagged **only** by `verdict` (a closed 4-value set), never account/party/amount (ADR-0077 cardinality contract). `account_id`/`counterparty_id` live in row columns (access-controlled), not metric labels. `/q/metrics` is cluster-internal | Low — verdict tag is bounded |
+| I2 | Metrics / persisted columns | **Information disclosure / DoS** — high-cardinality labels enable per-customer inference, PII leakage or TSDB exhaustion | `openbank_fraud_scores_total` is tagged by `verdict` (a closed 4-value set) and `rail`, which `FraudMetricsAdapter` bounds to the five verified caller values plus `unknown`; arbitrary request strings never become labels. No account/party/amount is a metric label (ADR-0077). `account_id`/`counterparty_id` live only in access-controlled row columns. `/q/metrics` is cluster-internal | Low — both label domains are bounded and regression-tested |
 | D1 | Scoring path | **DoS** — flood of `/score` calls, or a slow rule set, starves the payment hot path | Reactive non-blocking stack; per-service k8s limits; latency budget p99 ≤ 150 ms (ADR-0084); **fail-open** flag bounds caller blast radius if the scorer is slow/unavailable | Gateway rate-limiting — infra scope; load test before enforce phase |
 | E1 | Roles | **Elevation** — a read/operator role obtains a privileged action | Single endpoint, no privilege tiers within it yet; deny-by-default once OPA enforce is on (ADR-0034) | OPA still advisory — *open* |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — fraud reuses the shared `openbank-services` Keycloak confidential client / shared Vault key (like the rest of the fleet). Compromise of that one key mints tokens accepted across services. | Secret Vault-projected (never in git/state); confidential (not public) client; endpoint additionally requires a service/operator/admin role | **Shared-credential blast radius accepted for sandbox only.** Dedicated Vault path + per-service Keycloak client = hardening before prod. **Prod go-live requires the second money-path approver to sign off this residual** (ADR-0030). — *open* |
@@ -119,8 +142,12 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - Money thresholds are **data** (ADR-0347): no money literal in `domain/rules`; the engine takes
   the active `FraudThresholdSet` as an argument; only an EXECUTED set approved by a principal other
   than its proposer is ever read; no active set ⇒ REVIEW, never ALLOW.
-- Once DomainMetrics is added, verdict labels are **low-cardinality and PII-free** (the closed
-  `verdict` set only; never account/party/amount/id — ADR-0077).
+- The verdict type is shared with the rails (`openbank-libs-fincrime`, ADR-0353); its
+  consumer-only `UNKNOWN` is **never rendered by a rule nor emitted on the wire** — `RuleHit`
+  rejects it and `POST /api/v1/fraud/score` answers 500 rather than put it in a response.
+- Fraud score labels are **low-cardinality and PII-free**: `verdict` is a closed set and `rail`
+  is a five-value allow-list plus `unknown`; never account/party/amount/id or raw caller text
+  (ADR-0077).
 
 ## 5. Open items / follow-ups
 
@@ -128,8 +155,6 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   yet a control. Phase 2 (real velocity/behavioural rules + signal-plane aggregates) and surface
   wiring (shadow → challenge → enforce, ADR-0084 §4) close this. Until then `fraud-monitoring` is
   honestly `partial`.
-- **DomainMetrics deferred (#850 Phase 1 follow-up):** `openbank_fraud_scores_total{verdict}` —
-  deferred to avoid an openbank-libs fleet rebuild; add when libs next ships.
 - **Surface integration not yet built:** no gitops/ArgoCD manifest, no payment-surface call. The
   service is inert; deployment is a separate follow-up.
 - **Dedicated OIDC credential (S2):** provision a per-service Vault path + dedicated confidential
@@ -148,6 +173,19 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-10-28** — **Bounded the fraud-score `rail` label (#12920).** The API remains compatible
+  and still accepts any non-blank rail string, but `FraudMetricsAdapter` now emits only the five
+  verified caller rails (`SEPA`, `SEPA_INSTANT`, `DOMESTIC`, `FX`, `CARD`) and buckets every other
+  value as `unknown`. This removes caller-controlled Prometheus cardinality without changing the
+  persisted request or verdict. Regression coverage collapses 26 distinct hostile/unknown values
+  into one series and preserves known-rail counters. Rollback: revert; raw caller-controlled label
+  cardinality returns.
+- **2026-10-24** — **Verdict type moved to `openbank-libs-fincrime` (ADR-0353, #13439).** The
+  four rails mirrored `FraudVerdict` with an extra consumer-side `UNKNOWN`; there is now one type
+  for producer and consumers. Wire values unchanged (`ALLOW/CHALLENGE/REVIEW/DECLINE`). New
+  fail-closed guards: a rule cannot render `UNKNOWN`, and the score response refuses to emit it, so
+  no rail can receive from this service a value it was told never to trust. Rollback: revert the
+  PR; no data or contract change.
 - **2026-10-21** — **Least privilege on `fraud_threshold_set`** (V10, follow-up to #13457). V9's
   trailing `GRANT ALL ON ALL TABLES IN SCHEMA public TO openbank` was a no-op (the app role owns
   the database), but it left the owner able to DELETE/TRUNCATE the threshold-set audit record.
@@ -337,3 +375,5 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
   (`BaselineFraudModel` restored verbatim); no data migration, no config change.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+- **2026-11-04** — **Null rule entry in a threshold proposal answers 400 (#14783).** `POST /api/v1/fraud/thresholds/proposals` (inbound REST, `FraudThresholdResource`) now rejects a rule whose currency map is JSON `null` with 400 via `requireNotNull`, instead of a 500 from a Kotlin null dereference. Input validation only: no new endpoint, role, data flow or trust boundary; authorization (`ROLE_RISK`/`ROLE_COMPLIANCE`, four-eyes decide) is unchanged. **STRIDE:** D (malformed input no longer produces an unhandled server error; nothing is persisted). Rollback: revert the commit; no data or config change.

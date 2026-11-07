@@ -43,7 +43,7 @@ data class AgentMergeRecord(
 
 enum class MergeActorType { HUMAN, GITHUB_APP }
 
-enum class MergeAuthorizationKind { OWNER_WORKFLOW_EXACT_HEAD, LEGACY_PR_AUTO_MERGE }
+enum class MergeAuthorizationKind { OWNER_WORKFLOW_EXACT_HEAD, LEGACY_PR_AUTO_MERGE, POLICY_PR_AUTO_MERGE }
 
 enum class MergeAuthorizationScope { HEAD, PR }
 
@@ -68,12 +68,20 @@ data class MergeAuthorization(
     val mergeEventNodeId: String? = null,
     val mergeEventAt: Instant? = null,
     val observedAt: Instant? = null,
+    val policyCommitSha: String? = null,
+    val policyBlobSha: String? = null,
 ) {
     init {
         require(approvedBy.matches(Regex("[A-Za-z0-9][A-Za-z0-9-]{0,38}"))) {
             "approvedBy must be a human GitHub login"
         }
         require(approvedById > 0) { "approvedById must be positive" }
+        if (kind == MergeAuthorizationKind.POLICY_PR_AUTO_MERGE) {
+            require(policyCommitSha?.matches(Regex("[0-9a-f]{40}")) == true) { "policyCommitSha must be a full SHA" }
+            require(policyBlobSha?.matches(Regex("[0-9a-f]{40}")) == true) { "policyBlobSha must be a full SHA" }
+        } else {
+            require(policyCommitSha == null && policyBlobSha == null) { "policy context requires policy PR evidence" }
+        }
         when (kind) {
             MergeAuthorizationKind.OWNER_WORKFLOW_EXACT_HEAD -> {
                 require(scope == MergeAuthorizationScope.HEAD) { "exact-head authorization requires HEAD scope" }
@@ -89,7 +97,7 @@ data class MergeAuthorization(
                     "exact-head authorization cannot carry legacy observation fields"
                 }
             }
-            MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE -> {
+            MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE, MergeAuthorizationKind.POLICY_PR_AUTO_MERGE -> {
                 require(scope == MergeAuthorizationScope.PR) { "legacy authorization requires PR scope" }
                 require(statusId == null && workflowRunId == null) { "legacy evidence is not workflow approval" }
                 require(!pullRequestNodeId.isNullOrBlank() && !mergeEventNodeId.isNullOrBlank()) {
@@ -105,7 +113,7 @@ data class MergeAuthorization(
     /** Observation refreshes do not change the identity of the historical authorization evidence. */
     fun sameEvidenceAs(other: MergeAuthorization?): Boolean {
         if (other == null || kind != other.kind) return false
-        return if (kind == MergeAuthorizationKind.LEGACY_PR_AUTO_MERGE) {
+        return if (scope == MergeAuthorizationScope.PR) {
             copy(observedAt = other.observedAt) == other
         } else {
             this == other

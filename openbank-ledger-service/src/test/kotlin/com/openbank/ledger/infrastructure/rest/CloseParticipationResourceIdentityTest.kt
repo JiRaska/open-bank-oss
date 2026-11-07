@@ -111,5 +111,24 @@ class CloseParticipationResourceIdentityTest {
         coVerify(exactly = 1) { useCase.waive(any()) }
     }
 
+    @Test
+    fun `participant report cannot create operator waiver or absence status`() {
+        for (forbidden in listOf("WAIVED", "MISSING")) {
+            val failure = runCatching {
+                runBlocking {
+                    resource.report(
+                        "2026-10-17",
+                        "interest",
+                        ReportParticipationRequest(forbidden, 0, 0, "not a participant outcome"),
+                    )
+                }
+            }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(WebApplicationException::class.java)
+            assertThat((failure as WebApplicationException).response.status).isEqualTo(400)
+            assertThat(failure.message).contains("RAN, SKIPPED, REFUSED")
+        }
+        coVerify(exactly = 0) { useCase.report(any()) }
+    }
+
     private class ReachedUseCase : RuntimeException()
 }

@@ -138,6 +138,13 @@ BASELINE: dict[str, str] = {
     "openbank-delegation-service:EXECUTED,PROPOSED,REJECTED":
         "#5962 — lifecycle approval state: deliberate subset of libs ProposalState; decide is "
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
+    # NOT drift — a DELIBERATE SUBSET (ADR-0353 D4). fraud-service's verdict is the shared
+    # openbank-libs-fincrime `FraudVerdict`, whose UNKNOWN is what a CONSUMER reads when an answer
+    # cannot be parsed (#4403). fraud-service never renders it (`RuleHit` rejects it) and never emits
+    # it (`toResponse` fails closed), so the spec is right to omit it.
+    "openbank-fraud-service:ALLOW,CHALLENGE,DECLINE,REVIEW":
+        "ADR-0353 D4 — fraud verdict: NOT drift. UNKNOWN is consumer-only; RuleHit and the score "
+        "response refuse it, so the endpoint cannot produce it.",
     # MIS-PAIRINGS, surfaced when the scan began including openbank-libs-* (#7984): three
     # customer-edge spec enums clear the threshold against shared libs enums on 2-3 coincidental
     # values. FAILED/PENDING (a screening verdict vs OutboxStatus), APPROVED/REJECTED (a task
@@ -257,6 +264,11 @@ BASELINE: dict[str, str] = {
     "openbank-statement-service:RECONCILIATION,UNKNOWN,UPSTREAM":
         "#5962 — CloseFailure.reason: NOT drift. A deliberate subset of CloseFailureReason; "
         "NOT_VIABLE is skipped rather than recorded, on both paths, so no CloseFailure can carry it.",
+    # NOT drift — the frozen v1 response/request vocabulary. CZ_TERRORISTS is deliberately served
+    # only by the parallel v3 operations; the complete eight-value enum pairs exactly and needs no
+    # exception. The v1 resource independently enforces the same seven-value allow-list (#10760).
+    "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,PEP_GLOBAL,UN_CONSOLIDATED":
+        "#10760 — v1 SanctionsListType: deliberate compatibility subset; CZ_TERRORISTS is v3-only.",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")

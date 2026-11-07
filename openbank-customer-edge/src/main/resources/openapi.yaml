@@ -52,7 +52,16 @@ info:
   # 1.81.0 -> 1.82.0 (#12259): additive company-scoped business payment batch draft routes.
   # 1.82.0 -> 1.83.0: additive configured pension provider and explicit unconfigured-provider 503 responses.
   # 1.83.0 -> 1.84.0: additive low-balance-alert endpoint and schemas (ADR-0333).
-  version: 1.84.0
+  # 1.84.0 -> 1.85.0 (#13210): CORRECTION — GET /balances/{accountId} is documented as the wire
+  # actually carries it, `{"balances": [Balance]}` (balance-service wraps its list), not a bare array;
+  # Balance gains the `id` and `version` it always sent. No served behaviour changed.
+  # 1.85.0 -> 1.86.0 (#13711): additive — optional `cursor` query parameter on GET /accounts;
+  # delegated accounts are listed in the account page on the first page only.
+  # 1.87.0 -> 1.88.0 (#12260): additive — optional `cursor` and `nextCursor` keyset history on
+  # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
+  # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
+  # GET /pension/transfers (a pension-service read refusal, never a change refusal).
+  version: 1.90.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -107,6 +116,40 @@ tags:
   - name: Complaints
 
 paths:
+  /game/levels:
+    get:
+      operationId: getGameLevels
+      summary: Lion Quest chapters and unlocks for the JWT party
+      description: OFF and inactive chapters are absent. Beta is a presentation hint, not a privileged entitlement. No marketing consent is required for an opened game.
+      security: [{customerOidc: []}]
+      parameters:
+        - {name: beta, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Server-evaluated catalogue; unknown themes must be hidden by the app
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerGameCatalog'
+        '401': {description: Authentication required}
+        '403': {description: Invalid customer or acting-for context}
+        '502': {description: Invalid upstream catalogue}
+        '503': {description: Game catalogue unavailable; retain cached locks and bundled fallback}
+  /game/levels/{levelId}/completion:
+    post:
+      operationId: postGameLevelCompletion
+      summary: Idempotently record a game completion for the JWT party
+      description: The client supplies no party, points or banking outcome. Locked and disabled chapters cannot be completed. Completion only unlocks play.
+      security: [{customerOidc: []}]
+      parameters:
+        - {name: levelId, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}}
+        - {name: beta, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '204': {description: Completion recorded or already recorded}
+        '400': {description: Invalid chapter identifier}
+        '401': {description: Authentication required}
+        '403': {description: Invalid customer context or chapter locked/unavailable}
+        '503': {description: Completion could not be confirmed; retain as pending}
   /app-copy:
     get:
       operationId: getAppCopy
@@ -1048,6 +1091,7 @@ paths:
                 items: {$ref: '#/components/schemas/PensionTransfer'}
         '400': {description: 'Invalid direction or pending'}
         '401': {description: Missing or invalid bearer token}
+        '403': {description: 'PENSION_ACCESS_DENIED (pension-service refused the read; never a change refusal)'}
         '502': {description: Pension service unavailable}
   /pension/transfers/{transferId}:
     get:
@@ -2098,8 +2142,15 @@ paths:
       tags: [Accounts]
       summary: List the authenticated customer's accounts
       operationId: listAccounts
+      description: |
+        Accounts shared WITH the caller (active delegation grants with read capability) are appended
+        to `data`, marked `sharedWithMe: true`, on the FIRST page only (no `cursor`), and raise
+        `pagination.totalCount` accordingly. They sit outside cursor pagination; cursors are
+        account-service's own and are forwarded unchanged.
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - {name: cursor, in: query, required: false, schema: {type: string}}
       responses:
         '200':
           description: Account list
@@ -2416,9 +2467,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Balance'
+                $ref: '#/components/schemas/BalanceList'
 
   /balances/{accountId}/{currency}/low-balance-alert:
     parameters:
@@ -2576,6 +2625,10 @@ paths:
       responses:
         '200':
           description: Party-scoped notification page with total and exact unreadCount
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalNotificationPage'
 
   /notifications/unified:
     get:
@@ -2587,6 +2640,7 @@ paths:
       parameters:
         - {name: limit, in: query, required: false, schema: {type: integer, default: 20, minimum: 1, maximum: 100}}
         - {name: partyId, in: query, required: false, description: Filter to an authorized person or company, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, required: false, description: Opaque keyset cursor from nextCursor, bound to the authorized profile set; arrivals do not shift older pages and a changed set requires restarting from the first page, schema: {type: string, maxLength: 220}}
       responses:
         '200':
           description: >-
@@ -2619,6 +2673,9 @@ paths:
                   unreadCount: {type: integer, format: int64, minimum: 0}
                   size: {type: integer, minimum: 1, maximum: 100}
                   page: {type: integer, enum: [0]}
+                  nextCursor: {type: [string, 'null'], description: Opaque cursor for the next older page; null when no older item exists}
+        '400':
+          description: Invalid cursor, or a cursor issued for a different authorized profile set
         '403':
           description: Requested party is not authorized
         '502':
@@ -2647,13 +2704,17 @@ paths:
   /notifications/read-all:
     patch:
       tags: [Notifications]
-      summary: Mark all of the caller's notifications as read
+      summary: Mark all notifications in one authorized origin profile as read
       operationId: markAllNotificationsRead
       security:
         - customerOidc: [accounts:read]
+      parameters:
+        - {name: partyId, in: query, required: false, description: Authorized origin profile; defaults to the selected profile, schema: {type: string, format: uuid}}
       responses:
         '200':
           description: Count of notifications marked read
+        '403':
+          description: Requested origin profile is not authorized
 
   /notifications/{id}:
     get:
@@ -6944,6 +7005,37 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    GameRequirement:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [NONE, PREVIOUS_LEVEL, EARN_SOURCE]}
+        source: {type: string, nullable: true, enum: [EDUCATIONAL_CONTENT_COMPLETION, SAVINGS_GOAL_DEPOSIT, LOGIN_STREAK, ON_TIME_REPAYMENT]}
+        count: {type: integer, minimum: 1, maximum: 1000, default: 1}
+        hintCs: {type: string, maxLength: 160}
+        hintEn: {type: string, maxLength: 160}
+    CustomerGameCatalog:
+      type: object
+      required: [revision, levels]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        levels:
+          type: array
+          maxItems: 30
+          items: {$ref: '#/components/schemas/CustomerGameLevel'}
+    CustomerGameLevel:
+      type: object
+      required: [id, theme, order, titleCs, titleEn, state, unlocked, completed]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        theme: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        order: {type: integer, minimum: 0, maximum: 99}
+        titleCs: {type: string, minLength: 1, maxLength: 80}
+        titleEn: {type: string, minLength: 1, maxLength: 80}
+        state: {type: string, enum: [OFF, BETA, LIVE]}
+        requirement: {$ref: '#/components/schemas/GameRequirement'}
+        unlocked: {type: boolean}
+        completed: {type: boolean}
     BusinessPaymentBatchDraftItem:
       type: object
       additionalProperties: false
@@ -8081,14 +8173,41 @@ components:
         hasNextPage:
           type: boolean
         nextCursor:
-          type: string
-          nullable: true
+          type: [string, 'null']
         previousCursor:
-          type: string
-          nullable: true
+          type: [string, 'null']
         totalCount:
-          type: integer
-          nullable: true
+          type: [integer, 'null']
+
+    PersonalNotificationPage:
+      type: object
+      description: Token-party-scoped history. Counts cover the party, independently of this bounded page.
+      required: [items, total, unreadCount, page, size]
+      properties:
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/PersonalNotificationSummary'}
+        total: {type: integer, format: int64, minimum: 0}
+        unreadCount: {type: integer, format: int64, minimum: 0}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1, maximum: 100}
+    PersonalNotificationSummary:
+      type: object
+      description: Notification-service metadata passed through unchanged; rendered body is excluded.
+      required: [id, partyId, channel, template, recipient, status, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        channel: {type: string}
+        template: {type: string}
+        templateRevision: {type: [integer, 'null'], format: int64}
+        recipient: {type: string}
+        subject: {type: [string, 'null']}
+        status: {type: string}
+        sentAt: {type: [string, 'null'], format: date-time}
+        visibleAt: {type: [string, 'null'], format: date-time}
+        readAt: {type: [string, 'null'], format: date-time}
+        createdAt: {type: string, format: date-time}
 
     # Mirrors notification-service's NotificationPreferenceDto. No stored row defaults every
     # channel to true.
@@ -8193,23 +8312,18 @@ components:
           type: string
           format: date-time
         closedAt:
-          type: string
+          type: [string, 'null']
           format: date-time
-          nullable: true
         goalName:
-          type: string
-          nullable: true
+          type: [string, 'null']
         goalTargetMinorUnits:
-          type: integer
+          type: [integer, 'null']
           format: int64
-          nullable: true
         goalTargetDate:
-          type: string
+          type: [string, 'null']
           format: date
-          nullable: true
         nickname:
-          type: string
-          nullable: true
+          type: [string, 'null']
         sharedWithMe:
           type: boolean
           default: false
@@ -8274,8 +8388,6 @@ components:
         pagination:
           $ref: '#/components/schemas/Pagination'
 
-    # Mirrors openbank-balance-service BalanceResponse. GET /api/v1/balances/{accountId} returns
-    # one entry per currency held on the account (an array), not a single balance.
     LowBalanceAlertRequest:
       type: object
       required: [enabled, threshold, rearmMargin]
@@ -8292,9 +8404,27 @@ components:
         enabled: {type: boolean}
         threshold: {type: number}
         rearmMargin: {type: number}
+    # Passthrough of balance-service GET /api/v1/balances/{accountId}, which answers
+    # `mapOf("balances" to list)` — one Balance per currency held on the account.
+    BalanceList:
+      type: object
+      required: [balances]
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: '#/components/schemas/Balance'
+
     Balance:
       type: object
+      required: [id, accountId, currency, bookedAmount, availableAmount, reservedAmount, pendingAmount, updatedAt, version]
       properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          format: int64
         accountId:
           type: string
           format: uuid

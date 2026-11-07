@@ -182,19 +182,20 @@ object CanonicalJson {
 
     private fun appendObject(sb: StringBuilder, map: Map<*, *>) {
         sb.append('{')
-        map.entries.map {
+        val entries = map.entries.toTypedArray()
+        entries.forEach {
             val k = it.key
             require(k is String) {
                 "canonical JSON object keys must be String, got ${k?.let { c -> c::class.java.name }} ($k)"
             }
-            k to it.value
-        }.sortedWith { a, b -> a.first.compareTo(b.first) }
-            .forEachIndexed { i, (k, v) ->
-                if (i > 0) sb.append(',')
-                appendString(sb, k)
-                sb.append(':')
-                append(sb, v)
-            }
+        }
+        entries.sortWith { a, b -> (a.key as String).compareTo(b.key as String) }
+        entries.forEachIndexed { i, (k, v) ->
+            if (i > 0) sb.append(',')
+            appendString(sb, k as String)
+            sb.append(':')
+            append(sb, v)
+        }
         sb.append('}')
     }
 

@@ -84,11 +84,17 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int) =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?) =
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 2))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
 
         scheduler.onStart(StartupEvent())
 
@@ -116,11 +122,17 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int) =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?) =
                 Uni.createFrom().item(AccrualOutcome(asOf = asOf, installmentsAccrued = 0))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
         scheduler.onStart(StartupEvent())
 
         scheduler.runAccrualPass().await().indefinitely()
@@ -135,11 +147,17 @@ class LendingWorkflowLivenessTest {
         val registry = SimpleMeterRegistry()
         val clock = Clock.fixed(Instant.parse("2026-07-01T04:00:00Z"), ZoneOffset.UTC)
         val accrual = object : AccrueInterestUseCase {
-            override fun accrueDueInterest(asOf: LocalDate, limit: Int): Uni<AccrualOutcome> =
+            override fun accrueDueInterest(asOf: LocalDate, limit: Int, deadline: Instant?): Uni<AccrualOutcome> =
                 Uni.createFrom().failure(IllegalStateException("ledger down"))
         }
         val scheduler =
-            InterestAccrualScheduler(accrual, batchSize = 500, clock = clock, domainMetrics = metricsOver(registry))
+            InterestAccrualScheduler(
+                accrual,
+                batchSize = 500,
+                clock = clock,
+                domainMetrics = metricsOver(registry),
+                closeJobRuns = RecordingCloseJobRuns(),
+            )
         scheduler.onStart(StartupEvent())
 
         runCatching { scheduler.runAccrualPass().await().indefinitely() }
@@ -174,6 +192,7 @@ class LendingWorkflowLivenessTest {
                 },
                 runs = cycleRuns(),
                 registry = null,
+                closeJobRuns = RecordingCloseJobRuns(),
             )
 
         scheduler.onStart(StartupEvent())
@@ -220,6 +239,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(),
             null,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -252,6 +272,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(),
             null,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -283,6 +304,7 @@ class LendingWorkflowLivenessTest {
             coverage,
             cycleRuns(unresolvedPriorDays = 1),
             registry,
+            RecordingCloseJobRuns(),
         )
         scheduler.onStart(StartupEvent())
 
@@ -321,6 +343,7 @@ class LendingWorkflowLivenessTest {
                 },
                 runs = cycleRuns(),
                 registry = null,
+                closeJobRuns = RecordingCloseJobRuns(),
             )
         scheduler.onStart(StartupEvent())
 

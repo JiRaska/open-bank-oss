@@ -4,8 +4,8 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.fincrime.AmlCaseSeverity
 import com.openbank.sepa.application.port.out.AccountLookupPort
-import com.openbank.sepa.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepa.application.port.out.OpenAmlCaseCommand
 import io.mockk.every
 import io.mockk.mockk
@@ -40,7 +40,7 @@ class AmlCaseAdapterTest {
         paymentId = UUID.randomUUID(),
         debtorAccountId = UUID.randomUUID(),
         customerReference = "Payer / 1000/0800",
-        riskLevel = AmlCaseRiskLevel.CRITICAL,
+        riskLevel = AmlCaseSeverity.CRITICAL,
         alertCode = "SANCTIONS_HIT",
         alertDetail = "creditor on list",
         matchedEntity = matchedEntity,

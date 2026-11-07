@@ -101,3 +101,16 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 ## Přepsání consumer group pro Kafka
 
 Consumer group id a offset reset pro Kafka kanály této služby nejsou v `application.yaml` nastaveny jako YAML klíče, protože SmallRye Config uvozuje klíče s tečkou a konektor je nikdy nenačte. Dodává je ConfigMap s přepsáním ve formě properties souboru, načítaný přes `QUARKUS_CONFIG_LOCATIONS`. Referenčním vzorem je kanál `party-events-in` ve službě card-issuance-service; komentáře v `application.yaml` na něj odkazují. Jde pouze o změnu dokumentace a komentářů. Žádná hodnota konfigurace ani chování za běhu se nemění.
+
+## Rekonstrukce důkazů podle pravidel pro PR
+
+Pro `codex/` zůstává povinné schválení přesného HEAD. U ostatních sloučení App lze doložit
+pozorovanou lidskou žádost pro PR jen podle výslovně prověřeného neměnného blobu pravidel z prvního
+rodiče merge commitu. Neznámý blob vyžaduje review zdroje a běžné PR, nikoli provozní výjimku.
+Důkaz má rozsah PR; nedokládá schválení SHA ani splnění všech historických kontrol. Producer před
+zápisem do `/api/v1/agent-merge-records/app-policy` vyžaduje číselnou verzi schématu 2 a příznak
+`policyPrAuthorization: true`, poté nezávisle přečte `policyAuthorization`. Staré pole
+`authorization` je pro tento důkaz null. Před doplněním historie ověřte skutečně nasazený backend,
+migraci V8 a nové UI. Zachovejte původní čas pozorování, prošetřete konflikty 409 a při rollbacku
+uchovejte důkazy. Deployment holdy uvolňujte samostatným governance PR až po doložení všech
+podmínek. Zelený běh recorderu sám neprokazuje opravu historických chybějících řádků.

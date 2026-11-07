@@ -6,12 +6,14 @@
 package com.openbank.agent.infrastructure.rest
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.agent.application.port.`in`.MergeRecordCommand
 import com.openbank.agent.application.port.`in`.MergeRecordQueries
 import com.openbank.agent.application.port.`in`.RecordMergeUseCase
 import com.openbank.agent.domain.mergerecord.AgentMergeRecord
 import com.openbank.agent.domain.mergerecord.MergeActorType
 import com.openbank.agent.domain.mergerecord.MergeAuthorization
+import com.openbank.agent.domain.mergerecord.MergeAuthorizationKind
 import com.openbank.agent.domain.mergerecord.MergeEvidenceConflict
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.RolesAllowed
@@ -80,7 +82,26 @@ class AgentMergeRecordResource {
         val mergedById: Long? = null,
         val headSha: String? = null,
         val mergeCommitSha: String? = null,
-        val authorization: MergeAuthorization? = null,
+        val authorization: ExistingMergeAuthorization? = null,
+        val policyAuthorization: JsonNode? = null,
+    )
+
+    data class PolicyAppMergeRecordIngestRequest(
+        val agentId: String?,
+        val prNumber: Long?,
+        val prUrl: String?,
+        val headBranch: String?,
+        val mergedBy: String?,
+        val mergedAt: Instant?,
+        val title: String?,
+        val proposalId: String? = null,
+        val source: String? = null,
+        val mergedByType: GitHubAppActorType? = null,
+        val mergedById: Long? = null,
+        val headSha: String? = null,
+        val mergeCommitSha: String? = null,
+        val authorization: JsonNode? = null,
+        val policyAuthorization: PolicyMergeAuthorization? = null,
     )
 
     data class MergeRecordDto(
@@ -101,7 +122,8 @@ class AgentMergeRecordResource {
         val mergedById: Long?,
         val headSha: String?,
         val mergeCommitSha: String?,
-        val authorization: MergeAuthorization?,
+        val authorization: ExistingMergeAuthorization?,
+        val policyAuthorization: PolicyMergeAuthorization?,
     )
 
     private fun AgentMergeRecord.toDto(inserted: Boolean) = MergeRecordDto(
@@ -110,7 +132,13 @@ class AgentMergeRecordResource {
         proposalId = proposalId?.toString(), recordedAt = recordedAt, source = source,
         inserted = inserted,
         mergedByType = mergedByType, mergedById = mergedById, headSha = headSha,
-        mergeCommitSha = mergeCommitSha, authorization = authorization,
+        mergeCommitSha = mergeCommitSha,
+        authorization = authorization?.takeUnless {
+            it.kind == MergeAuthorizationKind.POLICY_PR_AUTO_MERGE
+        }?.toExistingWire(),
+        policyAuthorization = authorization?.takeIf {
+            it.kind == MergeAuthorizationKind.POLICY_PR_AUTO_MERGE
+        }?.toPolicyWire(),
     )
 
     /**
@@ -131,6 +159,7 @@ class AgentMergeRecordResource {
     @RolesAllowed("ROLE_MERGE_RECORDER")
     fun ingestApp(body: AppMergeRecordIngestRequest): Response {
         requireNotNull(body.mergedByType) { "mergedByType is required" }
+        require(body.policyAuthorization == null) { "policy authorization requires /app-policy" }
         val common = MergeRecordIngestRequest(
             agentId = body.agentId, prNumber = body.prNumber, prUrl = body.prUrl,
             headBranch = body.headBranch, mergedBy = body.mergedBy, mergedAt = body.mergedAt,
@@ -142,7 +171,31 @@ class AgentMergeRecordResource {
                 mergedById = body.mergedById,
                 headSha = body.headSha,
                 mergeCommitSha = body.mergeCommitSha,
-                authorization = body.authorization,
+                authorization = body.authorization?.toDomain(),
+            ),
+        )
+    }
+
+    @POST
+    @Path("/app-policy")
+    @Blocking
+    @RolesAllowed("ROLE_MERGE_RECORDER")
+    fun ingestPolicyApp(body: PolicyAppMergeRecordIngestRequest): Response {
+        requireNotNull(body.mergedByType) { "mergedByType is required" }
+        require(body.authorization == null) { "authorization families cannot be combined" }
+        requireNotNull(body.policyAuthorization) { "policyAuthorization is required" }
+        val common = MergeRecordIngestRequest(
+            agentId = body.agentId, prNumber = body.prNumber, prUrl = body.prUrl,
+            headBranch = body.headBranch, mergedBy = body.mergedBy, mergedAt = body.mergedAt,
+            title = body.title, proposalId = body.proposalId, source = body.source,
+        )
+        return store(
+            common.toCommand(
+                mergedByType = MergeActorType.GITHUB_APP,
+                mergedById = body.mergedById,
+                headSha = body.headSha,
+                mergeCommitSha = body.mergeCommitSha,
+                authorization = body.policyAuthorization.toDomain(),
             ),
         )
     }
@@ -194,7 +247,9 @@ class AgentMergeRecordResource {
     @GET
     @Path("/capabilities")
     @RolesAllowed("ROLE_MERGE_RECORDER")
-    fun capabilities(): Map<String, Int> = mapOf("evidenceSchemaVersion" to 2)
+    fun capabilities() = MergeEvidenceCapabilities()
+
+    data class MergeEvidenceCapabilities(val evidenceSchemaVersion: Int = 2, val policyPrAuthorization: Boolean = true)
 
     /** Read back the durable record, rather than trusting only a successful POST response. */
     @GET

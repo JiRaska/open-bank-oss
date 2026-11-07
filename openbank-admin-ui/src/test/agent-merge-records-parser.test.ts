@@ -131,3 +131,32 @@ describe('parseAgentMergeRecordList', () => {
     expect(records.map(r => r.agentId)).toContain('agent/unknown ?weird=1')
   })
 })
+
+const POLICY_RECORD = {
+  ...LEGACY_RECORD,
+  mergedAt: '2026-10-24T10:00:00Z', recordedAt: '2026-10-24T10:00:05Z',
+  authorization: null,
+  policyAuthorization: {
+    ...LEGACY_RECORD.authorization, kind: 'POLICY_PR_AUTO_MERGE',
+    mergeEventAt: '2026-10-24T10:00:01Z', observedAt: '2026-10-24T10:00:02Z',
+    policyCommitSha: 'c'.repeat(40), policyBlobSha: 'd'.repeat(40),
+  },
+}
+
+describe('modern PR policy proof', () => {
+  it('retains modern evidence and actual App in its separate PR slot', () => {
+    expect(parseAgentMergeRecord(POLICY_RECORD)).toEqual(POLICY_RECORD)
+    expect(parseAgentMergeRecordList([POLICY_RECORD]).dropped).toBe(0)
+  })
+
+  it.each([
+    ['dual proof', { ...POLICY_RECORD, authorization: APP_RECORD.authorization }],
+    ['wrong family', { ...POLICY_RECORD, authorization: POLICY_RECORD.policyAuthorization, policyAuthorization: null }],
+    ['codex downgrade', { ...POLICY_RECORD, headBranch: 'codex/fixture' }],
+    ['missing context', { ...POLICY_RECORD, policyAuthorization: { ...POLICY_RECORD.policyAuthorization, policyBlobSha: undefined } }],
+    ['invalid context', { ...POLICY_RECORD, policyAuthorization: { ...POLICY_RECORD.policyAuthorization, policyCommitSha: 'bad' } }],
+    ['head scope', { ...POLICY_RECORD, policyAuthorization: { ...POLICY_RECORD.policyAuthorization, scope: 'HEAD' } }],
+    ['workflow id', { ...POLICY_RECORD, policyAuthorization: { ...POLICY_RECORD.policyAuthorization, statusId: 42 } }],
+    ['human with policy proof', { ...VALID_RECORD, policyAuthorization: POLICY_RECORD.policyAuthorization }],
+  ])('rejects %s', (_label, value) => expect(parseAgentMergeRecord(value)).toBeNull())
+})

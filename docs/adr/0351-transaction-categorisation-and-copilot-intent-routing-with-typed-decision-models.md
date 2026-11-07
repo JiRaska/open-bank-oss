@@ -33,8 +33,8 @@ the boundaries now so that the first PR for either does not have to re-derive th
 ## Decision
 
 **D1 — Spending category is a read-model attribute, never a booking fact.** A typed-decision model
-assigns `SpendingCategory` (a closed enum owned by the consuming read model, versioned per
-ADR-0348 D2) from the counterparty, the remittance information and the amount sign. The category is
+assigns `SpendingCategoryCode` (typed code in a pinned, versioned taxonomy owned by the
+consuming read model, per ADR-0348 D2) from the counterparty, the remittance information and the amount sign. The category is
 stored beside the transaction in the consuming read model (Customer 360 / loyalty), **not** in the
 ledger, the transaction journal or any outbox event that other services treat as authoritative. A
 customer correction overrides it and becomes a label. Thresholds: `AUTO` once calibrated per
@@ -85,7 +85,8 @@ ADR-0175 class 1, so outside the sandbox both adapters must be `self-hosted` or 
 ### Delivery check
 
 ```bash
-git grep -n 'enum class SpendingCategory' -- 'openbank-*/src/main/**'           # expect 1
+git grep -n 'SpendingCategoryCode' -- 'openbank-*/src/main/**' # expect owning read-model code
+# consumer tests must prove pinned-taxonomy validation and unknown-code rejection
 git grep -n 'enum class CopilotIntent' -- 'openbank-copilot-service/src/main/**' # expect 1
 # the category never reaches the ledger or the transaction journal
 git grep -n 'SpendingCategory' -- 'openbank-ledger-service/**' 'openbank-transaction-service/**' # expect none

@@ -4,9 +4,9 @@
 # topic operator only watches its own namespace). Single partition + RF 1 for the sandbox;
 # raise partitions and RF to 3 for production.
 #
-# Producers: aml-service, sanctions-service (pending — they will emit an event here when a
-# high-priority finding arrives that warrants an immediate compliance sweep rather than waiting
-# for the next scheduled run).
+# Producers: aml-service and sanctions-service fan out HIGH/CRITICAL cases and high-risk
+# screening hits from their durable outboxes. The minimal trigger contains only sourceService
+# and occurredAt; the original ce-id/ce-type headers retain correlation without screening PII.
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:

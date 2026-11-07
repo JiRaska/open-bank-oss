@@ -9,14 +9,15 @@ import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
 import com.openbank.ledger.application.usecase.CloseParticipantForbiddenException
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
-import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -83,6 +84,9 @@ class DayCloseParticipantsIT {
     @Inject
     lateinit var accountingClock: AccountingClock
 
+    @Inject
+    lateinit var participantsConfig: CloseParticipantsConfig
+
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
@@ -123,7 +127,32 @@ class DayCloseParticipantsIT {
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
         }
+        othersReport(date)
     }
+
+    /**
+     * Every declared participant OTHER than interest reports RAN, each under its own declared
+     * principal, so interest stays the one participant these scenarios hold or release the day on.
+     * Read from the live config, so a participant declared later (#13167: lending, billing, ...) is
+     * covered without editing this test, and a missing one cannot make a scenario vacuous.
+     */
+    private fun othersReport(date: LocalDate) = participantsConfig.participants()
+        .filterKeys { it != "interest" }
+        .forEach { (name, declared) ->
+            onEventLoop {
+                participation.report(
+                    ReportParticipationCommand(
+                        businessDate = date,
+                        participant = name,
+                        outcome = ParticipationOutcome.RAN,
+                        journalsPosted = 0,
+                        itemsProcessed = 0,
+                        reason = null,
+                        callerPrincipal = declared.principal(),
+                    ),
+                )
+            }
+        }
 
     private fun interestReports(date: LocalDate, outcome: ParticipationOutcome, journals: Int, reason: String? = null) =
         onEventLoop {
@@ -255,6 +284,7 @@ class DayCloseParticipantsIT {
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
         }
+        othersReport(date)
     }
 
     @Test

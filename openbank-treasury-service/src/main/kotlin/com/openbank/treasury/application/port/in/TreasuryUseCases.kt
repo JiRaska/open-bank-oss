@@ -5,13 +5,16 @@
 package com.openbank.treasury.application.port.`in`
 
 import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.treasury.application.port.out.CompletePortfolio
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.StoredPortfolioStatement
 import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.CustodyStatement
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealHeader
 import com.openbank.treasury.domain.model.DealKind
@@ -28,6 +31,7 @@ import com.openbank.treasury.domain.reference.ReferencePayload
 import com.openbank.treasury.domain.reference.ReferenceRecord
 import com.openbank.treasury.domain.reference.ReferenceStatus
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -134,8 +138,26 @@ fun interface TreasuryQuoteUseCase {
     suspend fun quotes(product: ProductType, currency: String, tenorDays: Int): QuoteBoard
 }
 
-/** One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed. */
-data class AccrualRun(val journals: Int, val failures: List<Throwable>)
+/**
+ * One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed.
+ * [deals] is how many SETTLED deals the pass assessed and [unassessed] how many it left for the next
+ * pass because its deadline passed (ADR-0342 day-close evidence: a pass that left deals behind cannot
+ * report its day complete).
+ */
+data class AccrualRun(
+    val journals: Int,
+    val failures: List<Throwable>,
+    val deals: Int = 0,
+    val unassessed: Int = 0,
+    /** #13883: deals skipped because a posting intent is open on them (counted in [deals] as assessed). */
+    val deferred: Int = 0,
+)
+
+/**
+ * One reconciler pass over open posting intents (#13883): completed; failed (still open, with their
+ * causes); escalated (too old to resume as the stored actor, left OPEN for an operator).
+ */
+data class IntentReconciliation(val completed: Int, val failures: List<Throwable>, val escalated: Int = 0)
 
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
@@ -182,6 +204,41 @@ interface TreasuryDealUseCase {
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
+
+    /** ADR-0344 D7: the posting-rule matrix, every product (versioned data). */
+    fun postingRules(): List<com.openbank.treasury.domain.model.PostingRule> =
+        com.openbank.treasury.domain.model.PostingMatrix.rules
+
+    /**
+     * [accrueInterest], stopping before the next deal once [deadline] has passed; the deals left are
+     * counted in [AccrualRun.unassessed] and accrued by the next pass (accrual catches up by design).
+     * The deadline bounds a live pass, which is what lets the day-close reporter tell a pass that is
+     * still running from one that died (ADR-0342, `TreasuryCloseJobs.staleAfter`).
+     */
+    suspend fun accrueInterest(asOf: LocalDate, deadline: Instant): AccrualRun
+
+    /**
+     * #13883: re-runs the command of every posting intent still OPEN that was created before
+     * [olderThan], under its original journal key (the ledger answers with the original journal),
+     * so a crash between the ledger's answer and treasury's commit is completed without a second
+     * journal. A failure is recorded on the intent, which stays open and keeps holding its day.
+     */
+    suspend fun reconcilePostingIntents(olderThan: Instant): IntentReconciliation
+
+    /**
+     * #13883: an operator closes the OPEN posting intent of [dealId]'s [event] that cannot complete
+     * (CLOSED_BY_OPERATOR, who and why recorded and appended to its history), releasing its day's
+     * close hold. Only a person may, and never the posting's own actor or the deal's approver (four
+     * eyes). A later re-issue of the command reopens it with its first value day.
+     */
+    suspend fun closePostingIntent(
+        dealId: UUID,
+        event: com.openbank.treasury.domain.model.PostingEvent,
+        reason: String,
+        actor: Actor,
+        /** Client Idempotency-Key: a replay of the same close answers CLOSED again without acting. */
+        key: String? = null,
+    ): com.openbank.treasury.application.port.out.PostingIntentCloseOutcome
 }
 
 interface NostroReconciliationUseCase {
@@ -383,4 +440,30 @@ interface CashFlowUseCase {
         bookId: String?,
         types: Set<TreasuryEventType>?,
     ): List<TreasuryCalendarEvent>
+}
+
+/**
+ * The custodian's period-end statement of holdings (ADR-0337 amendment): ingested like a nostro
+ * camt.053, served per date, never derived.
+ */
+interface PortfolioStatementUseCase {
+    /**
+     * Store a parsed semt.002 for the configured entity and safekeeping account. A replay of
+     * [idempotencyKey] with the same bytes, or the same bytes under a new key for the same date,
+     * returns the stored version (idempotent re-ingestion); the key reused on other bytes is a
+     * conflict. Different bytes for a date that already has a statement is a CORRECTION: stored
+     * as the next version, superseding the current one, which is kept.
+     */
+    suspend fun upload(
+        statement: CustodyStatement,
+        sha256: String,
+        idempotencyKey: String,
+        actor: Actor,
+    ): StoredPortfolioStatement
+
+    /** The current snapshot at [date]. @throws com.openbank.treasury.application.port.out.PortfolioSnapshotMissingException when none (409). */
+    suspend fun periodEnd(date: LocalDate): CompletePortfolio
+
+    /** Every version stored for [date], oldest first: the correction trail. */
+    suspend fun versions(date: LocalDate): List<StoredPortfolioStatement>
 }

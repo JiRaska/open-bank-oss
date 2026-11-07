@@ -150,7 +150,13 @@ data class KycAttributes(
     val kycLevel: KycLevel,
     val kycCompletedAt: OffsetDateTime?,
     val kycExpiresAt: OffsetDateTime?,
-    val amlRiskScore: AmlRiskScore,
+    /**
+     * DEPRECATED (ADR-0353 D2) — **not a customer risk rating.** The canonical rating is
+     * kyc-service's `riskLevel`; pid-service never computes one. Kept only for values a caller of
+     * `PUT /parties/{id}/kyc` already stored; `null` for every party created since, including every
+     * party registered from an EUDI Wallet PID presentation — a PID proves identity, not risk.
+     */
+    val amlRiskScore: AmlRiskScore?,
     val pepFlag: Boolean,
     val sanctionsFlag: Boolean,
     val uboVerifiedAt: OffsetDateTime?,
@@ -164,6 +170,7 @@ enum class KycLevel {
     FULL,
 }
 
+/** DEPRECATED value set of [KycAttributes.amlRiskScore] (ADR-0353 D2); see kyc-service `RiskLevel`. */
 enum class AmlRiskScore {
     LOW,
     MEDIUM,
