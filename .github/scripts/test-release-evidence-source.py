@@ -58,10 +58,32 @@ class ReleaseSourceTest(unittest.TestCase):
             binaries.mkdir()
             (binaries / "trivy").write_text("#!/bin/sh\nexit 1\n")
             (binaries / "trivy").chmod(0o755)
-            env = {**CLEAN_ENV, "PATH": str(binaries) + os.pathsep + os.environ["PATH"], "GITHUB_SHA": trigger, "RELEASE_EVIDENCE_SOURCE_SHA": release}
+            env = {**CLEAN_ENV, "PATH": str(binaries) + os.pathsep + os.environ["PATH"], "GITHUB_SHA": trigger, "RELEASE_EVIDENCE_SOURCE_SHA": release, "GITHUB_REPOSITORY": "example/fixture", "GITHUB_WORKFLOW_REF": "example/fixture/.github/workflows/backfill-release-evidence.yml@refs/heads/main", "GITHUB_WORKFLOW_SHA": "b" * 40, "RELEASE_EVIDENCE_WORKFLOW_REF": "example/fixture/.github/workflows/backfill-release-evidence.yml@refs/heads/main"}
             subprocess.run(["bash", str(SCRIPTS / "build-release-evidence.sh"), "fixture", "1.1.0", "fixture-v1.1.0", "module", "fixture-v1.1.0.cdx.json"], cwd=root, env=env, check=True, capture_output=True)
             manifest = json.loads((root / "fixture-v1.1.0.evidence.json").read_text())
             self.assertEqual(manifest["git_commit"], release)
+            statement = json.loads((root / "fixture-v1.1.0.slsa.json").read_text())
+            self.assertEqual(statement["predicate"]["runDetails"]["builder"]["id"], "https://github.com/example/fixture/.github/workflows/backfill-release-evidence.yml")
+
+    def test_explicit_producer_must_match_actual_allowed_workflow_context(self):
+        ref = 'example/fixture/.github/workflows/backfill-release-evidence.yml@refs/heads/main'
+        base = dict(CLEAN_ENV, GITHUB_REPOSITORY='example/fixture', GITHUB_WORKFLOW_REF=ref,
+                    GITHUB_WORKFLOW_SHA='b' * 40, RELEASE_EVIDENCE_WORKFLOW_REF=ref)
+        for changes in (
+            {'RELEASE_EVIDENCE_WORKFLOW_REF': 'other/repo/.github/workflows/backfill-release-evidence.yml@refs/heads/main'},
+            {'RELEASE_EVIDENCE_WORKFLOW_REF': ref.replace('backfill-release-evidence', 'other')},
+            {'RELEASE_EVIDENCE_WORKFLOW_REF': ref.replace('refs/heads/main', 'refs/heads/other')},
+            {'GITHUB_WORKFLOW_REF': ''}, {'GITHUB_WORKFLOW_SHA': ''},
+            {'GITHUB_WORKFLOW_REF': ref.replace('backfill-release-evidence', 'other'), 'RELEASE_EVIDENCE_WORKFLOW_REF': ref.replace('backfill-release-evidence', 'other')},
+            {'GITHUB_WORKFLOW_REF': ref.replace('refs/heads/main', 'refs/heads/other'), 'RELEASE_EVIDENCE_WORKFLOW_REF': ref.replace('refs/heads/main', 'refs/heads/other')},
+            {'GITHUB_WORKFLOW_REF': ref.replace('example/fixture', 'other/repo'), 'RELEASE_EVIDENCE_WORKFLOW_REF': ref.replace('example/fixture', 'other/repo')},
+        ):
+            with self.subTest(changes=changes):
+                result = subprocess.run(['bash', str(SCRIPTS / 'build-release-evidence.sh'), 'fixture', '1.0.0',
+                    'fixture-v1.0.0', 'module', 'missing.cdx.json'], env=base | changes, capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('evidence producer', result.stderr)
+
 
 
 class IsolatedSourceTest(unittest.TestCase):
@@ -119,6 +141,23 @@ if os.environ.get('MOVE_REMOTE'):
 
     def prepare(self, component="fixture", version="1.1.0", tag="fixture-v1.1.0", **env):
         return subprocess.run(["python3", str(SCRIPTS / "prepare-release-evidence.py"), "module", component, version, tag], cwd=self.checkout, env={**self.env, **env}, capture_output=True, text=True)
+
+    def test_changed_tag_after_plan_rejected_before_any_build_execution(self):
+        from unittest.mock import patch
+        self.git(self.remote, 'tag', '-f', 'fixture-v1.1.0', self.trigger)
+        approved = source.remote_commit(self.checkout, 'fixture-v1.1.0')
+        self.git(self.remote, 'tag', '-f', 'fixture-v1.1.0', self.release)
+        # The real remote tag moved after the plan's independent resolution.
+        original_run = subprocess.run
+        builds = []
+        def observe(command, *args, **kwargs):
+            if command[0] == './gradlew': builds.append(command)
+            return original_run(command, *args, **kwargs)
+        with patch.dict(os.environ, self.env, clear=True), patch.object(source.subprocess, 'run', side_effect=observe):
+            with self.assertRaisesRegex(ValueError, 'approved source commit before execution'):
+                source.prepare(self.checkout, 'module', 'fixture', '1.1.0', 'fixture-v1.1.0', expected_commit=approved)
+        self.assertEqual(builds, [])
+        self.assertFalse((self.checkout / 'fixture-v1.1.0.evidence.json').exists())
 
     def test_tag_checkout_drives_actual_version_and_sbom(self):
         result = self.prepare()
