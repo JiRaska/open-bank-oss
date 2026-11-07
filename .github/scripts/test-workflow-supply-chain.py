@@ -87,7 +87,8 @@ class SupplyChainTest(unittest.TestCase):
     def test_trigger_filter_regression(self):
         for name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):
             self.assertTrue(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {}}, 'jobs': {}}))
-            self.assertFalse(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
+            self.assertNotIn('workflow_run must reject non-main branches at the trigger',
+                             guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
                                                    'jobs': {}}))
 
     def test_admin_ui_deploy_pin_uses_the_app_token(self):
@@ -105,6 +106,66 @@ class SupplyChainTest(unittest.TestCase):
             'deploy pin must be written by publish-deploy-pin.py with the GitHub App token',
             guard.findings(path.name, mutated),
         )
+
+    def test_admin_ui_deploy_without_build_push_job_fails(self):
+        # A renamed job must not silently switch the pin-token check off.
+        path = guard.ROOT / '.github/workflows/admin-ui-deploy.yml'
+        mutated = yaml.safe_load(path.read_text())
+        mutated['jobs']['renamed'] = mutated['jobs'].pop('build-push')
+        self.assertIn('admin-ui-deploy.yml must keep its build-push job (the deploy pin check is keyed on it)',
+                      guard.findings(path.name, mutated))
+
+    def test_admin_ui_repin_app_token_only_on_main(self):
+        path = guard.ROOT / '.github/workflows/admin-ui-repin.yml'
+        original = yaml.safe_load(path.read_text())
+        self.assertFalse(guard.findings(path.name, original))
+        message = ('admin-ui-repin.yml: a job that mints the GitHub App token must declare the '
+                   f'{guard.REPIN_ENVIRONMENT} environment and fail first on any ref but main')
+        for mutation in ('no-environment', 'other-environment', 'no-guard', 'guard-skips',
+                         'guard-not-first'):
+            doc = copy.deepcopy(original)
+            job = doc['jobs']['repin']
+            if mutation == 'no-environment':
+                job.pop('environment')
+            elif mutation == 'other-environment':
+                job['environment'] = 'copilot'
+            elif mutation == 'no-guard':
+                job['steps'].pop(0)
+            elif mutation == 'guard-skips':
+                job['steps'][0]['run'] = 'echo not main; exit 0'
+            else:
+                job['steps'].insert(0, job['steps'].pop(1))
+            with self.subTest(mutation=mutation):
+                self.assertIn(message, guard.findings(path.name, doc))
+
+    def test_publish_older_pin_is_a_distinct_outcome(self):
+        import os
+        import tempfile
+        spec = importlib.util.spec_from_file_location(
+            'publish', Path(__file__).with_name('publish-deploy-pin.py'))
+        publish = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(publish)
+        with tempfile.TemporaryDirectory() as tmp:
+            out, summary = Path(tmp) / 'out', Path(tmp) / 'summary'
+            env = {'GITHUB_OUTPUT': str(out), 'GITHUB_STEP_SUMMARY': str(summary)}
+            saved = {k: os.environ.get(k) for k in env}
+            os.environ.update(env)
+            try:
+                rc = publish.on_contract_rejection(
+                    'admin-ui', publish.pins.PinError('admin-ui image_source_sha moves backwards'))
+                self.assertEqual(rc, 0)
+                self.assertIn('outcome=skipped-older\n', out.read_text())
+                self.assertIn('skipped-older', summary.read_text())
+                out.unlink()
+                rc = publish.on_contract_rejection('admin-ui', publish.pins.PinError('outside pins/'))
+                self.assertEqual(rc, 1)
+                self.assertIn('outcome=rejected\n', out.read_text())
+            finally:
+                for k, v in saved.items():
+                    if v is None:
+                        os.environ.pop(k, None)
+                    else:
+                        os.environ[k] = v
 
     def test_pull_request_workflow_requires_concurrency(self):
         path = guard.ROOT / '.github/workflows/dependency-review.yml'

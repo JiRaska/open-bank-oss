@@ -7365,6 +7365,8 @@ gates:
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/scripts/shard-verification-modules.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/admin-ui-repin.yml"
+      - ".github/scripts/publish-deploy-pin.py"
       - ".github/workflows/auto-deploy.yml"
       - ".github/workflows/platform-images.yml"
     selftest: |

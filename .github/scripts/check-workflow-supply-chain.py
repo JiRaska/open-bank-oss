@@ -61,6 +61,33 @@ def grant_drift(actual, expected):
     return errors
 
 
+# ADR-0358: admin-ui-repin.yml is workflow_dispatch-able from any ref, and a dispatched ref
+# runs ITS OWN copy of the YAML. A job that mints the GitOps App token (which writes
+# deploy/sandbox, synced by ArgoCD without review) must therefore (a) sit in the main-only
+# environment that holds the credential, and (b) fail - not skip - as its first step on any
+# other ref, so a run that somehow reaches the job still mints nothing.
+REPIN_ENVIRONMENT = 'deploy-pin-sandbox'
+MAIN_ONLY_GUARD = "github.ref != 'refs/heads/main'"
+
+
+def repin_findings(jobs):
+    errors = []
+    for job in jobs.values():
+        steps = job.get('steps', [])
+        if not any('create-github-app-token' in step.get('uses', '') for step in steps):
+            continue
+        environment = job.get('environment')
+        if isinstance(environment, dict):
+            environment = environment.get('name')
+        first = steps[0] if steps else {}
+        guarded = (MAIN_ONLY_GUARD in str(first.get('if', ''))
+                   and re.search(r'(^|\n)\s*exit 1\s*$', first.get('run', ''), re.M) is not None)
+        if environment != REPIN_ENVIRONMENT or not guarded:
+            errors.append(f'admin-ui-repin.yml: a job that mints the GitHub App token must declare the '
+                          f'{REPIN_ENVIRONMENT} environment and fail first on any ref but main')
+    return errors
+
+
 def findings(name, doc):
     errors = list(top_level_findings(doc))
     # A personal subscription credential must never be wired into CI, even if
@@ -81,6 +108,10 @@ def findings(name, doc):
         events = doc.get('on', doc.get(True, {}))
         if events.get('workflow_run', {}).get('branches') != ['main']:
             errors.append('workflow_run must reject non-main branches at the trigger')
+    if name == 'admin-ui-deploy.yml' and 'build-push' not in jobs:
+        errors.append('admin-ui-deploy.yml must keep its build-push job (the deploy pin check is keyed on it)')
+    if name == 'admin-ui-repin.yml':
+        errors.extend(repin_findings(jobs))
     if name == 'admin-ui-deploy.yml' and 'build-push' in jobs:
         steps = [step for job in jobs.values() for step in job.get('steps', [])]
         # ADR-0358: the pin is written to deploy/sandbox only as a signed App commit; the

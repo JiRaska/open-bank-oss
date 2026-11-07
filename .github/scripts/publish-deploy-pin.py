@@ -82,6 +82,31 @@ def candidate_commit(parent, component, files):
         return commit, stale
 
 
+def record_outcome(outcome, summary):
+    """Expose WHAT happened as its own step output, so a no-op never shares the success state:
+    outcome=written|unchanged|skipped-older|rejected, plus one step-summary line."""
+    for var, line in (("GITHUB_OUTPUT", f"outcome={outcome}\n"),
+                      ("GITHUB_STEP_SUMMARY", f"- deploy pin outcome: **{outcome}** - {summary}\n")):
+        path = os.environ.get(var)
+        if path:
+            with open(path, "a") as handle:
+                handle.write(line)
+
+
+def on_contract_rejection(component, error):
+    """An older build reaching a newer pin is the designed no-op (exit 0, the newer pin is the
+    right answer) but is reported as outcome=skipped-older, never as a write. Anything else the
+    contract rejects is a failure."""
+    if "moves backwards" in str(error):
+        print(f"::notice::{BRANCH} already pins a newer {component}: {error}. Nothing written.")
+        record_outcome("skipped-older",
+                       f"{component}: {BRANCH} already pins a newer build ({error}); nothing written")
+        return 0
+    print(f"::error::deploy-pin-branch-contract rejects this pin: {error}")
+    record_outcome("rejected", f"{component}: contract rejected the pin ({error})")
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["deploy", "repin", "rollback"])
@@ -125,15 +150,12 @@ def main():
         candidate, stale = candidate_commit(parent, args.component, files)
         if git("rev-parse", f"{candidate}^{{tree}}") == git("rev-parse", f"{parent}^{{tree}}"):
             print(f"{args.component} on {BRANCH} already pins exactly this; nothing to do")
+            record_outcome("unchanged", f"{args.component}: {BRANCH} already pins exactly this; nothing written")
             return 0
         try:
             pins.check_commit(".", candidate, parent, "origin/main")
         except pins.PinError as error:
-            if "moves backwards" in str(error):
-                print(f"::notice::{BRANCH} already pins a newer {args.component}: {error}. Nothing written.")
-                return 0
-            print(f"::error::deploy-pin-branch-contract rejects this pin: {error}")
-            return 1
+            return on_contract_rejection(args.component, error)
         if args.dry_run:
             print(f"dry run: candidate {candidate[:12]} passes the contract; nothing written")
             return 0
@@ -176,6 +198,7 @@ def main():
         if out:
             with open(out, "a") as handle:
                 handle.write(f"pin_commit={commit['oid']}\n")
+        record_outcome("written", f"{args.component}: pinned {tag} at {BRANCH}@{commit['oid'][:12]}")
         return 0
     print(f"::error::{BRANCH} kept moving; gave up after 3 attempts")
     return 1

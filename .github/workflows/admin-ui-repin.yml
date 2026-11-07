@@ -48,10 +48,21 @@ jobs:
     name: Re-pin admin-ui on deploy/sandbox
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Environment with a main-only deployment-branch policy: a dispatch from another ref (which
+    # runs that ref's copy of this file) is refused before the job starts. It isolates the key
+    # only once the key is held here and not as a repository secret (ADR-0358 bootstrap).
+    # check-workflow-supply-chain.py enforces the environment and the guard below.
+    environment: deploy-pin-sandbox
     permissions:
       contents: read
       id-token: write  # GitHub OIDC -> ECR read + KMS verify, rollback mode only
     steps:
+      # Fail, not skip: a non-main run must end red before anything mints a token.
+      - name: Refuse any ref but main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::admin-ui-repin writes deploy/sandbox and runs only from main (ref: ${GITHUB_REF})"
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/heads/main
