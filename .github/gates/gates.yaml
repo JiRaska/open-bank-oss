@@ -745,14 +745,12 @@ gates:
       second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
       against live PRs, so this is where it can go red before it acts.
     review_after: "2027-03-30"
-    budget_seconds: 15
+    budget_seconds: 45
     run: |
       set -e
       python3 .github/scripts/deploy-window.py --self-test
       python3 .github/scripts/test-deploy-producer-isolation.py
-      python3 .github/scripts/test-check-deploy-source-freshness.py \
-        DeploySourceFreshnessTest.test_new_tag_over_the_replaced_digest_fails \
-        DeploySourceFreshnessTest.test_pin_without_a_digest_fails
+      python3 .github/scripts/test-check-deploy-source-freshness.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -3367,7 +3365,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 180   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s), 180 = ~1.7x
+    budget_seconds: 300   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07, 300 = ~1.5x
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test

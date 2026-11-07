@@ -52,3 +52,67 @@ partial. Keep the first shadow sample advisory; it does not change merge policy.
 
 API semantics: [workflow runs](https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository)
 and [pull requests](https://docs.github.com/en/rest/pulls/pulls#list-pull-requests).
+
+## Continuous sampling and durable history
+
+`GET /api/v1/devops/delivery/history?limit=288` reads persisted observations only;
+`ROLE_ADMIN` or `ROLE_VIEWER` is required. The limit is 1–288, newest observation
+first. An empty list means no stored observations, never zero throughput.
+
+Sampling is opt-in: `DEVOPS_DELIVERY_SHADOW_ENABLED=true` enables a thirty-minute
+cron. The default is false and `samplingEnabled` exposes that fact even when old
+history remains. `samplingCron` reports the effective configured cron;
+`slotIntervalSeconds` is the independent, fixed 300-second deduplication bucket.
+Enabling needs the normal reviewed image/config rollout; this PR
+changes no live manifest. The sampler only uses the existing GET collector, never
+analysis, proposals, retries, merges or deployments. Its liveness success is recorded
+only after the database transaction completes, including a committed duplicate no-op.
+A failed transaction records no success. Disabled sampling registers no liveness task.
+
+Each row records the overview's original observation time and window, a five-minute
+slot, database-write request time, collector release version and payload schema version.
+The release version is not a source-SHA or deployment attestation. Cached observations
+keep their original slot; replicas and retries cannot overwrite the first row for the
+same repository/slot. Completeness, null counts and NOT_COLLECTED deployment status
+survive a database round trip unchanged. Missing intervals remain gaps.
+
+Rows are retained for 30 days. Each sampling transaction removes at most 1,000 expired
+rows for its repository; long-disabled collectors may need several ticks to catch up.
+With sampling disabled retention does not run. History reads filter the configured
+repository and supported payload schema and never perform collection or cleanup.
+The configured cadence is a sampling schedule, not proof every interval succeeded.
+Compare individual complete `mergedPrsPerDay` observations against the 100 PR/day goal;
+never sum or average overlapping rolling windows into daily completed-work totals.
+
+Migration V2 is additive and does not change findings. Rollback: disable sampling and
+roll back the application image, retaining the table for readback and later recovery.
+Dropping `delivery_observations` is a separate destructive operator decision; it is not
+part of application rollback. Old images ignore the new table. No historical success
+is backfilled or inferred from an empty store.
+
+## GitHub API budget
+
+All GitHub GETs issued by the metrics adapter, including direct overview reads and
+the daily analysis, share a PostgreSQL-backed rolling-hour budget: at most 20 attempts
+per hour across all replicas, with at most 18 reserved by the delivery observer. The
+remaining capacity is reserved for the existing basic analysis. Reservations use the
+database clock and one transactional lock row. Restarting a pod does not reset them;
+missing budget storage fails closed without sending an upstream request. Failed HTTP
+attempts are charged conservatively; no automatic retry is issued.
+
+The default shadow cron is once per 30 minutes, not every five minutes. Five minutes
+is only the immutable deduplication bucket. History reads use PostgreSQL and never
+consume GitHub API calls. An exhausted budget yields incomplete/unavailable evidence,
+not a fabricated healthy zero. This budget covers this adapter, not other clients
+sharing the GitHub credential or existing proposal writes.
+
+Responses supply quota metadata without a separate quota-poll endpoint. At 20 percent
+remaining capacity (or 100 requests, whichever is greater), the adapter pauses until
+at least the upstream reset. Any 403/429 response also pauses. Retry-After and reset
+are honored; missing metadata causes at least a 15-minute pause. The pause is stored
+in PostgreSQL and shared across replicas and restarts; later responses cannot shorten
+it. There is no token rotation or alternate credential to bypass an exhausted quota.
+
+Prefer existing event evidence and stable conditional requests for future collection
+improvements; those must preserve provenance and must not add a second polling loop.
+See [GitHub REST best practices](https://docs.github.com/en/rest/using-the-rest-api/best-practices-for-using-the-rest-api).

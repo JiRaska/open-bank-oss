@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank DevOps Agent API
-  version: 1.1.0
+  version: 1.2.0
   description: Internal operational analysis and read-only delivery evidence. Finding
     decisions and analysis triggers require ROLE_ADMIN. Delivery evidence and findings
     may be read by ROLE_ADMIN or ROLE_VIEWER.
@@ -120,6 +120,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryOverview'
+        '401':
+          description: Authentication required
+        '403':
+          description: Read or admin role required
+  /api/v1/devops/delivery/history:
+    get:
+      operationId: getDeliveryHistory
+      description: Bounded immutable shadow samples. Rolling 24-hour PR rates overlap;
+        do not sum them. Reading does not collect or mutate evidence.
+      parameters:
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 288
+          default: 288
+      responses:
+        '200':
+          description: Persisted history, including explicit sampling status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryHistory'
+        '400':
+          description: Invalid limit
         '401':
           description: Authentication required
         '403':
@@ -266,3 +292,53 @@ components:
           type: integer
           nullable: true
           minimum: 0
+    DeliveryObservation:
+      type: object
+      required:
+      - slotStart
+      - recordedAt
+      - collectorVersion
+      - schemaVersion
+      - overview
+      properties:
+        slotStart:
+          type: string
+          format: date-time
+        recordedAt:
+          type: string
+          format: date-time
+        collectorVersion:
+          type: string
+        schemaVersion:
+          type: integer
+          enum:
+          - 1
+        overview:
+          $ref: '#/components/schemas/DeliveryOverview'
+    DeliveryHistory:
+      type: object
+      required:
+      - samplingEnabled
+      - slotIntervalSeconds
+      - retentionDays
+      - observations
+      - samplingCron
+      properties:
+        samplingEnabled:
+          type: boolean
+        retentionDays:
+          type: integer
+          enum:
+          - 30
+        observations:
+          type: array
+          maxItems: 288
+          items:
+            $ref: '#/components/schemas/DeliveryObservation'
+        slotIntervalSeconds:
+          type: integer
+          enum:
+          - 300
+        samplingCron:
+          type: string
+          description: Effective configured collection cron; slot interval is independent.

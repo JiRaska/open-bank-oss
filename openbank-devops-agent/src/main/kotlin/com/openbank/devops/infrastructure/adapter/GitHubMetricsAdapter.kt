@@ -7,6 +7,7 @@ package com.openbank.devops.infrastructure.adapter
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.application.port.out.GitHubMetricsPort
+import com.openbank.devops.application.port.out.GitHubReadBudget
 import com.openbank.devops.infrastructure.config.DevOpsConfig
 import com.openbank.libs.security.EgressPolicy
 import com.openbank.libs.security.EgressRequest
@@ -19,7 +20,9 @@ import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
 
 /**
  * SSDLC signals straight from the GitHub REST API (ADR-0119) — no Prometheus exporter / pushgateway,
@@ -32,7 +35,11 @@ import java.time.Duration
  * or any API error returns null, leaving the detector inert (never noisy). Never logged.
  */
 @ApplicationScoped
-class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort {
+class GitHubMetricsAdapter(
+    private val config: DevOpsConfig,
+    private val readBudget: GitHubReadBudget,
+    private val clock: Clock,
+) : GitHubMetricsPort {
 
     @Inject
     lateinit var objectMapper: ObjectMapper
@@ -99,26 +106,34 @@ class GitHubMetricsAdapter(private val config: DevOpsConfig) : GitHubMetricsPort
         )
     }
 
-    internal suspend fun deliveryPage(path: String): String? = if (token.isBlank()) null else get(path, deliveryHttp)
+    internal suspend fun deliveryPage(path: String): String? =
+        if (token.isBlank()) null else get(path, deliveryHttp, observer = true)
 
-    internal suspend fun get(path: String, client: SafeHttpClient = http): String? = withContext(Dispatchers.IO) {
-        val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
-        val request = EgressRequest(
-            method = "GET",
-            url = url,
-            headers = mapOf(
-                "Authorization" to "Bearer $token",
-                "Accept" to "application/vnd.github+json",
-                "X-GitHub-Api-Version" to "2022-11-28",
-            ),
-            body = null,
-        )
-        val resp = client.send(request)
-        if (resp.status !in OK_RANGE) {
-            log.warnf("GitHub API %s returned HTTP %d", path, resp.status)
+    internal suspend fun get(path: String, client: SafeHttpClient = http, observer: Boolean = false): String? {
+        if (!readBudget.reserve(observer)) {
+            log.debug("GitHub read deferred by the shared request budget or backoff")
+            return null
+        }
+        val response = withContext(Dispatchers.IO) {
+            val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
+            val request = EgressRequest(
+                method = "GET",
+                url = url,
+                headers = mapOf(
+                    "Authorization" to "Bearer $token",
+                    "Accept" to "application/vnd.github+json",
+                    "X-GitHub-Api-Version" to "2022-11-28",
+                ),
+                body = null,
+            )
+            client.send(request)
+        }
+        GitHubReadBackoff.until(response, Instant.now(clock))?.let { readBudget.deferUntil(it) }
+        return if (response.status !in OK_RANGE) {
+            log.warnf("GitHub API %s returned HTTP %d", path, response.status)
             null
         } else {
-            resp.bodyAsString()
+            response.bodyAsString()
         }
     }
 
