@@ -146,6 +146,8 @@ export const PERMISSIONS = {
   // auditor is included deliberately — the programme's obligation and its cap are exactly what an
   // audit asks about.
   "loyalty:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
+  "game:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "game:manage":           [ROLES.ADMIN],
   "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
   "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
@@ -397,6 +399,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
     // its own permission at the BFF boundary — this prefix only gates the page shell.
     '/reporting',
   ]],
+  ['game:view', ['/loyalty/game']],
   ['loyalty:view', ['/loyalty']],
   ['campaign:view', ['/segments']],
   ['campaign:create', ['/segments/new']],

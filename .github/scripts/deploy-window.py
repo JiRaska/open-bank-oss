@@ -22,7 +22,9 @@ moment a deploy PR's auto-merge is ARMED does:
                 every pending service and supersede-deploy-prs.sh closes the older ones. That
                 is what turns "several pushes inside one window" into ONE commit. A pin is
                 carried only while main still holds the tag that PR replaced — if main moved
-                that service since, the old pin is stale and carrying it would rewind it. It is
+                that service since, the old pin is stale and carrying it would rewind it. A pin
+                is the pair tag@digest and moves as one: the kubelet pulls by digest, so a new
+                tag over the old digest runs the old image under the new label. It is
                 also refused when build inputs changed after that image's source commit.
   * `verify`  — before either deploy workflow arms a GitOps PR, proves every image in its diff
                 still represents the current main build inputs. Unknown sources fail closed.
@@ -47,7 +49,7 @@ from functools import lru_cache
 DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
 DEPLOY_SUBJECTS = ("chore(gitops): auto-deploy ", "chore(admin-ui): deploy ")
-PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)")
+PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)(?:@(?P<digest>sha256:[0-9a-f]{64}))?")
 
 
 def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, window: int) -> tuple[str, str]:
@@ -188,6 +190,56 @@ def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
 
 
 @lru_cache(maxsize=128)
+def pin_transitions(diff: str) -> list[tuple[str, str, str, str | None, str, str | None]]:
+    """(file, image, old_tag, old_digest, new_tag, new_digest) for every retagged image."""
+    out, cur, removed = [], None, {}
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            cur = line[4:].removeprefix("b/")
+            removed = {}
+        elif line.startswith("--- "):
+            continue
+        elif line.startswith("-") and cur:
+            for m in PIN_RE.finditer(line):
+                removed.setdefault(m["image"], (m["tag"], m["digest"]))
+        elif line.startswith("+") and cur:
+            for m in PIN_RE.finditer(line):
+                old = removed.get(m["image"])
+                if old and old[0] != m["tag"]:
+                    out.append((cur, m["image"], old[0], old[1], m["tag"], m["digest"]))
+    return list(dict.fromkeys(out))
+
+
+def pin_identity_failures(diff: str, require_digest: bool = False) -> list[str]:
+    """Pins whose tag and digest cannot name the same image, decided from the diff alone.
+
+    A rebuild pushes a new image, so a new tag over the digest it replaced is a label moved
+    without the image, and a digest dropped by a retag loses the identity the kubelet pulls.
+    One tag naming two digests in one diff cannot be true of both lines. `require_digest` is
+    for gitops deploy PRs, whose producer always has the pushed digest; admin-ui pins by a
+    per-run tag and carries its digest as evidence on the run.
+    """
+    failures = []
+    for rel, image, old_tag, old_digest, new_tag, new_digest in pin_transitions(diff):
+        service = image.rsplit("/", 1)[-1]
+        if new_digest and new_digest == old_digest:
+            failures.append(f"{service}:{new_tag} in {rel} keeps the digest of {old_tag}")
+        elif old_digest and not new_digest:
+            failures.append(f"{service}:{new_tag} in {rel} drops the digest of {old_tag}")
+    seen: dict[tuple[str, str], str | None] = {}
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        for m in PIN_RE.finditer(line):
+            service = m["image"].rsplit("/", 1)[-1]
+            if require_digest and not m["digest"]:
+                failures.append(f"{service}:{m['tag']} has no digest")
+            if seen.setdefault((m["image"], m["tag"]), m["digest"]) != m["digest"]:
+                failures.append(f"{service}:{m['tag']} names two digests")
+    return list(dict.fromkeys(failures))
+
+
+@lru_cache(maxsize=128)
 def global_build_inputs_unchanged(root: str, source: str) -> bool:
     """Cheap rejection shared by every service built from the same source commit."""
     result = subprocess.run(
@@ -223,25 +275,34 @@ def carry(root: str, diff: str, skip_images: set[str],
           fresh: Callable[[str, str], bool]) -> list[str]:
     """Apply an older PR's pins only when main and its image source remain equivalent."""
     carried = []
-    for rel, image, old, new in pins_from_diff(diff):
+    refused = set(pin_identity_failures(diff, require_digest=True))
+    for rel, image, old, old_digest, new, new_digest in pin_transitions(diff):
         if image in skip_images:
             continue  # this run pins it itself — the newer build wins
+        service = image.rsplit("/", 1)[-1]
+        if not new_digest or any(f.startswith(f"{service}:{new} ") for f in refused):
+            continue  # that PR's pin is not one image; repeating it would spread the false pair
         path = os.path.join(root, rel)
         if not os.path.isfile(path):
             continue
         text = open(path, encoding="utf-8").read()
-        cur = {m["tag"] for m in PIN_RE.finditer(text) if m["image"] == image}
-        if cur != {old}:
+        cur = {(m["tag"], m["digest"]) for m in PIN_RE.finditer(text) if m["image"] == image}
+        if cur != {(old, old_digest)}:
             continue  # main moved this service since that PR was cut: carrying would rewind it
         if not fresh(image, new):
             continue  # a newer build input changed; this image cannot be carried safely
-        open(path, "w", encoding="utf-8").write(text.replace(f"{image}:{old}", f"{image}:{new}"))
-        carried.append(f"{image}:{new} in {rel}")
+        old_ref = f"{image}:{old}" + (f"@{old_digest}" if old_digest else "")
+        open(path, "w", encoding="utf-8").write(text.replace(old_ref, f"{image}:{new}@{new_digest}"))
+        carried.append(f"{image}:{new}@{new_digest} in {rel}")
     return carried
 
 
-def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
+def verify_pins(diff: str, fresh: Callable[[str, str], bool],
+                require_digest: bool = False) -> list[str]:
     """Return the first stale or unverifiable pin; one is enough to refuse arming."""
+    identity = pin_identity_failures(diff, require_digest)
+    if identity:
+        return identity
     pins = pins_from_diff(diff)
     if not pins:
         return ["no image pins found in the GitOps diff"]
@@ -473,6 +534,7 @@ def self_test() -> int:
 
     # 5. two pushes in one window -> ONE PR pins both (carry), and a moved service is not rewound
     reg = "123.dkr.ecr.eu-north-1.amazonaws.com"
+    dg = lambda c: f"@sha256:{c * 64}"
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "g"))
         for svc, tag in (("billing", "sandbox-aaa"), ("lending", "sandbox-bbb"), ("party", "sandbox-ccc")):
@@ -485,7 +547,7 @@ def self_test() -> int:
         # party has since moved on main (sandbox-ccc -> sandbox-999 by another merged deploy).
         open(os.path.join(d, "g", "party.yaml"), "w").write(f"image: {reg}/openbank-party:sandbox-999\n")
         older = "".join(
-            f"--- a/g/{s}.yaml\n+++ b/g/{s}.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-{s}:{o}\n+image: {reg}/openbank-{s}:sandbox-111\n"
+            f"--- a/g/{s}.yaml\n+++ b/g/{s}.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-{s}:{o}\n+image: {reg}/openbank-{s}:sandbox-111{dg('1')}\n"
             for s, o in (("billing", "sandbox-aaa"), ("lending", "sandbox-bbb"), ("party", "sandbox-ccc"))
         )
         got = carry(d, older, {f"{reg}/openbank-lending"}, lambda image, tag: True)
@@ -505,6 +567,39 @@ def self_test() -> int:
               and "sandbox-aaa" in read("billing"))
         check("verify refuses stale GitOps pins", len(verify_pins(older, lambda image, tag: False)) == 1)
         check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
+        check("carry moves tag and digest together",
+              carry(d, older, set(), lambda image, tag: True) != []
+              and f"openbank-billing:sandbox-111{dg('1')}\n" in read("billing"))
+        # The shape of #14905: a new tag over the digest of the tag it replaced.
+        def hunk(old, new):
+            return f"--- a/g/aml.yaml\n+++ b/g/aml.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-aml:{old}\n+image: {reg}/openbank-aml:{new}\n"
+        retag = hunk(f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('a')}")
+        rebuilt = hunk(f"sandbox-aaa{dg('a')}", f"sandbox-bbb{dg('b')}")
+        always = lambda image, tag: True
+        check("a new tag over the old digest is refused", len(verify_pins(retag, always)) == 1)
+        check("a new tag with its own digest passes", verify_pins(rebuilt, always) == [])
+        check("a retag that drops the digest is refused",
+              len(verify_pins(hunk(f"sandbox-aaa{dg('a')}", "sandbox-bbb"), always)) == 1)
+        check("a gitops pin without a digest is refused",
+              verify_pins(hunk("sandbox-aaa", "sandbox-bbb"), always, require_digest=True) != [])
+        check("a per-run tag without a digest stays legal for admin-ui",
+              verify_pins(hunk("sandbox-aaa-run1", "sandbox-bbb-run2"), always) == [])
+        check("one tag naming two digests is refused",
+              pin_identity_failures(f"+++ b/g/a.yaml\n+image: {reg}/openbank-aml:sandbox-b{dg('a')}\n"
+                                    f"+image: {reg}/openbank-aml:sandbox-b{dg('b')}\n") != [])
+        aml = os.path.join(d, "g", "aml.yaml")
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('a')}\n")
+        check("carry refuses a donor whose pin is a false pair",
+              carry(d, retag, set(), always) == [] and "sandbox-aaa" in open(aml).read())
+        check("carry refuses a donor pin with no digest",
+              carry(d, hunk(f"sandbox-aaa{dg('a')}", "sandbox-bbb"), set(), always) == [])
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('c')}\n")
+        check("carry treats a moved digest under the same tag as moved",
+              carry(d, rebuilt, set(), always) == [])
+        open(aml, "w").write(f"image: {reg}/openbank-aml:sandbox-aaa{dg('a')}\n")
+        check("carry replaces the whole old reference, leaving no stale digest",
+              carry(d, rebuilt, set(), always) != []
+              and open(aml).read() == f"image: {reg}/openbank-aml:sandbox-bbb{dg('b')}\n")
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
     if fails:
@@ -535,6 +630,7 @@ def main() -> int:
     sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    v.add_argument("--require-digest", action="store_true")
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -604,7 +700,8 @@ def main() -> int:
         return 0
     if a.cmd == "verify":
         stale = verify_pins(sys.stdin.read(),
-                            lambda image, tag: image_source_is_current(a.root, image, tag))
+                            lambda image, tag: image_source_is_current(a.root, image, tag),
+                            require_digest=a.require_digest)
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
         return 1 if stale else 0

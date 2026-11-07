@@ -18,8 +18,9 @@
 // generate-governance.mjs — a declaration that contradicts the tree is a gap there.
 
 import { z } from 'zod'
+import { domainIds } from './generate-domain-taxonomy.mjs'
 
-export const DATA_DOMAINS = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
+export const DATA_DOMAINS = domainIds
 export const LINEAGE_ROLES = ['producer', 'consumer', 'both', 'internal']
 export const CLASSIFICATIONS = ['public', 'internal', 'confidential', 'restricted', 'unknown']
 

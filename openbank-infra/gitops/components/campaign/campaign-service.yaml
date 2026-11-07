@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-campaign-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e000bbe72b3ac81a"
+        openbank.tech/policy-checksum: "992024f7d358c27d"
       labels:
         app.kubernetes.io/name: campaign-service
         app.kubernetes.io/part-of: campaign
@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: campaign-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-48a6da90@sha256:721834c0b12ef65c9b3be68e18b03cb9264383957773a9cfe0935c2eab33e7b5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-0943bd54@sha256:1ec3d08100914b5892f26b7852bcb53a32c30f5de039db9b5c983d92d9af03e0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

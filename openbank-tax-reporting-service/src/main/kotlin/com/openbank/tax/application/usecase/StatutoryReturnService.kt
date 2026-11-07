@@ -29,6 +29,17 @@ data class ReportingEntities(val companyId: String, val fundIds: List<String>, v
         ReturnScope.COMPANY -> listOf(companyId)
         ReturnScope.FUND -> fundIds
     }
+
+    /**
+     * What an operator has not yet declared, or null when the deadline check can run. A deployment
+     * without these is unconfigured on purpose, not broken: callers report the two states apart.
+     */
+    fun missingConfiguration(catalogues: List<ReturnCatalogue>): String? = when {
+        reportingStart == null -> "Statutory return reporting start is not configured"
+        fundIds.isEmpty() && catalogues.any { catalogue -> catalogue.returns.any { it.scope == ReturnScope.FUND } } ->
+            "Statutory return fund roster is not configured"
+        else -> null
+    }
 }
 
 enum class BreachKind { NOT_ASSEMBLED, NOT_SUBMITTED }
@@ -114,16 +125,10 @@ class StatutoryReturnService(
      * unknowable, so the check fails instead of publishing a misleading zero.
      */
     suspend fun breaches(): List<ReturnBreach> {
-        val start = entities.reportingStart ?: throw ReturnDataUnavailableException(
-            "Statutory return reporting start is not configured; deadline status is unavailable",
-        )
-        if (catalogues.catalogues().any { catalogue -> catalogue.returns.any { it.scope == ReturnScope.FUND } } &&
-            entities.fundIds.isEmpty()
-        ) {
-            throw ReturnDataUnavailableException(
-                "Statutory return fund roster is not configured; deadline status is unavailable",
-            )
+        entities.missingConfiguration(catalogues.catalogues())?.let {
+            throw ReturnDataUnavailableException("$it; deadline status is unavailable")
         }
+        val start = requireNotNull(entities.reportingStart)
         val today = accountingClock.today()
         val stored = repository.listReturns()
         val latestByKey = stored.groupBy { Key(it.catalogueId, it.returnCode, it.entityId, it.period) }

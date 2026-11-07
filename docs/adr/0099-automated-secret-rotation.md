@@ -12,6 +12,16 @@ summary: "Static per-service credentials give way to OpenBao dynamic database cr
 
 # ADR-0099 — Automated secret rotation: OpenBao dynamic credentials + CronJob rotator
 
+> **Amended by ADR-0177 — Tier 2 withdrawn and removed (2026-11).** The weekly
+> `vault/secret-rotator` CronJob (OIDC client secrets + JWT signing keys) is no longer
+> deployed. It never once recorded a success. It wrote `openbank/keycloak/<svc>` while
+> services read `openbank/<svc>`, and nothing consumed `openbank/jwt-signing/*`. ADR-0177
+> withdraws the OIDC-secret-rotation objective in favour of workload identity, so the
+> Tier 2 text below is historical and is NOT a live control. Tier 1 (OpenBao dynamic
+> database credentials) is unaffected and still in force. Until ADR-0177 Phase 3, a
+> static OIDC client secret is rotated by hand, against the `openbank.io/rotation-deadline`
+> annotation on its ExternalSecret.
+
 **Implementation note (Tier 1 + Tier 2 scripts — shipped 2026-06-30, PR feat/secret-rotation):**
 All script and configuration bugs fixed; CronJobs un-suspended. One out-of-band
 operator step remains before Tier 1 fires successfully: §3 in runbook 0006 (create
