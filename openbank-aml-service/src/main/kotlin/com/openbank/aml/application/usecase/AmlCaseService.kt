@@ -157,6 +157,9 @@ class AmlCaseService(
                 assignedAnalyst = current.assignedAnalyst,
                 decidedBy = current.decidedBy,
                 occurredAt = current.updatedAt,
+                transactionId = current.transactionId,
+                alertCode = current.alertCode,
+                idempotencyKey = current.idempotencyKey,
             ),
         ),
     )

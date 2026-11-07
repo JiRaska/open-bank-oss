@@ -1,5 +1,73 @@
 # Changelog
 
+## [4.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.1...admin-ui-v4.4.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve header commit badge contrast ([#15085](https://github.com/JiRaska/open-bank-oss/issues/15085)) ([4c59828](https://github.com/JiRaska/open-bank-oss/commit/4c598286b7315947e775f8df8e43c37b61a14926))
+* **admin-ui:** refresh cluster-topology snapshot when GitOps inputs change ([#14599](https://github.com/JiRaska/open-bank-oss/issues/14599)) ([abbbf30](https://github.com/JiRaska/open-bank-oss/commit/abbbf309cd3a810a27abd54803e9b417ab58b0aa))
+
+## [4.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.0...admin-ui-v4.4.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui,mcp-service:** align remaining domain consumers ([#15040](https://github.com/JiRaska/open-bank-oss/issues/15040)) ([7e5b6d5](https://github.com/JiRaska/open-bank-oss/commit/7e5b6d552d94dd952dc1e5e0a549439e87896a18))
+
+## [4.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.3.0...admin-ui-v4.4.0) (2026-11-07)
+
+
+### Features
+
+* **admin-ui:** make access matrix compact and compare selected roles ([#15032](https://github.com/JiRaska/open-bank-oss/issues/15032)) ([173c387](https://github.com/JiRaska/open-bank-oss/commit/173c3877b246b8a6710cb4536aeb87a466cea7d5))
+
+## [4.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.2.0...admin-ui-v4.3.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** explain access preview roles and permissions in Czech and English ([#14997](https://github.com/JiRaska/open-bank-oss/issues/14997)) ([fe9b4d1](https://github.com/JiRaska/open-bank-oss/commit/fe9b4d17dd3ec06cbf5012ba752811279d8b523d))
+
+## [4.2.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.1.0...admin-ui-v4.2.0) (2026-11-06)
+
+
+### Features
+
+* **admin-ui:** preview role and permission catalog in settings ([#14980](https://github.com/JiRaska/open-bank-oss/issues/14980)) ([e1530f5](https://github.com/JiRaska/open-bank-oss/commit/e1530f5b31a0bde3b73064c42c6f45d08bcc8b7f))
+* **engagement,customer-edge,admin-ui:** manage Lion Quest chapters through the bank ([#14964](https://github.com/JiRaska/open-bank-oss/issues/14964)) ([beb444f](https://github.com/JiRaska/open-bank-oss/commit/beb444f56996633fa564719fe5dca1b8ec943a96))
+
+
+### Bug Fixes
+
+* **admin-ui:** derive business domains from canonical governance ([#14953](https://github.com/JiRaska/open-bank-oss/issues/14953)) ([20e2adf](https://github.com/JiRaska/open-bank-oss/commit/20e2adf3413cc2d484a1138228d2d843562fd4f1))
+
+## [4.1.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.0.0...admin-ui-v4.1.0) (2026-11-06)
+
+
+### Features
+
+* **products:** obp CLI and MCP product tools over a shared ProductToolkit (ADR-0352 phase 5a) ([#14205](https://github.com/JiRaska/open-bank-oss/issues/14205)) ([ba97611](https://github.com/JiRaska/open-bank-oss/commit/ba9761178b8f2abbf3516ec679a49ab694f95b59))
+
+## [4.0.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.18.0...admin-ui-v4.0.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207))
+
+### Features
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207)) ([4592d82](https://github.com/JiRaska/open-bank-oss/commit/4592d82576861a903ecc1b7c2d0e62863395f68e))
+
+
+### Bug Fixes
+
+* **admin-ui:** keep the SSO button disabled until the login page hydrates ([#14782](https://github.com/JiRaska/open-bank-oss/issues/14782)) ([f82897e](https://github.com/JiRaska/open-bank-oss/commit/f82897efdebe95cac3b70f289174a787c93ecd58)), closes [#14779](https://github.com/JiRaska/open-bank-oss/issues/14779)
+* **admin-ui:** override glob to 14.0.2 and minimatch to 11.0.1 for advisories ([#14761](https://github.com/JiRaska/open-bank-oss/issues/14761)) ([5bd6a1b](https://github.com/JiRaska/open-bank-oss/commit/5bd6a1b530a3a10aa57c83305cde0393c2425b78)), closes [#14757](https://github.com/JiRaska/open-bank-oss/issues/14757)
+* **admin-ui:** queue sanctions list refresh on the v2 trigger and show the queued state ([#14789](https://github.com/JiRaska/open-bank-oss/issues/14789)) ([eb48aee](https://github.com/JiRaska/open-bank-oss/commit/eb48aee81a3af10444b4e0269f45825307a7e161)), closes [#14780](https://github.com/JiRaska/open-bank-oss/issues/14780)
+* **admin-ui:** show auth-blocked fuzz operations as not run on the DAST tile ([#14778](https://github.com/JiRaska/open-bank-oss/issues/14778)) ([bee9491](https://github.com/JiRaska/open-bank-oss/commit/bee94917d748a5de85b63a6cc62bb76d0d0d8ef2))
+
 ## [3.18.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v3.17.0...admin-ui-v3.18.0) (2026-11-05)
 
 

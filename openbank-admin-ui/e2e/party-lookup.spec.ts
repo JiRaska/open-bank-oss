@@ -54,7 +54,7 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
 
     await expect(page.getByText('Jan Novák')).toBeVisible()
     await page.getByRole('button', { name: /Vybrat|Select/ }).first().click()
-    await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^(Typy agregátů a aktuálnost|Aggregate types and recency)$/ })).toBeVisible()
   })
 
   test('a party with no events says so, and never that the source is empty', async ({ page }) => {
@@ -83,7 +83,7 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
     await page.getByRole('button', { name: /Vybrat|Select/ }).first().click()
 
-    await expect(page.getByText(/Domains and recency|Domény a aktuálnost/)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^(Typy agregátů a aktuálnost|Aggregate types and recency)$/ })).toBeVisible()
     await expect(
       page.getByRole('status').filter({
         hasText: /Invalid projection records excluded: 2|Vyloučeno neplatných projekčních záznamů: 2/,
@@ -104,19 +104,22 @@ test.describe('party-name lookup (ADR-0210 D8)', () => {
     await page.getByRole('textbox').fill('Novák')
     await page.getByRole('button', { name: /Vyhledat|Search/ }).click()
     await page.getByRole('button', { name: /Vybrat Jan Novák|Select Jan Novák/ }).click()
-    await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toBeVisible()
+    await expect(page.getByRole('heading', { name: /^(Typy agregátů a aktuálnost|Aggregate types and recency)$/ })).toBeVisible()
 
     await page.getByRole('button', { name: /Vybrat Nováková Petra|Select Nováková Petra/ }).click()
     await expect(page.getByText(/Vypršela relace|Session expired/)).toBeVisible()
     await expect(page.getByText(/Začněte člověkem, ne UUID|Start with a person, not a UUID/)).toBeVisible()
-    await expect(page.getByText(/Domény a aktuálnost|Domains and recency/)).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: /^(Typy agregátů a aktuálnost|Aggregate types and recency)$/ })).toHaveCount(0)
   })
 
   test('/consents defaults to the party lens, so an operator lands on name search', async ({ page }) => {
     await stubSearch(page)
     await page.goto('/consents')
     await expect(page.getByRole('combobox')).toHaveValue('party')
-    await expect(page.getByPlaceholder(/Jméno, příjmení|Name, surname/)).toBeVisible()
+    const lookup = page.getByRole('search', { name: /^(Vyhledání klienta nebo firmy|Find a customer or company)$/ })
+      .getByRole('textbox', { name: /^(Vyhledat stranu|Search parties)$/ })
+    await expect(lookup).toBeVisible()
+    await expect(lookup).toHaveAttribute('placeholder', /Jméno, příjmení|Name, surname/)
   })
 
   test('a lens switch invalidates an IN-FLIGHT lookup, not just the settled rows', async ({ page }) => {

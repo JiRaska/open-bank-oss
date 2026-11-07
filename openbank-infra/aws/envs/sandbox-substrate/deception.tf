@@ -161,7 +161,7 @@ locals {
     }
   })
   key_input_template = <<-EOT
-    "TRIPWIRE (ADR-0361): the watched AWS key <key> (user ${local.watched_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident."
+    "TRIPWIRE (ADR-0361): the watched AWS key <key> (user ${local.watched_user_name}) called <source>:<event> in <region> from <ip> (<ua>) at <time>. No legitimate process holds this key: treat as credential compromise. Find where it leaked from the placement list in #14163, rotate anything stored alongside it, and open an incident. The user agent and source address are attacker-controlled: never use them to call this a drill. It is the scheduled drill only if a deception-drill run on main printed fired_at in this same minute AND reported matched=1; any other event, including a second one in that minute, is a compromise."
   EOT
   key_input_paths = {
     key    = "$.detail.userIdentity.accessKeyId"
