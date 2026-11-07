@@ -6,6 +6,7 @@ import importlib.util
 import errno
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -30,6 +31,39 @@ def cleanup_temporary_directory(temporary_directory):
             if error.errno != errno.ENOTEMPTY or attempt == 4:
                 raise
             time.sleep(0.1 * (attempt + 1))
+
+
+def _seed_git(root, *args):
+    env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+    result = subprocess.run(['git', *args], cwd=root, env=env,
+                            capture_output=True, text=True, check=False)
+    if result.returncode:
+        raise RuntimeError(f'fixture git {args!r} failed: {result.stderr or result.stdout}')
+    return result.stdout.strip()
+
+
+def _seed_commit(root):
+    paths = _seed_git(root, 'ls-files', '--others', '--modified', '--exclude-standard').splitlines()
+    _seed_git(root, 'add', '--', *paths)
+    _seed_git(root, 'commit', '-qm', 'fixture')
+    return _seed_git(root, 'rev-parse', 'HEAD')
+
+
+def _new_seed(test_class, *init_args):
+    temporary = tempfile.TemporaryDirectory()
+    # unittest runs this even if setUpClass fails before any test starts.
+    test_class.addClassCleanup(cleanup_temporary_directory, temporary)
+    root = Path(temporary.name)
+    _seed_git(root, 'init', *init_args)
+    _seed_git(root, 'config', 'user.email', 'test@example.com')
+    _seed_git(root, 'config', 'user.name', 'test')
+    _seed_git(root, 'config', 'commit.gpgsign', 'false')
+    return root
+
+
+def _copy_seed(source, destination):
+    # Copy every file independently: no hardlinks, alternates or mutable shared Git state.
+    shutil.copytree(source, destination)
 
 
 class TemporaryDirectoryCleanupTests(unittest.TestCase):
@@ -72,27 +106,32 @@ class PushPreservesNewerPinTest(unittest.TestCase):
     Measured on #14579: a deploy PR for an older source rewrote 22 newer pins. These cases were
     written before the rule and FAIL on the old `decision()`, which publishes every push."""
 
+    @classmethod
+    def setUpClass(cls):
+        cls._seed_path = _new_seed(cls, '-q', '-b', 'main')
+        root = cls._seed_path
+        (root / 'f.txt').write_text('1\n'); c1 = _seed_commit(root)
+        (root / 'f.txt').write_text('2\n'); c2 = _seed_commit(root)
+        (root / 'f.txt').write_text('3\n'); c3 = _seed_commit(root)
+        _seed_git(root, 'checkout', '-q', '-b', 'side', c1)
+        (root / 'g.txt').write_text('s\n'); side = _seed_commit(root)
+        _seed_git(root, 'checkout', '-q', 'main')
+        cls._seed_values = (c1, c2, c3, side)
+
     def setUp(self):
+        # Gate runners provide a scratch index; every copied fixture needs its own.
         clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         isolated = patch.dict(os.environ, clean_env, clear=True)
         isolated.start()
         self.addCleanup(isolated.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = Path.cwd()
-        os.chdir(self.tmp.name)
         self.addCleanup(cleanup_temporary_directory, self.tmp)
         self.addCleanup(os.chdir, self.previous)
-        self.git('init', '-q', '-b', 'main')
-        self.git('config', 'user.email', 'test@example.com')
-        self.git('config', 'user.name', 'test')
-        self.git('config', 'commit.gpgsign', 'false')
-        # c1 -> c2 -> c3 on main; side diverges from c1.
-        self.write('f.txt', '1\n'); self.c1 = self.commit()
-        self.write('f.txt', '2\n'); self.c2 = self.commit()
-        self.write('f.txt', '3\n'); self.c3 = self.commit()
-        self.git('checkout', '-q', '-b', 'side', self.c1)
-        self.write('g.txt', 's\n'); self.side = self.commit()
-        self.git('checkout', '-q', 'main')
+        repository = Path(self.tmp.name) / 'repo'
+        _copy_seed(type(self)._seed_path, repository)
+        os.chdir(repository)
+        self.c1, self.c2, self.c3, self.side = type(self)._seed_values
 
     def git(self, *args):
         result = subprocess.run(['git', *args], capture_output=True, text=True, check=False)
@@ -137,27 +176,35 @@ class PushPreservesNewerPinTest(unittest.TestCase):
 
 
 class PublicationTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._seed_path = _new_seed(cls, '-q')
+        root = cls._seed_path
+        manifest = 'openbank-infra/gitops/components/example/service.yaml'
+        path = root / manifest
+        path.parent.mkdir(parents=True)
+        path.write_text('image: registry.example/openbank-example:sandbox-11111111\n')
+        (root / 'service').mkdir()
+        (root / 'service/version.txt').write_text('1.0\n')
+        base = _seed_commit(root)
+        path.write_text(f'image: registry.example/openbank-example:sandbox-{base[:8]}\n')
+        tip = _seed_commit(root)
+        cls._seed_values = (manifest, base, tip)
+
     def setUp(self):
-        # Gate runners provide a scratch index for the checkout; fixtures need their own.
+        # Gate runners provide a scratch index; every copied fixture needs its own.
         clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         isolated = patch.dict(os.environ, clean_env, clear=True)
         isolated.start()
         self.addCleanup(isolated.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.previous = Path.cwd()
-        os.chdir(self.tmp.name)
         self.addCleanup(cleanup_temporary_directory, self.tmp)
         self.addCleanup(os.chdir, self.previous)
-        self.git('init', '-q')
-        self.git('config', 'user.email', 'test@example.com')
-        self.git('config', 'user.name', 'test')
-        self.git('config', 'commit.gpgsign', 'false')
-        self.manifest = 'openbank-infra/gitops/components/example/service.yaml'
-        self.write(self.manifest, 'image: registry.example/openbank-example:sandbox-11111111\n')
-        self.write('service/version.txt', '1.0\n')
-        self.base = self.commit()
-        self.write(self.manifest, f'image: registry.example/openbank-example:sandbox-{self.base[:8]}\n')
-        self.tip = self.commit()
+        repository = Path(self.tmp.name) / 'repo'
+        _copy_seed(type(self)._seed_path, repository)
+        os.chdir(repository)
+        self.manifest, self.base, self.tip = type(self)._seed_values
 
     def git(self, *args):
         result = subprocess.run(['git', *args], capture_output=True, text=True, check=False)
@@ -319,6 +366,80 @@ class PublicationTest(unittest.TestCase):
                                                event=event, reconcile=reconcile)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('@sha256:' + 'c' * 64, Path(self.manifest).read_text())
+
+
+class FixtureSeedTests(unittest.TestCase):
+    def test_copies_do_not_share_objects_refs_index_or_worktree(self):
+        seed = _new_seed(type(self), '-q', '-b', 'main')
+        (seed / 'f').write_text('base\n')
+        base = _seed_commit(seed)
+        blob = _seed_git(seed, 'rev-parse', 'HEAD:f')
+        object_path = Path('.git/objects') / blob[:2] / blob[2:]
+        original_object = (seed / object_path).read_bytes()
+        with tempfile.TemporaryDirectory() as directory:
+            first, peer = Path(directory) / 'first', Path(directory) / 'peer'
+            for destination in (first, peer):
+                _copy_seed(seed, destination)
+
+            def state(root):
+                return ((root / '.git/index').read_bytes(), (root / 'f').read_bytes(),
+                        _seed_git(root, 'for-each-ref', '--format=%(refname) %(objectname)'))
+
+            before_seed, before_peer = state(seed), state(peer)
+            (first / 'f').write_text('first only\n')
+            changed = _seed_commit(first)
+            _seed_git(first, 'reset', '--hard', base)
+            new_object = Path('.git/objects') / changed[:2] / changed[2:]
+            self.assertFalse((seed / new_object).exists())
+            self.assertFalse((peer / new_object).exists())
+            # This catches copy_function=os.link, including links to existing objects.
+            (first / object_path).chmod(0o600)
+            (first / object_path).write_bytes(b'corrupt only the disposable copy')
+            self.assertEqual((seed / object_path).read_bytes(), original_object)
+            self.assertEqual((peer / object_path).read_bytes(), original_object)
+            self.assertEqual(state(seed), before_seed)
+            self.assertEqual(state(peer), before_peer)
+            for root in (seed, first, peer):
+                self.assertFalse((root / '.git/objects/info/alternates').exists())
+
+    def test_seed_copy_and_chdir_failures_restore_owned_resources(self):
+        previous = Path.cwd()
+        real_chdir = os.chdir
+        for mode in ('seed', 'copy', 'chdir'):
+            with self.subTest(mode=mode):
+                paths, ran = [], []
+
+                class BrokenPublication(PublicationTest):
+                    def test_body(self):
+                        ran.append(True)
+
+                def fail_seed(root, *args):
+                    paths.append(Path(root))
+                    raise OSError('injected seed initialization failure')
+
+                def fail_copy(source, destination):
+                    paths.extend((Path(source), Path(destination).parent))
+                    Path(destination).mkdir()
+                    (Path(destination) / 'partial').write_text('partial copy')
+                    raise OSError('injected partial copy failure')
+
+                def fail_chdir(path):
+                    if Path(path) != previous:
+                        paths.extend((BrokenPublication._seed_path, Path(path).parent))
+                        raise OSError('injected chdir failure')
+                    return real_chdir(path)
+
+                replacements = ({'_seed_git': fail_seed} if mode == 'seed' else
+                                {'_copy_seed': fail_copy} if mode == 'copy' else {})
+                with patch.dict(globals(), replacements), \
+                     patch.object(os, 'chdir', side_effect=fail_chdir if mode == 'chdir' else real_chdir):
+                    result = unittest.TestResult()
+                    unittest.TestSuite([BrokenPublication('test_body')]).run(result)
+                self.assertEqual(len(result.errors), 1)
+                self.assertFalse(ran)
+                self.assertEqual(Path.cwd(), previous)
+                self.assertTrue(paths)
+                self.assertTrue(all(not path.exists() for path in paths))
 
 
 if __name__ == '__main__':
