@@ -94,6 +94,7 @@ describe('sidebar business-domain ownership', () => {
     state.roles = Object.values(ROLES).filter(role => role !== ROLES.DEMO)
     mount()
     expect(destinations()).toEqual([...new Set(readSidebarDestinations().map(item => item.href))].sort())
+    expect(screen.queryByRole('region', { name: 'Unclassified', exact: true })).not.toBeInTheDocument()
   })
 
   it('uses reviewed ownership updates without changing the route or access permission', () => {

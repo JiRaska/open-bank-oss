@@ -28,7 +28,7 @@ const CPU_WEIGHT = 0.5
 const RAM_WEIGHT = 0.5
 
 // Services with a resource footprint but unknown to the governance manifest (in-cluster
-// platform infra: keycloak, redis, external-dns, apicurio, admin-ui itself). They genuinely
+// infrastructure components without declared business ownership). They genuinely
 // consume compute, so we DO allocate to them — but under the `unclassified` group, and we record
 // them in `unmapped` for transparency rather than silently folding their cost into business
 // services.

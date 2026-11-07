@@ -95,7 +95,10 @@ allowlists do not derive from these presentation labels.
 
 FinOps business-domain showback joins service footprints to governance. AWS billing categories
 and namespace-level resource observations are independent dimensions: a shared namespace must
-not be attributed to one service or treated as one business domain. Cluster topology likewise
+not be attributed to one service or treated as one business domain. Application cost footprints include Deployments and Rollouts. Overlay duplicates represent
+one namespace/workload identity; distinct tenant namespaces contribute independently before
+rolling up to the owning service. Workload naming exceptions use the existing operational
+registry, not suffix guesses or another domain table. Cluster topology likewise
 shows physical application namespaces without claiming one namespace per business domain.
 
 Both MCP registries package the canonical taxonomy and service declarations as runtime inputs.

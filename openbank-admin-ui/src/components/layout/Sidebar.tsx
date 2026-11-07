@@ -101,6 +101,8 @@ import styles from './Sidebar.module.css'
 /** owner references an existing ServiceEntry.id; fleet membership and domains come from the catalog. */
 type NavItem = { owner?: string; nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
 
+// Static inventory chunks support route auditing; they do not assign business domains.
+// Rendering groups ALL_NAV by each destination owner in reviewed governance.
 const coreNav: NavItem[] = [
   { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
   { nameCs: 'Účty',         nameEn: 'Accounts',     href: '/accounts',     icon: CreditCard,      permission: 'accounts:view', owner: 'account' },
@@ -188,7 +190,7 @@ const complianceNav: NavItem[] = [
   { nameCs: 'MGM programy',        nameEn: 'MGM Programs',     href: '/campaigns/referrals', icon: Gift,                  permission: 'campaign:view', owner: 'referral' },
   { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view', owner: 'campaign' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view', owner: 'consent' },
-  // ADR-0212 D4: four-eyes activation of the jurisdictional credit compliance packs. Filed under
+  // ADR-0212 D4: four-eyes activation of jurisdictional credit compliance packs in lending.
   { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view', owner: 'lending' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view', owner: 'audit' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view', owner: 'finrep' },
@@ -199,9 +201,9 @@ const complianceNav: NavItem[] = [
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view', owner: 'pid' },
   { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view', owner: 'notification' },
-  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Filed under Ops beside
-  // Notifications (what we send) rather than under the agent cockpit: the audience is the
-  // contact centre and back-office, not agent operators.
+  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Inventory entries beside
+  // Notifications (what we send): both resolve to customer engagement through governance.
+  // The audience is the contact centre and back-office, not agent operators.
   { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view', owner: 'communication' },
   { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view', owner: 'notification' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
