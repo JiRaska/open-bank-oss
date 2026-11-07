@@ -171,8 +171,22 @@ def live_pins_api(repo: str, branch: str, path: str) -> dict[str, tuple[str, str
     return full_pins_in_text(r.stdout) if r.returncode == 0 else None
 
 
+def tree_pins(root: str, rev: str) -> dict[str, set[tuple[str, str, str]]] | None:
+    """image name -> every distinct pin for it anywhere under PIN_ROOT at `rev` (None if unreadable).
+    A pin is judged against the whole tree, so moving it to a new or renamed manifest is no escape."""
+    r = git(root, "grep", "-h", "-I", "-e", "sandbox-", rev, "--", PIN_ROOT, check=False)
+    if r.returncode not in (0, 1):
+        return None
+    out: dict[str, set[tuple[str, str, str]]] = {}
+    for line in r.stdout.splitlines():
+        m = PIN_RE.match(line)
+        if m:
+            out.setdefault(m.group("image").rsplit("/", 1)[-1], set()).add((m.group("sha"), m.group("rest"), m.group("image")))
+    return out
+
+
 def changed_manifests(root: str, base: str) -> list[str]:
-    r = git(root, "diff", "--name-only", f"{base}...HEAD", "--", PIN_ROOT)
+    r = git(root, "diff", "--no-renames", "--name-only", f"{base}...HEAD", "--", PIN_ROOT)
     return [p for p in r.stdout.split("\n") if p.strip()]
 
 
@@ -274,15 +288,31 @@ def own_labels_allow(repo: str, number: str, labels_of: Callable[[str, str], set
     return False, f"#{number} is not labelled {REVERT_LABEL}"
 
 
+def compare(old: tuple[str, str, str], new: tuple[str, str, str], ancestry: Callable[[str, str], str]) -> str:
+    if old[2] != new[2]:
+        return REPINNED   # another registry/repository
+    if old[0] == new[0] or new[0].startswith(old[0]) or old[0].startswith(new[0]):
+        # same source commit: identical pin is OK; another digest/run under it cannot be placed in history
+        return OK if old[1] == new[1] else REPINNED
+    return ancestry(old[0], new[0])
+
+
 def judge(root: str, base: str, ancestry: Callable[[str, str], str],
-          live_pins: Callable[[str], dict[str, tuple[str, str, str]] | None]) -> list[tuple[str, str, str, str, str]]:
+          live_pins: Callable[[str], dict[str, tuple[str, str, str]] | None],
+          live_tree: Callable[[], dict[str, set[tuple[str, str, str]]] | None]) -> list[tuple[str, str, str, str, str]]:
     """(path, image, live pin, new pin, verdict) for every pin line the PR added, judged against LIVE main.
 
-    Each ADDED line is judged on its own: a line that sets a sandbox pin in any shape the pin regex
-    cannot read fails as UNPARSED (whatever its key syntax), the full repository path and digest are
-    part of the pin, a name pinned twice differently fails closed, and a sandbox pin the PR drops
-    from a manifest that still exists fails closed too."""
+    Each ADDED line is judged on its own, against live main — never against the merge-base, since a
+    line restating an older pin rewinds a newer one just the same. It is compared with the pin in the
+    same manifest on live main, or, where that manifest has none (a new, moved or renamed file), with
+    every pin for that name anywhere under PIN_ROOT. A line carrying a sandbox tag the pin regex cannot
+    read fails as UNPARSED (whatever its key syntax); the full repository path and digest are part of
+    the pin; a name pinned twice differently in one manifest fails closed; and a pin the PR removes
+    fails closed unless its manifest is deleted and the image is gone from the whole tree (a
+    decommission)."""
     out = []
+    tree = live_tree()
+    head_tree = tree_pins(root, "HEAD") or {}
     for path in changed_manifests(root, base):
         at_base, after = full_pins_at(root, base, path), full_pins_at(root, "HEAD", path)
         live = live_pins(path)
@@ -301,27 +331,22 @@ def judge(root: str, base: str, ancestry: Callable[[str, str], str],
             if DUPLICATE in (after.get(image), (live or {}).get(image)):
                 out.append((path, image, "?", new[0], UNPARSED))   # two different pins for one name
                 continue
-            if at_base.get(image) == new:
-                continue   # this exact pin was already there at the merge-base; the PR did not move it
-            if live is None:
+            if live is not None and image in live:
+                olds = {live[image]}
+            elif tree is not None:
+                olds = tree.get(image, set())   # empty: image new to main
+            else:
                 out.append((path, image, "?", new[0], UNKNOWN))   # live main unreadable: fail closed
                 continue
-            if image not in live:
-                continue   # image new to main
-            old = live[image]
-            if old[2] != new[2]:
-                out.append((path, image, old[2], new[2], REPINNED))   # another registry/repository
-                continue
-            if old[0] == new[0] or new[0].startswith(old[0]) or old[0].startswith(new[0]):
-                if old[1] != new[1]:
-                    # same source commit, different digest/run: another image under an unchanged sha
-                    # cannot be placed in history, so it fails closed.
-                    out.append((path, image, old[0] + old[1], new[0] + new[1], REPINNED))
-                continue   # already at this commit (another abbreviation)
-            out.append((path, image, old[0], new[0], ancestry(old[0], new[0])))
-        if git(root, "cat-file", "-e", f"HEAD:{path}", check=False).returncode == 0:
-            for image in sorted(set(at_base) - set(after)):
-                out.append((path, image, at_base[image][0], "(removed)", UNPARSED))   # pin dropped or hidden
+            for old in sorted(olds):
+                verdict = compare(old, new, ancestry)
+                if verdict != OK:
+                    shown = (old[2], new[2]) if verdict == REPINNED and old[2] != new[2] else (old[0] + old[1], new[0] + new[1])
+                    out.append((path, image, shown[0], shown[1], verdict))
+        still_there = git(root, "cat-file", "-e", f"HEAD:{path}", check=False).returncode == 0
+        for image in sorted(set(at_base) - set(after)):
+            if still_there or image in head_tree:
+                out.append((path, image, at_base[image][0], "(removed)", UNPARSED))   # pin dropped or moved
     return out
 
 
@@ -329,6 +354,7 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
              ancestry: Callable[[str, str], str] | None = None,
              labels_of: Callable[[str, str], set[str] | None] = pr_labels,
              live_pins: Callable[[str], dict[str, tuple[str, str, str]] | None] | None = None,
+             live_tree: Callable[[], dict[str, set[tuple[str, str, str]]] | None] | None = None,
              fetch_pr: Callable[[str, str], dict | None] = carrier_lib.gh_pr,
              fetch_record: Callable[[str, str], str | None] = carrier_lib.gh_record_tree) -> int:
     subjects = count_subjects(root)
@@ -344,16 +370,21 @@ def run_gate(root: str, base: str, repo: str, number: str, head_ref: str, event:
         local = ancestry_local(root, old, new)
         return local if local is not None else ancestry_api(repo, old, new)
 
-    if live_pins is None:
+    ref: str | None = None
+    if live_pins is None or live_tree is None:
         ref = live_ref(root, branch)
         print(f"live {branch}: {ref or 'not fetchable; falling back to the contents API'}")
 
+    if live_pins is None:
         def live_pins(path: str) -> dict[str, tuple[str, str, str]] | None:
             if ref is not None:
                 return full_pins_at(root, ref, path)
             return live_pins_api(repo, branch, path)
+    if live_tree is None:
+        def live_tree() -> dict[str, set[tuple[str, str, str]]] | None:
+            return tree_pins(root, ref) if ref is not None else None   # API mode: no whole-tree view
 
-    moved = judge(root, base, ancestry or decide, live_pins)
+    moved = judge(root, base, ancestry or decide, live_pins, live_tree)
     bad = [m for m in moved if m[4] != OK]
     for path, image, old, new, verdict in moved:
         print(f"{verdict:9s} {image}: live {old[:8]} -> {new[:8]}  ({path})")
@@ -434,7 +465,8 @@ def self_test() -> int:
         def gate(**kw) -> int:
             # Live main is the local `main` branch; the PR branch is cut from `base` (main's tip at cut time).
             args = dict(root=root, base=base, repo="o/r", number="7", head_ref="chore/x", event="pull_request",
-                        labels_of=no_labels, live_pins=live_from("main"), fetch_pr=lambda _r, _n: None,
+                        labels_of=no_labels, live_pins=live_from("main"), live_tree=lambda: tree_pins(root, "main"),
+                        fetch_pr=lambda _r, _n: None,
                         fetch_record=lambda _r, _s: "")
             args.update(kw)
             return run_gate(**args)
@@ -449,7 +481,7 @@ def self_test() -> int:
         pr(c4[:8]);   check("pin equal to live main passes", gate() == 0)
         pr(c2[:8], "cafe0002"); check("svc-a untouched (equals merge-base) is ignored even though main moved; svc-b unknown fails",
                                       gate(ancestry=lambda o, n: UNKNOWN) == 1)
-        pr(c4[:8]);   check("live main unreadable -> UNKNOWN, fails closed", gate(live_pins=lambda _p: None) == 1)
+        pr(c4[:8]);   check("live main unreadable -> UNKNOWN, fails closed", gate(live_pins=lambda _p: None, live_tree=lambda: None) == 1)
         g("checkout", "-q", "main"); g("reset", "-q", "--hard", base)   # main back at c2 pins for the remaining cases
         pr(c1[:8]);   check("DOWNGRADE (c2 -> c1) fails", gate() == 1)
         pr(side[:8]); check("DIVERGED (c2 -> side) fails", gate() == 1)
@@ -479,6 +511,25 @@ def self_test() -> int:
         pr(c2[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n"
                           "      destinationPath: s3://openbank-sandbox-db-backups/x\n")
         check("a non-pin line containing `sandbox-` (bucket name) is not a pin", gate() == 0)
+        # Review round 3: restating the merge-base pin rewinds a newer live pin; moved/new/deleted manifests.
+        g("checkout", "-q", "main"); write_pins(c4[:8]); g("add", "-A"); g("commit", "-q", "-m", "main moves to c4")
+        pr(c2[:8], raw_a=f"      image:   registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n")
+        check("an added line restating the MERGE-BASE pin while live main is newer fails", gate() == 1)
+        g("checkout", "-q", "-B", "pr", base); manifest.unlink()
+        moved = pathlib.Path(root, PIN_ROOT, "components/svc-a2/svc-a.yaml"); moved.parent.mkdir(parents=True, exist_ok=True)
+        moved.write_text(f"      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n")
+        g("add", "-A"); g("commit", "-q", "-m", "move")
+        check("a pin MOVED to a new manifest is judged against live main tree-wide (c4 -> c3 fails)", gate() == 1)
+        g("checkout", "-q", "-B", "pr", base); moved.parent.mkdir(parents=True, exist_ok=True)
+        moved.write_text(f"      image: registry.example/openbank-svc-a:sandbox-{c3[:8]}@sha256:{'0' * 64}\n")
+        g("add", "-A"); g("commit", "-q", "-m", "second manifest")
+        check("a pin ADDED in a new manifest for an image live main pins elsewhere is judged tree-wide", gate() == 1)
+        moved.write_text(f"      image: registry.example/openbank-svc-a:sandbox-{c4[:8]}@sha256:{'0' * 64}\n")
+        g("add", "-A"); g("commit", "-q", "-m", "second manifest at live")
+        check("...and the same new manifest at live main's pin passes", gate() == 0)
+        g("checkout", "-q", "-B", "pr", base); manifest.unlink(); g("add", "-A"); g("commit", "-q", "-m", "decommission svc-a")
+        check("deleting a manifest whose image is gone from the whole tree (decommission) passes", gate() == 0)
+        g("checkout", "-q", "main"); g("reset", "-q", "--hard", base)
         pr(c2[:8], raw_a=f"      image: registry.example/openbank-svc-a:sandbox-{c2[:8]}@sha256:{'0' * 64}\n"
                           f"      tag: sandbox-{c1[:8].upper()}\n")
         check("an upper-case sandbox tag the pin regex refuses fails closed", gate() == 1)
