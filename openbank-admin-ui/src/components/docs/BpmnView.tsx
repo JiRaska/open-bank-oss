@@ -261,7 +261,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
                 <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{t('Krok procesu', 'Process step')}</div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{step.label}</div>
                 {step.lane && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t('Doména', 'Lane')}: {step.lane}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t('Procesní dráha', 'Lane')}: {step.lane}</div>
                 )}
               </div>
 

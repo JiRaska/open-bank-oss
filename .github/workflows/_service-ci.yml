@@ -64,6 +64,11 @@ on:
         required: false
         default: ""
         type: string
+      consumer:
+        description: "Optional consumer name; blank verifies every consumer."
+        required: false
+        default: ""
+        type: string
       historical_admin_ui_version:
         description: "Validated one-off admin-ui version for product-catalog; blank keeps normal selection."
         required: false
@@ -531,6 +536,10 @@ jobs:
           # predate --own-test-overlay, and P must never get to judge its own equivalence.
           cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
             "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          cp provider-proof-source/.github/scripts/runtime_resource_inputs.py \
+            "$RUNNER_TEMP/runtime_resource_inputs.py"
+          cp provider-proof-source/.github/scripts/library_dependency_graph.py \
+            "$RUNNER_TEMP/library_dependency_graph.py"
           chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -759,13 +768,46 @@ jobs:
         if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
+          PACT_CONSUMER: ${{ inputs.consumer }}
+          SERVICE: ${{ inputs.service }}
         run: |
+          set -euo pipefail
+          consumer_args=()
+          if [ -n "${PACT_CONSUMER:-}" ]; then
+            [[ "$PACT_CONSUMER" =~ ^openbank-[a-z0-9-]+$ ]] || {
+              echo '::error::Consumer must be an openbank-* module name.'
+              exit 1
+            }
+            if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
+              echo '::error::A consumer scope cannot be combined with a historical admin-ui proof.'
+              exit 1
+            fi
+            # P keeps its own build-logic. Validate its effective Test task after
+            # configuration, before any provider task/JVM can publish a result.
+            scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
+            cat > "$scope_guard" <<'GRADLE'
+          gradle.projectsEvaluated {
+              def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
+              def task = provider.tasks.named("providerPactTest").get()
+              if (!(task instanceof org.gradle.api.tasks.testing.Test) ||
+                      task.systemProperties["pact.filter.consumers"] != System.getenv("PACT_CONSUMER")) {
+                  throw new GradleException("Consumer scope is not forwarded by the checked-out provider Test task; refusing replay.")
+              }
+          }
+          GRADLE
+            # A scoped run
+            # publishes verification results only for the pacts it actually verified (pact-jvm
+            # publishes per verified consumer pact), so the broker never records a result for a
+            # consumer that was not replayed; other consumers stay unverified for this version.
+            consumer_args=("-Dpact.filter.consumers=${PACT_CONSUMER}" --init-script "$scope_guard")
+          fi
           pact_url_arg=()
           if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
             pact_url_arg=(-Dpact.filter.pacturl="${HISTORICAL_PACT_URL}" -Dpact.filter.consumers=openbank-admin-ui)
           fi
           ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
+            ${consumer_args[@]+"${consumer_args[@]}"} \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
             -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
@@ -775,7 +817,7 @@ jobs:
             -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
             -Dpact.provider.branch="${BRANCH}" \
             -Dpact.provider.tag="${BRANCH}" \
-            "${pact_url_arg[@]}"
+            ${pact_url_arg[@]+"${pact_url_arg[@]}"}
 
       - name: Require historical broker verifier interactions
         if: ${{ inputs.historical_admin_ui_version != '' }}

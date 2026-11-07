@@ -105,6 +105,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Verify committed cluster topology snapshot
+        run: node openbank-admin-ui/scripts/generate-cluster-topology.mjs --check
       - id: check
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -137,7 +139,8 @@ jobs:
                   openbank-product-catalog/src/main/resources/openapi.yaml \
                   openbank-developer-portal/ \
                   '*/governance.yaml' \
-                  openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
+                  openbank-libs/governance/governance.schema.json \
+                  openbank-libs/governance/domain-taxonomy.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
             echo "Admin UI, developer portal or governance files changed: $N"
             # Derive cross-package guard inputs from literal backend paths.

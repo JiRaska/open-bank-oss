@@ -355,7 +355,8 @@ positive="$tmp/positive-repo"
 mkdir -p "$positive/.github/scripts" "$positive/.github/workflows" \
   "$positive/openbank-demo-service/src/main"
 for script in can-i-deploy-gate.sh probe-pact-version.sh pact-version-tree-equivalent.sh \
-  resolve-can-i-deploy-selector.sh classify-can-i-deploy-block.sh verify-reconcile-image-map.py; do
+  resolve-can-i-deploy-selector.sh classify-can-i-deploy-block.sh verify-reconcile-image-map.py \
+  runtime_resource_inputs.py library_dependency_graph.py; do
   cp "$root/.github/scripts/$script" "$positive/.github/scripts/$script"
 done
 printf 'env:\n  ANALYTICS_SINK_TYPE: clickhouse\n  AGENT_SVID_NONCE_STORE: redis\n' \

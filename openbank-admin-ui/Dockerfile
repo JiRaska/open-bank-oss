@@ -397,6 +397,8 @@ COPY --chmod=0644 openbank-libs/governance/compliance-controls.yaml ./compliance
 # scripts/generate-catalog.mjs before the build so this file always exists.
 # --chmod=0644 for the same UID-100 readability reason as test-results.json.
 COPY --chmod=0644 openbank-admin-ui/catalog.json ./catalog.json
+# Same-source ownership fallback when a published content bundle predates the domain contract.
+COPY --chmod=0644 openbank-admin-ui/governance.json ./governance.json
 # CI-produced code-derived dependency graph (ADR-0029 D1; read-only consumer; see
 # src/app/api/catalog/graph/route.ts). build-push-admin-ui.sh runs
 # scripts/generate-service-graph.mjs before the build so this file always exists.

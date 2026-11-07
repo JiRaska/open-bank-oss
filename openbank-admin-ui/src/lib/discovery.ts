@@ -18,13 +18,14 @@ import { readFileSync, existsSync } from 'node:fs'
 import https from 'node:https'
 import { getRegistry } from '@/lib/services/fleet'
 import { k8sNameOf } from '@/lib/services/registry'
+import { currentDomainOwnership } from '@/lib/services/domainOwnership'
 
 const SA_DIR = '/var/run/secrets/kubernetes.io/serviceaccount'
 const TOKEN_PATH = `${SA_DIR}/token`
 const CA_PATH = `${SA_DIR}/ca.crt`
 
-export type ServiceGroup =
-  | 'core' | 'payments' | 'compliance' | 'identity' | 'open-banking' | 'platform'
+import type { DomainGroup } from '@/lib/governance/domains'
+export type ServiceGroup = DomainGroup
 
 export interface DiscoveredService {
   name: string
@@ -55,58 +56,11 @@ export interface ServiceDiscoverySnapshot {
   services: DiscoveredService[]
 }
 
-// Namespace → UI group. Adding a whole new domain namespace requires THREE steps
-// (ADR-0051, "new namespace checklist") — no code deploy needed after this:
-//   1. Add it here (determines the group chip in System Health).
-//   2. Add it to OPENBANK_NAMESPACES in gitops/components/admin-ui/admin-ui.yaml.
-//   3. Add a RoleBinding for admin-ui-discovery in that namespace (same file).
-// Adding a service *inside* an existing namespace is fully automatic.
-// Unknown namespaces fall back to 'platform' so they are never silently hidden.
-const NS_GROUP: Record<string, ServiceGroup> = {
-  accounts:           'core',
-  payments:           'payments',
-  compliance:         'compliance',
-  identity:           'identity',
-  'open-banking':     'open-banking',
-  platform:           'platform',
-  ledger:             'core',
-  balances:           'core',
-  audit:              'compliance',
-  sanctions:          'compliance',
-  'security-scanner': 'platform',
-  // Services that live in their own namespace (ADR-0051 three-step checklist):
-  party:              'identity',    // party-service (ADR-0055)
-  sca:                'identity',    // sca-service (ADR-0021)
-  statements:         'compliance',  // statement-service
-  onboarding:         'compliance',  // onboarding-service (ADR-0069)
-  kyc:                'compliance',  // kyc-service (ADR-0068)
-  'customer-edge':    'platform',    // customer-facing edge (ADR-0065)
-  notifications:      'platform',    // notification-service (T2 scale-to-zero, ADR-0057)
-  // Namespaces added after initial ADR-0051 rollout (each service in its own ns):
-  aml:                'compliance',  // aml-service
-  consent:            'open-banking', // consent-service (PSD2)
-  dispute:            'compliance',  // dispute-service
-  fraud:              'compliance',  // fraud-service
-  fx:                 'payments',    // fx-service
-  interest:           'payments',    // interest-service
-  pid:                'identity',    // pid-service (EUDI wallet, ADR-0094)
-  psd2:               'open-banking', // psd2-service (Berlin Group)
-  documents:          'platform',    // document-service (ADR-0161/0162)
-  engagement:         'platform',    // engagement-service (ADR-0220 in-app surfaces)
-  referral:           'platform',    // referral-service (ADR-0266 MGM attribution)
-  kyb:                'compliance',  // kyb-service (ADR-0284 legal-entity onboarding)
-  communication:      'platform',    // communication-service (ADR-0285 Communication Studio)
-  context:            'compliance',  // context-service (ADR-0303 investigation graph)
-  pricing:            'platform',    // pricing-service and pricing-console
-  analytics:          'platform',    // analytics-sink
-  'authz-policy-auditor': 'platform',
-  'control-liveness-sentinel': 'platform',
-  'devops-agent':      'platform',
-  'docs-truth-agent':  'platform',
-  'finops-agent':      'platform',
-  'flaky-test-hunter': 'platform',
-  'governance-auditor': 'platform',
-  'release-steward':  'platform',
+// Business ownership is independent of namespace and legal-entity tenancy.
+// Unknown deployments stay visible as unclassified, never as an invented platform owner.
+async function currentWorkloadDomains(): Promise<ReadonlyMap<string, ServiceGroup>> {
+  const ownership = await currentDomainOwnership(getRegistry())
+  return ownership.byWorkload
 }
 
 export function inCluster(): boolean {
@@ -237,9 +191,10 @@ export async function collectServiceDiscovery(
     }
   }
 
-  const [deploymentResults, rolloutResults] = await Promise.all([
+  const [deploymentResults, rolloutResults, workloadDomains] = await Promise.all([
     Promise.all(targetNamespaces.map((n) => list(`/apis/apps/v1/namespaces/${n}/deployments?limit=500`))),
     Promise.all(targetNamespaces.map((n) => list(`/apis/argoproj.io/v1alpha1/namespaces/${n}/rollouts?limit=500`))),
+    currentWorkloadDomains(),
   ])
   const results = [...deploymentResults, ...rolloutResults]
   const successfulLists = results.filter((result) => result.ok).length
@@ -269,7 +224,7 @@ export async function collectServiceDiscovery(
         name: d.metadata.name,
         namespace: d.metadata.namespace,
         port: businessPort(d),
-        group: NS_GROUP[d.metadata.namespace] ?? 'platform',
+        group: workloadDomains.get(d.metadata.name) ?? 'unclassified',
         ready: readyReplicas > 0 && readyReplicas >= replicas,
         replicas,
         readyReplicas,
