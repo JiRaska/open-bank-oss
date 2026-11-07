@@ -9,8 +9,9 @@
 import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ScrollText, FileText } from 'lucide-react'
-import { loadAdrIndex, type AdrMeta, type AdrStatus } from '@/lib/governance/docs'
+import { loadAdrRegistry, type AdrMeta, type AdrStatus } from '@/lib/governance/docs'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,7 +31,7 @@ export default async function AdrRegistryPage() {
   const lang = (await cookies()).get('openbank-admin-lang')?.value === 'cs' ? 'cs' : 'en'
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
 
-  const adrs = await loadAdrIndex()
+  const { items: adrs, contentSource } = await loadAdrRegistry()
   const statusLabel = (s: AdrStatus) => ({
     Accepted: t('Schválené', 'Accepted'),
     Proposed: t('Navržené', 'Proposed'),
@@ -50,6 +51,7 @@ export default async function AdrRegistryPage() {
 
   return (
     <div>
+      <ContentSourceNote source={contentSource} />
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>

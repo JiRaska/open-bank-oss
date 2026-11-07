@@ -95,6 +95,8 @@ Opening the AML case is best-effort: a case-store outage is logged but must not 
 
 Every mutation emits a domain event (`domestic.payment.created`, `domestic.payment.status-changed`) drained via the transactional outbox to Kafka, where `audit-service` persists it with a tamper-evident chain. This provides the repudiation defence for payment initiation (caller denies initiating) together with the `actor_id`, `channel`, `ip_address`, and `sca_reference` columns.
 
+Account-service lookup failures no longer include account identifiers, upstream exception messages, or stack traces in logs. HTTP failures retain only the status code; other failures retain only the exception class so operators can distinguish error types without exposing request or upstream data.
+
 ## Security controls
 
 - ✅ Input validation (Bean Validation; constant-symbol CHECK at the DB)

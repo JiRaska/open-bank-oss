@@ -5,7 +5,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
-import { resolveInClusterBaseUrl } from '@/lib/discovery'
+import { inCluster, resolveInClusterService } from '@/lib/discovery'
 
 // Serves the per-service CycloneDX SBOM. Preferred source is LIVE from the
 // running service: each service self-publishes its baked SBOM at
@@ -77,6 +77,8 @@ interface CycloneDxSbom {
 
 interface SbomSummary {
   service: string
+  source: 'live' | 'image-baked'
+  discovery: 'complete' | 'partial' | 'unknown' | 'static'
   generatedAt: string | null
   generator: string | null
   specVersion: string | null
@@ -104,7 +106,7 @@ interface SbomSummary {
   }>
 }
 
-function summarise(sbom: CycloneDxSbom, serviceName: string): SbomSummary {
+function summarise(sbom: CycloneDxSbom, serviceName: string, source: 'live' | 'image-baked', discovery: SbomSummary['discovery']): SbomSummary {
   const components = sbom.components ?? []
   const licenseCounts = new Map<string, number>()
   const ecoCounts = new Map<string, number>()
@@ -149,6 +151,8 @@ function summarise(sbom: CycloneDxSbom, serviceName: string): SbomSummary {
     : tools?.components?.[0] ?? tools?.services?.[0]
   return {
     service: serviceName,
+    source,
+    discovery,
     generatedAt: sbom.metadata?.timestamp ?? null,
     generator: firstTool
       ? `${firstTool.vendor ?? firstTool.author ?? ''} ${firstTool.name ?? ''} ${firstTool.version ?? ''}`.trim()
@@ -203,29 +207,39 @@ async function loadSbom(name: string): Promise<{ raw: string; parsed: CycloneDxS
   return null
 }
 
-// Live fetch from the running service's own /q/openbank/sbom endpoint
-// (openbank-libs.web.SbomResource). Returns null off-cluster (no SA token →
-// resolveInClusterBaseUrl is null), when the service is undeployed, when it
-// predates the endpoint (404 not_generated), or on timeout — every one of those
-// degrades cleanly to the baked-bundle fallback in GET. The k8s Deployment name
-// may be `<name>` or `<name>-service` depending on the route param shape.
-async function fetchLiveSbom(name: string): Promise<{ raw: string; parsed: CycloneDxSbom } | null> {
+type LoadedSbom = { raw: string; parsed: CycloneDxSbom }
+type DiscoveryState = SbomSummary['discovery']
+
+// Resolve each candidate through the discovery inventory. A missing workload is
+// authoritative only for complete coverage; partial/unavailable inventory must
+// not silently become a not-found result. Image-baked SBOMs remain available as
+// an explicitly labeled fallback.
+async function fetchLiveSbom(name: string): Promise<{ loaded: LoadedSbom | null; discovery: DiscoveryState }> {
+  if (!inCluster()) return { loaded: null, discovery: 'static' }
+  let discovery: DiscoveryState = 'complete'
   for (const k8sName of [name, `${name}-service`]) {
-    const base = await resolveInClusterBaseUrl(k8sName)
-    if (!base) continue
+    const resolved = await resolveInClusterService(k8sName)
+    if (resolved.state === 'off_cluster') return { loaded: null, discovery: 'static' }
+    if (resolved.state === 'unknown') {
+      discovery = 'unknown'
+      continue
+    }
+    if (resolved.state === 'not_found') continue
+    discovery = resolved.coverage
+    const { baseUrl } = resolved
     try {
       const ctrl = new AbortController()
       const timer = setTimeout(() => ctrl.abort(), 8000)
-      const res = await fetch(`${base}/q/openbank/sbom`, { signal: ctrl.signal, cache: 'no-store' })
+      const res = await fetch(`${baseUrl}/q/openbank/sbom`, { signal: ctrl.signal, cache: 'no-store' })
       clearTimeout(timer)
-      if (!res.ok) return null // 404 not_generated / 5xx → fall back to bundle
+      if (!res.ok) continue // 404 not_generated / 5xx → try bundle fallback
       const raw = await res.text()
-      return { raw, parsed: JSON.parse(raw) as CycloneDxSbom }
+      return { loaded: { raw, parsed: JSON.parse(raw) as CycloneDxSbom }, discovery }
     } catch {
-      return null // timeout / parse error → fall back to bundle
+      // Timeout / parse error → preserve the bundle fallback.
     }
   }
-  return null
+  return { loaded: null, discovery }
 }
 
 export async function GET(
@@ -241,8 +255,13 @@ export async function GET(
   const wantSummary = url.searchParams.get('summary') === 'true'
 
   // Prefer the live SBOM from the running service; fall back to the baked bundle.
-  const loaded = (await fetchLiveSbom(name)) ?? (await loadSbom(name))
+  const live = await fetchLiveSbom(name)
+  const liveLoaded = live.loaded
+  const loaded = liveLoaded ?? await loadSbom(name)
   if (!loaded) {
+    if (live.discovery === 'unknown') {
+      return NextResponse.json({ error: 'service discovery incomplete', service: name }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
     return NextResponse.json({
       error: 'SBOM not found',
       hint: `Service /q/openbank/sbom unreachable and no baked bundle. Rebuild the service image (bakes bom.json) or run ./gradlew :openbank-${name}-service:cyclonedxBom and rebuild admin-ui.`,
@@ -250,8 +269,8 @@ export async function GET(
   }
 
   if (wantSummary) {
-    return NextResponse.json(summarise(loaded.parsed, name), {
-      headers: { 'Cache-Control': 'public, max-age=300' },
+    return NextResponse.json(summarise(loaded.parsed, name, liveLoaded ? 'live' : 'image-baked', live.discovery), {
+      headers: { 'Cache-Control': live.discovery === 'partial' || live.discovery === 'unknown' ? 'no-store' : 'public, max-age=300' },
     })
   }
 
@@ -260,6 +279,8 @@ export async function GET(
     headers: {
       'Content-Type': 'application/vnd.cyclonedx+json',
       'Content-Disposition': `attachment; filename="openbank-${name}-sbom.cdx.json"`,
+      'X-SBOM-Source': liveLoaded ? 'live' : 'image-baked',
+      'X-Service-Discovery': live.discovery,
       'Cache-Control': 'public, max-age=300',
     },
   })

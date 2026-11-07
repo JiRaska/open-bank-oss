@@ -11,7 +11,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, ShortId, StatusBadge } from '@/components/ui'
 import { StatCard } from '@/components/ui/StatCard'
 import { parseAmlCases, type AmlCase } from '@/lib/aml/amlCaseContract'
 import { AmlCaseInvestigation } from '@/components/context/AmlCaseInvestigation'
@@ -67,6 +67,7 @@ export default function AmlPage() {
                 idle: t('aml-service spí (scale-to-zero), probouzí se…', 'aml-service idle (scaled to zero), waking…'),
                 down: t('aml-service neodpovídá', 'aml-service is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit AML případy', 'Refresh AML cases')} className="btn btn-secondary btn-sm">
@@ -160,8 +161,7 @@ export default function AmlPage() {
                     onMouseLeave={e => e.currentTarget.style.background = ''}>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-primary)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600 }}><UserRoundSearch size={12} aria-hidden="true" />{c.customerReference}</div>
-                      <div style={{ marginTop: 3, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>#{c.id}</div>
-                      <div style={{ marginTop: 2, fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{t('Party', 'Party')}: {c.partyId}</div>
+                      <div style={{ marginTop: 3, color: 'var(--text-tertiary)' }}><ShortId value={c.id} copyLabel={t('Kopírovat ID případu', 'Copy case ID')} /></div>
                       {['OPEN', 'UNDER_REVIEW', 'ESCALATED'].includes(c.status) && <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => setInvestigationCaseId(c.id)}>{t('Vazby v grafu', 'Explore graph')}</button>}
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.screeningType.replaceAll('_', ' ')}</td>

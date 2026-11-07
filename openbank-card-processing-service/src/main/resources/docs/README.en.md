@@ -25,3 +25,7 @@ This documentation is published by the service itself at the management endpoint
 - **Auth:** Keycloak OIDC; every endpoint requires `ROLE_API`, `ROLE_OPERATOR` or `ROLE_ADMIN` plus an OPA `@Authorize` action (advisory while `AUTHZ_ENFORCE=false`). The sandbox acquirer is `ROLE_ADMIN` only and off by default.
 - **Scheme bindings:** `simulator` by default. BIN lookup can be switched to `visa` or `mastercard` (sandbox APIs); tokenisation and disputes have **no vendor adapter** — choosing `visa`/`mastercard` answers `NOT_BOUND`, which the token and dispute endpoints return as `SCHEME_UNAVAILABLE` (409).
 - **Money-path:** treated as money-path by its threat model (`docs/threat-models/openbank-card-processing-service.md`); at the time of writing it is **not yet listed** in `rules.yaml: money_path_services`.
+
+## Build-time wiring
+
+- **OPA policy decision point.** `openbank.authz.opa-pdp-producer.enabled: true` makes libs-runtime's `OpaPolicyDecisionPointProducer` supply the OPA sidecar client, configured by `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). It is read at build time.

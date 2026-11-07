@@ -10,6 +10,17 @@ Perpetual-KYC slice 1 of [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-even
 4. **Fail durably** — coordinator 429/503/timeout records an `OPEN_FAILED` trigger, and once attempts exhaust, a `KYC_COORDINATOR_OPEN_FAILED` outbox row written in the SAME transaction as the state flip. A missing `CASE_COORDINATOR_URL` maps every trigger to the durable `NOT_CONFIGURED` path — never to a silent skip.
 5. **Retry** — `ScreeningTriggerRetryJob` re-attempts backed-off `OPEN_FAILED` rows, so the loop closes when the coordinator recovers.
 
+## Coordinator HTTP outcomes
+
+The AML case-opening adapter classifies mapped HTTP failures inside its existing retry boundary:
+
+- `201` opens the case only when the response contains a nonblank `caseId`. A missing identifier is rejected.
+- `409` means the coordinator already has the case (`AlreadyExists`); it is not retried.
+- Other deterministic `4xx` responses, including `400` and `403`, are rejected without retry. `429` is the exception: it remains retryable.
+- `429`, `5xx` and transport failures retain the existing bounded retry policy: at most three HTTP attempts per adapter invocation. The circuit breaker and timeout may stop an invocation earlier. This bound is separate from the durable trigger recovery budget below.
+
+Provider responses are closed after classification, including responses recovered from the REST client's exception mapper. Failure outcome details contain only the HTTP status or exception type, never a provider response body, URL or exception message. These classifications preserve the existing durable trigger handling; they do not enable screening triggers or change coordinator idempotency.
+
 ## Known v1 granularity
 
 The candidate set is **not** diff-scoped per entry: kyc-service persists no party ↔ list-entry mapping, so v1 triggers on parties with a non-terminal KYC case whenever a diff publication lands (bounded by the in-flight book). Per-entry scoping needs a party ↔ matched-entry index (a follow-up slice); the trigger rows retain the full diff for audit either way.

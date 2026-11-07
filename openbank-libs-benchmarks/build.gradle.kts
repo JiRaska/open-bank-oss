@@ -8,9 +8,10 @@
 // `maven-publish`, nothing depends on it, and its code lives only in the `jmh` source set. It has
 // no Kover floor on purpose — a benchmark is measured by what it reports, not by line coverage.
 //
-// What is gated is ALLOCATION per operation (`gc.alloc.rate.norm`, B/op), which is a property of
-// the code and reproduces across machines; wall-clock (ns/op) depends on the runner and is only
-// ever reported. The comparison against `alloc-baseline.json` is
+// Declared stable ALLOCATION baselines (`gc.alloc.rate.norm`, B/op) are enforced; explicitly
+// unstable kernels remain report-only. ProductInterpreter also has an absolute sampled p99
+// budget (ADR-0352). Other wall-clock results require comparable runners and are report-only,
+// not production request latency or throughput evidence. The comparison against `alloc-baseline.json` is
 // `.github/scripts/check-bench-alloc-baseline.py`.
 //
 //   ./gradlew :openbank-libs-benchmarks:jmh          # writes build/reports/jmh/results.json
@@ -45,6 +46,16 @@ dependencies {
     jmh(project(":openbank-libs-domain"))
     jmh(project(":openbank-libs-runtime"))
     jmh(project(":openbank-libs-iso20022"))
+    // ADR-0352 ProductInterpreterBench: the interpreter (libs-domain), its arithmetic (libs-finance)
+    // and the golden set it evaluates (see the jmh resources below).
+    jmh(project(":openbank-libs-finance"))
+}
+
+// ADR-0352 ProductInterpreterBench evaluates the committed golden set. The scenario JSON is read
+// straight from openbank-libs-testing's resources: that module is a test-fixture library and must not
+// sit on a non-test classpath (rules.yaml: authz_policy, gate no-allow-all-pdp-in-main).
+sourceSets.named("jmh") {
+    resources.srcDir("../openbank-libs-testing/src/main/resources")
 }
 
 jmh {

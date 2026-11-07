@@ -4,6 +4,8 @@
 
 package com.openbank.pension.application.port.out
 
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import com.openbank.pension.domain.statecontribution.ReturnReportLine
 import com.openbank.pension.domain.statecontribution.ReturnResultLine
 import com.openbank.pension.domain.statecontribution.ReturnStatus
@@ -46,13 +48,19 @@ interface StateAgencyGateway {
 interface StateContributionReturnChannel {
     val format: String
 
-    /** Renders the report. Fails if the channel is not configured to file. */
-    fun render(month: YearMonth, lines: List<ReturnReportLine>): String
+    /**
+     * Renders the report for ONE [currency]: every line must be in it. A month with returns in
+     * several currencies is several reports. Fails if the channel is not configured to file.
+     */
+    fun render(month: YearMonth, currency: CurrencyCode, lines: List<ReturnReportLine>): String
 
     fun parseResult(payload: String): List<ReturnResultLine>
 }
 
-/** A filed monthly return report (ZDPS §18(4)) and the evidence of what was filed. */
+/**
+ * A filed monthly return report (ZDPS §18(4)) and the evidence of what was filed. A report is
+ * single-currency: [total] carries its currency and sums only lines in that currency.
+ */
 data class ReturnReport(
     val id: UUID,
     val month: YearMonth,
@@ -61,6 +69,7 @@ data class ReturnReport(
     val channelReference: String?,
     val resultApplied: Boolean,
     val createdAt: Instant,
+    val total: Money,
 )
 
 // One repository for the return lifecycle and its reports, which share a transaction (fileReportAtomically).

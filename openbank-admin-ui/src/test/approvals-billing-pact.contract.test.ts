@@ -84,6 +84,13 @@ describe('Admin UI billing approval consumer contract', () => {
             maker: 'maker.billing',
             makerActorKind: 'UNKNOWN',
             proposedAt: '2026-08-31T11:00:42Z',
+            // ADR-0227 D1 facets: the provider predates the projection, so the optional fields
+            // arrive absent; the risk class is the BFF's own derivation (billing scope + post verb).
+            summary: null,
+            amount: null,
+            currency: null,
+            riskClass: 'MONEY_PATH',
+            payloadRef: null,
           },
         ])
       })

@@ -47,6 +47,7 @@ const NO_SUCCESS = { "never 200": (r) => r.status !== 200 };
 const NO_5XX = { "never 5xx": (r) => r.status < 500 };
 
 const probes = new Counter("security_probes_total", true);
+const enumerationProbes = new Counter("security_enumeration_probes_total");
 const contractBreaches = new Counter("security_contract_breaches", true);
 const enumerateMs = new Trend("enumeration_ms", true);
 
@@ -110,8 +111,9 @@ export function enumerationSweep() {
   // Sequential, non-existent ids. 401/403/404 are all correct rejections; a 200 is an
   // IDOR finding. The latency trend makes a found-vs-not-found timing gap visible.
   const base = 1000000 + Math.floor(Math.random() * 1000);
-  const id = base + __iter;
+  const id = base + __ITER;
   const res = http.get(`${BASE_URL}${DETAIL.replace("{id}", String(id))}`);
+  enumerationProbes.add(1);
   enumerateMs.add(res.timings.duration);
   probe("enumeration", res);
 }

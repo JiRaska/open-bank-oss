@@ -62,13 +62,14 @@ OBLIGATIONS = [
     ("Art. 11 Technical documentation",
      "This ADR-0148 mapping + the charter in agents.yaml + the model card (ADR-0141)."),
     ("Art. 12 Record-keeping / logging",
-     "AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain)."),
+     "AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain); ADR-0031 phase 3 adds the recorded-human-merge evidence (agent_merge_record + agent.pr.merged, attested per runbook 0018)."),
     ("Art. 13 Transparency to deployers",
      "Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable."),
     ("Art. 14 Human oversight",
      "requires_human on every write; approver_must_differ_from author (segregation of duties)."),
     ("Art. 15 Accuracy, robustness, cybersecurity",
-     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity."),
+     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt. "
+     "SPIFFE/SPIRE workload identity is deferred (#1914); no credit is taken for it."),
 ]
 
 
@@ -175,15 +176,17 @@ def main():
 
     w("## Obligation coverage (Art. 9–15) for a high-risk system")
     w("")
-    w("The controls below already exist and satisfy each obligation *in substance* for the day")
-    w("a high-risk system (credit decisioning) ships. What is open is the article-by-article")
-    w("*evidence*, not the mechanism.")
+    w("The controls below are current or planned. Each obligation needs article-by-article")
+    w("evidence before a high-risk system (credit decisioning) ships; Art. 15 still has an")
+    w("unbuilt workload-identity control (#1914).")
     w("")
     w("| Obligation | Existing control | Status |")
     w("|---|---|---|")
     live_high_risk = high_risk or ml_high_risk_live
     for art, control in OBLIGATIONS:
         status = "control exists; evidence pack open" if not live_high_risk else "APPLIES NOW — verify per system"
+        if art.startswith("Art. 15") and not live_high_risk:
+            status = "partial; evidence pack open"
         w(f"| {art} | {control} | {status} |")
     w("")
     if live_high_risk:
@@ -192,8 +195,8 @@ def main():
           "Every obligation above APPLIES from 2026-08-02; this table must be reviewed per system, "
           "and ADR-0142's preconditions confirmed, before deploy.")
     else:
-        w("> No high-risk system is declared today, so the obligations are pre-satisfied in")
-        w("> substance and tracked here in advance. The first `HIGH-RISK` row that appears in the")
+        w("> No high-risk system is declared today. The obligations are tracked in advance,")
+        w("> but Art. 15 is incomplete (#1914). The first `HIGH-RISK` row that appears in the")
         w("> inventory above (via a new/changed charter) flips every status to APPLIES NOW.")
     w("")
 

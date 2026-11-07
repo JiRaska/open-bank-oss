@@ -66,6 +66,20 @@
 # the probe reads `openbank-*:sandbox-*` image fields, which exist solely in Deployment and
 # Rollout manifests; no CNPG Cluster, and so no money-path database pod, is ever rewritten.
 #
+# PRIORITY: OWN-SOURCE DRIFT OUTRANKS MARKER DRIFT. The lagging set is split into two classes
+# before the cap: CLASS 0 — never-deployed placeholder pins, and services whose OWN source
+# tree (src/, app.py, requirements.txt) moved since the pin — a real behaviour change is
+# running nowhere. CLASS 1 — everything else lagging only through markers (version.txt
+# release bumps, Dockerfile, build files, shared libs): still re-driven, honouring #8127,
+# but no behaviour difference is waiting on it. 2026-10-15 (MGM #12813): customer-edge's
+# referralLink passthrough built fine, was blocked one tick by a transient PENDING_BUILD,
+# then sat at the BACK of the rotation behind ~40 marker-lagging services for ~17h — its
+# pin was the newest, so the oldest-first ranking kept deferring it. Code that is not
+# running must not wait behind version strings that are. Class 0 fills the cap first
+# (oldest pin first); class 1 takes the remaining slots through the same rotating window.
+# This changes ORDER only: every lagging service is still re-driven, the gate is untouched,
+# and the #8127 release-marker guarantee is preserved.
+#
 # Modules that are not Gradle modules (no build.gradle.kts at HEAD — the Python renderer)
 # cannot be classified by the equivalence script, which would refuse them forever and
 # re-drive them every tick. For those alone the probe keeps the push trigger's own globs.
@@ -80,6 +94,9 @@
 #   RECONCILE_SERVICES (env): space-separated buildable allowlist (auto-deploy's
 #     ALL_SERVICES). When set, only these services are considered. When empty, no
 #     allowlist filter is applied.
+#   RECONCILE_TARGETS (env): optional, at most three exact service names to re-drive.
+#     Targets must be in RECONCILE_SERVICES and have a sandbox image pin in GitOps.
+#     This narrows candidates; it does not bypass stale-tree, hold, Pact, or freshness checks.
 #   RECONCILE_HOLDS (env): space-separated services held by live main governance.
 #     Excluded before the oldest-first cap, so a held service cannot consume a slot.
 # Must run inside a full-history checkout (fetch-depth: 0) with main checked out. Any CWD
@@ -109,15 +126,65 @@ cd "$REPO_ROOT"
 HEAD_SHA="$(git rev-parse HEAD)"
 # Newline-delimited allowlist for O(1) membership tests; empty => no filter.
 ALLOWLIST="$(tr -s ' \t' '\n' <<< "${RECONCILE_SERVICES:-}" | sed '/^$/d' | sort -u)"
+TARGET_LIST="$(tr ' \t' '\n' <<< "${RECONCILE_TARGETS:-}" | sed '/^$/d')"
+TARGET_COUNT="$(printf '%s\n' "$TARGET_LIST" | grep -c . || true)"
+SEEN_TARGET_PINS=""
+if [ -n "${RECONCILE_TARGETS:-}" ] && [ "$TARGET_COUNT" -eq 0 ]; then
+  echo "::error::targeted reconcile requires at least one service name" >&2
+  exit 2
+fi
+if [ "$TARGET_COUNT" -gt 0 ]; then
+  if [ "$TARGET_COUNT" -gt 3 ]; then
+    echo "::error::targeted reconcile accepts at most three services" >&2
+    exit 2
+  fi
+  if [ -z "$ALLOWLIST" ]; then
+    echo "::error::targeted reconcile requires the buildable-service allowlist" >&2
+    exit 2
+  fi
+  while IFS= read -r target; do
+    [ -n "$target" ] || continue
+    if [[ ! "$target" =~ ^openbank-[a-z0-9-]+$ ]]; then
+      echo "::error::invalid targeted reconcile service name: ${target}" >&2
+      exit 2
+    fi
+    if grep -qxF "$target" <<< "$SEEN_TARGET_PINS"; then
+      echo "::error::duplicate targeted reconcile service: ${target}" >&2
+      exit 2
+    fi
+    if ! grep -qxF "$target" <<< "$ALLOWLIST"; then
+      echo "::error::targeted reconcile service is not in the buildable allowlist: ${target}" >&2
+      exit 2
+    fi
+    SEEN_TARGET_PINS="${SEEN_TARGET_PINS}${target}"$'\n'
+  done <<< "$TARGET_LIST"
+  SEEN_TARGET_PINS=""
+fi
 # Cap how many stranded services one tick re-drives, oldest-deployed first, so the first
 # reconcile after this lands does not fan out a whole backlog (23 services today) into a
 # single build fan-out + one giant gitops PR. The remainder drain on later ticks and are
 # logged, never silently dropped. 0 => unlimited.
 RECONCILE_MAX="${RECONCILE_MAX:-12}"
 
-# Each entry: "<sortkey>\t<svc>" — sortkey is the pinned commit's epoch (0 for a placeholder
-# pin), so the oldest-deployed / never-deployed strands are re-driven first under the cap.
+# Each entry: "<class>\t<sortkey>\t<svc>" — class 0 = own-source drift or placeholder
+# (see PRIORITY above), class 1 = marker drift only; sortkey is the pinned commit's epoch
+# (0 for a placeholder pin), so the oldest-deployed / never-deployed strands re-drive first.
 lagging=()
+
+# Does the service's OWN source tree carry commits the pinned image does not? This is the
+# class-0 test: src/ for Gradle modules (main AND test — a provider's @State handlers live
+# in src/test and the broker only learns them when that version is deployed, #11597), and
+# the Python entry points for non-Gradle modules. Marker-only deltas (version.txt,
+# Dockerfile, build files, shared libs) stay class 1.
+own_source_drift() {
+  local svc="$1" commit="$2"
+  if git cat-file -e "${HEAD_SHA}:${svc}/build.gradle.kts" 2>/dev/null; then
+    [ -n "$(git log --format=%H "${commit}..${HEAD_SHA}" -- "${svc}/src" 2>/dev/null | head -1)" ]
+  else
+    [ -n "$(git log --format=%H "${commit}..${HEAD_SHA}" -- \
+              "${svc}/src" "${svc}/app.py" "${svc}/requirements.txt" 2>/dev/null | head -1)" ]
+  fi
+}
 
 # Collect unique `openbank-<svc>:sandbox-<tag>` pins across every manifest.
 while IFS= read -r pin; do
@@ -125,6 +192,12 @@ while IFS= read -r pin; do
   svc="${pin%%:sandbox-*}"
   tag="${pin##*:sandbox-}"
   [ -n "$svc" ] && [ -n "$tag" ] || continue
+
+  if [ "$TARGET_COUNT" -gt 0 ] && grep -qxF "$svc" <<< "$TARGET_LIST"; then
+    SEEN_TARGET_PINS="${SEEN_TARGET_PINS}${svc}"$'\n'
+  elif [ "$TARGET_COUNT" -gt 0 ]; then
+    continue
+  fi
 
   # Manual evidence refreshes rebuild an already-tested commit under ECR's immutable
   # tag policy, carrying a provenance-only `-run<GitHub run id>` suffix. Resolve the
@@ -146,9 +219,9 @@ while IFS= read -r pin; do
   esac
 
   # A pin that is not a resolvable commit is a placeholder (never really deployed) -> stale,
-  # sortkey 0 so placeholders re-drive before any real-but-old pin.
+  # class 0, sortkey 0 so placeholders re-drive before any real-but-old pin.
   if [ -z "$commit" ] || ! git rev-parse -q --verify "${commit}^{commit}" >/dev/null 2>&1; then
-    lagging+=("0	$svc")
+    lagging+=("0	0	$svc")
     continue
   fi
 
@@ -167,7 +240,11 @@ while IFS= read -r pin; do
               "${svc}/app.py" "${svc}/requirements.txt" 2>/dev/null)" ] || continue
   fi
   epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
-  lagging+=("${epoch}	$svc")
+  if own_source_drift "$svc" "$commit"; then
+    lagging+=("0	${epoch}	$svc")
+  else
+    lagging+=("1	${epoch}	$svc")
+  fi
 done < <(
   # Only YAML image fields are deployed pins. Searching arbitrary text also picks up
   # historical tags in policy comments and re-drives that service every tick (#8690).
@@ -178,31 +255,84 @@ done < <(
     | sort -u
 )
 
-# Oldest-deployed first, de-duplicated by service, then apply the per-tick cap.
+while IFS= read -r target; do
+  [ -n "$target" ] || continue
+  if ! grep -qxF "$target" <<< "$SEEN_TARGET_PINS"; then
+    echo "::error::targeted reconcile service has no sandbox image pin in GitOps: ${target}" >&2
+    exit 2
+  fi
+done <<< "$TARGET_LIST"
+
+# Class first (0 before 1), then oldest-deployed, de-duplicated by service.
 ranked="$(printf '%s\n' "${lagging[@]:-}" \
-  | awk -F'\t' 'NF==2 && !seen[$2]++' \
-  | sort -t'	' -k1,1n -k2,2)"
+  | awk -F'\t' 'NF==3 && !seen[$3]++' \
+  | sort -t'	' -k1,1n -k2,2n -k3,3)"
 [ -n "$ranked" ] || { echo '[]'; exit 0; }
 
+# Rotating window over a list presented on stdin: prints the first `take` lines of the
+# list rotated by (tick * take) mod total. With take >= total the whole list passes
+# through unrotated. The rotation math mirrors the pre-class split behaviour, so a class
+# whose size fits the window takes everything (no needless churn) and an oversized class
+# still reaches every member within ceil(total/take) ticks.
+rot_window() {
+  local take="$1" tick="$2"
+  local list total start
+  list="$(cat)"
+  total="$(printf '%s\n' "$list" | grep -c . || true)"
+  [ "$total" -gt 0 ] || return 0
+  if [ "$total" -le "$take" ]; then
+    printf '%s\n' "$list"
+    return 0
+  fi
+  start=$(( (tick * take) % total ))
+  # Rotated position of line NR is (NR-1-start) mod total; keep the first `take`.
+  # Pure awk — no head downstream, so a fast-closing reader can never SIGPIPE the
+  # writers under `set -o pipefail`.
+  printf '%s\n' "$list" | awk -v s="$start" -v n="$take" -v total="$total" '
+    { idx = (NR - 1 - s + total) % total; if (idx < n) print }'
+}
+
 selected="$ranked"
+tick=0
 if [ "$RECONCILE_MAX" -gt 0 ]; then
   total="$(printf '%s\n' "$ranked" | grep -c . || true)"
   if [ "$total" -gt "$RECONCILE_MAX" ]; then
-    # FAIR CAP. Take a cyclic window of RECONCILE_MAX over the oldest-first ranking, starting
-    # at (tick * cap) mod total. Consecutive ticks advance the window by a full cap, so every
-    # lagging service is offered within ceil(total/cap) ticks whatever the gate decides —
-    # an always-blocked strand can no longer hold its slot forever. Stateless and
-    # deterministic: the tick is the 3h schedule bucket of wall-clock time (the cron cadence),
-    # overridable via RECONCILE_TICK for tests and manual re-drives.
+    # CLASS-SPLIT FAIR CAP. Class 0 (own-source drift, placeholders) fills the cap first —
+    # behaviour that is running nowhere outranks version-marker drift — and class 1 takes
+    # the remaining slots through its own rotating window. Both windows advance with the
+    # same tick, so an always-blocked strand cannot hold a slot forever in either class.
+    # Stateless and deterministic: the tick is the 3h schedule bucket of wall-clock time
+    # (the cron cadence), overridable via RECONCILE_TICK for tests and manual re-drives.
     tick="${RECONCILE_TICK:-$(( $(date -u +%s) / 10800 ))}"
     [[ "$tick" =~ ^[0-9]+$ ]] || { echo "::error::RECONCILE_TICK '${tick}' is not a non-negative integer" >&2; exit 2; }
-    start=$(( (tick * RECONCILE_MAX) % total ))
-    rotated="$(printf '%s\n' "$ranked" | awk -v s="$start" 'NR>s' ; printf '%s\n' "$ranked" | awk -v s="$start" 'NR<=s')"
-    selected="$(printf '%s\n' "$rotated" | head -n "$RECONCILE_MAX")"
-    # Log the deferred remainder to stderr — visible in the job log, never silent.
-    printf '%s\n' "$rotated" | tail -n +"$((RECONCILE_MAX + 1))" | cut -f2 \
-      | while IFS= read -r d; do echo "::notice::reconcile deferred (cap ${RECONCILE_MAX}, tick ${tick}) — rotation reaches it within $(( (total + RECONCILE_MAX - 1) / RECONCILE_MAX )) ticks: ${d}" >&2; done
+
+    code_lines="$(printf '%s\n' "$ranked" | awk -F'\t' '$1==0')"
+    marker_lines="$(printf '%s\n' "$ranked" | awk -F'\t' '$1==1')"
+    code_total="$(printf '%s\n' "$code_lines" | grep -c . || true)"
+    marker_total="$(printf '%s\n' "$marker_lines" | grep -c . || true)"
+
+    code_take="$RECONCILE_MAX"
+    [ "$code_total" -lt "$code_take" ] && code_take="$code_total"
+    sel_code="$(rot_window "$code_take" "$tick" <<< "$code_lines")"
+
+    marker_take=$(( RECONCILE_MAX - code_take ))
+    sel_marker=""
+    if [ "$marker_take" -gt 0 ] && [ "$marker_total" -gt 0 ]; then
+      sel_marker="$(rot_window "$marker_take" "$tick" <<< "$marker_lines")"
+    fi
+
+    selected="$(printf '%s\n' "$sel_code" "$sel_marker" | grep -v '^$' || true)"
+    # Log the deferred remainder (ranked minus selected) to stderr — visible in the job
+    # log, never silent.
+    deferred="$(printf '%s\n' "$ranked" | grep -vxF -f <(printf '%s\n' "$selected") || true)"
+    printf '%s\n' "$deferred" \
+      | while IFS= read -r d; do
+          [ -n "$d" ] || continue
+          cls="${d%%$'\t'*}"
+          svc="${d##*$'\t'}"
+          echo "::notice::reconcile deferred (cap ${RECONCILE_MAX}, tick ${tick}, class ${cls}) — rotation reaches it within $(( (total + RECONCILE_MAX - 1) / RECONCILE_MAX )) ticks: ${svc}" >&2
+        done
   fi
 fi
 
-printf '%s\n' "$selected" | cut -f2 | jq -R . | jq -sc 'map(select(length > 0))'
+printf '%s\n' "$selected" | cut -f3 | jq -R . | jq -sc 'map(select(length > 0))'

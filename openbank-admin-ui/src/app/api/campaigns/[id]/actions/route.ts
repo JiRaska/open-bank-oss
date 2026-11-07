@@ -35,7 +35,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // No body is forwarded. `activate` in particular takes its approver from the service's own view
   // of the authenticated caller — sending one from here would reintroduce the maker/checker hole
   // where the check compares a value the caller supplied on both sides (#3051).
-  const path = `/api/v1/campaigns/${encodeURIComponent(id)}/${body.action}`
+  const path = body.action === 'enrol'
+    ? `/api/v1/campaigns/${encodeURIComponent(id)}/bulk-runs`
+    : `/api/v1/campaigns/${encodeURIComponent(id)}/${body.action}`
   try {
     const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, path), {
       method: 'POST',

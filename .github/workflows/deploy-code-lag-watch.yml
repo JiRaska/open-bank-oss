@@ -1,0 +1,179 @@
+# -----------------------------------------------------------------------------
+# Deployed-code-lag watch (2026-10-15 MGM deploy postmortem).
+#
+# WHY THIS EXISTS
+#   deploy-drift-watch compares version.txt markers on a multi-day threshold — the right
+#   bar for release-marker drift. It says nothing about the far more urgent case: source
+#   code that is on main but has not been running in sandbox for HOURS. Measured on
+#   2026-10-15: customer-edge's referralLink passthrough (#12813) sat undeployed for ~17h
+#   behind the reconcile rotation; nothing in the repo raised a flag until a human
+#   deployment monitor noticed the landing page answering 307.
+#
+# WHAT THIS DOES
+#   Every 6h it runs deploy-code-lag-report.sh — the SAME lag probe the auto-deploy
+#   reconcile uses, so the watch can never disagree with the pipeline, aged by each
+#   service's oldest own-source commit since its pin. Services whose own-source drift is
+#   older than the 6h threshold escalate: one open `deploy-code-lag` issue per service,
+#   refreshed in place, reopened if hand-closed while the lag persists, auto-closed when
+#   the deployment catches up. Marker-only drift (version bumps, Dockerfile, shared libs)
+#   is deliberately excluded — it has no behaviour attached and is deploy-drift-watch's
+#   lane.
+#
+# WHY IT IS NOT A REQUIRED CHECK
+#   A lagging deployment is an operational signal, not a defect in the PR at hand — same
+#   reasoning as deploy-drift-watch. The escalation shape (issue, not red schedule) is the
+#   main-red-watch lesson: a scheduled job that goes red reproduces the blind spot it
+#   exists to close.
+# -----------------------------------------------------------------------------
+
+name: Deployed-code-lag watch
+
+on:
+  schedule:
+    # 47 minutes past every 6th hour — off the congested :00/:30 marks, between the
+    # auto-deploy 3-hourly reconcile ticks (…, :23) so it observes their output.
+    - cron: "47 5,11,17,23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-code-lag-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    name: deployed-code-lag-watch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Self-test the report script
+        run: bash .github/scripts/test-deploy-code-lag-report.sh
+
+      - name: Report deployed code lag
+        id: probe
+        run: |
+          set +e
+          bash .github/scripts/deploy-code-lag-report.sh 6 | tee /tmp/code-lag.json
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "Report produced (entries may be empty)." ;;
+            *) echo "::error::code-lag report failed (exit $code) — the watch could not"
+               echo "::error::answer. That is a failure of THIS GATE, not a clean bill."
+               exit 1 ;;
+          esac
+
+      # Runs on an empty report too: the auto-close half is the only thing that closes a
+      # tracker whose lag has resolved (same lesson as deploy-drift-watch, measured
+      # 2026-08-08: gating the close on drift left the last issue open forever).
+      - name: Escalate code lag per service
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const report = JSON.parse(fs.readFileSync('/tmp/code-lag.json', 'utf8'))
+            const LABEL = 'deploy-code-lag'
+            const markerFor = s => `<!-- deploy-code-lag:${s} -->`
+
+            const lagging = report.entries
+            const bodyFor = e => [
+              markerFor(e.service),
+              `## Code on main is not running: \`${e.service}\``,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| deployed | \`${e.deployed_tag}\` (pin \`${e.pinned_commit}\`) |`,
+              `| oldest undeployed src commit | \`${e.oldest_src_commit}\` — **${e.oldest_src_age_hours}h** on main |`,
+              `| threshold | ${report.threshold_hours}h |`,
+              '',
+              'A change to this service own source has been on main longer than the',
+              'threshold without reaching sandbox. The auto-deploy reconcile re-drives it',
+              '(possibly behind a transient can-i-deploy block); this issue tracks the fact',
+              'until the deployed pin catches up, then the watch closes it itself.',
+              '',
+              'If the lag is deliberate (hold, governance), say so in a comment — a silent',
+              'lag is the only unacceptable state.',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId}, threshold ${report.threshold_hours}h. Refreshed in place while the lag persists._`,
+            ].join('\n')
+            const titleFor = e =>
+              `deploy-code-lag: ${e.service} has src ${e.oldest_src_age_hours}h on main, sandbox runs ${e.deployed_tag}`
+
+            // One open issue per lagging service — refreshed, never stacked; a recently
+            // hand-closed issue for a service that still lags is reopened, not duplicated
+            // (the deploy-drift-watch pairing, #3597/#3833).
+            const REOPEN_WINDOW_DAYS = 30
+            const markerRe = /<!-- deploy-code-lag:([a-z0-9-]+) -->/
+            const indexByMarker = (issues, map) => {
+              for (const issue of issues) {
+                const m = issue.body && issue.body.match(markerRe)
+                if (m && !map.has(m[1])) map.set(m[1], issue)
+              }
+            }
+            const openByMarker = new Map()
+            indexByMarker(await github.paginate(github.rest.issues.listForRepo, {
+              ...context.repo, state: 'open', labels: LABEL, per_page: 100,
+            }), openByMarker)
+            const closedRecent = await github.rest.issues.listForRepo({
+              ...context.repo, state: 'closed', labels: LABEL, per_page: 100,
+              sort: 'updated', direction: 'desc',
+            })
+            const reopenCutoff = Date.now() - REOPEN_WINDOW_DAYS * 24 * 60 * 60 * 1000
+            const closedByMarker = new Map()
+            indexByMarker(
+              closedRecent.data.filter(i => i.closed_at && Date.parse(i.closed_at) >= reopenCutoff),
+              closedByMarker,
+            )
+
+            const reported = new Set()
+            for (const e of lagging) {
+              reported.add(e.service)
+              const existingOpen = openByMarker.get(e.service)
+              if (existingOpen) {
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existingOpen.number,
+                  title: titleFor(e), body: bodyFor(e),
+                })
+                openByMarker.delete(e.service)
+                continue
+              }
+              const existingClosed = closedByMarker.get(e.service)
+              if (existingClosed) {
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: existingClosed.number,
+                  title: titleFor(e), body: bodyFor(e), state: 'open',
+                })
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: existingClosed.number,
+                  body: `Lag persists — reopening. This issue tracks a fact about the cluster: closing it by hand does not deploy anything, and the watch closes it itself once the pin catches up. To accept the lag knowingly, say so in a comment. _(\`${context.workflow}\` run ${context.runId})_`,
+                })
+                continue
+              }
+              await github.rest.issues.create({
+                ...context.repo, title: titleFor(e), body: bodyFor(e),
+                labels: [LABEL],
+              })
+            }
+
+            // Auto-close: an open issue whose service no longer lags is closed by the
+            // watch, never left for a human to notice.
+            for (const [service, issue] of openByMarker) {
+              if (reported.has(service)) continue
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: issue.number,
+                body: `Deployed pin caught up — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              await github.rest.issues.update({
+                ...context.repo, issue_number: issue.number, state: 'closed',
+              })
+            }

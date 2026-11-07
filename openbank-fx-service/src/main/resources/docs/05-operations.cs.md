@@ -85,6 +85,7 @@ PENDING znamená, že screening řekl REVIEW nebo byla sanctions-service nedostu
 ### Chybí ČNB fixing pro dnešek
 
 1. Proběhl cron 14:40 Europe/Prague? `kubectl logs -l app=openbank-fx-service | grep "ČNB fixing"`.
+   Každý pod navíc spustí stejnou ingestaci zhruba 30 s po startu (`openbank.cnb.initial-delay`, opakuje se každých `openbank.cnb.startup-every`, výchozí 24h; v testech `"off"`). Ingestace je idempotentní pro pracovní den, takže pod nastartovaný po 14:40 si fixing dne stáhne a zaznamená úspěch workflow, místo aby až do cronu dalšího dne hlásil `openbank_workflow_success_recorded == 0`.
 2. Backfill ručně (idempotentní): `POST /api/v1/fx/cnb/ingest?date=YYYY-MM-DD` s `ROLE_OPERATOR`.
 3. Ověření: `GET /api/v1/fx/cnb/rates/EUR`.
 
@@ -101,3 +102,11 @@ PENDING znamená, že screening řekl REVIEW nebo byla sanctions-service nedostu
 ## Produkční mTLS volání AML služby
 
 Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

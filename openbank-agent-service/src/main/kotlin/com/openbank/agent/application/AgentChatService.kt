@@ -277,9 +277,8 @@ class AgentChatService {
             }
         }
         // ADR-0080 P0: only offer the model the tools the agent's charter allows. The model
-        // never even sees the other tool schemas, so a prompt injection cannot name a tool to
-        // call (defense-in-depth; the gate still denies on top). Empty allow-list → no
-        // filtering (unchanged behaviour).
+        // never even sees the other tool schemas. The same request-level allow-list is checked
+        // again against model output below: a model can return a call it was never offered.
         val allowedCaps = charterRegistry.allowedCapabilities(identity.agentId)
         val tools = registry.tools
             .filter { allowedCaps.isEmpty() || registry.capabilityOf(it.name) in allowedCaps }
@@ -376,21 +375,32 @@ class AgentChatService {
             messages += ChatMessage(ChatRole.ASSISTANT, response.content, toolCalls = response.toolInvocations)
             var errors = 0
             for (inv in response.toolInvocations) {
-                val outcome = policyGate.authorize(
-                    identity = identity,
-                    tool = inv.name,
-                    capability = registry.capabilityOf(inv.name),
-                    resource = resourceOf(inv.arguments),
-                )
                 val resultText: String
                 val errored: Boolean
-                if (!outcome.proceed) {
-                    resultText = "Policy denied tool '${inv.name}': ${outcome.decision.reason}"
+                val allowed: Boolean
+                if (offeredToolNames != null && inv.name !in offeredToolNames) {
+                    // Request-level denial happens before policy/registry lookup, including for
+                    // empty sets used by no-tools workflows. Do not trust the model to honor the
+                    // schemas it was given.
+                    resultText = "Tool '${inv.name}' was not offered for this request."
+                    allowed = false
                     errored = true
                 } else {
-                    val res = registry.call(inv.name, inv.arguments, actorId = identity.agentId)
-                    resultText = res.content.joinToString("\n") { it.text }
-                    errored = res.isError
+                    val outcome = policyGate.authorize(
+                        identity = identity,
+                        tool = inv.name,
+                        capability = registry.capabilityOf(inv.name),
+                        resource = resourceOf(inv.arguments),
+                    )
+                    allowed = outcome.proceed
+                    if (!outcome.proceed) {
+                        resultText = "Policy denied tool '${inv.name}': ${outcome.decision.reason}"
+                        errored = true
+                    } else {
+                        val res = registry.call(inv.name, inv.arguments, actorId = identity.agentId)
+                        resultText = res.content.joinToString("\n") { it.text }
+                        errored = res.isError
+                    }
                 }
                 if (errored) errors++
                 // Cap large tool results before feeding them back to the model. A verbose result
@@ -410,7 +420,7 @@ class AgentChatService {
                 // markers are also what the preamble at the top of the loop promised exist.)
                 val wrapped = injectionGuard.sanitizeToolResult(identity, forModel)
                 messages += ChatMessage(ChatRole.TOOL, wrapped, toolCallId = inv.id)
-                record += ToolCallRecord(inv.name, outcome.proceed, resultText.take(200))
+                record += ToolCallRecord(inv.name, allowed, resultText.take(200))
             }
             // Every tool this round failed → don't let the model keep retrying; force a text answer next.
             if (errors == response.toolInvocations.size) offerTools = false

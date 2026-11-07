@@ -1,6 +1,6 @@
 # Runbook 0008 — Kafka mTLS cutover for payment.scheme-accepted (ADR-0137)
 
-Status: Draft (manifests landed; not yet applied to sandbox)
+Status: Obsolete (2026-10-17): the `payment.scheme-accepted` topic, its ACLs, DLQ and consumer were removed; nothing ever produced to it and rail settlement runs over REST (ADR-0108). Kept for history only; do not execute.
 Owner: Payments + Platform + Security
 Related: ADR-0137 (this migration), ADR-0108 (rail settlement trust boundary),
 transaction-service threat model §2a, #2554 (the premature-ACL removal this

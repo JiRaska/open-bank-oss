@@ -20,7 +20,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Notification Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Delivery outcomes for notification requests (ADR-0239, issue #3663).
 
@@ -163,10 +163,10 @@ components:
           format: uuid
         channel:
           type: string
-          enum: [EMAIL, PUSH]
+          x-extensible-enum: [EMAIL, PUSH, INBOX]
           description: |
-            Mirrors `NotificationChannel`. SMS and IN_APP were removed in #2372 as never-implemented;
-            a channel added later appears here first as a value a consumer must tolerate.
+            Mirrors `NotificationChannel`. INBOX is visible in the authenticated feed without
+            provider handoff. Consumers must tolerate future channel values.
         template:
           type: string
           description: |
@@ -175,7 +175,7 @@ components:
             an unrelated template being added.
         outcome:
           type: string
-          enum: [SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED]
+          x-extensible-enum: [SENT, SUPPRESSED, FAILED, BOUNCED, REROUTED, VISIBLE]
           description: |
             The terminal fate. `SENT` means the channel adapter accepted it — for EMAIL that is an
             SMTP accept, which a later bounce can still refine.
@@ -188,6 +188,13 @@ components:
             `REROUTED` means a PUSH had no active device and a separate generic EMAIL request was
             durably created in the same transaction. It does not mean that email was delivered; the
             EMAIL row emits its own terminal outcome.
+
+            `VISIBLE` means an INBOX row and this outcome committed in the same transaction.
+            It does not mean the customer opened it or a transport provider accepted it.
+        templateRevision:
+          type: [integer, 'null']
+          format: int64
+          description: Immutable published copy revision, or null for reviewed built-in copy.
         reason:
           type: [string, 'null']
           description: |

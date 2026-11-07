@@ -55,7 +55,7 @@ export type PreviewLike =
   | { status: 'unavailable'; kind: string }
   | { status: 'no-periods' }
   | { status: 'unsupported' }
-  | { status: 'ready'; templates: ReadonlyArray<TemplateLike>; evidence?: 'FROZEN' | 'LIVE_PREVIEW' }
+  | { status: 'ready'; templates: ReadonlyArray<TemplateLike>; evidence?: 'FROZEN' | 'LIVE_PREVIEW' | 'GENERATED' }
 
 export interface CellLike {
   isDataGap?: boolean

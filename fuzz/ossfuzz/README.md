@@ -20,12 +20,19 @@ statement imports, webhook payloads) — one object with a
 ## Local run
 
 ```bash
-./gradlew :openbank-libs-domain:classes           # from the repo root
-cd fuzz/ossfuzz && gradle shadowJar               # standalone build (deliberately
-                                                  # not in the root settings)
+./gradlew :openbank-libs-domain:classes :openbank-libs-iso20022:classes
+./gradlew -p fuzz/ossfuzz test shadowJar           # standalone build, root wrapper
 # https://github.com/CodeIntelligenceTesting/jazzer/releases
 jazzer --cp=build/libs/ossfuzz-all.jar --target_class=com.openbank.fuzz.Pacs008ReaderFuzzer
 ```
+
+Run the last command from `fuzz/ossfuzz` with a Jazzer driver that supports JDK 25 bytecode
+(the 0.22.1 driver does not; the harness's API dependency is separate). Bound local runs with
+`-max_total_time=60 -max_len=65536` and put generated corpus/crash artifacts outside tracked
+sources. Keep the driver version, JVM and budget with the results. The public seed is a reader
+example, not an XSD-valid recovery oracle: the harness builds its own complete message and checks
+exact fields after every arbitrary input. Corpus regression tests run before coverage-guided
+fuzzing in `ossfuzz-build.sh`, and separately in `libs-quality.yml`.
 
 ## Files for google/oss-fuzz `projects/openbank/`
 
@@ -44,9 +51,11 @@ auto_ccs: []
 ```dockerfile
 FROM gcr.io/oss-fuzz-base/base-builder-jvm
 # libs-domain targets JVM 25; the base image's JDK may lag — install Temurin 25.
-RUN curl -fsSL https://api.adoptium.net/v3/binary/latest/25/ga/linux/x64/jdk/hotspot/normal/eclipse \
-      -o /tmp/jdk25.tar.gz && mkdir -p /opt/jdk25 \
-      && tar -xzf /tmp/jdk25.tar.gz -C /opt/jdk25 --strip-components=1
+RUN curl -fsSL 'https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.5%2B8/OpenJDK25U-jdk_x64_linux_hotspot_25.0.5_8.tar.gz' \
+      -o /tmp/jdk25.tar.gz \
+      && echo '68982529869257d0ee6b824ec5aa270ff8b118bb438670da0b97ebdab178d7fb  /tmp/jdk25.tar.gz' | sha256sum -c - \
+      && mkdir -p /opt/jdk25 \
+      && tar -xzf /tmp/jdk25.tar.gz -C /opt/jdk25 --strip-components=1 && rm /tmp/jdk25.tar.gz
 ENV JAVA_HOME=/opt/jdk25 PATH=/opt/jdk25/bin:$PATH
 RUN git clone --depth 1 https://github.com/JiRaska/open-bank-oss.git $SRC/open-bank-oss
 COPY build.sh $SRC/

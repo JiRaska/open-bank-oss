@@ -26,6 +26,8 @@ import { readdirSync, statSync, readFileSync, writeFileSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { parse as parseYaml } from 'yaml'
+import { DATA_DOMAINS } from './governance-schema.mjs'
+import { runnableModules } from './service-inventory.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const args = process.argv.slice(2)
@@ -39,6 +41,16 @@ const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'catalog.
 
 function readText(p) {
   try { return readFileSync(p, 'utf-8') } catch { return null }
+}
+
+function releaseRegistered(name) {
+  try {
+    const config = JSON.parse(readText(path.join(REPO, 'release-please-config.json')) ?? '{}')
+    const manifest = JSON.parse(readText(path.join(REPO, '.release-please-manifest.json')) ?? '{}')
+    return Object.hasOwn(config.packages ?? {}, name) && Object.hasOwn(manifest, name)
+  } catch {
+    return false
+  }
 }
 
 // Money-path set + (optional) data-domain hints from the single governance source.
@@ -90,6 +102,7 @@ function readPorts(serviceDir) {
 }
 
 const gov = loadGovernance()
+const runnableNames = new Set(runnableModules(REPO).map(module => module.name))
 
 // Discover service modules: every top-level openbank-* dir that is a Gradle
 // module (has version.txt OR an openapi spec OR a build.gradle.kts). admin-ui and
@@ -109,20 +122,23 @@ for (const name of entries) {
   }
   const { hasOpenapi, apiVersion, apiTitle } = readOpenapi(dir)
   const isService = name.endsWith('-service') || name.endsWith('-payment') || name.endsWith('-instant')
-  // The convention plugin identifies a runnable Quarkus module more reliably
-  // than its name: risk-engine and product-catalog have no -service suffix.
-  const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
-  const runnable = (/^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
-    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")')))
-    // analytics-sink applies the Quarkus Gradle plugin directly (no convention plugin) but is a
-    // deployable service with its own port, so it belongs to the fleet too.
-    || /^\s*alias\(libs\.plugins\.quarkus\)/m.test(buildScript)
+  const runnable = runnableNames.has(name)
   const { port, mgmtPort } = readPorts(dir)
   const moneyPath = gov.moneyPath.has(name)
+  let dataDomain = null
+  const declaration = readText(path.join(dir, 'governance.yaml'))
+  if (declaration !== null) {
+    const parsed = parseYaml(declaration)
+    if (!DATA_DOMAINS.includes(parsed?.dataDomain)) throw new Error(`${name}: invalid or missing dataDomain`)
+    dataDomain = parsed.dataDomain
+  }
+  if (runnable && dataDomain === null) throw new Error(`${name}: missing domain ownership in governance.yaml`)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
   const gaps = []
-  if (isService && !releaseVersion) gaps.push('missing version.txt')
+  if ((isService || runnable) && !releaseVersion) gaps.push('missing version.txt')
+  if (runnable && !releaseRegistered(name)) gaps.push('runnable backend component is not release-registered')
+  if (runnable && !readText(path.join(dir, 'governance.yaml'))) gaps.push('runnable backend component has no governance.yaml')
   if (moneyPath && !hasOpenapi) gaps.push('money-path service with no OpenAPI spec')
 
   services.push({
@@ -130,6 +146,7 @@ for (const name of entries) {
     short: name.replace(/^openbank-/, ''),
     kind: name === 'openbank-admin-ui' ? 'ui' : name === 'openbank-libs' ? 'library' : isService ? 'service' : 'component',
     runnable,
+    dataDomain,
     port,
     mgmtPort,
     releaseVersion,
@@ -151,6 +168,7 @@ const totals = {
 
 const catalog = {
   schema: 'openbank.catalog/v1',
+    domainTaxonomy: 'openbank.domain-taxonomy/v1',
   generator: 'generate-catalog.mjs',
   source: 'code-derived (version.txt, openapi.yaml, rules.yaml) — ADR-0029 D3 / ADR-0048',
   // collectedAt is stamped by the caller/CI (kept null here so the artifact is

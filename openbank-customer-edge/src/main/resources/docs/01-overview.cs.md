@@ -51,6 +51,7 @@ Edge je proxy: **nevydává žádné vlastní události**. Sloupec „upstream" 
 | Vypsat moje účty | `GET /accounts` | account-service |
 | Získat jeden z mých účtů | `GET /accounts/{accountId}` | account-service (vlastnictví vynuceno zde) |
 | Získat zůstatek | `GET /balances/{accountId}` | balance-service (vlastnictví vynuceno zde) |
+| Spravovat upozornění na nízký zůstatek | `GET,PUT /balances/{accountId}/{currency}/low-balance-alert` | balance-service (pouze vlastník; dobrovolné upozornění v aplikaci) |
 | Vypsat moje transakce | `GET /transactions?accountId=…` | transaction-service (vlastnictví vynuceno zde) |
 | Vypsat období výpisů | `GET /statements/{accountId}` | statement-service (vlastnictví vynuceno zde) |
 | Vyrenderovat výpis (camt.053/MT940/PDF) | `GET /statements/{accountId}/{currency}/{legalSequence}` | statement-service |

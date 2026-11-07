@@ -23,4 +23,8 @@ Tato dokumentace je vystavena přímo službou na management endpointu `/q/openb
 - **Outbox:** `sanctions_outbox` → Kafka topic `openbank.sanctions.screening.event`
 - **Idempotence:** pole `idempotencyKey` v těle požadavku → Redis (deduplikace)
 - **Auth:** Keycloak OIDC, role `ROLE_OPERATOR` pro mutace
-- **Listiny:** OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC
+- **Listiny:** OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, CNB_DOMESTIC, CZ_TERRORISTS (oficiální e-Sbírka)
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

@@ -114,7 +114,16 @@ data class FlakyTestReport(
     val trigger: RunTrigger,
 )
 
-enum class RunTrigger { SCHEDULED, CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUAL }
+/**
+ * The weekly sweep was removed because the deployed pod carries no repository checkout or test
+ * results. Its replay-only SCHEDULED value was removed after the 168-hour Temporal history
+ * retention window. The scan remains reachable through a webhook or operator trigger; production
+ * input is the Admin UI Test Intelligence snapshot posted to `POST /evidence/analyze`.
+ */
+enum class RunTrigger {
+    CI_TEST_SUITE_FAILURE_WEBHOOK,
+    OPERATOR_MANUAL,
+}
 
 /** Privacy-bounded projection received only from the authenticated Admin UI BFF. */
 data class TestIntelligenceAnalysisRequest(

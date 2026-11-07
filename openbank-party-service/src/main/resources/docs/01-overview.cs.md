@@ -46,7 +46,7 @@
 | Zaznamenání koncového výsledku KYC (event) | konzumuje `openbank.kyc.events` | `KYC_STATUS_CHANGED` |
 | Zaznamenání koncového výsledku AML (event) | konzumuje `openbank.aml.events` | `KYC_STATUS_CHANGED` |
 | Výpis party (stránkovaný, volitelný filtr stavu) | `GET /api/v1/parties?status=…` | — |
-| Vyhledání party podle jména (trigram) | `GET /api/v1/parties/search?q=…` | — |
+| Vyhledání party podle jména, národního identifikátoru nebo jména + data narození | `GET /api/v1/parties/search?q=…` | — |
 | Výmaz party (GDPR čl. 17) | `DELETE /api/v1/parties/{id}` | `PARTY_ERASED` |
 
 ## Volající

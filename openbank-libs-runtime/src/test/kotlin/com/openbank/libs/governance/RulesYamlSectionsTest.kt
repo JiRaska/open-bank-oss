@@ -5,7 +5,6 @@
 package com.openbank.libs.governance
 
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
@@ -147,8 +146,13 @@ class RulesYamlSectionsTest {
 
     @Test
     fun `the real checked-in rules yaml parses to a non-empty money-path set and review pair`() {
-        val path = Path.of("..", "..", "openbank-libs", "governance", "rules.yaml")
-        assumeTrue(Files.exists(path), "rules.yaml not on disk in this checkout")
+        val configuredPath = requireNotNull(System.getProperty("openbank.test.governance-rules")) {
+            "Run this test through Gradle: openbank.test.governance-rules must identify the checked-in rules.yaml"
+        }
+        val path = Path.of(configuredPath)
+        assertThat(Files.isRegularFile(path))
+            .describedAs("checked-in governance rules must exist at %s", path)
+            .isTrue
 
         val lines = Files.readAllLines(path)
         assertThat(RulesYamlSections.moneyPathServices(lines)).isNotEmpty

@@ -66,7 +66,7 @@ open class RepresentationAttestationService : RepresentationAttestationUseCase {
     private val log = Logger.getLogger(RepresentationAttestationService::class.java)
 
     override suspend fun decisionFor(scheme: IdentifierScheme, identifier: String): RepresentationDecision? {
-        val id = LegalEntityIdentifier.of(scheme, identifier)
+        LegalEntityIdentifier.of(scheme, identifier)
         val extract = lookup.lookup(LookupCommand(scheme, identifier)) ?: return null
         return decide(extract)
     }

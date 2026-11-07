@@ -6,6 +6,8 @@ package com.openbank.treasury.nostro
 
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.infrastructure.nostro.AccountBalanceView
+import com.openbank.treasury.infrastructure.nostro.AccountingClassMappingView
+import com.openbank.treasury.infrastructure.nostro.LedgerAccountingClassRestClient
 import com.openbank.treasury.infrastructure.nostro.LedgerReadAdapter
 import com.openbank.treasury.infrastructure.nostro.LedgerReadRestClient
 import io.mockk.every
@@ -29,7 +31,8 @@ class LedgerReadAdapterTest {
 
     private val date = LocalDate.parse("2026-09-25")
     private val client = mockk<LedgerReadRestClient>()
-    private val adapter = LedgerReadAdapter(client)
+    private val classes = mockk<LedgerAccountingClassRestClient>()
+    private val adapter = LedgerReadAdapter(client, classes, postByClass = true)
 
     private fun answer404(body: String?) {
         val response = mockk<Response>(relaxed = true)
@@ -77,5 +80,90 @@ class LedgerReadAdapterTest {
             ),
         )
         assertThat(adapter.accountBalance("1001", "CZK", date)).isEqualByComparingTo("7")
+    }
+
+    @Test
+    fun `the nostro of a currency is whatever the ledger map says, not a literal`() = runBlocking<Unit> {
+        val moved = java.util.UUID.fromString("a0000000-0000-0000-0000-000000009001")
+        every { classes.list() } returns Uni.createFrom().item(
+            listOf(
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", moved, "9001"),
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "EUR", java.util.UUID.randomUUID(), "1002"),
+                // other classes and roles are not nostros
+                AccountingClassMappingView(
+                    "INTERBANK_PLACEMENT",
+                    "PRINCIPAL",
+                    "CZK",
+                    java.util.UUID.randomUUID(),
+                    "1500",
+                ),
+                AccountingClassMappingView(
+                    "NOSTRO_ACCOUNT",
+                    "ACCRUED_INTEREST",
+                    "USD",
+                    java.util.UUID.randomUUID(),
+                    "1999",
+                ),
+            ),
+        )
+        val nostros = adapter.nostroAccounts()
+        assertThat(nostros.keys).containsExactlyInAnyOrder("CZK", "EUR")
+        assertThat(nostros.getValue("CZK").glCode).isEqualTo("9001")
+        assertThat(nostros.getValue("CZK").glAccountId).isEqualTo(moved)
+    }
+
+    @Test
+    fun `a ledger that does not serve the class map is unavailable, never an empty nostro set`() {
+        val response = mockk<Response>(relaxed = true)
+        every { response.status } returns 404
+        every { classes.list() } returns Uni.createFrom().failure(WebApplicationException(response))
+        assertThatThrownBy { runBlocking { adapter.nostroAccounts() } }
+            .isInstanceOf(LedgerUnavailableException::class.java)
+    }
+
+    @Test
+    fun `with the switch off an older ledger's 404 on the class map does not stop reconciliation`() =
+        runBlocking<Unit> {
+            val response = mockk<Response>(relaxed = true)
+            every { response.status } returns 404
+            every { classes.list() } returns Uni.createFrom().failure(WebApplicationException(response))
+            val legacy = LedgerReadAdapter(client, classes, postByClass = false)
+
+            val nostros = legacy.nostroAccounts()
+
+            assertThat(nostros.getValue("CZK").glCode).isEqualTo("1001")
+            assertThat(nostros.getValue("EUR").glCode).isEqualTo("1002")
+            assertThat(nostros.getValue("CZK").glAccountId.toString()).isEqualTo("a0000000-0000-0000-0000-000000001001")
+            io.mockk.verify(exactly = 0) { classes.list() }
+        }
+
+    @Test
+    fun `with the switch off the line read finds the nostro account without touching the class map`() =
+        runBlocking<Unit> {
+            every { classes.list() } returns Uni.createFrom().failure(IllegalStateException("must not be called"))
+            every { client.list(any(), any(), any(), any()) } returns Uni.createFrom().item(
+                com.openbank.treasury.infrastructure.nostro.JournalPage(),
+            )
+            val legacy = LedgerReadAdapter(client, classes, postByClass = false)
+            assertThat(legacy.nostroLines(legacy.nostroAccounts().getValue("CZK"), date, date)).isEmpty()
+        }
+
+    @Test
+    fun `one reconcile run reads the class map once and nothing is cached between runs`() = runBlocking<Unit> {
+        every { classes.list() } returns Uni.createFrom().item(
+            listOf(
+                AccountingClassMappingView("NOSTRO_ACCOUNT", "PRINCIPAL", "CZK", java.util.UUID.randomUUID(), "1001"),
+            ),
+        )
+        every { client.list(any(), any(), any(), any()) } returns Uni.createFrom().item(
+            com.openbank.treasury.infrastructure.nostro.JournalPage(),
+        )
+        // run 1: resolve once, hand the account to the line read
+        val nostro = adapter.nostroAccounts().getValue("CZK")
+        adapter.nostroLines(nostro, date, date)
+        io.mockk.verify(exactly = 1) { classes.list() }
+        // run 2 sees the ledger afresh
+        adapter.nostroAccounts()
+        io.mockk.verify(exactly = 2) { classes.list() }
     }
 }

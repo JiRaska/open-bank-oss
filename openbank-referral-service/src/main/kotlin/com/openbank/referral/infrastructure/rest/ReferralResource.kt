@@ -40,13 +40,22 @@ class ReferralResource(
 
     @GET
     @Path("/programs")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun programs(): Response = Response.ok(service.listPublishedPrograms()).build()
 
     @GET
     @Path("/programs/{id}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun program(@PathParam("id") id: UUID): Response = service.publishedProgram(id)
         ?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND).build()
+
+    // Exact-match segment: RESTEasy routes /programs/drafts here and /programs/{id} only for
+    // a single path segment — 'drafts' is not a UUID, so an unknown {id} still 404s below.
+    @GET
+    @Path("/programs/drafts")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
+    suspend fun drafts(): Response = Response.ok(service.listDraftPrograms()).build()
 
     /**
      * The invites [partyId] issued, as the REFERRER may see them. Reached through the customer
@@ -81,6 +90,7 @@ class ReferralResource(
 
     @POST
     @Path("/programs")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun create(req: CreateReferralProgramRequest): Response = Response.status(
         Response.Status.CREATED,
     ).entity(
@@ -97,6 +107,7 @@ class ReferralResource(
 
     @POST
     @Path("/programs/{id}/publish")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_MARKETING")
     suspend fun publish(@PathParam("id") id: UUID): Response = Response.ok(service.publishProgram(id, actor())).build()
 
     @POST

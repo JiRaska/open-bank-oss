@@ -6,9 +6,17 @@ package com.openbank.libs.iso20022
 
 import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Element
+import org.xml.sax.SAXException
+import java.io.IOException
 
 /** The status a rail needs from an inbound `pacs.002`: the verdict and (on reject) why. */
-data class ReceivedStatusReport(val originalEndToEndId: String?, val status: PaymentStatus, val reasonCode: String?)
+data class ReceivedStatusReport(
+    val originalEndToEndId: String?,
+    val status: PaymentStatus,
+    val reasonCode: String?,
+    val originalMessageId: String? = null,
+    val originalUetr: String? = null,
+)
 
 /** Thrown when a `pacs.002` cannot be parsed into a [ReceivedStatusReport]. */
 class Pacs002ParseException(message: String) : RuntimeException(message)
@@ -23,7 +31,13 @@ class Pacs002ParseException(message: String) : RuntimeException(message)
  */
 class Pacs002Reader {
     fun read(xml: String): ReceivedStatusReport {
-        val doc = SecureXml.parse(xml)
+        val doc = try {
+            SecureXml.parse(xml)
+        } catch (failure: SAXException) {
+            fail("malformed XML: ${failure.message}")
+        } catch (failure: IOException) {
+            fail("unreadable XML: ${failure.message}")
+        }
         doc.documentElement.normalize()
 
         val root = doc.documentElement
@@ -36,6 +50,8 @@ class Pacs002Reader {
             originalEndToEndId = txSts.firstByLocal("OrgnlEndToEndId")?.textContent?.trim(),
             status = status,
             reasonCode = txSts.firstByLocal("StsRsnInf")?.firstByLocal("Cd")?.textContent?.trim(),
+            originalMessageId = txSts.firstByLocal("OrgnlMsgId")?.textContent?.trim(),
+            originalUetr = txSts.firstByLocal("OrgnlUETR")?.textContent?.trim(),
         )
     }
 

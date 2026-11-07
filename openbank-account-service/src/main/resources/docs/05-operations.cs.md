@@ -94,6 +94,22 @@ Pool size: 30 (default). Pokud saturated:
 2. Long-running TX? Kill: `SELECT pg_cancel_backend(pid)`
 3. Zvyš pool: `quarkus.datasource.reactive.max-size=50` (přes config map).
 
+### Otevření účtu odmítnuto: PRODUCT_CATALOG_UNAVAILABLE / PRODUCT_REVISION_NOT_PUBLISHED
+
+Od ADR-0341 D1 se účet otevře jen s pinem PUBLIKOVANÉ revize katalogu (fail-closed na pinu; při
+odmítnutí se nic neuloží). Výsledky počítá `openbank_account_product_revision_pin_total{outcome}`
+(`pinned`, `catalog_unavailable`, `no_published_revision`, `product_not_found`, `product_not_eligible`).
+
+- Roste `catalog_unavailable`: product-catalog neběží, je škálovaný na nulu, nebo odmítá token služby
+  (401/403 se počítá sem, nikdy jako „nenalezeno“). Čtení katalogu používá sdílený resilience profil
+  `read` (timeout 2 s, 2 opakování, circuit breaker); zkontrolujte pody katalogu a URL / Host override
+  rest-clientu `product-catalog-api`. Otevření z onboardingu (Kafka) se opakuje a pak jde do DLQ, takže
+  se po obnovení katalogu přehraje.
+- `no_published_revision`: produkt nemá k okamžiku otevření publikovanou revizi. Vlastník katalogu ji
+  publikuje; služba to nemůže obejít.
+- `openbank_account_product_revision_unpinned` je dluh backfillu (účty z doby před V33); nesmí růst.
+  Růst znamená, že nějaká cesta otevření pin vynechala. Viz 04-data, plán backfillu.
+
 ## Tech-stack version matrix
 
 Auto-generated z `libs.versions.toml` při buildu, dostupné v `/api/v1/info` payloadu:
@@ -133,3 +149,27 @@ CI per-service pipeline (`.github/workflows/ci-account-service.yml`):
 3. CycloneDX SBOM generation
 4. Docker image build → push to registry
 5. CD: ArgoCD picks up new tag from `k8s/account-service.yaml` bump
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Volání transaction-service
+
+Úvěrování uvítacího bonusu se odesílá přes sdílenou fasádu `TransactionClient` z generovaného modulu `openbank-client-transaction` (ADR-0319), která HTTP odpověď klasifikuje na jednom místě. Stav 2xx znamená přiznáno jen tehdy, když fasáda přečte transakci ve stavu COMPLETED a adaptér ověří přítomnost jejího identifikátoru; jakýkoli jiný stav 2xx (FAILED, probíhá, nečitelné tělo) se vyhodí jako nejistě dokončený a zopakuje se se stejným idempotentním klíčem. Odpověď 409 nebo odmítnutí 400/422 nadále způsobí selhání přiznání, stejně jako dříve výjimka klienta. Jakýkoli jiný stav nebo ztracené spojení se vyhodí, aby volající zopakoval pokus; požadavek musí zachovat původní idempotentní klíč `welcome-bonus-<accountId>`. Tento zdroj nedokládá živou ochranu poskytovatele pro každé souběžné nebo vícedenní opakování. Konfigurace se nezměnila.
+
+Chybějící identifikátor transakce zůstává nejistým výsledkem a nikdy nepotvrdí přiznání bonusu. Zachovává se tím původní požadavek vazby potvrzení. Oprava nemění přijímané stavy 200/201/202/206. Existující logování výjimek mimo tuto kontrolu není prohlášené za anonymní.
+
+
+### Identita pro čtení publikované revize
+
+Čtení produktu a publikované revize používá vlastní pojmenovaný klient `m2m` služby account.
+Před nasazením musí konfigurace vydavatele tokenů dodat tomuto klientovi scope `catalog:read`;
+role operátora není potřeba. Odmítnutí autorizace dál zablokuje otevření účtu jako nedostupný
+katalog. Před aktivací ověřte čtení publikované revize běžnou identitou služby; změna zdrojů
+ani testovací token nedokládají živou konfiguraci. Při návratu odeberte společně grant pro
+čtení, scope a výběr klienta. Již uložené vazby účtů na revize zůstanou zachované.

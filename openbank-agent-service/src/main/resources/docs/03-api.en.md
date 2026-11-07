@@ -1,8 +1,8 @@
 # API
 
-The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.5.0**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
+The REST/RPC contract is formalised in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version` **1.18.1**). The service is **internal** — it is **not** exposed via the API Gateway to external TPPs.
 
-Two version axes apply (ADR-0048): the release version (`version.txt` = `1.5.0`) and the API-contract version (`openapi.yaml: info.version` = `1.5.0`, `openbank.api.version = "1"`). They are independent.
+Two version axes apply (ADR-0048): the release version (`version.txt`) and the API-contract version (`openapi.yaml: info.version` = `1.18.1`, `openbank.api.version = "1"`). They are independent.
 
 ## Surfaces
 
@@ -11,6 +11,9 @@ Two version axes apply (ADR-0048): the release version (`version.txt` = `1.5.0`)
 | MCP server | `POST /mcp` | JSON-RPC 2.0 over HTTP | `X-Agent-Id` identity (deny-by-default if absent) |
 | Admin assistant | `POST /agent/chat` | JSON | Keycloak OIDC; runs as `ui-assistant` |
 | Model registry | `GET /agent/models` | JSON | Keycloak OIDC |
+| Catalog review capability/review | `GET` / `POST` `/agent/catalog-reviews` | JSON | Keycloak OIDC; operator/admin/compliance |
+| Human merge ingest / evidence reads | `POST` / `GET` `/api/v1/agent-merge-records` | JSON | Keycloak OIDC (roles below) |
+| App merge ingest | `POST /api/v1/agent-merge-records/app` | JSON | `ROLE_MERGE_RECORDER` |
 | Health | `GET /q/health/live`, `/q/health/ready` | JSON | none (management port 8085) |
 
 ## MCP — `POST /mcp`
@@ -23,6 +26,19 @@ A single JSON-RPC 2.0 dispatcher. The `method` field selects the operation. Noti
 | `tools/list` | Enumerate the available tools (name, description, JSON-Schema `inputSchema`). |
 | `tools/call` | Invoke a named tool with `arguments`. The call is authorized by the policy gate **before** execution; a denial returns a `ToolCallResult` with `isError=true` and the policy reason. |
 | `ping` | Liveness — returns `{ "pong": true }`. |
+
+### Business ownership metadata
+
+Each `tools/list` entry retains its downstream `service` identity. Its `domain` label is
+read from the same per-module `governance.yaml` and canonical domain taxonomy packaged
+into the service image during resource processing. External infrastructure without a
+declaration is `Unclassified`; known banking tools must resolve a declared owner.
+The historical `sepa-instant-service` tool identity resolves `openbank-sepa-instant`
+ownership without renaming tools or changing their target.
+
+The admin MCP relay overlays reviewed published ownership on successful `tools/list`
+responses when that metadata advances before the agent image. The tool set, charter
+filtering, capabilities, input schemas and `tools/call` responses remain unchanged.
 
 ### Tool catalogue (all read-only)
 
@@ -38,6 +54,8 @@ Tools are grouped by the charter capability they require (`McpToolRegistry`):
 | `query.disputes.readonly` | `dispute_list`, `dispute_get`, `dispute_list_by_account`, `dispute_get_timeline` |
 
 A tool **not** present in the capability map has no capability and is **denied by default** — registering a new tool without a mapping fails closed, it does not silently bypass governance.
+
+The `sepa_instant_list`, `sepa_instant_get`, and `sepa_instant_list_by_debtor` read tools are contract-tested against the `openbank-sepa-instant` API. The consumer contract pins the response shape and verifies that an unknown payment ID fails closed.
 
 > Schema note: numeric tool arguments (`limit`, `size`) are declared as JSON `string` on purpose. The Groq llama backend frequently emits numeric arguments as strings and rejects an `integer` schema; the handler coerces with `asInt()`, so a string schema is both accepted and correct.
 
@@ -74,12 +92,99 @@ The loop enforces the `ui-assistant` charter: a runs-per-day pre-flight check (o
 
 Returns the default model id and every enabled model in the gateway registry: `{ default, models: [{ id, provider, sensitivity }] }` where `sensitivity ∈ {HOSTED, SELF_HOSTED}`.
 
+## Catalog Intelligence — `/agent/catalog-reviews`
+
+Both operations require `ROLE_OPERATOR`, `ROLE_ADMIN`, or `ROLE_COMPLIANCE`.
+
+- **`GET /agent/catalog-reviews`** returns the catalog-review capability: whether a configured route is eligible, its mode, configured default model id, and the eligible model descriptors. The list is derived from the service model registry and deployment policy; it does not probe the provider or guarantee that an upstream model is currently healthy. The UI reads this response rather than embedding model ids.
+- **`POST /agent/catalog-reviews`** accepts `offeringId` and `revisionId` UUIDs, plus an optional `model` from the capability allow-list. If omitted, the service uses the configured default. The service fetches that exact catalog revision, requires it to remain `DRAFT`, and rejects snapshots over 64,000 characters. The model receives the pinned snapshot with tools disabled. The only persisted result is a `PROPOSED` item in the human-in-the-loop queue; the operation does not write, publish, or retire catalog content.
+
+Hosted review is a catalog-only sandbox exception. `catalog-review.allow-hosted-models` defaults to `false`; the sandbox deployment explicitly enables it. When enabled, the server permits only registered `openai-compat` models whose configured endpoint matches the in-cluster LiteLLM gateway. It uses the already configured default and existing LiteLLM budget controls; it adds no provider credential or direct-provider route. In deployments without the opt-in, catalog review retains the existing self-hosted sensitive-context requirement. This exception does not change routing for other agent workflows.
+
+Invalid identifiers, non-DRAFT revisions, oversized snapshots, or a model outside the allow-list return `400`; no eligible configured route or an unavailable model returns `503`. A successful response includes the proposal id/state, context hash, bounded findings, and the model id used.
+
+## Merge execution and human authorization — `/api/v1/agent-merge-records`
+
+ADR-0031 phase 3 stores the **actual merge executor** separately from the **human authorizer**.
+The trusted CI recorder submits the evidence; agent tools cannot self-report a merge.
+
+- `POST /api/v1/agent-merge-records`: `ROLE_MERGE_RECORDER` only. Existing required fields remain
+  `agentId`, `prNumber`, `prUrl`, `headBranch`, `mergedBy`, `mergedAt`, `title`; `proposalId` and
+  `source` remain optional. This original endpoint always records a human executor. Unknown
+  legacy fields remain ignored and never become App identity or authorization evidence.
+- `POST /api/v1/agent-merge-records/app`: the separate additive App-only ingest operation, also
+  recorder-only. Requires `mergedByType=GITHUB_APP`, `mergedById`, `headSha`, `mergeCommitSha` and
+  non-null `authorization`; human actor input is rejected. `mergedBy` remains the actual trusted App login. Authorization contains the
+  human login/id/time and evidence reference. `OWNER_WORKFLOW_EXACT_HEAD` / `HEAD` binds the
+  premerge owner workflow decision to this exact PR head, with `statusId` and `workflowRunId`.
+- `LEGACY_PR_AUTO_MERGE` / `PR` is bounded to merges through `2026-10-23T19:42:17Z`. It stores the
+  observed human auto-merge request, PR node, immutable merge-event node/time and observation time.
+  It does **not** certify SHA approval or historical policy compliance. Future observations and
+  contradictory proof are rejected. New App merges require exact-head workflow evidence.
+- `GET /api/v1/agent-merge-records/capabilities`: recorder-only; schema version 2 must be confirmed
+  before writing. `GET /api/v1/agent-merge-records/{prNumber}`: recorder-only committed read-back,
+  or 404 when missing. Neither read is granted to `ROLE_ADMIN` alone.
+- `GET /api/v1/agent-merge-records?agentId=` remains available to `ROLE_OPERATOR`, `ROLE_ADMIN` and
+  `ROLE_COMPLIANCE`, newest first, optionally restricted by agent.
+
+A duplicate returns the original record with `inserted=false`, without another audit event.
+Conflicting App executor, head, merge or authorization evidence returns 409; a refreshed historical
+observation retains the original timestamp. Invalid or missing proof returns 400. Merge-row and
+outbox insertion are atomic, so failed audit enqueue rolls back both. The App is audited as
+`SERVICE`; a human executor remains `HUMAN`. Recorder redirects are refused to protect credentials.
+
+Deploy the additive V7 migration and new reader before schema-2 writes. Then backfill merged PRs
+through an owner-only main workflow and independently read each result. A new green run does not
+repair an earlier gap by itself. Rollback retains evidence and stops App ingestion before reverting
+an incompatible reader; do not discard authorization rows to make rollback appear successful.
+
 ## Error model
 
 - **MCP / RPC:** JSON-RPC `error` object with standard codes — `-32700` parse, `-32600` invalid request, `-32601` method not found, `-32602` invalid params, `-32603` internal.
 - **Tool-level:** errors *inside* a tool (bad arguments, downstream unreachable, policy deny) are returned as a `ToolCallResult` with `isError=true` and a human-readable `text`, distinct from RPC-level errors, so the model can recover.
 - **Chat-level:** model rate-limit / outage degrades to a friendly `reply` (HTTP 200), never a raw 5xx.
+- **REST ingest:** a missing/blank required field or a non-UUID `proposalId` on the merge-record ingest maps to `400` through the shared `IllegalArgumentException` mapping (libs-runtime), never a 500.
 
 ## Versioning
 
 `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The MCP protocol version (`2024-11-05`) is negotiated separately on `initialize` and is independent of the HTTP API version.
+
+## Sanctions read-tool contracts
+
+`sanctions_list_checks`, `sanctions_get_check` and `sanctions_list_pending` return sanctions-service response bodies through `RestDownstreamReadAdapter`. The list tools return arrays; pending rows carry `POTENTIAL_HIT`. An unknown check id remains a downstream404 error and does not become a fabricated clear verdict.
+
+The four consumer Pact interactions cover list, a known check, pending and missing-id behavior using the real adapter with a handwritten client connected to a Pact mock. Sanctions provider replay reads a seeded row through real HTTP and PostgreSQL. These tests do not establish actual REST-client annotation mapping, JWT validity, policy enforcement, ownership or completeness of the returned population.
+
+## Balance holds downstream contract
+
+`get_balance_holds` calls `GET /api/v1/balances/{accountId}/holds` and passes the `holds` array
+through unchanged, including sensitive reason/reference metadata. The balance provider filters
+released/expired rows without releasing funds. The consumer Pact covers an active hold, an empty
+result and propagation of a missing-identity 401; its canonical contract test is discovered by
+Pact drift CI. These fixtures do not prove a live token, customer-edge header forwarding or a
+production OPA decision. The provider retains its existing RBAC/OPA and optional customer-owner guard.
+
+## Product as Code authoring tools (ADR-0352 §12)
+
+Five MCP tools let the `product-author` charter draft and check Product IR v1. They run in-process
+over `ProductToolkit` (openbank-libs-domain), the exact functions the `obp` CLI calls, and return
+the toolkit's canonical JSON unchanged — so the CLI and MCP surfaces yield identical bytes for the
+same document (gate `product-ir-authoring-parity`). None of them calls another service.
+
+| Tool | Capability | Tier | Arguments | Effect |
+|---|---|---|---|---|
+| `product_lint` | `product.lint` | read | `ir` | schema, run limits, `ruleId` uniqueness; `{ok:false, problems}` for an invalid document |
+| `product_compile` | `product.compile` | read | `ir` | canonical IR and `revisionHash` |
+| `product_simulate` | `product.simulate` | read | `ir`, `portfolio`, `from?`, `to?` | replays a portfolio fixture through the pure interpreter; posts nothing |
+| `product_explain` | `product.explain` | read | `ir`, `ruleId` or `instruction` | the rule's JSON pointer in the canonical IR |
+| `product_propose` | `product.propose` | write_proposal | `ir`, `offeringId`, `schemaId`, `schemaVersion`, `rationale` | records the DRAFT-revision plan as a HITL proposal; writes nothing to the catalog |
+
+There is no publish, sign or approve tool. `product.publish` and `product.sign` are in
+`tool_tiers.deny` (agents.yaml) and a unit test fails the build if any registered tool name contains
+`publish`, `sign` or `approve`. Publishing stays a human, four-eyes catalog action (ADR-0259) and
+the identity-bound signature belongs to the catalog publish path (ADR-0352 §4). JSON-text arguments
+are capped at 256 KiB, the proposal `rationale` at 4 KiB.
+
+A tool result is `isError = true` exactly when `obp` would exit non-zero for the same input — an
+invalid IR (`{ok:false, problems}`, the same bytes obp prints on stderr), an unknown `ruleId`, or a
+foreign instruction — so an agent that reads only `isError` never takes a failed check for success.

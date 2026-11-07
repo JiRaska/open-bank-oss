@@ -8,6 +8,7 @@ import com.openbank.pension.application.ProviderBoundary
 import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.usecase.PensionContractService
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import com.openbank.pension.infrastructure.pack.JurisdictionPackLoader
@@ -52,6 +53,7 @@ class PensionBeans {
         onboarding: jakarta.enterprise.inject.Instance<com.openbank.pension.application.onboarding.OnboardingService>,
         sca: com.openbank.pension.application.exit.ScaVerificationPort,
         providerBoundary: ProviderBoundary,
+        metrics: PensionMetrics,
     ): PensionContractUseCase = PensionContractService(
         repository,
         registry,
@@ -68,5 +70,6 @@ class PensionBeans {
         },
         sca,
         providerBoundary,
+        metrics,
     )
 }

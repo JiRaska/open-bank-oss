@@ -158,10 +158,6 @@
         <error line="79" column="27" source="standard:trailing-comma-on-declaration-site" />
         <error line="102" column="26" source="standard:trailing-comma-on-call-site" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/test/kotlin/com/openbank/sepa/domain/model/SepaPaymentTest.kt">
         <error line="27" column="22" source="standard:trailing-comma-on-call-site" />
         <error line="55" column="58" source="standard:trailing-comma-on-call-site" />

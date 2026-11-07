@@ -23,3 +23,7 @@ Tato dokumentace je vystavena přímo službou na management endpointu `/q/openb
 - **Outbox:** `account_outbox` → Kafka topic `openbank.account.events.v1`
 - **Idempotence:** `Idempotency-Key` header → Redis (24h TTL)
 - **Auth:** Keycloak OIDC, role `ROLE_OPERATOR` pro mutace
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

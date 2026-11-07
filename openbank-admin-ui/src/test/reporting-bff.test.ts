@@ -8,6 +8,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { getReport } from '@/lib/reporting/registry'
+import { parseReportResult } from '@/lib/reporting/clientContract'
+import { clickHouseRiskLargeSettledRows } from '../../e2e/fixtures/clickhouse-risk-large-settled'
 
 const permissionMock = vi.fn()
 vi.mock('@/lib/auth/api-permission', () => ({
@@ -34,6 +37,44 @@ function req(url: string): NextRequest {
 const PARAMS = Promise.resolve({ queryId: 'risk-failures-daily' })
 
 describe('reporting BFF /api/reporting/[queryId]', () => {
+  it('requests ISO DateTime64 output and returns rows accepted by the strict client contract', async () => {
+    allow()
+    const fetchSpy = vi.fn(async () => Response.json({ data: clickHouseRiskLargeSettledRows }))
+    vi.stubGlobal('fetch', fetchSpy)
+    const { GET } = await import('@/app/api/reporting/[queryId]/route')
+    const entry = getReport('risk-large-settled')!
+    const res = await GET(
+      req('/api/reporting/risk-large-settled?from=2026-09-20&to=2026-10-19&minAmount=100000'),
+      { params: Promise.resolve({ queryId: entry.id }) },
+    )
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(String(fetchSpy.mock.calls[0][0])).toContain('date_time_output_format=iso')
+    expect(parseReportResult(body, entry)).toMatchObject({
+      available: true,
+      rows: [{ settled_at: '2026-10-19T12:34:56.789Z' }],
+      rowCount: 1,
+    })
+  })
+
+  it.each([
+    ['missing data', {}],
+    ['non-array data', { data: { day: '2026-09-01' } }],
+    ['non-object row', { data: [null] }],
+  ])('degrades malformed successful ClickHouse JSON (%s) instead of reporting an empty success', async (_label, payload) => {
+    allow()
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(payload)))
+    const { GET } = await import('@/app/api/reporting/[queryId]/route')
+    const entry = getReport('risk-failures-daily')!
+    const res = await GET(
+      req('/api/reporting/risk-failures-daily?from=2026-08-01&to=2026-09-01'),
+      { params: Promise.resolve({ queryId: entry.id }) },
+    )
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ available: false, error: 'ClickHouse query failed', rows: [] })
+  })
+
   it('404s an unknown report id without touching the warehouse', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)

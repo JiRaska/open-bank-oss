@@ -10,7 +10,7 @@
 
 import { useCallback, useState } from 'react'
 import { Search, Loader2, SearchX, ServerOff } from 'lucide-react'
-import { resolveParty, partyLabel, MIN_TERM_LENGTH, type PartyResolution, type PartyLookupFailure } from '@/lib/party/resolveParty'
+import { resolveParty, partyLabel, MIN_TERM_LENGTH, type PartyResolution, type PartyLookupFailure } from '@/lib/party/contracts'
 
 interface Props {
   onSelect: (partyId: string) => void

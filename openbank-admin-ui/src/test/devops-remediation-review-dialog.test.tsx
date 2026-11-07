@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RemediationReviewDialog } from '@/components/devops/RemediationReviewDialog'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import type { DevOpsFinding } from '@/app/api/devops/insights/route'
+import type { DevOpsFinding } from '@/lib/devops/contracts'
 
 const FINDING = {
   id: 'finding-1',

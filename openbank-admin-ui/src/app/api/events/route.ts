@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveRepositoryDocumentation, repositoryDocumentationFallback } from '@/lib/evidence/repositoryDocumentationSource'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,14 +50,16 @@ const UNAVAILABLE: Events = {
 }
 
 export async function GET() {
+  const published = await resolveRepositoryDocumentation()
+  if (published.value) return NextResponse.json({ ...published.value.events, contentSource: published.contentSource }, { headers: { 'Cache-Control': 'no-store' } })
   try {
     const raw = await fs.readFile(eventsFile(), 'utf-8')
     const parsed = JSON.parse(raw) as Events
     if (Array.isArray(parsed?.topics)) {
-      return NextResponse.json({ ...parsed, available: true }, { headers: { 'Cache-Control': 'no-store' } })
+      return NextResponse.json({ ...parsed, available: true, contentSource: repositoryDocumentationFallback(true, published.contentSource.detail) }, { headers: { 'Cache-Control': 'no-store' } })
     }
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json({ ...UNAVAILABLE, contentSource: repositoryDocumentationFallback(false, published.contentSource.detail) }, { headers: { 'Cache-Control': 'no-store' } })
   } catch {
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json({ ...UNAVAILABLE, contentSource: repositoryDocumentationFallback(false, published.contentSource.detail) }, { headers: { 'Cache-Control': 'no-store' } })
   }
 }

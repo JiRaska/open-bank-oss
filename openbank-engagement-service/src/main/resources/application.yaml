@@ -40,11 +40,6 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   log:
     level: INFO
 

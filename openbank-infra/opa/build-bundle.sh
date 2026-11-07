@@ -89,6 +89,17 @@ assert "run.skill denied when skill not chartered" \
 assert "unknown agent denied by default" \
 	'{"agent":"ghost","tool":"read.catalog","resource":null}' false
 
+# ADR-0031 D9 phase 3: object-shaped ({tier, resources}) charters — the write-path callers that
+# query this package directly (flaky-test-hunter's GitHub PR gate) send input.tier. These run
+# against the REAL agents-opa-data.yaml: if the charter's write_proposal/github-pr grant is
+# removed or re-tiered, the drift guard fails here, not in the running service.
+assert "flaky-test-hunter may open a proposal PR on github-pr (charter tier grant)" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"github-pr","tier":"write_proposal"}' true
+assert "flaky-test-hunter PR grant does not extend to other resources" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.open","resource":"some-other-repo","tier":"write_proposal"}' false
+assert "flaky-test-hunter may not merge/approve (segregation of duties, hard tier)" \
+	'{"agent":"flaky-test-hunter","tool":"gh.pr.merge","resource":"github-pr","tier":"write_proposal"}' false
+
 # REST PEP decision assertions against the REAL rules.yaml (ADR-0034 / issue #419). These would
 # all silently pass-as-undefined if rules.yaml were not staged into data.rules — the drift guard
 # that catches the latent "four_eyes never fires in prod" bug.
@@ -139,7 +150,7 @@ for a in treasury.deal.draft treasury.deal.read treasury.counterparty.read treas
 done
 for a in treasury.deal.approve treasury.deal.settle treasury.deal.override-limit treasury.nostro.upload \
 	treasury.deal.submit treasury.deal.reverse treasury.deal.mature treasury.deal.cancel treasury.deal.reject \
-	treasury.deal.confirm; do
+	treasury.deal.confirm treasury.posting-intent.close; do
 	rassert "treasury agent may NOT $a (charter deny)" allow.allow "{\"principal\":$TRS_AGENT,\"action\":\"$a\"}" false
 done
 rassert "another agent may not draft a treasury deal (the grant is the charter's, not the role's)" allow.allow \

@@ -7,10 +7,10 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.domain.Fixtures.tb
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -79,7 +79,7 @@ class RiskCashFlowApiIT {
             .body("provenance", equalTo("synthetic"))
             .body("curves[0].index", equalTo("CZEONIA"))
             .body("curves[0].pillars", hasSize<Any>(3))
-            .body("curves[0].pillars[0].date", equalTo("2026-05-30"))
+            .body("curves[0].pillars[0].date", equalTo("2026-06-01"))
         assertThat(count("SELECT count(*) FROM curve_set_quote WHERE curve_set_id = ?::uuid", id)).isEqualTo(6)
         assertThat(count("SELECT count(*) FROM curve_set_pillar WHERE curve_set_id = ?::uuid", id)).isEqualTo(6)
     }

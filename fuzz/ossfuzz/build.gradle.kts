@@ -28,7 +28,13 @@ dependencies {
     implementation("com.code-intelligence:jazzer-api:0.22.1")
     // libs-domain's own compile-time deps used by the fuzzed classes
     implementation("com.fasterxml.jackson.core:jackson-annotations:2.18.2")
+
+    testImplementation(platform("org.junit:junit-bom:5.11.0"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
+
+tasks.test { useJUnitPlatform() }
 
 kotlin {
     // Must match openbank-libs-domain's toolchain (25) to link against its bytecode;

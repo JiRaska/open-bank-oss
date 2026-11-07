@@ -123,6 +123,10 @@ out of it (they are path-scoped, not less important — several are live-inciden
   (`DisruptionBlocked`, `Drifted=True AMIDrift` indefinitely), and anything else that lands on it
   stays too. Protect a singleton by placing it on a pool whose disruption policy cannot hurt it
   (e.g. `stateful`: WhenEmpty, on-demand, budgeted drift) rather than by freezing a node.
+- **Drift on the `default` NodePool rolls only inside a daily window, so an AMI fix may wait up to ~22h.**
+  A scheduled `Drifted` budget of 0 nodes (active 09:00-07:00 UTC) confines drift replacement to
+  07:00-09:00 UTC, one node at a time; consolidation is unaffected. Gate `default-nodepool-budget-shape`
+  pins this shape (#13726).
 - **Right-sizing requests can pin a NodePool at its `limits` cap.** The cap was calibrated to the
   old, understated requests; after raising them Karpenter may refuse to provision
   ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
@@ -398,7 +402,8 @@ out of it (they are path-scoped, not less important — several are live-inciden
   save you — Prometheus writes `up` per TARGET, so a workload nobody scrapes has no `up` either.**
   `PostgresInstanceDown` documents at length that `cnpg_collector_up` cannot report its own
   exporter's death and that `up` survives instead; that is right and stops one level short. A CNPG
-  `Cluster` without `spec.monitoring.enablePodMonitor` creates no PodMonitor, so all nine Postgres
+  `Cluster` that no PodMonitor selects (since CNPG 1.30: an owned `<cluster>-metrics` PodMonitor next
+  to the Cluster; the operator flag is deprecated and the gate rejects it) is not a target, so all nine Postgres
   alerts — `PostgresInstanceDown` included — matched an empty vector forever. Measured 2026-08-30:
   4 of 62 declared clusters, two of them the party and identity golden-record databases, both
   backing up to S3 with that backup state watched by nothing. **The fix is a denominator that

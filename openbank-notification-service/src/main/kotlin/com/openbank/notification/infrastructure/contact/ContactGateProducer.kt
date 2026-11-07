@@ -9,10 +9,7 @@ import com.openbank.libs.contact.ContactCounterPort
 import com.openbank.libs.contact.ContactPolicy
 import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.ContactSuppressionPort
-import com.openbank.notification.domain.model.NotificationCategory
-import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.infrastructure.client.ConsentServiceClient
-import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
@@ -27,13 +24,12 @@ import java.util.UUID
  *
  * - `consent`: the same `ConsentServiceClient` call `NotificationConsumer.gateMarketingOnConsent`
  *   used directly before this change.
- * - `counters.sendsInWindow`: [NotificationRepository.countSince], scoped to the MARKETING
- *   template set — this service's own durable send log, same "slice 1" convention as
- *   campaign-service's send log (no shared Valkey counter exists yet).
- *   `impressionsInWindow` is unused by `OUTBOUND_SEND` and returns 0 rather than being wired to
- *   anything invented.
- * - `suppression`: the honest empty port, same reason as campaign/engagement — no ADR-0219 D3
- *   platform suppression *store* exists yet.
+ * - The gate handles live suppression, quiet hours and consent. Its read-only counter is zero;
+ *   the actual send cap is enforced by [MarketingContactReservationStore] atomically before
+ *   provider handoff. Counting the newly persisted PENDING row here would deny the current
+ *   contact against itself, while a read-only count cannot serialize concurrent sends.
+ * - `suppression`: the live consent-service list, shared with campaign-service. An unavailable
+ *   read propagates so the gate denies counted traffic with GATE_UNAVAILABLE.
  */
 @ApplicationScoped
 class ContactGateProducer {
@@ -42,25 +38,19 @@ class ContactGateProducer {
     @ApplicationScoped
     fun contactPolicyGate(
         @RestClient consentServiceClient: ConsentServiceClient,
-        notificationRepo: NotificationRepository,
-    ): ContactPolicyGate {
-        val marketingTemplates = NotificationTemplate.entries
-            .filter { it.category == NotificationCategory.MARKETING }
-            .map { it.name }
-        return ContactPolicyGate(
-            consent = ContactConsentPort { partyId, scope ->
-                consentServiceClient.hasActiveConsent(partyId, MARKETING_GRANTEE, scope).awaitSuspending().granted
-            },
-            counters = object : ContactCounterPort {
-                override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int =
-                    notificationRepo.countSince(partyId, marketingTemplates, windowStart)
+        suppression: ContactSuppressionPort,
+    ): ContactPolicyGate = ContactPolicyGate(
+        consent = ContactConsentPort { partyId, scope ->
+            consentServiceClient.hasActiveConsent(partyId, MARKETING_GRANTEE, scope).awaitSuspending().granted
+        },
+        counters = object : ContactCounterPort {
+            override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int = 0
 
-                override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int = 0
-            },
-            suppression = ContactSuppressionPort { emptyList() },
-            policy = ContactPolicy(),
-        )
-    }
+            override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int = 0
+        },
+        suppression = suppression,
+        policy = ContactPolicy(),
+    )
 
     companion object {
         /** Matches `NotificationConsumer.MARKETING_GRANTEE` (ADR-0205 D3). */

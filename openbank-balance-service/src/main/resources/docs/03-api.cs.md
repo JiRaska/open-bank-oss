@@ -135,16 +135,30 @@ záporná delta zůstává validní (jde o zaúčtovaná fakta z ledgeru).
 
 | Event | Trigger | Klíčové fieldy |
 |---|---|---|
-| `balance.opened.v1` | inicializace pro nový účet | accountId, currency, openedAt |
-| `balance.updated.v1` | každá změna (booked/reserved/pending) | accountId, currency, deltas, version |
-| `balance.hold.created.v1` | POST /holds | holdId, accountId, amount, reason, expiresAt |
-| `balance.hold.captured.v1` | POST /capture | holdId, actualAmount |
-| `balance.hold.released.v1` | DELETE /holds | holdId, reason (manual/expired) |
-| `balance.low.v1` | `available < threshold` (per účet config) | accountId, currency, available, threshold |
-| `balance.overdraft.changed.v1` | PATCH /overdraft | accountId, currency, oldLimit, newLimit |
+| `BALANCE_UPDATED` | kredit/debet, projekce ledgeru nebo value-date roll | eventId, accountId, currency, bookedAmount, availableAmount, reservedAmount, occurredAt |
+| `HOLD_PLACED` | vytvoření blokace | eventId, accountId, currency, amount, availableAmount, occurredAt |
+| `HOLD_RELEASED` | uvolnění blokace nebo spotřeba krytí v ledgeru | eventId, accountId, currency, amount, availableAmount, occurredAt |
+
+`balance.low.v1` je plánované v ADR-0333 a dnes se neemituje. Před vznikem zákaznického záměru
+musí být nastavení pro účet, sestup přes práh, cooldown a ověření vlastnictví.
 
 ## Backward compatibility
 
 - API `/api/v1/...`. v2 = paralelní 6 měsíců.
 - Event verze v topic name + per-event `v1` suffix v type.
 - OpenAPI diff v CI bránící breaking změnám bez bumpu.
+
+## Čtení aktivních rezervací
+
+`GET /api/v1/balances/{accountId}/holds` vrací `{ "holds": [...] }`, případně prázdné pole.
+Řádek obsahuje id, accountId, amount, currency, reason, referenceId a časové údaje životního cyklu.
+Vrací se pouze neuvolněné rezervace bez expirace nebo s expirací striktně po čase hodin služby.
+Čtení neuvolňuje prostředky, nemění zůstatek ani nevytváří událost; vynechání expirovaného řádku
+není důkazem uvolnění rezervace.
+
+Stejně jako ostatní čtení endpoint vyžaduje roli `ROLE_API`, `ROLE_VIEWER`, `ROLE_OPERATOR` nebo
+`ROLE_ADMIN` a rozhodnutí OPA `balance.read`. Pokud důvěryhodný customer-edge předá
+`X-Customer-Party-Id`, vlastník účtu musí odpovídat; neexistující účet i neshoda vrací 404.
+Bez hlavičky zůstává dosavadní cesta pro službu, nikoli důkaz vlastnictví zákazníkem.
+Bez identity se vrací 401, s nesouvisející rolí 403. Důvod a reference rezervace jsou citlivá finanční
+metadata; nástroj asistenta `get_balance_holds` předává tuto odpověď beze změny.

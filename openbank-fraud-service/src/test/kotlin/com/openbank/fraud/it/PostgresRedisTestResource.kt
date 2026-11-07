@@ -17,7 +17,7 @@ import org.testcontainers.utility.DockerImageName
  * Redis-backed online feature store (ADR-0140), so a real Redis is needed at boot for the
  * `ReactiveRedisDataSource` `@Produces` (FeatureStoreConfig) to resolve and for the quarkus-redis
  * readiness probe to pass. The `transaction-signal` Kafka channel is disabled in `%test`, so no
- * broker is required.
+ * broker is required. The app connects as a non-superuser owner — see [AppOwnerRole].
  */
 class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
 
@@ -28,11 +28,9 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
-            .withUsername("openbank")
-            .withPassword("openbank_secret")
-            .withDatabaseName("openbank_fraud_it")
+        val pg = AppOwnerRole.container(POSTGRES_IMAGE)
         pg.start()
+        val datasource = AppOwnerRole.provision(pg)
         postgres = pg
         TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
@@ -40,14 +38,7 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
         rd.start()
         redis = rd
         TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
-
-        val host = pg.host
-        val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
-        return mapOf(
-            "quarkus.datasource.reactive.url" to "vertx-reactive:postgresql://$host:$port/openbank_fraud_it",
-            "quarkus.datasource.jdbc.url" to "jdbc:postgresql://$host:$port/openbank_fraud_it",
-            "quarkus.datasource.username" to "openbank",
-            "quarkus.datasource.password" to "openbank_secret",
+        return datasource + mapOf(
             "quarkus.redis.hosts" to "redis://${rd.host}:${rd.getMappedPort(REDIS_PORT)}",
             "quarkus.devservices.enabled" to "false",
         )

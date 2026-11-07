@@ -56,7 +56,7 @@ import rego.v1
 
 allowed_reasons contains "auditor-audit-oversight-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action in {"audit.trail.inspect", "audit.verify"}
@@ -64,7 +64,7 @@ allowed_reasons contains "auditor-audit-oversight-read" if {
 
 allowed_reasons contains "evidence-bundle-read" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_CREDIT_RISK"}
 	role in input.principal.roles
 	input.action == "audit.evidence.reconstruct"

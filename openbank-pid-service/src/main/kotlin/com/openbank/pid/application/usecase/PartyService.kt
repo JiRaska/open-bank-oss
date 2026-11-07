@@ -119,7 +119,8 @@ class PartyService(
                 kycLevel = KycLevel.BASIC,
                 kycCompletedAt = now,
                 kycExpiresAt = now.plusYears(1),
-                amlRiskScore = AmlRiskScore.LOW,
+                // ADR-0353 D2: pid asserts no risk rating; kyc-service owns it.
+                amlRiskScore = null,
                 pepFlag = false,
                 sanctionsFlag = false,
                 uboVerifiedAt = null,
@@ -291,7 +292,8 @@ class PartyService(
                 kycLevel = command.kycLevel,
                 kycCompletedAt = now,
                 kycExpiresAt = now.plusYears(1),
-                amlRiskScore = command.amlRiskScore,
+                // Deprecated field (ADR-0353 D2): absent in the request leaves any stored value alone.
+                amlRiskScore = command.amlRiskScore ?: party.kycAttributes.amlRiskScore,
                 pepFlag = command.pepFlag,
                 sanctionsFlag = command.sanctionsFlag,
                 lastAmlReviewAt = now,

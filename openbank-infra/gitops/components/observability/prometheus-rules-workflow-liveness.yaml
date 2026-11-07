@@ -74,7 +74,12 @@ spec:
         # covered statically instead, by the registration gate
         # (check-scheduler-liveness.py) and the HR000068 guards, not by this rule.
         - alert: WorkflowLivenessStale
-          expr: openbank_workflow_last_success_age_seconds > 2 * openbank_workflow_expected_interval_seconds
+          # A workflow that declares itself unconfigured (openbank_workflow_unconfigured == 1)
+          # cannot succeed by design; WorkflowUnconfigured below reports it instead, so this
+          # rule keeps meaning "the job is dead or failing", not "nobody declared its inputs".
+          expr: >-
+            (openbank_workflow_last_success_age_seconds > 2 * openbank_workflow_expected_interval_seconds)
+            unless on (namespace, workflow) (openbank_workflow_unconfigured == 1)
           for: 15m
           labels:
             severity: warning
@@ -109,6 +114,42 @@ spec:
               increase() lookback wide enough to cover a daily feed truncates
               silently. The gauge carries its state forward with no lookback at
               all; the counter is read at triage time.
+
+        # An intentionally unconfigured workflow (its inputs are business facts an operator
+        # has not declared yet) is not an outage, but it is not healthy either: it says so
+        # at low severity, for as long as it lasts, instead of hiding or paging.
+        - alert: WorkflowUnconfigured
+          expr: openbank_workflow_unconfigured == 1
+          for: 1h
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "{{ $labels.workflow }} in {{ $labels.namespace }} is not configured and does not run"
+            description: >-
+              The workflow reports that required configuration is not declared, so it skips
+              every tick and records no success. WorkflowLivenessStale is suppressed for it
+              while this holds. The pod log names the missing setting at DEBUG level; the
+              service's application.yaml documents which keys it needs.
+
+        # The watcher must be watched. WorkflowLivenessStale cannot catch the
+        # control-liveness-sentinel's own heartbeat going missing: a stale series needs the
+        # series, and the rule above is silent about a workflow that never registered or whose pod
+        # is gone. WorkflowLivenessHeartbeatAbsent is fleet-wide (it stays quiet while any other
+        # heartbeat exists), so the sentinel needs its own absent() on its own workflow tag.
+        - alert: LivenessSentinelHeartbeatAbsent
+          expr: absent(openbank_workflow_last_success_age_seconds{workflow="liveness-sentinel-check"})
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "The control-liveness-sentinel reports no heartbeat"
+            description: >-
+              No openbank_workflow_last_success_age_seconds series exists for
+              workflow="liveness-sentinel-check". The sentinel is down, not scraped, or its
+              scheduler never registered. While this fires, an empty findings table means
+              "nothing is looking", not "no stale controls".
 
         # 3. A job still runs, and takes too long doing it (issue #6169). Liveness above cannot see
         # this: a sweep that degrades from 6s to 300s records a success every time, so the age

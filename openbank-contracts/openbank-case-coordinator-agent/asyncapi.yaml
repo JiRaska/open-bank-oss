@@ -48,6 +48,7 @@ servers:
 channels:
   proposalEvents:
     address: proposal-events
+    x-planned-consumer: https://github.com/JiRaska/open-bank-oss/issues/3737
     title: Agent-swarm case convergence proposals
     description: |
       **The address is a bare name, not the `openbank.<domain>.<event>` convention the rest of the

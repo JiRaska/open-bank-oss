@@ -15,8 +15,17 @@ describe('Service Map evidence parsers', () => {
       { port: 8128, status: 'DOWN', name: 'customer-edge', container: 'openbank-customer-edge' },
     ] })).toHaveLength(2)
     expect(parseMapHealth({ services: [
-      { port: 8128, status: 'UP', name: 'a' }, { port: 8129, status: 'UP', name: 'a' },
+      { port: 8128, status: 'UP', name: 'a', namespace: 'tenant-a' },
+      { port: 8129, status: 'DOWN', name: 'a', namespace: 'tenant-b' },
+    ] })).toHaveLength(2)
+    expect(parseMapHealth({ services: [
+      { port: 8128, status: 'UP', name: 'a', namespace: 'tenant-a' },
+      { port: 8129, status: 'DOWN', name: 'a', namespace: 'tenant-a' },
     ] })).toBeNull()
+    // Namespace-free static entries keep their legacy name/port identity.
+    expect(parseMapHealth({ services: [
+      { port: 8128, status: 'UP', name: 'a' }, { port: 8129, status: 'UP', name: 'a' },
+    ] })).toHaveLength(2)
   })
 
   it('keeps unavailable governance distinct and rejects contradictory evidence', () => {

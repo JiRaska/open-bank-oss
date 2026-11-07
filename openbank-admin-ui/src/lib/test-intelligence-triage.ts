@@ -3,13 +3,14 @@
 
 import type { TestCaseHistory } from '@/lib/types/test-intelligence'
 
-export type TestTriageFilter = 'all' | 'failing' | 'flaky' | 'skipped' | 'unstable'
+export type TestTriageFilter = 'all' | 'failing' | 'flaky' | 'skipped' | 'stale' | 'unstable'
 
 const STATE_PRIORITY: Record<TestCaseHistory['state'], number> = {
   failing: 0,
   flaky: 1,
   skipped: 2,
-  stable: 3,
+  stale: 3,
+  stable: 4,
 }
 
 /**

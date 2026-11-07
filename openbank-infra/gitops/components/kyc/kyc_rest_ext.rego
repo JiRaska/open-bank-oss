@@ -35,7 +35,7 @@ import rego.v1
 # Manual check override on an open case (ADMIN or a KYC opener).
 allowed_reasons contains "operator-kyc-case-update-check" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_ADMIN", "ROLE_KYC_OPENER"}
 	role in input.principal.roles
 	input.action == "kycCase.updateCheck"
@@ -44,7 +44,7 @@ allowed_reasons contains "operator-kyc-case-update-check" if {
 # Re-run PEP screening on a case (opener/compliance oversight, plus operator/admin).
 allowed_reasons contains "operator-kyc-case-pep-rescreen" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC_OPENER", "ROLE_COMPLIANCE"}
 	role in input.principal.roles
 	input.action == "kycCase.pepRescreen"
@@ -54,7 +54,7 @@ allowed_reasons contains "operator-kyc-case-pep-rescreen" if {
 # four-eyes maker/checker enforcement, if any, is applied by rest.rego, not here.
 allowed_reasons contains "operator-kyc-case-review-disposition" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC_REVIEWER"}
 	role in input.principal.roles
 	input.action in {"kyc.case.approve", "kyc.case.reject"}

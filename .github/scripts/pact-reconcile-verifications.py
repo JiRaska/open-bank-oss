@@ -78,6 +78,7 @@
 
 import argparse
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -335,22 +336,33 @@ def github_json(url: str, token: str) -> dict:
         return json.loads(response.read().decode())
 
 
-def complete_run_history(repo: str, workflow: str, token: str, fetch=None) -> list[dict]:
+def _history_url(repo: str, workflow: str, created: str, page: int) -> str:
+    query = urllib.parse.urlencode({
+        "event": "workflow_dispatch", "created": created,
+        "per_page": HISTORY_PAGE_SIZE, "page": page,
+    })
+    return f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?{query}"
+
+
+def complete_run_history(repo: str, workflow: str, token: str, fetch=None, now=None) -> list[dict]:
     """Fetch every run in the migration window, or refuse to decide.
 
     The hard page cap limits API work during a storm. Exceeding it pauses automated
     dispatch and leaves the broker debt visible; it must not silently forget a failure.
+
+    The paged scan is pinned to `created <= cutoff`. Unpinned, any run dispatched
+    while ~10 pages were read shifted page 1 and aborted the scan: 5 of 8 scheduled
+    runs on 2026-10-31 dispatched nothing for exactly that reason. Runs created after
+    the cutoff are read afterwards as one bounded tail page, so none is missed.
     """
     fetch = fetch or github_json
+    cutoff = (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    window = f"{HISTORY_START}..{cutoff}"
     runs = []
     first_count = None
     first_ids = None
     for page in range(1, HISTORY_MAX_PAGES + 1):
-        query = urllib.parse.urlencode({
-            "event": "workflow_dispatch", "created": f">={HISTORY_START}",
-            "per_page": HISTORY_PAGE_SIZE, "page": page,
-        })
-        url = f"https://api.github.com/repos/{repo}/actions/workflows/{workflow}/runs?{query}"
+        url = _history_url(repo, workflow, window, page)
         doc = fetch(url, token)
         count, batch = doc.get("total_count"), doc.get("workflow_runs")
         if not isinstance(count, int) or not isinstance(batch, list):
@@ -369,16 +381,27 @@ def complete_run_history(repo: str, workflow: str, token: str, fetch=None) -> li
             if len(runs) != count or len({r["id"] for r in runs}) != count:
                 raise ValueError("Actions run-history pages overlap or omit runs")
             if page > 1:
-                first_url = url.replace(f"page={page}", "page=1")
-                fresh = fetch(first_url, token)
+                fresh = fetch(_history_url(repo, workflow, window, 1), token)
                 fresh_runs = fresh.get("workflow_runs")
                 if (fresh.get("total_count") != first_count or not isinstance(fresh_runs, list)
                         or [r.get("id") for r in fresh_runs] != first_ids):
                     raise ValueError("Actions first page changed during pagination")
-            return runs
+            break
         if not batch:
             raise ValueError("Actions run-history pagination ended early")
-    raise ValueError("Actions run-history page cap reached")
+    else:
+        raise ValueError("Actions run-history page cap reached")
+    tail = fetch(_history_url(repo, workflow, f">{cutoff}", 1), token)
+    tail_count, tail_runs = tail.get("total_count"), tail.get("workflow_runs")
+    if not isinstance(tail_count, int) or not isinstance(tail_runs, list):
+        raise TypeError("incomplete Actions run-history tail response")
+    if tail_count > HISTORY_PAGE_SIZE or len(tail_runs) != tail_count:
+        raise ValueError("Actions runs created during the scan exceed one page")
+    tail_ids = [r.get("id") for r in tail_runs if isinstance(r, dict)]
+    if (len(tail_ids) != len(tail_runs) or any(not isinstance(i, int) for i in tail_ids)
+            or len(set(tail_ids)) != len(tail_ids) or set(tail_ids) & {r["id"] for r in runs}):
+        raise ValueError("Actions run-history tail overlaps the pinned window")
+    return tail_runs + runs
 
 
 def admit_provider(provider: str, key: str, runs: list[dict]) -> tuple[bool, str]:
@@ -773,7 +796,14 @@ def self_test() -> int:
     # The API count, not a short first page, defines complete history. Failure
     # here must stop every POST rather than treat a missing older failure as fresh.
     history_checks = []
-    one_page = complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda *_: {
+    def created_of(url):
+        return urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["created"][0]
+    def history(fetch, tail_runs=()):
+        # The pinned window answers from `fetch`; the post-cutoff tail from `tail_runs`.
+        return complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda url, token: (
+            {"total_count": len(tail_runs), "workflow_runs": list(tail_runs)}
+            if created_of(url).startswith(">") else fetch(url, token)))
+    one_page = history( fetch=lambda *_: {
         "total_count": 1, "workflow_runs": [auto_a],
     })
     history_checks.append(("complete one-page history is accepted", len(one_page) == 1))
@@ -785,7 +815,7 @@ def self_test() -> int:
             return {"total_count": 101, "workflow_runs": page_one.copy()}
         return {"total_count": second_count,
                 "workflow_runs": [run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto") | {"id": second_id}]}
-    complete = complete_run_history("org/repo", "verify-provider.yml", "x",
+    complete = history(
                                     fetch=history_fixture)
     history_checks.append(("two stable pages are accepted", len(complete) == 101))
     for why, fetcher in (
@@ -795,7 +825,7 @@ def self_test() -> int:
          lambda url, token: history_fixture(url, token, second_id=100)),
     ):
         try:
-            complete_run_history("org/repo", "verify-provider.yml", "x", fetch=fetcher)
+            history( fetch=fetcher)
         except ValueError:
             history_checks.append((why, True))
         else:
@@ -810,13 +840,13 @@ def self_test() -> int:
                 answer["workflow_runs"][0] = answer["workflow_runs"][0] | {"id": 999}
         return answer
     try:
-        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=shifted_first_page)
+        history( fetch=shifted_first_page)
     except ValueError:
         history_checks.append(("first page changed during scan fails closed", True))
     else:
         history_checks.append(("first page changed during scan fails closed", False))
     try:
-        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda url, _token: {
+        history( fetch=lambda url, _token: {
             "total_count": 2,
             "workflow_runs": [auto_a] if urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["page"] == ["1"] else [],
         })
@@ -825,13 +855,36 @@ def self_test() -> int:
     else:
         history_checks.append(("missing second page fails closed", False))
     try:
-        complete_run_history("org/repo", "verify-provider.yml", "x", fetch=lambda *_: {
+        history( fetch=lambda *_: {
             "total_count": HISTORY_PAGE_SIZE * HISTORY_MAX_PAGES + 1, "workflow_runs": [],
         })
     except ValueError:
         history_checks.append(("history beyond the hard cap fails closed", True))
     else:
         history_checks.append(("history beyond the hard cap fails closed", False))
+    # 2026-10-31: 5 of 8 scheduled runs aborted on a page-1 shift caused by runs
+    # dispatched mid-scan. The window is now pinned; those runs arrive in the tail.
+    seen = []
+    def recording(url, token):
+        seen.append(created_of(url))
+        return history_fixture(url, token)
+    late = run(f"{RUN_NAME_PREFIX}{provider}:{key_a}:auto") | {"id": 5000}
+    with_late = history(recording, tail_runs=[late])
+    history_checks.append(("paged window is pinned to an upper bound",
+                           bool(seen) and all(c.startswith(HISTORY_START + "..") for c in seen)))
+    history_checks.append(("run dispatched mid-scan is read from the tail, not lost",
+                           len(with_late) == 102 and with_late[0]["id"] == 5000))
+    for why, tail_runs in (
+        ("tail overlapping the window fails closed", [page_one[0]]),
+        ("tail beyond one page fails closed",
+         [late | {"id": 6000 + i} for i in range(HISTORY_PAGE_SIZE + 1)]),
+    ):
+        try:
+            history(history_fixture, tail_runs=tail_runs)
+        except ValueError:
+            history_checks.append((why, True))
+        else:
+            history_checks.append((why, False))
     for why, okay in history_checks:
         print(f"  {'ok ' if okay else 'BAD'} {why}")
         if not okay:

@@ -29,7 +29,6 @@ export default function KycPage() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [search, setSearch]   = useState('')
   const [partyId, setPartyId] = useState('')
-  const [partyIdInput, setPartyIdInput] = useState('')
   const [loadedPartyId, setLoadedPartyId] = useState<string | null>(null)
   const loadedPartyIdRef = useRef<string | null>(null)
   const activeLoad = useRef<AbortController | null>(null)
@@ -166,8 +165,8 @@ export default function KycPage() {
       <PartySearch
         selectedId={selectedParty?.id}
         busy={loading}
-        onSelect={party => { setSelectedParty(party); setPartyIdInput(party.id); setPage(0); setPartyId(party.id) }}
-        placeholder={t('Jméno, příjmení, firma nebo Party UUID', 'Name, company, or Party UUID')}
+        onSelect={party => { setSelectedParty(party); setPage(0); setPartyId(party.id) }}
+        placeholder={t('Jméno, příjmení, rodné číslo nebo e-mail klienta', 'Client name, surname, birth number or e-mail')}
       />
 
       {/* Case-local filter */}
@@ -177,22 +176,7 @@ export default function KycPage() {
           <label className="sr-only" htmlFor="kyc-search">{t('Hledat KYC případy', 'Search KYC cases')}</label>
           <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Filtrovat načtené případy (ID / stav)…', 'Filter loaded cases (ID / status)…')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <label className="sr-only" htmlFor="kyc-party-id">{t('Filtrovat podle Party ID', 'Filter by Party ID')}</label>
-        <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyIdInput} onChange={e => setPartyIdInput(e.target.value)} />
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            const nextPartyId = partyIdInput.trim()
-            setPage(0)
-            if (nextPartyId === partyId) void load(nextPartyId, 0)
-            else setPartyId(nextPartyId)
-          }}
-          disabled={loading || partyIdInput.trim() === ''}
-          aria-busy={loading}
-          aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}
-        >{t('Hledat', 'Search')}</button>
-        {(selectedParty || partyId) && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyIdInput(''); setPage(0); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
+        {(selectedParty || partyId) && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPage(0); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
       </div>
 
       {unavailable && (

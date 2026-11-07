@@ -18,20 +18,20 @@ package openbank.rest
 import rego.v1
 
 # Real back-office staff — a human Keycloak user, NOT a service account.
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # The customer-edge M2M identity: classified HUMAN, carries ROLE_OPERATOR, reachable from a
 # customer-facing service. THE reason the write rule carries a service-account exclusion.
-edge_m2m := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge_m2m := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 # The shared backend M2M identity agent-service authenticates as on its outbound hop.
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
-anon := {"type": "ANONYMOUS", "id": "anonymous", "roles": []}
+anon := {"service_account": false, "type": "ANONYMOUS", "id": "anonymous", "roles": []}
 
 # --- the write plane: exactly the three actions, for real staff only ---
 
@@ -182,7 +182,7 @@ test_extension_does_not_restate_base_reads if {
 }
 
 # #10486 batch 8
-b8agent_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+b8agent_sa(id) := {"service_account": true, "client_id": trim_prefix(id, "service-account-"), "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
 
 test_b8agent_own_identity_reads if {
 	every action in {"dispute.list", "dispute.read"} {
@@ -199,5 +199,26 @@ test_b8agent_own_identity_never_writes if {
 test_b8agent_other_api_identity_gets_nothing if {
 	every action in {"dispute.list", "dispute.read"} {
 		not "service-agent-dispute-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-services"), "action": action}
+	}
+}
+
+# --- dispute-auditor-read: auditors read, never write; a pure viewer still gets nothing ---
+
+auditor := {"service_account": false, "type": "HUMAN", "id": "u-aud", "roles": ["ROLE_VIEWER", "ROLE_AUDITOR"]}
+
+test_auditor_lists_and_reads_disputes if {
+	every a in ["dispute.list", "dispute.read"] {
+		"dispute-auditor-read" in allowed_reasons with input as {"principal": auditor, "action": a}
+	}
+}
+
+test_auditor_cannot_write_dispute if {
+	not "dispute-auditor-read" in allowed_reasons with input as {"principal": auditor, "action": "dispute.update"}
+}
+
+test_machine_auditor_not_granted if {
+	not "dispute-auditor-read" in allowed_reasons with input as {
+		"principal": {"service_account": true, "type": "HUMAN", "id": "service-account-openbank-x", "roles": ["ROLE_AUDITOR"]},
+		"action": "dispute.list",
 	}
 }

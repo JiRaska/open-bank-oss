@@ -137,6 +137,7 @@ was removed from the rotation entirely, not just made optional):
 | account | accounts | accounts-db | openbank_accounts |
 | transaction | payments | transaction-db | openbank_transactions |
 | ledger | ledger | ledger-db | openbank_ledger |
+| ledger-pension-co | ledger-pension-co | ledger-pension-co-db | openbank_ledger |
 
 ```sh
 # Replace <namespace>, <cluster>, <dbname>, <password> per the table above.
@@ -253,6 +254,20 @@ kubectl create secret generic openbao-db-admin-passwords -n vault \
   --from-literal=ledger='<pass>'
 ```
 
+**ledger-pension-co (ADR-0337) is added LATER, to the existing Secret — not by recreating it.** Its
+CronJob env is `optional: true` and `configure.sh` skips it while the key is absent, so the fleet's
+rotation never depended on this instance being provisioned. Once §3 and §3a have been run against
+`ledger-pension-co-db` (namespace `ledger-pension-co`, database `openbank_ledger`):
+
+```sh
+kubectl patch secret openbao-db-admin-passwords -n vault --type merge \
+  -p "{\"stringData\":{\"ledger-pension-co\":\"<pass>\"}}"
+kubectl create job -n vault --from=cronjob/openbao-db-rotation-sync db-rotation-sync-manual-$(date +%s)
+# Expected in the job log: "[openbao-db] ledger-pension-co done." (not "... skipped")
+kubectl get externalsecret -n ledger-pension-co ledger-pension-co-db-dynamic
+# Expected: READY True, STATUS SecretSynced
+```
+
 CNPG primary pod name: `<cluster-name>-1` (e.g. `notifications-db-1`). Use
 `kubectl get pods -n <namespace> -l cnpg.io/instanceRole=primary` to confirm. The app's own DB
 user (table owner, verified `openbank` for all 7 databases 2026-07-11) is `-c postgres` because
@@ -336,6 +351,10 @@ bao "bao kv put openbank/jwt-signing/<service> current_key='${INITIAL_KEY}' prev
 - ~~No ExternalSecret consumes `database/creds/*` yet~~ FIXED (per-service db-dynamic-externalsecret.yaml)
 - ~~`vault_admin` Postgres role not yet created → complete §3 above before next run~~ DONE
   2026-07-11, though §3 itself was incomplete at the time — see the 2026-07-11 "Fixed items" below
+
+**Tier 2 — `secret-rotator`: RETIRED (ADR-0177).** It wrote `openbank/keycloak/<svc>` while services
+read `openbank/<svc>`, no workload reads `openbank/jwt-signing/*`, and it never recorded a success.
+The CronJob and its seed script were removed. Steps in this runbook that mention it are historical.
 
 ~~**Tier 2 — `secret-rotator` (`secret-rotator-cronjob.yaml`):**~~
 - ~~Script reads `secret/...`; KV mount is `openbank/`~~ FIXED (all paths corrected)

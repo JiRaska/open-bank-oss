@@ -190,14 +190,14 @@ test.describe('approval workbench', () => {
     await expect(rows.nth(0).getByTestId('approval-maker-kind')).toContainText(/Human|Člověk/)
     await expect(rows.nth(0).locator('time')).toHaveAttribute('datetime', billingApproval.proposedAt)
 
-    await page.getByLabel(/^(Domain|Doména)$/).selectOption('sanctions')
+    await page.getByLabel(/^(Approval area|Oblast schvalování)$/).selectOption('sanctions')
     await expect(rows).toHaveCount(1)
     await expect(rows.first()).toContainText(sanctionsApproval.action)
     await expect(rows.first().getByTestId('approval-maker-kind')).toContainText('AI agent')
     await page.getByLabel(/Search queue|Hledat ve frontě/).fill('maker.sanctions')
     await expect(rows).toHaveCount(1)
 
-    const handoff = page.getByRole('link', { name: new RegExp(`Open governed review for approval ${sanctionsApproval.id}|Otevřít řízenou kontrolu žádosti ${sanctionsApproval.id}`) })
+    const handoff = page.getByRole('link', { name: /Open governed review for this approval|Otevřít řízenou kontrolu žádosti/ })
     await expect(handoff).toHaveAttribute('href', '/sanctions?approvalId=sanctions-approval%20%2F%2042#sanctions-approval-id')
     await Promise.all([
       page.waitForURL(
@@ -206,7 +206,8 @@ test.describe('approval workbench', () => {
       ),
       handoff.click(),
     ])
-    await expect(page.getByLabel(/Approval id|ID žádosti/)).toHaveValue(sanctionsApproval.id)
+    // The deep link preselects the pending request; the id itself is not shown, its action is.
+    await expect(page.locator('#sanctions-approval-id')).toContainText(sanctionsApproval.action)
   })
 
   test('never reports an empty domain queue when the federated read itself failed', async ({ page }) => {

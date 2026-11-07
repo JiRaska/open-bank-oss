@@ -8,7 +8,7 @@ test.beforeEach(async ({ context, baseURL, page }) => {
   await page.route('**/api/services/health', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ services: [] }),
+    body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [] }),
   }))
   await page.route('**/api/catalog/services', route => route.fulfill({
     status: 200,

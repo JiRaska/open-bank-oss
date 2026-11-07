@@ -54,19 +54,18 @@ echo "    platform: ${PLATFORM}"
 
 # 1. Build the fast-jar on the host (warm Gradle cache, real network).
 echo "==> gradle ${MODULE}:quarkusBuild (fast-jar)"
-./gradlew "${MODULE}:quarkusBuild" "${MODULE}:cyclonedxBom" -Dquarkus.package.jar.type=fast-jar --console=plain -q
+./gradlew "${MODULE}:verifyPackagedLibrarySbom" -Dquarkus.package.jar.type=fast-jar --console=plain -q
 QA="${DIR}/build/quarkus-app"
 [ -f "${QA}/quarkus-run.jar" ] || { echo "ERROR: fast-jar not produced at ${QA}/quarkus-run.jar" >&2; exit 1; }
 # CycloneDX SBOM (schema 1.5, runtimeClasspath) — baked into the image and served
-# live by libs SbomResource at /q/openbank/sbom. Best-effort: warn if absent so a
-# missing plugin never fails an otherwise-good deploy build.
+# live by libs SbomResource at /q/openbank/sbom. The explicit task above verifies
+# original library bytes; it does not establish augmented-runtime or live identity.
 BOM="${DIR}/build/reports/bom.json"
-[ -f "$BOM" ] || echo "WARN: no SBOM at ${BOM} — image will serve /q/openbank/sbom as not_generated" >&2
+[ -f "$BOM" ] || { echo "ERROR: verified SBOM missing at ${BOM}" >&2; exit 1; }
 
 # 2. Bake quarkus-app/ into a runtime image. EXPOSE is cosmetic (k8s uses the
-#    Deployment containerPort); we lift it from the service Dockerfile when present.
-PORT="$(grep -oE 'EXPOSE[[:space:]]+[0-9]+' "${DIR}/Dockerfile" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)"
-PORT="${PORT:-8080}"
+#    Deployment containerPort); it comes from quarkus.http.port via service-port.py.
+PORT="$(python3 "${REPO_ROOT}/.github/scripts/service-port.py" "${DIR}")"
 CTX="$(mktemp -d)"; trap 'rm -rf "$CTX"' EXIT
 cp -r "${QA}" "${CTX}/quarkus-app"
 # Gradle produces quarkus-app files with 600 permissions (owner-only). The container

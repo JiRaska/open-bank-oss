@@ -4,17 +4,23 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
-import com.openbank.sepa.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepa.application.port.out.FraudScoreCommand
 import com.openbank.sepa.application.port.out.FraudScoringPort
-import com.openbank.sepa.application.port.out.FraudVerdict
 import com.openbank.sepa.application.port.out.OpenAmlCaseCommand
 import com.openbank.sepa.application.port.out.SanctionsScreeningPort
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaBookingQuery
+import com.openbank.sepa.application.port.out.SepaBookingWrites
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.port.out.SettlementPort
@@ -22,10 +28,6 @@ import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaRejectReason
-import com.openbank.sepa.domain.screening.ScreeningDecision
-import com.openbank.sepa.domain.screening.ScreeningMatchStatus
-import com.openbank.sepa.domain.screening.ScreeningPolicy
-import com.openbank.sepa.domain.screening.ScreeningRole
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
@@ -46,6 +48,8 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 @ApplicationScoped
 open class SepaPaymentActivitiesImpl(
     private val paymentRepository: SepaPaymentRepository,
+    private val bookingWrites: SepaBookingWrites,
+    private val bookingQuery: SepaBookingQuery,
     private val screeningPort: SanctionsScreeningPort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
@@ -72,7 +76,7 @@ open class SepaPaymentActivitiesImpl(
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
             openCaseQuietly(
                 payment = payment,
-                riskLevel = AmlCaseRiskLevel.MEDIUM,
+                riskLevel = AmlCaseSeverity.MEDIUM,
                 alertCode = ALERT_SCREENING_UNAVAILABLE,
                 detail = ex.message,
                 matchedEntity = null,
@@ -107,9 +111,9 @@ open class SepaPaymentActivitiesImpl(
                 .joinToString("; ") { "${it.role} '${it.subject}' ${it.status} score=${it.score}" }
                 .ifBlank { "no actionable matches" }
             val riskLevel = if (decision == ScreeningDecision.BLOCK) {
-                AmlCaseRiskLevel.CRITICAL
+                AmlCaseSeverity.CRITICAL
             } else {
-                AmlCaseRiskLevel.HIGH
+                AmlCaseSeverity.HIGH
             }
             openCaseQuietly(
                 payment = payment,
@@ -208,6 +212,20 @@ open class SepaPaymentActivitiesImpl(
     override fun submitToScheme(paymentId: UUID): SepaPaymentStatus = runOnVertxContext {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during scheme-submission activity")
+        // #13623 re-drive: an ACCEPTED payment whose booking never proved stays PROCESSING with an open
+        // booking clock, and nothing else ever calls settlement for it again. Re-entering here (an
+        // operator Temporal reset to just before this activity) settles it under the SAME
+        // `sepa-settlement-<id>` key, so transaction-service replays an existing booking and never books
+        // twice. Keyed on the durable booking clock, not on PROCESSING alone: a PROCESSING row with no
+        // tracked obligation (legacy, or a generic status write) was never proven scheme-accepted here.
+        // Consequence, deliberately accepted: ANY Temporal retry of this activity on a held payment (the
+        // workflow's 3 attempts within 10 minutes, e.g. after a worker restart or timeout that followed the
+        // PROCESSING write) now re-settles on its own. That is safe for the same reason: same key, a value date
+        // pinned to the due instant, and completion only through the locked, replay-tolerant write.
+        if (payment.status == SepaPaymentStatus.PROCESSING) {
+            val dueAt = bookingQuery.pendingBookingDueAt(paymentId)
+            if (dueAt != null) return@runOnVertxContext settleHeld(payment, paymentId, dueAt)
+        }
         if (!schemeSubmissionEnabled || payment.status != SepaPaymentStatus.VALIDATED) {
             return@runOnVertxContext payment.status
         }
@@ -248,9 +266,9 @@ open class SepaPaymentActivitiesImpl(
      */
     private suspend fun settleAfterAcceptance(payment: SepaPayment, paymentId: UUID): SepaPaymentStatus {
         val processing = payment.transitionTo(SepaPaymentStatus.PROCESSING, clock = clock)
-        paymentRepository.update(
+        bookingWrites.acceptForBooking(
             payment = processing,
-            outboxMessage = SepaPaymentOutboxMessage(
+            outbox = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = """{"paymentId":"$paymentId","version":${processing.revision},"status":"PROCESSING",""" +
@@ -258,25 +276,35 @@ open class SepaPaymentActivitiesImpl(
                 createdAt = Instant.now(clock),
             ),
         )
+        // processing.updatedAt is exactly the instant acceptForBooking records as booking_first_due_at.
+        return settleHeld(processing, paymentId, processing.updatedAt)
+    }
+
+    /** Book an accepted PROCESSING payment; any unproven answer holds it in PROCESSING with its clock open. */
+    private suspend fun settleHeld(processing: SepaPayment, paymentId: UUID, acceptedAt: Instant): SepaPaymentStatus {
         val settled = try {
-            settlementPort.settle(processing)
+            settlementPort.settle(processing, acceptedAt)
         } catch (ex: SettlementUnavailableException) {
             log.warnf(ex, "Settlement unavailable for payment %s; holding in PROCESSING", paymentId)
             return SepaPaymentStatus.PROCESSING
         }
-        return if (settled.settled) {
-            val completed = processing.transitionTo(SepaPaymentStatus.COMPLETED, clock = clock)
-            paymentRepository.update(
-                payment = completed,
-                outboxMessage = SepaPaymentOutboxMessage(
-                    aggregateId = completed.id,
+        return if (settled.settled && settled.transactionId != null) {
+            // SettlementAdapter validated this exact request/response. A return may have committed
+            // while that network call was outstanding; never write the old processing revision.
+            val completed = paymentRepository.completeSettlement(
+                requestedPayment = processing,
+                transactionId = settled.transactionId,
+                completedAt = Instant.now(clock),
+            ) { current ->
+                SepaPaymentOutboxMessage(
+                    aggregateId = paymentId,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","version":${completed.revision},"status":"COMPLETED",""" +
-                        """"occurredAt":"${completed.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
-                    createdAt = Instant.now(clock),
-                ),
-            )
-            SepaPaymentStatus.COMPLETED
+                    payload = """{"paymentId":"$paymentId","version":${current.revision},"status":"COMPLETED",""" +
+                        """"occurredAt":"${current.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
+                    createdAt = current.updatedAt,
+                )
+            }
+            completed.status
         } else {
             log.warnf("Settlement returned not-settled for payment %s; holding in PROCESSING", paymentId)
             SepaPaymentStatus.PROCESSING
@@ -295,7 +323,7 @@ open class SepaPaymentActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun openCaseQuietly(
         payment: SepaPayment,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,

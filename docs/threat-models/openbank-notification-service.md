@@ -33,3 +33,21 @@ suspend, reinstate or renounce events without notifying customers.
   safe generic state until that client contract is available and verified end to end.
 - At-least-once delivery may create duplicate notification rows. This is visible but not an
   authorization or money-movement defect; durable deduplication remains preferable for UX quality.
+
+## Managed template editorial access
+
+The policy for all managed-template editorial routes, including list/detail reads, requires a verified human operator or administrator. `commstemplate.read` is excluded from the generic operator/compliance read grants; the dedicated editorial grant requires the verified person marker. A machine holding a staff role cannot use this surface, even when its principal name has no service-account prefix. This policy boundary does not itself prove the target environment has deployed the matching identity-producing PEP and policy bundle.
+
+### Maker and checker are separate roles (Elevation of privilege / Repudiation)
+
+Drafting (`commstemplate.create`, `.preview`) belongs to `ROLE_OPERATOR`; publishing
+(`commstemplate.publish`) belongs only to `ROLE_COMMS_APPROVER`, the same checker role ADR-0285 D6
+uses for Communication Studio style and playbook publishing. `ROLE_ADMIN` holds both as
+break-glass. Before this split any two operator accounts could author and release customer copy
+between them, so the four-eyes step was only as strong as the operator population. The split is
+enforced three times, independently: the `commstemplate-publish` OPA rule (machines excluded via
+the verified person marker), per-method `@RolesAllowed` on `ManagedTemplateResource`, and the
+maker-is-not-checker refusal in both the resource (409) and the `created_by <> actor` predicate of
+the publishing `UPDATE`, which also stops an administrator publishing its own draft. Residual risk:
+the split only holds while `ROLE_COMMS_APPROVER` is granted to people who do not also author
+template copy; that assignment lives in the identity provider, not in this repository.

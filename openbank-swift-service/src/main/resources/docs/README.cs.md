@@ -24,3 +24,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Idempotence:** klientem dodaný `idempotencyKey` v příkazu send, deduplikováno přes `UNIQUE` constraint v `swift_messages` (zapojen je i Redis klient)
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA sidecar autorizace (ADR-0034) ve výchozím advisory režimu (`authz.enforce=false`), `@Authorize` na akci acknowledge
 - **Klasifikace:** **money-path** služba (`rules.yaml: money_path_services`) — vyžaduje 2 schválení + threat model ([threat model](../../../../docs/threat-models/openbank-swift-service.md))
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for SwiftInstitutionTransferManualReconciliation: a must-FIRE case on the first
+# stop after boot (series registered at 0), a must-NOT-fire control that stays at 0, and the
+# alert clearing once no new stop happened inside the window.
+rule_files:
+  - payments-openbank-swift-alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "the first manual-reconciliation stop after boot fires"
+    input_series:
+      - series: 'openbank_swift_institution_transfer_manual_reconciliation_total{rail="TARGET2",cause="UNTYPED_NOT_FOUND",pod="swift-a"}'
+        values: "0x5 1x30"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: SwiftInstitutionTransferManualReconciliation
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: swift
+              rail: TARGET2
+              cause: UNTYPED_NOT_FOUND
+            exp_annotations:
+              subject_period: continuous
+              summary: "Bank-own transfer needs manual reconciliation (TARGET2, UNTYPED_NOT_FOUND)"
+              description: "swift-service stopped automating a bank-own transfer because the scheme's answer was ambiguous. It will NOT be resent. Find the transfer in swift_institution_transfers with status MANUAL_RECONCILIATION, confirm its UETR with the scheme, and settle or reject it by hand; treasury still sees it as RELEASED or SENT."
+      - eval_time: 30m
+        alertname: SwiftInstitutionTransferManualReconciliation
+        exp_alerts: []
+
+  - interval: 1m
+    name: "counters registered at zero never fire"
+    input_series:
+      - series: 'openbank_swift_institution_transfer_manual_reconciliation_total{rail="CERTIS",cause="MISMATCHED_STATUS",pod="swift-a"}'
+        values: "0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: SwiftInstitutionTransferManualReconciliation
+        exp_alerts: []

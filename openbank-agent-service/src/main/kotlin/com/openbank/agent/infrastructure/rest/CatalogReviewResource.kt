@@ -9,6 +9,7 @@ import com.openbank.agent.application.CatalogReviewService
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.Produces
@@ -28,6 +29,12 @@ class CatalogReviewResource {
     @Inject lateinit var reviews: CatalogReviewService
 
     data class ReviewRequest(val offeringId: String?, val revisionId: String?, val model: String? = null)
+    data class CapabilityDto(
+        val available: Boolean,
+        val mode: String?,
+        val defaultModel: String?,
+        val models: List<CatalogReviewService.ModelOption>,
+    )
     data class FindingDto(
         val severity: String,
         val category: String,
@@ -44,6 +51,12 @@ class CatalogReviewResource {
         val findings: List<FindingDto>,
         val model: String,
     )
+
+    @GET
+    fun capability(): CapabilityDto {
+        val capability = reviews.capability()
+        return CapabilityDto(capability.available, capability.mode, capability.defaultModel, capability.models)
+    }
 
     @POST
     fun review(body: ReviewRequest): Response {
@@ -73,7 +86,7 @@ class CatalogReviewResource {
         } catch (e: IllegalArgumentException) {
             badRequest(e.message ?: "catalog review was rejected")
         } catch (e: CatalogReviewService.ModelUnavailableException) {
-            log.warn("catalog review unavailable: no eligible self-hosted model", e)
+            log.warn("catalog review unavailable: no eligible model", e)
             Response.status(Response.Status.SERVICE_UNAVAILABLE)
                 .entity(mapOf("error" to "catalog review model is unavailable"))
                 .build()

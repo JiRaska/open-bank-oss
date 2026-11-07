@@ -65,7 +65,11 @@ IMAGE_RE = re.compile(
 # A manually requested evidence refresh may rebuild the same commit. ECR tags are immutable,
 # so it appends the GitHub workflow run id. The suffix is deliberately narrow: it is provenance,
 # not a second version axis, and parsing must still resolve exactly the commit prefix.
-SANDBOX_TAG_RE = re.compile(r"^sandbox-([0-9a-f]{8,40})(?:-run([1-9][0-9]*))?$")
+# A digest-qualified reference retains the same source tag; accept only a complete,
+# canonical SHA-256 suffix. This is syntax validation, not signature verification.
+SANDBOX_TAG_RE = re.compile(
+    r"^sandbox-([0-9a-f]{8,40})(?:-run([1-9][0-9]*))?(?:@sha256:[0-9a-f]{64})?$"
+)
 
 STATUS_OK = "ok"
 STATUS_DRIFT = "drift"
@@ -231,7 +235,7 @@ def run_offline(root: pathlib.Path) -> int:
         for tag, manifest in sorted(tags):
             if parse_sandbox_tag(tag) is None:
                 print(f"ERROR: {manifest}: {service} pinned to {tag!r} — "
-                      "deployed images must carry sandbox-<sha>[-run<id>] so the drift watch "
+                      "deployed images must carry sandbox-<sha>[-run<id>][@sha256:<64hex>] so the drift watch "
                       "can compare them to main.", file=sys.stderr)
                 errors += 1
     if skipped:
@@ -320,6 +324,21 @@ def self_test() -> int:
     expect("parses sandbox-<sha>", parse_sandbox_tag("sandbox-99114189") == "99114189")
     expect("parses full sha", parse_sandbox_tag("sandbox-" + "a" * 40) == "a" * 40)
     expect("parses manual refresh tag", parse_sandbox_tag("sandbox-99114189-run32826611610") == "99114189")
+    digest = "ab" * 32
+    expect("parses digest-qualified source tag",
+           parse_sandbox_tag(f"sandbox-99114189@sha256:{digest}") == "99114189")
+    expect("parses digest-qualified full source and refresh run",
+           parse_sandbox_tag(f"sandbox-{'a' * 40}-run123@sha256:{digest}") == "a" * 40)
+    for invalid_digest in (digest[:-1], digest + "0", "g" * 64, "", digest.upper()):
+        expect(f"rejects malformed SHA-256 suffix {invalid_digest!r}",
+               parse_sandbox_tag(f"sandbox-99114189@sha256:{invalid_digest}") is None)
+    expect("rejects unsupported digest algorithm",
+           parse_sandbox_tag(f"sandbox-99114189@sha512:{digest}") is None)
+    expect("rejects digest without source tag", parse_sandbox_tag(f"sha256:{digest}") is None)
+    expect("rejects duplicate digest suffix",
+           parse_sandbox_tag(f"sandbox-99114189@sha256:{digest}@sha256:{digest}") is None)
+    expect("rejects zero refresh run with digest",
+           parse_sandbox_tag(f"sandbox-99114189-run0@sha256:{digest}") is None)
     expect("rejects sandbox-sec1", parse_sandbox_tag("sandbox-sec1") is None)
     expect("rejects non-numeric refresh suffix", parse_sandbox_tag("sandbox-99114189-runproof") is None)
     expect("rejects zero refresh run", parse_sandbox_tag("sandbox-99114189-run0") is None)
@@ -383,6 +402,19 @@ def self_test() -> int:
             encoding="utf-8")
         expect("current pin is in sync",
                run_full(repo, 7, "") == 0)
+
+        # The writer emits tag@digest; both lanes must still use the TAG's commit.
+        current_pin = drift_yaml.read_text()
+        digest_pin = current_pin.replace(f"sandbox-{new_sha[:8]}",
+                                         f"sandbox-{new_sha[:8]}-run123@sha256:{digest}")
+        drift_yaml.write_text(digest_pin, encoding="utf-8")
+        expect("digest-qualified current pin passes offline declarations", run_offline(repo) == 0)
+        expect("digest-qualified current pin resolves the same source commit", run_full(repo, 7, "") == 0)
+        drift_yaml.write_text(digest_pin.replace(new_sha[:8], old_sha[:8]), encoding="utf-8")
+        expect("digest does not hide stale source version", run_full(repo, 7, "") == 2)
+        drift_yaml.write_text(digest_pin.replace(digest, digest[:-1]), encoding="utf-8")
+        expect("truncated digest fails offline declarations", run_offline(repo) == 1)
+        expect("truncated digest is unverifiable in full scan", run_full(repo, 7, "") == 2)
 
         # An unparseable tag must never read as "in sync" — offline lane fails
         # it, scheduled lane reports it unverifiable.

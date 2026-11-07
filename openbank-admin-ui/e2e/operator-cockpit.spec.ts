@@ -81,8 +81,9 @@ test('Test Coverage is backed by a dated CI evidence snapshot, not a static scor
   await page.goto('/system/tests')
   await expect(page.getByText(/sesbíráno|collected/)).toBeVisible()
   await expect(page.getByText(/absence se nikdy nevykresluje jako nula|absence is never rendered as zero/)).toBeVisible()
-  await expect(page.getByText('ledger-service')).toBeVisible()
-  await expect(page.getByText('account-service')).toBeVisible()
+  const matrix = page.getByRole('region', { name: /Matice důkazů komponent|Component evidence matrix/ })
+  await expect(matrix.getByText('ledger-service')).toBeVisible()
+  await expect(matrix.getByText('account-service')).toBeVisible()
 })
 
 test('Trace Explorer renders an OTLP waterfall after selecting a trace', async ({ page }) => {
@@ -134,7 +135,7 @@ test('regulatory preview blocks fiction: it shows real FINREP cells and no submi
     await page.waitForTimeout(250)
     return [before, await disclosure.count()]
   }).toEqual([1, 1])
-  await expect(disclosure).toHaveAccessibleName(/CNB — Finanční výkazy.*(?:Rozbalit detail|Expand details)/)
+  await expect(disclosure).toHaveAccessibleName(/CNB — (?:Finanční výkazy|Financial statements).*(?:Rozbalit detail|Expand details)/)
   await disclosure.focus()
   await page.keyboard.press('Enter')
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
@@ -152,7 +153,8 @@ test('Temporal and approvals show live source-backed state without inventing hum
     metrics: { workflows: { scheduled1h: 12, completed1h: 11, failed1h: 1, timedOut1h: 0 }, latency: { activityScheduleToStartMs: 20, workflowTaskScheduleToStartMs: 10, serverRequestP99Ms: 30 }, persistence: { requestsPerSec: 4 }, workers: { totalSlotsAvailable: 8, slotsUsed: 2 }, namespaces: ['openbank'] },
   })
   await page.goto('/temporal')
-  await expect(page.getByText(/Provozní|Running/)).toBeVisible()
+  await expect(page.getByText(/Metriky Temporal nalezeny|Temporal metrics observed/)).toBeVisible()
+  await expect(page.getByText(/^(Provozní|Running)$/)).toHaveCount(0)
   await page.getByRole('button', { name: /Metriky|Metrics/ }).click()
   await expect(page.getByRole('heading', { name: /Workflowy \(posledních 60 minut\)|Workflows \(last 60 minutes\)/ })).toBeVisible()
   await expect(page.getByLabel(/^(Spuštěno|Scheduled): 12$/)).toBeVisible()

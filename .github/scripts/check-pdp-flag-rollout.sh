@@ -16,7 +16,7 @@
 # merging.
 #
 # WHAT "CONTAINS PHASE 1" MEANS
-# The marker commit is DERIVED, not hard-coded: the first commit on this history whose
+# The marker commit is DERIVED, not hard-coded: the first commit on canonical main whose
 # OpaSidecarPolicyDecisionPoint.kt puts "service_account" into the OPA input. A pinned image
 # `openbank-<svc>:sandbox-<sha>[-run<id>]` is current iff that marker is an ancestor of <sha>.
 # A pin that cannot be resolved to a commit (a placeholder, or a commit outside this clone) counts
@@ -46,15 +46,20 @@ cd "$(git rev-parse --show-toplevel)"
 REPO="${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 API=0
 
-# First commit (oldest) on HEAD's history that introduced the marker text.
+# Follow canonical main: a stacked PR can retain a parallel pre-squash introduction.
+# Local callers must fetch origin/main before checking rollout.
 marker_commit() {
   if [ "$API" -eq 0 ]; then
-    git log --format=%H --reverse -S"$MARKER_TEXT" HEAD -- "$MARKER_FILE" | head -1
+    git rev-parse --verify refs/remotes/origin/main >/dev/null 2>&1 || {
+      echo "::error::origin/main is unavailable; fetch main before checking rollout." >&2
+      return 1
+    }
+    git log --first-parent --format=%H --reverse -S"$MARKER_TEXT" origin/main -- "$MARKER_FILE" | head -1
     return
   fi
   # Commits touching the file, newest first; the marker is the oldest whose content has the text.
   local found="" sha
-  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=$(git rev-parse HEAD)&per_page=100" --jq '.[].sha'); do
+  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha'); do
     if gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}" \
         | grep -qF "$MARKER_TEXT"; then
       found="$sha"
@@ -71,9 +76,40 @@ is_ancestor() {
     git merge-base --is-ancestor "$1" "$2"
     return
   fi
-  local status
-  status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)" || return 1
-  [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+  local status cache="" attempt=1 max="${PDP_ROLLOUT_API_ATTEMPTS:-4}"
+  # #14011: one GitOps invocation compares the same immutable (marker, source) pair once per
+  # consumer pin, ~70 calls for ~9 distinct pairs. Commits are immutable, so a DEFINITIVE answer
+  # is reused, keyed by the exact inputs (a short and a full SHA are different keys). Unknown,
+  # malformed and transport-error answers are never cached: they stay failures, and a later
+  # success re-asks rather than overwriting a failure already counted for an earlier pin.
+  # A file per key, not an associative array: macOS ships Bash 3.2.
+  if [ -n "${COMPARE_CACHE_DIR:-}" ]; then
+    cache="${COMPARE_CACHE_DIR}/${1}_${2}"
+    if [ -f "$cache" ]; then
+      status="$(cat "$cache")"
+      [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+      return
+    fi
+  fi
+  # Only a definitive verdict ends the loop. A transport error, rate limit or malformed answer
+  # is "could not look": retried, then still LAGGING (fail-closed), never read as current. The
+  # old single attempt turned one transient API failure into a red main (sca-service 2026-10-31,
+  # the same pin had passed 70/0 twice in the preceding 30 minutes).
+  while :; do
+    if status="$(gh api "repos/${REPO}/compare/${1}...${2}" --jq .status 2>/dev/null)"; then
+      case "$status" in
+        ahead|identical|behind|diverged)
+          [ -z "$cache" ] || printf '%s\n' "$status" > "$cache"
+          [ "$status" = "ahead" ] || [ "$status" = "identical" ]
+          return ;;
+      esac
+    fi
+    [ "$attempt" -ge "$max" ] && break
+    sleep "$(( attempt * ${PDP_ROLLOUT_RETRY_SLEEP:-3} ))"
+    attempt=$((attempt + 1))
+  done
+  echo "::warning::compare ${1:0:10}...${2:0:10} unresolved after ${max} attempts; counting as LAGGING" >&2
+  return 1
 }
 
 # Services whose image embeds libs-runtime: the same derivation Auto deploy uses to rebuild them.
@@ -117,9 +153,16 @@ run() {
       return 2
     fi
   fi
+  # Fresh compare cache per GitOps invocation (#14011); live mode reads stay uncached.
+  COMPARE_CACHE_DIR=""
+  if [ "$source" = gitops ] && [ "$API" -eq 1 ]; then
+    COMPARE_CACHE_DIR="$(mktemp -d)"
+    # shellcheck disable=SC2064 # expand now: the path is fixed for this invocation
+    trap "rm -rf '$COMPARE_CACHE_DIR'" EXIT
+  fi
   marker="$(marker_commit)"
   if [ -z "$marker" ]; then
-    echo "::error::Phase 1 (libs-runtime sending service_account) is not on this history: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
+    echo "::error::Phase 1 (libs-runtime sending service_account) is not on canonical main: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
     return 1
   fi
   echo "marker commit (Phase 1): $marker"
@@ -181,6 +224,114 @@ selftest() {
     if pin_is_current "$marker" "${parent:0:12}"; then echo "selftest FAIL: an OLDER pin read as current" >&2; f=1; fi
     if pin_is_current "$marker" "000000000"; then echo "selftest FAIL: a placeholder read as current" >&2; f=1; fi
     if pin_is_current "$marker" "deadbeefdeadbeef"; then echo "selftest FAIL: an unresolvable pin read as current" >&2; f=1; fi
+    # A stacked PR retains the pre-squash phase-1 commit after main is merged in.
+    # Images are built from main's squash commit, not from that parallel ancestor.
+    git branch -M main
+    mkdir -p "$(dirname "$MARKER_FILE")"
+    printf '// baseline\n' > "$MARKER_FILE"
+    git add "$MARKER_FILE"
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qm baseline
+    before_phase1="$(git rev-parse HEAD)"
+    git checkout -qb phase1
+    printf '%s\n' 'put("service_account", true)' > "$MARKER_FILE"
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qam phase1
+    git checkout -q main
+    git merge --squash phase1 >/dev/null
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t commit -qm 'squash phase1'
+    shipped="$(git rev-parse HEAD)"
+    git update-ref refs/remotes/origin/main "$shipped"
+    git checkout -qb phase2 phase1
+    git -c commit.gpgsign=false -c user.email=t@t -c user.name=t merge --no-edit main >/dev/null
+    marker="$(marker_commit)"
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: marker follows pre-squash branch history" >&2; f=1; }
+    pin_is_current "$marker" "$shipped" || { echo "selftest FAIL: squashed phase-1 image rejected" >&2; f=1; }
+    if pin_is_current "$marker" "$before_phase1"; then echo "selftest FAIL: pre-phase-1 image accepted" >&2; f=1; fi
+
+    # Exercise the shallow-clone transport without credentials or a network request.
+    gh() {
+      case "$*" in
+        *"commits?path="*"&sha=main&"*) printf '%s\n' "$shipped" "$before_phase1" ;;
+        *"contents/"*"?ref=$shipped"*) printf '%s\n' 'put("service_account", true)' ;;
+        *"contents/"*"?ref=$before_phase1"*) printf '// baseline\n' ;;
+        *) return 1 ;;
+      esac
+    }
+    API=1
+    marker="$(marker_commit)"
+    [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
+    unset -f gh
+    # Compare cache (#14011) is exercised with a single attempt so a scripted transport error is observable.
+    export PDP_ROLLOUT_API_ATTEMPTS=1
+    # Compare cache (#14011): count compare requests against a scripted API. Removing the
+    # cache makes the repeated-verdict counts 2 instead of 1, so these cases fail without it.
+    calls="$tmp/compare-calls"; flaky="$tmp/flaky-once"; : > "$calls"; : > "$flaky"
+    gh() {
+      case "$*" in
+        *"compare/"*)
+          echo x >> "$calls"
+          case "$*" in
+            *"compare/mk1...aaaaaaaa "*|*"compare/mk1...aaaaaaaaaaaa "*|*"compare/mk2...aaaaaaaa "*) echo ahead ;;
+            *"compare/mk1...bbbbbbbb "*) echo behind ;;
+            *"compare/mk1...cccccccc "*)
+              if [ -s "$flaky" ]; then echo ahead; else echo x > "$flaky"; return 1; fi ;;
+            *) echo surprising-status ;;
+          esac ;;
+        *) return 1 ;;
+      esac
+    }
+    ncalls() { wc -l < "$calls" | tr -d '[:space:]'; }
+    COMPARE_CACHE_DIR="$tmp/cache1"; mkdir -p "$COMPARE_CACHE_DIR"
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } \
+      || { echo "selftest FAIL: repeated positive verdict not current" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated positive compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 bbbbbbbb || is_ancestor mk1 bbbbbbbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: repeated negative compare not reused ($(ncalls) calls)" >&2; f=1; }
+    : > "$calls"
+    { is_ancestor mk2 aaaaaaaa && is_ancestor mk1 aaaaaaaaaaaa; } \
+      || { echo "selftest FAIL: distinct marker / longer short SHA not current" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: distinct marker or SHA length shared a cache key" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 cccccccc; then echo "selftest FAIL: transport error read as current" >&2; f=1; fi
+    is_ancestor mk1 cccccccc || { echo "selftest FAIL: success after an uncached error rejected" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: a transport error was cached" >&2; f=1; }
+    : > "$calls"
+    if is_ancestor mk1 dddddddd || is_ancestor mk1 dddddddd; then echo "selftest FAIL: unknown status read as current" >&2; f=1; fi
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: an unknown status was cached" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR="$tmp/cache2"; mkdir -p "$COMPARE_CACHE_DIR"
+    is_ancestor mk1 aaaaaaaa || { echo "selftest FAIL: fresh cache verdict" >&2; f=1; }
+    [ "$(ncalls)" = 1 ] || { echo "selftest FAIL: a new invocation reused an old cache" >&2; f=1; }
+    : > "$calls"
+    COMPARE_CACHE_DIR=""
+    { is_ancestor mk1 aaaaaaaa && is_ancestor mk1 aaaaaaaa; } || { echo "selftest FAIL: uncached verdict" >&2; f=1; }
+    [ "$(ncalls)" = 2 ] || { echo "selftest FAIL: live/uncached mode reused a verdict" >&2; f=1; }
+    unset -f gh ncalls
+    unset PDP_ROLLOUT_API_ATTEMPTS
+
+    # Transient compare-API failures: retried, but a never-answering API stays LAGGING.
+    export PDP_ROLLOUT_RETRY_SLEEP=0
+    calls="$tmp/calls"; : > "$calls"
+    gh() {
+      echo x >> "$calls"
+      case "$MOCK" in
+        flaky) [ "$(wc -l < "$calls")" -ge 3 ] && echo ahead || return 1 ;;
+        down) return 1 ;;
+        junk) echo "" ;;
+        behind) echo behind ;;
+      esac
+    }
+    MOCK=flaky; is_ancestor aaa bbb || { echo "selftest FAIL: transient API errors not retried" >&2; f=1; }
+    : > "$calls"; MOCK=down
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: dead API read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 4 ] || { echo "selftest FAIL: retry bound not honoured" >&2; f=1; }
+    : > "$calls"; MOCK=junk
+    if is_ancestor aaa bbb 2>/dev/null; then echo "selftest FAIL: empty verdict read as current" >&2; f=1; fi
+    : > "$calls"; MOCK=behind
+    if is_ancestor aaa bbb; then echo "selftest FAIL: behind read as current" >&2; f=1; fi
+    [ "$(wc -l < "$calls")" -eq 1 ] || { echo "selftest FAIL: definitive verdict was retried" >&2; f=1; }
+    unset -f gh
+    API=0
     exit "$f"
   ) || fail=1
   rm -rf "$tmp"

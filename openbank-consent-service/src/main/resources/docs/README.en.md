@@ -25,3 +25,7 @@ This documentation is published directly by the service at the management endpoi
 - **Auth:** Keycloak OIDC (RS256 JWT); OPA sidecar authorization (ADR 0034, advisory by default); `@Authorize` on revoke
 - **SCA:** activation requires a `COMPLETED` SCA challenge from `openbank-sca-service` (ADR 0021)
 - **Money-path service:** yes — 2 approvals + threat model required on every change
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

@@ -11,11 +11,13 @@ import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
+import com.openbank.tax.domain.returns.ReturnLine
 import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
@@ -26,6 +28,26 @@ import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+
+@Entity
+@Table(name = "statutory_return_line")
+class StatutoryReturnLineEntity : PanacheEntityBase {
+    @jakarta.persistence.EmbeddedId
+    var key: StatutoryReturnLineKey = StatutoryReturnLineKey()
+
+    @Column(name = "fields_json", nullable = false)
+    var fieldsJson: String = "{}"
+}
+
+/** Composite key: (return, position). Lines are ordered — line order is part of the stored artefact. */
+@jakarta.persistence.Embeddable
+data class StatutoryReturnLineKey(
+    @Column(name = "return_id") var returnId: UUID = UUID(0L, 0L),
+    @Column(name = "line_index") var lineIndex: Int = 0,
+) : java.io.Serializable
+
+@ApplicationScoped
+class StatutoryReturnLineRepository : PanacheRepositoryBase<StatutoryReturnLineEntity, StatutoryReturnLineKey>
 
 @Entity
 @Table(name = "statutory_return")
@@ -96,37 +118,65 @@ class StatutoryReturnEntity : PanacheEntityBase {
 }
 
 @ApplicationScoped
-class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
-    StatutoryReturnRepository,
+class PanacheStatutoryReturnRepository(
+    private val objectMapper: ObjectMapper,
+    private val lineRepository: StatutoryReturnLineRepository,
+) : StatutoryReturnRepository,
     PanacheRepositoryBase<StatutoryReturnEntity, UUID> {
 
     override suspend fun insert(statutoryReturn: StatutoryReturn): StatutoryReturn = Panache.withTransaction {
         persist(statutoryReturn.toEntity())
-    }.awaitSuspending().toDomain()
+            .invoke { entity ->
+                val lineEntities = statutoryReturn.toLineEntities(entity.id)
+                // An empty persist(Iterable) zips ZERO unis and fails with "The Uni set is empty" —
+                // figure-only returns (pension) carry no lines and must skip the step outright.
+                if (lineEntities.isEmpty()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    lineRepository.persist(lineEntities)
+                }
+            }
+            .map { statutoryReturn }
+    }.awaitSuspending()
 
-    override suspend fun findReturn(id: UUID): StatutoryReturn? = Panache.withSession {
-        find("id = ?1", id).firstResult()
-    }.awaitSuspending()?.toDomain()
+    override suspend fun findReturn(id: UUID): StatutoryReturn? {
+        val entity = Panache.withSession {
+            find("id = ?1", id).firstResult()
+        }.awaitSuspending() ?: return null
+        return entity.toDomain(withLines(entity.id))
+    }
 
     override suspend fun latestRevision(
         catalogueId: String,
         returnCode: String,
         entityId: String,
         period: ReportingPeriod,
-    ): StatutoryReturn? = Panache.withSession {
-        find(
-            "catalogueId = ?1 and returnCode = ?2 and entityId = ?3 and periodicity = ?4 and periodEnd = ?5 order by revision desc",
-            catalogueId,
-            returnCode,
-            entityId,
-            period.periodicity.name,
-            period.endDate,
-        ).firstResult()
-    }.awaitSuspending()?.toDomain()
+    ): StatutoryReturn? {
+        val entity = Panache.withSession {
+            find(
+                "catalogueId = ?1 and returnCode = ?2 and entityId = ?3 and periodicity = ?4 and periodEnd = ?5 order by revision desc",
+                catalogueId,
+                returnCode,
+                entityId,
+                period.periodicity.name,
+                period.endDate,
+            ).firstResult()
+        }.awaitSuspending() ?: return null
+        return entity.toDomain(withLines(entity.id))
+    }
 
-    override suspend fun listReturns(): List<StatutoryReturn> = Panache.withSession {
-        find("order by periodEnd desc, returnCode asc, entityId asc, revision desc").list()
-    }.awaitSuspending().map { it.toDomain() }
+    override suspend fun listReturns(): List<StatutoryReturn> {
+        val entities = Panache.withSession {
+            find("order by periodEnd desc, returnCode asc, entityId asc, revision desc").list()
+        }.awaitSuspending()
+        return entities.map { it.toDomain(withLines(it.id)) }
+    }
+
+    private suspend fun withLines(returnId: UUID): List<ReturnLine> = Panache.withSession {
+        lineRepository.find("key.returnId = ?1 order by key.lineIndex", returnId).list()
+    }.awaitSuspending().map { line ->
+        ReturnLine(objectMapper.readValue(line.fieldsJson, STRING_MAP))
+    }
 
     /** Lifecycle columns only — the figures and their hash are immutable once a revision exists. */
     override suspend fun save(statutoryReturn: StatutoryReturn, expectedVersion: Long): StatutoryReturn =
@@ -154,6 +204,13 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
             }
         }.awaitSuspending()
 
+    private fun StatutoryReturn.toLineEntities(returnId: UUID) = lines.mapIndexed { index, line ->
+        StatutoryReturnLineEntity().also {
+            it.key = StatutoryReturnLineKey(returnId, index)
+            it.fieldsJson = objectMapper.writeValueAsString(line.fields)
+        }
+    }
+
     private fun StatutoryReturn.toEntity() = StatutoryReturnEntity().also {
         it.id = id
         it.catalogueId = catalogueId
@@ -180,7 +237,7 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
 
     // Values are stored as strings so a JSON number round-trip cannot alter the scale or precision
     // of a figure whose hash was attested.
-    private fun StatutoryReturnEntity.toDomain() = StatutoryReturn(
+    private fun StatutoryReturnEntity.toDomain(lines: List<ReturnLine>) = StatutoryReturn(
         id = id,
         catalogueId = catalogueId,
         catalogueVersion = catalogueVersion,
@@ -192,6 +249,7 @@ class PanacheStatutoryReturnRepository(private val objectMapper: ObjectMapper) :
         datapoints = objectMapper.readValue(datapointsJson, STRING_MAP).mapValues { (_, v) ->
             BigDecimal(v)
         }.toSortedMap(),
+        lines = lines,
         contentHash = contentHash,
         dueDate = dueDate,
         assembledBy = assembledBy,

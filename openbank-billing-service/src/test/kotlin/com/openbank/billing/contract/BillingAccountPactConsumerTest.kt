@@ -60,6 +60,8 @@ class BillingAccountPactConsumerTest {
                 o.stringValue("currencyCode", "CZK")
                 o.stringType("status", "ACTIVE")
                 o.stringValue("partyId", PACT_PARTY_ID)
+                // The revision pin is resolved as of this instant (ADR-0341 D1), not as of "now".
+                o.stringType("openedAt", "2026-03-01T08:30:00Z")
             }.build(),
         )
         .toPact()
@@ -121,6 +123,7 @@ class BillingAccountPactConsumerTest {
         val account = mapper.readValue<AccountDto>(raw)
         assertThat(account.productId).isEqualTo(PACT_PRODUCT_ID)
         assertThat(account.currencyCode).isEqualTo("CZK")
+        assertThat(java.time.Instant.parse(account.openedAt)).isNotNull()
     }
 
     @Test

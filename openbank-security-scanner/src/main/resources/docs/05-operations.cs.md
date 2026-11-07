@@ -103,7 +103,7 @@ Pravděpodobně problém s network policy nebo DNS.
 ### Event ICT incidentu chybí downstream
 
 Přechody incidentu zůstávají v `ict_incident_outbox`, dokud je relay neoznačí jako odeslané.
-Produkční dispatch zůstává během migrační zkoušky vypnutý a zapne se až po ověření schématu a ACL.
+Relay je v nasazené konfiguraci zapnutý (`OPENBANK_OUTBOX_DISPATCH_ENABLED=true`, #4942); nastavení na `false` pozastaví doručování bez ztráty incidentů, které zůstávají v outboxu.
 
 1. Zkontroluj chyby relaye a `openbank_outbox_backlog{service="security-scanner"}`.
 2. Zkontroluj broker: `kcat -L -b kafka:9092`
@@ -127,3 +127,11 @@ naplníš přes `POST /api/v1/security/scan`. Rozpracované ICT incidenty se NEV
 ## Poznámky k lokálnímu vývoji
 
 Scanner prověřuje služby pomocí URL — v dev módu by seznam služeb měl být přepsán v `application.yaml` tak, aby odkazoval na lokálně běžící služby. Alternativně spusť s `QUARKUS_PROFILE=test`, kde je seznam služeb prázdný a skeny produkují prázdné reporty.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

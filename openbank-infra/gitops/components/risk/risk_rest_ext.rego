@@ -4,7 +4,9 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (RiskResource):
-#   risk.snapshot.read    — GET  /snapshots/{id}, GET /snapshots/{id}/positions
+#   risk.snapshot.list    — GET  /snapshots (the run list)
+#   risk.valuation.read   — GET  /snapshots/{id}/valuation (ADR-0344 D8)
+#   risk.snapshot.read    — GET  /snapshots/{id} and every other per-snapshot analysis
 #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
 #   risk.snapshot.create  — POST /snapshots
 #   risk.curve-set.read   — GET  /curve-sets, /curve-sets/{id}, and cash flows ride on
@@ -36,7 +38,7 @@ import rego.v1
 
 allowed_reasons contains "operator-risk-snapshot-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
 	role in input.principal.roles
 	input.action == "risk.snapshot.create"
@@ -44,7 +46,7 @@ allowed_reasons contains "operator-risk-snapshot-create" if {
 
 allowed_reasons contains "operator-risk-curve-set-create" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
 	role in input.principal.roles
 	input.action == "risk.curve-set.create"
@@ -55,8 +57,8 @@ allowed_reasons contains "operator-risk-curve-set-create" if {
 # grant reaches this one machine and nothing that happens to share a role; reads only.
 allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-finrep"
-	input.action == "risk.snapshot.read"
+	machine_named("service-account-openbank-finrep")
+	input.action in {"risk.snapshot.read", "risk.snapshot.list"}
 }
 
 # treasury-service's simulated counterparties quote off the latest curve set (ADR-0315 D9) as its
@@ -64,6 +66,16 @@ allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
 # ledger). Keyed by principal id, never by role; curve-set reads only — no snapshot, no create.
 allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-treasury"
+	machine_named("service-account-openbank-treasury")
 	input.action == "risk.curve-set.read"
+}
+
+# ADR-0344 D8: treasury revalues its fair-value deals off the risk engine's valuation of a TIED_OUT
+# snapshot, as its OWN Keycloak client. Exactly two paths — the snapshot list (to find the run for a
+# date) and that run's valuation — each behind its own action, so no other per-snapshot analysis
+# (capital, liquidity, limits, positions …) and no write is reachable. Keyed by principal id.
+allowed_reasons contains "treasury-m2m-risk-valuation-read" if {
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-treasury")
+	input.action in {"risk.snapshot.list", "risk.valuation.read"}
 }

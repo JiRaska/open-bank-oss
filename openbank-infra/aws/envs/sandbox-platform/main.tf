@@ -559,12 +559,18 @@ resource "kubectl_manifest" "nodepool_default" {
         budgets = [
           # Standard 5-field cron: no disruption 20:00–07:00 UTC daily
           { schedule = "0 20 * * *", duration = "11h", nodes = "0%" },
-          { nodes = "50%" },
+          # Waves: 89 of 150 CNPG pods live on this spot pool; one 24h sample (2026-10-23)
+          # logged 60 disruptions incl. Underutilized deletes recreating ~10 DB clusters at
+          # once. ONE node at a time for every reason (was 50%); DBs stay on spot (#11608).
+          { nodes = "1" },
           # #11304: drift (AMI release, kubelet/NodeClass change) replaces ONE node at a
-          # time. Karpenter applies the most restrictive matching budget, so consolidation
-          # keeps its 50% while a fleet-wide drift can no longer take out half the pool at
-          # once -- the 2026-09-28 wedge landed on top of a fleet-wide CNPG bump.
+          # time. Karpenter applies the most restrictive matching budget.
           { nodes = "1", reasons = ["Drifted"] },
+          # Drift only inside the maintenance window 07:00-09:00 UTC (09:00-11:00 Prague
+          # CEST, 08:00-10:00 CET), right after the overnight freeze ends. The budget below
+          # is active 09:00 -> 07:00 UTC (22h) and forbids Drifted replacements. Karpenter
+          # schedules are UTC. Consolidation (Underutilized/Empty) is NOT affected.
+          { schedule = "0 9 * * *", duration = "22h", nodes = "0", reasons = ["Drifted"] },
         ]
       }
       # Hard cap against runaway provisioning: without it Karpenter once

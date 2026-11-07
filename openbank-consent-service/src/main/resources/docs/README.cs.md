@@ -25,3 +25,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Auth:** Keycloak OIDC (RS256 JWT); autorizace přes OPA sidecar (ADR 0034, defaultně advisory); `@Authorize` na revoke
 - **SCA:** aktivace vyžaduje `COMPLETED` SCA výzvu z `openbank-sca-service` (ADR 0021)
 - **Money-path služba:** ano — každá změna vyžaduje 2 schválení + threat model
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

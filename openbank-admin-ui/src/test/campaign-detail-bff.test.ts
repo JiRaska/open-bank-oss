@@ -27,6 +27,8 @@ describe('campaign detail bundle', () => {
         const u = String(url)
         const body = u.endsWith('/enrolments')
           ? [{ from: 'enrolments' }]
+          : u.endsWith('/bulk-runs')
+            ? [{ from: 'bulkRuns' }]
           : u.includes('/sends/summary')
             ? { from: 'summary' }
             : u.includes('/journey')
@@ -50,6 +52,7 @@ describe('campaign detail bundle', () => {
     expect(d.sendSummary).toEqual({ from: 'summary' })
     expect(d.journey).toEqual([{ from: 'journey' }])
     expect(d.incentives).toEqual({ from: 'incentives' })
+    expect(d.bulkRuns).toEqual([{ from: 'bulkRuns' }])
     expect(d.sources.incentives).toBe('ok')
   })
 

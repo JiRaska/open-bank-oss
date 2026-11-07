@@ -23,8 +23,8 @@ describe('standalone Product Studio auth contract', () => {
       realm_access: { roles: ['ROLE_PENSION_LEGAL_COUNSEL'] },
     })
     expect(hasPermission(legalReader, 'catalog:read')).toBe(true)
-    expect(hasPermission(legalReader, 'catalog:pension:legal-approve')).toBe(true)
-    expect(hasPermission(legalReader, 'catalog:pension:product-approve')).toBe(false)
+    expect(hasPermission(legalReader, 'catalog:revision-approve:LEGAL_COUNSEL')).toBe(true)
+    expect(hasPermission(legalReader, 'catalog:revision-approve:PRODUCT_OWNER')).toBe(false)
     expect(hasPermission(legalReader, 'catalog:publish')).toBe(false)
     const productReader = extractCatalogScopeRoles({
       preferred_username: 'product-reviewer',
@@ -33,8 +33,8 @@ describe('standalone Product Studio auth contract', () => {
       realm_access: { roles: ['ROLE_PENSION_PRODUCT_OWNER'] },
     })
     expect(hasPermission(productReader, 'catalog:read')).toBe(true)
-    expect(hasPermission(productReader, 'catalog:pension:product-approve')).toBe(true)
-    expect(hasPermission(productReader, 'catalog:pension:legal-approve')).toBe(false)
+    expect(hasPermission(productReader, 'catalog:revision-approve:PRODUCT_OWNER')).toBe(true)
+    expect(hasPermission(productReader, 'catalog:revision-approve:LEGAL_COUNSEL')).toBe(false)
     const scopeOnly = extractCatalogScopeRoles({ scope: 'pension:legal-approve pension:product-approve' })
     expect(scopeOnly).toEqual([])
     const roleWithoutScope = extractCatalogScopeRoles({

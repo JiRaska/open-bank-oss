@@ -73,9 +73,13 @@
     {
       "code": "PSP34-12-PS", "name": "PSP (ČNB) 34-12 Hlášení o skladbě portfolia penzijní společnosti",
       "scope": "COMPANY", "periodicity": "QUARTER", "deadlineDaysAfterPeriodEnd": 30,
-      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(4)",
-      "datapoints": ["holdings_carrying_value", "holdings_count"],
-      "rules": [{"type": "NON_NEGATIVE", "id": "holdings-non-negative", "datapoints": ["holdings_carrying_value", "holdings_count"]}]
+      "legalBasis": "vyhl. 425/2012 Sb. §3(1)(b)(4) — LEGAL-REVIEW: datapoint ids are platform vocabulary, not the SDAT cell codes (not read)",
+      "datapoints": ["holdings_carrying_value", "holdings_count", "government_bond_quantity", "government_bond_valuation", "corporate_bond_quantity", "corporate_bond_valuation", "equity_quantity", "equity_valuation", "fund_units_quantity", "fund_units_valuation", "money_market_quantity", "money_market_valuation", "deposit_quantity", "deposit_valuation"],
+      "rules": [
+        {"type": "NON_NEGATIVE", "id": "holdings-non-negative", "datapoints": ["holdings_carrying_value", "holdings_count", "government_bond_quantity", "government_bond_valuation", "corporate_bond_quantity", "corporate_bond_valuation", "equity_quantity", "equity_valuation", "fund_units_quantity", "fund_units_valuation", "money_market_quantity", "money_market_valuation", "deposit_quantity", "deposit_valuation"]},
+        {"type": "SUM_EQUALS", "id": "holdings-by-class", "target": "holdings_carrying_value",
+         "terms": [{"datapoint": "government_bond_valuation", "sign": 1}, {"datapoint": "corporate_bond_valuation", "sign": 1}, {"datapoint": "equity_valuation", "sign": 1}, {"datapoint": "fund_units_valuation", "sign": 1}, {"datapoint": "money_market_valuation", "sign": 1}, {"datapoint": "deposit_valuation", "sign": 1}]}
+      ]
     },
     {
       "code": "PSP31-04", "name": "PSP (ČNB) 31-04 Hlášení o přijatých a vyplacených prostředcích (year to date)",

@@ -9,6 +9,13 @@
 # NOT EXISTS` and `CREATE OR REPLACE VIEW` are idempotent, so this is safe to re-run on every sync
 # where either schema ConfigMap (or anything else in this directory) changes, which is what
 # BeforeHookCreation causes to happen.
+#
+# The clickhouse-init ConfigMap (the analytics-sink V1..Vn migrations) is applied here FIRST, on
+# every sync. Its /docker-entrypoint-initdb.d mount runs only when the data dir is empty, so on the
+# live PVC (created long before V13/V15) every later migration simply never ran: the Admin UI's
+# DWH reports over silver_settled_transactions / gold_loan_* failed as "ClickHouse not responding"
+# while the bronze-only reports answered. Every statement in it is IF NOT EXISTS / OR REPLACE, and
+# a full replay was verified to converge (applied twice over a fresh database, ClickHouse 26.9).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -83,11 +90,12 @@ spec:
               # terminator to RS=";\n". The remaining records match the repository convention:
               # every real statement ends with a semicolon followed by a newline.
               total=0
-              for script in /sql/ci/ci-gate-runs.sql /sql/campaign/campaign-engagement.sql /sql/finops/cloud-finops.sql; do
+              # /sql/init/*.sql expands in lexical order — the same order the initdb entrypoint uses.
+              for script in /sql/init/*.sql /sql/ci/ci-gate-runs.sql /sql/campaign/campaign-engagement.sql /sql/finops/cloud-finops.sql; do
                 echo "Splitting and applying ${script} to ${CLICKHOUSE_URL}"
                 rm -f /tmp/stmt*.sql
                 grep -v '^[[:space:]]*--' "$script" \
-                  | awk 'BEGIN{RS=";\n"} NF{fn="/tmp/stmt" NR ".sql"; print $0";" > fn}'
+                  | awk 'BEGIN{RS=";\n"} NF{fn=sprintf("/tmp/stmt%04d.sql", NR); print $0";" > fn}'
                 n=0
                 for f in /tmp/stmt*.sql; do
                   [ -e "$f" ] || continue
@@ -114,6 +122,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: init-sql
+              mountPath: /sql/init
+              readOnly: true
             - name: ci-sql
               mountPath: /sql/ci
               readOnly: true
@@ -126,6 +137,9 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: init-sql
+          configMap:
+            name: clickhouse-init
         - name: ci-sql
           configMap:
             name: ci-gate-runs-schema

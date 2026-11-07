@@ -7,14 +7,6 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     // openbank-libs-runtime's outbound SyntheticTaintClientFilter reads OpenTelemetry baggage.
     // Keep the narrow API runtime in the fast-jar; the service does not export telemetry itself.
     implementation("io.opentelemetry:opentelemetry-api")
@@ -23,18 +15,14 @@ dependencies {
 
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.oidc.client.reactive.filter)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract test for the ledger trial-balance call (ADR-0063, git-pact).
     // Consumer side only — finrep is not a Pact provider for anyone, so no libs.pact.provider.
     testImplementation(libs.pact.consumer)

@@ -133,6 +133,20 @@ already requires for credit; erasure under ADR-0118 does not rewrite the chain.
 lifecycle table in ADR-0214 D1 is unchanged, and its policy-evaluation and ML-decision rows are
 emitted as `DecisionRecord`s.
 
+## Amendment 2026-10-21: typed-decision models (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md) D6 extends the envelope for typed decisions, delivered with the first
+consumer (ADR-0349):
+
+- `DecisionClass` gains `TRIAGE`, with outcome `DecisionOutcome.Triage { AUTO, HUMAN_REVIEW,
+  ABSTAIN }`.
+- `engine.kind` is the existing `MODEL`; `engine.version` resolves to the ADR-0141 model card.
+- The record carries the decided value, its probability and the threshold-policy version, so the
+  band a decision fell in can be recomputed from the record alone.
+- `ABSTAIN` is recorded, never dropped, because the abstain rate is the first signal that a provider
+  or a threshold is wrong. Triage decisions accompany a state change only in the AUTO band, so they
+  take the transactional path there and the non-transactional one otherwise, per D2.
+
 ## Alternatives considered
 
 - **One envelope per domain (extend the ADR-0214 pattern service by service)** — least

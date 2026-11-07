@@ -14,9 +14,25 @@ function agentBase(): string {
 
 /**
  * The browser can request a review, but never reaches a model or agent-service directly.
- * agent-service pins the exact DRAFT, invokes a self-hosted model without tools and persists only
- * a PROPOSED HITL item. The operator bearer is relayed so its own policy remains authoritative.
+ * agent-service pins the exact DRAFT, invokes only its server-approved review model without tools
+ * and persists only a PROPOSED HITL item. The operator bearer is relayed for authorization.
  */
+export async function GET() {
+  try {
+    const accessToken = (await auth())?.user?.accessToken
+    if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    const response = await fetch(`${agentBase()}/agent/catalog-reviews`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(10_000),
+      cache: 'no-store',
+    })
+    if (!response.ok) return NextResponse.json({ error: 'upstream_error' }, { status: response.status })
+    return NextResponse.json(await response.json(), { status: response.status })
+  } catch {
+    return NextResponse.json({ error: 'agent_unreachable' }, { status: 502 })
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as { offeringId?: unknown; revisionId?: unknown; model?: unknown }

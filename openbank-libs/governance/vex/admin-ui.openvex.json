@@ -1,0 +1,15 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/admin-ui",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-103923"
+      },
+      "status": "affected",
+      "action_statement": "At main commit 503a418adf4670b665541a071e0abc8ef63a2c73, the Admin UI lockfile resolves Mermaid 12.1.0 and its transitive KaTeX 0.16.47. Upstream GHSA-238p-pmpm-9mq7 identifies inherited trust after pre-existing prototype pollution as the vulnerable behavior; application exploitability has not been demonstrated. This change pins KaTeX 0.18.2 and adds a regression test that rejects inherited trust. Keep this finding affected until the change passes required hosted checks and independent review, merges, and a new Admin UI release evidence bundle confirms the patched resolved artifact. Reassess the statement as fixed only against that release artifact."
+    }
+  ]
+}

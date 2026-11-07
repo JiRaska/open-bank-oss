@@ -145,6 +145,35 @@ class IdentityRegistrationServiceTest {
     }
 
     @Test
+    fun `a party registered from an EUDI PID presentation carries no pid-asserted risk rating`(): Unit = runBlocking {
+        // ADR-0353 D2: a PID proves identity, never risk. The rating comes from the kyc flow; a
+        // defaulted LOW here would be a risk claim nothing computed.
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns null
+        val saved = slot<Party>()
+        coEvery { repo.save(capture(saved)) } answers { saved.captured }
+
+        service().register(command(id, eudiSub = "sub:CZ-PID-0002"))
+
+        assertThat(saved.captured.kycAttributes.amlRiskScore).isNull()
+        assertThat(saved.captured.kycAttributes.kycLevel).isEqualTo(KycLevel.NONE)
+    }
+
+    @Test
+    fun `re-registering from a wallet presentation neither invents nor erases a stored rating`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        coEvery { repo.findByExternalId(any(), any()) } returns null
+        coEvery { repo.findById(id) } returns indexParty(id)
+        val updated = slot<Party>()
+        coEvery { repo.update(capture(updated)) } answers { updated.captured }
+
+        service().register(command(id, eudiSub = "sub:CZ-PID-0003"))
+
+        assertThat(updated.captured.kycAttributes).isEqualTo(indexParty(id).kycAttributes)
+    }
+
+    @Test
     fun `without a pepper an EUDI sub is skipped (degrades, does not crash)`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         coEvery { repo.findByExternalId(any(), any()) } returns null

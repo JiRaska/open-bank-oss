@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge } from '@/components/ui'
 import { parseCustomer360Evidence, type Customer360Evidence } from '@/lib/customer360/evidence'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
@@ -196,7 +196,7 @@ export default function Customer360Page() {
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '20px' }}>
-            <StatCard label={t('Domén', 'Domains')} value={data.domains.length} />
+            <StatCard label={t('Typů agregátů', 'Aggregate types')} value={data.domains.length} />
             <StatCard label={t('Událostí', 'Events')} value={totalEvents} />
             <StatCard label={t('Účtů', 'Accounts')} value={data.accountIds.length} tone="info" />
             <StatCard
@@ -217,12 +217,12 @@ export default function Customer360Page() {
 
           <div className="card" style={{ marginBottom: '20px', overflowX: 'auto', padding: '20px' }}>
             <h2 className="section-title" style={{ marginBottom: '12px' }}>
-              {t('Domény a aktuálnost', 'Domains and recency')}
+              {t('Typy agregátů a aktuálnost', 'Aggregate types and recency')}
             </h2>
             <table className="table">
               <thead>
                 <tr>
-                  <th>{t('Doména', 'Domain')}</th>
+                  <th>{t('Typ agregátu', 'Aggregate type')}</th>
                   <th style={{ textAlign: 'right' }}>{t('Událostí', 'Events')}</th>
                   <th>{t('Poslední událost', 'Last event')}</th>
                   <th>{t('Kdy', 'When')}</th>
@@ -257,7 +257,7 @@ export default function Customer360Page() {
                 <tbody>
                   {data.consents.map(c => (
                     <tr key={c.consentId}>
-                      <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px' }}>{c.consentId}</td>
+                      <td><ShortId value={c.consentId} copyLabel={t('Kopírovat ID souhlasu', 'Copy consent ID')} /></td>
                       <td><StatusBadge status={c.status} withDot /></td>
                       <td>
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

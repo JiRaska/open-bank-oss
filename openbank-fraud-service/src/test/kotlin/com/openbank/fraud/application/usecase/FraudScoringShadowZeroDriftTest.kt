@@ -11,6 +11,7 @@ import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.rules.FraudRuleEngine
+import com.openbank.fraud.domain.rules.FraudThresholdFixtures
 import com.openbank.libs.domain.feature.FeatureValue
 import com.openbank.libs.domain.feature.OnlineFeatureStore
 import io.mockk.coEvery
@@ -64,6 +65,8 @@ class FraudScoringShadowZeroDriftTest {
             // Field-injected (LongParameterList) — see FraudScoringServiceTest for why this must
             // be set manually outside CDI.
             it.fraudHoldService = mockk(relaxed = true)
+            // ADR-0347: the active threshold set is read per score; these suites run on the seed.
+            it.thresholdRepo = mockk { coEvery { findActive(any()) } returns FraudThresholdFixtures.SEED_V1 }
         }
     }
 
@@ -100,7 +103,7 @@ class FraudScoringShadowZeroDriftTest {
                 } else {
                     request
                 }
-                val expected = FraudRuleEngine.score(enriched)
+                val expected = FraudRuleEngine.score(enriched, FraudThresholdFixtures.SEED_V1)
                 assertThat(shadowOn.score(request)).isEqualTo(expected)
             }
         }

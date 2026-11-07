@@ -25,3 +25,7 @@ Tuto dokumentaci publikuje služba sama na management endpointu `/q/openbank/doc
 - **Auth:** Keycloak OIDC; každý endpoint vyžaduje `ROLE_API`, `ROLE_OPERATOR` nebo `ROLE_ADMIN` a OPA akci `@Authorize` (poradní, dokud `AUTHZ_ENFORCE=false`). Sandbox acquirer je jen pro `ROLE_ADMIN` a ve výchozím stavu vypnutý.
 - **Vazby na schémata:** výchozí je `simulator`. BIN lookup lze přepnout na `visa` nebo `mastercard` (sandbox API); tokenizace a reklamace **nemají vendor adaptér** — volba `visa`/`mastercard` odpoví `NOT_BOUND`, což token a reklamační endpointy vracejí jako `SCHEME_UNAVAILABLE` (409).
 - **Money-path:** threat model ji považuje za money-path (`docs/threat-models/openbank-card-processing-service.md`); v době psaní ale **ještě není uvedena** v `rules.yaml: money_path_services`.
+
+## Zapojení při buildu
+
+- **Bod rozhodování politik OPA.** `openbank.authz.opa-pdp-producer.enabled: true` zapne v libs-runtime `OpaPolicyDecisionPointProducer`, který dodá klienta OPA sidecaru podle `opa.url`, `opa.path` a `opa.timeout-ms` (výchozí 500 ms). Čte se při buildu.

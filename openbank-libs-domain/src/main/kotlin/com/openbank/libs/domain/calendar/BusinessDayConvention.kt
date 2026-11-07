@@ -8,6 +8,7 @@ package com.openbank.libs.domain.calendar
  * Date-rolling conventions for moving a non-business day onto a business day.
  *
  * Mirrors the ISDA/market conventions used for value and settlement dates:
+ * - [UNADJUSTED]: ISDA "No Adjustment" - the date is left as it is, even on a weekend or holiday.
  * - [FOLLOWING]: roll forward to the next business day.
  * - [MODIFIED_FOLLOWING]: roll forward, but if that crosses into the next calendar month,
  *   roll backward instead (keeps the date in the same month).
@@ -20,4 +21,5 @@ enum class BusinessDayConvention {
     MODIFIED_FOLLOWING,
     PRECEDING,
     MODIFIED_PRECEDING,
+    UNADJUSTED,
 }

@@ -12,6 +12,7 @@ import com.openbank.kyc.domain.model.ScreeningTriggerFailure
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
@@ -62,12 +63,14 @@ class CaseCoordinatorAdapter(
             )
         return try {
             classify(self.openWithResilience(partyId, url), partyId)
+        } catch (e: CoordinatorHttpException) {
+            CaseOpenOutcome.Retryable("HTTP ${e.status}")
         } catch (e: Exception) {
             // Transport fault, timeout, open circuit breaker, exhausted @Retry — all mean "the
             // coordinator may recover", which is the Retryable contract. TooGenericExceptionCaught
             // is deliberate: the outcome taxonomy exists precisely so callers don't enumerate
             // exception types (mirrors SanctionsScreeningAdapter's degradation catch).
-            CaseOpenOutcome.Retryable("${e.javaClass.simpleName}: ${e.message}")
+            CaseOpenOutcome.Retryable(e.javaClass.simpleName)
         }
     }
 
@@ -89,42 +92,63 @@ class CaseCoordinatorAdapter(
         // the explicit guard above exists so an UNSET url fails visible here instead of deep inside
         // the client stack with a less diagnosable fault.
         log.debugf("case-coordinator base url: %s", url)
-        return client.openCase(
-            OpenCaseRequest(
-                caseClass = CASE_CLASS,
-                subjectRef = partyId.toString(),
-                openedBy = OPENED_BY,
-                dispositionTarget = DISPOSITION_TARGET,
-            ),
-        ).awaitSuspending()
-    }
-
-    private fun classify(response: Response, partyId: UUID): CaseOpenOutcome = when (response.status) {
-        Response.Status.CREATED.statusCode -> {
-            val caseId = runCatching {
-                objectMapper.readValue(response.readEntity(String::class.java), JsonNode::class.java)
-                    .path("caseId").asText(null)
-            }.getOrNull()
-            if (caseId.isNullOrBlank()) {
-                log.errorf("case-coordinator returned 201 without a caseId for party %s", partyId)
-                CaseOpenOutcome.Rejected(
-                    ScreeningTriggerFailure.COORDINATOR_REJECTED,
-                    "201 response without a caseId",
-                )
+        return try {
+            client.openCase(
+                OpenCaseRequest(
+                    caseClass = CASE_CLASS,
+                    subjectRef = partyId.toString(),
+                    openedBy = OPENED_BY,
+                    dispositionTarget = DISPOSITION_TARGET,
+                ),
+            ).awaitSuspending()
+        } catch (failure: WebApplicationException) {
+            // The default mapper throws before classify(). Recover deterministic 4xx inside
+            // the retry boundary; overload/server errors must still consume the existing budget.
+            val status = failure.response.use { it.status }
+            if (status in Response.Status.BAD_REQUEST.statusCode until HTTP_SERVER_ERROR_THRESHOLD &&
+                status != Response.Status.TOO_MANY_REQUESTS.statusCode
+            ) {
+                Response.status(status).build()
             } else {
-                CaseOpenOutcome.Opened(caseId)
+                // Preserve status only, never a provider body, URL, message or exception cause.
+                throw CoordinatorHttpException(status)
             }
         }
-        Response.Status.CONFLICT.statusCode -> CaseOpenOutcome.AlreadyExists
-        Response.Status.TOO_MANY_REQUESTS.statusCode,
-        Response.Status.SERVICE_UNAVAILABLE.statusCode,
-        -> CaseOpenOutcome.Retryable("HTTP ${response.status}")
-        else -> if (response.status >= HTTP_SERVER_ERROR_THRESHOLD) {
-            CaseOpenOutcome.Retryable("HTTP ${response.status}")
-        } else {
-            CaseOpenOutcome.Rejected(ScreeningTriggerFailure.COORDINATOR_REJECTED, "HTTP ${response.status}")
+    }
+
+    private fun classify(response: Response, partyId: UUID): CaseOpenOutcome = response.use {
+        when (response.status) {
+            Response.Status.CREATED.statusCode -> {
+                val caseId = runCatching {
+                    objectMapper.readValue(response.readEntity(String::class.java), JsonNode::class.java)
+                        .path("caseId").asText(null)
+                }.getOrNull()
+                if (caseId.isNullOrBlank()) {
+                    log.errorf("case-coordinator returned 201 without a caseId for party %s", partyId)
+                    CaseOpenOutcome.Rejected(
+                        ScreeningTriggerFailure.COORDINATOR_REJECTED,
+                        "201 response without a caseId",
+                    )
+                } else {
+                    CaseOpenOutcome.Opened(caseId)
+                }
+            }
+
+            Response.Status.CONFLICT.statusCode -> CaseOpenOutcome.AlreadyExists
+
+            Response.Status.TOO_MANY_REQUESTS.statusCode,
+            Response.Status.SERVICE_UNAVAILABLE.statusCode,
+            -> CaseOpenOutcome.Retryable("HTTP ${response.status}")
+
+            else -> if (response.status >= HTTP_SERVER_ERROR_THRESHOLD) {
+                CaseOpenOutcome.Retryable("HTTP ${response.status}")
+            } else {
+                CaseOpenOutcome.Rejected(ScreeningTriggerFailure.COORDINATOR_REJECTED, "HTTP ${response.status}")
+            }
         }
     }
+
+    private class CoordinatorHttpException(val status: Int) : RuntimeException("HTTP $status")
 
     private companion object {
         // First server-error status: anything at or above it that is not 503 is still a

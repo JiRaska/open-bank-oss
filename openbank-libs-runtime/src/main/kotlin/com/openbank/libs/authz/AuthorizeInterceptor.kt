@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.interceptor.GuardedInvocation
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
 import io.quarkus.security.identity.SecurityIdentity
@@ -22,15 +23,12 @@ import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.intrinsics.startCoroutineUninterceptedOrReturn
-import kotlin.coroutines.intrinsics.suspendCoroutineUninterceptedOrReturn
 import kotlin.reflect.full.memberProperties
 import kotlin.reflect.jvm.kotlinFunction
 
@@ -184,70 +182,25 @@ class AuthorizeInterceptor {
     var fourEyesEnforce: Boolean = false
 
     /**
-     * Two dispatches of one decision, because WHERE the wait happens decides whether it deadlocks.
-     *
-     * The authorization pipeline is suspending end to end: [PolicyDecisionPoint.allow] and every
-     * [ApprovalStore] call are `suspend`. An `@AroundInvoke` method is not, so bridging was
-     * unavoidable — and the bridge was `runBlocking`, which parks the thread it runs on.
-     *
-     * For a **suspend** endpoint that thread is a Vert.x EVENT LOOP, and the pool has one thread
-     * per CPU. Measured 2026-09-13 (#9874) with `-XX:ActiveProcessorCount=2`, the hosted runner's
-     * shape: the first four-eyes request parks loop 0, the second parks loop 1, the reactive Redis
-     * completion then has no loop left to run on, and every subsequent request times out. A thread
-     * dump showed both loops inside `runBlocking` in this class. It is not a test artefact — the
-     * same arithmetic applies to a pod with `requests.cpu: 2`, and 27 of the fleet's 40 four-eyes
-     * endpoints are suspend functions.
-     *
-     * `@Blocking` is not available as an escape: Quarkus rejects it outright —
-     * `Suspendable @Blocking methods are not supported yet`. Raising
-     * `quarkus.vertx.event-loops-pool-size` only buys a bigger window, since N concurrent
-     * four-eyes calls still need N+1 loops.
-     *
-     * So a suspend endpoint is joined in ITS OWN coroutine instead:
-     * [startCoroutineUninterceptedOrReturn] runs [decide] on the calling thread until it genuinely
-     * suspends, and [proceedSuspending] hands the target a continuation of ours. Nothing is parked,
-     * so nothing has to be free for the continuation to run.
-     *
-     * A **plain** endpoint keeps the `runBlocking` bridge, and that is correct rather than a
-     * leftover: RESTEasy Reactive dispatches a non-suspend method on a WORKER thread, so the wait
-     * parks a worker the pool exists to have parked. 13 of the 40 four-eyes endpoints are this
-     * shape.
+     * [PolicyDecisionPoint.allow] and [ApprovalStore] calls suspend. The dispatch bridge must
+     * preserve suspend, Uni and CompletionStage return shapes without parking the event loop.
+     * Ordinary synchronous methods retain their worker-thread blocking bridge.
      */
     @AroundInvoke
     fun authorize(ctx: InvocationContext): Any? {
         val annotation = ctx.method.getAnnotation(Authorize::class.java)
             ?: return ctx.proceed()
 
-        val continuationIndex = ctx.parameters.indexOfLast { it is Continuation<*> }
-        if (continuationIndex < 0) {
-            runBlocking { decide(ctx, annotation) }
-            return ctx.proceed()
-        }
-
-        @Suppress("UNCHECKED_CAST")
-        val caller = ctx.parameters[continuationIndex] as Continuation<Any?>
-        val pipeline: suspend () -> Any? = {
-            decide(ctx, annotation)
-            // Invoke the target with a continuation of OURS in place of the caller's, so its
-            // completion resumes THIS coroutine rather than the endpoint's directly. That single
-            // substitution is what makes the pipeline suspending instead of blocking; inline
-            // because it is meaningless anywhere except right here.
-            suspendCoroutineUninterceptedOrReturn { own ->
-                val params = ctx.parameters
-                params[continuationIndex] = own
-                ctx.parameters = params
-                ctx.proceed()
-            }
-        }
-        return pipeline.startCoroutineUninterceptedOrReturn(caller)
+        return GuardedInvocation.proceed(ctx) { decide(ctx, annotation) }
     }
 
     /**
      * The whole authorization verdict, and nothing else: it returns normally to let the call
      * through and THROWS to refuse. It deliberately never calls `ctx.proceed()` — that belongs to
-     * whichever of the two dispatches in [authorize] invoked it, which is what lets one decision
-     * serve both a blocking and a suspending call path with no branch duplicated.
+     * the dispatch bridge in [authorize], so all return shapes share the same policy checks.
      */
+    // Cancellation, provider outage and policy denial are distinct outcomes and must propagate.
+    @Suppress("ThrowsCount")
     private suspend fun decide(ctx: InvocationContext, annotation: Authorize) {
         if (!pdp.isResolvable) {
             return onMissingPdp(ctx, annotation)
@@ -258,6 +211,7 @@ class AuthorizeInterceptor {
         val decision: AuthzDecision = run {
             runCatching { decisionPoint.allow(query) }
                 .getOrElse { ex ->
+                    if (ex is CancellationException) throw ex
                     record(annotation.action, "pdp_unavailable", query.principal.type)
                     if (!enforce) {
                         log.warnf(
@@ -620,14 +574,11 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  * not above it.
  */
 private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
-    val jwt = authenticatedIdentity.principal as? JsonWebToken
-    val preferredUsername = jwt?.getClaim<String>("preferred_username")
     val verifiedServiceAccount = ServiceAccountIdentity.verifiedClientId(authenticatedIdentity) != null
     return when {
         query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
         verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT
-        preferredUsername?.startsWith(SERVICE_ACCOUNT_PREFIX) == true -> MakerActorKind.UNKNOWN
-        query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) && jwt == null -> MakerActorKind.UNKNOWN
+        !ServiceAccountIdentity.isVerifiedPerson(authenticatedIdentity) -> MakerActorKind.UNKNOWN
         query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
         query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
         else -> MakerActorKind.UNKNOWN

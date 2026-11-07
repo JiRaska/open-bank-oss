@@ -27,6 +27,7 @@ import com.openbank.pid.application.port.`in`.TransitionPartyCaseCommand
 import com.openbank.pid.application.port.`in`.UpdateContactCommand
 import com.openbank.pid.application.port.`in`.UpdateKycCommand
 import com.openbank.pid.application.port.`in`.UpdatePartyUseCase
+import com.openbank.pid.application.usecase.PartyNotFoundException
 import com.openbank.pid.domain.model.Address
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.IdDocument
@@ -42,6 +43,8 @@ import com.openbank.pid.infrastructure.rest.dto.ChangeStatusRequest
 import com.openbank.pid.infrastructure.rest.dto.ContactAttributesResponse
 import com.openbank.pid.infrastructure.rest.dto.CoreAttributesResponse
 import com.openbank.pid.infrastructure.rest.dto.CreatePartyRequest
+import com.openbank.pid.infrastructure.rest.dto.ExternalIdLookupRequest
+import com.openbank.pid.infrastructure.rest.dto.ExternalIdLookupResponse
 import com.openbank.pid.infrastructure.rest.dto.ExternalIdResponse
 import com.openbank.pid.infrastructure.rest.dto.IdDocumentDto
 import com.openbank.pid.infrastructure.rest.dto.KycAttributesResponse
@@ -63,6 +66,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.PUT
@@ -299,6 +303,41 @@ class PartyResource(
         return Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
     }
 
+    /**
+     * PII-minimised exact lookup for browser clients. The identifier is carried in the request
+     * body so it does not appear in URL/access logs; only the requested identifier is returned,
+     * never the party's other external IDs or profile attributes.
+     */
+    @POST
+    @Path("/by-external-id/lookup")
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @Operation(summary = "Look up a party by one exact external identifier (PII-minimised response)")
+    suspend fun lookupByExternalId(request: ExternalIdLookupRequest?): Response {
+        val lookup = requireNotNull(request) { "request body is required" }
+        val lookupType = requireNotNull(lookup.type) { "request field 'type' is required" }
+        val type = ExternalIdType.valueOf(lookupType.name)
+        val value = requireNotNull(lookup.value) { "request field 'value' is required" }
+        require(value.isNotBlank()) { "request field 'value' must not be blank" }
+        require(value.length <= MAX_EXTERNAL_ID_LOOKUP_LENGTH) { "request field 'value' is too long" }
+        val party = try {
+            getPartyUseCase.getByExternalId(type, value)
+        } catch (_: PartyNotFoundException) {
+            // The use case's diagnostic includes the submitted identifier; the browser-safe
+            // endpoint must never reflect it into the response body or server error logs.
+            throw NotFoundException("Party not found")
+        }
+        val matched = party.externalIds.firstOrNull { it.type == type && it.value == value }
+            ?: throw NotFoundException("Party not found")
+        return Response.ok(
+            ExternalIdLookupResponse(
+                partyId = party.id,
+                status = party.status,
+                createdAt = party.createdAt,
+                externalId = ExternalIdResponse(matched.type, matched.value, matched.verifiedAt),
+            ),
+        ).build()
+    }
+
     @GET
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Search parties")
@@ -470,6 +509,10 @@ class PartyResource(
             ),
         )
         return Response.ok(rel.toResponse()).build()
+    }
+
+    private companion object {
+        const val MAX_EXTERNAL_ID_LOOKUP_LENGTH = 256
     }
 
     private fun Party.toResponse() = PartyResponse(

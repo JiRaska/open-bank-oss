@@ -35,7 +35,7 @@ import rego.v1
 
 allowed_reasons contains "operator-sepa-payment-write" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
 	role in input.principal.roles
 	startswith(input.action, "sepaPayment.")
@@ -66,7 +66,7 @@ allowed_reasons contains "operator-sepa-payment-write" if {
 #     not unique to clearing-simulator, documented inline.
 allowed_reasons contains "service-sepa-payment-edge-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"sepaPayment.create",
 		"sepaPayment.read",
@@ -75,7 +75,7 @@ allowed_reasons contains "service-sepa-payment-edge-m2m" if {
 
 allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "sepaPayment.handleReturn"
 }
 
@@ -87,7 +87,7 @@ allowed_reasons contains "service-sepa-payment-shared-client-m2m" if {
 # ROLE_API holder is denied by OPA (sepa_payment_rest_ext_test.rego).
 allowed_reasons contains "service-standing-order-sepa-payment-create" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-standing-order"
+	machine_named("service-account-openbank-standing-order")
 	input.action == "sepaPayment.create"
 }
 
@@ -98,7 +98,7 @@ allowed_reasons contains "service-standing-order-sepa-payment-create" if {
 # absent — it is the edge's identity-scoped grant above (verified caller: customer-edge
 # UpstreamClient POST /sepa-payments, after the edge's own ownership guard + SCA gate, ADR-0021).
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action in {
 		"sepaPayment.transitionStatus",
 		"sepaPayment.handleReturn",

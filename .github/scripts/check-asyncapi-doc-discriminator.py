@@ -27,7 +27,8 @@ For every channel in `docs/asyncapi/openbank-events.yaml`:
 
   A. THE ADDRESS IS A REAL TOPIC. The channel `address` must be a topic some in-tree service
      produces or consumes (`mp.messaging.outgoing|incoming.*.topic` in its own
-     `application.yaml`). Catches a channel documenting a topic nobody speaks.
+     `application.yaml`, or a supported literal/constant Kafka Streams `stream()`/`to()` call).
+     Catches a channel documenting a topic nobody speaks.
 
   B. THE CHANNEL SAYS WHERE THE DISCRIMINATOR LIVES. The channel `description` must contain
      either the literal `ce-type` (header-carried — the outbox-relayed shape) or the literal
@@ -80,6 +81,7 @@ Exit:   0 clean, 1 the published document contradicts itself or names a topic no
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 import tempfile
 
@@ -99,8 +101,169 @@ def _yaml():
     return yaml
 
 
+def streams_topics(source: str) -> dict[str, set[str]]:
+    """Static Kotlin Streams evidence, not a Kotlin compiler or a topic-name allowlist.
+
+    Recognize imported StreamsBuilder/KStream receivers and supported fluent chains only.
+    Topic arguments must be whole literals or unambiguous same-file const val literals.
+    Dynamic topics, aliases, unknown chain methods and ambiguous/shadowed names fail closed.
+    Comments (including nested Kotlin comments) and string contents are never executable code.
+    """
+    literals: dict[str, str] = {}
+    parts: list[str] = []
+    i = 0
+    while i < len(source):
+        start = i
+        if source.startswith("//", i):
+            end = source.find("\n", i)
+            i = len(source) if end < 0 else end
+        elif source.startswith("/*", i):
+            depth = 1
+            i += 2
+            while i < len(source) and depth:
+                if source.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif source.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+        elif source.startswith('"""', i):
+            end = source.find('"""', i + 3)
+            i = len(source) if end < 0 else end + 3
+        elif source[i] in ('"', "'"):
+            quote = source[i]
+            i += 1
+            while i < len(source):
+                if source[i] == "\\":
+                    i += 2
+                elif source[i] == quote:
+                    i += 1
+                    break
+                else:
+                    i += 1
+            raw = source[start:i]
+            marker = f"§{len(literals)}§"
+            literals[marker] = raw[1:-1] if re.fullmatch(r'"[A-Za-z0-9_.-]{1,249}"', raw) else ""
+            parts.append(marker)
+            continue
+        else:
+            parts.append(source[i])
+            i += 1
+            continue
+        parts.append("\n" * source[start:i].count("\n") + " ")
+    code = "".join(parts)
+    result: dict[str, set[str]] = {"stream": set(), "to": set()}
+    builder_import = bool(re.search(r"(?m)^import org\.apache\.kafka\.streams\.StreamsBuilder\s*$", code))
+    stream_import = bool(re.search(r"(?m)^import org\.apache\.kafka\.streams\.kstream\.KStream\s*$", code))
+    if not (builder_import or stream_import):
+        return result
+
+    # A local declaration or parameter with the same name makes a file-level lookup unsafe.
+    bindings = re.findall(r"\b(?:val|var)\s+(\w+)|[(,]\s*(\w+)\s*:", code)
+    names = [left or right for left, right in bindings]
+    constants = {
+        name: literals[marker]
+        for name, marker in re.findall(
+            r"\bconst\s+val\s+(\w+)\s*(?::\s*String\s*)?=\s*(§\d+§)[ \t]*(?=[;\n}])", code
+        )
+        if names.count(name) == 1
+    }
+    declarations: list[tuple[str, str]] = []
+    if builder_import:
+        for match in re.finditer(r"\bval\s+(\w+)\s*=\s*StreamsBuilder\s*\(\s*\)", code):
+            rest = code[match.end():]
+            if (not rest.strip() or rest.lstrip().startswith((";", "}")) or
+                    re.match(r"[ \t]*\n", rest) and not rest.lstrip().startswith(".")):
+                declarations.append((match[1], "builder"))
+        declarations += [(name, "builder") for name in re.findall(r"[(,]\s*(\w+)\s*:\s*StreamsBuilder\b", code)]
+    if stream_import:
+        declarations += [(name, "stream") for name in re.findall(r"[(,]\s*(\w+)\s*:\s*KStream\s*<", code)]
+    receivers = dict(declarations)
+    token_matches = list(re.finditer(r"§\d+§|[A-Za-z_]\w*|[^\s]", code))
+    tokens = [match[0] for match in token_matches]
+
+    def after_group(pos: int) -> int:
+        pairs = {"(": ")", "{": "}", "[": "]", "<": ">"}
+        stack = [pairs[tokens[pos]]]
+        pos += 1
+        while pos < len(tokens) and stack:
+            token = tokens[pos]
+            # Angle brackets only balance an explicit generic argument list, not comparisons.
+            if token in ("(", "{", "[") or (token == "<" and stack[-1] == ">"):
+                stack.append(pairs[token])
+            elif token == stack[-1]:
+                stack.pop()
+            pos += 1
+        return pos if not stack else len(tokens)
+
+    stream_ops = {"filter", "filterNot", "map", "mapValues", "flatMap", "flatMapValues",
+                  "selectKey", "peek", "repartition", "process", "processValues"}
+    for start, receiver in enumerate(tokens):
+        if receiver not in receivers or (start and tokens[start - 1] == "."):
+            continue
+        if names.count(receiver) != sum(name == receiver for name, _ in declarations):
+            continue
+        if len({kind for name, kind in declarations if name == receiver}) != 1:
+            continue
+        kind = receivers[receiver]
+        pos = start + 1
+        while pos + 2 < len(tokens) and tokens[pos] == ".":
+            method = tokens[pos + 1]
+            arg = pos + 2
+            if tokens[arg] == "<":
+                arg = after_group(arg)
+            if arg >= len(tokens) or tokens[arg] not in ("(", "{"):
+                kind = "unknown"
+                break
+            end = after_group(arg)
+            if (method == "stream" and kind == "builder") or (method == "to" and kind == "stream"):
+                if arg + 2 < len(tokens) and tokens[arg] == "(" and tokens[arg + 2] in (",", ")"):
+                    topic = literals.get(tokens[arg + 1], constants.get(tokens[arg + 1], ""))
+                    if topic and topic not in (".", ".."):
+                        result[method].add(topic)
+                kind = "stream" if method == "stream" else "terminal"
+            elif kind == "stream" and method in stream_ops:
+                pass
+            elif kind == "stream" and method in {"groupBy", "groupByKey"}:
+                kind = "grouped"
+            elif kind == "grouped" and method == "windowedBy":
+                pass
+            elif kind == "grouped" and method in {"aggregate", "count", "reduce"}:
+                kind = "table"
+            elif kind == "table" and method == "toStream":
+                kind = "stream"
+            else:
+                kind = "unknown"
+                break
+            if end < len(tokens) and tokens[end] == "{":
+                end = after_group(end)
+            pos = end
+        if start >= 3 and tokens[start - 3] == "val" and tokens[start - 1] == "=" and kind == "stream":
+            name = tokens[start - 2]
+            # A call followed by an operator/property is not a proven KStream initializer.
+            boundary = pos == len(tokens) or tokens[pos] in (";", "}")
+            if pos < len(tokens) and pos > start + 1:
+                boundary |= "\n" in code[token_matches[pos - 1].end():token_matches[pos].start()]
+            if boundary:
+                declarations.append((name, kind))
+                receivers[name] = kind
+    return result
+
+
+def service_streams_topics(service_dir: pathlib.Path, direction: str) -> set[str]:
+    """Only production Kotlin source can corroborate an AsyncAPI address."""
+    topics: set[str] = set()
+    for path in sorted((service_dir / "src/main/kotlin").rglob("*.kt")):
+        source = path.read_text(encoding="utf-8")
+        if "org.apache.kafka.streams" in source:
+            topics |= streams_topics(source)[direction]
+    return topics
+
+
 def spoken_topics(root: pathlib.Path) -> set[str]:
-    """Every topic any in-tree service produces to or consumes from, derived from its own config."""
+    """Topics evidenced by messaging config or actual supported Kafka Streams calls."""
     yaml = _yaml()
     topics: set[str] = set()
     for cfg in sorted(root.glob("openbank-*/src/main/resources/application.yaml")):
@@ -120,6 +283,8 @@ def spoken_topics(root: pathlib.Path) -> set[str]:
                 # one of them look unspoken.
                 if channel.get("topics"):
                     topics |= {t.strip() for t in str(channel["topics"]).split(",") if t.strip()}
+    for service in sorted(root.glob("openbank-*")):
+        topics |= service_streams_topics(service, "stream") | service_streams_topics(service, "to")
     return topics
 
 
@@ -182,7 +347,7 @@ def audit(doc_path: pathlib.Path, root: pathlib.Path) -> list[str]:
         if address and spoken and address not in spoken:
             failures.append(
                 f"{name}: address '{address}' is not produced or consumed by any in-tree "
-                f"service (no mp.messaging.*.topic declares it)"
+                f"service (no mp.messaging topic or supported Kafka Streams call declares it)"
             )
 
         # B. the channel must say where the discriminator lives
@@ -279,6 +444,91 @@ def self_test() -> int:
     cases.append(("a body eventType that IS claimed is allowed", yaml.safe_dump(claimed), True))
 
     failed = 0
+    imports = "import org.apache.kafka.streams.StreamsBuilder\nimport org.apache.kafka.streams.kstream.KStream\n"
+    topology = imports + '''
+        const val INPUT = "openbank.input"
+        const val OUTPUT: String = "openbank.output"
+        const val UNUSED = "openbank.unused"
+        fun build() {
+            val builder = StreamsBuilder()
+            val signals = builder.stream(INPUT, consumed).filter { _, value -> true }
+            signals.to("openbank.literal")
+        }
+        fun aggregate(signals: KStream<String, String>) {
+            signals.groupByKey().windowedBy(window).aggregate({ "{}" }, aggregate, store)
+                .toStream().mapValues { key, value -> value }.to(OUTPUT, produced)
+        }
+    '''
+    stream_cases = [
+        ("Streams literal/constant calls and grouped fluent sink", topology,
+         {"stream": {"openbank.input"}, "to": {"openbank.output", "openbank.literal"}}),
+        ("unused constants are not calls", imports + 'const val TOPIC = "openbank.unused"\n', None),
+        ("comments, nested comments and documentation strings are not calls", imports + '''
+            // val builder = StreamsBuilder(); builder.stream("openbank.comment")
+            /* outer /* nested */ val builder = StreamsBuilder(); builder.stream("openbank.nested") */
+            val doc = """val builder = StreamsBuilder(); builder.stream("openbank.doc")"""
+            val text = "builder.stream(\\"openbank.text\\")"
+        ''', None),
+        ("an unrelated to method cannot borrow Kafka imports", imports + '''
+            fun unrelated() { other.to("openbank.unrelated"); other.stream("openbank.unrelated") }
+        ''', None),
+        ("unresolved, concatenated, interpolated and dynamic topics stay unsupported", imports + '''
+            const val PREFIX = "openbank.prefix"
+            const val CONCAT = "openbank." + suffix
+            fun build() {
+                val builder = StreamsBuilder()
+                builder.stream(UNKNOWN)
+                builder.stream(PREFIX + suffix)
+                builder.stream("openbank.$suffix")
+                builder.stream(CONCAT)
+                builder.stream(topicName())
+            }
+        ''', None),
+        ("shadowed constants cannot corroborate a different runtime topic", imports + '''
+            const val TOPIC = "openbank.constant"
+            fun build(TOPIC: String) { val builder = StreamsBuilder(); builder.stream(TOPIC) }
+        ''', None),
+        ("ambiguous constants in separate objects are unresolved", imports + '''
+            object One { const val TOPIC = "openbank.one" }
+            object Two { const val TOPIC = "openbank.two" }
+            fun build() { val builder = StreamsBuilder(); builder.stream(TOPIC) }
+        ''', None),
+        ("unknown chain result is not a KStream", imports + '''
+            fun build(signals: KStream<String, String>) {
+                val unknown = signals.unsupported()
+                unknown.to("openbank.unsupported")
+                signals.unsupported().to("openbank.unsupported")
+            }
+        ''', None),
+        ("builder factory suffix cannot establish a StreamsBuilder receiver", imports + '''
+            fun build() {
+                val builder = StreamsBuilder().unrelated()
+                builder.stream("openbank.fake")
+            }
+        ''', None),
+        ("operator result cannot establish a KStream receiver", imports + '''
+            fun build(signals: KStream<String, String>) {
+                val unknown = signals.mapValues { key, value -> value } + something
+                unknown.to("openbank.fake")
+            }
+        ''', None),
+        ("a shadowed receiver cannot borrow a KStream parameter", imports + '''
+            fun build(signals: KStream<String, String>) {
+                val signals = other
+                signals.to("openbank.shadowed")
+            }
+        ''', None),
+        ("source without Kafka imports is unsupported", '''
+            fun build() { val builder = StreamsBuilder(); builder.stream("openbank.fake") }
+        ''', None),
+    ]
+    for label, source, expected in stream_cases:
+        actual = streams_topics(source)
+        ok = actual == (expected or {"stream": set(), "to": set()})
+        print(f"  [{'ok' if ok else 'FAIL'}] {label}")
+        if not ok:
+            failed += 1
+            print(f"        {actual}")
     with tempfile.TemporaryDirectory() as tmp:
         root = pathlib.Path(tmp)
         for label, text, expect_clean in cases:
@@ -312,6 +562,22 @@ def self_test() -> int:
         print(f"  [{'ok' if ok else 'FAIL'}] an address no service speaks is flagged")
         if not ok:
             failed += 1
+
+        source_dir = root / "openbank-a/src/main/kotlin"
+        source_dir.mkdir(parents=True)
+        (source_dir / "Topology.kt").write_text(topology, encoding="utf-8")
+        doc["channels"]["ok-direct"]["address"] = "openbank.output"
+        path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        ok = not audit(path, root) and "openbank.unused" not in spoken_topics(root)
+        print(f"  [{'ok' if ok else 'FAIL'}] actual production Streams sink corroborates address")
+        failed += not ok
+        (source_dir / "Topology.kt").unlink()
+        test_dir = root / "openbank-a/src/test/kotlin"
+        test_dir.mkdir(parents=True)
+        (test_dir / "Topology.kt").write_text(topology, encoding="utf-8")
+        ok = any("not produced or consumed" in f for f in audit(path, root))
+        print(f"  [{'ok' if ok else 'FAIL'}] test-only Streams sink cannot corroborate address")
+        failed += not ok
 
     print("self-test: " + ("PASS" if failed == 0 else f"FAIL ({failed})"))
     return 1 if failed else 0

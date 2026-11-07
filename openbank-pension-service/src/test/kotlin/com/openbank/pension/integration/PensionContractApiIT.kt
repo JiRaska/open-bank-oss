@@ -70,12 +70,16 @@ class PensionContractApiIT {
     """.trimIndent()
 
     /** Fixture: the S1 create route is retired (#12435); the use case still opens a draft. */
-    private fun create(key: String = UUID.randomUUID().toString()): String = onVertx {
+    private fun create(
+        key: String = UUID.randomUUID().toString(),
+        asParty: UUID = party,
+        birthDate: LocalDate = LocalDate.parse("1985-05-05"),
+    ): String = onVertx {
         useCase.createDraft(
             CreateDraftCommand(
-                participantPartyId = party, productLine = ProductLine.DPS, jurisdiction = "CZ",
+                participantPartyId = asParty, productLine = ProductLine.DPS, jurisdiction = "CZ",
                 providerEntityId = ProviderFixtures.ID, providerType = ProviderType.PENSION_COMPANY,
-                birthDate = LocalDate.parse("1985-05-05"), residencyCountry = "CZ", residencyEvidence = emptySet(),
+                birthDate = birthDate, residencyCountry = "CZ", residencyEvidence = emptySet(),
                 hasGuardian = false,
                 schedule = ContributionSchedule(BigDecimal("1700"), "CZK", ContributionFrequency.MONTHLY),
                 initialStrategy = "CONSERVATIVE",
@@ -104,6 +108,9 @@ class PensionContractApiIT {
 
     @Inject
     lateinit var contracts: PensionContractRepository
+
+    @Inject
+    lateinit var references: com.openbank.pension.application.port.out.ContractReferenceRepository
 
     private fun <T> onVertx(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
@@ -173,6 +180,32 @@ class PensionContractApiIT {
     }
 
     @Test
+    @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
+    fun `staff free-text search finds a contract by birth date, id fragment, product and reference`() {
+        val id = create()
+        val reference = onVertx { references.referenceFor(UUID.fromString(id)) }
+        // Bare digits of the birth date (rodné číslo style) and the ISO month both match.
+        given().queryParam("q", "850505").`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+            .body("participantBirthDate", hasItem("1985-05-05"))
+        given().queryParam("q", "1985-05").`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+        // A fragment of the contract id, the product line, and the payment reference (VS).
+        given().queryParam("q", id.take(8)).`when`().get(base).then().statusCode(200)
+            .body("contractId", hasItem(id))
+        val byProduct = given().queryParam("q", "dps").`when`().get(base)
+        assertThat(byProduct.statusCode).`as`(byProduct.body.asString()).isEqualTo(200)
+        byProduct.then().body("contractId", hasItem(id))
+        // (the reference query doubles as the diagnostic: any non-200 prints the service's body)
+        val byReference = given().queryParam("q", reference).`when`().get(base)
+        assertThat(byReference.statusCode).`as`(byReference.body.asString()).isEqualTo(200)
+        byReference.then().body("contractId", hasItem(id))
+        // The status filter narrows the search, never widens it.
+        given().queryParam("q", "850505").queryParam("status", "CLOSED").`when`().get(base).then().statusCode(200)
+            .body("contractId", not(hasItem(id)))
+    }
+
+    @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -189,6 +222,32 @@ class PensionContractApiIT {
             .body("participantPartyId", everyItem(equalTo(party.toString())))
         given().header("X-Customer-Party-Id", stranger.toString()).`when`().get(base).then().statusCode(200)
             .body("contractId", not(hasItem(mine)))
+    }
+
+    @Test
+    @TestSecurity(user = RELAY, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = RELAY_SUB),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = RELAY),
+        ],
+    )
+    fun `participant free-text query is ignored and never exposes another owner's contract`() {
+        val mine = create()
+        val otherBirthDate = LocalDate.parse("1991-06-17")
+        val other = create(asParty = UUID.randomUUID(), birthDate = otherBirthDate)
+
+        for (query in listOf(other, "no-contract-${UUID.randomUUID()}")) {
+            val response = given().header("X-Customer-Party-Id", party.toString())
+                .queryParam("q", query).`when`().get(base).then().statusCode(200)
+                .extract().jsonPath()
+            assertThat(response.getList<String>("contractId")).containsExactly(mine)
+            assertThat(response.getList<String>("participantPartyId")).containsExactly(party.toString())
+            assertThat(response.getList<String>("participantBirthDate"))
+                .containsExactly("1985-05-05")
+                .doesNotContain(otherBirthDate.toString())
+        }
     }
 
     @Test

@@ -71,7 +71,14 @@ info:
   #        remuneration from the ČNB facts in effect on the run's as-of date (fed by fx-service), no
   #        longer from configuration; assumptions.rateFacts names them with provenance. With no fact
   #        in effect the 424 answers NOT_EVALUABLE (MinReservesNotEvaluable) instead of a number.
-  version: 1.25.0
+  # 1.25.0 -> 1.26.0: additive (ADR-0344 D8) — POST /pricing (stateless pre-trade pricing of
+  #        LegSpec legs), GET /snapshots/{id}/valuation, /sensitivity, /var and /fx-position of the
+  #        own treasury book; curve quotes gain `instrument` (DEPOSIT | FRA | SWAP); the run manifest's
+  #        modelVersions gains optional curveModelVersion / valuationModelVersion; limit metrics gain
+  #        pv01 and var-99-1d.
+  # 1.26.0 -> 1.26.1: documentation only — the pricing request's lag bounds (0 to 30 business days)
+  #        are stated; no schema change.
+  version: 1.26.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -629,6 +636,205 @@ paths:
               schema:
                 $ref: '#/components/schemas/Untied'
 
+  /api/v1/risk/pricing:
+    post:
+      tags: [Risk]
+      operationId: priceLegs
+      summary: Stateless pre-trade pricing of HYPOTHETICAL treasury legs (ADR-0344 D8)
+      description: |
+        Prices the legs of a deal ticket (ADR-0344 contract section 8.1 header + LegSpec legs) on a
+        curve set as of `asOf` (default: the newest set recorded for that date) with libs-finance:
+        PV and PV by leg, PV01 (PV(+1bp) − PV, a payer of fixed is positive), key-rate DV01 on the
+        IRRBB ladder and FX delta (1 % of each foreign leg's PV). Header fields it does not price are
+        accepted and ignored. Nothing is persisted. Bounds: at most 8 legs, each spanning at most 50
+        years, no frequency finer than daily, at most 2,000 periods per leg, payment and fixing lags of
+        0 to 30 business days (400 otherwise); a
+        computation past `openbank.risk.pricing.timeout` answers 503 `COMPUTATION_TIMEOUT`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PricingRequest'
+      responses:
+        '200':
+          description: The pricing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricingResponse'
+        '400':
+          description: Malformed legs, no curve set for the date, or legs that cannot be priced (no curve / FX rate)
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
+        '404':
+          description: No such curve set
+
+  /api/v1/risk/snapshots/{id}/valuation:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotValuation
+      summary: Per-deal and per-book PV, accrued, clean and dirty of the own treasury book
+      description: |
+        ACTUAL deals only (ADR-0344 D2). Each deal says whether its flows are STORED (treasury's
+        cash-flow ledger, facts taken as-is, projections re-derived) or DERIVED (from its legs). A
+        deal that cannot be valued is listed with `unpriced` and the book totals are null with
+        `dataGap`: no book figure over a partial book. `header.valuationInputHash` identifies the
+        inputs; the same hash yields byte-identical output (ADR-0314 D2).
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BookId'
+        - $ref: '#/components/parameters/OptionalCurveSetId'
+      responses:
+        '200':
+          description: The valuation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValuationResponse'
+        '400':
+          description: Bad parameter, or no curve set as of the run's date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/sensitivity:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotSensitivity
+      summary: PV01, key-rate DV01 by bucket set and FX delta of the own treasury book
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BookId'
+        - $ref: '#/components/parameters/OptionalCurveSetId'
+        - name: bucketSetId
+          in: query
+          required: false
+          schema: { type: string, default: irrbb-standard }
+          description: A named bucket set; `irrbb-standard` (1D, 1M, 3M, 6M, 1Y, 2Y, 3Y, 5Y, 10Y) is the default.
+        - name: buckets
+          in: query
+          required: false
+          schema: { type: string }
+          description: An explicit, unique and strictly increasing tenor list (e.g. `1M,3M,1Y,5Y`), at most 30 buckets, longest ≤ 50Y; overrides bucketSetId.
+      responses:
+        '200':
+          description: The sensitivities, or the data gap
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SensitivityResponse'
+        '400':
+          description: Bad parameter
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/var:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotVar
+      summary: Historical-simulation VaR and expected shortfall of the own treasury book
+      description: |
+        Full revaluation per scenario over the stored curve-set and FX-fixing history
+        (`openbank.risk.var.window-days`): absolute zero-rate changes, relative FX changes,
+        overlapping `horizonDays`-apart pairs. VaR is the ⌈α·n⌉-th smallest loss (no interpolation),
+        ES the mean of the tail from it. Fewer complete scenarios than
+        `openbank.risk.var.minimum-scenarios` answers `dataGap` with null figures — never a number.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BookId'
+        - name: confidence
+          in: query
+          required: false
+          schema: { type: number, exclusiveMinimum: 0.5, maximum: 0.9999, default: 0.99 }
+        - name: horizonDays
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 250, default: 1 }
+      responses:
+        '200':
+          description: VaR and ES, or the data gap
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VarResponse'
+        '400':
+          description: Bad parameter
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
+        '404':
+          description: No such run
+        '409':
+          description: The run is UNTIED (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/snapshots/{id}/fx-position:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotFxPosition
+      summary: FX position (net PV per currency) of the own treasury book
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - $ref: '#/components/parameters/BookId'
+        - $ref: '#/components/parameters/OptionalCurveSetId'
+      responses:
+        '200':
+          description: The position per currency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FxPositionResponse'
+        '400':
+          description: Bad parameter
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '503':
+          description: The computation exceeded its configured wall-clock budget (`error` = COMPUTATION_TIMEOUT)
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
   /api/v1/risk/curve-sets:
     get:
       tags: [Risk]
@@ -734,8 +940,218 @@ components:
       schema:
         type: string
         format: uuid
+    BookId:
+      name: bookId
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Only deals booked to this book (ADR-0344 D8; descendants once treasury exposes the book tree).
+    OptionalCurveSetId:
+      name: curveSetId
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+      description: Defaults to the newest curve set recorded as of the run's date.
 
   schemas:
+    LegSpec:
+      type: object
+      description: One leg as treasury publishes it (ADR-0344 contract section 2; unknown fields ignored).
+      required: [payReceive, currency, notional, accrualStart, accrualEnd, accrualFrequency]
+      additionalProperties: true
+      properties:
+        payReceive: { type: string, enum: [PAY, RECEIVE] }
+        currency: { type: string }
+        notional: { type: number }
+        amortisation:
+          type: object
+          properties:
+            type: { type: string, description: 'BULLET, LINEAR, ANNUITY or CUSTOM (libs-finance AmortisationSpec)' }
+            schedule:
+              type: array
+              items:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  amount: { type: number }
+        accrualStart: { type: string, format: date }
+        accrualEnd: { type: string, format: date }
+        accrualFrequency: { type: string, description: 'ZERO, or <n>D|W|M|Y' }
+        paymentFrequency: { type: string }
+        stub: { type: string, enum: [SHORT_INITIAL, LONG_INITIAL, SHORT_FINAL, LONG_FINAL] }
+        adjustPaymentDate: { type: boolean }
+        adjustAccrualPeriod: { type: boolean }
+        paymentLagBusinessDays: { type: integer }
+        dayCount: { type: string, description: 'ACT/360, ACT/365F, ACT/ACT, 30/360, 30E/360 or a kernel name' }
+        paymentCalendars: { type: array, items: { type: string } }
+        businessDayConvention: { type: string }
+        rate:
+          type: object
+          properties:
+            type: { type: string, description: 'FIXED, FLOATING or NONE (libs-finance RateSpec)' }
+            rate: { type: number }
+            index: { type: string }
+            spread: { type: number }
+            fixingLagBusinessDays: { type: integer }
+            resetFrequency: { type: string }
+            cap: { type: [number, 'null'] }
+            floor: { type: [number, 'null'] }
+            capFloorAppliesTo: { type: string, enum: [INDEX, INDEX_PLUS_SPREAD] }
+            rateUntilFirstFixing: { type: [number, 'null'] }
+        initialNotionalExchange: { type: boolean }
+        finalNotionalExchange: { type: boolean }
+        finalExchangeAmount: { type: [number, 'null'] }
+
+    PricingRequest:
+      type: object
+      required: [asOf, legs]
+      additionalProperties: true
+      description: The deal header + legs (contract section 8.1); unpriced header fields are ignored.
+      properties:
+        asOf: { type: string, format: date }
+        curveSetId: { type: [string, 'null'], format: uuid }
+        currency: { type: string, description: 'Reporting currency, default CZK' }
+        calendars: { type: array, items: { type: string } }
+        businessDayConvention: { type: string }
+        legs:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/LegSpec'
+
+    LegValue:
+      type: object
+      properties:
+        legIndex: { type: integer }
+        currency: { type: string }
+        pv: { type: number }
+        pvReporting: { type: number }
+        accrued: { type: number }
+
+    Dv01Bucket:
+      type: object
+      properties:
+        bucket: { type: string }
+        dv01: { type: number }
+
+    FxRate:
+      type: object
+      required: [currency, rate, fixingDate, source]
+      properties:
+        currency: { type: string }
+        rate: { type: number, description: 'CZK per one unit of currency' }
+        fixingDate: { type: string, format: date }
+        source: { type: string }
+
+    FxDelta:
+      type: object
+      properties:
+        currency: { type: string }
+        delta: { type: number }
+
+    PricingResponse:
+      type: object
+      properties:
+        asOf: { type: string, format: date }
+        curveSetId: { type: string, format: uuid }
+        currency: { type: string }
+        provenance: { type: string, enum: [synthetic, intraday, regulatory] }
+        pv: { type: number }
+        pvByLeg: { type: array, items: { $ref: '#/components/schemas/LegValue' } }
+        accrued: { type: number }
+        pv01: { type: number, description: 'PV(+1bp parallel) − PV; positive for a payer of fixed' }
+        dv01Buckets: { type: array, items: { $ref: '#/components/schemas/Dv01Bucket' } }
+        fxDelta: { type: array, items: { $ref: '#/components/schemas/FxDelta' } }
+        fxRates: { type: array, items: { $ref: '#/components/schemas/FxRate' } }
+        modelVersion: { type: string }
+        curveModelVersion: { type: string }
+
+    ValuationHeader:
+      type: object
+      properties:
+        runId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        curveSetId: { type: string, format: uuid }
+        bookId: { type: [string, 'null'] }
+        currency: { type: string }
+        provenance: { type: string, enum: [synthetic, intraday, regulatory] }
+        valuationInputHash: { type: string }
+        modelVersion: { type: string }
+        curveModelVersion: { type: string }
+        fxRates: { type: array, items: { $ref: '#/components/schemas/FxRate' } }
+
+    DealValue:
+      type: object
+      properties:
+        dealId: { type: string, format: uuid }
+        bookId: { type: [string, 'null'] }
+        kind: { type: string, enum: [ACTUAL, PLANNED, HYPOTHETICAL] }
+        flowSource: { type: string, enum: [STORED, DERIVED] }
+        pv: { type: [number, 'null'] }
+        accrued: { type: [number, 'null'] }
+        clean: { type: [number, 'null'] }
+        dirty: { type: [number, 'null'] }
+        legs: { type: array, items: { $ref: '#/components/schemas/LegValue' } }
+        unpriced: { type: [string, 'null'] }
+
+    ValuationResponse:
+      type: object
+      properties:
+        header: { $ref: '#/components/schemas/ValuationHeader' }
+        deals: { type: array, items: { $ref: '#/components/schemas/DealValue' } }
+        book:
+          type: [object, 'null']
+          properties:
+            pv: { type: number }
+            accrued: { type: number }
+            clean: { type: number }
+            dirty: { type: number }
+        dataGap: { type: [string, 'null'] }
+
+    SensitivityResponse:
+      type: object
+      properties:
+        header: { $ref: '#/components/schemas/ValuationHeader' }
+        bucketSetId: { type: string }
+        pv01: { type: [number, 'null'] }
+        dv01Buckets: { type: array, items: { $ref: '#/components/schemas/Dv01Bucket' } }
+        fxDelta: { type: array, items: { $ref: '#/components/schemas/FxDelta' } }
+        dataGap: { type: [string, 'null'] }
+
+    VarResponse:
+      type: object
+      properties:
+        header: { $ref: '#/components/schemas/ValuationHeader' }
+        confidence: { type: number }
+        horizonDays: { type: integer }
+        windowFrom: { type: string, format: date }
+        windowTo: { type: string, format: date }
+        scenarioCount: { type: integer }
+        skippedScenarios: { type: integer }
+        minimumScenarios: { type: integer }
+        valueAtRisk: { type: [number, 'null'], description: 'A positive number is a loss' }
+        expectedShortfall: { type: [number, 'null'] }
+        dataGap: { type: [string, 'null'] }
+
+    FxPositionResponse:
+      type: object
+      properties:
+        header: { $ref: '#/components/schemas/ValuationHeader' }
+        currencies:
+          type: array
+          items:
+            type: object
+            properties:
+              currency: { type: string }
+              position: { type: number }
+              positionReporting: { type: number }
+              fxRate: { type: number }
+              fxDelta: { type: number }
+        dataGap: { type: [string, 'null'] }
+
     CreateSnapshotRequest:
       type: object
       required: [asOf]
@@ -849,6 +1265,12 @@ components:
           type: string
         behaviouralModelVersion:
           type: string
+        curveModelVersion:
+          type: [string, 'null']
+          description: ADR-0344 D8 curve bootstrap + interpolation version; null on a run recorded before it.
+        valuationModelVersion:
+          type: [string, 'null']
+          description: ADR-0344 D8 valuation / sensitivity / VaR model version; null on an older run.
 
     SnapshotRunSummary:
       type: object
@@ -1055,11 +1477,18 @@ components:
       properties:
         tenor:
           type: string
-          description: ON, or <n>D (n ≤ 7), <n>W, <n>M (n ≤ 12), 1Y.
-          examples: [ON, 1W, 3M, 12M]
+          description: |
+            DEPOSIT: ON, or <n>D (n ≤ 7), <n>W, <n>M (n ≤ 12), 1Y. FRA: <m>x<n> months (n ≤ 24).
+            SWAP: <n>Y (1..50), a par fixed-versus-float rate on the currency's fixed-leg convention.
+          examples: [ON, 1W, 3M, 12M, 6x12, 5Y]
         rate:
           type: number
-          description: Simple money-market rate as a fraction (0.035 = 3.5 %).
+          description: The quote as a fraction (0.035 = 3.5 %) — simple for DEPOSIT and FRA, par fixed for SWAP.
+        instrument:
+          type: string
+          enum: [DEPOSIT, FRA, SWAP]
+          default: DEPOSIT
+          description: ADR-0344 D8. Absent means DEPOSIT, the only instrument before this field.
 
     CreateCurveSetRequest:
       type: object
@@ -2047,7 +2476,7 @@ components:
         limitId: {type: string}
         metric:
           type: string
-          x-extensible-enum: [lcr, nsfr, total-capital-ratio, irrbb-eve-outlier, large-exposure-bank]
+          x-extensible-enum: [lcr, nsfr, total-capital-ratio, irrbb-eve-outlier, large-exposure-bank, pv01, var-99-1d]
         metricDescription: {type: string}
         bound:
           type: string

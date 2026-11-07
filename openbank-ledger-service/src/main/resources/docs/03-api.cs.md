@@ -85,3 +85,29 @@ Zaúčtování je idempotentní přes **pole `idempotencyKey` v těle požadavku
 ## Chybový model
 
 `ApiError`: `{ "code": "...", "message": "..." }`. Mapování je centralizováno v `ExceptionMappers` a generický fallback je delegován na `openbank-libs` (ADR-0049 D4 — služba neregistruje catch-all `Exception` mapper). Typické stavy: `400` (nevyvážené / neplatné zaúčtování), `401`/`403` (auth), `404` (neznámý zápis), `409` (konflikt idempotency klíče).
+
+## Účastníci závěrky dne (ADR-0342)
+
+`GET /api/v1/ledger/accounting-days/{date}/participants` vrací úplnost dne. Deklarovaný účastník (například `interest`) hlásí `RAN`, `SKIPPED` nebo `REFUSED` přes `PUT .../participants/{participant}`; hlásit smí jen service-account deklarovaný pro něj. Účastník, který nehlásil, je v `missing`; ten, jehož poslední hlášení je `REFUSED`, je v `refused` - jeho práce (například kapitalizace úroků) nebyla zaúčtována. Obojí drží den v `CUTOFF` (`complete=false`), dokud účastník nenahlásí `RAN` nebo ho operátor nepromině.
+
+`PUT .../participants/{participant}/waiver` (operátor, povinný důvod) je povolen jen pro existující den v `CUTOFF` a jen pro účastníka bez hlášení `RAN`: `404` pro den, který nebyl otevřen (tedy i pro budoucí den), `409` pro den mimo `CUTOFF` nebo účastníka, který již proběhl. Prominutí se přidává jako nový záznam, nikdy nepřepisuje předchozí; může nahradit hlášení `REFUSED`.
+
+`openbank.ledger.close.participants-mode` je `off`, `shadow` (výchozí, počítá by-hold rozhodnutí a den přesto uzavře) nebo `enforce`; jakákoli jiná hodnota zastaví start služby.
+
+V režimu `enforce` aplikační služba účetního dne kontroluje účastníky při automatickém i ručním přechodu operátora `CUTOFF → TIED_OUT`, pod stávajícím transakčním zámkem dne. Chybějící účastník nebo REFUSED vrací 409 do přijetí platného hlášení či výslovné výjimky operátora s důvodem. Volající tuto kontrolu nemůže vynechat. Výchozí režim zůstává `shadow`; změna nepovoluje aktivaci vynucování.
+
+Prominutí vyžaduje ověřený lidský JWT i v advisory režimu OPA; strojový token je odmítnut 403 i s rolí operátora. Audit používá pouze neprázdný JWT `sub`; chybějící, prázdný nebo nečitelný subject vrací 401 bez náhrady zobrazovaným jménem.
+
+## Mapa účetních tříd (ADR-0341 D3)
+
+Zdroje posílají na řádku žurnálu `accountingClass` a roli a ledger určí GL účet z vlastní tabulky `accounting_class_gl_map` (migrace V31). Čtecí strana je `GET /api/v1/accounting-classes` a `GET /api/v1/accounting-classes/resolve` pro regulatorní čtenáře a odsouhlasení. Zápisový endpoint záměrně neexistuje: mapa se mění revidovanou migrací stejně jako účtový rozvrh.
+
+## Snímky nezpracované historie účetních zápisů
+
+`POST /api/v1/journals/history-snapshots` přijímá účet, měnu a včetně krajních dnů vymezené období pod stávajícím oprávněním `ledger.list`. Vrací pevný pohled potvrzených databázových zápisů, počáteční součet připojených účetních řádků, pořadí, počet a SHA-256. Stránky `GET /.../{snapshotId}/entries?afterOrdinal=...` jsou stabilní; kontrolní součet používá přesné řetězce `canonicalJson` spojené LF. Výsledek bez zdrojových zápisů se vrací přímo (`persisted=false`), bez uloženého finančního snímku.
+
+Volání vyžaduje hlavičku `Idempotency-Key` (1–128 znaků `[A-Za-z0-9._:-]`, vázanou na volajícího a operaci). Záznam pro opakování se v PostgreSQL potvrdí atomicky se snímkem a vyprší 86 400 sekund po vytvoření. Během této lhůty stejný klíč a tělo vrátí původní výsledek s `X-Idempotency-Replayed: true`; jiné tělo vrátí 409. Opakování lhůtu neprodlužuje. Pokud byly zdroje původního snímku smazány nebo již nejsou dostupné, opakování vrátí 410 a nevytvoří tiše nové pozorování. Po vypršení lze klíč použít pro nový snímek.
+
+Záznam uchovává digest požadavku a rozsahu, druh výsledku a neprůhledný odkaz na zdroj, nikoli samostatnou finanční odpověď v Redis. U prázdného výsledku uchová pouze původní identifikátor, okamžik pozorování a metadata databázového pohledu. Vypršelé záznamy se mažou při přístupu a minutovou údržbou; fyzický úklid může při vypnuté službě zaostávat. Hashe ani neprůhledné identifikátory se nepovažují za anonymní data. Tyto mechanismy neprodlužují uchovávání zdrojových dat ani neobcházejí právní blokace mazání.
+
+Pokrytí zahrnuje jen připojené účetní zápisy, nikoli úplnou historii účtu či ověřenou ekonomickou klasifikaci. Přímé změny zůstatku, odpojené partition a chybějící původ zůstávají omezením. Volitelné `origin` je neověřené tvrzení již oprávněného odesílatele; jeho identitu doplňuje ledger ze svého bezpečnostního kontextu. Nejde o EventKind ani nové oprávnění účtovat.

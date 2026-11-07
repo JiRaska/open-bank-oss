@@ -9,7 +9,7 @@ const page = (name: string) => readFileSync(path.resolve(__dirname, `../app/${na
 describe('operator form accessibility contract', () => {
   it('names consent, identity-case and FX controls', () => {
     for (const label of [
-      'Pohled souhlasů', 'ID grantee',
+      'Pohled souhlasů', 'Příjemce souhlasu',
     ]) expect(page('consents')).toContain(`aria-label={t('${label}'`)
     for (const label of [
       'Verdikt případu identity', 'Propojit s existující party', 'Poznámka k rozhodnutí',

@@ -44,3 +44,41 @@ test('Product Studio remains readable without horizontal overflow on mobile', as
   expect(sizes.length).toBeGreaterThan(0)
   expect(sizes.every(size => size >= 10)).toBe(true)
 })
+
+
+test('Catalog Intelligence uses the server-configured LiteLLM model without sending an unselected draft', async ({ page }) => {
+  let reviewPosts = 0
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/agent/catalog-reviews' && request.method() === 'POST') reviewPosts += 1
+  })
+  await page.route('**/api/agent/catalog-reviews', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ available: true, mode: 'sandbox-hosted', defaultModel: 'configured-review-model', models: [
+      { id: 'configured-review-model', provider: 'openai-compat', sensitivity: 'HOSTED' },
+    ] }),
+  }))
+  await page.goto('/product-studio')
+  await expect(page.getByRole('note').filter({ hasText: 'Sandbox review sends the exact revision through LiteLLM to configured-review-model' })).toBeVisible()
+  await expect(page.getByText('Select a draft revision; review never works from an ambiguous or live document.')).toBeVisible()
+  expect(reviewPosts).toBe(0)
+})
+
+test('Catalog Intelligence recovers its capability after a transport failure', async ({ page }) => {
+  let unavailable = true
+  await page.route('**/api/agent/catalog-reviews', route => route.fulfill({
+    status: unavailable ? 503 : 200,
+    contentType: 'application/json',
+    body: JSON.stringify(unavailable ? { error: 'temporarily_unavailable' } : {
+      available: true, mode: 'sandbox-hosted', defaultModel: 'configured-review-model', models: [
+        { id: 'configured-review-model', provider: 'openai-compat', sensitivity: 'HOSTED' },
+      ],
+    }),
+  }))
+  await page.goto('/product-studio')
+  const failure = page.getByRole('status').filter({ hasText: 'Review availability could not be verified' })
+  await expect(failure).toBeVisible()
+  unavailable = false
+  await failure.getByRole('button', { name: 'Retry', exact: true }).click()
+  await expect(page.getByRole('note').filter({ hasText: 'configured-review-model' })).toBeVisible()
+  await expect(failure).toHaveCount(0)
+})

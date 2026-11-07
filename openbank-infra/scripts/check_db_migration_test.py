@@ -162,6 +162,139 @@ class GateAgainstGitTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("nothing to check", out)
 
+    def _noted(self, name: str, directory: str = MIGRATION_DIR) -> None:
+        self._write(f"{directory}/{name}", "-- Rollback: DROP TABLE fixture;\nSELECT 1;\n")
+
+    def _base_with(self, *names: str) -> None:
+        for name in names:
+            self._noted(name)
+        self._commit("base migrations")
+        self.base = self._git("rev-parse", "HEAD").strip()
+
+    def test_new_version_must_exceed_existing_service_maximum(self):
+        self._base_with("V27__existing.sql")
+        for version in (26, 27):
+            with self.subTest(version=version):
+                self._noted(f"V{version}__candidate.sql")
+                self._commit("candidate migration")
+                rc, out = self._run(enforce=True)
+                self.assertEqual(1, rc)
+                self.assertIn("must exceed", out)
+                self.assertIn("27", out)
+                self._git("reset", "--hard", self.base)
+
+    def test_higher_version_and_other_module_maximum_are_independent(self):
+        other = "openbank-other-service/src/main/resources/db/migration"
+        self._noted("V99__other.sql", other)
+        self._base_with("V27__existing.sql")
+        self._noted("V28__candidate.sql")
+        self._noted("V100__candidate.sql", other)
+        self._commit("forward migrations")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+
+    def test_existing_migrations_unchanged_do_not_become_new_candidates(self):
+        self._base_with("V26__existing.sql", "V27__existing.sql")
+        self._write("README.md", "unrelated change\n")
+        self._commit("unrelated change")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+        self.assertIn("nothing to check", out)
+
+    def test_multiple_new_versions_pass_but_duplicate_added_version_fails(self):
+        self._base_with("V27__existing.sql")
+        self._noted("V28__first.sql")
+        self._noted("V29__second.sql")
+        self._commit("two forward migrations")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+        self._noted("V028__duplicate.sql")
+        self._commit("duplicate integer version")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc)
+        self.assertIn("duplicate added Flyway version 28", out)
+
+    def test_unknown_or_noncommit_base_fails_closed(self):
+        self._noted("V1__candidate.sql")
+        self._commit("candidate")
+        for base in ("missing-base", "f" * 40, "HEAD:README.md"):
+            with self.subTest(base=base):
+                self.base = base
+                rc, _ = self._run(enforce=True)
+                self.assertNotEqual(0, rc)
+
+    def test_nested_migrations_share_the_service_maximum(self):
+        self._noted("V27__existing.sql", MIGRATION_DIR + "/nested")
+        self._commit("nested base migration")
+        self.base = self._git("rev-parse", "HEAD").strip()
+        self._noted("V26__candidate.sql")
+        self._commit("lower candidate")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc)
+        self.assertIn("must exceed", out)
+
+    def test_unsupported_versioned_names_fail_but_repeatable_scope_is_preserved(self):
+        self._base_with("V27__existing.sql")
+        for name in ("V28_1__candidate.sql", "V28.1__candidate.sql", "Vfoo__candidate.sql", "V28__.sql"):
+            with self.subTest(name=name):
+                self._noted(name)
+                self._commit("unsupported version shape")
+                rc, out = self._run(enforce=True)
+                self.assertEqual(1, rc)
+                self.assertIn("unsupported integer Flyway version", out)
+                self._git("reset", "--hard", self.base)
+        self._noted("R__refresh_view.sql")
+        self._commit("repeatable migration")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+
+    def test_unknown_base_version_prevents_assuming_a_maximum(self):
+        self._base_with("V2_1__unsupported.sql")
+        self._noted("V3__candidate.sql")
+        self._commit("candidate")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc)
+        self.assertIn("unsupported integer Flyway version", out)
+
+    def test_existing_duplicate_repair_exception_remains_unchanged(self):
+        self._base_with("V1__first.sql", "V1__second.sql")
+        self._git("mv", f"{MIGRATION_DIR}/V1__second.sql", f"{MIGRATION_DIR}/V2__second.sql")
+        self._commit("repair unapplied duplicate by exact rename")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+        self.assertIn("renumbers a DUPLICATE version", out)
+
+    def test_duplicate_repair_below_base_maximum_is_forbidden(self):
+        self._base_with("V1__first.sql", "V1__second.sql", "V27__existing.sql")
+        self._git("mv", f"{MIGRATION_DIR}/V1__second.sql", f"{MIGRATION_DIR}/V2__second.sql")
+        self._commit("duplicate repair below existing maximum")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc, out)
+        self.assertIn("must not be edited", out)
+        self.assertNotIn("renumbers a DUPLICATE version", out)
+
+    def test_duplicate_repair_above_base_maximum_is_permitted(self):
+        self._base_with("V1__first.sql", "V1__second.sql", "V27__existing.sql")
+        self._git("mv", f"{MIGRATION_DIR}/V1__second.sql", f"{MIGRATION_DIR}/V28__second.sql")
+        self._commit("duplicate repair above existing maximum")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(0, rc, out)
+        self.assertIn("renumbers a DUPLICATE version", out)
+
+    def test_duplicate_repair_unknown_version_formats_are_forbidden(self):
+        self._base_with("V1__first.sql", "V1__second.sql", "V2_1__unsupported.sql")
+        self._git("mv", f"{MIGRATION_DIR}/V1__second.sql", f"{MIGRATION_DIR}/V28__second.sql")
+        self._commit("duplicate repair with unknown base maximum")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc, out)
+        self.assertIn("must not be edited", out)
+        self._git("reset", "--hard", self.base)
+        self._git("mv", f"{MIGRATION_DIR}/V1__second.sql", f"{MIGRATION_DIR}/V28_1__second.sql")
+        self._commit("duplicate repair with unsupported destination")
+        rc, out = self._run(enforce=True)
+        self.assertEqual(1, rc, out)
+        self.assertIn("must not be edited", out)
+
 
 if __name__ == "__main__":
     unittest.main()

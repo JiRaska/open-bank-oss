@@ -1,0 +1,17 @@
+# Test fixture: the flaky-test-hunter charter with the write_proposal/github-pr grant REMOVED.
+# A tampered charter must fail the in-process check closed (ADR-0031 D9 phase 3).
+agents:
+  - id: flaky-test-hunter
+    enabled: true
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - governance
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'

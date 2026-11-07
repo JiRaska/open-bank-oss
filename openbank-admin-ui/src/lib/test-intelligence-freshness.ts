@@ -19,21 +19,40 @@ export function runtimeFreshnessState(
   return Date.now() - observed > evidenceFreshnessMs() ? 'stale' : state
 }
 
-export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestIntelligenceReport {
-  const components = report.components.map(component => ({
-    ...component,
-    evidence: component.evidence.map(item => ({
-      ...item, state: runtimeFreshnessState(item.state, item.observedAt),
-    })),
-    coverage: {
+function currentCodeState(state: EvidenceState, running: TestIntelligenceReport['components'][number]['running']): EvidenceState {
+  if (state === 'passed' && running?.runningCommit && running.match !== true && running.storeStatus !== 'hit') return 'unknown'
+  return state
+}
+
+function staleTestCase<T extends TestIntelligenceReport['testCases'][number]>(item: T, now: number): T {
+  if (item.state !== 'stable') return item
+  const observed = Date.parse(item.lastObservedAt)
+  if (!Number.isFinite(observed) || observed > now + MAX_FUTURE_SKEW_MS
+      || now - observed > evidenceFreshnessMs()) return { ...item, state: 'stale' }
+  return item
+}
+
+export function enforceRuntimeFreshness(report: TestIntelligenceReport, now = Date.now()): TestIntelligenceReport {
+  const components = report.components.map(component => {
+    const evidence = component.evidence.map(item => ({
+      ...item, state: currentCodeState(runtimeFreshnessState(item.state, item.observedAt), component.running),
+    }))
+    const coverage = {
       ...component.coverage,
-      state: runtimeFreshnessState(component.coverage.state, component.coverage.observedAt),
-    },
-  }))
+      state: currentCodeState(runtimeFreshnessState(component.coverage.state, component.coverage.observedAt), component.running),
+    }
+    return { ...component, evidence, coverage }
+  })
   const evidence = components.flatMap(component => component.evidence)
-  const requiredControls = report.requiredControls?.map(control => ({
-    ...control, state: runtimeFreshnessState(control.state, control.observedAt),
-  }))
+  const unknownComponentControls = new Set(components.filter(component => component.running?.runningCommit
+    && component.running.match !== true && component.running.storeStatus !== 'hit').map(component => component.component))
+  const requiredControls = report.requiredControls?.map(control => {
+    const freshState = runtimeFreshnessState(control.state, control.observedAt)
+    return {
+      ...control,
+      state: freshState === 'passed' && control.component && unknownComponentControls.has(control.component) ? 'unknown' : freshState,
+    }
+  })
   const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   return {
     ...report,
@@ -64,6 +83,7 @@ export function enforceRuntimeFreshness(report: TestIntelligenceReport): TestInt
         ...item, state: runtimeFreshnessState(item.state, item.observedAt),
       })),
     })),
+    testCases: (report.testCases ?? []).map(item => staleTestCase(item, now)),
     totals: {
       ...report.totals,
       components: components.length,

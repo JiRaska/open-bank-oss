@@ -166,7 +166,7 @@ spec:
   targets:
     staticConfig:
       static:
-        - https://status.open-bank.tech/api/v1/healthz
+        - https://status.open-bank.tech/api/v1/health
       labels:
         tier: public-status
 ---

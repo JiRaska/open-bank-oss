@@ -10,6 +10,5 @@ describe('sanctions review form accessibility', () => {
       expect(page).toContain(`id="sanctions-${field}"`)
     }
     expect(page).toContain('id="sanctions-approval-id"')
-    expect(page).toContain("aria-label={t('ID žádosti', 'Approval id')}")
   })
 })

@@ -87,6 +87,7 @@ private fun requirePositive(amount: Money) =
 interface BalanceUseCase {
     suspend fun getBalance(query: GetBalanceQuery): Balance
     suspend fun getBalances(accountId: UUID): List<Balance>
+    suspend fun listHolds(accountId: UUID): List<BalanceHold>
     suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold
     suspend fun releaseHold(cmd: ReleaseHoldCommand): BalanceHold
     suspend fun credit(cmd: CreditAccountCommand): Balance

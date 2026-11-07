@@ -13,7 +13,7 @@
 // so callers degrade gracefully without crashing.
 
 import { NextResponse } from 'next/server'
-import { discoverServices } from '@/lib/discovery'
+import { discoverServicesSnapshot } from '@/lib/discovery'
 
 export interface DiscoveryService {
   name: string
@@ -26,22 +26,30 @@ export interface DiscoveryService {
 export interface DiscoveryResponse {
   source: 'k8s' | 'static'
   services: DiscoveryService[]
+  discoveryStatus: 'complete' | 'partial' | 'unavailable' | 'static'
 }
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
 export async function GET(): Promise<NextResponse<DiscoveryResponse>> {
-  const discovered = await discoverServices()
+  const snapshot = await discoverServicesSnapshot()
 
-  if (!discovered) {
+  if (snapshot.status === 'static') {
     return NextResponse.json(
-      { source: 'static', services: [] },
+      { source: 'static', services: [], discoveryStatus: 'static' },
       { headers: { 'Cache-Control': 'no-store' } },
     )
   }
 
-  const services: DiscoveryService[] = discovered.map((d) => ({
+  if (snapshot.status === 'unavailable') {
+    return NextResponse.json(
+      { source: 'k8s', services: [], discoveryStatus: 'unavailable' },
+      { headers: { 'Cache-Control': 'no-store' } },
+    )
+  }
+
+  const services: DiscoveryService[] = snapshot.services.map((d) => ({
     name: d.name,
     namespace: d.namespace,
     ready: d.readyReplicas,
@@ -50,7 +58,7 @@ export async function GET(): Promise<NextResponse<DiscoveryResponse>> {
   }))
 
   return NextResponse.json(
-    { source: 'k8s', services },
+    { source: 'k8s', services, discoveryStatus: snapshot.status },
     { headers: { 'Cache-Control': 'no-store' } },
   )
 }

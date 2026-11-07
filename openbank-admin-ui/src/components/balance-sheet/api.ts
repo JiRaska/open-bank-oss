@@ -7,25 +7,15 @@
 // see the human — their @RolesAllowed, OPA and the backfill's maker != checker all evaluate the
 // person at the keyboard, never a shared service account (which OPA refuses for every write here).
 import type { z } from 'zod'
-import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
-import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { svcUrl } from '@/lib/services/bff'
+import { getJson } from '@/lib/services/resourceClient'
+import type { Loaded } from '@/lib/services/resourceClient'
 
 export const RISK = 'risk-engine'
 export const LENDING = 'lending-service'
 export const BACKFILL_BASE = '/api/v1/lending/ledger-backfill'
 
-export type Loaded<T> = { ok: true; data: T } | { ok: false; kind: UnavailableKind }
-
-export async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<Loaded<T>> {
-  try {
-    const res = await fetch(url, { cache: 'no-store' })
-    if (!res.ok) return { ok: false, kind: await classifyBffFailure(res) }
-    const parsed = schema.safeParse(await res.json())
-    return parsed.success ? { ok: true, data: parsed.data } : { ok: false, kind: 'error' }
-  } catch {
-    return { ok: false, kind: 'unreachable' }
-  }
-}
+export { getJson, type Loaded }
 
 /** A write's outcome. `message` is the backend's own refusal text (400/409/422), never a status line. */
 export type WriteResult<T> =

@@ -56,6 +56,9 @@ spec:
               kubernetes.io/metadata.name: analytics
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: arc-runners
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: audit
         - namespaceSelector:
             matchLabels:
@@ -137,6 +140,9 @@ spec:
               kubernetes.io/metadata.name: ledger
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: ledger-pension-co
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
@@ -201,9 +207,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: treasury
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: vault
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: wealth

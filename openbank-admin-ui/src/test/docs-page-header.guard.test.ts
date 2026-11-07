@@ -22,6 +22,7 @@ const pages = [
   'qrlesspay-readiness/page.tsx',
   'release-notes/[service]/page.tsx',
   'service-map/page.tsx',
+  'spayd-uri/page.tsx',
   'threat-models/page.tsx',
   'threat-models/[service]/page.tsx',
   'zero-trust/page.tsx',

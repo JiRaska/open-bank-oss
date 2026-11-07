@@ -16,7 +16,7 @@ import { useRef } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { DevOpsFinding } from '@/app/api/devops/insights/route'
+import type { DevOpsFinding } from '@/lib/devops/contracts'
 import { DORA_METRIC_LABEL } from '@/lib/devops/doraMetricLabels'
 
 const SEVERITY_LABEL: Record<DevOpsFinding['severity'], { cs: string; en: string; color: string }> = {

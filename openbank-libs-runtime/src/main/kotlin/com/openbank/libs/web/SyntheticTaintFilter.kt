@@ -9,6 +9,7 @@ import com.openbank.libs.synthetic.SyntheticTaint
 import io.opentelemetry.api.baggage.Baggage
 import io.opentelemetry.context.Context
 import io.opentelemetry.context.Scope
+import jakarta.inject.Inject
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.container.ContainerResponseContext
@@ -64,9 +65,8 @@ private const val SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY: String = "openbank.syn
  * ## Blast radius
  *
  * `@Provider` means this runs on every request of every service that depends on libs-runtime, so
- * it deliberately injects nothing but configuration and reads only the JAX-RS
- * `SecurityContext` — no `SecurityIdentity`, no registry, nothing that can be unsatisfied at
- * build time or throw at request time.
+ * it reads the JAX-RS `SecurityContext` and injects configuration plus the CDI request holder.
+ * It does not change the caller identity or trust list; the holder requires an active request context.
  */
 @Provider
 class SyntheticTaintRequestFilter : ContainerRequestFilter {
@@ -81,6 +81,14 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
      */
     @ConfigProperty(name = "openbank.synthetic.trusted-principals")
     lateinit var trustedPrincipals: Optional<String>
+
+    /**
+     * The request-scoped carrier read by suspend resource methods. Every decision below is written
+     * to both this Boolean and the JAX-RS request property. Controlled property-loss tests check
+     * the holder read without claiming to reproduce the older image's dispatch mechanism.
+     */
+    @Inject
+    lateinit var taintContext: SyntheticTaintContext
 
     private val log = Logger.getLogger(SyntheticTaintRequestFilter::class.java)
 
@@ -107,6 +115,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
             return
         }
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, true)
+        taintContext.tainted = true
         MDC.put(MDC_SYNTHETIC, "true")
         // This is the observability rail, not an authorization input. Only the trusted decision
         // above may set it; every other path removes an inbound value in [markReal].
@@ -128,6 +137,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
      */
     private fun markReal(ctx: ContainerRequestContext) {
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, false)
+        taintContext.tainted = false
         val inbound = Baggage.current()
         if (inbound.getEntryValue(SyntheticTaint.BAGGAGE_KEY) == null) return
         val cleaned = inbound.toBuilder().remove(SyntheticTaint.BAGGAGE_KEY).build()

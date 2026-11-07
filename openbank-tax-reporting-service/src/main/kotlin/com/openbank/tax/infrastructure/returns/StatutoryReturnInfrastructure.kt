@@ -75,6 +75,7 @@ object CatalogueParser {
         datapoints = required("datapoints").map { it.asText() },
         rules = (get("rules") ?: emptyList<JsonNode>()).map { it.toRule() },
         legalBasis = text("legalBasis"),
+        lineSchema = (get("lineSchema") ?: emptyList<JsonNode>()).map { it.asText() },
     )
 
     private fun JsonNode.toRule(): ValidationRule = when (val type = text("type")) {
@@ -136,13 +137,28 @@ class StatutoryReturnDeadlineScheduler(
     private val service: StatutoryReturnService,
     private val metrics: StatutoryReturnMetricsPort,
     private val domainMetrics: DomainMetrics,
+    private val registry: MeterRegistry,
+    private val entities: ReportingEntities,
 ) {
     private val log = Logger.getLogger(StatutoryReturnDeadlineScheduler::class.java)
     private lateinit var liveness: WorkflowLivenessRecorder
 
+    /**
+     * 1 while the operator has not declared the reporting start or fund roster. An unconfigured
+     * deployment never records liveness, which on its own reads exactly like a dead scheduler;
+     * `WorkflowLivenessStale` excludes workflows reporting this, and a separate low-severity
+     * alert names the missing configuration instead.
+     */
+    private val unconfigured = AtomicInteger(0)
+
     @PostConstruct
     fun registerLiveness() {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(1))
+        Gauge.builder(UNCONFIGURED_GAUGE, unconfigured) { it.get().toDouble() }
+            .tag(WORKFLOW_TAG, WORKFLOW_NAME)
+            .description("1 while the workflow cannot run because its configuration is not declared")
+            .register(registry)
+        unconfigured.set(if (entities.missingConfiguration(service.catalogues()) == null) 0 else 1)
     }
 
     @Scheduled(
@@ -150,6 +166,12 @@ class StatutoryReturnDeadlineScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() {
+        val missing = entities.missingConfiguration(service.catalogues())
+        unconfigured.set(if (missing == null) 0 else 1)
+        if (missing != null) {
+            log.debugf("statutory return deadline check skipped: %s", missing)
+            return
+        }
         val breaches = service.breaches()
         metrics.recordBreaches(breaches.size)
         liveness.recordSuccess()
@@ -167,5 +189,7 @@ class StatutoryReturnDeadlineScheduler(
     private companion object {
         const val LOG_SAMPLE = 10
         const val WORKFLOW_NAME = "statutory-return-deadline-check"
+        const val UNCONFIGURED_GAUGE = "openbank_workflow_unconfigured"
+        const val WORKFLOW_TAG = "workflow"
     }
 }

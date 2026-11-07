@@ -1,0 +1,20 @@
+# Test fixture: the flaky-test-hunter charter explicitly disabled (kill switch, ADR-0031 D7).
+# Even with the grant present, a disabled agent must be denied.
+agents:
+  - id: flaky-test-hunter
+    enabled: false
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - governance
+        - tier: write_proposal
+          resources:
+            - github-pr
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'

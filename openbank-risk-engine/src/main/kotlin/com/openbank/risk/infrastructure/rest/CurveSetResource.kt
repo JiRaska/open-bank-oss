@@ -9,8 +9,8 @@ import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.CreateCurveSetCommand
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.domain.curve.CurveIndex
-import com.openbank.risk.domain.curve.MoneyMarketQuote
-import com.openbank.risk.domain.curve.Tenor
+import com.openbank.risk.domain.curve.CurveInstrument
+import com.openbank.risk.domain.curve.CurveQuote
 import com.openbank.risk.domain.model.Provenance
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -79,10 +79,17 @@ class CurveSetResource {
     @Authorize(action = "risk.curve-set.read", resource = "#id")
     suspend fun get(@PathParam("id") id: UUID): Response = Response.ok(curveSets.get(id).toResponse()).build()
 
-    private fun QuoteDto.toQuote(index: String) = MoneyMarketQuote(
-        tenor = Tenor.parse(requireNotNull(tenor) { "curve '$index': every quote needs a 'tenor'" }),
-        simpleRate = requireNotNull(rate) { "curve '$index': every quote needs a 'rate'" },
-    )
+    private fun QuoteDto.toQuote(index: String): CurveQuote {
+        val kind = instrument?.let { raw ->
+            CurveInstrument.entries.firstOrNull { it.name == raw.trim().uppercase() }
+                ?: throw IllegalArgumentException("curve '$index': instrument '$raw' is not DEPOSIT, FRA or SWAP")
+        } ?: CurveInstrument.DEPOSIT
+        return CurveQuote.of(
+            kind,
+            requireNotNull(tenor) { "curve '$index': every quote needs a 'tenor'" },
+            requireNotNull(rate) { "curve '$index': every quote needs a 'rate'" },
+        )
+    }
 
     private fun parseDate(raw: String): LocalDate = try {
         LocalDate.parse(raw)

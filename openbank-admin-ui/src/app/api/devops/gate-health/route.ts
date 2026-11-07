@@ -5,15 +5,14 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { createGateHealthSnapshotReader, validateGateHealthSnapshotData } from '@/lib/evidence/gateHealthSnapshot'
 
 export const dynamic = 'force-dynamic'
+const runtimeSnapshot = createGateHealthSnapshotReader()
 
-// Read-only consumer of a build-time snapshot (ADR-0255, mirrors ADR-0061's DORA route
-// exactly). collect-gate-health.mjs runs inside admin-ui-deploy.yml's build job — which
-// holds a `permissions: actions: read` GITHUB_TOKEN scoped to that one job and gone before
-// this image ever runs — and writes gate-health.json. This pod never calls the GitHub API
-// and never holds a token: `available: false` on a missing/stale snapshot, never a live
-// fallback call from here.
+// Runtime evidence is published independently of the application image. The BFF
+// verifies the selector and content digest; its last-good and bundled fallbacks
+// carry explicit provenance. GitHub credentials remain in the producer job.
 
 interface GateSummary {
   id: string
@@ -70,13 +69,25 @@ async function readSnapshot(): Promise<GateHealthSnapshot | null> {
 }
 
 export async function GET() {
+  const runtime = await runtimeSnapshot.read()
+  const headers = { 'Cache-Control': 'private, no-store' }
+  if (runtime.snapshot) {
+    return NextResponse.json({ ...runtime.snapshot, evidence: {
+      state: runtime.status, reason: runtime.error, provenance: runtime.provenance,
+    } }, { headers })
+  }
   const snapshot = await readSnapshot()
-  if (!snapshot || !snapshot.available) {
+  if (!validateGateHealthSnapshotData(snapshot)) {
     return NextResponse.json({
       available: false,
-      reason: snapshot?.reason ?? 'gate-health.json not found — collector has not run yet',
+      reason: runtime.error ?? snapshot?.reason ?? 'No verified Gate Health snapshot is available',
       collectedAt: snapshot?.collectedAt ?? null,
-    })
+      evidence: { state: 'unavailable' },
+    }, { headers })
   }
-  return NextResponse.json(snapshot)
+  // A bundled compatibility snapshot is never represented as a fresh runtime publication.
+  return NextResponse.json({ ...snapshot, evidence: {
+    state: runtime.status === 'disabled' ? 'bundled' : 'stale',
+    reason: runtime.error ?? 'Bundled compatibility snapshot; runtime publisher is not configured',
+  } }, { headers })
 }

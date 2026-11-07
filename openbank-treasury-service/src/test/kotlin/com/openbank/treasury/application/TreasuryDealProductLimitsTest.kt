@@ -21,6 +21,7 @@ import com.openbank.treasury.domain.model.ProductLimit
 import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.infrastructure.LegWireJackson
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -45,7 +46,7 @@ class TreasuryDealProductLimitsTest {
         override suspend fun findById(id: String) = all.find { it.id == id }
         override suspend fun list() = all
     }
-    private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+    private val mapper = LegWireJackson.register(ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule()))
     private var productLimits: ProductLimitPolicy = DealFixtures.permissiveProductLimits
     private val service get() =
         TreasuryDealService(

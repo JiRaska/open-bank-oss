@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { loadDocsIndex } from '@/lib/services/docs'
+import { DocsDiscoveryIncompleteError, loadDocsIndex } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 
 // Docs-as-Service index proxy.
@@ -25,7 +25,15 @@ export async function GET(
   const langCookie = (await cookies()).get(LANG_COOKIE)?.value
   const lang = langQuery ?? langCookie ?? 'en'
 
-  const index = await loadDocsIndex(name, lang)
+  let index
+  try {
+    index = await loadDocsIndex(name, lang)
+  } catch (error) {
+    if (error instanceof DocsDiscoveryIncompleteError) {
+      return NextResponse.json({ error: 'service discovery incomplete', service: name }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
+    }
+    throw error
+  }
   if (!index) {
     return NextResponse.json(
       { error: 'docs not available', service: name },

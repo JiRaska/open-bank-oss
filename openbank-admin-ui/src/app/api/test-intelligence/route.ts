@@ -4,8 +4,15 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { NextResponse } from 'next/server'
-import type { EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
-import { enforceRuntimeFreshness } from '@/lib/test-intelligence-freshness'
+import type { EvidenceObservation, EvidenceState, TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import { enforceRuntimeFreshness, runtimeFreshnessState } from '@/lib/test-intelligence-freshness'
+import { executionEvidenceTotals } from '@/lib/test-intelligence-execution-evidence.mjs'
+import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshotCache'
+import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
+import { loadRunningCommits } from '@/lib/evidence/runningCommits'
+import { createEvidenceSnapshotReader, type EvidenceSnapshotResult } from '@/lib/evidence/publishedSnapshot'
+import { testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from '@/lib/evidence/testIntelligenceSnapshot'
+import { buildEvidenceMeta, etagOf, ifNoneMatchHits, overlayRunningEvidence } from '@/lib/evidence/overlay'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
 
@@ -182,6 +189,21 @@ async function queryPrometheus(base: string, query: string): Promise<number | nu
   } catch { return null }
 }
 
+/** The verdict a journey projects onto a covered component, dated by the RUN it describes.
+ *  A k6 journey with no live observation (no Prometheus, or no CronJob selector) carries only
+ *  the published snapshot's state, which is not a current observation: it projects `unknown`,
+ *  never a carried green. The date is the last successful run for a pass and the newest
+ *  completed run otherwise — never the query time, which would make every row look fresh. */
+function projectedVerdict(journey: TestIntelligenceReport['syntheticJourneys'][number]): Pick<EvidenceObservation, 'state' | 'observedAt'> {
+  if (journey.executor === 'github-actions') {
+    return { state: runtimeFreshnessState(journey.state, journey.ci?.observedAt), observedAt: journey.ci?.observedAt ?? null }
+  }
+  if (!journey.live) return { state: 'unknown', observedAt: null }
+  const newestRun = [...(journey.live.recentRuns ?? [])].map(run => run.observedAt).sort().at(-1) ?? null
+  const observedAt = journey.state === 'passed' ? journey.live.lastSuccessfulAt : newestRun
+  return { state: runtimeFreshnessState(journey.state, observedAt), observedAt }
+}
+
 async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
   const base = prometheusBase()
   const nowSeconds = Date.now() / 1000
@@ -202,7 +224,7 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
     // journey look healthy again while its last successful run was still nominally fresh.
     const failureWindowSeconds = freshnessLimitSeconds(journey.schedule)
     const journeyTag = cronjob.slice('journey-'.length)
-    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Ms, worstChecksRate] = await Promise.all([
+    const [scheduled, successful, failures, activeJobs, recentRunsResult, worstP95Seconds, worstChecksRate] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
       // kube-state-metrics continues exporting terminal Job status until the Job is garbage
@@ -242,7 +264,9 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
         performance: {
           source: 'prometheus' as const,
           windowSeconds: failureWindowSeconds,
-          worstP95Ms,
+          // k6's Prometheus remote-write exports durations in SECONDS (public-edge reads ~0.05,
+          // i.e. 52 ms). Rendered unconverted, every journey showed "0 ms" or "1 ms".
+          worstP95Ms: worstP95Seconds === null ? null : Math.round(worstP95Seconds * 1_000_000) / 1000,
           worstCheckPassRatePercent: worstChecksRate === null ? null : Math.round(worstChecksRate * 10_000) / 100,
         },
       },
@@ -283,15 +307,51 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
       observedAt: journey.live?.observedAt ?? journey.ci?.observedAt ?? control.observedAt,
     }
   })
+  // Project every ACTIVE journey's live verdict onto the components it `covers`, so the
+  // matrix's synthetic column reads the same state the Synthetics tab does. Without this the
+  // column was structurally empty: journeys lived only in their own table (2026-10-31,
+  // "synthetic 0/74" with nine journeys running). A planned journey proves nothing and adds
+  // no row; a journey whose run never happened projects `not-run`, never a pass.
+  const syntheticByComponent = new Map<string, EvidenceObservation[]>()
+  for (const journey of syntheticJourneys) {
+    if (journey.status !== 'active') continue
+    for (const component of journey.covers ?? []) {
+      const rows = syntheticByComponent.get(component) ?? []
+      rows.push({
+        kind: 'synthetic',
+        ...projectedVerdict(journey),
+        source: `journey:${journey.id}`,
+        environment: journey.environment ?? 'sandbox',
+        detail: `${journey.title} — ${journey.executor === 'github-actions' ? 'browser synthetic (GitHub Actions)' : 'k6 CronJob in the sandbox cluster'}.`,
+      })
+      syntheticByComponent.set(component, rows)
+    }
+  }
+  const components = report.components.map(component => {
+    const projected = syntheticByComponent.get(component.component)
+    if (!projected) return component
+    const kept = component.evidence.filter(item => !(item.kind === 'synthetic' && item.source.startsWith('journey:')))
+    return { ...component, evidence: [...kept, ...projected] }
+  })
+  // The freshness pass ran before this projection, so the headline totals must be recomputed
+  // over the projected rows too — otherwise a red journey shows in the matrix but not in them.
+  const evidence = components.flatMap(component => component.evidence)
+  const { componentsWithExecutionEvidence, missingEvidence } = executionEvidenceTotals(components)
   return {
-    ...report, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
-    ...(requiredControls ? {
-      requiredControls,
-      totals: {
-        ...report.totals,
+    ...report, components, syntheticJourneys, performance: [...report.performance, ...runtimePerformance],
+    ...(requiredControls ? { requiredControls } : {}),
+    totals: {
+      ...report.totals,
+      componentsWithExecutionEvidence,
+      failingEvidence: evidence.filter(item => item.state === 'failed').length,
+      missingEvidence,
+      staleEvidence: evidence.filter(item => item.state === 'stale').length,
+      unknownEvidence: evidence.filter(item => item.state === 'unknown').length,
+      unresolvedEvidence: evidence.filter(item => ['unknown', 'not-run', 'blocked'].includes(item.state)).length,
+      ...(requiredControls ? {
         requiredControlGaps: requiredControls.filter(control => control.state !== 'passed').length,
-      },
-    } : {}),
+      } : {}),
+    },
   }
 }
 
@@ -426,11 +486,37 @@ function attachAiEvalAssurance(report: TestIntelligenceReport): TestIntelligence
   } catch { return report }
 }
 
-export async function GET(): Promise<NextResponse> {
+type DatasetResult = EvidenceSnapshotResult<TestIntelligenceReport>
+
+function datasetMeta(result: DatasetResult) {
+  return {
+    status: result.status,
+    sourceSha: result.provenance?.sourceSha ?? null,
+    runId: result.provenance?.runId ?? null,
+    runAttempt: result.provenance?.runAttempt ?? null,
+    snapshot: result.provenance?.snapshot ?? null,
+    sha256: result.provenance?.sha256 ?? null,
+    collectedAt: result.provenance?.collectedAt ?? null,
+    expiresAt: result.provenance?.expiresAt ?? null,
+    pointerExpired: result.provenance?.pointerExpired ?? null,
+    snapshotAgeMs: result.provenance?.snapshotAgeMs ?? null,
+    ...(result.error ? { error: result.error } : {}),
+  }
+}
+
+async function assembleReport(file: string, publishedReader: ReturnType<typeof createEvidenceSnapshotReader<TestIntelligenceReport>>): Promise<{
+  report: TestIntelligenceReport; runningKnown: boolean; dataset: ReturnType<typeof datasetMeta>
+}> {
+  const published = await publishedReader.read()
+  const dataset = datasetMeta(published)
+  if (published.status === 'unavailable') {
+    const report = emptyReport(`Published Test Intelligence snapshot unavailable: ${published.error ?? 'no validated snapshot'}`)
+    return { report, runningKnown: false, dataset }
+  }
   try {
-    const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
+    const parsed = published.snapshot ?? JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
     if (parsed.schemaVersion !== 1 || !Array.isArray(parsed.components)) {
-      return NextResponse.json(emptyReport('Unsupported test-intelligence report schema'))
+      return { report: emptyReport('Unsupported test-intelligence report schema'), runningKnown: false, dataset }
     }
     const compatible = {
       ...parsed, history: parsed.history ?? [], performanceHistory: parsed.performanceHistory ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [], clientExperiences: parsed.clientExperiences ?? [],
@@ -440,10 +526,47 @@ export async function GET(): Promise<NextResponse> {
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
       })),
     }
-    const current = enforceRuntimeFreshness(compatible)
+    // Running commits come from ONE Kubernetes list call, never from the services (#13201).
+    const running = await loadRunningCommits().catch(() => null)
+    const joined = await overlayRunningEvidence(compatible, running, (component, commit) => commitEvidence.read(component, commit))
+    const current = enforceRuntimeFreshness(joined)
     const withJourneys = await attachLiveJourneys(current)
-    return NextResponse.json(attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), { headers: { 'Cache-Control': 'no-store' } })
+    return { report: attachAiEvalAssurance(await attachLiveClientExperience(withJourneys)), runningKnown: running !== null, dataset }
   } catch {
-    return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
+    return { report: emptyReport(published.status === 'stale'
+      ? `Published Test Intelligence snapshot stale and no usable snapshot was available: ${published.error ?? 'unknown reason'}`
+      : 'test-intelligence.json is not bundled'), runningKnown: false, dataset }
   }
+}
+
+// One assembled report per snapshot file, refreshed at most every CACHE_TTL_MS however many
+// viewers poll: the Prometheus/Tempo/Kubernetes/store fan-out is paid per TTL, not per request.
+const CACHE_TTL_MS = 30_000
+const commitEvidence = createCommitEvidenceReader()
+type AssembledReport = { report: TestIntelligenceReport; runningKnown: boolean; dataset: ReturnType<typeof datasetMeta> }
+const caches = new Map<string, SnapshotCache<AssembledReport>>()
+function cacheFor(file: string) {
+  const baseUrl = testIntelligenceSnapshotBaseUrl()
+  const key = `${file}\0${baseUrl ?? '<disabled>'}`
+  let cache = caches.get(key)
+  if (!cache) {
+    const publishedReader = createEvidenceSnapshotReader({
+      baseUrl,
+      validateSnapshot: validateTestIntelligenceSnapshot,
+      collectedAt: testIntelligenceCollectedAt,
+    })
+    cache = createSnapshotCache({ load: () => assembleReport(file, publishedReader), ttlMs: CACHE_TTL_MS })
+    caches.set(key, cache)
+  }
+  return cache
+}
+
+export async function GET(req: Request): Promise<Response> {
+  const { value, producedAt } = await cacheFor(reportFile()).get()
+  const payload = JSON.stringify({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt, value.dataset) })
+  const etag = etagOf(payload)
+  // `no-cache` = always revalidate; an unchanged poll is a bodyless 304.
+  const headers = { 'Cache-Control': 'private, no-cache', ETag: etag }
+  if (ifNoneMatchHits(req.headers.get('if-none-match') ?? null, etag)) return new Response(null, { status: 304, headers })
+  return new NextResponse(payload, { headers: { ...headers, 'Content-Type': 'application/json' } })
 }

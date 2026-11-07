@@ -105,6 +105,20 @@ spine of adverse-action defensibility in ADR-0142.
   approach outgrows hand-maintained cards; the schema here is deliberately
   MLflow-mappable so the move is mechanical.
 
+## Amendment 2026-10-21: typed-decision models (ADR-0348)
+
+[ADR-0348](0348-typed-decision-models-a-third-inference-class-for-calibrated-schema-bound-triage-decisions.md) adds a model class that is not an ONNX artifact: an external or
+self-hosted typed-decision model behind `TypedDecisionPort`. It is governed here all the same:
+
+- **A model card is required before first use, shadow included.** It records the provider class
+  (never the commercial name in tracked files, ADR-0348 D9), the model version the adapter pins, the
+  output schema and its `schemaVersion`, the threshold policy version, the residency `sensitivity`,
+  and the latest calibration result.
+- **The content-addressed artifact and in-toto attestation do not apply** when the weights are not
+  ours to hash. The card pins the provider's model version instead, and an unpinned
+  "latest" version is a card violation: a silent upstream model change is a model change.
+- `DecisionRecord.engine` (ADR-0322) resolves to this card exactly as it does for an ONNX model.
+
 ## Alternatives considered
 
 - **Artifacts in an object store, no registry.** Status quo if we did nothing.

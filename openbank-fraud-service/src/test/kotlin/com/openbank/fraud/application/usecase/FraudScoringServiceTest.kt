@@ -14,6 +14,7 @@ import com.openbank.fraud.domain.model.PayeeHistory
 import com.openbank.fraud.domain.model.ScoreRequest
 import com.openbank.fraud.domain.model.VelocityAggregate
 import com.openbank.fraud.domain.model.VelocityWindow
+import com.openbank.fraud.domain.rules.FraudThresholdFixtures
 import com.openbank.libs.domain.feature.OnlineFeatureStore
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -54,6 +55,8 @@ class FraudScoringServiceTest {
             // throws UninitializedPropertyAccessException. relaxed: these tests assert scoring
             // behaviour, not the fraud-hold side effect (see FraudHoldServiceTest for that).
             it.fraudHoldService = mockk(relaxed = true)
+            // ADR-0347: the active threshold set is read per score; these suites run on the seed.
+            it.thresholdRepo = mockk { coEvery { findActive(any()) } returns FraudThresholdFixtures.SEED_V1 }
         }
 
     private fun request(accountId: UUID = UUID.randomUUID()) = ScoreRequest(

@@ -18,6 +18,7 @@
         "body": {
           "currencyCode": "CZK",
           "id": "11111111-2222-4333-8444-555555555555",
+          "openedAt": "2026-03-01T08:30:00Z",
           "partyId": "66666666-7777-4888-8999-aaaaaaaaaaaa",
           "productId": "99999999-8888-4777-8666-555555555555",
           "status": "ACTIVE"
@@ -27,6 +28,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.openedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.status": {
               "combine": "AND",
               "matchers": [

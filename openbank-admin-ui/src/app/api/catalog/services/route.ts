@@ -5,16 +5,15 @@
 import { NextResponse } from 'next/server'
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveAdminUiContent } from '@/lib/evidence/contentSource'
 
 export const dynamic = 'force-dynamic'
 
-// Serves the code-derived service catalog (ADR-0029 D3). The build bakes
-// catalog.json via scripts/generate-catalog.mjs (mirrors test-results.json /
-// cost-report.json); this route hands it to the admin-ui catalog page as a
-// static, point-in-time snapshot — replacing the hand-maintained SERVICES array.
-// READ-ONLY consumer (rule #3): never recomputed at runtime. If the snapshot is
-// absent the route 200s with an empty, honest envelope (available:false), so the
-// page degrades calmly instead of leaking a raw error.
+// Serves the code-derived service catalog (ADR-0029 D3). Prefer the validated,
+// independently published reviewed-source snapshot; use catalog.json from the
+// image only as an explicitly labeled stale fallback. This is a read-only
+// consumer (rule #3), never recomputed at runtime. If neither source is present,
+// return the honest empty envelope (available:false).
 
 interface CatalogService {
   name: string
@@ -51,14 +50,16 @@ const UNAVAILABLE: Catalog = {
 }
 
 export async function GET() {
-  try {
-    const raw = await fs.readFile(catalogFile(), 'utf-8')
-    const parsed = JSON.parse(raw) as Catalog
-    if (Array.isArray(parsed?.services)) {
-      return NextResponse.json({ ...parsed, available: true }, { headers: { 'Cache-Control': 'no-store' } })
-    }
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  } catch {
-    return NextResponse.json(UNAVAILABLE, { headers: { 'Cache-Control': 'no-store' } })
-  }
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.catalog as unknown as Catalog,
+    async () => {
+      try { return JSON.parse(await fs.readFile(catalogFile(), 'utf-8')) as Catalog } catch { return null }
+    },
+  )
+  const catalog = resolved.value
+  const available = Boolean(catalog && Array.isArray(catalog.services))
+  return NextResponse.json(
+    { ...(available ? catalog : UNAVAILABLE), available, contentSource: resolved.contentSource },
+    { headers: { 'Cache-Control': 'no-store' } },
+  )
 }

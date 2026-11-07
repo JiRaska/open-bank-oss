@@ -80,7 +80,7 @@ class DurableAgentAuditPublisherTest {
             CompletableFuture.failedFuture(IllegalStateException("broker unavailable"))
         every { outbox.failed(any(), any()) } returns 1
 
-        AgentAuditOutboxDispatcher(outbox, emitterInstance, true).dispatch()
+        AgentAuditOutboxDispatcher(outbox, emitterInstance, true, java.time.Duration.ofSeconds(5)).dispatch()
 
         verify { outbox.failed(id, match { it.contains("broker unavailable") }) }
         verify(exactly = 0) { outbox.published(any()) }
@@ -90,7 +90,7 @@ class DurableAgentAuditPublisherTest {
     fun `disabled dispatcher does not resolve an unconfigured outgoing channel`(): Unit = runBlocking {
         val emitterInstance = mockk<Instance<Emitter<Record<String, String>>>>()
 
-        AgentAuditOutboxDispatcher(outbox, emitterInstance, false).dispatch()
+        AgentAuditOutboxDispatcher(outbox, emitterInstance, false, java.time.Duration.ofSeconds(5)).dispatch()
 
         verify(exactly = 0) { outbox.claim(any()) }
         verify(exactly = 0) { emitterInstance.get() }

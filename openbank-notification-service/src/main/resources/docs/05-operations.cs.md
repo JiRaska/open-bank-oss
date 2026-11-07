@@ -84,6 +84,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 1. Je výprava zastavená? `GET /api/v1/ops/dispatch` — pokud `state=HALTED`, operátor sáhl po break-glass. Obnovte přes four-eyes (`/resume/propose` + *jiný* aktér `/approve`).
 2. Zkontrolujte consumer lag na `openbank.notification.requests`; zkontrolujte logy `NotificationConsumer` na parse/processing chyby.
 3. EMAIL zaseknutý v `PENDING`/`FAILED`? Ověřte SMTP (`quarkus.mailer.*`); v dev je mailer mockovaný.
+   Který kanál drží řádky bez výsledku, ukáže `openbank_notification_pending_stale_by_channel{channel=...}`: řádky PENDING starší než 15 minut rozdělené podle kanálu (`EMAIL`, `PUSH`, `INBOX`). Součet kanálů odpovídá `openbank_notification_pending_stale`. Hodnota `-1` znamená, že dotaz selhal, ne nula řádků. Čtení produkční tabulky není potřeba.
 4. PUSH `FAILED` s "no active devices"? Party nemá žádné ACTIVE `device_tokens`, nebo jsou FCM/APNs adaptéry vypnuté (pak je push no-op SENT).
 
 ### Zastavení / obnovení výpravy (break-glass)
@@ -109,3 +110,11 @@ Neparsovatelný payload se zaloguje a potvrdí (nezaklíní partition). Prozkoum
 - Per-service path-scoped CI; release-please vlastní `version.txt` (aktuálně `0.4.0`) a changelog z Conventional Commits.
 - CI běží testy proti izolovanému PostgreSQL na test JVM přes Testcontainers (#578); Kafka je v testech in-memory (jen `@Incoming` kanál), `@Scheduled` outbox tick je pod testem vypnutý.
 - CD přes ArgoCD při bumpu image tagu (GitOps); u konfliktů image tagu berte `--ours`.
+
+## Sdílené výchozí konfigurace
+
+Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
+
+## Sdílené závislosti sestavení
+
+Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.

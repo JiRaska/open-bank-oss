@@ -7,23 +7,14 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.quarkus.scheduler)
@@ -50,9 +41,7 @@ dependencies {
     implementation(libs.pdfbox)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // ADR-0063: document-service is a pact PROVIDER. Three merged services render documents
     // through this service's template list + preview endpoints (ADR-0248 #3) — sepa-payment and
@@ -61,11 +50,15 @@ dependencies {
     // each consumer's own WireMock/mock stub, written from the client and so unable to disagree
     // with it (the #2269 shape).
     testImplementation(libs.pact.provider)
+    // document-service is also a pact CONSUMER: party/address, CURRENT accounts and product
+    // fee data for rendering, plus POST consume of the document-signing SCA challenge.
+    // The four Document*PactConsumerTest classes pin those contracts; the SCA contract drives
+    // ScaVerificationAdapter through a mock-server client, not the production OIDC filter.
+    testImplementation(libs.pact.consumer)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
     // a domain-event payload, so this service's producer tests assert against the real contract
     // rather than a per-service restatement of it (#3914).
     testImplementation(project(":openbank-libs-testing"))
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)

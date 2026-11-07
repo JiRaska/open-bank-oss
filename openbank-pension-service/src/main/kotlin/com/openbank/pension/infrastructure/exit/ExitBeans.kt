@@ -28,6 +28,7 @@ import com.openbank.pension.application.port.`in`.PensionContractUseCase
 import com.openbank.pension.application.port.out.FundAdministrationPort
 import com.openbank.pension.application.port.out.ParticipantNotifier
 import com.openbank.pension.application.port.out.PensionContractRepository
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.domain.pack.JurisdictionPackRegistry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
@@ -66,8 +67,13 @@ class ExitBeans {
 
     @Produces
     @Singleton
-    fun exitContext(stores: ExitStores, gateways: ExitGateways, packs: JurisdictionPackRegistry, clock: Clock) =
-        ExitContext(stores, gateways, packs, clock)
+    fun exitContext(
+        stores: ExitStores,
+        gateways: ExitGateways,
+        packs: JurisdictionPackRegistry,
+        clock: Clock,
+        metrics: PensionMetrics,
+    ) = ExitContext(stores, gateways, packs, clock, metrics)
 
     @Produces
     @ApplicationScoped

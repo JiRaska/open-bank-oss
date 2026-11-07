@@ -10,17 +10,17 @@ package openbank.rest
 
 import rego.v1
 
-kyb := {"type": "HUMAN", "id": "service-account-openbank-kyb", "roles": ["ROLE_API"]}
+kyb := {"service_account": true, "client_id": "openbank-kyb", "type": "HUMAN", "id": "service-account-openbank-kyb", "roles": ["ROLE_API"]}
 
 interest := {"type": "HUMAN", "id": "service-account-openbank-interest", "roles": ["ROLE_API"]}
 
-other_api_sa := {"type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
+other_api_sa := {"service_account": true, "client_id": "openbank-mcp-service", "type": "HUMAN", "id": "service-account-openbank-mcp-service", "roles": ["ROLE_API"]}
 
-shared_api_only := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
+shared_api_only := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_API"]}
 
-kyc_analyst := {"type": "HUMAN", "id": "u-kyc", "roles": ["ROLE_KYC"]}
+kyc_analyst := {"service_account": false, "type": "HUMAN", "id": "u-kyc", "roles": ["ROLE_KYC"]}
 
-viewer := {"type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
+viewer := {"service_account": false, "type": "HUMAN", "id": "u-view", "roles": ["ROLE_VIEWER"]}
 
 # --- must-ALLOW: kyb's own principal, exactly its two actions ---
 
@@ -72,15 +72,15 @@ test_viewer_may_not_create_party if {
 # --- customer-edge is also a named party creator for individual onboarding ---
 
 test_edge_creates_party if {
-	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.create"}
+	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.create"}
 }
 
 test_edge_keeps_consent_update if {
-	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
+	"service-edge-party-m2m" in allowed_reasons with input as {"principal": {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_API"]}, "action": "party.consent.update"}
 }
 
 # #10486 batch 8
-b8deleg_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+b8deleg_sa(id) := {"service_account": true, "client_id": trim_prefix(id, "service-account-"), "type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
 
 test_b8deleg_own_identity_reads if {
 	every action in {"party.mandate.read"} {
@@ -115,4 +115,49 @@ test_interest_granted_no_other_party_action if {
 test_interest_rule_is_identity_pinned if {
 	not allow.allow with input as {"principal": other_api_sa, "action": "party.amlProfile.read"}
 	not allow.allow with input as {"principal": shared_api_only, "action": "party.amlProfile.read"}
+}
+
+# --- must-ALLOW / must-DENY: tax-reporting's own principal, exactly the TIN boundary (ADR-0340 B1) ---
+
+tax_reporting := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_reads_party_tax_facts if {
+	allow.allow with input as {"principal": tax_reporting, "action": "party.reporting.taxFacts"}
+}
+
+test_tax_reporting_granted_no_other_party_action if {
+	every action in {"party.create", "party.update", "party.merge", "party.amlProfile.read", "party.mandate.grant", "party:resolve"} {
+		not allow.allow with input as {"principal": tax_reporting, "action": action}
+	}
+}
+
+test_tax_reporting_tax_facts_rule_is_identity_pinned if {
+	not allow.allow with input as {"principal": other_api_sa, "action": "party.reporting.taxFacts"}
+	not allow.allow with input as {"principal": shared_api_only, "action": "party.reporting.taxFacts"}
+	not allow.allow with input as {"principal": viewer, "action": "party.reporting.taxFacts"}
+}
+
+# Current PEP marker must be explicit true with the matching client. Absent is the
+# deliberate legacy ABI; explicit null is malformed and must not borrow that path.
+tax_reporting_guard_identity := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_current_and_absent_legacy_allowed if {
+	every principal in [tax_reporting_guard_identity, object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "openbank-tax-reporting"})] {
+		allow.allow with input as {"principal": principal, "action": "party.reporting.taxFacts"}
+	}
+}
+
+test_tax_reporting_explicit_null_marker_denied if {
+	not allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, {"service_account": null, "client_id": "openbank-tax-reporting"}), "action": "party.reporting.taxFacts"}
+}
+
+test_tax_reporting_false_or_bad_client_binding_denied if {
+	every changed in [
+		{"service_account": false, "client_id": "openbank-tax-reporting"},
+		{"service_account": true, "client_id": "another-client"},
+		{"service_account": true},
+		{"service_account": true, "client_id": "openbank-tax-reporting", "id": "service-account-another-client"},
+	] {
+		not allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "party.reporting.taxFacts"}
+	}
 }

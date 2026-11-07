@@ -331,13 +331,37 @@ def pr_triggered_job_names(root: pathlib.Path) -> set[str]:
     return job_names_for_event(root, "pull_request")
 
 
+SCRIPTS_DIR = ".github/scripts"
+# A tracked script that posts a commit status DECLARES the context it owns, as a module-level
+# constant. Matched at line start, so a mention in a docstring or comment does not count.
+_STATUS_CONTEXT_DECL = re.compile(r'^STATUS_CONTEXT\s*=\s*["\']([^"\']+)["\']', re.MULTILINE)
+
+
+def script_status_contexts(root: pathlib.Path) -> set[str]:
+    """Contexts satisfied by a commit STATUS a tracked script posts, not by a workflow job.
+
+    ADR-0343: the merge train posts `merge-train` through `POST /statuses/{sha}` on a PR head it
+    verified as part of a batch. No `pull_request` job emits that name, so the moment it became a
+    required context this gate would — correctly, under its original rule — red every PR. The
+    source of truth is the script's own `STATUS_CONTEXT = "..."` declaration, read here, never a
+    list in this file: delete the script and the context goes back to being orphaned.
+    """
+    out: set[str] = set()
+    for path in sorted((root / SCRIPTS_DIR).glob("*.py")):
+        try:
+            out.update(_STATUS_CONTEXT_DECL.findall(gatelib.read_text(path)))
+        except OSError:
+            continue
+    return out
+
+
 def findings(root: pathlib.Path, repo: str) -> tuple[list[str], list[str], int]:
     """Return (missing, unreachable_note, contexts_checked)."""
     contexts = required_contexts(repo)
     # Via the alias, NOT job_names_for_event directly: self_test() stubs this name, and calling
     # the underlying function instead would leave all 20 stubbed cases asserting nothing while
     # still passing. Found exactly that way when merge_group support was added (ADR-0272).
-    jobs = pr_triggered_job_names(root)
+    jobs = pr_triggered_job_names(root) | script_status_contexts(root)
     missing = [c for c in contexts if c not in jobs]
     return missing, contexts, len(contexts)
 
@@ -448,16 +472,43 @@ def self_test() -> int:
             if want_out in got:
                 fails.append(f"{label}: {want_out!r} must not be in {sorted(got)}")
 
+    # --- script-declared status contexts (ADR-0343) --------------------------------------
+    # Both directions: a declaration at line start counts, a mention in a comment or docstring
+    # does not, and the findings path must consult it (a stubbed-away scan would pass vacuously).
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        sd = root / SCRIPTS_DIR
+        sd.mkdir(parents=True)
+        (sd / "merge-train.py").write_text('"""posts STATUS_CONTEXT = "in-docstring" never"""\n'
+                                           'STATUS_CONTEXT = "merge-train"\n')
+        (sd / "other.py").write_text('# STATUS_CONTEXT = "commented-out"\nX = 1\n')
+        ran += ["status ctx: declared constant found", "status ctx: comment/docstring mention ignored"]
+        got = script_status_contexts(root)
+        if got != {"merge-train"}:
+            fails.append(f"script_status_contexts: want {{'merge-train'}}, got {got}")
+        ran.append("status ctx: findings consults the declaration")
+        orig_rc = globals()["required_contexts"]
+        globals()["required_contexts"] = lambda repo: ["merge-train", "orphan"]
+        try:
+            missing, _, _ = findings(root, "owner/repo")
+        finally:
+            globals()["required_contexts"] = orig_rc
+        if missing != ["orphan"]:
+            fails.append(f"findings with a declared status context: want ['orphan'], got {missing}")
+
     # --- findings, with gh_api / required_contexts stubbed ------------------------------
     def case(label, contexts, jobs, want_missing):
         ran.append(label)
         orig_rc, orig_jn = globals()["required_contexts"], globals()["pr_triggered_job_names"]
+        orig_sc = globals()["script_status_contexts"]
         globals()["required_contexts"] = lambda repo: contexts
         globals()["pr_triggered_job_names"] = lambda root: jobs
+        globals()["script_status_contexts"] = lambda root: set()
         try:
             missing, _, n = findings(pathlib.Path("."), "owner/repo")
         finally:
             globals()["required_contexts"], globals()["pr_triggered_job_names"] = orig_rc, orig_jn
+            globals()["script_status_contexts"] = orig_sc
         if sorted(missing) != sorted(want_missing) or n != len(contexts):
             fails.append(f"{label}: want missing={want_missing}, got {missing} (n={n})")
 

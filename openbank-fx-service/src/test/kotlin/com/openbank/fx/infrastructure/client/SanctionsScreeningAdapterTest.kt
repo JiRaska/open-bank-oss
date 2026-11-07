@@ -5,8 +5,8 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningRole
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni

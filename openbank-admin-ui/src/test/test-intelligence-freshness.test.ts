@@ -104,6 +104,32 @@ describe('test-intelligence runtime required-control freshness', () => {
     expect(freshened.totals).toMatchObject({ requiredControls: 2, requiredControlGaps: 2 })
   })
 
+  it('does not call bundled green evidence current when the known running commit differs and its store entry is missing', () => {
+    const snapshot = report([control('passed', FRESH)])
+    snapshot.components[0].running = {
+      runningCommit: 'bbbbbbb', snapshotCommit: 'aaaaaaa', source: 'snapshot', match: false,
+      storeStatus: 'miss', latestEvidenceAt: FRESH, latestEvidenceAgeSeconds: 86_400,
+    }
+    snapshot.components[0].evidence.push({ kind: 'integration', state: 'failed', observedAt: OLD, source: 'run:v1', environment: 'ci' })
+
+    const freshened = enforceRuntimeFreshness(snapshot)
+
+    expect(freshened.components[0].evidence.map(item => item.state)).toEqual(['unknown', 'failed'])
+    expect(freshened.requiredControls?.[0].state).toBe('unknown')
+    expect(freshened.totals.failingEvidence).toBe(1)
+  })
+
+  it('marks old stable testcase summaries stale instead of evergreen', () => {
+    const snapshot = report()
+    snapshot.testCases = [{
+      fingerprint: 'case-1', component: 'openbank-ledger-service', kind: 'unit', classname: 'LedgerTest',
+      name: 'posts a payment', owner: '@openbank/core', state: 'stable', lastState: 'passed', observations: 3,
+      failureRate: 0, averageDurationMs: 20, wastedDurationMs: 0, sameCommitTransitions: 0, lastObservedAt: OLD,
+    }]
+
+    expect(enforceRuntimeFreshness(snapshot).testCases[0].state).toBe('stale')
+  })
+
   it('preserves reports that predate required controls', () => {
     const freshened = enforceRuntimeFreshness(report())
 

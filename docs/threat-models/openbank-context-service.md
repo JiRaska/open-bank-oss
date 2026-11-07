@@ -145,3 +145,17 @@ Scale the context deployment to zero to stop routes and projections; source serv
 paths continue independently. Before any real projection or audit record exists, migrations can be
 rolled back in reverse order. After adoption, retain projection, assignment and audit tables for
 evidence retention and rebuild a new generation instead of deleting the active one.
+
+
+## Interactive investigator classification on the custom policy boundary
+
+The custom purpose/assignment policy input carries a human classification only for a verified
+staff-realm JWT from the existing interactive-client allowlist, with a nonblank subject and
+human username. The realm template disables service accounts on those clients and supplies
+`preferred_username` through the profile mapper. Both machine-note keys (`client_id`, `clientId`)
+must be absent, even if their value is null, blank or malformed. An unfamiliar client, machine
+username, missing proof or unreadable claims stays machine-classified. Named-machine client
+binding is checked independently and is not inferred from a failed human check. Assignment,
+root scope, purpose, roles and disclosure-audit requirements are unchanged. Unit regressions
+prove classification and custom policy-input propagation; they do not prove JWT signatures,
+live issuer configuration, image deployment or Phase 2 rollout readiness.

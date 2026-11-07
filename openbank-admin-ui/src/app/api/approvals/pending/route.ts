@@ -12,6 +12,7 @@
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { serverSvcUrl } from '@/lib/services/bff'
+import { classifyApprovalRisk, type ApprovalRiskClass } from '@/lib/approvals/risk'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,8 +33,19 @@ type InboxItem = {
   maker: string | null
   makerActorKind?: MakerActorKind
   proposedAt: string | null
+  // ADR-0227 D1 canonical projection, widened for D3 filters. amount/currency are null for
+  // every source today (the maker's request body is not persisted) — the amount-band filter
+  // treats null as outside every band. riskClass is BFF-derived from rules.yaml action-class
+  // metadata (src/lib/approvals/risk.ts), never trusted from the wire.
+  summary: string | null
+  amount: string | null
+  currency: string | null
+  riskClass: ApprovalRiskClass
+  payloadRef: string | null
 }
 
+// The shared libs PendingApproval wire shape (all 19 shared-store ApprovalResources serve the
+// ADR-0227 D1 projection of it; the D1 fields are additive and absent from older deployments).
 type LendingApproval = {
   id: string
   action: string
@@ -41,6 +53,29 @@ type LendingApproval = {
   makerId: string | null
   makerActorKind?: string
   createdAt: string | null
+  summary?: string | null
+  amount?: string | null
+  currency?: string | null
+  payloadRef?: string | null
+}
+
+/**
+ * One canonical mapper for every shared-store source: provenance as served, D1 projection
+ * fields when the deployment serves them (null otherwise), and the BFF-side risk class
+ * derived from rules.yaml action-class metadata — the wire's own riskClass (always UNKNOWN
+ * server-side) is deliberately ignored.
+ */
+function inboxItemFromApproval(domain: InboxItem['domain'], r: LendingApproval): InboxItem {
+  return {
+    id: r.id, domain, action: r.action,
+    resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    makerActorKind: parseMakerActorKind(r.makerActorKind),
+    summary: r.summary ?? null,
+    amount: r.amount ?? null,
+    currency: r.currency ?? null,
+    riskClass: classifyApprovalRisk(domain, r.action),
+    payloadRef: r.payloadRef ?? null,
+  }
 }
 
 // sanctions-service serves the same libs `PendingApproval` shape as lending — one contract,
@@ -163,11 +198,7 @@ async function lendingPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as LendingApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'lending' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('lending', r)),
   }
 }
 
@@ -179,11 +210,7 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as SanctionsApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'sanctions' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('sanctions', r)),
   }
 }
 
@@ -195,11 +222,7 @@ async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as TransactionApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'transaction' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('transaction', r)),
   }
 }
 
@@ -211,11 +234,7 @@ async function domesticPaymentPending(headers: HeadersInit): Promise<SourceResul
   const rows = (await res.json()) as DomesticPaymentApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'domestic-payment' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('domestic-payment', r)),
   }
 }
 
@@ -227,11 +246,7 @@ async function clearingPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as ClearingApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'clearing' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('clearing', r)),
   }
 }
 
@@ -250,11 +265,7 @@ async function fxPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as FxApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'fx' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('fx', r)),
   }
 }
 
@@ -266,11 +277,7 @@ async function ledgerPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as LedgerApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'ledger' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('ledger', r)),
   }
 }
 
@@ -282,11 +289,7 @@ async function swiftPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as SwiftApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'swift' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('swift', r)),
   }
 }
 
@@ -298,11 +301,7 @@ async function sepaPaymentPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as SepaPaymentApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'sepa-payment' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('sepa-payment', r)),
   }
 }
 
@@ -317,11 +316,7 @@ async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as SepaInstantApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'sepa-instant' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('sepa-instant', r)),
   }
 }
 
@@ -333,11 +328,7 @@ async function notificationPending(headers: HeadersInit): Promise<SourceResult> 
   const rows = (await res.json()) as NotificationApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'notification' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('notification', r)),
   }
 }
 
@@ -349,11 +340,7 @@ async function partyPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as PartyApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'party' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('party', r)),
   }
 }
 
@@ -365,11 +352,7 @@ async function accountPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as AccountApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'account' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('account', r)),
   }
 }
 
@@ -381,11 +364,7 @@ async function consentPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as ConsentApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'consent' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('consent', r)),
   }
 }
 
@@ -397,11 +376,7 @@ async function balancePending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as BalanceApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'balance' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('balance', r)),
   }
 }
 
@@ -413,11 +388,7 @@ async function billingPending(headers: HeadersInit): Promise<SourceResult> {
   const rows = (await res.json()) as BillingApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'billing' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('billing', r)),
   }
 }
 
@@ -442,6 +413,11 @@ async function delegationPending(headers: HeadersInit): Promise<SourceResult> {
       resourceId: r.delegationId,
       maker: r.proposedBy,
       proposedAt: r.proposedAt,
+      summary: null,
+      amount: null,
+      currency: null,
+      riskClass: classifyApprovalRisk('delegation', `delegation.${r.operation.toLowerCase()}`),
+      payloadRef: null,
     })),
   }
 }
@@ -459,11 +435,7 @@ async function communicationPending(headers: HeadersInit): Promise<SourceResult>
   const rows = (await res.json()) as CommunicationApproval[]
   return {
     state: 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain: 'communication' as const, action: r.action,
-      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => inboxItemFromApproval('communication', r)),
   }
 }
 
@@ -482,6 +454,9 @@ async function treasuryPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.dealId, domain: 'treasury' as const, action: `treasury.${r.product}`,
       resourceId: r.dealId, maker: r.submittedBy, proposedAt: r.history.filter(h => h.to === 'PENDING_APPROVAL').pop()!.at,
+      summary: null, amount: null, currency: null,
+      riskClass: classifyApprovalRisk('treasury', `treasury.${r.product}`),
+      payloadRef: null,
     })),
   }
 }
@@ -502,6 +477,9 @@ async function ledgerBackfillPending(headers: HeadersInit): Promise<SourceResult
     items: body.requests.filter(r => r.state === 'PROPOSED').map(r => ({
       id: r.id, domain: 'ledger-backfill' as const, action: 'lending.ledgerBackfill.decide',
       resourceId: r.id, maker: r.proposedBy, proposedAt: r.proposedAt,
+      summary: null, amount: null, currency: null,
+      riskClass: classifyApprovalRisk('ledger-backfill', 'lending.ledgerBackfill.decide'),
+      payloadRef: null,
     })),
   }
 }
@@ -518,6 +496,9 @@ async function compliancePackPending(headers: HeadersInit): Promise<SourceResult
   return { state: 'ok', items: rows.map(r => ({
     id: r.id, domain: 'compliance-pack' as const, action: 'lending.compliancePack.activate',
     resourceId: r.id, maker: r.proposedBy, proposedAt: r.proposedAt,
+    summary: null, amount: null, currency: null,
+    riskClass: classifyApprovalRisk('compliance-pack', 'lending.compliancePack.activate'),
+    payloadRef: null,
   })) }
 }
 
@@ -533,6 +514,9 @@ async function campaignPending(headers: HeadersInit): Promise<SourceResult> {
   return { state: 'ok', items: rows.filter(r => r.state === 'PENDING_APPROVAL').map(r => ({
     id: r.id, domain: 'campaign' as const, action: 'campaign.activate',
     resourceId: r.id, maker: r.createdBy, proposedAt: r.updatedAt,
+    summary: null, amount: null, currency: null,
+    riskClass: classifyApprovalRisk('campaign', 'campaign.activate'),
+    payloadRef: null,
   })) }
 }
 
@@ -549,6 +533,9 @@ async function audiencePending(headers: HeadersInit): Promise<SourceResult> {
   return { state: 'ok', items: rows.filter(r => r.state === 'PENDING_APPROVAL').map(r => ({
     id: `${r.name}@${r.version}`, domain: 'audience' as const, action: 'campaign.audience.approve',
     resourceId: `${r.name}@${r.version}`, maker: r.createdBy, proposedAt: null,
+    summary: null, amount: null, currency: null,
+    riskClass: classifyApprovalRisk('audience', 'campaign.audience.approve'),
+    payloadRef: null,
   })) }
 }
 
@@ -567,6 +554,9 @@ async function identityCasePending(headers: HeadersInit): Promise<SourceResult> 
   return { state: 'ok', items: rows.filter(r => r.status === 'AWAITING_SECOND_APPROVAL').map(r => ({
     id: r.id, domain: 'identity-case' as const, action: 'identity.case.secondApproval',
     resourceId: r.id, maker: r.firstApprover, proposedAt: r.firstAt,
+    summary: null, amount: null, currency: null,
+    riskClass: classifyApprovalRisk('identity-case', 'identity.case.secondApproval'),
+    payloadRef: null,
   })) }
 }
 
@@ -584,11 +574,10 @@ async function operatorApprovalsPending(
   // The queue is bounded at 50: a full page may hide older requests, so never report it complete.
   return {
     state: rows.length >= 50 ? 'unavailable' : 'ok',
-    items: rows.map(r => ({
-      id: r.id, domain, action: r.action,
-      resourceId: r.resourceId ?? null, maker: r.makerId ?? null, proposedAt: r.createdAt ?? null,
-      makerActorKind: parseMakerActorKind(r.makerActorKind),
-    })),
+    items: rows.map(r => {
+      const item = inboxItemFromApproval(domain, r)
+      return { ...item, resourceId: r.resourceId ?? null, maker: r.makerId ?? null, proposedAt: r.createdAt ?? null }
+    }),
   }
 }
 
@@ -611,6 +600,9 @@ async function agentPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'agent' as const, action: r.suggestedAction,
       resourceId: null, maker: r.proposedBy, proposedAt: r.proposedAt,
+      summary: null, amount: null, currency: null,
+      riskClass: classifyApprovalRisk('agent', r.suggestedAction),
+      payloadRef: null,
     })),
   }
 }

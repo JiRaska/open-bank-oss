@@ -164,9 +164,9 @@ class TemplateWireFormatTest {
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(6)
+        assertThat(cells).hasSize(7)
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
-        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0040", "r0181", "r0183", "r0360", "r0380")
+        assertThat(cells.map { it["rowRef"] }).contains("r0010", "r0030", "r0040", "r0181", "r0183", "r0360", "r0380")
         assertThat(cells.map { it["colRef"] }).containsOnly("c0010")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
         // Official F 01.01 r0380 total assets — proves the cell is really derived from the ledger
@@ -178,7 +178,7 @@ class TemplateWireFormatTest {
     }
 
     @Test
-    fun `the XBRL CSV preflight is ready when the governed mapping is complete and the trial balance agrees`() {
+    fun `the XBRL CSV preflight is ready when the trial balance agrees and datapoint ids are verified`() {
         val json = getJson("/api/v1/finrep/templates/F01.01/xbrl-csv/preflight", LocalDate.of(2026, 6, 30))
 
         assertThat(json.keys).containsExactlyInAnyOrder(

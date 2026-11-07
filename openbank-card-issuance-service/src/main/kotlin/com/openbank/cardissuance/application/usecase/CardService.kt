@@ -10,6 +10,7 @@ import com.openbank.cardissuance.application.port.out.*
 import com.openbank.cardissuance.domain.event.*
 import com.openbank.cardissuance.domain.model.*
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.security.logfmtValue
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -336,7 +337,7 @@ class CardService(
         auditLog.infof(
             "card secure-details access cardId=%s operator=%s result=%s detail=%s at=%s",
             query.cardId,
-            query.requestedBy,
+            query.requestedBy.logfmtValue(),
             result,
             detail,
             Instant.now(clock),

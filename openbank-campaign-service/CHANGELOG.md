@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.42.2](https://github.com/JiRaska/open-bank-oss/compare/campaign-service-v0.42.1...campaign-service-v0.42.2) (2026-11-06)
+
+
+### Bug Fixes
+
+* **campaign:** wire the PDP producer and gate sidecar-without-bean ([#14597](https://github.com/JiRaska/open-bank-oss/issues/14597)) ([0943bd5](https://github.com/JiRaska/open-bank-oss/commit/0943bd548c720fccababb26b844b23afd93ce8d6)), closes [#9105](https://github.com/JiRaska/open-bank-oss/issues/9105)
+
+## [0.42.1](https://github.com/JiRaska/open-bank-oss/compare/campaign-service-v0.42.0...campaign-service-v0.42.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **campaign:** opt in to the OPA sidecar PolicyDecisionPoint producer ([#14819](https://github.com/JiRaska/open-bank-oss/issues/14819)) ([5a66690](https://github.com/JiRaska/open-bank-oss/commit/5a666908d1277d7b4c6cb7ad739fefe52a882b2c))
+
+## [0.42.0](https://github.com/JiRaska/open-bank-oss/compare/v0.41.0...v0.42.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
 ## [0.41.0](https://github.com/JiRaska/open-bank-oss/compare/v0.40.4...v0.41.0) (2026-10-14)
 
 

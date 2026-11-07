@@ -22,6 +22,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
 import java.util.UUID
 
@@ -82,6 +83,23 @@ class PensionContractRepositoryImpl(
         } else {
             find("status = ?1 order by createdAt desc", status.name).page(0, limit).list()
         }
+    }
+
+    /**
+     * Free-text staff search over the contract row plus the payment-reference table. Native SQL
+     * because the references table has no Hibernate entity (it is written through the raw-sql
+     * [com.openbank.pension.infrastructure.persistence.funding.PgContractReferences]); the status
+     * clause interpolates only an enum constant, everything else is bound.
+     */
+    override suspend fun search(query: String, status: ContractStatus?, limit: Int): List<PensionContract> = loadAll {
+        Panache.getSession().flatMap { session -> findSearchIds(session, query, status, limit) }
+            .flatMap { ids ->
+                if (ids.isEmpty()) {
+                    Uni.createFrom().item(emptyList<PensionContractEntity>())
+                } else {
+                    find("contractId in ?1 order by createdAt desc", ids).list()
+                }
+            }
     }
 
     /** Each row with its own strategy history (bounded by the caller's page size). */
@@ -170,10 +188,46 @@ class PensionContractRepositoryImpl(
     data class BeneficiaryRow(val name: String, val partyId: String?, val sharePercent: BigDecimal) {
         fun toDomain() = Beneficiary(name, partyId?.let(UUID::fromString), sharePercent)
     }
-
-    private fun Beneficiary.toRow() = BeneficiaryRow(name, partyId?.toString(), sharePercent)
 }
+
+/** The storage row of a beneficiary designation (file-level to keep the repository class small). */
+private fun Beneficiary.toRow() = PensionContractRepositoryImpl.BeneficiaryRow(name, partyId?.toString(), sharePercent)
 
 /** A contract write lost a race (ADR-0334 S8): 409 to a caller, a fresh-read retry for an activity. */
 class ConcurrentContractUpdateException(id: UUID, stored: Int, expected: Int) :
     IllegalStateException("contract $id changed concurrently (version $stored, expected $expected)")
+
+/**
+ * The native SQL behind [PensionContractRepository.search]: matching contract ids from the
+ * contract row plus the payment-reference table. Native because the references table has no
+ * Hibernate entity (it is written through the raw-sql PgContractReferences); the status clause
+ * interpolates only an enum constant, everything else is bound. File-level, not a member, to
+ * keep the repository class under the TooManyFunctions threshold.
+ */
+private fun findSearchIds(
+    session: Mutiny.Session,
+    query: String,
+    status: ContractStatus?,
+    limit: Int,
+): Uni<List<UUID>> {
+    val pattern = "%${query.trim().lowercase()}%"
+    val digits = query.filter(Char::isDigit)
+    val statusClause = status?.let { " AND status = '${it.name}'" } ?: ""
+    return session.createNativeQuery<UUID>(
+        """
+        SELECT contract_id FROM pension_contracts
+        WHERE (lower(contract_id::text) LIKE :pattern
+           OR lower(participant_party_id::text) LIKE :pattern
+           OR lower(product_line) LIKE :pattern
+           OR replace(participant_birth_date::text, '-', '') LIKE :digits
+           OR contract_id IN (SELECT contract_id FROM pension_contract_references
+                              WHERE lower(reference) LIKE :pattern))
+        $statusClause
+        ORDER BY created_at DESC
+        """.trimIndent(),
+        UUID::class.java,
+    ).setParameter("pattern", pattern)
+        .setParameter("digits", if (digits.isEmpty()) "___no_match___" else "%$digits%")
+        .setMaxResults(limit)
+        .resultList
+}

@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Fraud Service API
-  version: 1.2.0
+  version: 1.3.0
   description: >-
     Real-time transaction fraud scoring (ADR-0084). Returns a verdict
     (ALLOW/CHALLENGE/REVIEW/DECLINE) for a payment intent. Phase 1 is a deterministic, versioned
@@ -17,6 +17,11 @@ servers:
     description: Local development
 tags:
   - name: Fraud
+  - name: Fraud thresholds
+    description: >-
+      Four-eyes administration of the money thresholds the amount-based rules compare against
+      (ADR-0347). Rule logic stays code; only the figures are data. Requires ROLE_RISK,
+      ROLE_COMPLIANCE or ROLE_ADMIN; the approver must differ from the proposer.
 
 paths:
   /api/v1/fraud/review-queue:
@@ -60,6 +65,122 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/fraud/thresholds/active:
+    get:
+      tags: [Fraud thresholds]
+      operationId: getActiveFraudThresholds
+      summary: The threshold set the scoring engine uses now
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: The active set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActiveFraudThresholds'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: >-
+            No set is active. Scoring is then failing closed: every amount rule returns REVIEW
+            and verdicts carry the reason `threshold-set-unavailable`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/fraud/thresholds/proposals:
+    post:
+      tags: [Fraud thresholds]
+      operationId: proposeFraudThresholds
+      summary: Propose a new threshold-set version (maker)
+      description: >-
+        Records a PROPOSED version. It changes no verdict until a different principal approves
+        it. An identical retry of a still-pending proposal returns that proposal.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeFraudThresholdsRequest'
+      responses:
+        '201':
+          description: Proposal recorded (or replayed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudThresholdProposal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/fraud/thresholds/proposals/pending:
+    get:
+      tags: [Fraud thresholds]
+      operationId: listPendingFraudThresholds
+      summary: Proposals awaiting a checker
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Pending proposals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FraudThresholdProposal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/fraud/thresholds/proposals/{id}/decide:
+    post:
+      tags: [Fraud thresholds]
+      operationId: decideFraudThresholds
+      summary: Approve or reject a proposal (checker, must differ from the maker)
+      description: >-
+        Approval puts the set in force from the later of its effectiveFrom and the approval
+        instant, on every replica at once (scoring reads the table, nothing is cached).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideFraudThresholdsRequest'
+      responses:
+        '200':
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudThresholdProposal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Four-eyes violation — the checker is the proposer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
 components:
   securitySchemes:
@@ -143,6 +264,68 @@ components:
           type: string
           description: Version of the rule set that produced the verdict
           example: "v0"
+
+    ThresholdsByRule:
+      type: object
+      description: >-
+        Rule key (`large-single-transaction`, `velocity-h1-amount`, `new-payee-high-amount` —
+        all three required, no others) to a map of ISO 4217 currency code to a positive decimal
+        STRING with at most 4 decimals. A currency left out of a rule fails closed (REVIEW) for
+        that rule.
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: string
+      example:
+        large-single-transaction: { CZK: "500000", EUR: "20000" }
+        velocity-h1-amount: { CZK: "1000000", EUR: "40000" }
+        new-payee-high-amount: { CZK: "250000", EUR: "10000" }
+
+    ActiveFraudThresholds:
+      type: object
+      required: [version, thresholds, contentHash]
+      properties:
+        version: { type: integer }
+        thresholds: { $ref: '#/components/schemas/ThresholdsByRule' }
+        contentHash: { type: string, description: SHA-256 over the canonical content }
+
+    ProposeFraudThresholdsRequest:
+      type: object
+      required: [version, thresholds]
+      properties:
+        version:
+          type: integer
+          description: Must exceed every live (proposed/approved/executed) version
+        effectiveFrom:
+          type: string
+          format: date-time
+          nullable: true
+          description: Not in the past. Omitted = in force on approval.
+        thresholds: { $ref: '#/components/schemas/ThresholdsByRule' }
+
+    DecideFraudThresholdsRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+        reason: { type: string, nullable: true }
+
+    FraudThresholdProposal:
+      type: object
+      required: [id, version, state, thresholds, contentHash, proposedBy, proposedAt]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: integer }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED] }
+        thresholds: { $ref: '#/components/schemas/ThresholdsByRule' }
+        contentHash: { type: string }
+        effectiveFrom: { type: string, format: date-time, nullable: true }
+        activeFrom: { type: string, format: date-time, nullable: true }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
 
     ApiError:
       type: object

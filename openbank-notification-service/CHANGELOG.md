@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.0...notification-service-v0.40.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* **notification:** attribute stale PENDING notifications to their channel ([#14767](https://github.com/JiRaska/open-bank-oss/issues/14767)) ([d2b9562](https://github.com/JiRaska/open-bank-oss/commit/d2b9562d0dd34b928370c3512d3e2dce914d4f5d))
+
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.1...notification-service-v0.40.0) (2026-11-05)
+
+
+### Features
+
+* **notification:** keyset-page party history with exact unread counts ([#14621](https://github.com/JiRaska/open-bank-oss/issues/14621)) ([f2ba664](https://github.com/JiRaska/open-bank-oss/commit/f2ba664b02f8d51529787dd65d2c24b083154b97)), closes [#12216](https://github.com/JiRaska/open-bank-oss/issues/12216)
+
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.39.0...notification-service-v0.39.1) (2026-10-18)
+
+
+### Security
+
+* **notification:** reserve commstemplate.publish for ROLE_COMMS_APPROVER ([#13133](https://github.com/JiRaska/open-bank-oss/issues/13133)) ([de2b093](https://github.com/JiRaska/open-bank-oss/commit/de2b0936fd079f9affd5f24b4eaf7532c54d6f55))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.38.0...notification-service-v0.39.0) (2026-10-17)
+
+
+### Features
+
+* **campaign:** bound bulk admission and define communication governance ([#12166](https://github.com/JiRaska/open-bank-oss/issues/12166)) ([2693719](https://github.com/JiRaska/open-bank-oss/commit/2693719ec0e122f9d019a9c7b6b8b8246437e950))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.1...notification-service-v0.38.0) (2026-10-16)
+
+
+### Features
+
+* **approval:** ADR-0227 D1 canonical ApprovalItem + D3 inbox amount/risk/age filters ([#12768](https://github.com/JiRaska/open-bank-oss/issues/12768)) ([5cc84e1](https://github.com/JiRaska/open-bank-oss/commit/5cc84e195a86d8453e3af84d73d70329940cd006))
+
 ## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.37.0...notification-service-v0.37.1) (2026-10-14)
 
 

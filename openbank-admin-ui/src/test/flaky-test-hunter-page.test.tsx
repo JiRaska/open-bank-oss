@@ -89,7 +89,23 @@ describe('Flaky Test Hunter findings page', () => {
     expect(screen.queryByRole('button', { name: /Run check now/i })).not.toBeInTheDocument()
   })
 
-  it('shows only proven admission and never invents a current workflow state', async () => {
+  it('keeps unavailable findings unknown and links to current CI evidence', async () => {
+    mockRoles = [ROLES.ADMIN]
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ findings: [], available: false }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      }),
+    ))
+
+    await act(async () => { renderPage() })
+
+    await waitFor(() => expect(screen.getByText('Findings and workflow completion status are unavailable.')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: 'Open CI test evidence' })).toHaveAttribute('href', '/system/tests')
+    expect(screen.queryByText('No active findings — the last sweep found nothing.')).not.toBeInTheDocument()
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+  })
+
+  it('shows Temporal execution status only after the service confirms the workflow handle', async () => {
     mockRoles = [ROLES.ADMIN]
     const requestedOn = new Date().toISOString().slice(0, 10)
     const workflowId = `flaky-test-hunter-check-operator_manual-${requestedOn}`
@@ -99,6 +115,12 @@ describe('Flaky Test Hunter findings page', () => {
         expect(init?.method).toBe('POST')
         return new Response(JSON.stringify({ workflowId }), {
           status: 202,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url === `/api/iaops/flaky-test-hunter/workflows/${workflowId}`) {
+        return new Response(JSON.stringify({ workflowId, status: 'RUNNING' }), {
+          status: 200,
           headers: { 'content-type': 'application/json' },
         })
       }
@@ -118,11 +140,14 @@ describe('Flaky Test Hunter findings page', () => {
     await waitFor(() => expect(screen.getByText(
       `The request was admitted as workflow ${workflowId}. This does not prove whether the workflow is running or already complete.`,
     )).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('RUNNING')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/iaops/flaky-test-hunter/trigger', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ requestedOn }),
     }))
-    expect(screen.getByText('Accepted')).toBeInTheDocument()
+    expect(screen.getByText('Last observed workflow status')).toBeInTheDocument()
+    expect(screen.getByText('RUNNING')).toBeInTheDocument()
+    expect(screen.getByText(/Last observed: \d{4}-\d{2}-\d{2}T/)).toBeInTheDocument()
     expect(screen.queryByText(/Check completed/i)).not.toBeInTheDocument()
     expect(trigger).toBeEnabled()
   })

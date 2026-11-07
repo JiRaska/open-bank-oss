@@ -14,6 +14,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.TestProfile
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * cost of the other spelling). Same shape as ledger's and transaction's negative twins.
  */
 @QuarkusTest
+@TestProfile(DocumentProviderProfile::class)
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)
 @Provider("openbank-document-service")
 @PactFolder("../pacts")

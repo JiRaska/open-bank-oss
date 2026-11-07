@@ -43,7 +43,7 @@ allowed_reasons contains "operator-interest-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {"interest.create", "interest.trigger", "interest.delete"}
 }
 
@@ -90,6 +90,6 @@ allowed_reasons contains "interest-oversight-read" if {
 # caller and fails closed for any FUTURE service account too. Keyed on the action set, not a
 # principal allowlist — a new backend client must never silently gain interest writes.
 prohibited if {
-	startswith(input.principal.id, "service-account-")
+	machine_grant_ok
 	input.action in {"interest.create", "interest.trigger", "interest.delete"}
 }

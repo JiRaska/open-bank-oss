@@ -56,7 +56,7 @@ test.describe('Consent lookup recovery', () => {
     await expect(page.getByText(/Failed to load: Consents|Načtení selhalo: Souhlasy/)).toBeVisible()
     expect(requests).toBe(successfulRequests + 1)
 
-    await page.getByLabel(/Grantee ID|ID grantee/).fill('different-service:auditing')
+    await page.getByLabel(/Consent recipient|Příjemce souhlasu/).fill('different-service:auditing')
     await lookup.click()
 
     await expect(page.getByText('Verified Marketing Service')).toBeHidden()

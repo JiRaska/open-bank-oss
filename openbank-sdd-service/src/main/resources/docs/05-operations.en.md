@@ -96,3 +96,25 @@ The `MandateExpiryScheduler` cron is **disabled by default** (`openbank.sdd.expi
 - Per-service CI builds a fast-jar and a container image (host-side `quarkusBuild`, not in-Docker Gradle — see CLAUDE.md GitOps rules).
 - **Release** is automatic via release-please from Conventional Commits (scope `sdd`). Do not hand-edit `version.txt` / `CHANGELOG.md`. `version.txt` is currently `0.2.0`; `quarkus.application.version` in `application.yaml` is `0.1.1` (a known drift — these are reconciled by the `bump` skill on the next change).
 - **Flyway** runs at start (`migrate-at-start: true`); `validate-on-migrate` is off and connection retries are configured for cold-start ordering against the DB.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Collection debit booking
+
+The collection-debit consumer books the debit through the shared `TransactionClient` facade of the generated `openbank-client-transaction` module (ADR-0319). Only a readable COMPLETED transaction counts as debited; any other 2xx state (FAILED, in progress, unreadable) is thrown as completion-uncertain and retried with the same idempotency key. A 409 is an idempotent success. A refusal (400/422) throws `SddDebitFailedException` so the event reaches the DLQ. Any other answer or a dropped connection is thrown and retried with the same idempotency key. No configuration changed.
+
+Before retry logging, completion-uncertain exceptions retain only their controlled status and discard body-binding causes that can contain provider payloads. Retry counts and original idempotency keys remain unchanged. Other exception logging and the shared response-close logger remain outside this bounded guarantee.
+
+## Test coverage floor
+
+`koverVerify` enforces a LINE coverage floor of 40%, the money-path baseline in `rules.yaml: coverage.money_path_floor` (raised from 38 in #13144). Measured coverage on 2026-10-31 was 78.8% (472/599 lines). The floor is ratchet-only.
+
+## API identity on the mTLS listener
+
+In production, `/api/*` accepts only bearer authentication, on both the plain HTTP listener and the client-authenticated mTLS listener, and requires an authenticated caller. A trusted client certificate is required for the TLS handshake on the mTLS listener but is transport authentication only: it cannot replace the caller's OIDC bearer token, so a certificate without a bearer receives HTTP 401. `GET /api/v1/info` and `GET /api/v1/config` remain public metadata. Route roles and OPA still decide what an authenticated caller may do. `SddListenerAuthParityIT` uses the production listener shape and verifies over real HTTP that a certificate-only request receives 401.

@@ -10,6 +10,17 @@ Perpetual-KYC slice 1 podle [ADR 0256](../../../../docs/adr/0256-perpetual-kyc-e
 4. **Trvalé selhání** — 429/503/timeout z coordinatoru zaznamená trigger `OPEN_FAILED` a po vyčerpání pokusů outbox řádek `KYC_COORDINATOR_OPEN_FAILED` ve STEJNÉ transakci jako změnu stavu. Chybějící `CASE_COORDINATOR_URL` namapuje každý trigger na trvalou cestu `NOT_CONFIGURED` — nikdy na tiché přeskočení.
 5. **Retry** — `ScreeningTriggerRetryJob` opakuje řádky `OPEN_FAILED` po backoffu, takže se smyčka uzavře, když se coordinator zotaví.
 
+## HTTP výsledky koordinátoru
+
+Adaptér pro otevření AML případu klasifikuje mapované HTTP chyby uvnitř stávající hranice opakování:
+
+- `201` otevře případ pouze tehdy, když odpověď obsahuje neprázdné `caseId`. Chybějící identifikátor se odmítne.
+- `409` znamená, že koordinátor případ již eviduje (`AlreadyExists`); volání se neopakuje.
+- Ostatní deterministické odpovědi `4xx`, včetně `400` a `403`, se odmítnou bez opakování. Výjimkou je `429`, které zůstává opakovatelné.
+- `429`, `5xx` a transportní chyby zachovávají stávající omezené opakování: nejvýše tři HTTP pokusy na jedno volání adaptéru. Circuit breaker a timeout mohou volání ukončit dříve. Tento limit je oddělený od rozpočtu trvalé obnovy triggeru popsaného níže.
+
+Odpovědi poskytovatele se po klasifikaci uzavírají, včetně odpovědí získaných z mapovače výjimek REST klienta. Detaily chybového výsledku obsahují pouze HTTP status nebo typ výjimky, nikdy tělo odpovědi poskytovatele, URL ani zprávu výjimky. Klasifikace zachovává stávající trvalé zpracování triggerů; nezapíná screeningové triggery ani nemění idempotenci koordinátoru.
+
 ## Známá granularita v1
 
 Kandidátní množina **není** rozsahovaná per položka diffu: kyc-service neuchovává mapování strana ↔ položka seznamu, takže v1 triggeruje na strany s neukončeným KYC případem při každé publikaci diffu (omezeno knihou rozpracovaných případů). Per-entry rozsahování vyžaduje index strana ↔ matched-entry (follow-up slice); trigger řádky si celý diff pro audit uchovají tak jako tak.

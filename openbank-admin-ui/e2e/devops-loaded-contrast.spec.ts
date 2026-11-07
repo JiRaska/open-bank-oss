@@ -10,9 +10,9 @@ for (const theme of ['light', 'dark'] as const) {
     await page.route('**/api/devops/dora', route => route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({
-        overall: 'elite',
+        overall: null,
         metrics: {
-          deploymentFrequency: { level: 'elite', perDay: 2, description: null },
+          deploymentFrequency: { level: null, perDay: 2, count30d: 60, description: '2.00 merged changes/day (proxy)', note: 'Proxy: first-parent git commits; deploy events are not collected.' },
           leadTime: { level: 'high', hours: 12, description: null },
           changeFailureRate: { level: 'medium', pct: 10, description: null },
           mttr: { level: 'low', hours: 8, description: null },
@@ -26,7 +26,10 @@ for (const theme of ['light', 'dark'] as const) {
     }))
 
     await page.goto('/devops', { waitUntil: 'domcontentloaded' })
-    await expect(page.locator('#main-content')).toContainText('Elite')
+    await expect(page.locator('#main-content')).toContainText('Merged Changes (proxy)')
+    await expect(page.locator('#main-content')).toContainText('2.00 merged changes/day (proxy)')
+    await expect(page.locator('#main-content')).not.toContainText('Overall DORA Performance')
+    await expect(page.locator('#main-content')).not.toContainText('deployments in last 30 days')
     await page.waitForTimeout(400)
     const scan = await new AxeBuilder({ page }).include('#main-content').withRules(['color-contrast']).analyze()
     expect(scan.violations.flatMap(violation => violation.nodes.map(node => ({

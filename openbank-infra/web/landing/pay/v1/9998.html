@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Zaplatit QR · OpenBank</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;background:#0b1420;color:#eaf2ec;margin:0;padding:28px 20px;line-height:1.5}
+  .card{max-width:420px;margin:0 auto;background:#121815;border:1px solid #243027;border-radius:16px;padding:22px}
+  h1{font-size:22px;margin:0 0 6px} p{margin:8px 0;color:#b7c3bb;font-size:15px}
+  .amt{font-size:30px;font-weight:700;color:#fff;margin:14px 0 4px;font-variant-numeric:tabular-nums}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:13px;color:#93a29a;word-break:break-all}
+  a.btn{display:block;text-align:center;background:#2bf59a;color:#04140c;font-weight:700;text-decoration:none;padding:14px;border-radius:12px;margin-top:18px}
+  .hint{font-size:13px;color:#93a29a;margin-top:14px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Zaplatit QR</h1>
+  <p>Načetl jsi platbu QR kódem, ale v telefonu není žádná aplikace, která ji umí otevřít.</p>
+  <div id="pay" hidden>
+    <div class="amt" id="amt"></div>
+    <div id="rn"></div>
+    <div class="mono" id="acc"></div>
+    <div id="msg" class="hint"></div>
+  </div>
+  <a class="btn" href="https://open-bank.tech/#app">Nainstalovat OpenBank</a>
+  <p class="hint">Údaje jsou jen z QR kódu a tato stránka je nikam neposílá. Platbu vždy zkontroluj v aplikaci banky.</p>
+</div>
+<script>
+(function(){
+  var q = location.search.slice(1); if (!q) return;
+  var s; try { s = decodeURIComponent(q); } catch (e) { return; }
+  if (s.indexOf('SPD*') !== 0) return;
+  var f = { ACC: '', AM: '', CC: '', RN: '', MSG: '', 'X-VS': '' };
+  s.split('*').slice(2).forEach(function(p){
+    var i = p.indexOf(':'); if (i <= 0) return;
+    var value = p.slice(i+1);
+    switch (p.slice(0,i).toUpperCase()) {
+      case 'ACC': f.ACC = value; break;
+      case 'AM': f.AM = value; break;
+      case 'CC': f.CC = value; break;
+      case 'RN': f.RN = value; break;
+      case 'MSG': f.MSG = value; break;
+      case 'X-VS': f['X-VS'] = value; break;
+    }
+  });
+  if (!f.ACC) return;
+  var t=function(id,v){ var el=document.getElementById(id); el.textContent=v||''; };
+  t('amt', f.AM ? (f.AM+' '+(f.CC||'')) : '');
+  t('rn', f.RN || 'Účet příjemce');
+  t('acc', f.ACC.split('+')[0]);
+  t('msg', [f.MSG, f['X-VS'] ? 'VS '+f['X-VS'] : ''].filter(Boolean).join(' · '));
+  document.getElementById('pay').hidden = false;
+})();
+</script>
+</body>
+</html>

@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
     client-id: openbank-services
@@ -57,11 +42,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -113,6 +93,9 @@ openbank:
     # Collisions with unrelated per-service batch jobs are not a consideration — different pods,
     # different databases. Quarkus cron is SIX fields (second minute hour day month weekday).
     analysis-cron: ${DEVOPS_ANALYSIS_CRON:0 30 3 * * ?}
+    # Opt-in read-only sampling; no deployment or CI mutations.
+    delivery-shadow-enabled: ${DEVOPS_DELIVERY_SHADOW_ENABLED:false}
+    delivery-shadow-cron: "0 */30 * * * ?"
     prometheus-url: ${PROMETHEUS_URL:http://prometheus-operated.observability:9090}
     alertmanager-url: ${ALERTMANAGER_URL:http://alertmanager-operated.observability:9093}
     # OpenAI-compatible model backend — DeepInfra + DeepSeek, same provider+model as the copilot

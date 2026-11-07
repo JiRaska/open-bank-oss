@@ -10,6 +10,9 @@ import com.sun.net.httpserver.HttpServer
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.InetSocketAddress
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -84,14 +87,14 @@ class UpstreamClientTest {
 
     @Test
     fun `cold token acquisition shares bounded get deadline with the party request`() {
-        withServer(tokenDelayMs = 200, serviceDelayMs = 400) { client, baseUrl, requests ->
+        withServer(tokenDelayMs = 800, serviceDelayMs = 1600, requestTimeoutMs = 8000) { client, baseUrl, requests ->
             val started = System.nanoTime()
-            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val response = client.get("$baseUrl/notifications", "party-9", 2000)
             val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             assertThat(response.status).isEqualTo(502)
-            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(elapsedMs).isLessThan(2_500)
             assertThat(tokenHits.get()).isEqualTo(1)
-            assertThat(requests.any { it.path == "/notifications" }).isTrue()
+            assertThat(requests.count { it.path == "/notifications" }).isEqualTo(1)
         }
     }
 
@@ -99,16 +102,18 @@ class UpstreamClientTest {
     fun `expired token refresh cannot restart bounded get deadline`() {
         withServer(
             tokenResponse = """{"access_token":"test-token","expires_in":0}""",
-            tokenDelayMs = 200,
-            serviceDelayMs = 400,
-        ) { client, baseUrl, _ ->
+            tokenDelayMs = 800,
+            serviceDelayMs = 1600,
+            requestTimeoutMs = 8000,
+        ) { client, baseUrl, requests ->
             assertThat(client.get("$baseUrl/notifications", "party-9").status).isEqualTo(200)
             val started = System.nanoTime()
-            val response = client.get("$baseUrl/notifications", "party-9", 500)
+            val response = client.get("$baseUrl/notifications", "party-9", 2000)
             val elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
             assertThat(response.status).isEqualTo(502)
-            assertThat(elapsedMs).isLessThan(1_000)
+            assertThat(elapsedMs).isLessThan(2_500)
             assertThat(tokenHits.get()).isEqualTo(2)
+            assertThat(requests.count { it.path == "/notifications" }).isEqualTo(2)
         }
     }
 
@@ -190,6 +195,127 @@ class UpstreamClientTest {
             val response = client.post("$baseUrl/reservations", "party-9", "{}", "stable-key")
 
             assertThat(response.getHeaderString(UpstreamClient.IDEMPOTENCY_REPLAY_HEADER)).isEqualTo("true")
+        }
+    }
+
+    @Test
+    fun `postToServiceWithQuery keeps query delimiters and braces inside query values`() {
+        withServer { client, baseUrl, requests ->
+            val opaque = "https://untrusted.invalid/path?partyId=other#{template}"
+            val response = client.postToServiceWithQuery(
+                baseUrl,
+                "/api/v1/game/levels/charles_bridge/completion",
+                mapOf("partyId" to "party-9", "proof" to opaque),
+                "party-9",
+                "{}",
+            )
+            assertThat(response.status).isEqualTo(200)
+            val request = requests.single()
+            assertThat(request.method).isEqualTo("POST")
+            assertThat(request.path).isEqualTo("/api/v1/game/levels/charles_bridge/completion")
+            assertThat(request.headers["x-customer-party-id"]).isEqualTo("party-9")
+            assertThat(request.body).isEqualTo("{}")
+            val query = request.rawQuery!!.split('&').associate {
+                val pair = it.split('=', limit = 2)
+                URLDecoder.decode(pair[0], StandardCharsets.UTF_8) to URLDecoder.decode(pair[1], StandardCharsets.UTF_8)
+            }
+            assertThat(query).containsExactlyInAnyOrderEntriesOf(mapOf("partyId" to "party-9", "proof" to opaque))
+        }
+    }
+
+    @Test
+    fun `postToServiceWithQuery with query rejects authority and path injection before fetching credentials`() {
+        withServer { client, baseUrl, requests ->
+            for ((base, path) in listOf(
+                "https://untrusted.invalid" to "/completion",
+                "$baseUrl@untrusted.invalid" to "/completion",
+                baseUrl to "//untrusted.invalid/completion",
+                baseUrl to "/completion?partyId=other",
+                baseUrl to "/completion#fragment",
+            )) {
+                assertThat(
+                    client.postToServiceWithQuery(base, path, mapOf("partyId" to "party-9"), "party-9", "{}").status,
+                )
+                    .isEqualTo(502)
+            }
+            assertThat(requests).isEmpty()
+            assertThat(tokenHits.get()).isZero()
+        }
+    }
+
+    @Test
+    fun `postToServiceWithQuery with query does not follow a redirect to another authority`() {
+        withServer(responseStatus = 302, responseHeaders = mapOf("Location" to "https://untrusted.invalid")) {
+                client,
+                baseUrl,
+                requests,
+            ->
+            assertThat(
+                client.postToServiceWithQuery(baseUrl, "/completion", mapOf("beta" to "true"), "party-9", "{}").status,
+            )
+                .isEqualTo(302)
+            assertThat(requests).hasSize(1)
+        }
+    }
+
+    @Test
+    fun `getToService preserves opaque cursor bytes and isolates query delimiters from authority`() {
+        val cursors = listOf(
+            "a b+c/%2F%25",
+            "https://untrusted.invalid/a?partyId=other&cursor=x#fragment",
+            "//untrusted.invalid/@target?x=y",
+            "{template}\r\nX-Other: value",
+            "příliš+žluťoučký",
+        )
+        withServer { client, baseUrl, requests ->
+            for (cursor in cursors) {
+                val response = client.getToService(
+                    baseUrl,
+                    "/api/v1/accounts",
+                    linkedMapOf("partyId" to "party-9", "cursor" to cursor),
+                    "party-9",
+                )
+                assertThat(response.status).isEqualTo(200)
+                val request = requests.last()
+                assertThat(request.path).isEqualTo("/api/v1/accounts")
+                assertThat(request.headers["x-customer-party-id"]).isEqualTo("party-9")
+                val query = request.rawQuery!!.split('&').associate {
+                    val pair = it.split('=', limit = 2)
+                    URLDecoder.decode(pair[0], StandardCharsets.UTF_8) to
+                        URLDecoder.decode(pair[1], StandardCharsets.UTF_8)
+                }
+                assertThat(query).containsExactlyInAnyOrderEntriesOf(mapOf("partyId" to "party-9", "cursor" to cursor))
+            }
+            assertThat(requests).hasSize(cursors.size)
+        }
+    }
+
+    @Test
+    fun `getToService refuses untrusted authorities and host-bearing paths before token acquisition`() {
+        withServer { client, baseUrl, requests ->
+            for ((base, path) in listOf(
+                "http://untrusted.invalid" to "/api/v1/accounts",
+                "$baseUrl@untrusted.invalid" to "/api/v1/accounts",
+                baseUrl to "//untrusted.invalid/accounts",
+                baseUrl to "/accounts?partyId=other",
+            )) {
+                assertThat(client.getToService(base, path, mapOf("cursor" to "opaque"), "party-9").status)
+                    .isEqualTo(502)
+            }
+            assertThat(requests).isEmpty()
+            assertThat(tokenHits.get()).isZero()
+        }
+    }
+
+    @Test
+    fun `getToService returns redirects without following their Location`() {
+        withServer(
+            responseStatus = 302,
+            responseHeaders = mapOf("Location" to "http://untrusted.invalid/accounts"),
+        ) { client, baseUrl, requests ->
+            assertThat(client.getToService(baseUrl, "/api/v1/accounts", mapOf("cursor" to "opaque"), "party-9").status)
+                .isEqualTo(302)
+            assertThat(requests).hasSize(1)
         }
     }
 
@@ -296,7 +422,13 @@ class UpstreamClientTest {
 
     // --- test harness ------------------------------------------------------------------
 
-    data class CapturedRequest(val method: String, val path: String, val headers: Map<String, String>, val body: String)
+    data class CapturedRequest(
+        val method: String,
+        val path: String,
+        val headers: Map<String, String>,
+        val body: String,
+        val rawQuery: String?,
+    )
 
     private val tokenHits = AtomicInteger(0)
 
@@ -310,12 +442,14 @@ class UpstreamClientTest {
         docBytes: ByteArray? = null,
         docContentType: String = "application/json",
         responseHeaders: Map<String, String> = emptyMap(),
+        responseStatus: Int = 200,
         tokenDelayMs: Long = 0,
         serviceDelayMs: Long = 0,
+        requestTimeoutMs: Long = 2000,
         block: (UpstreamClient, String, List<CapturedRequest>) -> Unit,
     ) {
         tokenHits.set(0)
-        val requests = mutableListOf<CapturedRequest>()
+        val requests = CopyOnWriteArrayList<CapturedRequest>()
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         server.createContext("/realms/openbank/protocol/openid-connect/token") { exchange ->
             tokenHits.incrementAndGet()
@@ -328,19 +462,18 @@ class UpstreamClientTest {
             }
         }
         server.createContext("/") { exchange ->
-            synchronized(requests) {
-                requests.add(
-                    CapturedRequest(
-                        method = exchange.requestMethod,
-                        path = exchange.requestURI.path,
-                        headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
-                        body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
-                    ),
-                )
-            }
+            requests.add(
+                CapturedRequest(
+                    method = exchange.requestMethod,
+                    path = exchange.requestURI.path,
+                    headers = exchange.requestHeaders.entries.associate { (k, v) -> k.lowercase() to v.first() },
+                    body = exchange.requestBody.readBytes().toString(Charsets.UTF_8),
+                    rawQuery = exchange.requestURI.rawQuery,
+                ),
+            )
             if (serviceDelayMs > 0) Thread.sleep(serviceDelayMs)
             responseHeaders.forEach { (name, value) -> exchange.responseHeaders.add(name, value) }
-            respond(exchange, 200, "application/json", "{}".toByteArray(Charsets.UTF_8))
+            respond(exchange, responseStatus, "application/json", "{}".toByteArray(Charsets.UTF_8))
         }
         server.start()
         try {
@@ -352,7 +485,7 @@ class UpstreamClientTest {
                 clientSecret = "test-secret"
                 tlsTrustCertificateFile = java.util.Optional.empty()
                 connectTimeoutMs = 2000
-                requestTimeoutMs = 2000
+                this.requestTimeoutMs = requestTimeoutMs
             }
             block(client, baseUrl, requests)
         } finally {

@@ -136,9 +136,20 @@ class CampaignJourneyMetricsTest {
 
     @BeforeEach
     fun setUp() {
+        coEvery { enrolments.findByCampaignAndParty(campaignId, partyId) } returns Enrolment(
+            id = UUID.randomUUID(),
+            campaignId = campaignId,
+            partyId = partyId,
+            state = EnrolmentState.ACTIVE,
+            currentStep = 1,
+            startedAt = Instant.now(),
+            completedAt = null,
+        )
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
+        coEvery { sendLog.reserveHandoff(any(), any(), any(), any(), any()) } just Runs
+        coEvery { sendLog.wasHandedOff(any()) } returns false
     }
 
     @Test

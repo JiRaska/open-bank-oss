@@ -60,6 +60,23 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
 
+  # ADR-0341: pension-fund-service's OWN machine identity for the one outbound call it makes - the
+  # pinned catalog revision read at fund creation. Keycloak client `openbank-pension-fund`
+  # (catalog:read scope, no realm role); never the shared openbank-services client.
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-pension-fund
+    credentials:
+      secret: ${OIDC_PENSION_FUND_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+
+  rest-client:
+    product-catalog:
+      url: ${PRODUCT_CATALOG_SERVICE_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 5000
+
 
   shutdown:
     timeout: 30S
@@ -89,6 +106,11 @@ quarkus:
     enabled: false
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   pension-fund:
     strategy-change:
       # Days between approval (participants notified) and the earliest effective date. A
@@ -98,7 +120,19 @@ openbank:
     enabled: true
     max-concurrent-requests: 100
   api:
-    version: "1"
+    version: "2"
+    # ADR-0048: unchanged v1 operations coexist with v2. The two legacy fund-definition writes
+    # are excluded by the owner-approved draft transition proposal; no revision is chosen for them.
+    deprecated-paths:
+      - /api/v1/funds
+      - /api/v1/navs
+      - /api/v1/strategies
+      - /api/v1/strategy-changes
+      - /api/v1/contracts
+      - /api/v1/reporting/funds
+      - /api/v1/position-classification-corrections
+    # Before an approved rollout, verify the actual sunset remains at least 180 days away.
+    sunset-date: "${PENSION_FUND_V1_SUNSET_DATE:Wed, 30 Jun 2027 00:00:00 GMT}"
   build:
     time: "${BUILD_TIME:unknown}"
   git:
@@ -107,9 +141,7 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
-  # an initializer, which a primitive would need.
-  timeout: "${OPA_TIMEOUT:PT0.5S}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
 
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
@@ -123,6 +155,8 @@ authz:
     oidc:
       tls:
         verification: none
+      enabled: false
+    oidc-client:
       enabled: false
   authz:
     enforce: "false"
@@ -139,11 +173,27 @@ authz:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
   authz:
     enforce: "false"
 
 "%prod":
   quarkus:
+    tls:
+      catalog-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/catalog-tls/tls.crt
+              key: /mnt/catalog-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/catalog-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      product-catalog:
+        tls-configuration-name: catalog-authority
     http:
       # Client authentication is fixed during Quarkus augmentation, not by deployment env.
       ssl:

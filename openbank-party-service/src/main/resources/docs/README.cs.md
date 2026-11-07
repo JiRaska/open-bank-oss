@@ -25,3 +25,9 @@ Tuto dokumentaci služba publikuje přímo na management endpointu `/q/openbank/
 - **Idempotence:** hlavička `Idempotency-Key` je povinná na `POST /api/v1/parties`; unikátní omezení na e-mail navíc deduplikuje party (409 při replay)
 - **Auth:** Keycloak OIDC, role `ROLE_VIEWER` / `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_KYC` / `ROLE_API`; OPA authz v advisory režimu (ADR-0034)
 - **Klasifikace dat:** `restricted` — služba drží PII (jméno, e-mail, telefon, adresu, národnost, DIČ). Není to money-path služba.
+
+## Odchozí HTTP consumer kontrakty
+
+Party-service publikuje dva HTTP consumer Pact kontrakty. `PartyAccountListPactConsumerTest` volá skutečný merge guard `AccountServiceClient` pro `GET /api/v1/accounts?partyId=...&limit=100`; ověřuje jeden aktivní účet, prázdnou stránku a propagaci anonymního 401. `PartyTransactionListPactConsumerTest` volá skutečný `PortabilityAggregationAdapter` pro `GET /api/v1/transactions?accountId=...&limit=200`; ověřuje stránku transakcí, prázdnou historii a odmítnutí 401 ukončující agregaci výjimkou `GdprAggregationAuthException`.
+
+Oba testy používají ručně napsané implementace REST-client rozhraní, které posílají HTTP požadavky na Pact mock server a deserializují odpovědi. Účetní a kartová závislost transakčního testu jsou lokální náhrady. Testy ověřují mapování a propagaci odmítnutí adaptérem, nikoli generovaný REST klient nebo získání tokenu. Commitované JSON kontrakty přehrávají provider folder testy account/transaction; anonymní interakce přehrávají samostatné negative-auth testy. Provider identitu dodává `@TestSecurity`. Fixture nedokládají ověření podpisu JWT/TLS, izolaci vlastnictví mezi klienty ani úplnost vícestránkového exportu. Stav prázdné historie záměrně nic nevkládá; broker a folder twin deklarují stejné názvy stavů.

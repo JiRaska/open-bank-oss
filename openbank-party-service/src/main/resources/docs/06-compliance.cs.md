@@ -6,7 +6,7 @@ party-service drží identitu zákazníka (PII) a životní cyklus KYC/AML, tak�
 
 | Regulace | Vztah k této službě | Implementace |
 |---|---|---|
-| **GDPR** (Nař. (EU) 2016/679) | Drží kanonický PII záznam o každém zákazníkovi | Endpoint Práva na výmaz (`DELETE /parties/{id}` → anonymizace + tombstone), minimalizace dat (žádné rodné číslo, vyhledávání jen podle jména), pole explicitního souhlasu (`gdpr_consent_at/version`), retenční okna |
+| **GDPR** (Nař. (EU) 2016/679) | Drží kanonický PII záznam o každém zákazníkovi | Endpoint Práva na výmaz (`DELETE /parties/{id}` → anonymizace + tombstone), minimalizace dat (rodné číslo jen jako blind index s přesnou shodou, identifikátory nikdy podle prefixu), pole explicitního souhlasu (`gdpr_consent_at/version`), retenční okna |
 | **AMLD** (4./5./6. AML směrnice) | Zaznamenává výsledky KYC + AML, PEP, rizikové hodnocení; pohání aktivační bránu | `kyc_status`/`aml_status`, dvouklíčová aktivační brána (v kódu, bez ADR), `pep_flag`, `risk_rating`, `next_review_due`, metadata sanctions kontroly; COMMENTy sloupců citují články |
 | **PSD2** (Nař. (EU) 2015/2366) | Identita pod účet/consent toky | party je read-only resolvována `account-service`; žádný přímý TPP přístup |
 | **FATCA / CRS** | Reporting daňové rezidence | sloupce `fatca_status`, `crs_status` na party |
@@ -35,7 +35,7 @@ party-service drží identitu zákazníka (PII) a životní cyklus KYC/AML, tak�
 
 ### Minimalizace dat
 
-- **Rodné číslo se zde nikdy neukládá ani není vyhledatelné** — pouze šifrované v `pid-service`.
+- **Rodné číslo se zde nikdy neukládá v čitelné podobě ani není vyhledatelné podle části** — šifrované je v `pid-service`; party-service drží jen jeho blind index (hash s pepperem), přes který vyhledávání dělá přesnou shodu 0/1.
 - Vyhledávání podle jména (ADR-0055) indexuje jen právní/obchodní název; odmítá prázdné/`*`/sub-2-znakové termy proti full-table enumeraci a vrací **minimalizovaný** souhrn.
 
 ### Toky dat ven
@@ -105,7 +105,7 @@ Každá mutace emituje doménový event na `openbank.party.events`, konzumovaný
 - ✅ Rate limiting (`openbank.rate-limit`, 150 souběžných)
 - ✅ Bezpečnostní hlavičky (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer/Permissions-Policy)
 - ✅ Tajemství musí být v prod přepsána (placeholdery `CHANGE_ME_LOCAL_DEV_ONLY` mají fail-fast záměr)
-- ✅ Minimalizace dat: rodné číslo mimo systém; vyhledávání jen podle jména
+- ✅ Minimalizace dat: rodné číslo jen jako blind index; identifikátory jen přesnou shodou, fuzzy vyhledávání jen podle jména
 - ✅ Poison-pill-safe Kafka consumer
 - ⚠️ OPA je advisory (zatím nevynucuje) — překlopení je pozdější fáze ADR-0034
 - ⚠️ Contract drift OpenAPI vs implementace — k narovnání (viz `03-api.md`)

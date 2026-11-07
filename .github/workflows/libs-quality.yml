@@ -1,0 +1,67 @@
+# SPDX-License-Identifier: Apache-2.0
+name: Libs compatibility and recovery
+
+on:
+  pull_request:
+    paths:
+      - ".github/scripts/pitest-libs-advisory.init.gradle"
+      - ".github/workflows/pitest.yml"
+      - "openbank-libs*/**"
+      - "fuzz/**"
+      - ".clusterfuzzlite/**"
+      - ".github/workflows/services-ci.yml"
+      - ".github/workflows/libs-quality.yml"
+      - ".github/workflows/libs-bench.yml"
+      - ".github/workflows/cflite-pr.yml"
+      - ".github/scripts/library_quality_scope.py"
+      - ".github/scripts/test_library_quality_scope.py"
+      - ".github/scripts/check_library_quality_evidence.py"
+      - ".github/scripts/test_library_quality_evidence.py"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/scripts/test_bench_ratchet.py"
+
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libs-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Library ABI and recovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          java-version: "25"
+          distribution: temurin
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+      - name: Build every library with ABI, coverage, recovery and old-consumer proofs
+        run: |
+          python3 .github/scripts/test_bench_ratchet.py
+          python3 .github/scripts/test_library_quality_scope.py
+          python3 .github/scripts/library_quality_scope.py > /tmp/library-proof-tasks
+          mapfile -t proof_tasks < /tmp/library-proof-tasks
+          ./gradlew "${proof_tasks[@]}" --continue --console=plain
+      - name: Enforce runtime mutation floor with unchanged targets
+        run: ./gradlew -I .github/scripts/pitest-libs-advisory.init.gradle :openbank-libs-runtime:pitest --console=plain
+      - name: Exercise the fuzz oracle on its corpus and deterministic mutations
+        run: ./gradlew -p fuzz/ossfuzz test --console=plain
+      - name: Upload compatibility and recovery evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libs-compatibility-recovery-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: |
+            openbank-libs-*/build/test-results/test/*.xml
+            fuzz/ossfuzz/build/test-results/test/*.xml
+            openbank-libs-runtime/build/reports/pitest/mutations.xml
+          if-no-files-found: error
+          retention-days: 30

@@ -53,3 +53,7 @@ or `openbank.ledger.tieout.cron` to `off` or `disabled` disables that trigger an
 omits its workflow-liveness heartbeat at startup. An absent heartbeat for a
 deliberately disabled job does not indicate a successful run. Other scheduler
 metrics retain their existing behavior.
+
+## Build-time wiring
+
+- **Four-eyes approval store.** `openbank.approval.store: redis` in `application.yaml` makes libs-runtime's `RedisApprovalStoreProducer` supply the Redis-backed `ApprovalStore`. It is read at build time; removing it removes the bean, and the service then fails `quarkusBuild` instead of silently running without four-eyes. The deployed Redis host comes from `QUARKUS_REDIS_HOSTS` on the workload, never the `localhost` default.

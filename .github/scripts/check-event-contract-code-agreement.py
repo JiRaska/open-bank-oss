@@ -29,7 +29,8 @@ For every `openbank-contracts/<service>/asyncapi.yaml` in the tree — the scope
 no list to maintain, and a contract added tomorrow is in scope the moment it is committed:
 
   A. CHANNELS vs PRODUCED TOPICS (both directions). Every `channels.*.address` must be a topic the
-     service produces (`mp.messaging.outgoing.*.topic` in its own `application.yaml`), and every
+     service produces (`mp.messaging.outgoing.*.topic` in its own `application.yaml` or a supported
+     Kafka Streams `to()` call with a literal/same-file constant topic), and every
      topic it produces must appear as a channel address. The second direction is the one the
      coverage ratchet cannot see at all: a contracted service that adds a SECOND topic still has
      "a contract file", so the ratchet passes and the new topic is undocumented.
@@ -85,6 +86,7 @@ Exit:   0 clean, 1 a contract disagrees with the code it claims to describe
 
 from __future__ import annotations
 
+import importlib.util
 import pathlib
 import re
 import sys
@@ -93,6 +95,15 @@ import gatelib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CONTRACTS_DIRNAME = "openbank-contracts"
+
+# Reuse the same conservative source evidence as the published fleet document checker.
+# Loading by file path keeps the hyphenated executable name and needs no third helper file.
+_streams_spec = importlib.util.spec_from_file_location(
+    "asyncapi_doc_discriminator", pathlib.Path(__file__).with_name("check-asyncapi-doc-discriminator.py")
+)
+assert _streams_spec is not None and _streams_spec.loader is not None
+_streams_checker = importlib.util.module_from_spec(_streams_spec)
+_streams_spec.loader.exec_module(_streams_checker)
 
 # Fields `DomainEvent` itself contributes to the serialized payload. `occurredAt` is a constructor
 # parameter of the base class and re-declared as an `override val` on every subclass, so it also
@@ -537,15 +548,16 @@ def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
 def produced_topics(service_dir: pathlib.Path) -> set[str]:
     import yaml
 
+    topics = _streams_checker.service_streams_topics(service_dir, "to")
     cfg = service_dir / "src" / "main" / "resources" / "application.yaml"
     if not cfg.is_file():
-        return set()
+        return topics
     try:
         doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
     except Exception:  # noqa: BLE001 - a malformed config is another gate's problem
-        return set()
+        return topics
     outgoing = (((doc.get("mp") or {}).get("messaging") or {}).get("outgoing")) or {}
-    return {
+    return topics | {
         _resolve_topic(c["topic"])
         for c in outgoing.values()
         if isinstance(c, dict) and isinstance(c.get("topic"), str)
@@ -660,7 +672,7 @@ def check_contract(path: pathlib.Path) -> list[str]:
         for extra in sorted(addresses - topics):
             errors.append(
                 f"{rel}: channel address `{extra}` is not a topic {service} produces. Its "
-                f"application.yaml declares: {sorted(topics) or 'none'}"
+                f"messaging config and supported Streams calls declare: {sorted(topics) or 'none'}"
             )
         for missing in sorted(topics - addresses):
             errors.append(
@@ -676,6 +688,11 @@ def check_contract(path: pathlib.Path) -> list[str]:
         declared.setdefault(literal, info)
     doc_names: set[str] = set()
     envelope_messages: dict[str, dict] = {}
+    payload_messages: dict[str, dict] = {}
+    source_text = "\n".join(
+        kt.read_text(encoding="utf-8", errors="replace")
+        for kt in sorted((service_dir / "src/main/kotlin").rglob("*.kt"))
+    ) if (service_dir / "src/main/kotlin").is_dir() else ""
     for key, msg in messages.items():
         if not isinstance(msg, dict):
             continue
@@ -697,7 +714,45 @@ def check_contract(path: pathlib.Path) -> list[str]:
                 )
                 continue
             envelope_messages[name] = info
-    ordinary_doc_names = doc_names - set(envelope_messages)
+
+        # Some outbox producers keep ce-type in a constant and serialise a plain data class; the
+        # type is deliberately absent from the body, so the literal-based class detector cannot
+        # associate them. Explicit evidence must name BOTH the wire literal and the payload class.
+        payload_class = msg.get("x-openbank-payload-class")
+        hand_built = msg.get("x-openbank-hand-built", False)
+        if payload_class is None and not hand_built:
+            continue
+        if envelope_class is not None or (payload_class is not None and hand_built):
+            errors.append(f"{rel}: message `{name}` has conflicting payload evidence markers.")
+            continue
+        if f'"{name}"' not in source_text and f"'{name}'" not in source_text:
+            errors.append(f"{rel}: message `{name}` has no source literal in {service}/src/main.")
+            continue
+        if hand_built is True and payload_class is None:
+            payload_messages[name] = {
+                "class": None,
+                "props": None,
+                "domain_event": False,
+                "path": f"{service}/src/main",
+            }
+            continue
+        if not isinstance(payload_class, str):
+            errors.append(f"{rel}: message `{name}` has invalid explicit payload evidence.")
+            continue
+        info = parse_named_data_class(service_dir, payload_class)
+        if info is None:
+            errors.append(
+                f"{rel}: message `{name}` names `{payload_class}`, but no matching data class "
+                f"exists in {service}/src/main."
+            )
+            continue
+        extra = msg.get("x-openbank-extra-properties", [])
+        if not isinstance(extra, list) or not all(isinstance(p, str) and p for p in extra):
+            errors.append(f"{rel}: message `{name}` has invalid x-openbank-extra-properties.")
+            continue
+        info["props"] = set(info["props"]) | set(extra)
+        payload_messages[name] = info
+    ordinary_doc_names = doc_names - set(envelope_messages) - set(payload_messages)
     for name in sorted(ordinary_doc_names - set(declared)):
         errors.append(
             f"{rel}: message `{name}` is declared in the contract but no class in {service}/src/main "
@@ -744,7 +799,14 @@ def check_contract(path: pathlib.Path) -> list[str]:
         if not isinstance(msg, dict):
             continue
         name = msg.get("name") or key
-        info = envelope_messages.get(name) or declared.get(name)
+        if msg.get("x-openbank-payload-class") is not None or msg.get("x-openbank-hand-built", False):
+            info = payload_messages.get(name)
+        elif msg.get("x-openbank-envelope-class") is not None:
+            info = envelope_messages.get(name)
+        else:
+            # A derivative message can share ce-type with its source event while carrying a smaller
+            # payload (the oversight trigger). Never apply the source event's class to that body.
+            info = declared.get(name)
         if info is None:
             continue  # already reported by B; do not double-report
         if info["props"] is None:
@@ -1048,7 +1110,86 @@ def self_test() -> int:
         "no class",
     )
 
+    case(
+        "explicit payload class must exist",
+        "openbank-aml-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-aml-service" / "asyncapi.yaml",
+            "x-openbank-payload-class: AmlCaseCreatedEvent",
+            "x-openbank-payload-class: AmlCaseCreatedMissing",
+        ),
+        "no matching data class",
+    )
+    case(
+        "explicit payload class checks all documented fields",
+        "openbank-aml-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-aml-service" / "asyncapi.yaml",
+            "        customerReference:\n          type: string",
+            "        customerRef:\n          type: string",
+        ),
+        "does not carry",
+    )
+    case(
+        "producer-added fields must be declared explicitly",
+        "openbank-sanctions-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-sanctions-service" / "asyncapi.yaml",
+            "      x-openbank-extra-properties: [occurredAt]\n",
+            "",
+        ),
+        "does not carry",
+    )
+    case(
+        "hand-built event type must have a source literal",
+        "openbank-sanctions-service",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-sanctions-service" / "asyncapi.yaml",
+            "      name: SANCTIONS_LIST_CHANGED\n      x-openbank-hand-built: true",
+            "      name: SANCTIONS_LIST_CHANGED_MISSING\n      x-openbank-hand-built: true",
+        ),
+        "has no source literal",
+    )
+
     failures = 0
+    # Exercise A in both directions without inventing an mp.messaging producer. B/C remain
+    # exercised by the existing contract mutations below; this fixture has no event-type claim.
+    with tempfile.TemporaryDirectory() as td:
+        tmp = pathlib.Path(td)
+        service = tmp / "openbank-stream-fixture"
+        source_dir = service / "src/main/kotlin"
+        source_dir.mkdir(parents=True)
+        source = source_dir / "Topology.kt"
+        source.write_text('''
+import org.apache.kafka.streams.StreamsBuilder
+fun build() {
+    val builder = StreamsBuilder()
+    builder.stream("openbank.input").to("openbank.output")
+}
+const val UNUSED = "openbank.unused"
+''', encoding="utf-8")
+        contract = tmp / CONTRACTS_DIRNAME / service.name / "asyncapi.yaml"
+        contract.parent.mkdir(parents=True)
+        import yaml
+        REPO = tmp
+        try:
+            for label, addresses, expect in [
+                ("Streams-only sink is a produced topic", ["openbank.output"], None),
+                ("undocumented Streams sink is flagged", [], "produces `openbank.output`"),
+                ("Streams source is not a produced topic", ["openbank.output", "openbank.input"],
+                 "channel address `openbank.input` is not a topic"),
+                ("unused constant is not a produced topic", ["openbank.output", "openbank.unused"],
+                 "channel address `openbank.unused` is not a topic"),
+            ]:
+                contract.write_text(yaml.safe_dump({"channels": {a: {"address": a} for a in addresses}}), encoding="utf-8")
+                findings = check_contract(contract)
+                ok = not findings if expect is None else any(expect in finding for finding in findings)
+                print(f"  {'ok' if ok else 'FAIL'} [{label}]")
+                if not ok:
+                    failures += 1
+                    print(findings)
+        finally:
+            REPO = real_repo
     for desc, service, mutate, expect in cases:
         with tempfile.TemporaryDirectory() as td:
             tmp = pathlib.Path(td)

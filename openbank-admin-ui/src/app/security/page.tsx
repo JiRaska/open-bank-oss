@@ -9,7 +9,10 @@ import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { parseSecurityEnvelope, summarizeReachable, serviceVerdict, type PlatformSecurityReport, type SecurityEnvelope, type ServiceScanResult } from '@/lib/security/summary'
+import { isCurrentSecurityReport } from '@/lib/security/reportFreshness'
 import { PageHeader } from '@/components/ui/PageHeader'
+
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
@@ -57,14 +60,25 @@ export default function SecurityPage() {
   // When the scanner can't be reached we render <DataUnavailable> instead of an
   // empty "run the first scan" prompt that an operator misreads as "broken".
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind; detail?: string } | null>(null)
+  const [reportMeta, setReportMeta] = useState<{
+    source: 'scanner' | 'ci-bundle' | null
+    freshness: 'fresh' | 'stale' | 'unknown'
+    scannerStatus: 'available' | 'unavailable' | 'not-configured'
+  } | null>(null)
 
   const applyEnvelope = useCallback((data: SecurityEnvelope) => {
     if (data.available) {
       setUnavailable(null)
       setReport(data.report)
-      if (data.report.serviceResults?.length > 0) setSelected(data.report.serviceResults[0])
+      setReportMeta({
+        source: data.source ?? null,
+        freshness: data.freshness ?? 'unknown',
+        scannerStatus: data.scannerStatus ?? 'unavailable',
+      })
+      setSelected(data.report.serviceResults?.[0] ?? null)
     } else {
       setReport(null)
+      setReportMeta(null)
       setUnavailable({ kind: data.reason, detail: data.detail })
     }
   }, [])
@@ -97,14 +111,34 @@ export default function SecurityPage() {
   }, [applyEnvelope])
 
   useEffect(() => {
-    const initialLoad = window.setTimeout(() => { void load() }, 0)
+    let disposed = false
+    let timer: number | undefined
+    const clearRefresh = () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+      timer = undefined
+    }
+    const scheduleRefresh = () => {
+      clearRefresh()
+      if (!disposed && document.visibilityState === 'visible') {
+        timer = window.setTimeout(() => { void load().finally(scheduleRefresh) }, REFRESH_INTERVAL_MS)
+      }
+    }
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== 'visible') {
+        clearRefresh()
+        return
+      }
+      void load().finally(scheduleRefresh)
+    }
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    const initialLoad = document.visibilityState === 'visible'
+      ? window.setTimeout(() => { void load().finally(scheduleRefresh) }, 0)
+      : undefined
     return () => {
-      // main's cleanup only cleared the timer. On unmount an in-flight fetch would still land and
-      // call setState on a gone component, and — worse for an evidence page — a stale response
-      // could overwrite a fresher one. Bumping the generation invalidates any reply still on the
-      // wire (every handler above re-checks `request !== requestRef.current`) and the abort stops
-      // the request itself.
-      window.clearTimeout(initialLoad)
+      disposed = true
+      clearRefresh()
+      if (initialLoad !== undefined) window.clearTimeout(initialLoad)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
       requestRef.current += 1
       controllerRef.current?.abort()
     }
@@ -144,7 +178,7 @@ export default function SecurityPage() {
           actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {report?.generatedAt && (
               <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginRight: '8px' }}>
-                {t('Poslední sken:', 'Last scan:')} {formatDate(report.generatedAt)}
+                {t('Report vytvořen:', 'Report generated:')} {formatDate(report.generatedAt)}
               </span>
             )}
             {report && (
@@ -161,18 +195,35 @@ export default function SecurityPage() {
               onClick={load}
               disabled={loading}
               aria-busy={loading}
-              aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}
+              aria-label={t('Obnovit bezpečnostní report', 'Refresh security report')}
               className="btn btn-secondary btn-sm"
             >
               <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
-              {t('Obnovit', 'Refresh')}
+              {t('Obnovit report', 'Refresh report')}
             </button>
           </div>}
         />
         <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '-20px', marginBottom: '28px', display: 'flex', alignItems: 'center', gap: '5px' }}>
           <Shield size={11} aria-hidden="true" style={{ flexShrink: 0 }} />
-          {t('Skeny běží automaticky v CI/CD pipeline (Trivy · CodeQL · Gitleaks). Tato stránka zobrazuje poslední výsledky — pouze ke čtení.', 'Scans run automatically in the CI/CD pipeline (Trivy · CodeQL · Gitleaks). This page is a read-only view of the latest results.')}
+          {t('Skeny běží automaticky v CI/CD a plánovaném security-scanneru. Tato stránka zobrazuje poslední report — pouze ke čtení.', 'Scans run automatically in CI/CD and the scheduled security scanner. This page is a read-only view of the latest report.')}
         </p>
+
+        {report && reportMeta && (() => {
+          const needsAttention = !isCurrentSecurityReport(reportMeta.source, reportMeta.freshness, reportMeta.scannerStatus)
+          return (
+            <p role={needsAttention ? 'alert' : 'status'} aria-live="polite"
+              style={{ margin: '-16px 0 20px', fontSize: '12px', color: needsAttention ? 'var(--warning-text)' : 'var(--text-tertiary)' }}>
+              {t(
+                `Zdroj reportu: ${reportMeta.source === 'scanner' ? 'security-scanner' : reportMeta.source === 'ci-bundle' ? 'CI snapshot' : 'neznámý'}`,
+                `Report source: ${reportMeta.source === 'scanner' ? 'security scanner' : reportMeta.source === 'ci-bundle' ? 'CI bundle' : 'unknown'}`,
+              )}
+              {reportMeta.freshness === 'stale' && t(' · zastaralý (starší než 45 minut)', ' · stale (older than 45 minutes)')}
+              {reportMeta.freshness === 'unknown' && t(' · stáří neznámé (čas chybí, je neplatný nebo leží v budoucnosti)', ' · age unknown (generation time is missing, invalid, or in the future)')}
+              {reportMeta.scannerStatus === 'unavailable' && t(' · scanner je nedostupný; zobrazený report může být CI fallback', ' · scanner is unavailable; the displayed report may be a CI fallback')}
+              {reportMeta.scannerStatus === 'not-configured' && t(' · živý scanner není nakonfigurován', ' · live scanner is not configured')}
+            </p>
+          )
+        })()}
 
         {criticalCount > 0 && (
           <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',

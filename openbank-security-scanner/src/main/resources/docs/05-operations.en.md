@@ -113,9 +113,9 @@ Likely a network policy or DNS issue.
 
 ### ICT incident event missing downstream
 
-Incident transitions remain in `ict_incident_outbox` until the relay marks them sent. Production
-dispatch stays off during the migration rehearsal and is enabled only after the schema and broker
-authorization checks pass.
+Incident transitions remain in `ict_incident_outbox` until the relay marks them sent. The relay is
+enabled in the deployed configuration (`OPENBANK_OUTBOX_DISPATCH_ENABLED=true`, #4942); setting it
+back to `false` pauses delivery without losing incidents, which stay durable in the outbox.
 
 1. Check relay errors and `openbank_outbox_backlog{service="security-scanner"}`.
 2. Check the broker: `kcat -L -b kafka:9092`
@@ -160,3 +160,11 @@ Per-service CI pipeline (`.github/workflows/ci-security-scanner.yml`):
 ## Local dev notes
 
 The scanner probes services by URL — in dev mode, the service list should be overridden in `application.yaml` to point to locally running services. Alternatively, run with `QUARKUS_PROFILE=test` where the service list is empty and scans produce empty reports.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

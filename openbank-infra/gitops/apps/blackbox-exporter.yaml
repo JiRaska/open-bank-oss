@@ -73,7 +73,8 @@ spec:
                 follow_redirects: false
                 preferred_ip_protocol: ip4
                 fail_if_body_not_matches_regexp:
-                  - 'openbank-public-status-api'
+                  - '"schemaVersion"[[:space:]]*:[[:space:]]*1'
+                  - '"status"[[:space:]]*:[[:space:]]*"operational"'
             http_status_freshness:
               prober: http
               timeout: 10s

@@ -54,7 +54,7 @@ const StepSchema = z.object({
   y: z.number(),
   label: z.string().min(1),
   lane: LaneSchema.optional(),
-  apis: z.array(z.string().min(1)).optional(),
+  apis: z.array(z.string().regex(/^(GET|POST|PUT|PATCH|DELETE) \/\S+$/, 'API reference must be METHOD /path')).optional(),
   relatedServices: z.array(z.string().min(1)).optional(),
   // Event semantics (ADR-0050 transactional outbox): domain-event topics this
   // step publishes / is triggered by. Surfaced in the coverage table so the
@@ -85,6 +85,28 @@ export const BpmnProcessSchema = z.object({
   steps: z.array(StepSchema).min(2),
   flows: z.array(FlowSchema).min(1),
   services: z.array(z.string().min(1)).min(1),
+}).superRefine((process, ctx) => {
+  const stepIds = new Set<string>()
+  for (const [index, step] of process.steps.entries()) {
+    if (stepIds.has(step.id)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', index, 'id'], message: `duplicate step id: ${step.id}` })
+    }
+    stepIds.add(step.id)
+    if (step.apis?.length && !step.relatedServices?.length) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['steps', index, 'relatedServices'], message: 'API references require a related service owner' })
+    }
+  }
+  process.flows.forEach((flow, index) => {
+    if (!stepIds.has(flow.from)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['flows', index, 'from'], message: `unknown step: ${flow.from}` })
+    }
+    if (!stepIds.has(flow.to)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['flows', index, 'to'], message: `unknown step: ${flow.to}` })
+    }
+    if (flow.kind === 'async' && !flow.topic) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['flows', index, 'topic'], message: 'async flows require a topic' })
+    }
+  })
 })
 
 export type StepType = z.infer<typeof StepTypeSchema>

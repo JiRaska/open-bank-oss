@@ -5,7 +5,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: async () => ({ user: { accessToken: 'operator-token' } }) }))
-vi.mock('@/lib/discovery', () => ({ resolveInClusterBaseUrl: async () => 'http://security-scanner' }))
+vi.mock('@/lib/discovery', () => ({
+  inCluster: vi.fn(() => true),
+  resolveInClusterService: vi.fn(async () => ({ state: 'found', service: {}, baseUrl: 'http://security-scanner', coverage: 'complete' })),
+}))
+
+import { resolveInClusterService } from '@/lib/discovery'
 
 const incident = {
   id: '11111111-1111-1111-1111-111111111111', title: 'Core banking outage',
@@ -20,6 +25,7 @@ const incident = {
 describe('security incidents BFF evidence boundary', () => {
   beforeEach(() => {
     vi.resetModules()
+    vi.mocked(resolveInClusterService).mockResolvedValue({ state: 'found', service: {} as never, baseUrl: 'http://security-scanner', coverage: 'complete' })
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -83,5 +89,17 @@ describe('security incidents BFF evidence boundary', () => {
     const response = await GET(new Request('http://localhost/api/security/incidents'))
 
     expect(await response.json()).toEqual({ available: false, reason: 'result_limit' })
+  })
+
+  it('does not claim not deployed when discovery cannot establish scanner absence', async () => {
+    vi.mocked(resolveInClusterService).mockResolvedValue({ state: 'unknown', coverage: 'partial' })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/security/incidents/route')
+
+    const response = await GET(new Request('http://localhost/api/security/incidents'))
+
+    expect(await response.json()).toEqual({ available: false, reason: 'discovery_unavailable' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })

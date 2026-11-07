@@ -66,6 +66,7 @@ NO_CORPUS = {
     "can-i-deploy-block-classifier-unit-test",
     "can-i-deploy-version-selector-unit-test",
     "co-deploy-set-derivation-unit-test",
+    "deploy-code-lag-report-unit-test",
     "deploy-window-decision",
     "ensure-ecr-repository",
     "gate-runner-self-test",
@@ -96,8 +97,8 @@ NO_CORPUS = {
     # drifts upward normally and floors here catch collapse, not drift.
     "governance-script-unit-tests",
 
-    # VALIDATES ONE NAMED FILE, fail-closed. Not a test suite: it reads
-    # .github/workflows/_service-ci.yml and greps its `build:` job. Its corpus is exactly 1, and a
+    # VALIDATES TWO FIXED NAMED FILES, fail-closed. Not a test suite: it reads
+    # _service-ci.yml and its exact PR projection _service-ci-pr.yml, and checks each `build:` job. A
     # `build:` job it cannot locate is returned as a finding ("missing build job fails closed"),
     # which is the collapse case a floor would otherwise cover.
     "pr-build-cloud-credentials",
@@ -120,6 +121,12 @@ NO_CORPUS = {
     # again. It prints SUBJECTS= including zero, so "clean" and "did not look" stay
     # distinguishable in the log — the same shape as openapi-version-not-taken above.
     "no-epoch-instant-default",
+
+    # DIFF-SCOPED: its corpus is the automated Applications whose source.path this PR first
+    # introduces, so zero is the ordinary case and a floor would fail every other PR. It prints
+    # SUBJECTS= including zero, so "no new service" and "did not look" stay distinguishable; its
+    # self-test carries the known-positive.
+    "service-application-readiness",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list

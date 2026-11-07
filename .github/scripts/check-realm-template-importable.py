@@ -75,6 +75,19 @@
 #         is the step-up flow disappearing, i.e. MFA silently gone after a rebuild. The boot test
 #         cannot see it; only this rule can.
 #
+#     R11 a `scopeMappings` entry that does not grant every realm role the template declares, or
+#         that names a client the template does not declare. Every client sets
+#         `fullScopeAllowed: false`, so its token carries ONLY the roles mapped to it; a role added
+#         to `roles.realm` later but not appended to each entry silently vanishes from that
+#         client's tokens after a cold-start import. Nothing errors: the import is clean, the role
+#         exists, the user holds it, and `@RolesAllowed` answers 403. This happened within a week
+#         of the rule being written down in prose (ROLE_MARKETING, ROLE_MERGE_RECORDER).
+#
+#     R12 a `defaultClientScopes` / `optionalClientScopes` entry that no `clientScopes[].name`
+#         declares. Keycloak logs "Referenced client scope ... doesn't exist" and silently drops
+#         the assignment. The reserved OIDC protocol scope `openid` is not a client scope: it must
+#         stay in the request's `scope` parameter and needs no definition or assignment here.
+#
 #   Measured on the pre-fix templates: 12 findings, covering R1 (×5), R2, R3 (×2), R7, R8 and R9.
 #   Each was independently confirmed against the real container — the customers realm needed all
 #   four import-blockers removed before `Realm 'openbank-customers' imported` appeared.
@@ -265,6 +278,35 @@ def check_realm(name, realm):
                         f"template does not declare (R10)."
                     )
 
+    role_names = {r.get("name") for r in ((realm.get("roles") or {}).get("realm") or [])}
+    client_ids = {c.get("clientId") for c in clients}
+    for m in realm.get("scopeMappings", []) or []:
+        cid = m.get("client")
+        if cid not in client_ids:
+            findings.append(
+                f"[{name}] scopeMappings names client `{cid}`, which the template does not "
+                f"declare (R11)."
+            )
+        missing = sorted(role_names - set(m.get("roles") or []))
+        if missing:
+            findings.append(
+                f"[{name}] scopeMappings for `{cid}` omits realm role(s) {missing} (R11) — with "
+                f"fullScopeAllowed=false the client's tokens silently lose them after a rebuild."
+            )
+
+    declared_scopes = {s.get("name") for s in realm.get("clientScopes", []) or []}
+    for c in clients:
+        for field in ("defaultClientScopes", "optionalClientScopes"):
+            for scope in c.get(field, []) or []:
+                if scope not in declared_scopes:
+                    findings.append(
+                        f"[{name}] client `{c.get('clientId')}` assigns `{scope}` in `{field}`, "
+                        f"which clientScopes does not declare (R12) — Keycloak logs "
+                        f"'Referenced client scope ... doesn't exist' and silently ignores it. "
+                        f"The reserved OIDC protocol scope `openid` needs no client-scope "
+                        f"definition or assignment."
+                    )
+
     return findings, (len(clients), len(users))
 
 
@@ -440,6 +482,38 @@ def self_test():
     f, _ = check_realm("t", d)
     cases.append(("R10 dangling sub-flow flagged", any("R10" in x and "sub-flow" in x for x in f), f))
 
+    # R11, both directions.
+    sm = _clean()
+    sm["roles"] = {"realm": [{"name": "A"}, {"name": "B"}]}
+    sm["scopeMappings"] = [{"client": "conf", "roles": ["A", "B"]}]
+    f, _ = check_realm("t", sm)
+    cases.append(("R11 complete scope mapping passes", f == [], f))
+    d = copy.deepcopy(sm)
+    d["roles"]["realm"].append({"name": "C"})
+    f, _ = check_realm("t", d)
+    cases.append(("R11 role added without extending the mapping flagged", any("(R11)" in x and "'C'" in x for x in f), f))
+    d = copy.deepcopy(sm)
+    d["scopeMappings"].append({"client": "ghost", "roles": ["A", "B"]})
+    f, _ = check_realm("t", d)
+    cases.append(("R11 mapping for an undeclared client flagged", any("(R11)" in x and "ghost" in x for x in f), f))
+    d = copy.deepcopy(sm)
+    d["scopeMappings"] = []
+    f, _ = check_realm("t", d)
+    cases.append(("R11 a client with no entry is NOT flagged (deliberately role-less clients)", f == [], f))
+
+    # R12, both directions. `openid` is the reserved OIDC protocol scope, not a
+    # client-scope definition; assigning it when clientScopes does not declare it
+    # makes Keycloak log a warning and silently drop the assignment on import.
+    scopes = _clean()
+    scopes["clientScopes"] = [{"name": "profile"}]
+    scopes["clients"][0]["defaultClientScopes"] = ["profile"]
+    f, _ = check_realm("t", scopes)
+    cases.append(("R12 declared client scope reference passes", f == [], f))
+    d = copy.deepcopy(scopes)
+    d["clients"][0]["optionalClientScopes"] = ["openid"]
+    f, _ = check_realm("t", d)
+    cases.append(("R12 undeclared client scope reference flagged", any("(R12)" in x and "openid" in x for x in f), f))
+
     bad = 0
     for label, passed, detail in cases:
         print(f"  {'PASS' if passed else 'FAIL'}  {label}")
@@ -467,7 +541,7 @@ def main():
     findings, n_clients, n_users = run(paths)
     print(
         f"realm-template-importable: compared {len(paths)} template(s), "
-        f"{n_clients} client(s), {n_users} user(s) against 9 rules."
+        f"{n_clients} client(s), {n_users} user(s) against 12 rules."
     )
     for p in paths:
         print(f"  - {p}")

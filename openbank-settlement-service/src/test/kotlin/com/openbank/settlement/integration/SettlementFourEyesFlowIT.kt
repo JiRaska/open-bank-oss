@@ -4,13 +4,16 @@
 
 package com.openbank.settlement.integration
 
-import com.openbank.settlement.it.PostgresTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.settlement.it.SettlementOpaTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -39,7 +42,10 @@ class SettlementFourEyesProfile : QuarkusTestProfile {
  * ROLE_OPERATOR in the realm are refused the queue by identity.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(
+    PostgresTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_settlement_it")],
+)
 @QuarkusTestResource(SettlementOpaTestResource::class, restrictToAnnotatedClass = true)
 @TestProfile(SettlementFourEyesProfile::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
@@ -49,6 +55,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(1)
     @TestSecurity(user = MAKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = MAKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = MAKER),
+        ],
+    )
     fun `an operator origination is parked for approval and creates no settlement`() {
         approvalId = given().contentType("application/json").body(instruction).post(SETTLEMENTS)
             .then().statusCode(202)
@@ -61,6 +74,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(2)
     @TestSecurity(user = MAKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = MAKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = MAKER),
+        ],
+    )
     fun `a malformed instruction is refused before any approval is parked`() {
         val before = approvalCount()
         given().contentType("application/json").body(instruction + ("amount" to "-1.00")).post(SETTLEMENTS)
@@ -71,6 +91,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(3)
     @TestSecurity(user = MAKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = MAKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = MAKER),
+        ],
+    )
     fun `the maker cannot approve their own origination`() {
         requireApproval()
         given().contentType("application/json").body(mapOf("approve" to true))
@@ -108,6 +135,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(7)
     @TestSecurity(user = CHECKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = CHECKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = CHECKER),
+        ],
+    )
     fun `a distinct checker reviews the bound instruction and approves it`() {
         requireApproval()
         val pending: List<String> = given().get("$APPROVALS?limit=200").then().statusCode(200).extract().path("id")
@@ -130,6 +164,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(8)
     @TestSecurity(user = MAKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = MAKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = MAKER),
+        ],
+    )
     fun `an approval cannot be borrowed by a different instruction`() {
         requireApproval()
         for (variant in listOf(
@@ -145,6 +186,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(9)
     @TestSecurity(user = MAKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = MAKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = MAKER),
+        ],
+    )
     fun `the identical instruction executes exactly once`() {
         requireApproval()
         given().header("X-Approval-Id", approvalId).contentType("application/json").body(instruction)
@@ -158,6 +206,13 @@ class SettlementFourEyesFlowIT {
     @Test
     @Order(10)
     @TestSecurity(user = CHECKER, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = CHECKER),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = CHECKER),
+        ],
+    )
     fun `the consumed approval stays readable as evidence`() {
         requireApproval()
         given().get("$APPROVALS/$approvalId").then().statusCode(200)

@@ -33,7 +33,7 @@ import rego.v1
 
 allowed_reasons contains "operator-tpp-registry-blacklist" if {
 	input.principal.type == "HUMAN"
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	input.action == "tppRegistry.blacklist"

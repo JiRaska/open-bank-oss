@@ -12,6 +12,29 @@
           {
             "/": "/app/oauth/*",
             "comment": "OAuth2 PKCE redirect (claimed-HTTPS callback, P0)"
+          },
+          {
+            "/": "/pay/v1/9999/*",
+            "exclude": true,
+            "comment": "SPAYD-URI pilot: addressed to the QRlessPay SDK example app (bank code 9999), not to OpenBank"
+          },
+          {
+            "/": "/pay/v1*",
+            "comment": "SPAYD-URI pilot: a payment QR scanned by the phone camera (common link and OpenBank's own /pay/v1/9998). Only apps listed here can open it, which is what stops a rogue app squatting the camera path."
+          }
+        ]
+      },
+      {
+        "appID": "37YYRR972B.tech.qrlesspay.example",
+        "components": [
+          {
+            "/": "/pay/v1/9998/*",
+            "exclude": true,
+            "comment": "SPAYD-URI pilot: addressed to OpenBank (bank code 9998), not to the example"
+          },
+          {
+            "/": "/pay/v1*",
+            "comment": "SPAYD-URI pilot: the QRlessPay SDK example app stands in for a second bank (code 9999), so the chooser can be seen"
           }
         ]
       }

@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { execFileSync } from 'child_process'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
@@ -22,6 +23,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 
 const REPO = path.resolve(__dirname, '..', '..', '..')
 const SCRIPT = path.join(REPO, 'openbank-admin-ui', 'scripts', 'collect-prod-readiness.mjs')
+const CATALOG_SCRIPT = path.join(REPO, 'openbank-admin-ui', 'scripts', 'generate-catalog.mjs')
 const tmps: string[] = []
 
 function declaredMoneyPath(): Set<string> {
@@ -35,19 +37,21 @@ function declaredMoneyPath(): Set<string> {
   return out
 }
 
-function runCollector(repo = REPO): { service: string; money_path: boolean; gate: string }[] {
+function runCollector(repo = REPO): { report: any; catalog: any } {
   const dir = mkdtempSync(path.join(tmpdir(), 'readiness-'))
   tmps.push(dir)
   const out = path.join(dir, 'prod-readiness.json')
+  const catalogOut = path.join(dir, 'catalog.json')
   execFileSync('node', [SCRIPT, '--repo', repo, '--out', out], { stdio: 'pipe' })
-  const doc = JSON.parse(readFileSync(out, 'utf-8'))
-  return doc.services ?? doc
+  execFileSync('node', [CATALOG_SCRIPT, '--repo', repo, '--out', catalogOut], { stdio: 'pipe' })
+  return { report: JSON.parse(readFileSync(out, 'utf-8')), catalog: JSON.parse(readFileSync(catalogOut, 'utf-8')) }
 }
 
 describe('readiness collector money-path set', () => {
   afterAll(() => { for (const d of tmps) rmSync(d, { recursive: true, force: true }) })
 
-  const services = runCollector()
+  const { report, catalog } = runCollector()
+  const services = report.services
   const byName = new Map(services.map(s => [s.service, s]))
   const declared = declaredMoneyPath()
 
@@ -58,9 +62,30 @@ describe('readiness collector money-path set', () => {
     expect(declared.has('ledger')).toBe(true)
   })
 
+  it('publishes the verified canonical service-module and money-path scope with provenance', () => {
+    const canonicalServices = catalog.services
+      .filter((service: { runnable?: boolean }) => service.runnable === true)
+      .map((service: { name: string }) => service.name.replace(/^openbank-/, '').replace(/-service$/, ''))
+      .sort()
+    expect(services.map((service: { service: string }) => service.service).sort()).toEqual(canonicalServices)
+    expect(report.scope.kind).toBe('service-module-matrix-v1')
+    expect(report.scope.money_path_count).toBe(declared.size)
+    const canonicalRoster = report.services.map((service: { service: string; money_path: boolean }) => `${service.service}:${service.money_path}`).sort().join('\n')
+    expect(report.scope.roster_sha256).toBe(createHash('sha256').update(canonicalRoster).digest('hex'))
+    expect(report.schema_version).toBe(1)
+    expect(report.collected_at).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/)
+    expect(report.source_sha).toMatch(/^[0-9a-f]{40}$/)
+  })
+
   it('scores a row for every service rules.yaml declares money-path', () => {
     const missing = [...declared].filter(s => !byName.has(s))
     expect(missing).toEqual([])
+  })
+
+  it('keeps runnable analytics-sink visible in the readiness cohort', () => {
+    const analytics = catalog.services.find((service: { name: string }) => service.name === 'openbank-analytics-sink')
+    expect(analytics?.runnable).toBe(true)
+    expect(byName.has('analytics-sink')).toBe(true)
   })
 
   it('marks every declared money-path service money_path, with no drift in either direction', () => {

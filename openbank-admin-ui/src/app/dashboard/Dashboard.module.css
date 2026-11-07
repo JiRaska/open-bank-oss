@@ -302,6 +302,15 @@
   background: var(--text-tertiary);
 }
 
+.serviceChipUnknown {
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.serviceChipUnknown .serviceDot {
+  background: var(--text-tertiary);
+}
+
 .serviceDot {
   width: 5px;
   height: 5px;

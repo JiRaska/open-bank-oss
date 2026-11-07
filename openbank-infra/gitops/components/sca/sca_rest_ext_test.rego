@@ -37,11 +37,11 @@ rules_mock := {
 	}],
 }
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+services_m2m := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # --- the regressions this file exists to prevent ---
 
@@ -135,7 +135,7 @@ revocation_rules := object.union(rules_mock, {
 # Credential revocation grants are owner scoped and retain the money-path obligation.
 test_customer_can_request_own_device_revocation if {
 	decision := rest.allow with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}
@@ -145,7 +145,7 @@ test_customer_can_request_own_device_revocation if {
 
 test_customer_cannot_request_foreign_device_revocation if {
 	not rest.allow with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-other"},
 	}
@@ -154,7 +154,7 @@ test_customer_cannot_request_foreign_device_revocation if {
 
 test_customer_device_revocation_requires_four_eyes if {
 	rest.four_eyes_required with input as {
-		"principal": {"id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
+		"principal": {"service_account": false, "id": "party-owner", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}
@@ -163,7 +163,7 @@ test_customer_device_revocation_requires_four_eyes if {
 
 test_service_principal_cannot_revoke_customer_device_via_self_rule if {
 	not rest.allow with input as {
-		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
+		"principal": {"service_account": true, "client_id": "openbank-services", "id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API"]},
 		"action": "device.revoke",
 		"resource": {"id": "party-owner"},
 	}

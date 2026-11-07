@@ -69,8 +69,6 @@ PROSE_DIRS = ("docs/adr", "docs/threat-models", "openbank-libs/docs")
 PROSE_ALLOWLIST: dict[tuple[str, str], str] = {
     ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "RunOnVirtualThread"):
         "the ADR's whole subject is the decision NOT to adopt it; its absence is the outcome",
-    ("docs/adr/0016-virtual-threads-not-adopted-yet.md", "Transactional"):
-        "contrasted against the reactive stack that ADR chose; imperative JTA is not used here",
     ("docs/adr/0048-decouple-api-contract-version-from-service-release-version.md",
      "ApplicationPath"):
         "illustrative JAX-RS snippet showing where a version prefix would live",
@@ -156,6 +154,7 @@ def unit_of(lines: list[str]) -> list[str]:
 
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
 LINE_COMMENT = re.compile(r"//[^\n]*")
+BLOCK_MARKER = re.compile(r"/\*|\*/")
 
 
 def strip_comments(src: str) -> str:
@@ -169,13 +168,17 @@ def strip_comments(src: str) -> str:
             depth -= 1
             i += 2
         elif depth:
-            i += 1
+            marker = BLOCK_MARKER.search(src, i)
+            i = marker.start() if marker else n
         elif src.startswith("//", i):
             j = src.find("\n", i)
             i = n if j < 0 else j
         else:
-            out.append(src[i])
-            i += 1
+            # Only a slash can start a comment; copy the intervening text as one span.
+            j = src.find("/", i + 1)
+            j = n if j < 0 else j
+            out.append(src[i:j])
+            i = j
     return "".join(out)
 
 
@@ -340,6 +343,22 @@ def self_test() -> int:
     import tempfile
 
     ok = True
+    for source, expected in (
+        ("plain text", "plain text"),
+        ("a/b", "a/b"),
+        ("a/* outer /* nested */ tail */b", "ab"),
+        ("a/* unterminated", "a"),
+        ("a/*/", "a"),
+        ("a/* outer // still block */b", "ab"),
+        ("a// tail\nb", "a\nb"),
+        ("a// no newline", "a"),
+        ("*/a", "*/a"),
+        ("a/**//**/b", "ab"),
+        ("a/\n/* x */b", "a/\nb"),
+    ):
+        if strip_comments(source) != expected:
+            print(f"SELF-TEST FAIL: comment scan for {source!r}")
+            ok = False
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         libs = root / "openbank-libs-domain" / "src" / "main" / "kotlin"

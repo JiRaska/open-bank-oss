@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -128,11 +113,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -183,6 +163,26 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.domestic-payment.delegated-spend-reservation-state-in
+      # #4403: an analyst's decision on a FRAUD_REVIEW case releases or rejects the held payment.
+      # Off until the activation PR, which turns it on with the enforcement flag. Nested keys, because
+      # a dotted leaf never reaches the connector. earliest is safe: the group is new, every other
+      # alert code is skipped, and a decision for a finished run is only counted.
+      fraud-hold-resolution-in:
+        enabled: ${DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED:false}
+        connector: smallrye-kafka
+        topic: openbank.aml.events
+        client:
+          id: domestic-payment-fraud-hold-resolution-${quarkus.uuid}
+        group:
+          id: domestic-payment-fraud-hold-resolution
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.domestic-payment.fraud-hold-resolution-in
 "%dev":
   quarkus:
     log:
@@ -210,6 +210,11 @@ mp:
       worker:
         enabled: false
 openbank:
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own ApprovalConfig. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
@@ -239,18 +244,11 @@ openbank:
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}
-    # fraud.enforcement-enabled was REMOVED here (#4221 layer 3). It is not a disabled feature —
-    # it had no reader. The enforcement path it named (`DomesticPaymentService.applyFraudGate`)
-    # was deleted by the Temporal migration (#1917) along with the in-service orchestration; the
-    # key, ADR-0084 §4.2 and the threat-model row survived it, so the runbook offered an operator a
-    # flip that would have changed nothing and reported nothing, and the threat model credited a
-    # mitigation that no longer existed. Both are corrected in this change.
-    #
-    # Re-introducing enforcement is NOT a config key: the verdict now reaches a Temporal activity
-    # (`shadowFraudScore`, returns Unit), so acting on it needs a decision returned to
-    # `DomesticPaymentWorkflow` and a hold state for the payment. Tracked in #4403 — do not
-    # re-add this key without that path, and see FraudEnforcementFlagRetiredTest, which fails if
-    # the key comes back with nothing reading it.
+    # fraud.enforcement-enabled is deliberately NOT declared here. #4221 removed the old key because
+    # nothing read it; #4403 brought enforcement back as a workflow decision, and the flag is now read
+    # by `DomesticPaymentActivitiesImpl.fraudGate` with `@ConfigProperty(defaultValue = "false")`.
+    # Set OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED=true only after shadow calibration on
+    # openbank_fraud_enforcement_decisions_total{mode="shadow"} (ADR-0084 §4.2).
   temporal:
     enabled: false
     server-url: temporal-frontend.temporal.svc.cluster.local:7233
@@ -304,6 +302,21 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own, on the TLS listener only. /api/* therefore accepts the bearer
+      # mechanism ONLY and demands authentication itself; the certificate stays transport authentication.
+      # DomesticPaymentListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit
     # PaymentConfirmationRenderAdapter calls document-service. Production uses a named TLS bucket over
     # document-service's private-CA mTLS listener (8443, client auth REQUIRED), the same shape as
     # notification-service's party-authority bucket. Local/test fixtures speak plain HTTP, so this

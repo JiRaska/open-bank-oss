@@ -12,10 +12,8 @@ import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
 import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.application.port.out.AmlCasePort
-import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreOutcome
 import com.openbank.fx.application.port.out.FraudScoringPort
-import com.openbank.fx.application.port.out.FraudVerdict
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
@@ -26,9 +24,11 @@ import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningResult
-import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.Runs
@@ -298,7 +298,7 @@ class FxServiceTest {
 
         assertThat(result.status).isEqualTo(FxConversionStatus.FAILED)
         assertThat(result.settledAt).isNull()
-        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.CRITICAL)
+        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.CRITICAL)
         assertThat(case.captured.alertCode).isEqualTo("SANCTIONS_HIT")
         assertThat(case.captured.matchedEntity).isEqualTo("OFAC SDN")
         coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
@@ -318,7 +318,7 @@ class FxServiceTest {
 
         assertThat(result.status).isEqualTo(FxConversionStatus.PENDING)
         assertThat(result.settledAt).isNull()
-        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.HIGH)
+        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.HIGH)
         assertThat(case.captured.alertCode).isEqualTo("AML_HOLD")
         coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }
@@ -337,7 +337,7 @@ class FxServiceTest {
 
         assertThat(result.status).isEqualTo(FxConversionStatus.PENDING)
         assertThat(result.settledAt).isNull()
-        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseRiskLevel.MEDIUM)
+        assertThat(case.captured.riskLevel).isEqualTo(AmlCaseSeverity.MEDIUM)
         assertThat(case.captured.alertCode).isEqualTo("SCREENING_UNAVAILABLE")
         coVerify(exactly = 0) { convRepo.saveWithOutbox(any(), any()) }
     }

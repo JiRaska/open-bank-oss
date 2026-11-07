@@ -123,7 +123,10 @@
       ]
     },
     "openbank-campaign-service": {
-      "release-type": "simple"
+      "component": "campaign-service",
+      "exclude-paths": [
+        "openbank-campaign-service/src/test"
+      ]
     },
     "openbank-incentive-service": {
       "component": "incentive-service",
@@ -477,6 +480,12 @@
       "component": "pension-fund-service",
       "exclude-paths": [
         "openbank-pension-fund-service/src/test"
+      ]
+    },
+    "openbank-products": {
+      "component": "products",
+      "exclude-paths": [
+        "openbank-products/src/test"
       ]
     }
   }

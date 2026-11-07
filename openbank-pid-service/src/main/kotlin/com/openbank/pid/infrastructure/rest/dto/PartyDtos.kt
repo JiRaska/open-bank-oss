@@ -73,7 +73,8 @@ data class UpdateContactRequest(
 
 data class UpdateKycRequest(
     val kycLevel: KycLevel,
-    val amlRiskScore: AmlRiskScore,
+    /** Deprecated (ADR-0353 D2): optional; absent leaves the stored value unchanged. */
+    val amlRiskScore: AmlRiskScore? = null,
     val pepFlag: Boolean = false,
     val sanctionsFlag: Boolean = false,
 )
@@ -137,6 +138,26 @@ data class PartyCaseLifecycleResponse(
 
 data class ExternalIdResponse(val type: ExternalIdType, val value: String, val verifiedAt: OffsetDateTime?)
 
+/** Exact external-id lookup input; nullable fields let the REST boundary return 400 for omissions. */
+/** Identifier types intentionally accepted by the browser-safe, exact lookup endpoint. */
+enum class ExternalIdLookupType {
+    BANKID_SUB,
+    ROB_AIFO,
+    ICO,
+    PASSPORT_NUMBER,
+    ID_CARD_NUMBER,
+}
+
+data class ExternalIdLookupRequest(val type: ExternalIdLookupType?, val value: String?)
+
+/** PII-minimised response for the Admin UI's exact identifier lookup. */
+data class ExternalIdLookupResponse(
+    val partyId: UUID,
+    val status: PartyStatus,
+    val createdAt: OffsetDateTime,
+    val externalId: ExternalIdResponse,
+)
+
 data class CoreAttributesResponse(
     val givenName: String,
     val familyName: String,
@@ -168,7 +189,8 @@ data class KycAttributesResponse(
     val kycLevel: KycLevel,
     val kycCompletedAt: OffsetDateTime?,
     val kycExpiresAt: OffsetDateTime?,
-    val amlRiskScore: AmlRiskScore,
+    /** Deprecated (ADR-0353 D2): not a risk rating; `null` unless a caller stored one. */
+    val amlRiskScore: AmlRiskScore?,
     val pepFlag: Boolean,
     val sanctionsFlag: Boolean,
     val lastAmlReviewAt: OffsetDateTime?,

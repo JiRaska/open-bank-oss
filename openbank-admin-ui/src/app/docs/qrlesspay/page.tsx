@@ -50,6 +50,9 @@ export default function QrlessPayPage() {
           <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
         <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={ShieldCheck} label={t('money-path', 'money-path')} />
+        <Link href="/docs/spayd-uri" style={{ textDecoration: 'none' }}>
+          <Pill color={ACCENT_TEXT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={ScanLine} label={t('QR fotoaparátem (spayd://)', 'Camera QR (spayd://)')} />
+        </Link>
         <Link href="/docs/qrlesspay-readiness" style={{ textDecoration: 'none' }}>
           <Pill color="var(--warning-text)" bg="var(--warning-bg)" border="var(--warning-border)" Icon={ScrollText} label={t('Posouzení připravenosti', 'Readiness assessment')} />
         </Link>

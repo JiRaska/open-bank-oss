@@ -84,6 +84,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 1. Is dispatch halted? `GET /api/v1/ops/dispatch` — if `state=HALTED`, an operator hit the break-glass. Resume via four-eyes (`/resume/propose` + a *different* actor `/approve`).
 2. Check consumer lag on `openbank.notification.requests`; check `NotificationConsumer` logs for parse/processing errors.
 3. EMAIL stuck `PENDING`/`FAILED`? Verify SMTP (`quarkus.mailer.*`); in dev the mailer is mocked.
+   To see which channel holds rows that never got an outcome, read `openbank_notification_pending_stale_by_channel{channel=...}`: the PENDING rows older than 15 minutes, split by channel (`EMAIL`, `PUSH`, `INBOX`). Its channels sum to `openbank_notification_pending_stale`. `-1` means the count query failed, not zero rows. No read of the production table is needed.
 4. PUSH `FAILED` with "no active devices"? The party has no ACTIVE `device_tokens`, or FCM/APNs adapters are disabled (then push is a no-op SENT).
 
 ### Halt / resume the dispatch loop (break-glass)
@@ -109,3 +110,11 @@ An un-parseable payload is logged and acked (it does not wedge the partition). I
 - Per-service path-scoped CI; release-please owns `version.txt` (currently `0.4.0`) and the changelog from Conventional Commits.
 - CI runs tests against an isolated PostgreSQL per test JVM via Testcontainers (#578); Kafka is in-memory in tests (only an `@Incoming` channel), the `@Scheduled` outbox tick is disabled under test.
 - CD via ArgoCD on image-tag bump (GitOps); for image-tag merge conflicts take `--ours`.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

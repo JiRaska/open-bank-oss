@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Onboarding-funnel alerts (ADR-0069 Phase 2). The customer-edge OnboardingFunnelPublisher
-# increments onboarding_funnel_events_total{step,action} on every app-reported funnel transition
+# increments openbank_onboarding_funnel_events_total{step,action} on every app-reported funnel transition
 # (step & action are closed allow-lists — bounded cardinality). customer-edge's /q/metrics is
 # already scraped by the fleet PodMonitor (components/observability/podmonitor-openbank-services.yaml
 # lists the customer-edge namespace), so these series reach Prometheus with no extra wiring.
@@ -43,12 +43,12 @@ spec:
           # and the rule is silent — `or vector(0)` adds no boot-time false positive.
           expr: |
             (
-              (sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_SUCCESS"}[1h])) or vector(0))
+              (sum(increase(openbank_onboarding_funnel_events_total{step="SIGN", action="SIGN_SUCCESS"}[1h])) or vector(0))
               /
-              clamp_min(sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])), 1)
+              clamp_min(sum(increase(openbank_onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])), 1)
             ) < 0.70
             and
-            sum(increase(onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])) >= 10
+            sum(increase(openbank_onboarding_funnel_events_total{step="SIGN", action="SIGN_ATTEMPT"}[1h])) >= 10
           for: 15m
           labels:
             severity: warning
@@ -72,13 +72,13 @@ spec:
             (
               1 -
               (
-                (sum(increase(onboarding_funnel_events_total{step="SIGN", action="STEP_VIEWED"}[6h])) or vector(0))
+                (sum(increase(openbank_onboarding_funnel_events_total{step="SIGN", action="STEP_VIEWED"}[6h])) or vector(0))
                 /
-                clamp_min(sum(increase(onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])), 1)
+                clamp_min(sum(increase(openbank_onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])), 1)
               )
             ) > 0.40
             and
-            sum(increase(onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])) >= 20
+            sum(increase(openbank_onboarding_funnel_events_total{step="AGREEMENT", action="STEP_COMPLETED"}[6h])) >= 20
           for: 30m
           labels:
             severity: warning
@@ -97,7 +97,7 @@ spec:
           # the usual cause is that the bucket / EKS Pod Identity association was never provisioned
           # (Terraform, sandbox-platform) — the comment survives, the image does not.
           expr: |
-            sum(increase(feedback_submissions_total{screenshot_status="STORE_FAILED"}[1h])) >= 3
+            sum(increase(openbank_feedback_submissions_total{screenshot_status="STORE_FAILED"}[1h])) >= 3
           for: 15m
           labels:
             severity: warning
@@ -110,7 +110,7 @@ spec:
           # reaches analytics-sink. Missing/expired Write ACL on openbank.feedback.events is the
           # first thing to check: that exact gap silently hung the sepa-instant and swift submits.
           expr: |
-            sum(increase(feedback_emit_failures_total[15m])) > 0
+            sum(increase(openbank_feedback_emit_failures_total[15m])) > 0
           for: 10m
           labels:
             severity: warning

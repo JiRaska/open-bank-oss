@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.9.6...anacredit-service-v0.10.0) (2026-10-16)
+
+
+### Features
+
+* **anacredit:** enable runtime tracing and verify exposure correlation ([#12912](https://github.com/JiRaska/open-bank-oss/issues/12912)) ([df24a30](https://github.com/JiRaska/open-bank-oss/commit/df24a30d54ca1aaf27b79cb82ef9c9111bf875ab))
+
 ## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/anacredit-service-v0.9.5...anacredit-service-v0.9.6) (2026-10-14)
 
 

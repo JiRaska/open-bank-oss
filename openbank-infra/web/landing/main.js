@@ -70,7 +70,7 @@ function loadHcaptcha() {
   if (!widgets.length || document.querySelector('script[src*="js.hcaptcha.com"]')) return;
   widgets.forEach((w) => { if (!w.dataset.sitekey) w.dataset.sitekey = HCAPTCHA_SITEKEY; });
   const s = document.createElement('script');
-  s.src = 'https://js.hcaptcha.com/1/api.js?recaptchacompat=off';
+  s.src = 'https://js.hcaptcha.com/1/api.js?recaptchacompat=off&hl=en';
   s.async = true;
   s.defer = true;
   document.body.appendChild(s);

@@ -8,57 +8,7 @@ import path from 'path'
 
 export const dynamic = 'force-dynamic'
 
-// DORA classification thresholds (Google State of DevOps 2023)
-// Deployment Frequency
-const DF_ELITE = 1       // per day
-const DF_HIGH  = 1 / 7   // per day (weekly)
-const DF_MED   = 1 / 30  // per day (monthly)
-// Lead Time for Changes (hours)
-const LT_ELITE = 1
-const LT_HIGH  = 24
-const LT_MED   = 168     // 1 week
-// Change Failure Rate (%)
-const CFR_ELITE = 5
-const CFR_HIGH  = 10
-const CFR_MED   = 15
-// MTTR (hours)
-const MTTR_ELITE = 1
-const MTTR_HIGH  = 24
-const MTTR_MED   = 168
-
 type DoraLevel = 'elite' | 'high' | 'medium' | 'low'
-
-function classifyDf(perDay: number): DoraLevel {
-  if (perDay >= DF_ELITE) return 'elite'
-  if (perDay >= DF_HIGH)  return 'high'
-  if (perDay >= DF_MED)   return 'medium'
-  return 'low'
-}
-function classifyLt(hours: number): DoraLevel {
-  if (hours <= LT_ELITE) return 'elite'
-  if (hours <= LT_HIGH)  return 'high'
-  if (hours <= LT_MED)   return 'medium'
-  return 'low'
-}
-function classifyCfr(pct: number): DoraLevel {
-  if (pct <= CFR_ELITE) return 'elite'
-  if (pct <= CFR_HIGH)  return 'high'
-  if (pct <= CFR_MED)   return 'medium'
-  return 'low'
-}
-function classifyMttr(hours: number): DoraLevel {
-  if (hours <= MTTR_ELITE) return 'elite'
-  if (hours <= MTTR_HIGH)  return 'high'
-  if (hours <= MTTR_MED)   return 'medium'
-  return 'low'
-}
-
-function overallLevel(levels: DoraLevel[]): DoraLevel {
-  const rank = { elite: 4, high: 3, medium: 2, low: 1 } as const
-  const min = Math.min(...levels.map(l => rank[l]))
-  return (['low', 'medium', 'high', 'elite'] as DoraLevel[])[min - 1]
-}
-
 // Deployment Frequency + Lead Time come from a build-time git-derived snapshot
 // (scripts/collect-dora.mjs → dora.json), not a live GitHub call: the admin-ui is
 // a read-only consumer and holds no GITHUB_TOKEN (ADR-0061, mirrors the cost/test
@@ -163,15 +113,12 @@ export async function GET() {
     } catch { /* Prometheus unreachable */ }
 
     // ── Compute DORA levels ──────────────────────────────────────────────────
-    const dfLevel   = deploymentFrequencyPerDay !== null ? classifyDf(deploymentFrequencyPerDay) : null
-    const ltLevel   = leadTimeHours              !== null ? classifyLt(leadTimeHours)             : null
-    const cfrLevel  = changeFailureRate          !== null ? classifyCfr(changeFailureRate)        : null
-
     const mttrHours: number | null = mttrHoursFromPrometheus
-    const mttrLevel: DoraLevel | null = mttrHours !== null ? classifyMttr(mttrHours) : null
 
-    const knownLevels = [dfLevel, ltLevel, cfrLevel, mttrLevel].filter((l): l is DoraLevel => l !== null)
-    const overall: DoraLevel | null = knownLevels.length >= 2 ? overallLevel(knownLevels) : null
+    // The available values are proxies: first-parent commits are not deploy events,
+    // HTTP 5xx rate is not change failure rate, and alert firing duration is not
+    // incident MTTR. Do not combine them into a DORA performance grade.
+    const overall: DoraLevel | null = null
 
     return NextResponse.json({
       overall,
@@ -179,29 +126,34 @@ export async function GET() {
         deploymentFrequency: {
           perDay: deploymentFrequencyPerDay,
           count30d: deploymentCount30d,
-          level: dfLevel,
+          level: null,
           description: deploymentFrequencyPerDay !== null
-            ? `${deploymentFrequencyPerDay.toFixed(2)} deployments/day`
+            ? `${deploymentFrequencyPerDay.toFixed(2)} merged changes/day (proxy)`
             : null,
+          note: 'Proxy: first-parent git commits; deploy events are not collected.',
         },
         leadTime: {
           hours: leadTimeHours !== null ? Math.round(leadTimeHours * 10) / 10 : null,
-          level: ltLevel,
+          level: null,
           description: leadTimeHours !== null
             ? leadTimeHours < 1 ? `${Math.round(leadTimeHours * 60)} min`
               : leadTimeHours < 24 ? `${Math.round(leadTimeHours)}h`
               : `${Math.round(leadTimeHours / 24)}d`
             : null,
-          note: leadTimeReason,
+          note: leadTimeHours !== null
+            ? 'Proxy: author-to-committer time for first-parent merge commits; not deployment lead time.'
+            : leadTimeReason,
         },
         changeFailureRate: {
           pct: changeFailureRate,
-          level: cfrLevel,
+          // The proxy is an HTTP error rate, not the share of deployments causing incidents.
+          level: null,
           note: 'Proxy: 30-day HTTP 5xx rate. Integrate incident mgmt for precision.',
         },
         mttr: {
           hours: mttrHours,
-          level: mttrLevel,
+          // Alert firing duration is not incident-to-recovery time.
+          level: null,
           note: 'Approximation: Prometheus ALERTS firing duration ÷ distinct alert count (30 d, 15 s scrape assumed). Improve with GoAlert/ADR-0061 ph.3.',
         },
       },

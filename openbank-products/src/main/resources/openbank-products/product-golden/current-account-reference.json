@@ -1,0 +1,189 @@
+{
+  "name": "current-account-reference",
+  "description": "CURRENT-ACCOUNT on 100 EUR with a 500 arranged overdraft: a 700 card payment (projected -600) is rejected, a 300 one (projected -200) is accepted, the 4.90 fee is charged while the balance is under the 1000 waiver threshold, and closing notifies.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "CURRENT-ACCOUNT",
+    "currency": "EUR",
+    "fees": [
+      {
+        "ruleId": "fee.maintenance",
+        "feeCode": "MAINT",
+        "amount": "4.90",
+        "cadence": "MONTHLY",
+        "accountingClass": "FEE_INCOME",
+        "waiver": {
+          "type": "comparison",
+          "attribute": "BALANCE",
+          "operator": "GTE",
+          "threshold": "1000.00",
+          "currency": "EUR"
+        }
+      }
+    ],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-fee",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "FEE_MAINT",
+            "cadence": "MONTHLY"
+          }
+        },
+        {
+          "ruleId": "open.welcome",
+          "action": {
+            "type": "NOTIFY",
+            "templateId": "current-account-welcome",
+            "variables": {
+              "productCode": "CURRENT-ACCOUNT"
+            }
+          }
+        }
+      ],
+      "prePosting": [
+        {
+          "ruleId": "posting.overdraft-limit",
+          "when": {
+            "type": "postingComparison",
+            "attribute": "PROJECTED_BALANCE",
+            "operator": "LT",
+            "threshold": "-500.00"
+          },
+          "action": {
+            "type": "REJECT",
+            "reasonCode": "OVERDRAFT_LIMIT_EXCEEDED"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.fee",
+          "trigger": "FEE_MAINT",
+          "action": {
+            "type": "CHARGE_FEE",
+            "feeRuleId": "fee.maintenance"
+          }
+        }
+      ],
+      "onClose": [
+        {
+          "ruleId": "close.notify",
+          "action": {
+            "type": "NOTIFY",
+            "templateId": "account-closed",
+            "variables": {
+              "productCode": "CURRENT-ACCOUNT"
+            }
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "100.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-03-01"
+  },
+  "steps": [
+    {
+      "at": "2026-03-01T08:00:00Z",
+      "hook": "onOpen",
+      "expected": [
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-fee",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "FEE_MAINT",
+          "cadence": "MONTHLY",
+          "at": null
+        },
+        {
+          "type": "NOTIFY",
+          "ruleId": "open.welcome",
+          "irVersion": 1,
+          "templateId": "current-account-welcome",
+          "variables": {
+            "productCode": "CURRENT-ACCOUNT"
+          }
+        }
+      ]
+    },
+    {
+      "at": "2026-03-02T12:00:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "CARD_PAYMENT",
+        "direction": "DEBIT",
+        "amount": "700.00"
+      },
+      "expected": [
+        {
+          "type": "REJECT",
+          "ruleId": "posting.overdraft-limit",
+          "irVersion": 1,
+          "reasonCode": "OVERDRAFT_LIMIT_EXCEEDED"
+        }
+      ]
+    },
+    {
+      "at": "2026-03-02T12:05:00Z",
+      "hook": "prePosting",
+      "posting": {
+        "kind": "CARD_PAYMENT",
+        "direction": "DEBIT",
+        "amount": "300.00"
+      },
+      "expected": []
+    },
+    {
+      "at": "2026-03-31T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "FEE_MAINT",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.fee",
+          "irVersion": 1,
+          "narrative": "fee MAINT",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "DEBIT",
+              "amount": "4.90",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "FEE_INCOME",
+              "direction": "CREDIT",
+              "amount": "4.90",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-04-15T09:00:00Z",
+      "hook": "onClose",
+      "expected": [
+        {
+          "type": "NOTIFY",
+          "ruleId": "close.notify",
+          "irVersion": 1,
+          "templateId": "account-closed",
+          "variables": {
+            "productCode": "CURRENT-ACCOUNT"
+          }
+        }
+      ]
+    }
+  ]
+}

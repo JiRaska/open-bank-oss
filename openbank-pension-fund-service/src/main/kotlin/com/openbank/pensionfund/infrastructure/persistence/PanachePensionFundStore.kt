@@ -92,7 +92,7 @@ class PanachePensionFundStore(
                         if (c.status == ClassificationCorrectionStatus.PROPOSED) {
                             session.persist(c.toEntity())
                         } else {
-                            session.createQuery<Int>(
+                            session.createMutationQuery(
                                 "update PositionClassificationCorrectionEntity set status = :status, " +
                                     "decidedBy = :actor, decidedAt = :at where id = :id and status = 'PROPOSED'",
                             )
@@ -275,6 +275,7 @@ class PanachePensionFundStore(
         it.riskClass = riskClass.toShort()
         it.mandatoryConservative = mandatoryConservative
         it.managementFeeRate = managementFeeRate
+        it.productRevisionId = productRevisionId
         it.launchNavPerUnit = launchNavPerUnit
         it.status = status.name
         it.createdAt = createdAt
@@ -292,6 +293,7 @@ class PanachePensionFundStore(
         riskClass = riskClass.toInt(),
         mandatoryConservative = mandatoryConservative,
         managementFeeRate = managementFeeRate,
+        productRevisionId = productRevisionId,
         launchNavPerUnit = launchNavPerUnit,
         status = FundStatus.valueOf(status),
         createdAt = createdAt,

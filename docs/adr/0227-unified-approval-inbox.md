@@ -13,6 +13,42 @@ summary: "Sixteen per-service ApprovalResources become one canonical ApprovalIte
 
 # ADR-0227 — Unified approval inbox: one disposition point for human and agent proposals
 
+**Delivery note (2026-10-06, branch `agent/adr-0227-inbox-contract`).** D1 and D3 are
+shipped; D4 remains, deliberately.
+
+- **D1 (canonical `ApprovalItem`)** — the contract exists in
+  `openbank-libs-domain` (`ApprovalItem`, `ApprovalMaker`, `ApprovalRiskClass`,
+  `PendingApproval.toApprovalItem`) and the shared `ApprovalEndpointSupport` projects it
+  for all 19 shared-store ApprovalResources by extending `ApprovalResponse` **additively**
+  (new fields `summary`, `domain`, `amount`, `currency`, `riskClass`, `payloadRef`, all
+  optional) — no resource file changed, and the class remains a plain delegate (not a CDI
+  bean), so the `AuthorizeInterceptor` four-eyes bean-presence invariant is untouched. The
+  18 services whose `openapi.yaml` declares `ApprovalResponse` got the additive properties
+  plus a MINOR `info.version` bump per the ADR-0048 api-contract gate (additive ⇒ MINOR);
+  communication-service declares no approval schema and is unchanged. Honest sourcing,
+  recorded in the type KDocs: `summary` comes from the persisted request binding;
+  `amount`/`currency` are null for every record today because the maker's request body is
+  not persisted (only its SHA-256 fingerprint is — a null is never "zero amount");
+  `payloadRef` is null because the fingerprint is an integrity digest, not a retrievable
+  pointer; `riskClass` is UNKNOWN server-side because the authoritative classification is
+  rules.yaml `four_eyes` action-class metadata the store cannot see — deriving it in the
+  BFF from a static, drift-guarded copy of that metadata was chosen over coupling the
+  inbox read to the OPA bundle.
+- **D3 (inbox filters)** — `/approvals` gains amount-band, risk-class and age facets
+  (`filterAndSortDomainApprovals` in `src/lib/approvals/triage.ts`), with the amount band
+  and age band treating absent values as outside every band rather than guessing. The
+  inbox stays read-only: no bulk approve, disposal still in the governed per-domain flows.
+- **D4 (governed disposal enforcement) remains**, and this note records why it is not in
+  this branch: D4's server-side refusal of disposal outside the governed UI must be
+  **action-class based** (money-path and destructive classes), but ADR-0224 amended the
+  proposal mechanism on the **channel** dimension and explicitly rejected channel-based
+  refusal. Shipping D4 on top of the current ADR-0224 text would either re-litigate that
+  rejection or enforce on the wrong axis, so D4 needs an ADR-0224 amendment first
+  (action-class-based enforcement) before the disposal endpoint can require the
+  approver's own UI session plus SCA for money-path classes.
+
+Decision status stays `proposed`; delivery status stays `partial` (D4 outstanding).
+
 **Delivery note (2026-08-19).** Phase 1 exists and the ADR's premise about D1 is stale: the
 sixteen `ApprovalResource`s do **not** carry sixteen item shapes — they all sit on the shared
 `com.openbank.libs.approval.ApprovalStore` / `PendingApproval`, and `findPending` in

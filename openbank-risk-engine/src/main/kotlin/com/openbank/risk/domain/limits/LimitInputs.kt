@@ -20,6 +20,7 @@ import java.math.RoundingMode
  * book is not a figure. An unclassified balance, an unconverted currency, an unpriced currency or a
  * counterparty-less bank exposure makes the metric NOT evaluable rather than evaluated on the rest.
  */
+@Suppress("TooManyFunctions") // one input builder per declared metric, by design
 object LimitInputs {
 
     private const val RATIO_SCALE = 6
@@ -112,6 +113,26 @@ object LimitInputs {
         return MetricInput.Measured(
             ratio(largest.value, t1),
             "largest bank exposure ${largest.value} CZK (counterparty ${largest.key}) / Tier 1 $t1",
+        )
+    }
+
+    /** |PV01| of the own book, or the valuation's gap (a partial book states no PV01). */
+    fun pv01(pv01: BigDecimal?, gap: String?): MetricInput = when {
+        gap != null -> MetricInput.Gap(gap)
+        pv01 == null -> MetricInput.Gap("PV01 was not computed")
+        else -> MetricInput.Measured(
+            pv01.abs().setScale(2, RoundingMode.HALF_EVEN),
+            "|PV01| of the own book $pv01 CZK per +1bp",
+        )
+    }
+
+    /** VaR as a positive loss, or the data gap (too little history, a partial book). */
+    fun valueAtRisk(valueAtRisk: BigDecimal?, gap: String?): MetricInput = when {
+        gap != null -> MetricInput.Gap(gap)
+        valueAtRisk == null -> MetricInput.Gap("VaR was not computed")
+        else -> MetricInput.Measured(
+            valueAtRisk.max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_EVEN),
+            "historical-simulation VaR 99 % / 1 day of the own book, CZK",
         )
     }
 

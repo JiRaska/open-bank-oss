@@ -21,7 +21,7 @@ test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
 })
 
-test('applies a Party UUID explicitly, preserves only the same-filter snapshot, and recovers', async ({ page }) => {
+test('applies a pasted Party id explicitly, preserves only the same-filter snapshot, and recovers', async ({ page }) => {
   let partyAvailable = true
   let partyRequests = 0
   await page.route('**/api/svc/kyc-service/api/v1/kyc/cases', route =>
@@ -39,12 +39,15 @@ test('applies a Party UUID explicitly, preserves only the same-filter snapshot, 
   )
 
   await page.goto('/kyc')
-  const input = page.locator('#kyc-party-id')
-  const search = page.getByRole('button', { name: /Vyhledat KYC případy|Search KYC cases/ })
+  // The client lookup is the only way to scope the list; a pasted Party id still passes through it
+  // (no name search), and re-reading the same filter is the page's Refresh action.
+  const input = page.getByRole('search').getByLabel(/Vyhledat stranu|Search parties/)
+  const applyParty = page.getByRole('search').getByRole('button', { name: /Vyhledat|Search/ })
+  const search = page.getByRole('button', { name: /Obnovit KYC případy|Refresh KYC cases/ })
 
   await input.fill(PARTY_ID)
   expect(partyRequests).toBe(0)
-  await search.click()
+  await applyParty.click()
   await expect(page.getByText('UNDER_REVIEW', { exact: true })).toBeVisible()
   expect(partyRequests).toBe(1)
 
@@ -59,7 +62,7 @@ test('applies a Party UUID explicitly, preserves only the same-filter snapshot, 
   await expect(page.getByText('UNDER_REVIEW', { exact: true })).toBeVisible()
 
   await input.fill(OTHER_PARTY_ID)
-  await search.click()
+  await applyParty.click()
   await expect(page.getByText('UNDER_REVIEW', { exact: true })).toHaveCount(0)
   await expect(page.getByText(/poslední ověřený snapshot|last verified snapshot/)).toHaveCount(0)
   expect(partyRequests).toBe(3)

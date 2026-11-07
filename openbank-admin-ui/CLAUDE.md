@@ -48,17 +48,22 @@ issues #66–68); until it lands, the UI degrades through rule #1 instead of sur
 
 The admin-ui **displays** state; it does not generate it. Two consequences, both industry-standard:
 
-- **Security scanning is a CI/CD concern, never a UI button.** Never let the browser trigger a live scan
-  (no `POST /scan`). SAST/DAST/dependency/secret scans run in the pipeline (`.github/workflows/security.yml`
-  — Trivy, CodeQL, Gitleaks). The page is a read-only view of the latest verdict. A privileged, expensive
-  fleet action behind a UI button is an anti-pattern (OWASP DevSecOps / EBA ICT risk).
+- **Security scanning is never triggered by the UI.** Never let the browser trigger a live scan
+  (no `POST /scan`). CI scans run in `.github/workflows/security.yml` (Trivy, CodeQL, Gitleaks), while
+  `security-scanner` also publishes its scheduled read-only report every 30 minutes. The page and its
+  refresh button only read the latest report; a privileged, expensive fleet action behind a UI button is
+  an anti-pattern (OWASP DevSecOps / EBA ICT risk).
 - **CI artifacts are baked into the image and served read-only.** Test/coverage and security reports follow
   the same pattern as the SBOM bundle: the deploy build summarises real CI output into a JSON
   (`test-results.json`, `security-report.json`), bakes it into the image, and an internal route serves it
   (`OPENBANK_TEST_RESULTS`, `OPENBANK_SECURITY_REPORT`). Never fabricate numbers; a service with no report
-  shows `0` (honest "not run here"). Collectors: `scripts/collect-test-results.mjs`. Routes:
-  `src/app/api/test-results/route.ts`, `src/app/api/security/route.ts` — both prefer the bundled file, fall
-  back to a live read-only source if configured, else degrade through rule #1.
+  shows `0` (honest "not run here"). Collector: `scripts/collect-test-results.mjs`. The test-results route
+  serves its image-baked snapshot. The security route compares the bundle with a read-only scanner GET and
+  returns the newest report with a parseable source timestamp; its envelope identifies `scanner` versus
+  `ci-bundle`, scanner availability, and freshness. Reports older than 45 minutes are marked stale;
+  missing, invalid, or future timestamps are marked unknown. The Security Scanner page polls this GET every five minutes while visible;
+  scanner outage keeps the bundle visible with an explicit fallback/stale warning rather than calling it
+  live. Routes: `src/app/api/test-results/route.ts`, `src/app/api/security/route.ts`.
 - **Where the bundle comes from.** `build-push-admin-ui.sh` runs the collector before the image build and
   bakes `openbank-admin-ui/test-results.json` (gitignored — derived, never committed). It reads JUnit XML
   from `${TEST_RESULTS_REPO:-<repo-root>}/openbank-*/build/test-results/`, so in CI (which runs

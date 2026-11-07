@@ -17,7 +17,7 @@
 # --no-bump to only build & push (e.g. a throwaway test image).
 #
 # Usage:
-#   openbank-infra/scripts/build-push-admin-ui.sh [--no-bump] [--no-sbom] [--platform <p>]
+#   openbank-infra/scripts/build-push-admin-ui.sh [--collect-only] [--no-bump] [--no-sbom] [--platform <p>]
 #
 #   --no-sbom  skip ./gradlew sbomAll and reuse whatever build/reports/bom.json
 #              files already exist (fast UI-only iteration).
@@ -42,10 +42,12 @@ PLATFORM="linux/arm64"
 BUMP_MANIFEST=1
 GEN_SBOM=1
 ECR_LOGIN=1
+COLLECT_ONLY=0
 MANIFEST="openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --collect-only) COLLECT_ONLY=1; shift ;;
     --no-bump)    BUMP_MANIFEST=0; shift ;;
     --no-sbom)    GEN_SBOM=0; shift ;;
     --no-login)   ECR_LOGIN=0; shift ;;
@@ -159,9 +161,46 @@ fi
 # read-only vars the CI can-i-deploy gate uses) are exported, the collector folds the
 # real provider-verification verdict from the broker (ADR-0092) into each contract;
 # unset/unreachable → contracts stay 'pending' (fail-soft).
+run_traced_collector() {
+  local trace_stage="$1" trace_auth="$2"
+  shift 2
+  if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+    "$@"
+    return $?
+  fi
+  (
+    eval "$(python3 .github/scripts/admin_ui_trace_ipc.py begin --stage "${trace_stage}" --auth "${trace_auth}")" || true
+    "$@"
+  )
+}
+record_trace_status() {
+  local name="$1" status="$2"
+  if [ -n "${GITHUB_ENV:-}" ]; then
+    printf 'TRACE_STATUS_%s=%s\n' "${name}" "${status}" >> "${GITHUB_ENV}" 2>/dev/null || \
+      echo "WARN: could not record trace status for ${name}." >&2
+  fi
+}
 QR_OUT="openbank-admin-ui/quality-report.json"
 echo "==> collect quality report (contracts + mutation scores)"
-if ! ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+QR_AUTH="none"
+if [ -n "${PACT_BROKER_USERNAME:-}" ] && [ -n "${PACT_BROKER_PASSWORD:-}" ]; then QR_AUTH="pact_broker"; fi
+if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+  if ! ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+    [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
+    echo "    WARN: quality-report collector failed; baked empty bundle." >&2
+  fi
+elif [ -z "${PACT_BROKER_URL:-}" ]; then
+  if ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "${REPO_ROOT}" ) 2>&1; then
+    record_trace_status QUALITY_REPORT skipped
+  else
+    record_trace_status QUALITY_REPORT failure
+    [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
+    echo "    WARN: quality-report collector failed; baked empty bundle." >&2
+  fi
+elif run_traced_collector quality_report "${QR_AUTH}" bash -c 'cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-root "$1"' _ "${REPO_ROOT}" 2>&1; then
+  record_trace_status QUALITY_REPORT success
+else
+  record_trace_status QUALITY_REPORT failure
   [ -f "${QR_OUT}" ] || echo '{"contracts":[],"mutations":[],"serviceScores":[],"collectedAt":null}' > "${QR_OUT}"
   echo "    WARN: quality-report collector failed; baked empty bundle." >&2
 fi
@@ -268,7 +307,15 @@ echo "    governance manifest: ${GOV_SVC_COUNT} services"
 # fails the build if zero lifecycle feeds resolve (the governance-empty lesson).
 IL_OUT="openbank-admin-ui/infra-lifecycle.json"
 echo "==> generate infra lifecycle snapshot (ADR-0077)"
-if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+if [ -z "${ADMIN_UI_TRACE_DIR:-}" ]; then
+  if ! node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+    echo "ERROR: infra-lifecycle generator failed (endoflife.date unreachable?)." >&2
+    exit 1
+  fi
+elif run_traced_collector infra_lifecycle none node openbank-admin-ui/scripts/generate-infra-lifecycle.mjs --repo "${REPO_ROOT}" --out "${IL_OUT}" 2>&1; then
+  record_trace_status INFRA_LIFECYCLE success
+else
+  record_trace_status INFRA_LIFECYCLE failure
   echo "ERROR: infra-lifecycle generator failed (endoflife.date unreachable?)." >&2
   exit 1
 fi
@@ -326,6 +373,11 @@ else
   echo "    WARN: app-status.json missing/garbled; baked available:false stub." >&2
 fi
 
+if [ "${COLLECT_ONLY}" = "1" ]; then
+  echo '==> collected image inputs; no image built or published'
+  exit 0
+fi
+
 if [ "${ECR_LOGIN}" = "1" ]; then
   echo "==> ECR login (${AWS_REGION})"
   aws ecr get-login-password --region "${AWS_REGION}" \
@@ -367,6 +419,19 @@ buildx_args=(
   --push \
   .
 )
+
+# Shared cache is an optimization only. Source validation and image smoke tests still run.
+# The caller exposes the short-lived Actions runtime credentials; no cache credentials
+# are passed as build arguments or copied into the image.
+if [ "${ADMIN_UI_BUILDKIT_CACHE:-}" = "gha" ]; then
+  : "${ACTIONS_RUNTIME_TOKEN:?Actions runtime token required for gha cache}"
+  : "${ACTIONS_RESULTS_URL:?Actions cache v2 URL required}"
+  buildx_args=(--cache-from "type=gha,version=2,scope=admin-ui-${PLATFORM//\//-}" \
+    --cache-to "type=gha,version=2,scope=admin-ui-${PLATFORM//\//-},mode=max,ignore-error=true" "${buildx_args[@]}")
+fi
+if [ -n "${ADMIN_UI_BUILD_METADATA_FILE:-}" ]; then
+  buildx_args=(--metadata-file "${ADMIN_UI_BUILD_METADATA_FILE}" "${buildx_args[@]}")
+fi
 
 # The GitHub job has a 30-minute ceiling, but an unbounded BuildKit invocation can consume the
 # entire deploy slot and leave no time for a useful failure or cleanup signal. GNU timeout is

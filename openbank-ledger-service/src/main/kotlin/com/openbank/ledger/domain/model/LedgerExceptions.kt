@@ -35,3 +35,7 @@ inline fun requireValid(condition: Boolean, lazyMessage: () -> String) {
 inline fun checkConflict(condition: Boolean, lazyMessage: () -> String) {
     if (!condition) throw LedgerConflictException(lazyMessage())
 }
+
+/** A tie-out was attempted while declared day-close participants were missing or REFUSED. */
+class CloseParticipantsPendingException(val pending: Set<String>) :
+    RuntimeException("Day-close participants still pending: ${pending.sorted()}")

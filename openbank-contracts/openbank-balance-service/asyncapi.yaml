@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+asyncapi: 3.0.0
+info:
+  title: OpenBank Balance Service events
+  version: 1.0.0
+  description: >-
+    Balance facts are emitted from the transactional balance outbox. Customer-opted-in low-balance
+    notification requests use the same outbox but are routed to the notification request topic;
+    a balance fact is only a wake-up to evaluate the current pocket and ownership.
+defaultContentType: application/json
+channels:
+  balanceEvents:
+    address: openbank.balance.events
+    messages:
+      balanceEvent:
+        payload:
+          type: object
+          required: [eventId, eventType, accountId, currency, bookedAmount, availableAmount, reservedAmount, occurredAt]
+          properties:
+            eventId: {type: string, format: uuid}
+            eventType: {type: string, enum: [BALANCE_UPDATED, HOLD_PLACED, HOLD_RELEASED, HOLD_EXPIRED]}
+            accountId: {type: string, format: uuid}
+            currency: {type: string}
+            bookedAmount: {type: number}
+            availableAmount: {type: number}
+            reservedAmount: {type: number}
+            occurredAt: {type: string, format: date-time}
+  notificationRequests:
+    address: openbank.notification.requests
+    messages:
+      lowBalanceAlertRequest:
+        payload:
+          type: object
+          required: [partyId, channel, template, recipient, variables, correlationId, deduplicationKey]
+          properties:
+            partyId: {type: string, format: uuid}
+            channel: {type: string, const: INBOX}
+            template: {type: string, const: LOW_BALANCE_ALERT}
+            recipient: {type: string}
+            variables: {type: object, maxProperties: 0}
+            correlationId: {type: string, format: uuid}
+            deduplicationKey: {type: string, format: uuid}
+operations:
+  publishBalanceEvent:
+    action: send
+    channel: {$ref: '#/channels/balanceEvents'}
+  publishLowBalanceAlertRequest:
+    action: send
+    channel: {$ref: '#/channels/notificationRequests'}

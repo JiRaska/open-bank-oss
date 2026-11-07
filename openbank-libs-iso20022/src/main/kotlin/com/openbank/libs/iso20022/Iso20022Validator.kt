@@ -6,6 +6,7 @@ package com.openbank.libs.iso20022
 
 import com.openbank.libs.xml.SecureXml
 import org.xml.sax.ErrorHandler
+import org.xml.sax.SAXException
 import org.xml.sax.SAXParseException
 import javax.xml.XMLConstants
 import javax.xml.transform.dom.DOMSource
@@ -67,6 +68,9 @@ class Iso20022Validator(private val schema: Schema) {
         } catch (e: SAXParseException) {
             // A fatal parse error can be thrown rather than reported when no handler swallows it.
             Iso20022ValidationResult.Invalid(errors + format(e))
+        } catch (e: SAXException) {
+            // JAXP may reject malformed input without SAXParseException coordinates.
+            Iso20022ValidationResult.Invalid(errors + (e.message ?: "XML validation failed"))
         }
     }
 

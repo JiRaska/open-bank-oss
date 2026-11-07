@@ -10,24 +10,15 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
-    implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.scheduler)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     // #999: book the withholding-tax cash leg to the finanční úřad via transaction-service, with an
@@ -41,8 +32,11 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
+    // ADR-0352 phase 3: the product-IR shadow evaluates the pinned revision with the pure interpreter;
+    // its interest arithmetic lives in libs-finance (FinanceProductArithmetic), never in this service.
+    implementation(project(":openbank-libs-finance"))
+    // ADR-0319: transaction-service client GENERATED from its openapi.yaml.
+    implementation(project(":openbank-client-transaction"))
     testImplementation(libs.mockk)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // #8352: AuditEventTime — the ONE shared copy of the rule `AuditConsumer.eventTime` applies to
@@ -61,7 +55,6 @@ dependencies {
     // Consumer-driven contract for the ledger-service postJournal call the ADR-0033 §D
     // capitalization credit leg makes (ADR-0063). interest-service is the fifth ledger-posting
     // consumer; every other one already has a pact with openbank-ledger-service as provider.
-    testImplementation(libs.rest.assured.kotlin)
     // InterestMissingParamStatusIT (#3104) drives `capitalize` over REAL HTTP behind @RolesAllowed —
     // the only layer at which an omitted @QueryParam can be observed at all.
     testImplementation(libs.quarkus.test.security)
@@ -81,6 +74,16 @@ kover {
             }
         }
     }
+}
+
+// Test-JVM heap: CI died with java.lang.OutOfMemoryError in the forked test JVM once the
+// trace-contract IT added its own Quarkus boot (OTel SDK + Testcontainers) alongside the
+// service's existing @QuarkusTest suite on the default ~512m heap; QuarkusTestExtension
+// then hung until the 10-minute hang-detection timeout killed the executor. Same measured
+// failure account-service recorded (see its maxHeapSize comment): per-module on purpose,
+// not a fleet default.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
 }
 
 // Pact: write the generated consumer contract to pacts/ and forward broker config, matching

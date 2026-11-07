@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.banking.treasury-instrument:1",
+  "$comment": "ADR-0341: treasury own-dealing instruments are catalog offerings. Classification and limits live here; the deal price stays dealer-entered, so there are no price components.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "instrumentType",
+    "counterpartyKind",
+    "balanceSide",
+    "currencies",
+    "accountingClass",
+    "regulatoryClass"
+  ],
+  "properties": {
+    "instrumentType": {
+      "type": "string",
+      "enum": [
+        "MM_PLACEMENT",
+        "MM_BORROWING",
+        "CNB_DEPOSIT_FACILITY",
+        "CNB_LOMBARD",
+        "FX_SPOT"
+      ]
+    },
+    "counterpartyKind": {
+      "type": "string",
+      "enum": [
+        "BANK",
+        "CENTRAL_BANK"
+      ]
+    },
+    "balanceSide": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "LIABILITY",
+        "POSITION"
+      ]
+    },
+    "currencies": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z]{3}$"
+      }
+    },
+    "maxTenorDays": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "accountingClass": {
+      "type": "string",
+      "enum": [
+        "INTERBANK_PLACEMENT",
+        "INTERBANK_BORROWING",
+        "CNB_DEPOSIT_FACILITY",
+        "CNB_LOMBARD_BORROWING",
+        "FX_SPOT_POSITION"
+      ],
+      "description": "ADR-0341 accounting class. The ledger maps it to GL accounts; a revision never carries GL codes."
+    },
+    "regulatoryClass": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "ADR-0341 regulatory class drawn from the FINREP / AnaCredit taxonomies.",
+      "required": [
+        "finrepInstrument",
+        "counterpartySector"
+      ],
+      "properties": {
+        "finrepInstrument": {
+          "type": "string",
+          "enum": [
+            "LOANS_AND_ADVANCES",
+            "CASH_BALANCES_AT_CENTRAL_BANKS",
+            "BORROWINGS_AT_AMORTISED_COST",
+            "FX_SPOT_POSITION"
+          ]
+        },
+        "counterpartySector": {
+          "type": "string",
+          "enum": [
+            "HOUSEHOLDS",
+            "NON_FINANCIAL_CORPORATIONS",
+            "CREDIT_INSTITUTIONS",
+            "CENTRAL_BANK",
+            "GENERAL_GOVERNMENT",
+            "OTHER_FINANCIAL_CORPORATIONS",
+            "PER_PARTY"
+          ]
+        }
+      }
+    }
+  }
+}

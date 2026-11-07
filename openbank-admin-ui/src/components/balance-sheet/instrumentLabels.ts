@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react'
 import { getJson, riskUrl } from './api'
 import { instrumentsSchema, type Instrument } from './contracts'
-import { formatMoney } from '@/lib/risk/aggregate'
+import { formatMoney } from '@/lib/risk/contracts'
 
 /**
  * The snapshot's instruments by id; null while loading, when the endpoint is unavailable, or when

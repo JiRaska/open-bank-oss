@@ -1,6 +1,6 @@
 # API
 
-The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1, `info.version` 1.1.0) and served from the `TransactionResource`. All paths are under `/api/v1` (`openbank.api.version = 1`, ADR-0048). `X-API-Version` / `X-Service-Version` and `/api/v1/info` are served by `openbank-libs`.
+The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1, `info.version` 1.21.0) and served from the `TransactionResource`. All paths are under `/api/v1` (`openbank.api.version = 1`, ADR-0048). `X-API-Version` / `X-Service-Version` and `/api/v1/info` are served by `openbank-libs`.
 
 > Note: the `openapi.yaml` `servers` entry lists port 8101 for local dev, but the running application binds **8102** (`application.yaml`). The POST initiate endpoint is implemented in `TransactionResource` but is not yet enumerated in `openapi.yaml` — treat the contract for `POST /api/v1/transactions` as documented here until the spec is regenerated (TBD).
 
@@ -24,11 +24,11 @@ Response `200` — `TransactionPage`:
 ```json
 {
   "data": [ { "...": "TransactionResponse" } ],
-  "pagination": { "nextCursor": "…", "hasMore": true }
+  "pagination": { "limit": 20, "hasNextPage": true, "nextCursor": "…", "previousCursor": null, "totalCount": null }
 }
 ```
 
-Cursor pagination uses `libs.api.pagination.CursorEncoder`; the service fetches `limit + 1` rows to compute `hasMore` and emits `nextCursor` only when more pages exist.
+Cursor pagination uses `libs.api.pagination.CursorEncoder`; the service fetches `limit + 1` rows to compute `hasNextPage` and emits `nextCursor` only when more pages exist. The spec still declares `hasMore` only because removing a published response property is breaking (oasdiff); the server has never sent it.
 
 ## Search — `GET /api/v1/transactions/search`
 
@@ -103,5 +103,5 @@ Domain invariants that must surface as 422 deliberately throw `IllegalStateExcep
 
 ## Versioning
 
-- **API contract axis:** `openapi.yaml:info.version` (1.1.0); its major == URL `/api/v{N}` == `openbank.api.version` (1). An API change classifies its own bump from the OpenAPI diff (ADR-0048).
+- **API contract axis:** `openapi.yaml:info.version` (1.21.0); its major == URL `/api/v{N}` == `openbank.api.version` (1). An API change classifies its own bump from the OpenAPI diff (ADR-0048).
 - **Release axis:** `version.txt` (1.2.1), owned by release-please — independent of the API axis.

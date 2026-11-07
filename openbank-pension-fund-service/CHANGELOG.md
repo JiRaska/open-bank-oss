@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.2...pension-fund-service-v2.0.0) (2026-11-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207))
+
+### Features
+
+* **pension-fund:** version pinned fund API and transition clients ([#13207](https://github.com/JiRaska/open-bank-oss/issues/13207)) ([4592d82](https://github.com/JiRaska/open-bank-oss/commit/4592d82576861a903ecc1b7c2d0e62863395f68e))
+
+## [1.0.2](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.1...pension-fund-service-v1.0.2) (2026-10-16)
+
+
+### Security
+
+* **opa:** authorize machines by the verified service_account flag (phase 2 of 2, gated on [#12538](https://github.com/JiRaska/open-bank-oss/issues/12538) rollout) ([#12537](https://github.com/JiRaska/open-bank-oss/issues/12537)) ([abf3aff](https://github.com/JiRaska/open-bank-oss/commit/abf3aff4f24fd170a6e1641b3008f9e4648a9572))
+
 ## [1.0.1](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.0...pension-fund-service-v1.0.1) (2026-10-14)
 
 

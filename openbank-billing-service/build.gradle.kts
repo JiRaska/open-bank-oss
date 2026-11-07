@@ -7,15 +7,7 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.kotlinx.coroutines.core)
@@ -25,7 +17,6 @@ dependencies {
     // account/balance (FeeContext), with OIDC client-credentials propagation on the PII reads.
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.smallrye.fault.tolerance)
 
@@ -49,14 +40,14 @@ dependencies {
     // The shared fee-waiver engine (ADR-0138 phase 1b) + outbox/approval primitives (ADR-0013/0155).
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
+    // ADR-0352 phase 3: the product-IR shadow evaluates revisions with the one pure interpreter, whose
+    // interest and penalty arithmetic lives in libs-finance (FinanceProductArithmetic).
+    implementation(project(":openbank-libs-finance"))
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
@@ -64,6 +55,8 @@ dependencies {
     // Standalone Flyway upgrade tests run outside Quarkus bootstrap, which installs this plugin.
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testImplementation(project(":openbank-libs-testing"))
+    // ADR-0352 phase 3: the shadow is held to the public reference products and their golden vectors.
+    testImplementation(project(":openbank-products"))
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
     // Admin UI pending-approval contract: generated consumer pact + live HTTP provider replay.

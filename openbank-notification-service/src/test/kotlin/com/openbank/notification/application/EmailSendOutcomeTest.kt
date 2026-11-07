@@ -22,8 +22,7 @@ import org.junit.jupiter.api.Test
  * shows it disagrees. Without it the rest would pass against the bug — the mocked case is exactly
  * the case a "did it throw?" test cannot distinguish, which is why the bug survived a green suite.
  *
- * Mirrors `PushFanOutOutcomeTest` on purpose: the same defect, the same three-state vocabulary,
- * and deliberately not a second shape.
+ * A failed handoff is now an unresolved observation; a timeout cannot establish rejection.
  */
 class EmailSendOutcomeTest {
 
@@ -39,7 +38,7 @@ class EmailSendOutcomeTest {
 
         // What it computes now, from the same two facts.
         val sendOutcome = when {
-            failure != null -> EmailSendOutcome.FAILED
+            failure != null -> EmailSendOutcome.IN_DOUBT
             mailerMocked -> EmailSendOutcome.MOCKED
             else -> EmailSendOutcome.ACCEPTED
         }
@@ -70,11 +69,9 @@ class EmailSendOutcomeTest {
     }
 
     @Test
-    fun `a mailer rejection is FAILED and keeps its own reason`() {
-        assertThat(NotificationConsumer.emailOutcomeOf(EmailSendOutcome.FAILED))
-            .isEqualTo(NotificationOutcome.FAILED)
-        assertThat(NotificationConsumer.emailReasonOf(EmailSendOutcome.FAILED))
-            .isEqualTo(NotificationOutcomeEvent.REASON_MAILER_REFUSED)
+    fun `a mailer exception leaves acceptance in doubt with no terminal outcome`() {
+        assertThat(NotificationConsumer.emailOutcomeOf(EmailSendOutcome.IN_DOUBT)).isNull()
+        assertThat(NotificationConsumer.emailReasonOf(EmailSendOutcome.IN_DOUBT)).isNull()
     }
 
     @Test
@@ -86,19 +83,14 @@ class EmailSendOutcomeTest {
     }
 
     @Test
-    fun `every outcome maps to a distinct status, so no two states share a number`() {
+    fun `each observation maps to a distinct terminal status or unresolved`() {
         val statuses = EmailSendOutcome.entries.map { NotificationConsumer.emailOutcomeOf(it) }
         assertThat(statuses).doesNotHaveDuplicates()
     }
 
     @Test
-    fun `a reason accompanies exactly the non-delivering outcomes`() {
+    fun `a terminal reason accompanies only a mocked send`() {
         val withReason = EmailSendOutcome.entries.filter { NotificationConsumer.emailReasonOf(it) != null }
-        assertThat(withReason).containsExactlyInAnyOrder(EmailSendOutcome.MOCKED, EmailSendOutcome.FAILED)
-        // The two must never collapse into one code: "switched off" and "rejected" are different
-        // problems with different owners, the same distinction no_active_consent /
-        // consent_check_unavailable already draws.
-        assertThat(NotificationConsumer.emailReasonOf(EmailSendOutcome.MOCKED))
-            .isNotEqualTo(NotificationConsumer.emailReasonOf(EmailSendOutcome.FAILED))
+        assertThat(withReason).containsExactly(EmailSendOutcome.MOCKED)
     }
 }

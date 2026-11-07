@@ -77,7 +77,7 @@ com.openbank.domestic/
 │   ├── model/                 DomesticPayment, enumy stav / priorita / scope / důvod zamítnutí,
 │   │                          transitionTo() + canTransitionTo() (stavový automat)
 │   ├── event/                 DomesticPaymentCreatedEvent, DomesticPaymentStatusChangedEvent
-│   └── screening/             ScreeningPolicy (čisté rozhodnutí), ScreeningResult, ScreeningDecision
+│   └── screening/             (moved to openbank-libs-fincrime, ADR-0353)
 │
 ├── application/               ◄── orchestrace use-case
 │   ├── port/in/               DomesticPaymentUseCase + příkazy / dotazy
@@ -90,7 +90,6 @@ com.openbank.domestic/
     ├── persistence/           implementace repository, JPA entity, mappery
     ├── outbox/                DomesticPaymentOutboxDispatcher (scheduled, fault-tolerant)
     ├── kafka/                 KafkaDomesticPaymentEventPublisher
-    ├── approval/              ApprovalConfig (pouze four-eyes workflow v Redisu)
     ├── client/               SanctionsServiceClient + adaptér, AmlServiceClient + adaptér
     └── authz/                AuthzProducer (OPA, ADR-0034)
 ```

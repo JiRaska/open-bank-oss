@@ -5,8 +5,8 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.FraudScoreCommand
-import com.openbank.fx.application.port.out.FraudVerdict
 import com.openbank.fx.infrastructure.observability.FraudScoringMetrics
+import com.openbank.libs.fincrime.FraudVerdict
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk

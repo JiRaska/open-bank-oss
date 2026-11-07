@@ -58,6 +58,12 @@ We will adopt Virtual Threads **case-by-case**, gated by these triggers:
 
 None of those triggers are met today.
 
+This decision concerns Virtual Thread adoption, not the use of imperative transaction demarcation
+on a blocking persistence path. The agent service's JDBC-backed merge recorder and proposal
+lifecycle use `@Transactional`: each merge record, proposal creation, or proposal decision commits
+or rolls back together with its corresponding durable local audit outbox enqueue. These narrowly
+scoped transactions do not change the coroutine/Mutiny flows or adopt `@RunOnVirtualThread`.
+
 ## Alternatives considered
 
 - **Mass-migrate all `suspend fun consume(...)` to `fun consume(...)` +

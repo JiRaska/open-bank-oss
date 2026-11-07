@@ -107,11 +107,13 @@ DECLARED: dict[str, tuple[str, str]] = {
         "reasoning as dependency-submission.yml's own demotion above.",
     ),
     "security.yml::codeql": (
-        "writes-on-main",
-        "Left as-is deliberately. Its java-kotlin leg documents a 25-30 min cold penalty and "
-        "is the most preemption-exposed job in the fleet, so demoting it would trade a felt "
-        "regression for headroom already obtained more cheaply elsewhere. Revisit only with "
-        "a measurement showing fleet-lint's entry covers `testClasses` for it.",
+        "read-only",
+        "Demoted in #14413. Its own entry was the NEWEST Linux-X64 home on main after every "
+        "push (it finishes after fleet-lint), so every Services CI build leg fell back to it "
+        "— and codeql-force-compilers.init.gradle makes every compiler non-cacheable, so that "
+        "entry carried no compile outputs and build-logic + openbank-libs-* recompiled in "
+        "every service job. Its own runs gain nothing from writing: 418 of 419 tasks execute "
+        "anyway; it now restores fleet-lint's superset home for dependencies.",
     ),
     "auto-deploy.yml::build-push": (
         "writes-always",
@@ -136,6 +138,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "self-hosted, cache-disabled leg (ARC NAT egress, ~$200/mo) moved to the new "
         "`contract` job below.",
     ),
+    "_service-ci-pr.yml::build": (
+        "read-only",
+        ("Generated exact PR projection of the canonical service build job. Its hosted "
+         "cache consumer retains cache-read-only true; no additional writer is admitted."),
+    ),
     "_service-ci.yml::contract": (
         "disabled",
         "ADR-0250 Phase 2: the self-hosted half of the pre-split `build` job (ARC NAT "
@@ -147,6 +154,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
+    "libs-quality.yml::compatibility": (
+        "read-only",
+        "Library ABI, coverage and recovery proofs consume fleet-lint's Gradle home. "
+        "The dedicated library job must never publish another cache entry or become a writer.",
+    ),
     "api-fuzz-authenticated.yml::fuzz-authenticated": (
         "read-only",
         "Consumer; restores fleet-lint's home.",
@@ -206,6 +218,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "read-only",
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
         "never a writer, so it costs the pool nothing.",
+    ),
+    "perf-gate.yml::security-abuse": (
+        "read-only",
+        "Sibling consumer of the perf-gate.yml::perf lane (same auth-on boot, same "
+        "k6 image pin): restores fleet-lint's home to build one service's test "
+        "classes, never a writer (`cache-read-only: true` literally).",
     ),
     "libs-bench.yml::jmh": (
         "read-only",

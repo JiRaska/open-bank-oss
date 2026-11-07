@@ -39,7 +39,7 @@ const FUND_B = '22222222-2222-4222-8222-222222222222'
 const STRATEGY = '33333333-3333-4333-8333-333333333333'
 
 const contract = (status: string) => ({
-  contractId: CONTRACT_ID, participantPartyId: '55555555-5555-4555-8555-555555555555', productLine: 'DPS', jurisdiction: 'CZ',
+  contractId: CONTRACT_ID, participantPartyId: '55555555-5555-4555-8555-555555555555', participantBirthDate: '1985-05-05', productLine: 'DPS', jurisdiction: 'CZ',
   packVersion: 1, providerEntityId: '66666666-6666-4666-8666-666666666666', providerType: 'PENSION_COMPANY', status,
   schedule: { amount: 1000, currency: 'CZK', frequency: 'MONTHLY' },
   currentStrategy: { strategyCode: 'BALANCED', effectiveFrom: '2026-01-01', electedAt: '2026-01-01T10:00:00Z' },
@@ -65,7 +65,7 @@ const renderPage = async (node: React.ReactNode) => {
 }
 
 let calls: { url: string; init?: RequestInit }[] = []
-let router: (url: string, init?: RequestInit) => Response
+let router: (url: string, init?: RequestInit) => Response | Promise<Response>
 
 beforeEach(() => {
   calls = []
@@ -122,13 +122,53 @@ describe('pension model', () => {
 })
 
 describe('contract search', () => {
-  it('rejects a non-UUID contract id without navigating', async () => {
+  it.each(['success', 'failure'])('keeps the latest search when an older %s finishes last', async (outcome) => {
+    let finishOlder!: (response: Response) => void
+    const latestId = '99999999-9999-4999-8999-999999999999'
+    router = (url) => {
+      const q = new URL(url, 'http://localhost').searchParams.get('q')
+      if (q === 'older') return new Promise<Response>(resolve => { finishOlder = resolve })
+      if (q === 'latest') return json([{ ...contract('ACTIVE'), contractId: latestId }])
+      return json([])
+    }
+    await renderPage(<PensionContractsPage />)
+    await act(async () => { fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: 'older' } }) })
+    await act(async () => { fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: 'latest' } }) })
+    expect(screen.getByRole('link', { name: latestId })).toBeTruthy()
+    await act(async () => {
+      finishOlder(outcome === 'success' ? json([contract('ACTIVE')]) : new Response('', { status: 503 }))
+    })
+    expect(screen.getByRole('link', { name: latestId })).toBeTruthy()
+    expect(screen.queryByRole('link', { name: CONTRACT_ID })).toBeNull()
+  })
+
+  it('opens a bare UUID directly without a list call', async () => {
     router = () => json([])
     await renderPage(<PensionContractsPage />)
-    fireEvent.change(screen.getByLabelText('Contract id'), { target: { value: 'not-an-id' } })
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Open' })) })
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: CONTRACT_ID } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Filter list' })) })
+    expect(push).toHaveBeenCalledWith(`/pension/contracts/${CONTRACT_ID}`)
+    expect(calls.filter(c => c.url.includes('q='))).toHaveLength(0)
+  })
+
+  it('searches a non-UUID term through the staff q parameter without navigating', async () => {
+    router = () => json([contract('ACTIVE')])
+    await renderPage(<PensionContractsPage />)
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: '850505' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Filter list' })) })
     expect(push).not.toHaveBeenCalled()
-    expect(screen.getByRole('alert').textContent).toMatch(/UUID/)
+    expect(calls.some(c => c.url.includes('q=850505'))).toBe(true)
+    expect(document.body.textContent).toContain('1985-05-05')
+  })
+
+  it('refuses a one-character search without calling the list route', async () => {
+    router = () => json([])
+    await renderPage(<PensionContractsPage />)
+    fireEvent.change(screen.getByLabelText('Search contracts'), { target: { value: '8' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Filter list' })) })
+    expect(push).not.toHaveBeenCalled()
+    expect(calls.filter(c => c.url.includes('q='))).toHaveLength(0)
+    expect(screen.getByRole('alert').textContent).toMatch(/2 characters/)
   })
 
   it('caps the list request and degrades when the list route is not deployed', async () => {
@@ -161,7 +201,7 @@ describe('contract detail', () => {
 describe('NAV four-eyes', () => {
   it('withholds publish on the viewer’s own NAV and offers it on someone else’s', async () => {
     router = url => {
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Balanced fund')])
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Balanced fund')])
       if (url.includes('/navs')) return json([nav('own', 'olga.operator'), nav('other', 'karel.operator')])
       return json({}, 404)
     }
@@ -173,7 +213,7 @@ describe('NAV four-eyes', () => {
   it('renders the service’s refusal readably when a publish is refused anyway', async () => {
     router = (url, init) => {
       if (url.includes('/navs/other/approve') && init?.method === 'POST') return json({ error: 'FOUR_EYES_VIOLATION' }, 409)
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Balanced fund')])
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Balanced fund')])
       if (url.includes('/navs')) return json([nav('other', 'karel.operator')])
       return json({}, 404)
     }
@@ -186,8 +226,8 @@ describe('NAV four-eyes', () => {
 describe('strategy change four-eyes', () => {
   beforeEach(() => {
     router = (url, init) => {
-      if (url.endsWith('/api/v1/funds')) return json([fund(FUND_A, 'Bond fund'), fund(FUND_B, 'Equity fund')])
-      if (url.endsWith('/api/v1/strategies')) {
+      if (url.endsWith('/api/v2/funds')) return json([fund(FUND_A, 'Bond fund'), fund(FUND_B, 'Equity fund')])
+      if (url.endsWith('/api/v2/strategies')) {
         return json([{ id: STRATEGY, name: 'Balanced', allocations: [{ fundId: FUND_A, weight: 0.5, lowerBand: 0.4, upperBand: 0.6 }, { fundId: FUND_B, weight: 0.5, lowerBand: 0.4, upperBand: 0.6 }], lifecycle: false, status: 'ACTIVE', version: 3 }])
       }
       if (url.endsWith('/changes') && init?.method === 'POST') return json(change('new', 'olga.operator'), 201)

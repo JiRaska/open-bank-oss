@@ -45,8 +45,8 @@ interface StrategyCatalogRestClient {
     ): JsonNode
 
     @GET
-    @Path("/offerings/{offeringId}/revisions/{revisionId}/pension-approvals")
-    suspend fun pensionApprovals(
+    @Path("/offerings/{offeringId}/revisions/{revisionId}/approvals")
+    suspend fun revisionApprovals(
         @PathParam("offeringId") offeringId: UUID,
         @PathParam("revisionId") revisionId: UUID,
     ): List<JsonNode>
@@ -58,7 +58,7 @@ interface StrategyCatalogRead {
 
     suspend fun published(offeringId: UUID, at: OffsetDateTime): JsonNode
 
-    suspend fun pensionApprovals(offeringId: UUID, revisionId: UUID): List<JsonNode>
+    suspend fun revisionApprovals(offeringId: UUID, revisionId: UUID): List<JsonNode>
 }
 
 @ApplicationScoped
@@ -70,8 +70,8 @@ class StrategyInstrumentCatalogAdapter(@RestClient private val client: StrategyC
 
             override suspend fun published(offeringId: UUID, at: OffsetDateTime) = client.published(offeringId, at)
 
-            override suspend fun pensionApprovals(offeringId: UUID, revisionId: UUID) =
-                client.pensionApprovals(offeringId, revisionId)
+            override suspend fun revisionApprovals(offeringId: UUID, revisionId: UUID) =
+                client.revisionApprovals(offeringId, revisionId)
         },
     )
 
@@ -147,7 +147,7 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
             }
             val revisionId = UUID.fromString(revision.requiredText("id"))
             requireEffectiveInterval(revision, at)
-            requirePensionApprovals(id, revisionId, revision)
+            requireRevisionApprovals(id, revisionId, revision)
             val classes = attributes.path("instrumentClasses")
             check(classes.isArray && classes.size() > 0) { "retirement mapping has no instrument classes" }
             val classNames = classes.map { item ->
@@ -187,13 +187,13 @@ class StrategyInstrumentCatalogResolver(private val catalog: StrategyCatalogRead
         }
     }
 
-    private suspend fun requirePensionApprovals(offeringId: UUID, revisionId: UUID, revision: JsonNode) {
+    private suspend fun requireRevisionApprovals(offeringId: UUID, revisionId: UUID, revision: JsonNode) {
         // The catalog freezes this digest at publication after checking distinct legal and product
         // actors under its DB lock. The consumer checks both immutable role records against that
         // exact revision/content/effective-interval digest, without exposing actor identities.
-        val approvalDigest = revision.requiredText("pensionApprovalDigest")
+        val approvalDigest = revision.requiredText("approvalDigest")
         check(CONTENT_HASH.matches(approvalDigest)) { "retirement mapping lacks frozen approval digest" }
-        val approvals = catalog.pensionApprovals(offeringId, revisionId)
+        val approvals = catalog.revisionApprovals(offeringId, revisionId)
         check(approvals.size == REQUIRED_APPROVAL_ROLES.size) {
             "retirement mapping lacks independent role approvals"
         }

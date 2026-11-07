@@ -49,6 +49,17 @@ class CardReadCallerGuardTest {
     }
 
     @Test
+    fun `customer edge may list and read with its verified client but a spoofed name is denied`() {
+        val edge = identity("service-account-openbank-edge", "ROLE_API")
+        val impostor = jwtIdentity("openbank-unrelated", "service-account-openbank-edge", "ROLE_API")
+        listOf(CARD_READ_CALLERS, CARD_PARTY_LIST_CALLERS).forEach { allowed ->
+            assertThatCode { requireNamedCardReader(edge, allowed) }.doesNotThrowAnyException()
+            assertThatThrownBy { requireNamedCardReader(impostor, allowed) }
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+    }
+
+    @Test
     fun `staff role on an unrelated machine token cannot bypass client binding`() {
         val machine = jwtIdentity(
             "openbank-unrelated",
@@ -114,6 +125,7 @@ class CardReadCallerGuardTest {
         }
         assertThat(principals("service-delegation-card-read")).isEqualTo(CARD_READ_CALLERS)
         assertThat(principals("service-party-card-list")).isEqualTo(CARD_PARTY_LIST_CALLERS)
+        assertThat(principals("service-edge-card-details-read")).isEqualTo(CARD_DETAILS_READ_CALLERS)
     }
 
     @Test
@@ -142,5 +154,43 @@ class CardReadCallerGuardTest {
         assertThatThrownBy {
             requireNamedCardReader(noSubject, CARD_READ_CALLERS)
         }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `only customer-edge's own principal may read a PAN`() {
+        assertThatCode {
+            requireCardDetailsReader(identity("service-account-openbank-edge", "ROLE_OPERATOR"))
+        }.doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `no staff role reads a PAN, the read-only viewer least of all`() {
+        listOf("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN").forEach { role ->
+            val staff = jwtIdentity("openbank-admin-ui", "u-staff", role)
+            assertThatThrownBy { requireCardDetailsReader(staff) }
+                .describedAs(role)
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+        val allStaff = jwtIdentity("openbank-admin-ui", "u-staff", "ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+        assertThatThrownBy { requireCardDetailsReader(allStaff) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `other service accounts, and the edge's name on another client's token, are refused the PAN`() {
+        listOf("service-account-openbank-services", "service-account-openbank-delegation").forEach { name ->
+            assertThatThrownBy { requireCardDetailsReader(identity(name, "ROLE_OPERATOR", "ROLE_API")) }
+                .describedAs(name)
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+        val impostor = jwtIdentity("openbank-admin-ui", "service-account-openbank-edge", "ROLE_OPERATOR")
+        assertThatThrownBy { requireCardDetailsReader(impostor) }.isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `the PAN read does not admit the read-only viewer role`() {
+        val roles = CardResource::class.java.declaredMethods
+            .filter { it.name.substringBefore("$") == "secureDetails" }
+            .mapNotNull { it.getAnnotation(RolesAllowed::class.java)?.value?.toSet() }
+        assertThat(roles).isNotEmpty.allSatisfy { assertThat(it).doesNotContain("ROLE_VIEWER") }
     }
 }

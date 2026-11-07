@@ -32,6 +32,9 @@ object OutboxKafkaHeaders {
     /** ADR-0252: emitted only for tainted records; absence means real activity. */
     const val HEADER_SYNTHETIC: String = SyntheticTaint.KAFKA_HEADER
 
+    /** W3C Trace Context header; consumer instrumentation links its span to the producing request. */
+    const val HEADER_TRACEPARENT: String = "traceparent"
+
     /** N2: partition key = aggregate id, so one aggregate's events keep their order. */
     fun partitionKey(entry: OutboxEntry): String = entry.aggregateId.toString()
 
@@ -44,6 +47,7 @@ object OutboxKafkaHeaders {
             HEADER_EVENT_TYPE to entry.eventType,
         ).also { headers ->
             if (entry.synthetic) headers[HEADER_SYNTHETIC] = SyntheticTaint.headerValue()
+            entry.traceparent?.takeIf { it.isNotBlank() }?.let { headers[HEADER_TRACEPARENT] = it }
         }
     }
 }

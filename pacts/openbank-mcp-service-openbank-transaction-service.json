@@ -7,7 +7,7 @@
       "description": "GET the transaction page the MCP list_transactions tool returns verbatim",
       "providerStates": [
         {
-          "name": "transaction-service is reachable and holds no transactions for the pact account"
+          "name": "transaction-service holds a transaction for the pact account"
         }
       ],
       "request": {
@@ -18,7 +18,7 @@
         "path": "/api/v1/transactions",
         "query": {
           "accountId": [
-            "e1e1e1e1-f2f2-4a4a-8b8b-c9c9c9c9c9c9"
+            "e2e2e2e2-f3f3-4b4b-8c8c-d0d0d0d0d0d0"
           ],
           "limit": [
             "20"
@@ -29,7 +29,7 @@
         "body": {
           "data": [
             {
-              "currency": "CZK",
+              "currencyCode": "CZK",
               "id": "9f8e7d6c-5b4a-4390-8123-456789abcdef"
             }
           ],
@@ -48,11 +48,11 @@
               "matchers": [
                 {
                   "match": "type",
-                  "min": 0
+                  "min": 1
                 }
               ]
             },
-            "$.data[*].currency": {
+            "$.data[*].currencyCode": {
               "combine": "AND",
               "matchers": [
                 {
@@ -64,7 +64,8 @@
               "combine": "AND",
               "matchers": [
                 {
-                  "match": "type"
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
                 }
               ]
             },

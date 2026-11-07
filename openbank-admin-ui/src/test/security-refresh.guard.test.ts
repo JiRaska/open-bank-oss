@@ -10,7 +10,7 @@ describe('Security refresh contract', () => {
     expect(source).toContain('type="button"')
     expect(source).toContain('disabled={loading}')
     expect(source).toContain('aria-busy={loading}')
-    expect(source).toContain("aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}")
+    expect(source).toContain("aria-label={t('Obnovit bezpečnostní report', 'Refresh security report')}")
     expect(source).toContain('<RefreshCw size={13} aria-hidden="true"')
     expect(source).toContain('onClick={load}')
   })

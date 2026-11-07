@@ -15,6 +15,7 @@
 
 import { promises as fs } from 'fs'
 import path from 'path'
+import { resolveAdminUiContent, type ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 export interface NetworkCoverageGap {
   namespace: string
@@ -49,6 +50,7 @@ export interface SecurityPosture {
     enforced?: boolean
   }
   available: boolean
+  contentSource?: ContentSourceMetadata
 }
 
 function postureFile(): string {
@@ -56,12 +58,11 @@ function postureFile(): string {
 }
 
 export async function loadSecurityPosture(): Promise<SecurityPosture | null> {
-  try {
-    const raw = await fs.readFile(postureFile(), 'utf-8')
-    const parsed = JSON.parse(raw) as SecurityPosture
-    if (parsed?.istio || parsed?.network) return parsed
-    return null
-  } catch {
-    return null
-  }
+  const resolved = await resolveAdminUiContent(
+    snapshot => snapshot.content.securityGraph as unknown as SecurityPosture,
+    async () => {
+      try { return JSON.parse(await fs.readFile(postureFile(), 'utf-8')) as SecurityPosture } catch { return null }
+    },
+  )
+  return resolved.value ? { ...resolved.value, contentSource: resolved.contentSource } : null
 }

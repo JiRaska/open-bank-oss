@@ -4,6 +4,7 @@
 
 package com.openbank.swift.application.port.out
 
+import com.openbank.swift.domain.institution.InstitutionTransfer
 import com.openbank.swift.domain.model.SwiftMessage
 
 /**
@@ -14,7 +15,68 @@ import com.openbank.swift.domain.model.SwiftMessage
  */
 interface SchemeGatewayPort {
     suspend fun submit(message: SwiftMessage): SchemeSubmissionOutcome
+
+    /**
+     * Build the `pacs.009` (FICdtTrf, CORE) for a bank-own [transfer], XSD-validate it, submit it
+     * on the transfer's rail (CERTIS / TARGET2 / SWIFT) and map the `pacs.002`. Throws
+     * [SchemeGatewayUnavailableException] when the scheme cannot be reached (retryable) and
+     * [NonConformingMessageException] when the built message fails its schema (not retryable).
+     * The default exists only so test doubles of the MT103 path keep compiling; the production
+     * adapter overrides it.
+     */
+    suspend fun submitInstitutionTransfer(transfer: InstitutionTransfer): InstitutionTransferSubmission =
+        throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
+
+    /**
+     * Ask the scheme what it holds for [transfer]'s UETR — read-only. The answer is trusted only
+     * when it is unambiguous: [SchemeStatus.Known] carries a status report that names this
+     * transfer's own MsgId and UETR; [SchemeStatus.NotKnown] only for the scheme's TYPED
+     * "unknown UETR" answer; everything else (a bare 404, a report about another message) is
+     * [SchemeStatus.Ambiguous]. [SchemeGatewayUnavailableException] when no answer was obtained.
+     */
+    suspend fun queryInstitutionTransferStatus(transfer: InstitutionTransfer): SchemeStatus =
+        throw UnsupportedOperationException("this gateway does not carry bank-own transfers")
 }
+
+/** What a status query established about a submitted `pacs.009`. */
+sealed interface SchemeStatus {
+    data class Known(val submission: InstitutionTransferSubmission) : SchemeStatus
+
+    /** The scheme's typed answer that it never received this UETR — the only licence to resend. */
+    data object NotKnown : SchemeStatus
+
+    data class Ambiguous(val why: String) : SchemeStatus
+
+    companion object {
+        /** [Ambiguous.why] for a 404 without the scheme's typed body. */
+        const val UNTYPED_NOT_FOUND: String = "untyped 404"
+
+        /** [Ambiguous.why] for a status report about another MsgId / UETR. */
+        const val MISMATCHED: String = "status report for another message"
+    }
+}
+
+/** The scheme's verdict on a `pacs.009`, from the `pacs.002` `TxSts`. */
+enum class InstitutionTransferVerdict {
+    /** `RCVD` / `ACSP`: taken for processing, settlement not yet confirmed. */
+    IN_PROCESS,
+
+    /** `ACSC`: settled on the rail. */
+    SETTLED,
+
+    /** `RJCT`, carrying the reason code. */
+    REJECTED,
+}
+
+/** Outcome of [SchemeGatewayPort.submitInstitutionTransfer]; [rawPacs009] is what went on the wire. */
+data class InstitutionTransferSubmission(
+    val verdict: InstitutionTransferVerdict,
+    val reasonCode: String?,
+    val rawPacs009: String,
+)
+
+/** The rail built a message its own schema rejects — a defect, never retried. */
+class NonConformingMessageException(message: String) : IllegalStateException(message)
 
 /**
  * The scheme's verdict on a submitted credit transfer, mapped from the `pacs.002` `TxSts`.

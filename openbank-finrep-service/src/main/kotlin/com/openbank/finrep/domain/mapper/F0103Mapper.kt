@@ -15,7 +15,8 @@ import java.time.LocalDate
 /** Official FINREP F 01.03 equity totals from EBA Reporting Framework 4.2 (#6980). */
 object F0103Mapper {
     fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
-        fun sum(vararg accountTypes: String): BigDecimal = snapshot.lines
+        val lines = FinrepCoverage.onBalanceSheet(snapshot.lines)
+        fun sum(vararg accountTypes: String): BigDecimal = lines
             .filter { it.accountType in accountTypes }
             .fold(BigDecimal.ZERO) { total, line -> total.add(line.net) }
 
@@ -24,9 +25,12 @@ object F0103Mapper {
         val retainedEarnings = creditBalance(snapshot.lines, "6020")
         val otherReserves = creditBalance(snapshot.lines, "6030").subtract(debitBalance(snapshot.lines, "6040"))
         val otherInstruments = creditBalance(snapshot.lines, "6050", "6060")
+        // ADR-0344 FVOCI revaluation reserve 3100/3101 is accumulated OCI; it reaches total equity
+        // r0300 only, because r0090 has no verified datapoint id yet (#14284).
         val currentProfit = sum("INCOME", "EXPENSE").negate()
         val equity = sum("EQUITY", "INCOME", "EXPENSE").negate()
-        val liabilities = sum("LIABILITY").negate()
+        // Nostro overdrafts are deposit liabilities (F01.02 r0120), so r0310 equals F01.01 r0380.
+        val liabilities = sum("LIABILITY").negate().add(NostroOverdraft.of(lines))
         val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(
             templateId = "F01.03",

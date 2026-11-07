@@ -12,8 +12,11 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.openbank.standingorder.infrastructure.client.InitiateTransactionRequest
+import com.openbank.clients.transaction.api.TransactionsApi
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.standingorder.infrastructure.client.TransactionServiceClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
@@ -21,6 +24,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -63,8 +67,9 @@ import java.util.UUID
  * request move together and the test stays green against a route that does not exist (#2269).
  * [assertClientPathMatchesContract] pins the client's annotations to the literal; the provider
  * replay (`TransactionPactFolderProviderVerificationTest`) independently answers whether
- * transaction-service serves it. Note this client is the odd one of the five: its `@Path` sits on
- * the **method**, not the interface, so the reflection below reads both and concatenates.
+ * transaction-service serves it. Since ADR-0319 the client is GENERATED from transaction-service's
+ * own `openapi.yaml`, so the reflection below reads the class prefix and the method sub-path off
+ * the generated interface and concatenates them.
  *
  * The request body is serialised from the REAL client DTO [InitiateTransactionRequest] rather than
  * retyped as JSON, so a field renamed on the mirror reddens here.
@@ -79,6 +84,9 @@ import java.util.UUID
 class StandingOrderTransferPactConsumerTest {
 
     private val mapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        // Quarkus' mapper writes java.time as ISO strings; the bare test mapper would write an array.
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     /**
      * Exactly what `StandingOrderDueConsumer.executeDomesticOrInternal` builds for a resolved
@@ -92,7 +100,7 @@ class StandingOrderTransferPactConsumerTest {
         amount = BigDecimal("1500.00"),
         currencyCode = "CZK",
         description = "Standing order — monthly savings",
-        valueDate = "2026-01-20",
+        valueDate = LocalDate.parse("2026-01-20"),
     )
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
@@ -102,7 +110,7 @@ class StandingOrderTransferPactConsumerTest {
         .path(EXPECTED_TRANSACTIONS_PATH)
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(jacksonObjectMapper().writeValueAsString(ownAccountTransfer))
+        .body(mapper.writeValueAsString(ownAccountTransfer))
         .willRespondWith()
         .status(201)
         .headers(mapOf("Content-Type" to "application/json"))
@@ -178,13 +186,18 @@ class StandingOrderTransferPactConsumerTest {
         const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
         /**
-         * This client declares no interface-level `@Path`; the route lives on the method. Read both
-         * so the derivation survives either shape.
+         * The route lives on the GENERATED interface [TransactionServiceClient] extends (ADR-0319):
+         * a `@Path` restated on the consumer sub-interface would win, so read that first. Both the
+         * class prefix and the method sub-path are read off the generated annotations; the literal
+         * above is what they must add up to.
          */
         fun clientDerivedTransactionsPath(): String {
-            val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java)?.value.orEmpty()
-            val method = TransactionServiceClient::class.java.methods
-                .single { it.name == "initiate" }
+            val base = (
+                TransactionServiceClient::class.java.getAnnotation(Path::class.java)
+                    ?: TransactionsApi::class.java.getAnnotation(Path::class.java)
+                )?.value.orEmpty()
+            val method = TransactionsApi::class.java.methods
+                .single { it.name == "initiateTransaction" }
                 .getAnnotation(Path::class.java)
                 ?.value
                 .orEmpty()

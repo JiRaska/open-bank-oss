@@ -12,13 +12,13 @@ import rego.v1
 
 import data.openbank.rest
 
-operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
+operator := {"service_account": false, "type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
-admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+admin := {"service_account": false, "type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
 
-edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
+edge := {"service_account": true, "client_id": "openbank-edge", "type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
-shared := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
+shared := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
 
 # The bundle's role_action_matrix grants ROLE_OPERATOR ALL ten account.* actions — this is what
 # matrix-allows re-admits to both M2M clients without the exclusion + veto pair. Shape mirrors
@@ -113,7 +113,7 @@ test_shared_no_operator_rule_on_update if {
 
 # --- #10486 batch 5: per-service read identities (ROLE_API only, exactly as the realm grants) ---
 
-sa_api(name) := {"type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
+sa_api(name) := {"service_account": true, "client_id": sprintf("openbank-%v", [name]), "type": "HUMAN", "id": sprintf("service-account-openbank-%v", [name]), "roles": ["ROLE_API"]}
 
 b5_rules := {
 	"authz": {"role_action_matrix": {"ROLE_OPERATOR": {"grant": [
@@ -135,6 +135,7 @@ b5_grants := {
 	"document": {"reason": "service-document-account-read", "actions": {"account.list"}},
 	"lending": {"reason": "service-lending-account-read", "actions": {"account.list"}},
 	"party": {"reason": "service-party-account-read", "actions": {"account.list"}},
+	"tax-reporting": {"reason": "service-tax-reporting-account-read", "actions": {"account.list"}},
 }
 
 b5_all_account_actions := {
@@ -185,7 +186,7 @@ test_shared_role_api_only_denied_account_list if {
 
 # --- ADR-0335 D2: pension-service gets the ownership projection and nothing else ---
 
-pension := {"type": "HUMAN", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
+pension := {"type": "HUMAN", "service_account": true, "client_id": "openbank-pension", "id": "service-account-openbank-pension", "roles": ["ROLE_API"]}
 
 billing_sa := {"type": "HUMAN", "id": "service-account-openbank-billing", "roles": ["ROLE_API"]}
 
@@ -223,10 +224,67 @@ test_operator_may_verify_ownership if {
 	rest.allow with input as verify_input(operator) with data.rules as rules_mock
 }
 
-sdd_sa := {"type": "HUMAN", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
+sdd_sa := {"type": "HUMAN", "service_account": true, "client_id": "openbank-sdd", "id": "service-account-openbank-sdd", "roles": ["ROLE_API"]}
 
 test_sdd_may_verify_ownership_and_nothing_else if {
 	rest.allow with input as verify_input(sdd_sa) with data.rules as rules_mock
 	not rest.allow with input as {"principal": sdd_sa, "action": "account.read", "resource": {"type": "account", "id": "a-1"}}
 		with data.rules as rules_mock
+}
+
+# Current PEP marker must be explicit true with the matching client. Absent is the
+# deliberate legacy ABI; explicit null is malformed and must not borrow that path.
+tax_reporting_guard_identity := {"type": "HUMAN", "id": "service-account-openbank-tax-reporting", "roles": ["ROLE_API"]}
+
+test_tax_reporting_current_and_absent_legacy_allowed if {
+	every principal in [tax_reporting_guard_identity, object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "openbank-tax-reporting"})] {
+		rest.allow.allow with input as {"principal": principal, "action": "account.list"}
+	}
+}
+
+test_tax_reporting_explicit_null_marker_denied if {
+	not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, {"service_account": null, "client_id": "openbank-tax-reporting"}), "action": "account.list"}
+}
+
+test_tax_reporting_false_or_bad_client_binding_denied if {
+	every changed in [
+		{"service_account": false, "client_id": "openbank-tax-reporting"},
+		{"service_account": true, "client_id": "another-client"},
+		{"service_account": true},
+		{"service_account": true, "client_id": "openbank-tax-reporting", "id": "service-account-another-client"},
+	] {
+		not rest.allow.allow with input as {"principal": object.union(tax_reporting_guard_identity, changed), "action": "account.list"}
+	}
+}
+
+# #8481 / ADR-0341 — interest-service's own principal reads the published catalog (catalog.read)
+# and nothing else; the shared openbank-services principal and other ROLE_API holders stay denied.
+interest_catalog := {"type": "HUMAN", "service_account": true, "client_id": "openbank-interest", "id": "service-account-openbank-interest", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}
+
+test_interest_catalog_read_allowed if {
+	rest.allow.allow with input as {"principal": interest_catalog, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_interest_catalog_read_needs_scope_role if {
+	not rest.allow.allow with input as {"principal": object.union(interest_catalog, {"roles": ["ROLE_API"]}), "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+		with data.rules as rules_mock
+}
+
+test_interest_catalog_grant_is_read_only if {
+	every action in ["catalog.author", "catalog.publish", "catalog.pensionApproval.decide"] {
+		not rest.allow.allow with input as {"principal": interest_catalog, "action": action, "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
+}
+
+test_shared_and_other_api_principals_denied_catalog_read if {
+	every principal in [
+		object.union(shared, {"roles": ["ROLE_API", "CATALOG_SCOPE_READ"]}),
+		{"type": "HUMAN", "service_account": true, "client_id": "openbank-billing", "id": "service-account-openbank-billing", "roles": ["ROLE_API", "CATALOG_SCOPE_READ"]},
+		object.union(interest_catalog, {"client_id": "another-client"}),
+	] {
+		not rest.allow.allow with input as {"principal": principal, "action": "catalog.read", "resource": {"type": "catalog", "id": "r-1"}}
+			with data.rules as rules_mock
+	}
 }

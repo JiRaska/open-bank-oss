@@ -10,6 +10,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -19,12 +22,39 @@ class AbstractOutboxDeadLetterGaugeTest {
     private class TestGauge(
         override val service: String,
         metrics: DomainMetrics,
-        private val deadLettered: () -> Long,
+        private val deadLettered: suspend () -> Long,
     ) : AbstractOutboxDeadLetterGauge(metrics) {
         override suspend fun currentDeadLettered(): Long = deadLettered()
         fun register() = registerDeadLetterGauge()
         fun bind(recorder: WorkflowLivenessRecorder) = bindLiveness(recorder)
         suspend fun refresh() = refreshDeadLettered()
+    }
+
+    @Test
+    fun `suspended refresh records success only after resumed repository success`(): Unit = runBlocking {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val recorder = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val supplier = slot<() -> Number>()
+        every { metrics.registerOutboxDeadLettered("party", capture(supplier)) } returns Unit
+        var result = CompletableDeferred<Long>()
+        val gauge = TestGauge("party", metrics) { result.await() }
+        gauge.register()
+        gauge.bind(recorder)
+        val success = async(start = CoroutineStart.UNDISPATCHED) { gauge.refresh() }
+        assertThat(success.isCompleted).isFalse()
+        verify(exactly = 0) { recorder.recordSuccess() }
+        result.complete(23)
+        success.await()
+        assertThat(supplier.captured().toLong()).isEqualTo(23)
+
+        result = CompletableDeferred()
+        val failure = async(start = CoroutineStart.UNDISPATCHED) { gauge.refresh() }
+        assertThat(failure.isCompleted).isFalse()
+        result.completeExceptionally(java.net.ConnectException("test database unavailable"))
+        failure.await()
+        assertThat(supplier.captured().toLong()).isEqualTo(23)
+        verify(exactly = 1) { recorder.recordSuccess() }
+        verify(exactly = 1) { metrics.outboxGaugeRefreshFailed("party", "dead_lettered") }
     }
 
     @Test

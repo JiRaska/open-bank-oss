@@ -64,6 +64,10 @@ Open one for a **fleet sweep**, a **governance follow-up** (the actionable tail 
 or an **enhancement** — not for architectural decisions (→ `docs/adr`), questions (→ Discussions), or
 security holes (→ private Security Advisories). Every PR links its issue (`Closes #<n>` / `Refs #<n>`).
 Labels are code (`.github/labels.yml`, applied by the Label-sync workflow) — don't create them by hand.
+Every issue carries **exactly one kind** label — `bug`, `enhancement`, `governance`, `sweep` or
+`tech-debt` (`rules.yaml: issues.kinds`). This repo is user-owned, so GitHub's native issue types
+are unavailable and a label is the only carrier; a template sets it, `gh issue create` does not,
+so pass `--label <kind>` yourself. `issue-kind.yml` flags violations with `needs-kind`.
 
 Autonomous work is WIP-limited across every prefix in
 `rules.yaml: autonomous_agent_prs.agent_branch_prefixes`, up to `max_open_prs` open PRs. Read both
@@ -274,6 +278,12 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   profile: a `QuarkusTestProfile` loads in a **different classloader** from the test class, so a
   companion object initializes twice — a randomized id in `getConfigOverrides()` hands the scheduler
   one value and the assertion another. Use literals.
+- **Reference data is not an `enum class` — no numbers in value names, no second copy in another
+  module.** `UP_TO_30K`/`DAYS_7` turn a business threshold into a compiled identifier (party-service
+  derives `HIGH_TURNOVER` from `OVER_500K`), and a vocabulary copied per service drifts: the AML risk
+  scale exists as seven enums on three scales. Model it as data or reuse the owning type.
+  `check-enum-reference-data.py` (gate `enum-reference-data-ratchet`) ratchets both shapes; today's
+  estate is baselined against #13434–#13441.
 - **A Kafka `group.id` / `auto.offset.reset` written as a YAML key never reaches the connector.**
   SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
   `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
@@ -625,9 +635,10 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `rest.rego` and consults no per-service exclusion. So the only gate is at build time — a write
   action must be declared in `rules.yaml: shared_m2m_matrix_write_grants.declared`
   (`check-matrix-write-grants.py`, enforced). Two things this cost: the "graduated ⇒ denied" column
-  of the audits was never true, because `data.rules.shared_m2m_write_prohibition` **is not emitted
-  into any bundle** (it is nested under `change_requirements:`, so `gen-rules-opa-data.py` cannot
-  select it) and the veto has therefore never fired anywhere; and `ledger.approve`, documented as
+  of the audits was untrue until 2026-08-07, because `data.rules.shared_m2m_write_prohibition` was
+  nested under `change_requirements:`, so `gen-rules-opa-data.py` could not select it and the veto
+  never fired (it is now a top-level key, emitted into `rules-opa-data.yaml` and every bundle that
+  embeds it — the lesson is to check the derived subset, not `rules.yaml`); and `ledger.approve`, documented as
   "NEVER reachable by any SERVICE principal", resolved `allow=true` for both service-accounts on the
   live bundle. **Measure a policy claim with `opa eval` against the bundle ConfigMap** — materialise
   it to the sidecar's own directory layout (`rules-data.yaml` → `rules/data.yaml`) and probe
@@ -742,6 +753,10 @@ fire from *outside* it, so they stay here:
   references files living only in an unmerged parent PR (e.g. ADR numbers the registry gate
   requires on-branch), merging the parent branch into the child makes the child's CI green
   independently; the shared files drop out of the diff as the parent lands on main.
+- **`merge-priority:expedite` is the OWNER's lever — an agent never applies or removes it.** The merge
+  train serves a labelled, armed PR first in its lane (after a fix for a red main). Agents run under the
+  owner's token, so nothing technical stops an agent labelling its own PR; that is exactly why the rule
+  is absolute. To get a PR expedited, say so in the report and let the owner label it.
 - **A PR-queue drain has a CEILING, and "queue empty" is the wrong success measure.** Measured
   2026-08-01: 21 PRs merged in one session and the queue still went 2 -> 8, because parallel
   agents open roughly one PR every two minutes. What survives a drain is structural, not

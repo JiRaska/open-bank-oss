@@ -3,149 +3,25 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { useState, useEffect } from 'react'
-import { ShieldAlert, CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, Server, Database, Lock, Zap, CreditCard, Eye, BookOpen } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { ShieldAlert, CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, Zap, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { aggregateHealthStatuses } from '@/lib/health/workloadHealth'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
-import { buildRegistry, k8sNameOf, type CatalogFleetModule } from '@/lib/services/registry'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
+import {
+  bcpCatalogCoverageIsComplete,
+  buildBcpRoster,
+  type BcpPolicy,
+  type BcpCatalogService,
+  type BcpServiceGraph,
+  type BcpTier,
+} from '@/lib/bcp/continuityModel'
 
 type Bilingual = [cs: string, en: string]
-
-const TIERS: {
-  id: number
-  label: Bilingual
-  labelShort: Bilingual
-  color: string
-  rto: string
-  rpo: string
-  priority: string
-  regulatoryBasis: Bilingual
-  icon: typeof Database
-  isComplianceGate?: boolean
-  services: { name: string; label: string; note: Bilingual }[]
-}[] = [
-  {
-    id: 0,
-    label: ['Tier 0 — Infrastrukturní prerekvizity', 'Tier 0 — Infrastructure Prerequisites'],
-    labelShort: ['Infrastruktura', 'Infrastructure'],
-    color: 'var(--text-secondary)',
-    rto: '5 min',
-    rpo: '0 (zero loss)',
-    priority: 'P0',
-    regulatoryBasis: ['Prerekvizita všech ostatních tierů', 'Prerequisite for all other tiers'],
-    icon: Database,
-    services: [
-      { name: 'postgres',         label: 'PostgreSQL (CloudNativePG)', note: ['Primární datové úložiště (operátor CNPG)', 'Primary data store (CNPG operator)'] },
-      { name: 'kafka',            label: 'Apache Kafka',     note: ['Event streaming, outbox pattern', 'Event streaming, outbox pattern'] },
-      { name: 'temporal',         label: 'Temporal',         note: ['Orchestrace platebních a závěrkových workflow (settlement, SEPA, EoM)', 'Payment & close workflow orchestration (settlement, SEPA, EoM)'] },
-      { name: 'keycloak',         label: 'Keycloak (IAM)',   note: ['PSD2 Art. 97 — autentizace', 'PSD2 Art. 97 — authentication'] },
-      { name: 'openbao',          label: 'OpenBao',          note: ['PCI DSS Req. 3.5 — správa klíčů', 'PCI DSS Req. 3.5 — key management'] },
-      { name: 'valkey',           label: 'Valkey (Redis)',   note: ['Idempotency — prevence duplikátů', 'Idempotency — duplicate prevention'] },
-      { name: 'schema-registry',  label: 'Schema Registry',  note: ['Kafka schema validace', 'Kafka schema validation'] },
-    ],
-  },
-  {
-    id: 1,
-    label: ['Tier 1 — Hlavní účetní kniha a identita', 'Tier 1 — Core Ledger & Identity'],
-    labelShort: ['Hlavní účetní kniha', 'Core Ledger'],
-    color: 'var(--info)',
-    rto: '15 min',
-    rpo: '< 1 min',
-    priority: 'P1',
-    regulatoryBasis: ['CNB § 4 — správa účtů; DORA Art. 17 — audit trail musí být online při incidentu', 'CNB § 4 — account management; DORA Art. 17 — audit trail must be online during an incident'],
-    icon: Server,
-    services: [
-      { name: 'account-service',     label: 'Account Service',     note: ['Lifecycle účtů, IBAN', 'Account lifecycle, IBAN'] },
-      { name: 'ledger-service',      label: 'Ledger Service',      note: ['Podvojné účetnictví', 'Double-entry bookkeeping'] },
-      { name: 'transaction-service', label: 'Transaction Service', note: ['Zpracování transakcí', 'Transaction processing'] },
-      { name: 'party-service',       label: 'Party Service',       note: ['GDPR Art. 25 — zákaznická data', 'GDPR Art. 25 — customer data'] },
-      { name: 'audit-service',       label: 'Audit Service',       note: ['DORA Art. 17 — immutable audit log', 'DORA Art. 17 — immutable audit log'] },
-    ],
-  },
-  {
-    id: 2,
-    label: ['Tier 2 — Compliance gate', 'Tier 2 — Compliance Gate'],
-    labelShort: ['Compliance gate', 'Compliance Gate'],
-    color: 'var(--danger)',
-    rto: '20 min',
-    rpo: '< 5 min',
-    priority: 'P1',
-    regulatoryBasis: ['5AMLD Art. 18 — platby NESMÍ jet bez AML/Sanctions; DORA Art. 12 — compliance gate', '5AMLD Art. 18 — payments MUST NOT run without AML/Sanctions; DORA Art. 12 — compliance gate'],
-    icon: Lock,
-    isComplianceGate: true,
-    services: [
-      { name: 'balance-service',     label: 'Balance Service',     note: ['Real-time zůstatky', 'Real-time balances'] },
-      { name: 'aml-service',         label: 'AML Service',         note: ['5AMLD Art. 18 — monitoring transakcí', '5AMLD Art. 18 — transaction monitoring'] },
-      { name: 'sanctions-service',   label: 'Sanctions Service',   note: ['5AMLD Art. 13 — sanctions screening', '5AMLD Art. 13 — sanctions screening'] },
-      { name: 'kyc-service',         label: 'KYC Service',         note: ['5AMLD Art. 13-14 — due diligence', '5AMLD Art. 13-14 — due diligence'] },
-      { name: 'security-scanner',    label: 'Security Scanner',    note: ['DORA Art. 8(2) — continuous scanning', 'DORA Art. 8(2) — continuous scanning'] },
-      { name: 'notification-service',label: 'Notification Service',note: ['GDPR Art. 34 — breach notification', 'GDPR Art. 34 — breach notification'] },
-    ],
-  },
-  {
-    id: 3,
-    label: ['Tier 3 — PSD2 / SCA', 'Tier 3 — PSD2 / SCA'],
-    labelShort: ['PSD2 / SCA', 'PSD2 / SCA'],
-    color: 'var(--warning)',
-    rto: '30 min',
-    rpo: '< 5 min',
-    priority: 'P2',
-    regulatoryBasis: ['PSD2 Art. 97 — SCA před každou platbou; PSD2 Art. 65-67 — consent management', 'PSD2 Art. 97 — SCA before every payment; PSD2 Art. 65-67 — consent management'],
-    icon: Lock,
-    services: [
-      { name: 'sca-service',          label: 'SCA Service',         note: ['PSD2 Art. 97 — strong customer auth', 'PSD2 Art. 97 — strong customer auth'] },
-      { name: 'consent-service',      label: 'Consent Service',     note: ['PSD2 Art. 65-67 — payment consent', 'PSD2 Art. 65-67 — payment consent'] },
-      { name: 'tpp-registry-service', label: 'TPP Registry',        note: ['PSD2 Art. 65 — validace TPP', 'PSD2 Art. 65 — TPP validation'] },
-      { name: 'pid-service',          label: 'PID Service',         note: ['eIDAS 2.0 — payment instrument dir.', 'eIDAS 2.0 — payment instrument dir.'] },
-      { name: 'psd2-service',         label: 'PSD2 Service',        note: ['PSD2 AISP/PISP API gateway', 'PSD2 AISP/PISP API gateway'] },
-    ],
-  },
-  {
-    id: 4,
-    label: ['Tier 4 — Zpracování plateb', 'Tier 4 — Payment Processing'],
-    labelShort: ['Platby', 'Payments'],
-    color: 'var(--accent)',
-    rto: '30 min',
-    rpo: '< 1 min',
-    priority: 'P2',
-    regulatoryBasis: ['CNB — platební systémy; PCI DSS Req. 3 — ochrana dat karet; DORA Art. 12 — RTO 15-30 min', 'CNB — payment systems; PCI DSS Req. 3 — card data protection; DORA Art. 12 — RTO 15-30 min'],
-    icon: CreditCard,
-    services: [
-      { name: 'domestic-payment',      label: 'Domestic Payment',    note: ['CZ domácí platby', 'CZ domestic payments'] },
-      { name: 'sepa-payment',          label: 'SEPA Payment',        note: ['SEPA Credit Transfer', 'SEPA Credit Transfer'] },
-      { name: 'sepa-instant-service',  label: 'SEPA Instant',        note: ['SCT Inst — real-time EUR', 'SCT Inst — real-time EUR'] },
-      { name: 'swift-service',         label: 'SWIFT Service',       note: ['Mezinárodní platby MT/MX', 'International payments MT/MX'] },
-      { name: 'fx-service',            label: 'FX Service',          note: ['Devizové operace', 'Foreign exchange operations'] },
-      { name: 'clearing-service',      label: 'Clearing Service',    note: ['Mezibankovní clearing', 'Interbank clearing'] },
-      { name: 'standing-order-service',label: 'Standing Order',      note: ['Trvalé příkazy', 'Standing orders'] },
-      { name: 'card-issuance-service', label: 'Card Issuance',       note: ['PCI DSS Req. 3 — data karet', 'PCI DSS Req. 3 — card data'] },
-    ],
-  },
-  {
-    id: 5,
-    label: ['Tier 5 — Provoz a observabilita', 'Tier 5 — Operations & Observability'],
-    labelShort: ['Provoz', 'Operations'],
-    color: 'var(--success)',
-    rto: '60 min',
-    rpo: '< 15 min',
-    priority: 'P3',
-    regulatoryBasis: ['DORA Art. 8 — monitoring; PCI DSS Req. 12 — dispute handling', 'DORA Art. 8 — monitoring; PCI DSS Req. 12 — dispute handling'],
-    icon: Eye,
-    services: [
-      { name: 'dispute-service',  label: 'Dispute Service',  note: ['PCI DSS Req. 12 — chargebacks', 'PCI DSS Req. 12 — chargebacks'] },
-      { name: 'interest-service', label: 'Interest Service', note: ['CNB — úrokové výpočty', 'CNB — interest calculations'] },
-      { name: 'admin-ui',         label: 'Admin UI',         note: ['Operátorská konzole', 'Operator console'] },
-      { name: 'keda',             label: 'KEDA',             note: ['Scale-to-zero autoscaling — úspora nákladů (ADR-0057)', 'Scale-to-zero autoscaling — cost saving (ADR-0057)'] },
-      { name: 'grafana',          label: 'Grafana',          note: ['DORA Art. 8 — monitoring', 'DORA Art. 8 — monitoring'] },
-      { name: 'prometheus',       label: 'Prometheus',       note: ['Metriky', 'Metrics'] },
-      { name: 'loki',             label: 'Loki',             note: ['DORA Art. 17 — log retention', 'DORA Art. 17 — log retention'] },
-      { name: 'tempo',            label: 'Tempo',            note: ['Distributed tracing', 'Distributed tracing'] },
-      { name: 'kafka-ui',         label: 'Kafka UI',         note: ['Operační nástroj', 'Operational tool'] },
-    ],
-  },
-]
 
 const INCIDENTS: {
   severity: string
@@ -155,10 +31,10 @@ const INCIDENTS: {
   response: Bilingual
   reporting: Bilingual
 }[] = [
-  { severity: 'P0', label: ['Kritický', 'Critical'], color: 'var(--danger)', criteria: ['Tier 0 nebo Tier 1 down; platební zpracování zastaveno', 'Tier 0 or Tier 1 down; payment processing halted'], response: ['Okamžitě', 'Immediately'], reporting: ['CNB do 24h (DORA Art. 17)', 'CNB within 24h (DORA Art. 17)'] },
-  { severity: 'P1', label: ['Vysoký', 'High'],     color: 'var(--warning)', criteria: ['Tier 2 compliance gate down; AML/Sanctions nedostupné', 'Tier 2 compliance gate down; AML/Sanctions unavailable'], response: ['< 15 min', '< 15 min'], reporting: ['Interní eskalace; CNB pokud > 4h', 'Internal escalation; CNB if > 4h'] },
-  { severity: 'P2', label: ['Střední', 'Medium'],   color: 'var(--accent)', criteria: ['Tier 3-4 částečná degradace; některé typy plateb nedostupné', 'Tier 3-4 partial degradation; some payment types unavailable'], response: ['< 30 min', '< 30 min'], reporting: ['Interní tracking', 'Internal tracking'] },
-  { severity: 'P3', label: ['Nízký', 'Low'],      color: 'var(--success)', criteria: ['Tier 5 operační nástroje down; žádný dopad na zákazníky', 'Tier 5 operational tools down; no customer impact'], response: ['< 2h', '< 2h'], reporting: ['Interní tracking', 'Internal tracking'] },
+  { severity: 'P1', label: ['Kritický', 'Critical'], color: 'var(--danger)', criteria: ['Výpadek money-path, obejití autentizace/autorizace, potvrzený únik dat nebo aktivní zneužití.', 'Money-path outage, authentication/authorization bypass, confirmed data exposure, or active exploitation.'], response: ['Do 30 min', 'Within 30 min'], reporting: ['Prohlásit do 15 min od detekce', 'Declare within 15 min of detection'] },
+  { severity: 'P2', label: ['Vysoký', 'High'], color: 'var(--warning)', criteria: ['Závažná zranitelnost bez potvrzeného zneužití, výpadek non-money-path service nebo degradace money-path.', 'High-severity vulnerability without confirmed exploitation, non-money-path outage, or degraded money-path service.'], response: ['Do 4 h', 'Within 4 h'], reporting: ['Prohlásit do 30 min od detekce', 'Declare within 30 min of detection'] },
+  { severity: 'P3', label: ['Střední', 'Medium'], color: 'var(--accent)', criteria: ['Střední nález nebo degradace bez dopadu na zákazníky.', 'Medium finding or non-customer-facing degradation.'], response: ['Do 24 h', 'Within 24 h'], reporting: ['Prohlásit tentýž pracovní den', 'Declare the same business day'] },
+  { severity: 'P4', label: ['Nízký', 'Low'], color: 'var(--text-secondary)', criteria: ['Informativní nález, nízké riziko a bez dopadu na uživatele.', 'Informational, low-severity finding with no user impact.'], response: ['Async — běžný issue', 'Async — regular issue'], reporting: ['Není deklarovaný incident', 'Not a declared incident'] },
 ]
 
 type HealthStatus = 'healthy' | 'unhealthy' | 'starting' | 'unknown'
@@ -167,27 +43,70 @@ interface ServiceHealth {
   [container: string]: HealthStatus
 }
 
-const CATALOG_PRESENT = TIERS.flatMap(tier => tier.services.map(s => s.name))
-  .filter(n => n.endsWith('-service') || n.endsWith('-payment') || n.endsWith('-instant'))
+const EVIDENCE_FETCH_TIMEOUT_MS = 8_000
+const HEALTH_VALUES = new Set(['UP', 'DOWN', 'UNKNOWN'])
+
+type ServiceHealthPayload = {
+  services?: { name: string; status: 'UP' | 'DOWN' | 'UNKNOWN' }[]
+  byContainer?: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
+}
+
+function isServiceHealthPayload(value: unknown): value is ServiceHealthPayload {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const payload = value as Record<string, unknown>
+  if ('services' in payload) {
+    return Array.isArray(payload.services) && payload.services.length > 0
+      && payload.services.every(service => service !== null && typeof service === 'object'
+        && typeof (service as { name?: unknown }).name === 'string'
+        && (service as { name: string }).name.trim().length > 0
+        && typeof (service as { status?: unknown }).status === 'string'
+        && HEALTH_VALUES.has((service as { status: string }).status))
+  }
+  const byContainer = payload.byContainer
+  return byContainer !== null && typeof byContainer === 'object' && !Array.isArray(byContainer)
+    && Object.keys(byContainer).length > 0
+    && Object.entries(byContainer as Record<string, unknown>).every(([container, entry]) => container.trim().length > 0
+      && entry !== null && typeof entry === 'object'
+      && typeof (entry as { status?: unknown }).status === 'string'
+      && HEALTH_VALUES.has((entry as { status: string }).status))
+}
 
 export default function BcpPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [health, setHealth] = useState<ServiceHealth>({})
+  const [tiers, setTiers] = useState<BcpTier[]>([])
+  const [catalogServiceNames, setCatalogServiceNames] = useState<string[]>([])
+  const [catalogServiceCount, setCatalogServiceCount] = useState(0)
+  const [policyServicesMissing, setPolicyServicesMissing] = useState<string[]>([])
+  const [unclassifiedServices, setUnclassifiedServices] = useState<string[]>([])
+  const [catalogAvailable, setCatalogAvailable] = useState(false)
+  const [policyAvailable, setPolicyAvailable] = useState(false)
+  const [policy, setPolicy] = useState<BcpPolicy | null>(null)
+  const [graphAvailable, setGraphAvailable] = useState(false)
+  const [infraAssets, setInfraAssets] = useState<{ id: string; label: string }[]>([])
   const [loading, setLoading] = useState(true)
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [lastSuccessfulRefresh, setLastSuccessfulRefresh] = useState<Date | null>(null)
+  const [healthRefreshState, setHealthRefreshState] = useState<'current' | 'partial' | 'unavailable'>('current')
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [expandedTiers, setExpandedTiers] = useState<Set<number>>(new Set([0, 1, 2]))
-  // Completeness cross-check (ADR-0029 D3): code-derived catalog services that are
-  // NOT assigned to any continuity tier. Surfaced so a newly-added service can't
-  // silently fall outside the BCP model — the hand-curated TIERS no longer hides drift.
-  const [unclassified, setUnclassified] = useState<string[]>([])
+  const refreshGeneration = useRef(0)
+  const refreshController = useRef<AbortController | null>(null)
 
   const fetchHealth = async () => {
+    const generation = ++refreshGeneration.current
+    refreshController.current?.abort()
+    const controller = new AbortController()
+    refreshController.current = controller
+    const timeout = setTimeout(() => controller.abort(), EVIDENCE_FETCH_TIMEOUT_MS)
     setLoading(true)
     try {
-      const [svcRes, infraRes] = await Promise.allSettled([
-        fetch('/api/services/health'),
-        fetch('/api/infra/status'),
+      const [svcRes, infraRes, catalogRes, graphRes, policyRes] = await Promise.allSettled([
+        fetch('/api/services/health', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
+        fetch('/api/infra/status', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
+        fetch('/api/catalog/services', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
+        fetch('/api/catalog/graph', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
+        fetch('/api/bcp/policy', { cache: 'no-store', signal: controller.signal }).then(res => res.ok ? res.json() : null),
       ])
       const toStatus = (s: string): HealthStatus =>
         s === 'UP' ? 'healthy' : s === 'DOWN' ? 'unhealthy' : 'unknown'
@@ -197,74 +116,109 @@ export default function BcpPage() {
       // `services[]` array (the shape the Dashboard consumes); fall back to the
       // legacy `byContainer` map so a future endpoint that drops one shape can't
       // silently blank every tier to UNKNOWN.
-      if (svcRes.status === 'fulfilled' && svcRes.value.ok) {
-        const data = await svcRes.value.json() as {
-          services?: { name: string; status: string }[]
-          byContainer?: Record<string, { status: string }>
-        }
-        if (Array.isArray(data.services) && data.services.length > 0) {
-          for (const s of data.services) mapped[s.name] = toStatus(s.status)
+      const serviceHealthAvailable = svcRes.status === 'fulfilled' && isServiceHealthPayload(svcRes.value)
+      if (serviceHealthAvailable) {
+        const data = svcRes.value as ServiceHealthPayload
+        if (Array.isArray(data.services)) {
+          const statusesByName = new Map<string, ('UP' | 'DOWN' | 'UNKNOWN')[]>()
+          for (const service of data.services) {
+            const observations = statusesByName.get(service.name) ?? []
+            observations.push(service.status === 'UP' || service.status === 'DOWN' ? service.status : 'UNKNOWN')
+            statusesByName.set(service.name, observations)
+          }
+          for (const [name, statuses] of statusesByName) mapped[name] = toStatus(aggregateHealthStatuses(statuses))
         } else if (data.byContainer) {
           for (const [container, entry] of Object.entries(data.byContainer)) {
             mapped[container] = toStatus(entry.status)
           }
         }
       }
-      // The tiers name a module by its directory (`security-scanner`); a cluster inventory names it by
-      // its workload (`security-scanner-service`). Alias through the catalog registry so a renamed
-      // workload does not read UNKNOWN in one of the two modes.
-      try {
-        const cat = await fetch('/api/catalog/services', { cache: 'no-store' })
-        if (cat.ok) {
-          const body = await cat.json() as { services?: CatalogFleetModule[] }
-          for (const r of buildRegistry(body.services ?? [])) {
-            const short = r.container.replace(/^openbank-/, '')
-            const k8s = k8sNameOf(r)
-            if (mapped[short] === undefined && mapped[k8s] !== undefined) mapped[short] = mapped[k8s]
-          }
+      const catalog = catalogRes.status === 'fulfilled' && catalogRes.value
+        ? catalogRes.value as { available?: boolean; services?: BcpCatalogService[] }
+        : null
+      const graph = graphRes.status === 'fulfilled' && graphRes.value
+        ? graphRes.value as BcpServiceGraph & { available?: boolean }
+        : null
+      const policyResponse = policyRes.status === 'fulfilled' && policyRes.value
+        ? policyRes.value as { available?: boolean; policy?: BcpPolicy | null }
+        : null
+      const bcpPolicy = policyResponse?.available === true ? policyResponse.policy ?? null : null
+      const hasCatalog = catalog?.available === true && Array.isArray(catalog.services)
+      const hasGraph = graph?.available === true
+        && Array.isArray(graph.edges) && Array.isArray(graph.infraEdges) && Array.isArray(graph.infraNodes)
+      if (generation === refreshGeneration.current) {
+        const source = [catalogRes, graphRes, policyRes]
+          .find((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled' && Boolean(result.value?.contentSource))
+          ?.value.contentSource as ContentSourceMetadata | undefined
+        setContentSource(source ?? null)
+        setCatalogAvailable(hasCatalog)
+        setPolicyAvailable(bcpPolicy !== null)
+        setPolicy(bcpPolicy)
+        setGraphAvailable(hasGraph)
+        if (hasCatalog) {
+          const roster = buildBcpRoster(catalog.services!, hasGraph ? graph : undefined, bcpPolicy)
+          setTiers(roster.tiers)
+          setCatalogServiceNames(roster.tiers.flatMap(tier => tier.services.map(service => service.name)))
+          setCatalogServiceCount(roster.catalogServiceCount)
+          setPolicyServicesMissing(roster.policyServicesMissingFromCatalog)
+          setUnclassifiedServices(roster.unclassifiedCatalogServices)
+        } else {
+          setTiers([])
+          setCatalogServiceNames([])
+          setCatalogServiceCount(0)
+          setPolicyServicesMissing([])
+          setUnclassifiedServices([])
         }
-      } catch { /* no catalog snapshot - names resolve as reported */ }
+        setInfraAssets(hasGraph
+          ? graph.infraNodes!.filter(node => node.kind === 'infra').map(node => ({ id: node.id, label: node.label }))
+          : [])
+      }
       // Infra: /api/infra/status is already keyed by the stable infra id
       // (postgres, kafka, keycloak, …) — the same ids the Tier 0/5 entries use.
-      if (infraRes.status === 'fulfilled' && infraRes.value.ok) {
-        const data = await infraRes.value.json() as Record<string, { status: string }>
+      const infraHealthAvailable = infraRes.status === 'fulfilled' && infraRes.value !== null
+        && typeof infraRes.value === 'object' && !Array.isArray(infraRes.value)
+        && Object.keys(infraRes.value as Record<string, unknown>).length > 0
+        && Object.values(infraRes.value as Record<string, unknown>).every(entry => entry !== null
+          && typeof entry === 'object' && typeof (entry as { status?: unknown }).status === 'string'
+          && HEALTH_VALUES.has((entry as { status: string }).status))
+      if (infraHealthAvailable) {
+        const data = infraRes.value as Record<string, { status: string }>
         for (const [id, entry] of Object.entries(data)) {
           mapped[id] = toStatus(entry.status)
         }
       }
-      // The admin UI is serving this very page, so it is healthy by construction.
-      mapped['admin-ui'] = 'healthy'
-      setHealth(mapped)
+      if (generation === refreshGeneration.current) {
+        setHealth(mapped)
+        const discoveryComplete = serviceHealthAvailable
+          && (svcRes.value as ServiceHealthPayload & { discoveryStatus?: unknown }).discoveryStatus === 'complete'
+        const complete = discoveryComplete && infraHealthAvailable
+        setHealthRefreshState(complete ? 'current' : serviceHealthAvailable || infraHealthAvailable ? 'partial' : 'unavailable')
+        if (complete) setLastSuccessfulRefresh(new Date())
+      }
     } catch {
+      // A failed refresh must not relabel the previous observation as current.
+      if (generation === refreshGeneration.current) {
+        setHealth({})
+        setHealthRefreshState('unavailable')
+      }
     } finally {
-      setLoading(false)
-      setLastRefresh(new Date())
+      clearTimeout(timeout)
+      if (generation === refreshGeneration.current) {
+        refreshController.current = null
+        setLoading(false)
+      }
     }
   }
 
   useEffect(() => {
     fetchHealth()
     const interval = setInterval(fetchHealth, 30000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Pull the code-derived catalog once and diff it against the tier membership.
-  useEffect(() => {
-    let alive = true
-    const classified = new Set(TIERS.flatMap(tier => tier.services.map(s => s.name)))
-    fetch('/api/catalog/services', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!alive || !data?.available || !Array.isArray(data.services)) return
-        setUnclassified(
-          data.services
-            .filter((s: { short: string; kind: string }) => s.kind === 'service' && !classified.has(s.short))
-            .map((s: { short: string }) => s.short)
-            .sort(),
-        )
-      })
-      .catch(() => { /* catalog snapshot absent — skip the cross-check */ })
-    return () => { alive = false }
+    return () => {
+      clearInterval(interval)
+      refreshGeneration.current += 1
+      refreshController.current?.abort()
+      refreshController.current = null
+    }
   }, [])
 
   const toggleTier = (id: number) => {
@@ -275,25 +229,55 @@ export default function BcpPage() {
     })
   }
 
-  const getTierStatus = (tier: typeof TIERS[0]): { status: HealthStatus; healthy: number; total: number } => {
+  const getTierStatus = (tier: BcpTier): { status: HealthStatus; healthy: number; total: number } => {
     const total = tier.services.length
     const statuses = tier.services.map(s => health[s.name] ?? 'unknown')
     const healthy = statuses.filter(s => s === 'healthy').length
+    if (total === 0) return { status: 'unknown', healthy, total }
     const hasUnhealthy = statuses.some(s => s === 'unhealthy')
     const hasStarting = statuses.some(s => s === 'starting')
-    const allUnknown = statuses.every(s => s === 'unknown')
+    const hasUnknown = statuses.some(s => s === 'unknown')
 
-    if (allUnknown) return { status: 'unknown', healthy, total }
     if (hasUnhealthy) return { status: 'unhealthy', healthy, total }
     if (hasStarting) return { status: 'starting', healthy, total }
+    if (hasUnknown) return { status: 'unknown', healthy, total }
     return { status: 'healthy', healthy, total }
   }
 
-  const complianceTierStatus = getTierStatus(TIERS[2])
-  const paymentsBlocked = complianceTierStatus.status !== 'healthy' && complianceTierStatus.status !== 'unknown'
+  const catalogCoverageComplete = catalogAvailable && policyAvailable && bcpCatalogCoverageIsComplete({
+    tiers, policyServicesMissingFromCatalog: policyServicesMissing,
+    unclassifiedCatalogServices: unclassifiedServices,
+    catalogServiceCount,
+  })
+  // Payment processing needs both the core T0 ledger/transaction path and the
+  // explicit compliance checks. An absent observation is unknown, never green.
+  const complianceServices = ['balance-service', 'aml-service', 'sanctions-service']
+  const complianceStatuses = complianceServices.map(name => health[name] ?? 'unknown')
+  const complianceUnknown = !catalogAvailable || complianceStatuses.some(status => status === 'unknown')
+  const complianceDegraded = complianceStatuses.some(status => status === 'unhealthy' || status === 'starting')
+  const requiredPaymentServices = [
+    'ledger-service', 'balance-service', 'transaction-service', 'clearing-service',
+    'aml-service', 'sanctions-service',
+  ]
+  const paymentStatuses = requiredPaymentServices.map(name => health[name] ?? 'unknown')
+  const paymentsUnknown = !catalogAvailable || policyServicesMissing.length > 0
+    || paymentStatuses.some(status => status === 'unknown')
+  const paymentsDegraded = paymentStatuses.some(status => status === 'unhealthy' || status === 'starting')
+  const serviceStatuses = tiers.flatMap(tier => tier.services.map(service => health[service.name] ?? 'unknown'))
+  const infraStatuses = infraAssets.map(asset => health[asset.id.replace(/^infra:/, '')] ?? 'unknown')
+  const allObservedStatuses = [...serviceStatuses, ...infraStatuses]
+  const overallStatus = allObservedStatuses.includes('unhealthy') || allObservedStatuses.includes('starting')
+    ? 'DEGRADED'
+    : !catalogCoverageComplete || policyServicesMissing.length > 0 || !graphAvailable || allObservedStatuses.includes('unknown')
+      ? 'UNKNOWN'
+      : 'NOMINAL'
 
-  const overallHealthy = TIERS.reduce((acc, t) => acc + getTierStatus(t).healthy, 0)
-  const overallTotal = TIERS.reduce((acc, t) => acc + t.services.length, 0)
+  const overallHealthy = serviceStatuses.filter(status => status === 'healthy').length
+  const overallTotal = serviceStatuses.length
+  const infraHealthy = infraStatuses.filter(status => status === 'healthy').length
+  const infraTotal = infraStatuses.length
+  const t0Policy = policy?.tiers.find(tier => tier.key === 'T0')
+  const t0Target = t0Policy ? `${t0Policy.rto} / ${t0Policy.rpo}` : t('NEZNÁMÉ', 'UNKNOWN')
 
   const StatusIcon = ({ status, size = 14 }: { status: HealthStatus; size?: number }) => {
     if (status === 'healthy')   return <CheckCircle2 size={size} style={{ color: 'var(--success)' }} />
@@ -330,9 +314,9 @@ export default function BcpPage() {
         subtitle={t('Prioritizovaný plán obnovy dle DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines', 'Prioritized recovery plan per DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines')}
         icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: 'var(--danger)' }} />}
         actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {lastRefresh && (
+          {lastSuccessfulRefresh && (
             <span style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString(dateLocale)}
+              {t('Poslední úspěšné načtení:', 'Last successful refresh:')} {lastSuccessfulRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <PrintDocumentButton />
@@ -356,32 +340,46 @@ export default function BcpPage() {
         </div>}
       />
 
+      <ContentSourceNote source={contentSource} />
+
+      {healthRefreshState !== 'current' && (
+        <div role="status" aria-live="polite" style={{ marginBottom: '16px', padding: '12px 16px', border: '1px solid var(--warning-border)', borderRadius: '10px', background: 'var(--warning-bg)', color: 'var(--text-primary)' }}>
+          {healthRefreshState === 'partial'
+            ? t('Některé údaje o provozním stavu jsou neúplné nebo nedostupné; neověřené stavy jsou označené.', 'Some health sources are incomplete or unavailable; unverified statuses are marked as such.')
+            : lastSuccessfulRefresh
+              ? t('Health zdroje nejsou dostupné; poslední úplné načtení zůstává uvedené výše.', 'Health sources are unavailable; the last complete refresh remains shown above.')
+              : t('Health zdroje nejsou dostupné a zatím není k dispozici úplné načtení.', 'Health sources are unavailable and no complete refresh is available yet.')}
+        </div>
+      )}
+
       {/* Summary stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}>
         {[
           {
             label: t('Celkový stav', 'Overall status'),
-            value: loading ? '…' : overallHealthy === overallTotal ? 'NOMINAL' : 'DEGRADED',
-            sub: loading ? '' : t(`${overallHealthy}/${overallTotal} služeb healthy`, `${overallHealthy}/${overallTotal} services healthy`),
-            color: overallHealthy === overallTotal ? 'var(--success-text)' : 'var(--danger-text)',
+            value: loading ? '…' : overallStatus,
+            sub: loading ? '' : t(`${overallHealthy}/${overallTotal} služeb v katalogu healthy`, `${overallHealthy}/${overallTotal} catalog services healthy`),
+            color: overallStatus === 'NOMINAL' ? 'var(--success-text)' : overallStatus === 'UNKNOWN' ? 'var(--text-secondary)' : 'var(--danger-text)',
           },
           {
-            label: t('Compliance gate', 'Compliance gate'),
-            value: loading ? '…' : complianceTierStatus.status === 'healthy' ? 'CLEAR' : 'BLOCKED',
-            sub: '5AMLD Art. 18 / DORA Art. 12',
-            color: complianceTierStatus.status === 'healthy' ? 'var(--success-text)' : 'var(--danger-text)',
+            label: t('Compliance service health', 'Compliance service health'),
+            value: loading ? '…' : complianceDegraded ? 'DEGRADED' : complianceUnknown ? 'UNVERIFIED' : 'HEALTHY',
+            sub: t('Pouze health probes Balance, AML a Sanctions; nejde o stav regulatorních kontrol.', 'Balance, AML and Sanctions health probes only; this is not regulatory-control status.'),
+            color: complianceDegraded ? 'var(--danger-text)' : complianceUnknown ? 'var(--text-secondary)' : 'var(--success-text)',
           },
           {
-            label: t('Platební zpracování', 'Payment processing'),
-            value: loading ? '…' : paymentsBlocked ? t('BLOKOVÁNO', 'BLOCKED') : t('POVOLENO', 'ALLOWED'),
-            sub: t('Tier 4 platební služby', 'Tier 4 payment services'),
-            color: paymentsBlocked ? 'var(--danger-text)' : 'var(--success-text)',
+            label: t('Payment-path service health', 'Payment-path service health'),
+            value: loading ? '…' : paymentsDegraded ? 'DEGRADED' : paymentsUnknown ? t('NEOVĚŘENO', 'UNVERIFIED') : 'HEALTHY',
+            sub: t('Health probes T0 a compliance services; stránka nerozhoduje o povolení transakce.', 'Health probes for T0 and compliance services; this page does not authorize transactions.'),
+            color: paymentsDegraded ? 'var(--danger-text)' : paymentsUnknown ? 'var(--text-secondary)' : 'var(--success-text)',
           },
           {
-            label: t('Cílový RTO (full stack)', 'Target RTO (full stack)'),
-            value: '< 8 min',
-            sub: t('Předpřipravené Docker images', 'Pre-built Docker images'),
-            color: 'var(--info-text)',
+            label: t('T0 cíl podle politiky', 'T0 policy target'),
+            value: t0Target,
+            sub: t0Policy
+              ? t('RTO / RPO aspirace; výsledek drillů není změřen', 'RTO / RPO aspirational; drill result is not measured')
+              : t('Kanonický cíl politiky není dostupný.', 'Canonical policy target is unavailable.'),
+            color: 'var(--text-secondary)',
           },
         ].map(stat => (
           <div key={stat.label} className="card" style={{ padding: '16px' }}>
@@ -392,7 +390,7 @@ export default function BcpPage() {
         ))}
       </div>
 
-      {paymentsBlocked && (
+      {paymentsDegraded && (
         <div style={{
           background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '10px',
           padding: '14px 18px', marginBottom: '20px',
@@ -401,45 +399,53 @@ export default function BcpPage() {
           <AlertTriangle size={18} style={{ color: 'var(--danger)', flexShrink: 0 }} />
           <div>
             <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '14px' }}>
-              {t('⛔ Compliance gate selhala — platební zpracování BLOKOVÁNO', '⛔ Compliance gate failed — payment processing BLOCKED')}
+              {t('Zdravotní stav závislostí platební cesty je degradovaný', 'Payment-path dependency health is degraded')}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginTop: '2px' }}>
-              {t('AML, Sanctions nebo Balance service není healthy. Platby nesmí být zpracovávány. Regulatorní základ: 5AMLD Art. 18, DORA Art. 12.', 'AML, Sanctions or Balance service is not healthy. Payments must not be processed. Regulatory basis: 5AMLD Art. 18, DORA Art. 12.')}
+              {t('Alespoň jedna sledovaná platební nebo compliance service hlásí unhealthy/starting. Tato stránka zobrazuje service health, nikoli vynucení platební brány.', 'At least one monitored payment or compliance service reports unhealthy/starting. This page shows service health, not enforcement of a payment gate.')}
             </div>
           </div>
         </div>
       )}
 
-      {/* Completeness cross-check: catalog services not assigned to any tier */}
-      {unclassified.length > 0 && (
+      {/* Do not present a green result while the canonical roster/model is incomplete. */}
+      {(!catalogAvailable || !policyAvailable || !catalogCoverageComplete || !graphAvailable || policyServicesMissing.length > 0) && (
         <div className="card" style={{
           marginBottom: '24px', padding: '12px 16px', borderLeft: '4px solid var(--warning)',
           display: 'flex', alignItems: 'flex-start', gap: '10px',
         }}>
           <AlertTriangle size={16} style={{ color: 'var(--warning)', flexShrink: 0, marginTop: '2px' }} />
           <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-            {t(
-              `${unclassified.length} služeb z katalogu zatím není zařazeno do žádné tieru kontinuity (ADR-0029 cross-check): `,
-              `${unclassified.length} catalog service(s) are not yet assigned to any continuity tier (ADR-0029 cross-check): `,
-            )}
-            <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{unclassified.join(', ')}</strong>
-            {t(' — doplň je do RTO/RPO modelu níže.', ' — classify them in the RTO/RPO model below.')}
+            {!catalogAvailable && t('Katalog služeb není dostupný; úplnost BCP rosteru nelze ověřit.', 'Service catalog is unavailable; BCP roster completeness cannot be verified.')}
+            {!policyAvailable && t('Kanonická BCP politika není dostupná nebo její tabulka §2 nešla ověřit; zařazení a cíle jsou neznámé.', 'The canonical BCP policy is unavailable or its §2 table could not be validated; classifications and targets are unknown.')}
+            {catalogAvailable && !catalogCoverageComplete && t('BCP roster nepokrývá každý katalogový service přesně jednou.', 'The BCP roster does not cover every catalog service exactly once.')}
+            {unclassifiedServices.length > 0 && <>
+              {t(' Nezařazené služby:', ' Unclassified services:')}{' '}
+              <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{unclassifiedServices.join(', ')}</strong>
+            </>}
+            {!graphAvailable && t('Graf závislostí není dostupný; závislosti obnovy nejsou ověřeny.', 'The dependency graph is unavailable; recovery dependencies are unverified.')}
+            {policyServicesMissing.length > 0 && <>
+              {t('Politika BCP odkazuje na service, který v aktuálním katalogu není; klasifikace se nepřemapuje odhadem: ', 'The BCP policy names a service absent from the current catalog; it is not guessed into a replacement: ')}
+              <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{policyServicesMissing.join(', ')}</strong>
+            </>}
           </div>
         </div>
       )}
 
-      {/* Startup tiers */}
+      {/* Recovery-policy tiers */}
       <div style={{ marginBottom: '32px' }}>
         <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <Zap size={15} style={{ color: 'var(--accent)' }} />
-          {t('Prioritizované pořadí startu', 'Prioritized startup order')}
+          {t('Katalog služeb podle BCP recovery tieru', 'Catalog services by BCP recovery tier')}
         </h2>
+        <div style={{ fontSize: '12px', color: 'var(--text-primary)', marginBottom: '12px' }}>
+          {t('RTO/RPO jsou cíle politiky, nikoli změřené výsledky; politika je označuje za aspirativní do Milestone M6.', 'RTO/RPO are policy targets, not measured results; the policy marks them aspirational until Milestone M6.')}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {TIERS.map((tier, idx) => {
+          {tiers.map(tier => {
             const { status, healthy, total } = getTierStatus(tier)
             const expanded = expandedTiers.has(tier.id)
-            const TierIcon = tier.icon
 
             return (
               <div key={tier.id} className="card" style={{ padding: 0, overflow: 'hidden', borderLeft: `4px solid ${tier.color}` }}>
@@ -459,23 +465,16 @@ export default function BcpPage() {
                   {/* Tier number */}
                   <div style={{
                     width: '28px', height: '28px', borderRadius: '50%',
-                    background: tier.color, color: 'var(--text-inverse)',
+                    background: tier.color, color: tier.textColor,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: '12px', fontWeight: 800, flexShrink: 0,
                   }}>
                     {tier.id}
                   </div>
 
-                  <TierIcon size={15} style={{ color: tier.color, flexShrink: 0 }} />
-
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(...tier.label)}</span>
-                      {tier.isComplianceGate && (
-                        <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '20px', background: 'var(--danger-bg)', color: 'var(--text-primary)', border: '1px solid var(--danger-border)' }}>
-                          {t('COMPLIANCE GATE', 'COMPLIANCE GATE')}
-                        </span>
-                      )}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '2px' }}>{t(...tier.regulatoryBasis)}</div>
                   </div>
@@ -489,10 +488,6 @@ export default function BcpPage() {
                     <div style={{ textAlign: 'center' }}>
                       <div style={{ fontSize: '10px', color: 'var(--text-primary)', textTransform: 'uppercase' }}>RPO</div>
                       <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tier.rpo}</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '10px', color: 'var(--text-primary)', textTransform: 'uppercase' }}>{t('Priorita', 'Priority')}</div>
-                      <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{tier.priority}</div>
                     </div>
                   </div>
 
@@ -510,13 +505,6 @@ export default function BcpPage() {
                 {/* Services list */}
                 {expanded && (
                   <div id={`bcp-tier-${tier.id}`} style={{ borderTop: '1px solid var(--border)', padding: '12px 18px' }}>
-                    {/* Startup sequence note */}
-                    {idx > 0 && (
-                      <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '10px', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: '6px' }}>
-                        {t(`⏱ Startuje po Tier ${tier.id - 1} — všechny služby v tomto tieru startují `, `⏱ Starts after Tier ${tier.id - 1} — all services in this tier start `)}<strong>{t('paralelně', 'in parallel')}</strong>
-                        {tier.id === 3 && t(' (výjimka: psd2-service čeká na consent-service healthy)', ' (exception: psd2-service waits for consent-service healthy)')}
-                      </div>
-                    )}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '8px' }}>
                       {tier.services.map(svc => {
                         const svcStatus = health[svc.name] ?? 'unknown'
@@ -547,6 +535,30 @@ export default function BcpPage() {
         </div>
       </div>
 
+      {graphAvailable && infraAssets.length > 0 && (
+        <section className="card" aria-label={t('Sdílené recovery závislosti', 'Shared recovery dependencies')} style={{ padding: '16px', marginBottom: '32px' }}>
+          <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px' }}>
+            {t('Sdílená infrastruktura v grafu závislostí', 'Shared infrastructure in the dependency graph')}
+          </h2>
+          <p style={{ fontSize: '12px', color: 'var(--text-primary)', margin: '0 0 12px' }}>
+            {t('Politika nepřiřazuje těmto infrastrukturním uzlům samostatný RTO/RPO; jejich obnova ovlivňuje závislé služby.', 'The policy does not assign these infrastructure nodes separate RTO/RPO targets; their recovery affects dependent services.')}
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '8px' }}>
+            {infraAssets.map(asset => {
+              const status = health[asset.id.replace(/^infra:/, '')] ?? 'unknown'
+              return <div key={asset.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                <StatusIcon status={status} />
+                <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: '12px' }}>{asset.label}</span>
+                <span style={{ ...statusBadgeStyle(status), fontSize: '10px', padding: '2px 6px', borderRadius: '20px' }}>{loading ? '…' : statusLabel(status)}</span>
+              </div>
+            })}
+          </div>
+          <div style={{ color: 'var(--text-primary)', fontSize: '11px', marginTop: '10px' }}>
+            {t(`Infrastruktura healthy: ${infraHealthy}/${infraTotal}`, `Infrastructure healthy: ${infraHealthy}/${infraTotal}`)}
+          </div>
+        </section>
+      )}
+
       {/* Incident classification */}
       <div style={{ marginBottom: '32px' }}>
         <h2 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -564,9 +576,6 @@ export default function BcpPage() {
               </div>
             </div>
           ))}
-        </div>
-        <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginTop: '8px', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-          <strong>{t('DORA Art. 17 — Práh významného incidentu:', 'DORA Art. 17 — Major incident threshold:')}</strong> {t('> 4h výpadek NEBO > 10 % transakcí zasaženo NEBO > EUR 1M dopad → hlášení CNB do 24h, závěrečná zpráva do 1 měsíce.', '> 4h downtime OR > 10 % of transactions affected OR > EUR 1M impact → report to CNB within 24h, final report within 1 month.')}
         </div>
       </div>
 
@@ -587,11 +596,8 @@ export default function BcpPage() {
             </thead>
             <tbody>
               {([
-                { type: ['Cold start drill', 'Cold start drill'], freq: ['Měsíčně', 'Monthly'], scope: ['Celý stack od nuly', 'Full stack from scratch'], owner: ['Platform Engineering', 'Platform Engineering'] },
-                { type: ['Tier 0 failover', 'Tier 0 failover'], freq: ['Čtvrtletně', 'Quarterly'], scope: ['Postgres/Kafka restart s daty', 'Postgres/Kafka restart with data'], owner: ['Platform Engineering', 'Platform Engineering'] },
-                { type: ['Obnova platebních služeb', 'Payment service recovery'], freq: ['Čtvrtletně', 'Quarterly'], scope: ['Tier 4 restart s aktivními transakcemi', 'Tier 4 restart with active transactions'], owner: ['Payments Team', 'Payments Team'] },
-                { type: ['Plná simulace DR', 'Full DR simulation'], freq: ['Pololetně', 'Semi-annually'], scope: ['Kompletní rebuild prostředí', 'Complete environment rebuild'], owner: ['Všechny týmy', 'All teams'] },
-                { type: ['TLPT (Threat-Led Penetration Test)', 'TLPT (Threat-Led Penetration Test)'], freq: ['Ročně', 'Annually'], scope: ['Externí red team', 'External red team'], owner: ['Security', 'Security'] },
+                { type: ['BCP tabletop', 'BCP tabletop'], freq: ['Čtvrtletně', 'Quarterly'], scope: ['Sandbox: kontrola runbooků a ověření záloh', 'Sandbox: review runbooks and verify backups'], owner: ['BCP Owner', 'BCP Owner'] },
+                { type: ['Živý failover DR', 'Live DR failover'], freq: ['Ročně (po M6)', 'Annually (M6+)'], scope: ['Produkční failover a měření RTO/RPO', 'Production failover and measured RTO/RPO'], owner: ['BCP Owner', 'BCP Owner'] },
               ] as { type: Bilingual; freq: Bilingual; scope: Bilingual; owner: Bilingual }[]).map((row, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', fontWeight: 600, color: 'var(--text-primary)' }}>{t(...row.type)}</td>
@@ -607,7 +613,7 @@ export default function BcpPage() {
           {t('Záznamy z testů musí být uchovávány ', 'Test records must be retained for ')}<strong>{t('5 let', '5 years')}</strong>{t(' (DORA Art. 11(6)).', ' (DORA Art. 11(6)).')}
         </div>
       </div>
-      <CatalogDriftBanner present={CATALOG_PRESENT} />
+      <CatalogDriftBanner present={catalogServiceNames} />
     </div>
   )
 }

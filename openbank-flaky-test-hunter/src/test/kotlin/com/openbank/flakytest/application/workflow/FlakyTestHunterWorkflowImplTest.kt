@@ -157,10 +157,10 @@ class FlakyTestHunterWorkflowImplTest {
     fun `the report carries the collected scan size, the trigger and a bounded time window`() {
         start(emptySnapshot(77), emptyList())
 
-        val report = runCheck(RunTrigger.SCHEDULED)
+        val report = runCheck(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK)
 
         assertThat(report.testFilesScanned).isEqualTo(77)
-        assertThat(report.trigger).isEqualTo(RunTrigger.SCHEDULED)
+        assertThat(report.trigger).isEqualTo(RunTrigger.CI_TEST_SUITE_FAILURE_WEBHOOK)
         assertThat(report.findingsDetected).isEmpty()
         assertThat(report.findingsProposed).isZero()
         assertThat(report.runId).isNotBlank()

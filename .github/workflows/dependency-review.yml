@@ -6,6 +6,33 @@ name: Dependency Review
 on:
   pull_request:
     branches: [main]
+    # The review diffs dependency manifests and submitted snapshots between base and head;
+    # a PR that changes no manifest, lockfile, workflow (actions are dependencies too) or
+    # snapshot input has nothing to review. Mirrors the `deps` step's own input list plus
+    # the manifests GitHub's dependency graph parses natively. Measured 2026-11-04: this ran
+    # on every one of 29 PR pushes against a 40-slot hosted cap.
+    paths:
+      - "**/build.gradle.kts"
+      - "build-logic/**"
+      - "openbank-libs/gradle/libs.versions.toml"
+      - "settings.gradle.kts"
+      - "gradle/wrapper/**"
+      - "**/gradle.lockfile"
+      - "**/package.json"
+      - "**/package-lock.json"
+      - "**/pnpm-lock.yaml"
+      - "**/yarn.lock"
+      - "**/requirements*.txt"
+      - "**/pyproject.toml"
+      - "**/go.mod"
+      - "**/go.sum"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".github/workflows/**"
+      - ".github/actions/**"
+      - ".github/scripts/dependency_snapshot.py"
+      - ".github/scripts/dependency-resolution-strict.init.gradle"
+      - ".github/scripts/tests/test_dependency_*.py"
 
 permissions:
   contents: read
@@ -40,6 +67,16 @@ jobs:
     # Only dependency-touching PRs wait; the rest finish in seconds.
     timeout-minutes: 80
     steps:
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter start
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB start $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Whether to wait for a Gradle snapshot depends on whether one is coming: the retry
@@ -57,6 +94,7 @@ jobs:
         run: |
           python3 .github/scripts/tests/test_dependency_review_basis.py
           python3 .github/scripts/tests/test_wait_dependency_review_snapshot.py
+          python3 .github/scripts/tests/test_dependency_license_choice.py
 
       - name: Detect dependency-manifest changes
         id: deps
@@ -164,7 +202,8 @@ jobs:
           # touching PRs. The action must not restart its own ten-second polling loop.
           retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
-          # allow-dependencies-licenses: none currently — the schemathesis 3.39.16 rfc3987
+          # No unconditional license exclusions. The guarded retry below records only
+          # the approved RocksDB 10.1.3 Apache alternative. The schemathesis 3.39.16 rfc3987
           # (GPL-3.0-or-later) suppression that used to live here was retired once the
           # 4.22.3 migration dropped rfc3987 from the resolved set entirely. Re-add only
           # with a fresh justification and a tracking issue.
@@ -236,7 +275,16 @@ jobs:
                "finding; the full policy review could not be completed."
           exit 1
 
+      - name: Select the approved Apache alternative for RocksDB
+        id: license-choice
+        if: ${{ steps.review.outcome == 'failure' }}
+        # This exact head/base comparison was captured by the API backoff above.
+        # Owner-approved choice: RocksDB JNI 10.1.3, Apache-2.0 OR GPL-2.0 (#13888).
+        # All RocksDB rows must match: the pinned action ignores exclusion versions.
+        run: python3 .github/scripts/dependency_license_choice.py /tmp/dependency-diff.json >> "$GITHUB_OUTPUT"
+
       - name: Dependency Review retry
+        id: review-retry
         if: ${{ steps.review.outcome == 'failure' }}
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
@@ -244,6 +292,22 @@ jobs:
           comment-summary-in-pr: always
           retry-on-snapshot-warnings: false
           deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          allow-dependencies-licenses: ${{ steps.license-choice.outputs.packages }}
+
+      - name: Verify the choice against the actual retry comparison
+        if: ${{ success() && steps.license-choice.outputs.packages != '' }}
+        env:
+          # The full fleet comparison exceeds the per-variable OS limit. Keep
+          # aligned field arrays from the action's actual output; the guard checks lengths.
+          # Skipped-step outputs can be evaluated before the step condition; keep them valid JSON.
+          # An active license choice still rejects empty evidence in --review-result.
+          RETRY_NAMES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.name) }}
+          RETRY_PACKAGE_URLS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.package_url) }}
+          RETRY_LICENSES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.license) }}
+          RETRY_VERSIONS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.version) }}
+          RETRY_ECOSYSTEMS: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.ecosystem) }}
+          RETRY_CHANGE_TYPES: ${{ toJSON(fromJSON(steps.review-retry.outputs.dependency-changes || '[]').*.change_type) }}
+        run: python3 .github/scripts/dependency_license_choice.py --review-result
 
       # A successful review attempt above can still PROCEED on an invalid basis instead of
       # failing (issue #2833, item 4).
@@ -397,3 +461,14 @@ jobs:
           # warning parser as the earlier wait, with a short bounded recheck.
           python3 .github/scripts/wait_dependency_review_snapshot.py --final-check
           echo "Both sides had successful producers and the comparison reported no missing snapshot."
+      # GITHUB_TOKEN quota meter (GET /rate_limit is free); never fails the job.
+      - name: quota-meter end
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          q=$(gh api rate_limit --jq '.resources.core|"used=\(.used) remaining=\(.remaining) reset=\(.reset)"' 2>/dev/null) || q=unavailable
+          line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
+          echo "::notice title=quota-meter::$line"
+          echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true

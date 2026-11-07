@@ -60,4 +60,21 @@ class OutboxKafkaHeadersTest {
 
         assertThat(headers).doesNotContainKey(OutboxKafkaHeaders.HEADER_SYNTHETIC)
     }
+
+    @Test
+    fun `an entry with a captured traceparent emits the W3C header unchanged`() {
+        val traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+
+        val headers = OutboxKafkaHeaders.headersFor(entry().copy(traceparent = traceparent))
+
+        assertThat(headers).containsEntry(OutboxKafkaHeaders.HEADER_TRACEPARENT, traceparent)
+    }
+
+    @Test
+    fun `an entry without a traceparent emits no trace header`() {
+        assertThat(OutboxKafkaHeaders.headersFor(entry())).doesNotContainKey(OutboxKafkaHeaders.HEADER_TRACEPARENT)
+        assertThat(OutboxKafkaHeaders.headersFor(entry().copy(traceparent = " "))).doesNotContainKey(
+            OutboxKafkaHeaders.HEADER_TRACEPARENT,
+        )
+    }
 }

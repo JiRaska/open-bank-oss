@@ -97,6 +97,15 @@ class ParticipantReportingApiIT {
                 "1000, 'CZK', 'MONTHLY', ?::date, ?::timestamptz, ?::timestamptz)",
             id, UUID.randomUUID(), line, UUID.randomUUID(), born, status, start, "${start}T08:00:00Z", updated,
         )
+        // The domain invariant (and every staff read that hydrates a contract) requires at least
+        // one strategy election; without this row the shared IT database breaks staff list/search.
+        exec(
+            "INSERT INTO pension_strategy_elections (id, contract_id, strategy_code, effective_from, elected_at) " +
+                "VALUES (1000000000000 + (random() * 1000000000)::bigint, ?, 'BALANCED', ?::date, ?::timestamptz)",
+            id,
+            start,
+            "${start}T08:00:00Z",
+        )
     }
 
     private fun Connection.contribution(key: String, source: String, amount: String, valueDate: String) = exec(

@@ -1,0 +1,88 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the transaction behind the get_transaction tool",
+      "providerStates": [
+        {
+          "name": "a posted transaction exists for the pact account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions/88888888-9999-4aaa-bbbb-cccccccccccc"
+      },
+      "response": {
+        "body": {
+          "amount": 100.0,
+          "currencyCode": "CZK",
+          "id": "88888888-9999-4aaa-bbbb-cccccccccccc",
+          "referenceNumber": "TXN-PARTY-PACT-001",
+          "status": "COMPLETED",
+          "type": "CREDIT"
+        },
+        "generators": {
+          "body": {
+            "$.amount": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a transaction id transaction-service does not hold, via the get_transaction tool",
+      "providerStates": [
+        {
+          "name": "no transactions exist for the requested account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/transactions/99999999-0000-4bbb-8ccc-dddddddddddd"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

@@ -1,0 +1,1017 @@
+public final class com/openbank/libs/decision/DecisionReason {
+	public fun <init> (Lcom/openbank/libs/decision/PolicyReasonCode;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Lcom/openbank/libs/decision/PolicyReasonCode;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/decision/PolicyReasonCode;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/decision/PolicyReasonCode;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/decision/DecisionReason;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/DecisionReason;Lcom/openbank/libs/decision/PolicyReasonCode;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/decision/DecisionReason;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Lcom/openbank/libs/decision/PolicyReasonCode;
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getRuleId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyApplication {
+	public fun <init> (Ljava/util/Map;Ljava/time/LocalDate;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun copy (Ljava/util/Map;Ljava/time/LocalDate;)Lcom/openbank/libs/decision/PolicyApplication;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyApplication;Ljava/util/Map;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyApplication;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAsOf ()Ljava/time/LocalDate;
+	public final fun getAttributes ()Ljava/util/Map;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyAttribute : java/lang/Enum {
+	public static final field AGE_YEARS Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field BUREAU_SCORE_BAND Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field CHANNEL Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field CUSTOMER_TYPE Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field DSTI Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field DTI Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field EMPLOYMENT_TENURE_MONTHS Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field EXISTING_DEBT_SERVICE_MONTHLY Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field JURISDICTION Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field PRODUCT_TYPE Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field REQUESTED_AMOUNT Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field RESIDENCY Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field TERM_MONTHS Lcom/openbank/libs/decision/PolicyAttribute;
+	public static final field VERIFIED_INCOME_MONTHLY Lcom/openbank/libs/decision/PolicyAttribute;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyAttribute;
+	public static fun values ()[Lcom/openbank/libs/decision/PolicyAttribute;
+}
+
+public final class com/openbank/libs/decision/PolicyBundle {
+	public fun <init> (Ljava/util/List;)V
+	public final fun active (Lcom/openbank/libs/decision/PolicyTableKind;Ljava/time/LocalDate;)Lcom/openbank/libs/decision/PolicyTable;
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/decision/PolicyBundle;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyBundle;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyBundle;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getTables ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public abstract interface class com/openbank/libs/decision/PolicyDecision {
+	public abstract fun getEvaluation ()Lcom/openbank/libs/decision/PolicyEvaluation;
+}
+
+public final class com/openbank/libs/decision/PolicyDecision$Approve : com/openbank/libs/decision/PolicyDecision {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/decision/PolicyEvaluation;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/decision/PolicyEvaluation;)Lcom/openbank/libs/decision/PolicyDecision$Approve;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyDecision$Approve;Ljava/lang/String;Lcom/openbank/libs/decision/PolicyEvaluation;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyDecision$Approve;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEvaluation ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public final fun getPriceBand ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyDecision$Decline : com/openbank/libs/decision/PolicyDecision {
+	public fun <init> (Lcom/openbank/libs/decision/PolicyEvaluation;)V
+	public final fun component1 ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public final fun copy (Lcom/openbank/libs/decision/PolicyEvaluation;)Lcom/openbank/libs/decision/PolicyDecision$Decline;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyDecision$Decline;Lcom/openbank/libs/decision/PolicyEvaluation;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyDecision$Decline;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEvaluation ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyDecision$Refer : com/openbank/libs/decision/PolicyDecision {
+	public fun <init> (Lcom/openbank/libs/decision/PolicyEvaluation;)V
+	public final fun component1 ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public final fun copy (Lcom/openbank/libs/decision/PolicyEvaluation;)Lcom/openbank/libs/decision/PolicyDecision$Refer;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyDecision$Refer;Lcom/openbank/libs/decision/PolicyEvaluation;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyDecision$Refer;
+	public fun equals (Ljava/lang/Object;)Z
+	public fun getEvaluation ()Lcom/openbank/libs/decision/PolicyEvaluation;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyEvaluation {
+	public fun <init> (Ljava/util/Map;Ljava/util/List;Ljava/util/List;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/List;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/util/Map;Ljava/util/List;Ljava/util/List;Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyEvaluation;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyEvaluation;Ljava/util/Map;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyEvaluation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getInputSnapshotHash ()Ljava/lang/String;
+	public final fun getMatchedRuleIds ()Ljava/util/List;
+	public final fun getPolicyVersions ()Ljava/util/Map;
+	public final fun getReasons ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyEvaluator {
+	public static final field INSTANCE Lcom/openbank/libs/decision/PolicyEvaluator;
+	public final fun evaluate (Lcom/openbank/libs/decision/PolicyApplication;Lcom/openbank/libs/decision/PolicyBundle;)Lcom/openbank/libs/decision/PolicyDecision;
+	public final fun inputSnapshotHash (Ljava/util/Map;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyOperator : java/lang/Enum {
+	public static final field EQ Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field GT Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field GTE Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field IN Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field LT Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field LTE Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field NEQ Lcom/openbank/libs/decision/PolicyOperator;
+	public static final field NOT_IN Lcom/openbank/libs/decision/PolicyOperator;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyOperator;
+	public static fun values ()[Lcom/openbank/libs/decision/PolicyOperator;
+}
+
+public final class com/openbank/libs/decision/PolicyReasonCode : java/lang/Enum {
+	public static final field AFFORDABILITY_FAILED Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field ELIGIBILITY_FAILED Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field EXCLUSION_MATCHED Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field INPUT_MISSING Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field POLICY_TABLE_MISSING Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field PRICING_BAND_UNMATCHED Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static final field RULE_NOT_EVALUABLE Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyReasonCode;
+	public static fun values ()[Lcom/openbank/libs/decision/PolicyReasonCode;
+}
+
+public final class com/openbank/libs/decision/PolicyRule {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/decision/PolicyAttribute;Lcom/openbank/libs/decision/PolicyOperator;Ljava/math/BigDecimal;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/decision/PolicyAttribute;Lcom/openbank/libs/decision/PolicyOperator;Ljava/math/BigDecimal;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/decision/PolicyAttribute;
+	public final fun component3 ()Lcom/openbank/libs/decision/PolicyOperator;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/util/Set;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/decision/PolicyAttribute;Lcom/openbank/libs/decision/PolicyOperator;Ljava/math/BigDecimal;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyRule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyRule;Ljava/lang/String;Lcom/openbank/libs/decision/PolicyAttribute;Lcom/openbank/libs/decision/PolicyOperator;Ljava/math/BigDecimal;Ljava/util/Set;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyRule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAttribute ()Lcom/openbank/libs/decision/PolicyAttribute;
+	public final fun getBand ()Ljava/lang/String;
+	public final fun getDetail ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getOperator ()Lcom/openbank/libs/decision/PolicyOperator;
+	public final fun getThreshold ()Ljava/math/BigDecimal;
+	public final fun getValues ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyTable {
+	public fun <init> (Lcom/openbank/libs/decision/PolicyTableKind;Ljava/lang/String;ILjava/time/LocalDate;Ljava/util/List;Ljava/time/LocalDate;)V
+	public synthetic fun <init> (Lcom/openbank/libs/decision/PolicyTableKind;Ljava/lang/String;ILjava/time/LocalDate;Ljava/util/List;Ljava/time/LocalDate;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/decision/PolicyTableKind;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/time/LocalDate;
+	public final fun component5 ()Ljava/util/List;
+	public final fun component6 ()Ljava/time/LocalDate;
+	public final fun copy (Lcom/openbank/libs/decision/PolicyTableKind;Ljava/lang/String;ILjava/time/LocalDate;Ljava/util/List;Ljava/time/LocalDate;)Lcom/openbank/libs/decision/PolicyTable;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyTable;Lcom/openbank/libs/decision/PolicyTableKind;Ljava/lang/String;ILjava/time/LocalDate;Ljava/util/List;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyTable;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEffectiveFrom ()Ljava/time/LocalDate;
+	public final fun getEffectiveTo ()Ljava/time/LocalDate;
+	public final fun getKind ()Lcom/openbank/libs/decision/PolicyTableKind;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getRules ()Ljava/util/List;
+	public final fun getVersion ()I
+	public fun hashCode ()I
+	public final fun isActive (Ljava/time/LocalDate;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyTableKind : java/lang/Enum {
+	public static final field AFFORDABILITY Lcom/openbank/libs/decision/PolicyTableKind;
+	public static final field ELIGIBILITY Lcom/openbank/libs/decision/PolicyTableKind;
+	public static final field EXCLUSION Lcom/openbank/libs/decision/PolicyTableKind;
+	public static final field PRICING_BAND Lcom/openbank/libs/decision/PolicyTableKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyTableKind;
+	public static fun values ()[Lcom/openbank/libs/decision/PolicyTableKind;
+}
+
+public abstract interface class com/openbank/libs/decision/PolicyValue {
+	public fun render ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyValue$DefaultImpls {
+	public static fun render (Lcom/openbank/libs/decision/PolicyValue;)Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyValue$Numeric : com/openbank/libs/decision/PolicyValue {
+	public fun <init> (Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/math/BigDecimal;)Lcom/openbank/libs/decision/PolicyValue$Numeric;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyValue$Numeric;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyValue$Numeric;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/decision/PolicyValue$Text : com/openbank/libs/decision/PolicyValue {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/openbank/libs/decision/PolicyValue$Text;
+	public static synthetic fun copy$default (Lcom/openbank/libs/decision/PolicyValue$Text;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/decision/PolicyValue$Text;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getValue ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun render ()Ljava/lang/String;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/Amortization {
+	public static final field INSTANCE Lcom/openbank/libs/lending/Amortization;
+	public final fun schedule (Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;ILjava/time/LocalDate;ILcom/openbank/libs/lending/AmortizationMethod;)Lcom/openbank/libs/lending/RepaymentSchedule;
+	public static synthetic fun schedule$default (Lcom/openbank/libs/lending/Amortization;Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;ILjava/time/LocalDate;ILcom/openbank/libs/lending/AmortizationMethod;ILjava/lang/Object;)Lcom/openbank/libs/lending/RepaymentSchedule;
+}
+
+public final class com/openbank/libs/lending/AmortizationMethod : java/lang/Enum {
+	public static final field ANNUITY Lcom/openbank/libs/lending/AmortizationMethod;
+	public static final field BULLET Lcom/openbank/libs/lending/AmortizationMethod;
+	public static final field EQUAL_PRINCIPAL Lcom/openbank/libs/lending/AmortizationMethod;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/AmortizationMethod;
+	public static fun values ()[Lcom/openbank/libs/lending/AmortizationMethod;
+}
+
+public final class com/openbank/libs/lending/Aprc {
+	public static final field INSTANCE Lcom/openbank/libs/lending/Aprc;
+	public final fun solve (Ljava/util/List;Ljava/util/List;)Ljava/math/BigDecimal;
+}
+
+public final class com/openbank/libs/lending/Aprc$CashFlow {
+	public fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lcom/openbank/libs/lending/Aprc$CashFlow;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/Aprc$CashFlow;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/lending/Aprc$CashFlow;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAmount ()Ljava/math/BigDecimal;
+	public final fun getYearsFromStart ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/CreditQuote {
+	public fun <init> (Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;Ljava/time/Instant;)V
+	public final fun component1 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component5 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component6 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component7 ()Ljava/math/BigDecimal;
+	public final fun component8 ()Ljava/time/Instant;
+	public final fun copy (Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;Ljava/time/Instant;)Lcom/openbank/libs/lending/CreditQuote;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/CreditQuote;Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;Ljava/time/Instant;ILjava/lang/Object;)Lcom/openbank/libs/lending/CreditQuote;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAprc ()Ljava/math/BigDecimal;
+	public final fun getMonthlyPayment ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getNominalAnnualRate ()Ljava/math/BigDecimal;
+	public final fun getPrincipal ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTermMonths ()I
+	public final fun getTotalCostOfCredit ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTotalPayable ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getValidUntil ()Ljava/time/Instant;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/CreditQuoteCalculator {
+	public static final field INSTANCE Lcom/openbank/libs/lending/CreditQuoteCalculator;
+	public final fun quote (Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/CreditQuote;
+	public final fun quote (Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/CreditQuote;
+	public static synthetic fun quote$default (Lcom/openbank/libs/lending/CreditQuoteCalculator;Lcom/openbank/libs/lending/CreditQuoteRequest;Ljava/time/Instant;Ljava/time/Duration;Ljava/time/LocalDate;Ljava/time/LocalDate;ILjava/lang/Object;)Lcom/openbank/libs/lending/CreditQuote;
+}
+
+public final class com/openbank/libs/lending/CreditQuoteRequest {
+	public fun <init> (Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/lending/AmortizationMethod;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;)V
+	public synthetic fun <init> (Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/lending/AmortizationMethod;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component2 ()I
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lcom/openbank/libs/lending/AmortizationMethod;
+	public final fun component5 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component6 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun copy (Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/lending/AmortizationMethod;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;)Lcom/openbank/libs/lending/CreditQuoteRequest;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/CreditQuoteRequest;Lcom/openbank/libs/domain/money/Money;ILjava/math/BigDecimal;Lcom/openbank/libs/lending/AmortizationMethod;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;ILjava/lang/Object;)Lcom/openbank/libs/lending/CreditQuoteRequest;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getMethod ()Lcom/openbank/libs/lending/AmortizationMethod;
+	public final fun getMonthlyFee ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getNominalAnnualRate ()Ljava/math/BigDecimal;
+	public final fun getPrincipal ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTermMonths ()I
+	public final fun getUpfrontFee ()Lcom/openbank/libs/domain/money/Money;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/Delinquency {
+	public static final field INSTANCE Lcom/openbank/libs/lending/Delinquency;
+	public final fun bucket (I)Lcom/openbank/libs/lending/DelinquencyBucket;
+	public final fun daysPastDue (Ljava/time/LocalDate;Ljava/time/LocalDate;)I
+	public final fun isDefaulted (II)Z
+	public static synthetic fun isDefaulted$default (Lcom/openbank/libs/lending/Delinquency;IIILjava/lang/Object;)Z
+}
+
+public final class com/openbank/libs/lending/DelinquencyBucket : java/lang/Enum {
+	public static final field CURRENT Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static final field DPD_1_30 Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static final field DPD_31_60 Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static final field DPD_61_90 Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static final field DPD_90_PLUS Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getLabel ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/DelinquencyBucket;
+	public static fun values ()[Lcom/openbank/libs/lending/DelinquencyBucket;
+}
+
+public final class com/openbank/libs/lending/EclHorizon : java/lang/Enum {
+	public static final field LIFETIME Lcom/openbank/libs/lending/EclHorizon;
+	public static final field TWELVE_MONTH Lcom/openbank/libs/lending/EclHorizon;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/EclHorizon;
+	public static fun values ()[Lcom/openbank/libs/lending/EclHorizon;
+}
+
+public final class com/openbank/libs/lending/EclInputs {
+	public fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Ljava/lang/String;)Lcom/openbank/libs/lending/EclInputs;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/EclInputs;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/EclInputs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExposureAtDefault ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getLgd ()Ljava/math/BigDecimal;
+	public final fun getModelVersion ()Ljava/lang/String;
+	public final fun getPd12Month ()Ljava/math/BigDecimal;
+	public final fun getPdLifetime ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/EclResult {
+	public fun <init> (Lcom/openbank/libs/lending/Ifrs9Stage;Lcom/openbank/libs/lending/EclHorizon;Lcom/openbank/libs/domain/money/Money;)V
+	public final fun component1 ()Lcom/openbank/libs/lending/Ifrs9Stage;
+	public final fun component2 ()Lcom/openbank/libs/lending/EclHorizon;
+	public final fun component3 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun copy (Lcom/openbank/libs/lending/Ifrs9Stage;Lcom/openbank/libs/lending/EclHorizon;Lcom/openbank/libs/domain/money/Money;)Lcom/openbank/libs/lending/EclResult;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/EclResult;Lcom/openbank/libs/lending/Ifrs9Stage;Lcom/openbank/libs/lending/EclHorizon;Lcom/openbank/libs/domain/money/Money;ILjava/lang/Object;)Lcom/openbank/libs/lending/EclResult;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getExpectedCreditLoss ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getHorizon ()Lcom/openbank/libs/lending/EclHorizon;
+	public final fun getStage ()Lcom/openbank/libs/lending/Ifrs9Stage;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/FinancialHealth {
+	public static final field INSTANCE Lcom/openbank/libs/lending/FinancialHealth;
+	public static final field PILLAR_CASHFLOW Ljava/lang/String;
+	public static final field PILLAR_HABITS Ljava/lang/String;
+	public static final field PILLAR_OBLIGATIONS Ljava/lang/String;
+	public static final field PILLAR_RESERVE Ljava/lang/String;
+	public final fun assess (Lcom/openbank/libs/lending/FinancialHealthInputs;)Lcom/openbank/libs/lending/FinancialHealthView;
+}
+
+public final class com/openbank/libs/lending/FinancialHealthInputs {
+	public fun <init> (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/Boolean;Ljava/lang/Integer;)V
+	public final fun component1 ()Ljava/math/BigDecimal;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun component5 ()Ljava/math/BigDecimal;
+	public final fun component6 ()Ljava/math/BigDecimal;
+	public final fun component7 ()Ljava/lang/Boolean;
+	public final fun component8 ()Ljava/lang/Integer;
+	public final fun copy (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/Boolean;Ljava/lang/Integer;)Lcom/openbank/libs/lending/FinancialHealthInputs;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/FinancialHealthInputs;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/lang/Boolean;Ljava/lang/Integer;ILjava/lang/Object;)Lcom/openbank/libs/lending/FinancialHealthInputs;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getHasArrears ()Ljava/lang/Boolean;
+	public final fun getLiquidBalance ()Ljava/math/BigDecimal;
+	public final fun getMonthlyDebtService ()Ljava/math/BigDecimal;
+	public final fun getMonthlyIncome ()Ljava/math/BigDecimal;
+	public final fun getMonthlyNet ()Ljava/math/BigDecimal;
+	public final fun getMonthlyOutflow ()Ljava/math/BigDecimal;
+	public final fun getMonthsObserved ()Ljava/lang/Integer;
+	public final fun getVolatilityRatio ()Ljava/math/BigDecimal;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/FinancialHealthView {
+	public fun <init> (Ljava/util/List;)V
+	public final fun component1 ()Ljava/util/List;
+	public final fun copy (Ljava/util/List;)Lcom/openbank/libs/lending/FinancialHealthView;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/FinancialHealthView;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/lending/FinancialHealthView;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getPillars ()Ljava/util/List;
+	public fun hashCode ()I
+	public final fun pillar (Ljava/lang/String;)Lcom/openbank/libs/lending/HealthPillar;
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/HealthPillar {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/PillarZone;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/PillarZone;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/lending/PillarZone;
+	public final fun component3 ()Ljava/math/BigDecimal;
+	public final fun component4 ()Ljava/math/BigDecimal;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/PillarZone;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Lcom/openbank/libs/lending/HealthPillar;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/HealthPillar;Ljava/lang/String;Lcom/openbank/libs/lending/PillarZone;Ljava/math/BigDecimal;Ljava/math/BigDecimal;ILjava/lang/Object;)Lcom/openbank/libs/lending/HealthPillar;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Ljava/lang/String;
+	public final fun getTarget ()Ljava/math/BigDecimal;
+	public final fun getValue ()Ljava/math/BigDecimal;
+	public final fun getZone ()Lcom/openbank/libs/lending/PillarZone;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/Ifrs9 {
+	public static final field INSTANCE Lcom/openbank/libs/lending/Ifrs9;
+	public final fun assess (ILcom/openbank/libs/lending/EclInputs;ZZII)Lcom/openbank/libs/lending/EclResult;
+	public static synthetic fun assess$default (Lcom/openbank/libs/lending/Ifrs9;ILcom/openbank/libs/lending/EclInputs;ZZIIILjava/lang/Object;)Lcom/openbank/libs/lending/EclResult;
+	public final fun collateralAdjustedLgd (Ljava/math/BigDecimal;Ljava/math/BigDecimal;Ljava/math/BigDecimal;)Ljava/math/BigDecimal;
+	public final fun ecl (Lcom/openbank/libs/lending/Ifrs9Stage;Lcom/openbank/libs/lending/EclInputs;)Lcom/openbank/libs/lending/EclResult;
+	public final fun stage (IZZII)Lcom/openbank/libs/lending/Ifrs9Stage;
+	public static synthetic fun stage$default (Lcom/openbank/libs/lending/Ifrs9;IZZIIILjava/lang/Object;)Lcom/openbank/libs/lending/Ifrs9Stage;
+}
+
+public final class com/openbank/libs/lending/Ifrs9Stage : java/lang/Enum {
+	public static final field STAGE_1 Lcom/openbank/libs/lending/Ifrs9Stage;
+	public static final field STAGE_2 Lcom/openbank/libs/lending/Ifrs9Stage;
+	public static final field STAGE_3 Lcom/openbank/libs/lending/Ifrs9Stage;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getHorizon ()Lcom/openbank/libs/lending/EclHorizon;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/Ifrs9Stage;
+	public static fun values ()[Lcom/openbank/libs/lending/Ifrs9Stage;
+}
+
+public final class com/openbank/libs/lending/Installment {
+	public fun <init> (ILjava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun component3 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component4 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component5 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component6 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component7 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun copy (ILjava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;)Lcom/openbank/libs/lending/Installment;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/Installment;ILjava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;ILjava/lang/Object;)Lcom/openbank/libs/lending/Installment;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getClosingBalance ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getDueDate ()Ljava/time/LocalDate;
+	public final fun getInterest ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getNumber ()I
+	public final fun getOpeningBalance ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getPayment ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getPrincipal ()Lcom/openbank/libs/domain/money/Money;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/PillarZone : java/lang/Enum {
+	public static final field AT_RISK Lcom/openbank/libs/lending/PillarZone;
+	public static final field HEALTHY Lcom/openbank/libs/lending/PillarZone;
+	public static final field STRETCHED Lcom/openbank/libs/lending/PillarZone;
+	public static final field UNKNOWN Lcom/openbank/libs/lending/PillarZone;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/PillarZone;
+	public static fun values ()[Lcom/openbank/libs/lending/PillarZone;
+}
+
+public final class com/openbank/libs/lending/RepaymentSchedule {
+	public fun <init> (Lcom/openbank/libs/lending/AmortizationMethod;Ljava/math/BigDecimal;ILjava/util/List;)V
+	public final fun balanceAfter (I)Lcom/openbank/libs/domain/money/Money;
+	public final fun component1 ()Lcom/openbank/libs/lending/AmortizationMethod;
+	public final fun component2 ()Ljava/math/BigDecimal;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/util/List;
+	public final fun copy (Lcom/openbank/libs/lending/AmortizationMethod;Ljava/math/BigDecimal;ILjava/util/List;)Lcom/openbank/libs/lending/RepaymentSchedule;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/RepaymentSchedule;Lcom/openbank/libs/lending/AmortizationMethod;Ljava/math/BigDecimal;ILjava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/lending/RepaymentSchedule;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getInstallments ()Ljava/util/List;
+	public final fun getMethod ()Lcom/openbank/libs/lending/AmortizationMethod;
+	public final fun getNominalAnnualRate ()Ljava/math/BigDecimal;
+	public final fun getPeriodsPerYear ()I
+	public final fun getTotalInterest ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTotalPayment ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTotalPrincipal ()Lcom/openbank/libs/domain/money/Money;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/Settlement {
+	public static final field INSTANCE Lcom/openbank/libs/lending/Settlement;
+	public final fun quote (Lcom/openbank/libs/lending/RepaymentSchedule;ILjava/time/LocalDate;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;I)Lcom/openbank/libs/lending/SettlementQuote;
+	public static synthetic fun quote$default (Lcom/openbank/libs/lending/Settlement;Lcom/openbank/libs/lending/RepaymentSchedule;ILjava/time/LocalDate;Ljava/math/BigDecimal;Ljava/math/BigDecimal;Lcom/openbank/libs/domain/money/Money;IILjava/lang/Object;)Lcom/openbank/libs/lending/SettlementQuote;
+	public final fun withdrawalInterest (Lcom/openbank/libs/domain/money/Money;Ljava/math/BigDecimal;Ljava/time/LocalDate;Ljava/time/LocalDate;)Lcom/openbank/libs/domain/money/Money;
+}
+
+public final class com/openbank/libs/lending/SettlementQuote {
+	public fun <init> (Ljava/time/LocalDate;Ljava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Z)V
+	public final fun component1 ()Ljava/time/LocalDate;
+	public final fun component2 ()Ljava/time/LocalDate;
+	public final fun component3 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component4 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component5 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component6 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component7 ()Lcom/openbank/libs/domain/money/Money;
+	public final fun component8 ()Z
+	public final fun copy (Ljava/time/LocalDate;Ljava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Z)Lcom/openbank/libs/lending/SettlementQuote;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/SettlementQuote;Ljava/time/LocalDate;Ljava/time/LocalDate;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;Lcom/openbank/libs/domain/money/Money;ZILjava/lang/Object;)Lcom/openbank/libs/lending/SettlementQuote;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAccruedInterest ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getAsOfDate ()Ljava/time/LocalDate;
+	public final fun getCompensation ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getCompensationCapped ()Z
+	public final fun getOutstandingPrincipal ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getTotal ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getUnappliedCredit ()Lcom/openbank/libs/domain/money/Money;
+	public final fun getValidUntil ()Ljava/time/LocalDate;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/AprDisclosure {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;)Lcom/openbank/libs/lending/compliance/AprDisclosure;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/AprDisclosure;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/AprDisclosure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getLabel ()Ljava/lang/String;
+	public final fun getLocale ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/CompiledCompliancePack {
+	public fun <init> (Lcom/openbank/libs/lending/compliance/CompliancePack;Ljava/lang/String;Ljava/util/Map;)V
+	public final fun component1 ()Lcom/openbank/libs/lending/compliance/CompliancePack;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/Map;
+	public final fun copy (Lcom/openbank/libs/lending/compliance/CompliancePack;Ljava/lang/String;Ljava/util/Map;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;Lcom/openbank/libs/lending/compliance/CompliancePack;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getContentHash ()Ljava/lang/String;
+	public final fun getDisclosureById ()Ljava/util/Map;
+	public final fun getKey ()Lcom/openbank/libs/lending/compliance/PackKey;
+	public final fun getPack ()Lcom/openbank/libs/lending/compliance/CompliancePack;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePack {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;ILjava/time/LocalDate;Ljava/time/LocalDate;Ljava/util/Set;ILjava/lang/Integer;Lcom/openbank/libs/lending/compliance/AprDisclosure;Ljava/math/BigDecimal;Lcom/openbank/libs/lending/compliance/TerminationRules;Ljava/util/List;Ljava/util/List;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;ILjava/time/LocalDate;Ljava/time/LocalDate;Ljava/util/Set;ILjava/lang/Integer;Lcom/openbank/libs/lending/compliance/AprDisclosure;Ljava/math/BigDecimal;Lcom/openbank/libs/lending/compliance/TerminationRules;Ljava/util/List;Ljava/util/List;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component10 ()Ljava/math/BigDecimal;
+	public final fun component11 ()Lcom/openbank/libs/lending/compliance/TerminationRules;
+	public final fun component12 ()Ljava/util/List;
+	public final fun component13 ()Ljava/util/List;
+	public final fun component2 ()Lcom/openbank/libs/lending/compliance/PackProductType;
+	public final fun component3 ()I
+	public final fun component4 ()Ljava/time/LocalDate;
+	public final fun component5 ()Ljava/time/LocalDate;
+	public final fun component6 ()Ljava/util/Set;
+	public final fun component7 ()I
+	public final fun component8 ()Ljava/lang/Integer;
+	public final fun component9 ()Lcom/openbank/libs/lending/compliance/AprDisclosure;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;ILjava/time/LocalDate;Ljava/time/LocalDate;Ljava/util/Set;ILjava/lang/Integer;Lcom/openbank/libs/lending/compliance/AprDisclosure;Ljava/math/BigDecimal;Lcom/openbank/libs/lending/compliance/TerminationRules;Ljava/util/List;Ljava/util/List;)Lcom/openbank/libs/lending/compliance/CompliancePack;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/CompliancePack;Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;ILjava/time/LocalDate;Ljava/time/LocalDate;Ljava/util/Set;ILjava/lang/Integer;Lcom/openbank/libs/lending/compliance/AprDisclosure;Ljava/math/BigDecimal;Lcom/openbank/libs/lending/compliance/TerminationRules;Ljava/util/List;Ljava/util/List;ILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/CompliancePack;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAprDisclosure ()Lcom/openbank/libs/lending/compliance/AprDisclosure;
+	public final fun getCoolingOffDays ()I
+	public final fun getDisclosures ()Ljava/util/List;
+	public final fun getEarlyRepaymentCompensationCap ()Ljava/math/BigDecimal;
+	public final fun getEffectiveFrom ()Ljava/time/LocalDate;
+	public final fun getEffectiveTo ()Ljava/time/LocalDate;
+	public final fun getJurisdiction ()Ljava/lang/String;
+	public final fun getMandatoryChecks ()Ljava/util/List;
+	public final fun getProductType ()Lcom/openbank/libs/lending/compliance/PackProductType;
+	public final fun getReflectionPeriodDays ()Ljava/lang/Integer;
+	public final fun getRequiredSteps ()Ljava/util/Set;
+	public final fun getTerminationRules ()Lcom/openbank/libs/lending/compliance/TerminationRules;
+	public final fun getVersion ()I
+	public fun hashCode ()I
+	public final fun isEffectiveOn (Ljava/time/LocalDate;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackCompiler {
+	public static final field INSTANCE Lcom/openbank/libs/lending/compliance/CompliancePackCompiler;
+	public final fun compile (Lcom/openbank/libs/lending/compliance/CompliancePack;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackEvaluator {
+	public static final field INSTANCE Lcom/openbank/libs/lending/compliance/CompliancePackEvaluator;
+	public final fun coolingOffDays (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;)I
+	public final fun disclosuresFor (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;Lcom/openbank/libs/lending/compliance/DisclosureStage;)Ljava/util/List;
+	public final fun mandatoryEligibilityRules (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;)Ljava/util/List;
+	public final fun mandatorySteps (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;)Ljava/util/Set;
+	public final fun terminationRules (Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;)Lcom/openbank/libs/lending/compliance/TerminationRules;
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackParseException : java/lang/IllegalArgumentException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackParser {
+	public static final field INSTANCE Lcom/openbank/libs/lending/compliance/CompliancePackParser;
+	public final fun fromMap (Ljava/util/Map;)Lcom/openbank/libs/lending/compliance/CompliancePack;
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackRegistry {
+	public fun <init> ()V
+	public final fun activate (Lcom/openbank/libs/governance/Proposal;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+	public final fun activePack (Lcom/openbank/libs/lending/compliance/PackKey;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+	public final fun activePack (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;Ljava/time/LocalDate;)Lcom/openbank/libs/lending/compliance/CompiledCompliancePack;
+	public final fun allActive (Ljava/time/LocalDate;)Ljava/util/List;
+	public final fun syncFrom (Ljava/util/List;)I
+}
+
+public final class com/openbank/libs/lending/compliance/CompliancePackValidationException : java/lang/IllegalArgumentException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/lending/compliance/DisclosureStage : java/lang/Enum {
+	public static final field CONTRACTUAL Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public static final field PRE_CONTRACTUAL Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public static final field PRE_TERMINATION Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public static fun values ()[Lcom/openbank/libs/lending/compliance/DisclosureStage;
+}
+
+public final class com/openbank/libs/lending/compliance/PackActivationException : java/lang/IllegalStateException {
+	public fun <init> (Ljava/lang/String;)V
+}
+
+public final class com/openbank/libs/lending/compliance/PackDisclosure {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/util/Set;ZLcom/openbank/libs/lending/compliance/DisclosureStage;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Ljava/lang/String;
+	public final fun component3 ()Ljava/util/Set;
+	public final fun component4 ()Z
+	public final fun component5 ()Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public final fun copy (Ljava/lang/String;Ljava/lang/String;Ljava/util/Set;ZLcom/openbank/libs/lending/compliance/DisclosureStage;)Lcom/openbank/libs/lending/compliance/PackDisclosure;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/PackDisclosure;Ljava/lang/String;Ljava/lang/String;Ljava/util/Set;ZLcom/openbank/libs/lending/compliance/DisclosureStage;ILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/PackDisclosure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getId ()Ljava/lang/String;
+	public final fun getLanguages ()Ljava/util/Set;
+	public final fun getRequiresAcknowledgement ()Z
+	public final fun getStage ()Lcom/openbank/libs/lending/compliance/DisclosureStage;
+	public final fun getTemplateKey ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/PackKey {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/lending/compliance/PackProductType;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;)Lcom/openbank/libs/lending/compliance/PackKey;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/PackKey;Ljava/lang/String;Lcom/openbank/libs/lending/compliance/PackProductType;ILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/PackKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getJurisdiction ()Ljava/lang/String;
+	public final fun getProductType ()Lcom/openbank/libs/lending/compliance/PackProductType;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/compliance/PackProductType : java/lang/Enum {
+	public static final field CONSUMER_CREDIT Lcom/openbank/libs/lending/compliance/PackProductType;
+	public static final field MORTGAGE Lcom/openbank/libs/lending/compliance/PackProductType;
+	public static final field OVERDRAFT Lcom/openbank/libs/lending/compliance/PackProductType;
+	public static final field SME_CREDIT Lcom/openbank/libs/lending/compliance/PackProductType;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/compliance/PackProductType;
+	public static fun values ()[Lcom/openbank/libs/lending/compliance/PackProductType;
+}
+
+public final class com/openbank/libs/lending/compliance/TerminationGround : java/lang/Enum {
+	public static final field DEFAULT_DPD Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static final field FRAUD Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static final field INSOLVENCY Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static final field MATERIAL_BREACH Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static final field OTHER_STATUTORY Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/compliance/TerminationGround;
+	public static fun values ()[Lcom/openbank/libs/lending/compliance/TerminationGround;
+}
+
+public final class com/openbank/libs/lending/compliance/TerminationRules {
+	public fun <init> (ILjava/util/Set;I)V
+	public synthetic fun <init> (ILjava/util/Set;IILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()I
+	public final fun component2 ()Ljava/util/Set;
+	public final fun component3 ()I
+	public final fun copy (ILjava/util/Set;I)Lcom/openbank/libs/lending/compliance/TerminationRules;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/compliance/TerminationRules;ILjava/util/Set;IILjava/lang/Object;)Lcom/openbank/libs/lending/compliance/TerminationRules;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getDefaultDpdThreshold ()I
+	public final fun getNoticePeriodDays ()I
+	public final fun getPermittedGrounds ()Ljava/util/Set;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/CreditJourneyKt {
+	public static final field STEP_ACTIVATE_LIMIT Ljava/lang/String;
+	public static final field STEP_APPLY Ljava/lang/String;
+	public static final field STEP_ASSESS Ljava/lang/String;
+	public static final field STEP_COLLATERAL Ljava/lang/String;
+	public static final field STEP_DISBURSE Ljava/lang/String;
+	public static final field STEP_DRAWDOWN Ljava/lang/String;
+	public static final field STEP_OFFER Ljava/lang/String;
+	public static final field STEP_SIGN Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/CreditJourneyProjection {
+	public static final field INSTANCE Lcom/openbank/libs/lending/origination/CreditJourneyProjection;
+	public final fun project (Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/lang/String;)Lcom/openbank/libs/lending/origination/CreditJourneyView;
+	public static synthetic fun project$default (Lcom/openbank/libs/lending/origination/CreditJourneyProjection;Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/CreditJourneyView;
+	public final fun stepsFor (Lcom/openbank/libs/lending/origination/CreditProductKind;)Ljava/util/List;
+}
+
+public final class com/openbank/libs/lending/origination/CreditJourneyStep {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditStepStatus;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditStepStatus;)Lcom/openbank/libs/lending/origination/CreditJourneyStep;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/CreditJourneyStep;Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditStepStatus;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/CreditJourneyStep;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Ljava/lang/String;
+	public final fun getStatus ()Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/CreditJourneyView {
+	public fun <init> (Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/util/List;Ljava/lang/String;)V
+	public synthetic fun <init> (Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public final fun component2 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun component3 ()Ljava/util/List;
+	public final fun component4 ()Ljava/util/List;
+	public final fun component5 ()Ljava/lang/String;
+	public final fun copy (Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/util/List;Ljava/lang/String;)Lcom/openbank/libs/lending/origination/CreditJourneyView;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/CreditJourneyView;Lcom/openbank/libs/lending/origination/CreditProductKind;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/List;Ljava/util/List;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/CreditJourneyView;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAwaitingCustomer ()Ljava/util/List;
+	public final fun getOutcomeReasonCode ()Ljava/lang/String;
+	public final fun getProductKind ()Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public final fun getRequirements ()Ljava/util/List;
+	public final fun getState ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun getSteps ()Ljava/util/List;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/CreditProductKind : java/lang/Enum {
+	public static final field REVOLVING Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public static final field SECURED Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public static final field UNSECURED Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/CreditProductKind;
+	public static fun values ()[Lcom/openbank/libs/lending/origination/CreditProductKind;
+}
+
+public final class com/openbank/libs/lending/origination/CreditRequirement {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditRequirementStatus;ZLjava/lang/String;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditRequirementStatus;ZLjava/lang/String;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public final fun component3 ()Z
+	public final fun component4 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditRequirementStatus;ZLjava/lang/String;)Lcom/openbank/libs/lending/origination/CreditRequirement;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/CreditRequirement;Ljava/lang/String;Lcom/openbank/libs/lending/origination/CreditRequirementStatus;ZLjava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/CreditRequirement;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getCode ()Ljava/lang/String;
+	public final fun getCompletedByCustomer ()Z
+	public final fun getOutstanding ()Z
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getStatus ()Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/CreditRequirementStatus : java/lang/Enum {
+	public static final field IN_REVIEW Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public static final field REJECTED Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public static final field SATISFIED Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public static final field TODO Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+	public static fun values ()[Lcom/openbank/libs/lending/origination/CreditRequirementStatus;
+}
+
+public final class com/openbank/libs/lending/origination/CreditStepStatus : java/lang/Enum {
+	public static final field CURRENT Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public static final field DONE Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public static final field UPCOMING Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/CreditStepStatus;
+	public static fun values ()[Lcom/openbank/libs/lending/origination/CreditStepStatus;
+}
+
+public final class com/openbank/libs/lending/origination/FourEyesDecision {
+	public static final field APPROVE Ljava/lang/String;
+	public static final field DECISION_KEY Ljava/lang/String;
+	public static final field DECLINE Ljava/lang/String;
+	public static final field INSTANCE Lcom/openbank/libs/lending/origination/FourEyesDecision;
+	public static final field PROPOSED_BY_KEY Ljava/lang/String;
+	public final fun getGuard ()Lcom/openbank/libs/lending/origination/OriginationGuard;
+	public final fun metadata (ZLjava/lang/String;)Ljava/util/Map;
+}
+
+public final class com/openbank/libs/lending/origination/LegacyOriginationMigration {
+	public static final field INSTANCE Lcom/openbank/libs/lending/origination/LegacyOriginationMigration;
+	public final fun getMAPPABLE_LEGACY_STATUSES ()Ljava/util/Set;
+	public final fun mapLegacyStatus (Ljava/lang/String;Z)Lcom/openbank/libs/lending/origination/OriginationState;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationActorKind : java/lang/Enum {
+	public static final field HUMAN Lcom/openbank/libs/lending/origination/OriginationActorKind;
+	public static final field SYSTEM Lcom/openbank/libs/lending/origination/OriginationActorKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/OriginationActorKind;
+	public static fun values ()[Lcom/openbank/libs/lending/origination/OriginationActorKind;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationAdvance {
+	public static final field INSTANCE Lcom/openbank/libs/lending/origination/OriginationAdvance;
+	public final fun getDECISION_STATES ()Ljava/util/Set;
+	public final fun getPOST_DECISION_STATES ()Ljava/util/Set;
+	public final fun nextState (Lcom/openbank/libs/lending/origination/OriginationState;Ljava/util/Set;)Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun requiresDecision (Lcom/openbank/libs/lending/origination/OriginationState;)Z
+	public final fun requiresRecordedDecision (Lcom/openbank/libs/lending/origination/OriginationState;)Z
+}
+
+public abstract interface class com/openbank/libs/lending/origination/OriginationGuard {
+	public abstract fun evaluate (Lcom/openbank/libs/lending/origination/OriginationTransition;)Lcom/openbank/libs/lending/origination/OriginationGuardFailure;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationGuardFailure {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/OriginationGuardFailure;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationGuardFailure;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationGuardFailure;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationState : java/lang/Enum {
+	public static final field ASSESSMENT Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field AWAITING_SIGNATURE Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field Companion Lcom/openbank/libs/lending/origination/OriginationState$Companion;
+	public static final field DECISION_PENDING Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field DECLINED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field DISBURSED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field DOCS_REQUIRED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field DRAFT Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field EXPIRED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field FOUR_EYES Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field KYC_PENDING Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field OFFERED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field READY_TO_DISBURSE Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field REFLECTION_PERIOD Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field SIGNED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field SUBMITTED Lcom/openbank/libs/lending/origination/OriginationState;
+	public static final field WITHDRAWN Lcom/openbank/libs/lending/origination/OriginationState;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun isTerminal ()Z
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/OriginationState;
+	public static fun values ()[Lcom/openbank/libs/lending/origination/OriginationState;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationState$Companion {
+	public final fun getTERMINAL ()Ljava/util/Set;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationStateMachine {
+	public static final field Companion Lcom/openbank/libs/lending/origination/OriginationStateMachine$Companion;
+	public fun <init> ()V
+	public fun <init> (Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;)V
+	public synthetic fun <init> (Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun apply (Lcom/openbank/libs/lending/origination/OriginationTransition;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult;
+	public final fun guard (Lcom/openbank/libs/lending/origination/OriginationTransition;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationStateMachine$Companion {
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransition {
+	public fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationActorKind;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationActorKind;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun component2 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun component3 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun component4 ()Ljava/lang/String;
+	public final fun component5 ()Lcom/openbank/libs/lending/origination/OriginationActorKind;
+	public final fun component6 ()Ljava/lang/String;
+	public final fun component7 ()Ljava/time/Instant;
+	public final fun component8 ()Ljava/lang/String;
+	public final fun component9 ()Ljava/util/Map;
+	public final fun copy (Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationActorKind;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Map;)Lcom/openbank/libs/lending/origination/OriginationTransition;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationTransition;Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;Ljava/lang/String;Lcom/openbank/libs/lending/origination/OriginationActorKind;Ljava/lang/String;Ljava/time/Instant;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationTransition;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getActor ()Ljava/lang/String;
+	public final fun getActorKind ()Lcom/openbank/libs/lending/origination/OriginationActorKind;
+	public final fun getApplicationId ()Ljava/lang/String;
+	public final fun getFrom ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun getMetadata ()Ljava/util/Map;
+	public final fun getOccurredAt ()Ljava/time/Instant;
+	public final fun getPackVersion ()Ljava/lang/String;
+	public final fun getReason ()Ljava/lang/String;
+	public final fun getTo ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransitionKey {
+	public fun <init> (Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;)V
+	public final fun component1 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun component2 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun copy (Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;)Lcom/openbank/libs/lending/origination/OriginationTransitionKey;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationTransitionKey;Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationTransitionKey;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getFrom ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun getTo ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransitionPolicy {
+	public static final field Companion Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy$Companion;
+	public fun <init> (Ljava/util/Map;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/util/Map;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun allowedTargets (Lcom/openbank/libs/lending/origination/OriginationState;)Ljava/util/Set;
+	public final fun component1 ()Ljava/util/Map;
+	public final fun component2 ()Ljava/util/Map;
+	public final fun copy (Ljava/util/Map;Ljava/util/Map;)Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;Ljava/util/Map;Ljava/util/Map;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getAllowedTransitions ()Ljava/util/Map;
+	public final fun getGuards ()Ljava/util/Map;
+	public final fun guardsFor (Lcom/openbank/libs/lending/origination/OriginationTransitionKey;)Ljava/util/List;
+	public fun hashCode ()I
+	public final fun isAllowed (Lcom/openbank/libs/lending/origination/OriginationState;Lcom/openbank/libs/lending/origination/OriginationState;)Z
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransitionPolicy$Companion {
+	public final fun standard ()Lcom/openbank/libs/lending/origination/OriginationTransitionPolicy;
+}
+
+public abstract interface class com/openbank/libs/lending/origination/OriginationTransitionResult {
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransitionResult$Applied : com/openbank/libs/lending/origination/OriginationTransitionResult {
+	public fun <init> (Lcom/openbank/libs/lending/origination/OriginationState;)V
+	public final fun component1 ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public final fun copy (Lcom/openbank/libs/lending/origination/OriginationState;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Applied;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Applied;Lcom/openbank/libs/lending/origination/OriginationState;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Applied;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getNewState ()Lcom/openbank/libs/lending/origination/OriginationState;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/lending/origination/OriginationTransitionResult$Rejected : com/openbank/libs/lending/origination/OriginationTransitionResult {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun component1 ()Ljava/lang/String;
+	public final fun copy (Ljava/lang/String;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Rejected;
+	public static synthetic fun copy$default (Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Rejected;Ljava/lang/String;ILjava/lang/Object;)Lcom/openbank/libs/lending/origination/OriginationTransitionResult$Rejected;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getReason ()Ljava/lang/String;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+

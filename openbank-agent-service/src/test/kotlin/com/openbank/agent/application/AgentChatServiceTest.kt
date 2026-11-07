@@ -181,15 +181,14 @@ class AgentChatServiceTest {
     }
 
     @Test
-    fun `a caller may narrow an agent to no tools but can never add one`() {
+    fun `a model returned tool call is denied before policy or registry when no tools were offered`() {
         runBlocking {
-            coEvery { gateway.complete(any(), any(), any(), any()) } answers {
-                ModelResponse(content = "review complete", stopReason = StopReason.END, modelId = "mock-echo")
-            }
+            coEvery { gateway.complete(any(), any(), any(), any()) } returnsMany toolUseThenEnd()
+            val gate = mockk<AgentPolicyGate>()
             val service = AgentChatService().apply {
                 this.gateway = this@AgentChatServiceTest.gateway
                 this.registry = this@AgentChatServiceTest.registry
-                this.policyGate = mockk()
+                this.policyGate = gate
                 this.rateLimiter = mockk<CharterRateLimiter>().also {
                     every { it.checkRunsPerDay(any()) } returns null
                     every { it.checkTokensPerRun(any(), any()) } returns null
@@ -212,11 +211,55 @@ class AgentChatServiceTest {
                 proposalExpected = true,
             )
 
-            assertThat(result.toolCalls).isEmpty()
+            assertThat(result.toolCalls).singleElement().satisfies({ call ->
+                assertThat(call.tool).isEqualTo("get_account")
+                assertThat(call.allowed).isFalse()
+                assertThat(call.resultPreview).contains("not offered")
+            })
             assertThat(result.isProposal).isTrue()
-            coVerify(exactly = 1) {
+            coVerify(exactly = 2) {
                 gateway.complete(any(), match { it.tools.isEmpty() }, true, "ui-assistant")
             }
+            io.mockk.verify(exactly = 0) { gate.authorize(any(), any(), any(), any()) }
+            io.mockk.verify(exactly = 0) { registry.call(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `a model returned tool call outside a narrowed offered set is denied before policy`() {
+        runBlocking {
+            coEvery { gateway.complete(any(), any(), any(), any()) } returnsMany toolUseThenEnd()
+            val gate = mockk<AgentPolicyGate>()
+            val service = AgentChatService().apply {
+                this.gateway = this@AgentChatServiceTest.gateway
+                this.registry = this@AgentChatServiceTest.registry
+                this.policyGate = gate
+                this.rateLimiter = mockk<CharterRateLimiter>().also {
+                    every { it.checkRunsPerDay(any()) } returns null
+                    every { it.checkTokensPerRun(any(), any()) } returns null
+                }
+                this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
+                this.runAuditor = this@AgentChatServiceTest.runAuditor
+                this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
+                this.killSwitch = noHaltKillSwitch
+            }
+
+            val result = service.run(
+                identity = com.openbank.agent.domain.policy.AgentIdentity("ui-assistant", plane = "control"),
+                systemPrompt = "review",
+                history = listOf(ChatMessage(ChatRole.USER, "snapshot")),
+                modelId = null,
+                trigger = "catalog_review",
+                offeredToolNames = setOf("other_tool"),
+                sensitive = true,
+                proposalExpected = true,
+            )
+
+            assertThat(result.toolCalls.single().allowed).isFalse()
+            assertThat(result.toolCalls.single().resultPreview).contains("not offered")
+            io.mockk.verify(exactly = 0) { gate.authorize(any(), any(), any(), any()) }
+            io.mockk.verify(exactly = 0) { registry.call(any(), any(), any()) }
         }
     }
 

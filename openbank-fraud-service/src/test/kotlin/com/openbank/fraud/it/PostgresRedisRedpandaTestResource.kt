@@ -37,11 +37,9 @@ class PostgresRedisRedpandaTestResource : QuarkusTestResourceLifecycleManager {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
-        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
-            .withUsername("openbank")
-            .withPassword("openbank_secret")
-            .withDatabaseName("openbank_fraud_it")
+        val pg = AppOwnerRole.container(POSTGRES_IMAGE)
         pg.start()
+        val datasource = AppOwnerRole.provision(pg)
         postgres = pg
         TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
 
@@ -74,18 +72,12 @@ class PostgresRedisRedpandaTestResource : QuarkusTestResourceLifecycleManager {
                 listOf(NewTopic("openbank.transactions.transaction.initiated", TOPIC_PARTITIONS, 1)),
             ).all().get()
         }
-
-        val host = pg.host
-        val port = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
-        return mapOf(
-            "quarkus.datasource.reactive.url" to "vertx-reactive:postgresql://$host:$port/openbank_fraud_it",
-            "quarkus.datasource.jdbc.url" to "jdbc:postgresql://$host:$port/openbank_fraud_it",
-            "quarkus.datasource.username" to "openbank",
-            "quarkus.datasource.password" to "openbank_secret",
+        return datasource + mapOf(
             "quarkus.redis.hosts" to "redis://${rd.host}:${rd.getMappedPort(REDIS_PORT)}",
             "kafka.bootstrap.servers" to rp.bootstrapServers,
             "mp.messaging.connector.smallrye-kafka.bootstrap.servers" to rp.bootstrapServers,
             "mp.messaging.incoming.transaction-signal.enabled" to "true",
+            "mp.messaging.outgoing.fraud-outbox-out.enabled" to "true",
             "mp.messaging.incoming.transaction-signal.connector" to "smallrye-kafka",
             // Set here (a genuine runtime property source, not YAML) rather than in
             // application.yaml, for the same reason production sets them via env vars: SmallRye

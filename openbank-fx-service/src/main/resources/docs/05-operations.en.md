@@ -85,6 +85,7 @@ PENDING means screening said REVIEW or the sanctions service was unavailable.
 ### ČNB fixing missing for today
 
 1. Did the 14:40 Europe/Prague cron run? `kubectl logs -l app=openbank-fx-service | grep "ČNB fixing"`.
+   Each pod also runs the same ingestion once about 30 s after boot (`openbank.cnb.initial-delay`, repeating every `openbank.cnb.startup-every`, default 24h; `"off"` in tests). Ingestion is idempotent per business day, so a pod started after 14:40 fetches the day's fixing and records a workflow success instead of reporting `openbank_workflow_success_recorded == 0` until the next day's cron.
 2. Backfill manually (idempotent): `POST /api/v1/fx/cnb/ingest?date=YYYY-MM-DD` with `ROLE_OPERATOR`.
 3. Verify: `GET /api/v1/fx/cnb/rates/EUR`.
 
@@ -101,3 +102,11 @@ PENDING means screening said REVIEW or the sanctions service was unavailable.
 ## AML service mTLS in production
 
 The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.
+
+## Shared configuration defaults
+
+This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
+
+## Shared build dependencies
+
+This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.

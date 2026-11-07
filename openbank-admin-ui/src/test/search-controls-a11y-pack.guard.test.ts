@@ -12,11 +12,13 @@ describe('operator search accessibility contract', () => {
       swift: 'Hledat SWIFT zprávy',
       sanctions: 'Hledat sankční kontroly',
       'product-catalog': 'Hledat v katalogu produktů',
-      audit: 'ID agregátu',
-      pid: 'Hledat PID případy',
+      audit: 'Technické ID (pokročilé)',
     }
     for (const [route, label] of Object.entries(expected)) {
       expect(page(route)).toContain(`aria-label={t('${label}'`)
     }
+    expect(page('pid')).toContain("aria-label={t('Přesná hodnota identifikátoru', 'Exact identifier value')}")
+    expect(page('pid')).toContain("{t('Typ identifikátoru', 'Identifier type')}")
+    expect(page('pid')).toContain('onSubmit={submitLookup}')
   })
 })

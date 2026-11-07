@@ -185,6 +185,10 @@ tool_tiers:
     - query.account.readonly      # PSD2 consent-scoped account list (openbank-mcp-service, ADR-0181)
     - query.consent.readonly      # the PSD2 consents the acting agent holds (openbank-mcp-service, ADR-0181)
     - verify.mandate              # bank-side AP2 mandate verification (openbank-ap2-service, ADR-0193) — evidence only, moves no funds
+    - product.lint                # Product IR lint, in-process ProductToolkit (openbank-agent-service, ADR-0352 §12)
+    - product.compile             # canonical IR + revisionHash, in-process (ADR-0352 §12)
+    - product.simulate            # portfolio replay through the pure interpreter; posts nothing (ADR-0352 §12)
+    - product.explain             # ruleId / instruction -> IR path (ADR-0352 §12)
   write_proposal: # produces a reviewable artifact, never a direct effect
     - draft.ticket
     - gh.pr.open
@@ -192,12 +196,15 @@ tool_tiers:
     - git.branch
     - git.commit.signed
     - run.skill            # constrained to the agent's `skills` allowlist
+    - product.propose      # DRAFT catalog revision as a HITL proposal; never publishes (ADR-0352 §12)
   deny:           # hard-forbidden for ALL agents -- not registrable
     - money.transfer
     - money.post.ledger
     - gh.pr.merge
     - gh.pr.approve
     - secrets.read.raw
+    - product.publish      # ADR-0259: publishing a product revision is a human decision, never an agent's
+    - product.sign         # ADR-0352 §4: the identity-bound signature belongs to the catalog publish path
 
 # ---------------------------------------------------------------------------------------
 # Case classes for agent swarm coordination (ADR-0244). A case is one long-running
@@ -324,6 +331,24 @@ agents:
       # ADR-0031 D4); the assistant itself only reads.
       - every: proposal
     limits: { tokens_per_run: 100000, runs_per_day: 500 }
+
+  - id: product-author
+    plane: control
+    model: llama-3.3-70b-versatile
+    charter: "The AI Author of ADR-0352 §12. Drafts and checks Product IR with the same toolkit the obp CLI runs (lint, compile, simulate, explain) and proposes a DRAFT catalog revision for a human; it never signs, approves or publishes."
+    data_scope:
+      read: [catalog]
+      pii: none
+    tools:
+      # Exactly the five MCP product tools. product.sign / product.publish are tool_tiers.deny for
+      # every agent; they are restated here so the charter reads complete on its own.
+      allow: [product.lint, product.compile, product.simulate, product.explain, product.propose]
+      deny:  [product.publish, product.sign, "money.*", "gh.pr.*", "*.write", secrets.read.raw]
+    requires_human:
+      # product.propose lands in the admin-ui approval queue; publishing stays four-eyes in the catalog.
+      - every: proposal
+      - approver_must_differ_from: author
+    limits: { tokens_per_run: 150000, runs_per_day: 100 }
 
   - id: rca-investigator
     plane: control
@@ -621,6 +646,7 @@ agents:
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
+        - treasury.posting-intent.close   # #13883: releases a day-close hold; approvers only
         - treasury.deal.override-limit
         - treasury.nostro.*
         - "money.*"
@@ -719,7 +745,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      daily: "04:00 UTC"
+      daily: "03:30 UTC"
       reactive: goalert-webhook       # triggered by GoAlert on a CI / deploy / runner anomaly alert
     data_scope:
       read:
@@ -773,7 +799,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      daily: "03:00 UTC"
+      daily: "03:15 UTC"
       reactive: goalert-webhook       # triggered when a WorkflowLivenessWatchdog gauge itself pages
     data_scope:
       read:
@@ -948,7 +974,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      weekly: "06:00 UTC"
+      weekly: "Sunday 05:30 UTC"
       reactive: adr-merge-webhook       # triggered by any merged change under docs/adr/*.md
     data_scope:
       read:
@@ -1004,7 +1030,7 @@ agents:
     enabled: true
     enforcement: block
     schedule:
-      weekly: "07:00 UTC"
+      weekly: "Sunday 06:00 UTC"
       reactive: policy-source-changed-webhook   # triggered when any .rego policy or agents.yaml changes
     data_scope:
       read:
@@ -1055,34 +1081,42 @@ agents:
     model: deepseek-ai/DeepSeek-V3.2
     charter: "ADR-0168"
     description: >
-      Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources.
-      Generalizes the check-test-runblocking-unit.sh CI guard (expression-body test functions
-      using runBlocking/runTest/GlobalScope.launch/GlobalScope.async without an explicit ': Unit'
-      return type, which JUnit5 silently drops instead of running) beyond its one hardcoded
-      builder, flags Pact provider verification tests gated on pactbroker.url (always skipped by
-      a local './gradlew test' run) and any provider with two colliding @Provider test classes,
-      and cross-checks declared-vs-executed @Test counts per module. Proposes a tracking ticket
-      through the HITL queue for nearly every finding -- guessing wrong on a fix here (suspend fun
-      vs ': Unit', which @Provider class should own an interaction) risks silently masking a real
-      bug instead of fixing it. Never writes to a test file directly.
+      Analyzer for fleet-wide silent-test-failure patterns. Its production input is the Admin
+      UI's Test Intelligence snapshot, posted to POST /api/v1/flaky-test-hunter/evidence/analyze
+      after every collection: a privacy-bounded projection of each component's evidence (JUnit,
+      Kover, trace, mutation, Testcontainers lifecycle) from which it detects current and
+      historical failures, missing evidence and drift. The static source scan (expression-body
+      test functions using runBlocking/GlobalScope.launch/GlobalScope.async without an explicit
+      ': Unit' return type, which JUnit5 silently drops; Pact provider tests gated on
+      pactbroker.url; two colliding @Provider classes; declared-vs-executed @Test counts) is
+      reachable only through the CI-failure webhook and the operator trigger where a repository
+      checkout exists -- the deployed pod mounts none, which is why the weekly sweep it carried
+      until 2026-10-17 had scanned an empty tree since the day it shipped and was removed.
+      Every finding without a bounded mechanical repair opens a tracking issue (label
+      flaky-test) through the GitHub adapter for the HITL queue -- guessing wrong on a fix here
+      (suspend fun vs ': Unit', which @Provider class should own an interaction) risks silently
+      masking a real bug instead of fixing it. Never writes to a test file directly.
     enabled: true
     enforcement: block
     schedule:
-      weekly: "08:00 UTC"
-      reactive: ci-test-suite-failure-webhook   # triggered when a CI test-suite run reports a failure
+      reactive: admin-ui-test-intelligence-snapshot   # every Admin UI Test Intelligence collection posts
+                                                      # its snapshot to /evidence/analyze (the single
+                                                      # source of truth); ci-test-suite-failure-webhook
+                                                      # and the operator trigger reach the static scan
+                                                      # only where a checkout is mounted
     data_scope:
       read:
-        - read.governance             # every module's src/test/kotlin tree, .github/scripts/*.sh CI
-                                       # guard scripts, and build/test-results/test/*.xml JUnit
-                                       # reports via a repo checkout
+        - read.governance             # the Admin UI's bounded Test Intelligence snapshot; on a
+                                       # developer checkout also src/test/kotlin trees and
+                                       # build/test-results/test/*.xml JUnit reports
       pii: none                       # test source text and JUnit report metadata only; no customer data
     tools:
       allow:
         - tier: read
           resources: [governance]
         - tier: write_proposal
-          resources: [github-pr]      # opens draft.ticket by default; gh.pr.open stays wired but is
-                                       # rarely used (ADR-0168 Decision)
+          resources: [github-pr]      # opens a GitHub issue (draft.ticket) by default; gh.pr.open
+                                       # stays wired but is rarely used (ADR-0168 Decision)
       deny:
         - tier: write
           resources: ["*"]            # explicit: no direct write to any test file ever

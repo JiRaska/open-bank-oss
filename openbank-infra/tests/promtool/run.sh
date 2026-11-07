@@ -13,24 +13,38 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 RULES_DIR="$REPO/openbank-infra/gitops/components/observability"
-PAYMENTS_RULES="$REPO/openbank-infra/gitops/components/payments/prometheus-rules.yaml"
+PAYMENTS_DIR="$REPO/openbank-infra/gitops/components/payments"
+BILLING_RULES="$REPO/openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"
 
 command -v promtool >/dev/null || { echo "promtool not on PATH"; exit 127; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-python3 - "$RULES_DIR" "$PAYMENTS_RULES" "$WORK" <<'PY'
+python3 - "$RULES_DIR" "$PAYMENTS_DIR" "$BILLING_RULES" "$WORK" <<'PY'
 import sys, pathlib, yaml
-src, payments, dst = map(pathlib.Path, sys.argv[1:])
+src, payments, billing, dst = map(pathlib.Path, sys.argv[1:])
 for f in sorted(src.glob("prometheus-rules-*.yaml")):
     for doc in yaml.safe_load_all(f.read_text()):
         if isinstance(doc, dict) and doc.get("kind") == "PrometheusRule":
             (dst / f.name).write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
-for doc in yaml.safe_load_all(payments.read_text()):
+# Every payments rule file (prometheus-rules.yaml plus the per-concern prometheus-rules-*.yaml,
+# e.g. the #13623 unsettled-booking rules), one unwrapped file per CR named payments-<name>.yaml.
+# A glob, not a list: a new payments rule file is testable the moment it exists.
+payment_files = sorted(payments.glob("prometheus-rules*.yaml"))
+if not payment_files:
+    sys.exit(f"no PrometheusRule files under {payments}")
+for f in payment_files:
+    for doc in yaml.safe_load_all(f.read_text()):
+        if isinstance(doc, dict) and doc.get("kind") == "PrometheusRule":
+            name = doc["metadata"]["name"]
+            out = dst / f"payments-{name}.yaml"
+            if out.exists():
+                sys.exit(f"duplicate PrometheusRule name {name} in {payments}")
+            out.write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
+for doc in yaml.safe_load_all(billing.read_text()):
     if isinstance(doc, dict) and doc.get("kind") == "PrometheusRule":
-        name = doc["metadata"]["name"]
-        (dst / f"payments-{name}.yaml").write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
+        (dst / billing.name).write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
 PY
 
 # Sanity: promtool must accept every unwrapped file before any test runs. A test that

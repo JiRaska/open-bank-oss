@@ -20,6 +20,7 @@ import com.openbank.treasury.domain.model.MarketCurve
 import com.openbank.treasury.domain.model.ProductLimit
 import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.RollDirection
 import com.openbank.treasury.domain.model.SimulatedQuote
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -318,5 +319,47 @@ class TreasuryEventPayloadsTest {
         assertThat(curve.index).isEqualTo("EURIBOR_3M")
         assertThat(curve.currency).isEqualTo("EUR")
         assertThat(curve.pillars).isEmpty()
+    }
+
+    @Test
+    fun `deal booked carries the roll direction and defaults to FROM_END`() {
+        fun booked(roll: RollDirection? = null) = DealBooked(
+            dealId = dealId,
+            product = ProductType.FX_SPOT,
+            counterpartyId = "cp-1",
+            currency = "EUR",
+            principal = BigDecimal("1000000"),
+            rate = BigDecimal("25.10"),
+            valueDate = valueDate,
+            maturityDate = maturityDate,
+            createdBy = "dealer-1",
+            approvedBy = "approver-1",
+            occurredAt = occurredAt,
+        ).let { if (roll == null) it else it.copy(rollDirection = roll) }
+
+        assertThat(booked().rollDirection).isEqualTo(RollDirection.FROM_END)
+        assertThat(booked(RollDirection.FROM_START).rollDirection).isEqualTo(RollDirection.FROM_START)
+    }
+
+    @Test
+    fun `deal booked carries the header calendars and business-day convention`() {
+        val booked = DealBooked(
+            dealId = dealId,
+            product = ProductType.IRS,
+            counterpartyId = "cp-1",
+            currency = "CZK",
+            principal = BigDecimal("1000000"),
+            rate = BigDecimal("3"),
+            valueDate = valueDate,
+            maturityDate = maturityDate,
+            createdBy = "dealer-1",
+            approvedBy = "approver-1",
+            occurredAt = occurredAt,
+            calendars = listOf("CERTIS", "TARGET2"),
+            businessDayConvention = "MODIFIED_FOLLOWING",
+        )
+
+        assertThat(booked.calendars).containsExactly("CERTIS", "TARGET2")
+        assertThat(booked.businessDayConvention).isEqualTo("MODIFIED_FOLLOWING")
     }
 }

@@ -147,6 +147,8 @@ KafkaSanctionsOutboxEventPublisher odesílá do openbank.sanctions.screening.eve
 audit-service + aml-service konzumují event
 ```
 
+Událost `SanctionChecked`, která odpovídá `SanctionsCheck.isHighRisk()`, se ze stejného trvalého outbox řádku publikuje také do `openbank.oversight-triggers` (ADR-0031 D9). Tělo triggeru obsahuje pouze `sourceService` a `occurredAt`; původní hlavičky `ce-id`/`ce-type` slouží ke korelaci. Screenovaná jména, identifikátory, detaily shod ani data listin se do oversight topicu nekopírují. Výsledky CLEAR, potenciální shody s nižším skóre, přezkumy a události změn listin zůstávají pouze v doménovém topicu.
+
 ## Komponenty z `openbank-libs`
 
 | Modul | Použití zde |
@@ -165,3 +167,11 @@ audit-service + aml-service konzumují event
 3. **Human-in-the-loop pro fuzzy shody** — `POTENTIAL_HIT` nikdy automaticky neblokuje; vyžaduje compliance přezkum.
 4. **Data listin se neukládají** — pouze metadata shody; záznamy listiny zůstávají na autoritativních zdrojových URL.
 5. **Minimalizace PII** — `name` a `dateOfBirth` jsou PII; maskují se v logu.
+
+## Heartbeat naplánované úlohy
+
+Úloha (60sekundový tick obnovy sankčních seznamů) registruje celoflotilový heartbeat `sanctions-list-refresh` (`DomainMetrics.registerWorkflowLiveness`, nasazený při startu) a úspěch zapisuje jen na cestě úspěchu: tick se počítá jako úspěšný, jen pokud v něm žádný seznam neselhal; feed, který selhává každou minutu, tak zestárne místo aby vypadal zdravě. `WorkflowLivenessStale` upozorní, když stáří překročí dvojnásobek očekávaného intervalu.
+
+## Sdílený stav kontroly a práh blokace (ADR-0353)
+
+`SanctionsCheckStatus` je typealias `ScreeningMatchStatus` z `openbank-libs-fincrime`, typu, který platební kanály čtou z drátu. `isHighRisk` čte sdílený práh `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0,85), stejný, podle kterého kanály blokují. Ukládané hodnoty (`@Enumerated(STRING)`) ani zápis v API se nemění.

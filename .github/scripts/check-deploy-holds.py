@@ -18,6 +18,12 @@ RULES = "openbank-libs/governance/rules.yaml"
 GITOPS = "openbank-infra/gitops/"
 IMAGE_REF = re.compile(r"^(?:[^\s]+/)?(openbank-[a-z0-9-]+)(?::|@)[^\s]+$")
 SERVICE = re.compile(r"^openbank-[a-z0-9-]+$")
+# `approved_image`: the last image the owner approved for a service while it is held. Immutable
+# form only — a bare `sha256:<64 hex>` digest, or `<service>:<tag>@sha256:<64 hex>`. The tag half
+# is what the GitOps pin names today; the digest half pins what that (mutable) tag meant when the
+# owner approved it, for a live-workload comparison this offline gate cannot make.
+APPROVED_IMAGE = re.compile(r"^(?:(openbank-[a-z0-9-]+):([A-Za-z0-9_][A-Za-z0-9_.-]{0,127})@)?"
+                            r"(sha256:[0-9a-f]{64})$")
 
 
 class InvalidHold(Exception):
@@ -56,13 +62,94 @@ def holds(text, allow_absent=False):
     for service, item in entries.items():
         if not isinstance(service, str) or not SERVICE.fullmatch(service):
             raise InvalidHold(f"invalid held service {service!r}")
-        if not isinstance(item, dict) or set(item) != {"issue", "reason", "release_condition"}:
-            raise InvalidHold(f"{service}: expected issue, reason, release_condition")
-        if (not isinstance(item["issue"], str) or not re.fullmatch(r"#[1-9][0-9]*", item["issue"])
-                or any(not isinstance(item[field], str) or not item[field].strip()
-                       for field in ("reason", "release_condition"))):
-            raise InvalidHold(f"{service}: invalid hold metadata")
+        constraints(item, service)
+        approved = item.get("approved_image")
+        if approved is not None:
+            match = APPROVED_IMAGE.fullmatch(approved) if isinstance(approved, str) else None
+            if not match or (match.group(1) and match.group(1) != service):
+                raise InvalidHold(f"{service}: approved_image must be sha256:<digest> or "
+                                  f"{service}:<tag>@sha256:<digest>")
     return entries
+
+
+FIELDS = ("issue", "reason", "release_condition")
+
+
+def constraints(item, service="hold"):
+    """Normalize without interpreting human release conditions or granting authority."""
+    if not isinstance(item, dict):
+        raise InvalidHold(f"{service}: hold must be a mapping")
+    # approved_image is service-level identity, not a release constraint (holds() validates it).
+    item = {key: value for key, value in item.items() if key != "approved_image"}
+    if set(item) == set(FIELDS):
+        values = [item]
+    elif set(item) == {"all_of"} and isinstance(item["all_of"], list) and item["all_of"]:
+        values = item["all_of"]
+    else:
+        raise InvalidHold(f"{service}: expected legacy triple or nonempty all_of")
+    seen = set()
+    for value in values:
+        if not isinstance(value, dict) or set(value) not in (set(FIELDS), set(FIELDS) | {"origins"}):
+            raise InvalidHold(f"{service}: invalid constraint fields")
+        if (not isinstance(value["issue"], str)
+                or not re.fullmatch(r"#[1-9][0-9]*", value["issue"])
+                or any(not isinstance(value[f], str) or not value[f].strip() for f in FIELDS[1:])):
+            raise InvalidHold(f"{service}: invalid hold metadata")
+        key = tuple(value[f] for f in FIELDS)
+        if key in seen:
+            raise InvalidHold(f"{service}: duplicate constraint")
+        seen.add(key)
+        if "origins" in value:
+            origins = value["origins"]
+            if not isinstance(origins, list) or not origins:
+                raise InvalidHold(f"{service}: origins must be nonempty")
+            origin_keys = set()
+            for origin in origins:
+                if (not isinstance(origin, dict) or set(origin) != {"pr", "head"}
+                        or type(origin["pr"]) is not int or origin["pr"] <= 0
+                        or not isinstance(origin["head"], str)
+                        or not re.fullmatch(r"[0-9a-f]{40}", origin["head"])):
+                    raise InvalidHold(f"{service}: invalid origin")
+                origin_key = (origin["pr"], origin["head"])
+                if origin_key in origin_keys:
+                    raise InvalidHold(f"{service}: duplicate origin")
+                origin_keys.add(origin_key)
+    return values
+
+
+def union_holds(*sources):
+    """Exact raw-string union; provenance is evidence, never release approval."""
+    merged = {}
+    approved = {}
+    for source in sources:
+        for service, item in source.items():
+            # The first source's approval wins (merge-deploy-holds passes main first); a donor
+            # can neither replace nor erase the image the owner approved on main.
+            if isinstance(item, dict) and item.get("approved_image") and service not in approved:
+                approved[service] = item["approved_image"]
+            target = merged.setdefault(service, {})
+            for value in constraints(item, service):
+                key = tuple(value[f] for f in FIELDS)
+                target.setdefault(key, set()).update(
+                    (o["pr"], o["head"]) for o in value.get("origins", []))
+    result = {}
+    for service, values in sorted(merged.items()):
+        items = []
+        for key, origins in sorted(values.items()):
+            value = dict(zip(FIELDS, key, strict=True))
+            if origins:
+                value["origins"] = [{"pr": pr, "head": head} for pr, head in sorted(origins)]
+            items.append(value)
+        result[service] = (dict(items[0]) if len(items) == 1 and "origins" not in items[0]
+                           else {"all_of": items})
+        if service in approved:
+            result[service]["approved_image"] = approved[service]
+    return result
+
+
+def describe(item):
+    return "; ".join(f"{v['issue']} — {v['reason']}. Release condition: {v['release_condition']}"
+                     for v in constraints(item))
 
 
 def git(root, *args):
@@ -126,8 +213,16 @@ def pins(text):
 def validate_services(root, entries, removed_pins=frozenset()):
     needed = set(entries) - set(removed_pins)
     for service in entries:
-        if not (root / service / "version.txt").is_file():
-            raise InvalidHold(f"{service}: no released module found")
+        module = root / service
+        released = (module / "version.txt").is_file()
+        # analytics-sink has a real GitOps image but is not a release-please
+        # component. Its Dockerfile is port/runtime metadata; the shared
+        # Dockerfile.deploy builds the image. Keep this exception exact; other
+        # unversioned directories must not become valid hold targets.
+        analytics_image = service == "openbank-analytics-sink" and (
+            module / "build.gradle.kts").is_file() and (module / "Dockerfile").is_file()
+        if not (released or analytics_image):
+            raise InvalidHold(f"{service}: no released or deployable module found")
     for path in (root / GITOPS).rglob("*"):
         if not needed:
             break
@@ -152,7 +247,7 @@ def filter_tags(root, raw):
                                           for k, v in tags.items()):
         raise InvalidHold("image tag map must be a string-to-string object")
     for service in sorted(entries.keys() & tags.keys()):
-        print(f"::notice::{service} held by {entries[service]['issue']}; leaving its image pin unchanged. "
+        print(f"::notice::{service} held by {describe(entries[service])}; leaving its image pin unchanged. "
               "Scheduled reconcile will re-offer it after the hold is removed.", file=sys.stderr)
     return {service: tag for service, tag in tags.items() if service not in entries}
 
@@ -183,33 +278,104 @@ def changed_held_pins(root, base, held):
     return violations
 
 
+def pin_matches(image, approved):
+    """True only when the GitOps pin names exactly the approved image."""
+    match = APPROVED_IMAGE.fullmatch(approved)
+    name, tag, digest = match.groups()
+    ref = image.rsplit("/", 1)[-1]  # drop the registry host; the service name is checked below
+    pinned_digest = ref.split("@", 1)[1] if "@" in ref else None
+    if pinned_digest is not None and pinned_digest != digest:
+        return False
+    if name is None:  # bare digest: only a digest pin can prove it
+        return pinned_digest == digest
+    head = ref.split("@", 1)[0]
+    return head == f"{name}:{tag}" or (pinned_digest == digest and head == name)
+
+
+def approved_image_findings(root, entries):
+    """Whole-tree comparison, not only changed pins: a held service running an image nobody
+    approved is a defect whichever PR put it there. Returns (drift, missing)."""
+    want = set(entries)
+    found = collections.defaultdict(set)
+    for path in sorted((root / GITOPS).rglob("*")):
+        if path.suffix not in (".yaml", ".yml") or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "image:" not in text or not any(service in text for service in want):
+            continue
+        for service, image in pins(text):
+            if service in want:
+                found[service].add((str(path.relative_to(root)), image))
+    drift, missing = [], []
+    for service in sorted(entries):
+        approved = entries[service].get("approved_image")
+        if approved is None:
+            missing.append(service)
+            continue
+        for path, image in sorted(found[service]):
+            if not pin_matches(image, approved):
+                drift.append((service, path, image, approved))
+    return drift, missing
+
+
+def report_approved_images(root, entries):
+    drift, missing = approved_image_findings(root, entries)
+    for service, path, image, approved in drift:
+        print(f"::error file={path}::{service} is held and pinned to {image}, which is not its "
+              f"approved_image {approved}. Restore the approved pin, or have the owner record the "
+              "new image as approved_image in a reviewed change.")
+    for service in missing:
+        print(f"::warning::{service} is held with no approved_image; its pinned image is not "
+              "compared against an owner approval (ratchet finding, not a failure).")
+    print(f"deploy holds: {len(drift)} held pin(s) differ from approved_image; "
+          f"{len(missing)} hold(s) without approved_image (baseline)")
+    return 1 if drift else 0
+
+
 def check(root, base):
     head = holds((root / RULES).read_text(encoding="utf-8"))
     # A PR must not remove a hold and change its image in the same diff. The hold
     # release is reviewed and merged first; a successor PR may then advance the pin.
     previous = holds(at_base(root, base, RULES), allow_absent=True)
-    held = previous | head
+    held = union_holds(previous, head)
     violations = changed_held_pins(root, base, held)
     validate_services(root, held, {service for service, _, _, _ in violations})
     for service, path, old, new in violations:
-        issue = held[service]["issue"]
+        issue = describe(held[service])
         print(f"::error file={path}::{service} deploy held by {issue}; image pin changed "
-              f"{old} -> {new}. Release condition: {held[service]['release_condition']}")
+              f"{old} -> {new}.")
     print(f"deploy holds: {len(held)} service(s), {len(violations)} blocked pin change(s)")
-    return 1 if violations else 0
+    drifted = report_approved_images(root, head)
+    return 1 if violations or drifted else 0
 
 
-def strict_required_checks(rules):
-    """A held deploy needs GitHub to invalidate green checks after main moves."""
+MERGE_TRAIN_CONTEXT = "merge-train"
+
+
+def strict_required_checks(rules, app_id=None):
+    """A held deploy needs a green check to be invalidated when main moves, so an older green
+    auto-deploy PR cannot merge over a hold. Two live protections give that (ADR-0343):
+    strict up-to-date on every required-status-checks rule, OR `merge-train` required and pinned
+    to the gitops App (`app_id`, read from GITOPS_APP_ID as merge-train.py does). The App posts
+    that status only on a head verified over live main (a train tree or a strict-lane head that
+    contains main), so a stale head never carries it. Neither -> False; an unset id never matches."""
     if not isinstance(rules, list):
         raise InvalidHold("live branch rules response is not a list")
     status_rules = [rule for rule in rules if isinstance(rule, dict)
                     and rule.get("type") == "required_status_checks"]
     if not status_rules:
         raise InvalidHold("main has no live required-status-checks rule")
-    return all(isinstance(rule.get("parameters"), dict)
-               and rule["parameters"].get("strict_required_status_checks_policy") is True
-               for rule in status_rules)
+    if all(isinstance(rule.get("parameters"), dict)
+           and rule["parameters"].get("strict_required_status_checks_policy") is True
+           for rule in status_rules):
+        return True
+    try:
+        want = int(str(app_id).strip())
+    except (TypeError, ValueError):
+        return False
+    return any(isinstance(c, dict) and c.get("context") == MERGE_TRAIN_CONTEXT and c.get("integration_id") == want
+               for rule in status_rules if isinstance(rule.get("parameters"), dict)
+               for c in rule["parameters"].get("required_status_checks") or [])
 
 
 def require_live_strict(root, base, repo):
@@ -229,8 +395,9 @@ def require_live_strict(root, base, repo):
         live_rules = json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise InvalidHold("live main protection response is not JSON") from error
-    if not strict_required_checks(live_rules):
-        raise InvalidHold("deploy hold requires strict up-to-date checks on main before it can merge; "
+    if not strict_required_checks(live_rules, os.environ.get("GITOPS_APP_ID", "")):
+        raise InvalidHold("deploy hold requires strict up-to-date checks on main, or `merge-train` required "
+                          "and pinned to the gitops App (GITOPS_APP_ID), before it can merge; "
                           "an older green auto-deploy PR would otherwise remain mergeable")
     print("deploy hold: live main protection requires current-base checks")
 
@@ -265,6 +432,38 @@ def self_test():
                '"openbank-ledger-service":"sandbox-bbbbbbbb"}'
         assert filter_tags(root, tags) == {
                                      "openbank-ledger-service": "sandbox-bbbbbbbb"}
+        analytics = root / "openbank-analytics-sink"
+        analytics.mkdir()
+        (analytics / "build.gradle.kts").write_text("plugins {}\n")
+        (analytics / "Dockerfile").write_text("FROM scratch\n")
+        analytics_hold = {"openbank-analytics-sink": {
+            "issue": "#13304", "reason": "review", "release_condition": "owner release"}}
+        manifest.write_text(original.replace(
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n",
+            "    - image: registry/openbank-ledger-service:sandbox-aaaaaaaa\n"
+            "    - image: registry/openbank-analytics-sink:sandbox-aaaaaaaa\n"))
+        validate_services(root, analytics_hold)
+        other = root / "openbank-other-service"
+        other.mkdir()
+        (other / "build.gradle.kts").write_text("plugins {}\n")
+        (other / "Dockerfile").write_text("FROM scratch\n")
+        manifest.write_text(manifest.read_text() +
+                            "    - image: registry/openbank-other-service:sandbox-aaaaaaaa\n")
+        try:
+            validate_services(root, {"openbank-other-service": {
+                "issue": "#13304", "reason": "review", "release_condition": "owner release"}})
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("another unversioned module passed")
+        (analytics / "Dockerfile").unlink()
+        try:
+            validate_services(root, analytics_hold)
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("non-deployable unversioned module passed")
+        manifest.write_text(original)
         rule.write_text("deploy_holds:\n  services: {}\n")
         assert filter_tags(root, tags) == json.loads(tags)  # eligible on next reconcile
         rule.write_text("deploy_holds:\n  services:\n    openbank-typo-service:\n"
@@ -334,6 +533,24 @@ def self_test():
         assert strict_required_checks([strict_rule])
         assert not strict_required_checks([{**strict_rule, "parameters": {
             **strict_rule["parameters"], "strict_required_status_checks_policy": False}}])
+        from unittest.mock import patch
+        # ADR-0343: strict off is acceptable only with merge-train required AND pinned to the App.
+        def rs(strict, ctx):
+            return [{"type": "required_status_checks", "parameters": {
+                "required_status_checks": ctx, "strict_required_status_checks_policy": strict}}]
+        assert not strict_required_checks(rs(False, [{"context": "Validate manifests"}]), "4242"), "no merge-train passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train"}]), "4242"), "unpinned merge-train passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 99}]), "4242"), \
+            "merge-train pinned to another integration passed"
+        assert not strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 4242}]), ""), \
+            "pinned merge-train passed with GITOPS_APP_ID unset"
+        assert strict_required_checks(rs(False, [{"context": "merge-train", "integration_id": 4242}]), "4242"), \
+            "pinned merge-train with strict off refused"
+        assert strict_required_checks(rs(True, [{"context": "Validate manifests"}]), ""), "strict on refused"
+        pinned_rule = rs(False, [{"context": "merge-train", "integration_id": 4242}])
+        with patch.dict(os.environ, {"GITOPS_APP_ID": "4242"}), patch(
+                "subprocess.run", return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps(pinned_rule), stderr="")):
+            require_live_strict(root, None, "example/repo")
         try:
             strict_required_checks([])
         except InvalidHold:
@@ -357,7 +574,61 @@ def self_test():
         rule.write_text("deploy_holds:\n  services: {}\n")
         with patch("subprocess.run", side_effect=AssertionError("empty hold queried GitHub")):
             require_live_strict(root, None, "example/repo")
+        approved_selftest(root, rule, manifest, original, base)
     print("deploy hold self-test passed")
+
+
+def approved_selftest(root, rule, manifest, original, base):
+    digest = "sha256:" + "c" * 64
+    held = ("deploy_holds:\n  services:\n    openbank-sanctions-service:\n"
+            "      issue: '#11492'\n      reason: review\n"
+            "      release_condition: fixed image and reviews verified\n")
+    subprocess.run(["git", "-C", str(root), "reset", "--hard", "-q", base], check=True)
+
+    def run(approved, content):
+        rule.write_text(held + (f"      approved_image: '{approved}'\n" if approved else ""))
+        manifest.write_text(content)
+        entries = holds(rule.read_text())
+        with contextlib.redirect_stdout(io.StringIO()):
+            return report_approved_images(root, entries), approved_image_findings(root, entries)
+
+    tagged = f"openbank-sanctions-service:sandbox-aaaaaaaa@{digest}"
+    # Known negative: the held pin is exactly the approved image.
+    assert run(tagged, original)[0] == 0, "matching approved pin failed"
+    # Known positive: a held pin the owner never approved fails, even unchanged by this diff.
+    moved = original.replace("openbank-sanctions-service:sandbox-aaaaaaaa",
+                             "openbank-sanctions-service:sandbox-bbbbbbbb")
+    status, (drift, _) = run(tagged, moved)
+    assert status == 1 and len(drift) == 1, "mismatched held pin passed"
+    # Same tag, different digest pinned: mutable tag cannot launder a new image.
+    status, _ = run(tagged, original.replace(
+        "sanctions-service:sandbox-aaaaaaaa", f"sanctions-service:sandbox-aaaaaaaa@sha256:{'d' * 64}"))
+    assert status == 1, "pin with a different digest passed"
+    # Bare digest: a tag pin cannot prove it; a digest pin can.
+    assert run(digest, original)[0] == 1, "tag pin passed against a bare digest"
+    assert run(digest, original.replace(
+        "sanctions-service:sandbox-aaaaaaaa", f"sanctions-service@{digest}"))[0] == 0, "digest pin refused"
+    # Unheld services are never compared; a hold without approved_image is a finding, not a failure.
+    status, (drift, missing) = run(None, moved)
+    assert status == 0 and missing == ["openbank-sanctions-service"] and not drift
+    # Whole tree through check(): an UNCHANGED drifted pin still fails the PR.
+    rule.write_text(held + f"      approved_image: 'openbank-sanctions-service:sandbox-zzzzzzzz@{digest}'\n")
+    manifest.write_text(original)
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert check(root, base) == 1, "whole-tree drift passed check()"
+    for bad in ("sandbox-aaaaaaaa", "sha256:abc", f"openbank-ledger-service:x@{digest}"):
+        try:
+            holds(held + f"      approved_image: '{bad}'\n")
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError(f"invalid approved_image {bad!r} passed")
+    # union keeps the first source's approval and never drops it.
+    a = holds(held + f"      approved_image: '{tagged}'\n")
+    assert union_holds(a, holds(held))["openbank-sanctions-service"]["approved_image"] == tagged
+    assert union_holds(holds(held), a)["openbank-sanctions-service"]["approved_image"] == tagged
+    subprocess.run(["git", "-C", str(root), "checkout", "--", RULES, str(manifest.relative_to(root))],
+                   check=True)
 
 
 def main():
@@ -392,9 +663,10 @@ def main():
             if os.environ.get("GITHUB_EVENT_NAME") == "push":
                 entries = holds((args.root / RULES).read_text(encoding="utf-8"))
                 print(f"deploy holds: {len(entries)} service(s); push run has no PR diff")
+                drifted = report_approved_images(args.root.resolve(), entries)
                 if args.enforce_live_strict:
                     require_live_strict(args.root.resolve(), None, args.repo)
-                return 0
+                return drifted
             raise InvalidHold("--base or PR_DIFF_BASE is required")
         result = check(args.root.resolve(), args.base)
         if args.enforce_live_strict:

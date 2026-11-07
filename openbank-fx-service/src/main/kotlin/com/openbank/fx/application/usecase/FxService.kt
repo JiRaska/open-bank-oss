@@ -11,10 +11,8 @@ import com.openbank.fx.application.port.`in`.GetRateHistoryQuery
 import com.openbank.fx.application.port.`in`.GetRateQuery
 import com.openbank.fx.application.port.`in`.ResolvedRate
 import com.openbank.fx.application.port.out.AmlCasePort
-import com.openbank.fx.application.port.out.AmlCaseRiskLevel
 import com.openbank.fx.application.port.out.FraudScoreCommand
 import com.openbank.fx.application.port.out.FraudScoringPort
-import com.openbank.fx.application.port.out.FraudVerdict
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
@@ -26,11 +24,13 @@ import com.openbank.fx.domain.model.FxConversionMath
 import com.openbank.fx.domain.model.FxConversionStatus
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateType
-import com.openbank.fx.domain.screening.ScreeningDecision
-import com.openbank.fx.domain.screening.ScreeningMatchStatus
-import com.openbank.fx.domain.screening.ScreeningPolicy
-import com.openbank.fx.domain.screening.ScreeningResult
-import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.libs.fincrime.AmlCaseSeverity
+import com.openbank.libs.fincrime.FraudVerdict
+import com.openbank.libs.fincrime.ScreeningDecision
+import com.openbank.libs.fincrime.ScreeningMatchStatus
+import com.openbank.libs.fincrime.ScreeningPolicy
+import com.openbank.libs.fincrime.ScreeningResult
+import com.openbank.libs.fincrime.ScreeningRole
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
@@ -147,7 +147,7 @@ class FxService(
                 toAmountMinorUnits,
                 feeMinorUnits,
                 conversionId,
-                AmlCaseRiskLevel.MEDIUM,
+                AmlCaseSeverity.MEDIUM,
                 ALERT_SCREENING_UNAVAILABLE,
                 ex.message,
                 null,
@@ -167,7 +167,7 @@ class FxService(
                     toAmountMinorUnits,
                     feeMinorUnits,
                     conversionId,
-                    AmlCaseRiskLevel.HIGH,
+                    AmlCaseSeverity.HIGH,
                     ALERT_AML_HOLD,
                     detail(results),
                     matchedEntity(results),
@@ -234,7 +234,7 @@ class FxService(
         toAmountMinorUnits: Long,
         feeMinorUnits: Long,
         conversionId: UUID,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,
@@ -277,7 +277,7 @@ class FxService(
                 settledAt = null,
             ),
         )
-        openCaseQuietly(saved, AmlCaseRiskLevel.CRITICAL, ALERT_SANCTIONS_HIT, detail, matchedEntity)
+        openCaseQuietly(saved, AmlCaseSeverity.CRITICAL, ALERT_SANCTIONS_HIT, detail, matchedEntity)
         metrics.paymentCompleted("fx", "${cmd.fromCurrency}_${cmd.toCurrency}", "rejected")
         metrics.sanctionsHit("party", "block")
         return saved
@@ -312,7 +312,7 @@ class FxService(
     /** Opening the AML case is best-effort: a case-store outage must not flip the screening verdict. */
     private suspend fun openCaseQuietly(
         conv: FxConversion,
-        riskLevel: AmlCaseRiskLevel,
+        riskLevel: AmlCaseSeverity,
         alertCode: String,
         detail: String?,
         matchedEntity: String?,

@@ -65,7 +65,7 @@ internal object KybJson {
         val address: AddressDoc? = null,
     )
 
-    fun write(extract: RegistryExtract): String = mapper.writeValueAsString(
+    fun writeExtract(extract: RegistryExtract): String = mapper.writeValueAsString(
         ExtractDoc(
             scheme = extract.identifier.scheme.name,
             value = extract.identifier.value,

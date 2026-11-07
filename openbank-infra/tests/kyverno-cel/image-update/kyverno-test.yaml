@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+# Native CLI UPDATE supplies oldObject==object: all submitted images are unchanged.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: image-rewrite-metadata-update
+policies:
+- ../../../gitops/components/kyverno/ecr-pull-through-rewrite-cel.yaml
+resources:
+- resources.yaml
+results:
+- policy: ecr-pull-through-rewrite-cel
+  isMutatingPolicy: true
+  kind: Pod
+  resources:
+  - pod-metadata-update
+  operation: UPDATE
+  result: skip
+- policy: ecr-pull-through-rewrite-cel
+  isMutatingPolicy: true
+  kind: Job
+  resources:
+  - job-metadata-update
+  operation: UPDATE
+  result: skip
+- policy: ecr-pull-through-rewrite-cel
+  isMutatingPolicy: true
+  kind: Deployment
+  resources:
+  - deployment-metadata-update
+  operation: UPDATE
+  result: skip
+- policy: ecr-pull-through-rewrite-cel
+  isMutatingPolicy: true
+  kind: CronJob
+  resources:
+  - cronjob-metadata-update
+  operation: UPDATE
+  result: skip

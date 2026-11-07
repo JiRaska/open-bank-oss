@@ -27,3 +27,7 @@ Jde o **money-path službu** (`rules.yaml: money_path_services`) — změny vyž
 - **Auth:** Keycloak OIDC; role pro zápis `ROLE_OPERATOR` / `ROLE_ADMIN` / `ROLE_PAYMENTS`, čtení přidává `ROLE_VIEWER`; OPA advisory→enforce (ADR-0034)
 - **Screening gate:** synchronní sankční screening při create, fail-closed (ADR-0032)
 - **FinOps tier:** T0 — always-on (synchronní money-path skok, ADR-0057)
+
+## Zapojení při buildu
+
+- **Úložiště schvalování čtyř očí.** `openbank.approval.store: redis` v `application.yaml` zapne v libs-runtime `RedisApprovalStoreProducer`, který dodá `ApprovalStore` nad Redisem. Čte se při buildu; po odebrání bean zmizí a služba neprojde `quarkusBuild`, místo aby tiše běžela bez čtyř očí. Nasazený host Redisu určuje `QUARKUS_REDIS_HOSTS` na workloadu, nikdy výchozí `localhost`.

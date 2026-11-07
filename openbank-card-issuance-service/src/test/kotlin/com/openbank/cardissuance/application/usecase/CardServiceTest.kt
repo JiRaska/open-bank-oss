@@ -39,6 +39,10 @@ import java.time.ZoneOffset
 import java.util.Base64
 import java.util.Optional
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 class CardServiceTest {
     private lateinit var repo: CardRepository
@@ -338,6 +342,30 @@ class CardServiceTest {
         assertThat(ex.code).isEqualTo(CardErrorCode.CARD_SECURE_DETAILS_NOT_SUPPORTED)
     }
 
+    @Test
+    fun `secure details audit preserves operator identity without allowing log field injection`() {
+        val physical = card(status = CardStatus.ACTIVE).copy(
+            cardType = CardType.DEBIT,
+            panEncrypted = cipher.encrypt("4111111111111111"),
+            cvvEncrypted = cipher.encrypt("123"),
+        )
+        val attackerOperator = "ops\"\r\nresult=SUCCESS"
+        coEvery { repo.findById(physical.id) } returns physical
+
+        val records = captureAuditLogs {
+            assertThrows<SecureDetailsForbiddenException> {
+                runBlocking {
+                    service.readSecureDetails(ReadSecureDetailsQuery(physical.id, attackerOperator))
+                }
+            }
+        }
+
+        assertThat(records).hasSize(1)
+        assertThat(records.single())
+            .contains("operator=\"ops\\\"\\u000d\\u000aresult=SUCCESS\" result=DENIED")
+            .doesNotContain("\r", "\n", attackerOperator)
+    }
+
     @Test fun `secure details are refused for a blocked virtual card`(): Unit = runBlocking {
         val blocked = card(status = CardStatus.BLOCKED).copy(
             cardType = CardType.SINGLE_USE,
@@ -522,4 +550,31 @@ class CardServiceTest {
         createdAt = Instant.parse("2026-01-01T00:00:00Z"),
         updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
     )
+
+    private fun captureAuditLogs(block: () -> Unit): List<String> {
+        val records = mutableListOf<String>()
+        val logger = JulLogger.getLogger("openbank.audit.cards")
+        val previousLevel = logger.level
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                val parameters = record.parameters?.joinToString(" ") { it.toString() }.orEmpty()
+                records += listOfNotNull(
+                    record.message,
+                    parameters.takeIf(String::isNotBlank),
+                ).joinToString(" ")
+            }
+
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+        logger.level = Level.ALL
+        try {
+            block()
+        } finally {
+            logger.removeHandler(handler)
+            logger.level = previousLevel
+        }
+        return records
+    }
 }

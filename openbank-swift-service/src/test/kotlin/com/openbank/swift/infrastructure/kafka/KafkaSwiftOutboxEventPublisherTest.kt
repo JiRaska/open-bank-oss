@@ -22,13 +22,26 @@ import java.util.UUID
 class KafkaSwiftOutboxEventPublisherTest {
 
     private val emitter = mockk<MutinyEmitter<String>>(relaxed = true)
-    private val publisher = KafkaSwiftOutboxEventPublisher(emitter)
+    private val transferEmitter = mockk<MutinyEmitter<String>>(relaxed = true)
+    private val publisher = KafkaSwiftOutboxEventPublisher(emitter, transferEmitter)
 
     @BeforeEach
     fun setUp() {
         // sendMessage returns Uni<Void>; a relaxed mock's Uni never invokes the subscriber
         // callback — awaitSuspending() hangs indefinitely. Stub with a real completed Uni.
         every { emitter.sendMessage(any()) } answers { Uni.createFrom().voidItem() }
+        every { transferEmitter.sendMessage(any()) } answers { Uni.createFrom().voidItem() }
+    }
+
+    @Test
+    fun `an institution-transfer status row is routed to its own channel and nothing else is`(): Unit = runBlocking {
+        publisher.publish(entry().copy(eventType = "swift.institution-transfer.status.v1"))
+        coVerify(exactly = 1) { transferEmitter.sendMessage(any()) }
+        coVerify(exactly = 0) { emitter.sendMessage(any()) }
+
+        publisher.publish(entry())
+        coVerify(exactly = 1) { emitter.sendMessage(any()) }
+        coVerify(exactly = 1) { transferEmitter.sendMessage(any()) }
     }
 
     private fun entry(payload: String = "the-payload") = OutboxEntry(

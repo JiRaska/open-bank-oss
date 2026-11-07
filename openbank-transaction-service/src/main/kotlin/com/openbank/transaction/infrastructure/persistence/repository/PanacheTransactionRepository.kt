@@ -16,8 +16,11 @@ import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.infrastructure.persistence.entity.TransactionEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
+import jakarta.persistence.Tuple
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -34,7 +37,38 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
 
     override suspend fun findByIdempotencyKey(key: String): com.openbank.transaction.domain.model.Transaction? =
         Panache.withSession {
-            find("idempotencyKey", key).firstResult()
+            Panache.getSession().flatMap { session ->
+                // Each branch filters on the key before UNION ALL; the three-row ceiling detects
+                // duplicates without joining whole partitioned history. One statement gives one
+                // snapshot even when a contender commits between reads.
+                session.createNativeQuery(
+                    """
+                    SELECT 'transaction' AS kind, id AS transaction_id, booking_date
+                    FROM transactions WHERE idempotency_key = :key
+                    UNION ALL
+                    SELECT 'claim' AS kind, transaction_id, booking_date
+                    FROM transaction_idempotency_keys WHERE idempotency_key = :key
+                    LIMIT 3
+                    """.trimIndent(),
+                    Tuple::class.java,
+                ).setParameter("key", key).resultList.flatMap snapshot@{ rows ->
+                    if (rows.isEmpty()) return@snapshot Uni.createFrom().nullItem<TransactionEntity>()
+                    val transaction = rows.singleOrNull { it.get("kind") == "transaction" }
+                    val claim = rows.singleOrNull { it.get("kind") == "claim" }
+                    if (rows.size != 2 || transaction == null || claim == null) inconsistentRegistry()
+                    val id = transaction.get("transaction_id") as? UUID ?: inconsistentRegistry()
+                    val date = snapshotDate(transaction.get("booking_date"))
+                    if (claim.get("transaction_id") != id || snapshotDate(claim.get("booking_date")) != date) {
+                        inconsistentRegistry()
+                    }
+                    // Identity is immutable. A later status commit is allowed, but disappearance
+                    // or a changed key must fail closed rather than initiate a replacement booking.
+                    find("id = ?1 and bookingDate = ?2", id, date).singleResult().map { entity ->
+                        if (entity == null || entity.idempotencyKey != key) inconsistentRegistry()
+                        entity
+                    }
+                }
+            }
         }.awaitSuspending()?.toDomain()
 
     override suspend fun findByAccountId(
@@ -52,7 +86,7 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         outboxMessage: OutboxMessage,
     ): com.openbank.transaction.domain.model.Transaction = Panache.withTransaction {
         val entity = transaction.toEntity()
-        persist(entity)
+        persistAndFlush(entity)
             .flatMap { outboxRepository.persistMessageUni(outboxMessage) }
             .replaceWith(transaction)
     }.awaitSuspending()
@@ -153,6 +187,15 @@ class PanacheTransactionRepository(private val outboxRepository: TransactionOutb
         val NON_TERMINAL_STATUSES = listOf(TransactionStatus.PENDING.name, TransactionStatus.PROCESSING.name)
     }
 }
+
+private fun snapshotDate(value: Any?): LocalDate = when (value) {
+    is LocalDate -> value
+    is java.sql.Date -> value.toLocalDate()
+    else -> inconsistentRegistry()
+}
+
+private fun inconsistentRegistry(): Nothing =
+    throw PersistenceException("Transaction idempotency registry is inconsistent")
 
 private data class SearchCondition(val clause: String, val params: List<Any>)
 

@@ -13,6 +13,7 @@ import com.openbank.interest.infrastructure.persistence.entity.InterestCapitaliz
 import com.openbank.interest.infrastructure.persistence.entity.InterestOutboxEntity
 import com.openbank.interest.infrastructure.persistence.entity.InterestRateConfigEntity
 import com.openbank.interest.infrastructure.persistence.mapper.InterestMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.quarkus.hibernate.reactive.panache.common.WithSession
@@ -94,16 +95,17 @@ class InterestRateConfigRepositoryImpl @Inject constructor(
         // the CASE orders overrides (0) before defaults (1) so setMaxResults(1) picks the override.
         // currency == null keeps the currency-agnostic view (the read-only effective-rate lookup);
         // accrue passes a non-null currency so a rate resolves only in its own currency (issue #1265).
-        s.createQuery(
+        val currencyFilter = if (currency == null) "" else "AND currency = :ccy "
+        val query = s.createQuery(
             "FROM InterestRateConfigEntity WHERE active = true AND effectiveFrom <= :d " +
                 "AND (effectiveTo IS NULL OR effectiveTo >= :d) " +
-                "AND (:ccy IS NULL OR currency = :ccy) " +
+                currencyFilter +
                 "AND (accountId = :a OR (accountId IS NULL AND productId = :p)) " +
                 "ORDER BY CASE WHEN accountId IS NULL THEN 1 ELSE 0 END, effectiveFrom DESC",
             InterestRateConfigEntity::class.java,
         ).setParameter("a", accountId).setParameter("p", productId).setParameter("d", date)
-            .setParameter("ccy", currency)
-            .setMaxResults(1).singleResultOrNull
+        if (currency != null) query.setParameter("ccy", currency)
+        query.setMaxResults(1).singleResultOrNull
     }.map { it?.let(mapper::toDomain) }
 
     @WithSession
@@ -369,5 +371,90 @@ internal fun OutboxMessage.toOutboxEntity(updatedAt: Instant): InterestOutboxEnt
         attemptCount = 0
         createdAt = m.createdAt
         this.updatedAt = stamp
+    }
+}
+
+@ApplicationScoped
+class RateRevisionPinRepositoryImpl @Inject constructor(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: InterestMapper,
+    private val clock: Clock,
+) : RateRevisionPinRepository {
+    @WithSession
+    override fun findPinnedConfig(accountId: UUID, productId: String, currency: String): Uni<InterestRateConfig?> =
+        sf.withSession { s ->
+            s.createQuery(
+                "SELECT c FROM InterestRateConfigEntity c, CatalogInterestRateSnapshotEntity r, " +
+                    "AccountRateRevisionPinEntity p WHERE p.accountId = :a AND p.productId = :prod " +
+                    "AND p.currency = :ccy AND r.revisionId = p.revisionId AND c.id = r.configId",
+                InterestRateConfigEntity::class.java,
+            ).setParameter("a", accountId).setParameter("prod", productId).setParameter("ccy", currency)
+                .setMaxResults(1).singleResultOrNull
+        }.map { it?.let(mapper::toDomain) }
+
+    @WithSession
+    override fun hasCatalogHistory(accountId: UUID, productId: String, currency: String): Uni<Boolean> =
+        sf.withSession { s ->
+            s.createNativeQuery<Number>(
+                "SELECT COUNT(*) FROM interest_accruals ia JOIN catalog_interest_rate_snapshots cs " +
+                    "ON cs.config_id = ia.config_id AND cs.outcome = 'APPLIED' " +
+                    "WHERE ia.account_id = :a AND ia.product_id = :prod AND ia.currency = :ccy " +
+                    "AND ia.status <> 'REVERSED'",
+            ).setParameter("a", accountId).setParameter("prod", productId).setParameter("ccy", currency)
+                .singleResult.map { it.toLong() > 0 }
+        }
+
+    @WithSession
+    override fun hasPin(accountId: UUID, productId: String, currency: String): Uni<Boolean> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(p) FROM AccountRateRevisionPinEntity p WHERE p.accountId = :a " +
+                "AND p.productId = :prod AND p.currency = :ccy",
+            Long::class.javaObjectType,
+        ).setParameter("a", accountId).setParameter("prod", productId).setParameter("ccy", currency)
+            .singleResult.map { it > 0 }
+    }
+
+    @WithTransaction
+    override fun pinIfCatalogSourced(
+        accountId: UUID,
+        productId: String,
+        currency: String,
+        config: InterestRateConfig,
+    ): Uni<Boolean> = sf.withTransaction { s ->
+        s.createQuery(
+            "SELECT r.revisionId FROM CatalogInterestRateSnapshotEntity r " +
+                "WHERE r.configId = :id AND r.outcome = 'APPLIED'",
+            UUID::class.java,
+        ).setParameter("id", config.id).setMaxResults(1).singleResultOrNull.flatMap { revisionId ->
+            if (revisionId == null) {
+                Uni.createFrom().item(false)
+            } else {
+                // First writer wins; a concurrent first accrual of the same account loses harmlessly.
+                // Skipped only when the account already accrued under a catalog-sourced config (V20 pinned it).
+                s.createNativeQuery<Int>(
+                    "INSERT INTO account_rate_revision_pins " +
+                        "(id, account_id, product_id, currency, revision_id, pinned_at) " +
+                        "SELECT CAST(:id AS uuid), CAST(:a AS uuid), CAST(:prod AS varchar), " +
+                        "CAST(:ccy AS char(3)), CAST(:rev AS uuid), CAST(:at AS timestamptz) " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM interest_accruals ia " +
+                        "JOIN catalog_interest_rate_snapshots cs ON cs.config_id = ia.config_id " +
+                        "AND cs.outcome = 'APPLIED' " +
+                        "WHERE ia.account_id = CAST(:a AS uuid) AND ia.product_id = CAST(:prod AS varchar) " +
+                        "AND ia.currency = CAST(:ccy AS char(3)) AND ia.status <> 'REVERSED') " +
+                        "ON CONFLICT (account_id, product_id, currency) DO NOTHING",
+                ).setParameter("id", Ids.newId()).setParameter("a", accountId)
+                    .setParameter("prod", productId).setParameter("ccy", currency)
+                    .setParameter("rev", revisionId).setParameter("at", OffsetDateTime.now(clock))
+                    .executeUpdate().map { it > 0 }
+            }
+        }
+    }
+
+    @WithSession
+    override fun isCatalogSourced(configId: UUID): Uni<Boolean> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(r) FROM CatalogInterestRateSnapshotEntity r WHERE r.configId = :id",
+            Long::class.javaObjectType,
+        ).setParameter("id", configId).singleResult.map { it > 0 }
     }
 }

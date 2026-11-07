@@ -54,6 +54,18 @@ class SepaSettlementScenarioTest {
 
         assertThat(world.sepaPayments.single().status).isEqualTo(SepaPaymentStatus.RETURNED)
         assertThat(world.settlements.single().status).isEqualTo(SettlementStatus.CREDITED_REVERSED)
+        val payment = world.sepaPayments.single()
+        val intent = requireNotNull(payment.returnIntent)
+        assertThat(intent.originalTransactionId).isEqualTo(payment.transactionId).isNotNull()
+        assertThat(intent.reversalTransactionId).isNotNull().isNotEqualTo(payment.transactionId)
+        assertThat(intent.firstReceivedAt).isEqualTo(world.context.clock.instant())
+        assertThat(intent.resolvedAt).isEqualTo(intent.firstReceivedAt)
+        assertThat(intent.idempotencyKey(payment.id)).isEqualTo("sepa-reversal-${payment.id}")
+
+        val replay = newWorld(FaultProfile(lockConflictRate = 1.0))
+        SepaSettlementScenario.step(replay)
+        assertThat(replay.sepaPayments).isEqualTo(world.sepaPayments)
+        assertThat(replay.settlements).isEqualTo(world.settlements)
     }
 
     @Test

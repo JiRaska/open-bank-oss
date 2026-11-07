@@ -8,21 +8,6 @@ quarkus:
       origins: "http://localhost:3000"
       methods: GET,POST,PUT,PATCH,DELETE,OPTIONS
       headers: Content-Type,Authorization,Idempotency-Key
-    header:
-      X-Content-Type-Options:
-        value: nosniff
-      X-Frame-Options:
-        value: DENY
-      X-XSS-Protection:
-        value: "1; mode=block"
-      Referrer-Policy:
-        value: strict-origin-when-cross-origin
-      Permissions-Policy:
-        value: "geolocation=(), microphone=(), camera=()"
-      Content-Security-Policy:
-        value: "default-src 'self'"
-      Strict-Transport-Security:
-        value: "max-age=31536000; includeSubDomains"
 
   datasource:
     db-kind: postgresql
@@ -71,6 +56,10 @@ quarkus:
         secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
       grant:
         type: client
+  # ADR-0319: the generated transaction-service client binds its responses with this mapper. A field
+  # the provider adds must never fail a bind AFTER the transfer has committed (Quarkus' default, pinned).
+  jackson:
+    fail-on-unknown-properties: false
   rest-client:
     sepa-payment-service:
       url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8115}
@@ -110,11 +99,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   dev-ui:
     enabled: false
 
@@ -223,3 +207,18 @@ authz:
       ssl:
         client-auth: required
       insecure-requests: enabled
+      # Listener parity (#12511, the #12506 pattern): with client-auth on, Quarkus ALSO registers its
+      # mTLS authentication mechanism, which turns any trusted client certificate into an authenticated
+      # SecurityIdentity of its own, on the TLS listener only. /api/* therefore accepts the bearer
+      # mechanism ONLY and demands authentication itself; the certificate stays transport authentication.
+      # StandingOrderListenerAuthParityIT holds both listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: authenticated
+            auth-mechanism: bearer
+          public-metadata:
+            paths: /api/v1/info,/api/v1/config
+            methods: GET
+            policy: permit

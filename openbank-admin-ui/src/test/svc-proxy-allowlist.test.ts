@@ -11,17 +11,17 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const state = vi.hoisted(() => ({ inCluster: false }))
+const state = vi.hoisted(() => ({ inCluster: false, status: 'complete' as 'complete' | 'partial' | 'unavailable', services: [] as any[] }))
 
 vi.mock('@/auth', () => ({ auth: async () => ({ user: { accessToken: 'tok', email: 'op@example.com' } }) }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => state.inCluster,
-  discoverServices: async () => [
-    { name: 'account-service', namespace: 'core', port: 8100, scaledToZero: false },
-    { name: 'mcp-service', namespace: 'agents', port: 8150, scaledToZero: false },
-    { name: 'devops-agent', namespace: 'agents', port: 8142, scaledToZero: false },
-    { name: 'not-in-catalog-service', namespace: 'x', port: 9999, scaledToZero: false },
-  ],
+  resolveInClusterService: async (name: string) => {
+    const matches = state.services.filter((service) => service.name === name)
+    if (matches.length > 1) return { state: 'unknown', coverage: state.status === 'complete' ? 'partial' : state.status }
+    if (matches.length === 1) return { state: 'found', service: matches[0], baseUrl: `http://${name}.${matches[0].namespace}.svc:${matches[0].port}`, coverage: state.status === 'partial' ? 'partial' : 'complete' }
+    return state.status === 'complete' ? { state: 'not_found', coverage: 'complete' } : { state: 'unknown', coverage: state.status }
+  },
 }))
 
 import { GET } from '@/app/api/svc/[service]/[...path]/route'
@@ -34,6 +34,13 @@ async function call(service: string) {
 
 let fetchMock: ReturnType<typeof vi.fn>
 beforeEach(() => {
+  state.status = 'complete'
+  state.services = [
+    { name: 'account-service', namespace: 'core', port: 8100, scaledToZero: false },
+    { name: 'mcp-service', namespace: 'agents', port: 8150, scaledToZero: false },
+    { name: 'devops-agent', namespace: 'agents', port: 8142, scaledToZero: false },
+    { name: 'not-in-catalog-service', namespace: 'x', port: 9999, scaledToZero: false },
+  ]
   fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
   vi.stubGlobal('fetch', fetchMock)
 })
@@ -67,6 +74,23 @@ for (const mode of ['off-cluster', 'in-cluster'] as const) {
 
 describe('in-cluster path is gated by the catalog allowlist', () => {
   beforeEach(() => { state.inCluster = true })
+  it('a known positive remains proxyable from a partial snapshot', async () => {
+    state.status = 'partial'
+    state.services = [{ name: 'account-service', namespace: 'core', port: 8100, scaledToZero: false }]
+    const res = await call('account-service')
+    expect(res.status).toBe(200)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('absence from a partial snapshot is unknown, not 404', async () => {
+    state.status = 'partial'
+    state.services = []
+    const res = await call('ledger-service')
+    expect(res.status).toBe(503)
+    expect(await res.json()).toEqual({ error: 'discovery_unavailable' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('a discovered workload that is not a catalog business service is not proxied', async () => {
     for (const key of ['not-in-catalog-service', 'devops-agent']) {
       const res = await call(key)

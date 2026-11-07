@@ -7,16 +7,19 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { edgeGeometry, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import { DOMAIN_GROUPS, domainColor, domainLabel, type DomainGroup as Domain } from '@/lib/governance/domains'
+import { classifyBffFailure } from '@/lib/services/bff'
 import {
   parseGovernanceLineage,
   type GovernanceLineageService as GovService,
-  type LineageDomain as Domain,
   type LineageRelation as Rel,
   type LineageRole as Role,
 } from '@/lib/governance/lineage-evidence'
@@ -31,15 +34,7 @@ import {
 // the service map — NOT hand-authored.
 // ---------------------------------------------------------------------------
 
-const DOMAIN_META: Record<Domain, { color: string; cs: string; en: string }> = {
-  core:           { color: 'var(--map-core)', cs: 'Jádro',         en: 'Core' },
-  payments:       { color: 'var(--map-payment)', cs: 'Platby',        en: 'Payments' },
-  compliance:     { color: 'var(--map-compliance)', cs: 'Compliance',    en: 'Compliance' },
-  identity:       { color: 'var(--map-identity)', cs: 'Identita',      en: 'Identity' },
-  'open-banking': { color: 'var(--map-psd2)', cs: 'Open Banking',  en: 'Open Banking' },
-  platform:       { color: 'var(--map-platform)', cs: 'Platforma',     en: 'Platform' },
-}
-const DOMAIN_ORDER: Domain[] = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
+const DOMAIN_ORDER = DOMAIN_GROUPS
 
 const REL_COLOR: Record<Rel, string> = { api: 'var(--map-core)', topic: 'var(--map-payment)', datastore: 'var(--map-identity)', unknown: 'var(--map-platform)' }
 const REL_DASHED: Record<Rel, boolean> = { api: false, topic: true, datastore: false, unknown: false }
@@ -63,7 +58,7 @@ const pillWidth = (label: string) => Math.max(96, 22 + label.length * 6.6 + 14)
 const BAND_CFG = { width: WIDTH, pad: CANVAS_PAD, pillH: PILL_H, bandHead: BAND_HEAD, bandPadY: BAND_PAD_Y, bandGap: BAND_GAP, pillGap: PILL_GAP, measure: pillWidth }
 
 export default function LineageFlowPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [services, setServices] = useState<GovService[]>([])
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -73,6 +68,7 @@ export default function LineageFlowPage() {
   const [flow, setFlow] = useFlowAnimation()
   const [isChecking, setIsChecking] = useState(true)
   const [hasVerifiedSnapshot, setHasVerifiedSnapshot] = useState(false)
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const requestRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -88,10 +84,13 @@ export default function LineageFlowPage() {
           setSelected(null)
           setHasVerifiedSnapshot(false)
         }
-        setUnavailable({ kind: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable' })
+        setUnavailable({ kind: await classifyBffFailure(res) })
         return
       }
-      const evidence = parseGovernanceLineage(await res.json())
+      const payload = await res.json()
+      if (request !== requestRef.current) return
+      setContentSource(payload.contentSource ?? null)
+      const evidence = parseGovernanceLineage(payload)
       if (request !== requestRef.current) return
       if (!evidence) { setUnavailable({ kind: 'error' }); return }
       if (!evidence.available) { setUnavailable({ kind: 'not_deployed' }); return }
@@ -130,7 +129,7 @@ export default function LineageFlowPage() {
   }
   const allEdges = [...edgeMap.values()]
 
-  const domainOf = (s: GovService): Domain => (s.dataDomain && DOMAIN_META[s.dataDomain] ? s.dataDomain : 'platform')
+  const domainOf = (s: GovService): Domain => s.dataDomain ?? 'unclassified'
   const visible = services.filter(s => domFilter === 'all' || domainOf(s) === domFilter)
   const visibleIds = new Set(visible.map(s => s.serviceName))
   const byDomain: Record<string, GovService[]> = {}
@@ -147,7 +146,7 @@ export default function LineageFlowPage() {
 
   const selectedSvc = selected ? byId[selected] : null
   const selectedEdges = selected ? allEdges.filter(e => e.from === selected || e.to === selected) : []
-  const domLabel = (d: Domain) => t(DOMAIN_META[d].cs, DOMAIN_META[d].en)
+  const domLabel = (domain: string) => domainLabel(domain, language === 'cs' ? 'cs' : 'en')
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
@@ -162,6 +161,8 @@ export default function LineageFlowPage() {
                'Who produces data for whom — the declared data-governance lineage (ADR-0071), derived from each service’s governance.yaml, animated as producer → consumer flow.')}
         icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {isChecking && !hasVerifiedSnapshot && !unavailable ? (
         <div className="card" role="status" aria-live="polite" data-testid="lineage-loading" style={{ padding: 40, textAlign: 'center', color: 'var(--text-tertiary)' }}>
@@ -185,7 +186,7 @@ export default function LineageFlowPage() {
           {/* Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div role="group" aria-label={t('Filtrování domén', 'Domain filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(['all', ...DOMAIN_ORDER] as const).map(key => (
+              {(['all', ...DOMAIN_ORDER.filter(domain => services.some(service => domainOf(service) === domain))] as const).map(key => (
                 <button key={key} onClick={() => setDomFilter(key)}
                   type="button" aria-pressed={domFilter === key}
                   style={{
@@ -244,8 +245,8 @@ export default function LineageFlowPage() {
                 {LAYOUT.bands.map(b => (
                   <g key={b.key}>
                     <rect x={CANVAS_PAD - 12} y={b.y} width={WIDTH - (CANVAS_PAD - 12) * 2} height={b.h} rx="16"
-                      fill={`color-mix(in srgb, ${DOMAIN_META[b.key].color} 4%, transparent)`} stroke={`color-mix(in srgb, ${DOMAIN_META[b.key].color} 24%, var(--border))`} strokeWidth="1" />
-                    <text x={CANVAS_PAD} y={b.y + 19} fontSize="11" fill={DOMAIN_META[b.key].color} fontWeight="700" letterSpacing="0.08em">
+                      fill={`color-mix(in srgb, ${domainColor(b.key)} 4%, transparent)`} stroke={`color-mix(in srgb, ${domainColor(b.key)} 24%, var(--border))`} strokeWidth="1" />
+                    <text x={CANVAS_PAD} y={b.y + 19} fontSize="11" fill={domainColor(b.key)} fontWeight="700" letterSpacing="0.08em">
                       {domLabel(b.key).toUpperCase()} · {b.count}
                     </text>
                   </g>
@@ -274,7 +275,7 @@ export default function LineageFlowPage() {
                 {visible.map(s => {
                   const p = LAYOUT.pos[s.serviceName]
                   if (!p) return null
-                  const color = DOMAIN_META[domainOf(s)].color
+                  const color = domainColor(domainOf(s))
                   const emphasized = !activeNode || isNeighbor(s.serviceName)
                   const isSel = selected === s.serviceName
                   const x = p.cx - p.w / 2, y = p.cy - PILL_H / 2
@@ -307,16 +308,16 @@ export default function LineageFlowPage() {
             {selectedSvc && (
               <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: DOMAIN_META[domainOf(selectedSvc)].color }} />
+                  <div style={{ width: '12px', height: '12px', borderRadius: '50%', background: domainColor(domainOf(selectedSvc)) }} />
                   <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{prettyName(selectedSvc.serviceName)}</div>
-                  <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `color-mix(in srgb, ${DOMAIN_META[domainOf(selectedSvc)].color} 12%, transparent)`, color: 'var(--text-primary)' }}>
+                  <div style={{ marginLeft: 'auto', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '2px 8px', borderRadius: '12px', background: `color-mix(in srgb, ${domainColor(domainOf(selectedSvc))} 12%, transparent)`, color: 'var(--text-primary)' }}>
                     {roleLabel(selectedSvc.dataLineageRole, t)}
                   </div>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                   <div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('DOMÉNA', 'DOMAIN')}</div>
-                    <div style={{ fontSize: '12px', color: DOMAIN_META[domainOf(selectedSvc)].color, fontWeight: 600 }}>{domLabel(domainOf(selectedSvc))}</div>
+                    <div style={{ fontSize: '12px', color: domainColor(domainOf(selectedSvc)), fontWeight: 600 }}>{domLabel(domainOf(selectedSvc))}</div>
                   </div>
                   <div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginBottom: '4px' }}>{t('ROZHRANÍ', 'INTERFACES')}</div>

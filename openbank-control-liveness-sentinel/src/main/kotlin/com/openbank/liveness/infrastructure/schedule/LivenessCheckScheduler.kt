@@ -5,13 +5,18 @@
 
 package com.openbank.liveness.infrastructure.schedule
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.liveness.application.port.incoming.RunLivenessCheckUseCase
 import com.openbank.liveness.domain.model.RunTrigger
+import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -35,6 +40,8 @@ import java.util.concurrent.atomic.AtomicLong
  * having done nothing, silently -- five schedulers in this fleet had never run for exactly that
  * reason (#2148, #2187), and it is now a hard rule (`rules.yaml: scheduled_methods`).
  */
+// @Startup: the heartbeat must be registered at boot, or the watcher's own staleness is invisible.
+@Startup
 @ApplicationScoped
 class LivenessCheckScheduler {
 
@@ -43,6 +50,11 @@ class LivenessCheckScheduler {
 
     @Inject
     lateinit var temporalConfig: TemporalConfig
+
+    @Inject
+    lateinit var metrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
 
     private val log = Logger.getLogger(LivenessCheckScheduler::class.java)
     private val fires = AtomicLong(0)
@@ -56,6 +68,13 @@ class LivenessCheckScheduler {
      */
     val fireCount: Long get() = fires.get()
 
+    @PostConstruct
+    fun registerHeartbeat() {
+        // Daily cadence. The LivenessSentinelHeartbeatAbsent rule alerts when this gauge is missing: the
+        // sentinel cannot watch itself, so something outside it has to.
+        liveness = metrics.registerWorkflowLiveness("liveness-sentinel-check", Duration.ofDays(1))
+    }
+
     @Scheduled(
         cron = "{openbank.liveness-sentinel.check-cron}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
@@ -68,5 +87,7 @@ class LivenessCheckScheduler {
         }
         val workflowId = runCheck.startDetached(RunTrigger.SCHEDULED)
         log.infof("Scheduled control-liveness check dispatched as workflow %s", workflowId)
+        // Disabled-Temporal returns above WITHOUT recording: a skipped check must not read as a pass.
+        liveness?.recordSuccess()
     }
 }

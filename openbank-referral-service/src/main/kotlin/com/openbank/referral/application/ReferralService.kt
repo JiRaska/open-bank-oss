@@ -69,6 +69,9 @@ class ReferralService(
 
     suspend fun listPublishedPrograms(): List<ReferralProgram> = programs.listPublished()
 
+    /** DRAFT programs, newest first — what the marketing maker sees as "my open concepts". */
+    suspend fun listDraftPrograms(): List<ReferralProgram> = programs.listDrafts()
+
     suspend fun publishedProgram(id: UUID): ReferralProgram? =
         programs.find(id)?.takeIf { it.status == ProgramStatus.PUBLISHED }
 

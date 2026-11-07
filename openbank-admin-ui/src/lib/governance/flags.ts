@@ -16,7 +16,9 @@
 // Sourcing mirrors the governance-docs bundle pattern (lib/governance/docs.ts):
 // openbank-infra/ is .dockerignore'd out of the runtime fs, so the Dockerfile's
 // `flags-collector` stage bakes each feature-flags.yaml into an immutable
-// /app/flags-bundle/<svc>.yaml. First existing candidate wins:
+// /app/flags-bundle/<svc>.yaml. Published declarations take precedence, with an explicit
+// stale image fallback. These values are repository intent, not runtime flagd evaluation.
+// Fallback candidates:
 //   1. $OPENBANK_FLAGS_BUNDLE   (explicit override; set in the image)
 //   2. <cwd>/flags-bundle       (image-baked bundle, flat <svc>.yaml files)
 //   3. <cwd>/../openbank-infra/gitops/components  (local dev: repo tree)
@@ -24,18 +26,10 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { parse as parseYaml } from 'yaml'
+import { resolveRepositoryDocumentation, repositoryDocumentationFallback, repositoryCatalogClassification } from '@/lib/evidence/repositoryDocumentationSource'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
-// Money-path services (source: openbank-libs/governance/rules.yaml →
-// money_path_services). A flag on one of these is classified MONEY_PATH and a
-// flip would require four-eyes (ADR-0067 §5, enforcement tracked in #419).
-const MONEY_PATH = new Set([
-  'ledger-service', 'transaction-service', 'account-service', 'balance-service',
-  'sepa-payment', 'sepa-instant', 'domestic-payment', 'clearing-service',
-  'swift-service', 'fx-service', 'lending-service', 'sca-service', 'consent-service',
-  'fraud-service',
-])
-
-export type FlagClassification = 'money-path' | 'feature'
+export type FlagClassification = 'money-path' | 'feature' | 'unknown'
 
 export interface FlagMeta {
   /** Owning service, e.g. "party-service". */
@@ -96,7 +90,7 @@ function serviceOf(cm: Record<string, unknown>): string {
 
 /** Parse one feature-flags.yaml ConfigMap into FlagMeta rows. Defensive: a malformed
  *  file yields no rows rather than throwing — a registry must not 500 on bad input. */
-function parseConfigMap(yamlText: string): FlagMeta[] {
+function parseConfigMap(yamlText: string, moneyPathServices: Set<string>, knownServices: Set<string>): FlagMeta[] {
   let cm: Record<string, unknown>
   try {
     cm = parseYaml(yamlText) as Record<string, unknown>
@@ -114,7 +108,8 @@ function parseConfigMap(yamlText: string): FlagMeta[] {
   const flags = parsed.flags ?? {}
 
   const service = serviceOf(cm)
-  const classification: FlagClassification = MONEY_PATH.has(service) ? 'money-path' : 'feature'
+  const canonical = service.replace(/^openbank-/, '')
+  const classification: FlagClassification = !knownServices.has(canonical) ? 'unknown' : moneyPathServices.has(canonical) ? 'money-path' : 'feature'
 
   return Object.entries(flags).map(([key, def]) => ({
     service,
@@ -128,12 +123,24 @@ function parseConfigMap(yamlText: string): FlagMeta[] {
 }
 
 /** Load the whole fleet's feature-flag catalog, sorted by service then key. */
-export async function loadFlagCatalog(): Promise<FlagMeta[]> {
+export async function loadFlagCatalogContent(): Promise<{ items: FlagMeta[]; contentSource: ContentSourceMetadata }> {
+  const published = await resolveRepositoryDocumentation()
+  if (published.value) return { items: [...published.value.featureFlags].sort((a, b) => a.service.localeCompare(b.service) || a.key.localeCompare(b.key)), contentSource: published.contentSource }
   const src = await flagsSource()
-  if (!src) return []
+  if (!src) return { items: [], contentSource: repositoryDocumentationFallback(false, published.contentSource.detail) }
+  let moneyPathServices = new Set<string>()
+  let knownServices = new Set<string>()
+  try {
+    const classification = repositoryCatalogClassification(JSON.parse(await fs.readFile(process.env.OPENBANK_CATALOG ?? path.resolve(process.cwd(), 'catalog.json'), 'utf-8')))
+    if (classification) {
+      knownServices = new Set(classification.keys())
+      moneyPathServices = new Set([...classification].filter(([, moneyPath]) => moneyPath).map(([service]) => service))
+    }
+  } catch { /* Unknown services are not promoted into the money-path class. */ }
   const files = await flagFiles(src)
-  const all = await Promise.all(
-    files.map(async f => parseConfigMap(await fs.readFile(f, 'utf-8'))),
-  )
-  return all.flat().sort((a, b) => a.service.localeCompare(b.service) || a.key.localeCompare(b.key))
+  const all = await Promise.all(files.map(async file => parseConfigMap(await fs.readFile(file, 'utf-8'), moneyPathServices, knownServices)))
+  return { items: all.flat().sort((a, b) => a.service.localeCompare(b.service) || a.key.localeCompare(b.key)),
+    contentSource: repositoryDocumentationFallback(true, published.contentSource.detail) }
 }
+
+export async function loadFlagCatalog(): Promise<FlagMeta[]> { return (await loadFlagCatalogContent()).items }

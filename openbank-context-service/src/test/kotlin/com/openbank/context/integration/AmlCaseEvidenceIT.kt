@@ -139,7 +139,9 @@ class AmlCaseEvidenceIT {
         assertThat(history(id).observations).isEmpty()
         onVertx { repository.append(event.copy(status = "ESCALATED")) }
         assertThat(history(id).observations.single().evidence.status).isEqualTo("ESCALATED")
-        assertThat(onVertx { other.history(id, Instant.now(), Instant.now()) }.observations.single().evidence)
+        // Match history(id)'s clock-skew allowance; this assertion checks bank isolation.
+        val bound = Instant.now().plusSeconds(60)
+        assertThat(onVertx { other.history(id, bound, bound) }.observations.single().evidence)
             .isEqualTo(event)
     }
 

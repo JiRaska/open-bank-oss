@@ -27,6 +27,7 @@ import path from 'node:path'
 
 const API_DIR = path.resolve(__dirname, '../app/api/communication')
 const PAGE_DIR = path.resolve(__dirname, '../app/communication')
+const NOTIFICATION_EDITOR_DIR = path.join(PAGE_DIR, 'notification-templates')
 
 const WRITE_HANDLER = /export\s+(?:async\s+)?function\s+(POST|PUT|PATCH|DELETE)\b/
 
@@ -53,10 +54,19 @@ describe('ADR-0285 D1 — the prompt core is read-only', () => {
     // A <form>, a <textarea> or a contentEditable region on these pages would mean the read-only
     // projection has grown an editor without the service, the linter and the four-eyes step that
     // ADR-0285 D3/D4 require around one.
+    // The notification editor is a separate deterministic-copy surface. Its writes go to
+    // notification-service; it never edits the Communication Studio prompt core.
     const offenders = filesUnder(PAGE_DIR)
       .filter(file => file.endsWith('.tsx'))
+      .filter(file => !file.startsWith(`${NOTIFICATION_EDITOR_DIR}${path.sep}`))
       .filter(file => /<form\b|<textarea\b|contentEditable/i.test(readFileSync(file, 'utf8')))
 
     expect(offenders).toEqual([])
+  })
+
+  it('keeps notification editing on the notification-service route', () => {
+    const editor = readFileSync(path.join(NOTIFICATION_EDITOR_DIR, 'page.tsx'), 'utf8')
+    expect(editor).toContain('/api/svc/notification-service/api/v1/notification-templates')
+    expect(editor).not.toMatch(/\/api\/communication\b/)
   })
 })

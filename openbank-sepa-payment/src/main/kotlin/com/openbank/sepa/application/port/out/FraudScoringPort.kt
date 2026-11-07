@@ -4,18 +4,13 @@
 
 package com.openbank.sepa.application.port.out
 
+import com.openbank.libs.fincrime.FraudVerdict
 import java.math.BigDecimal
 import java.util.UUID
 
-/** Fraud verdict contract (ADR-0084 §1). In SHADOW the use-case logs it and proceeds regardless. */
-/**
- * [UNKNOWN] is what the adapter reports when fraud-service answered with a verdict this rail does
- * not recognise, or with none at all (#4403). It is deliberately **not** [ALLOW]: a response that
- * could not be read says nothing about the payment, and an enforcing caller must never be able to
- * read it as a clean score. It is also not a synthetic outcome — fraud-service was reachable.
- */
-enum class FraudVerdict { ALLOW, CHALLENGE, REVIEW, DECLINE, UNKNOWN }
-
+// Fraud verdict contract (ADR-0084 §1): `FraudVerdict` is the shared type in openbank-libs-fincrime
+// (ADR-0353), whose UNKNOWN is what an unreadable answer reads as — never ALLOW (#4403).
+// In SHADOW the use-case logs it and proceeds regardless.
 /** What the payment boundary knows when it asks the fraud scorer for a verdict. */
 data class FraudScoreCommand(
     val amount: BigDecimal,

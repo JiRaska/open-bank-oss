@@ -12,8 +12,11 @@ import au.com.dius.pact.consumer.junit5.PactTestFor
 import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
+import com.openbank.clients.transaction.api.TransactionsApi
+import com.openbank.clients.transaction.model.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
@@ -21,6 +24,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -78,6 +82,9 @@ import java.util.UUID
 class SddCollectionDebitPactConsumerTest {
 
     private val mapper = jacksonObjectMapper()
+        .registerModule(JavaTimeModule())
+        // Quarkus' mapper writes java.time as ISO strings; the bare test mapper would write an array.
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
     /**
      * Exactly what `SddCollectionDebitConsumer.debitRequestFrom` builds for an authorised
@@ -92,7 +99,7 @@ class SddCollectionDebitPactConsumerTest {
         amount = BigDecimal("89.90"),
         currencyCode = "EUR",
         description = "SEPA Direct Debit DE98ZZZ09999999999 / $UMR",
-        valueDate = DUE_DATE,
+        valueDate = LocalDate.parse(DUE_DATE),
         rail = "SEPA_CT",
         instructionType = "DIRECT_DEBIT",
     )
@@ -208,9 +215,16 @@ class SddCollectionDebitPactConsumerTest {
          */
         const val EXPECTED_TRANSACTIONS_PATH = "/api/v1/transactions"
 
+        /**
+         * The route lives on the GENERATED interface the client extends (ADR-0319); a `@Path` restated
+         * on the consumer sub-interface would win, so read that first.
+         */
         fun clientDerivedTransactionsPath(): String {
-            val base = TransactionServiceClient::class.java.getAnnotation(Path::class.java)?.value.orEmpty()
-            val method = TransactionServiceClient::class.java.methods
+            val base = (
+                TransactionServiceClient::class.java.getAnnotation(Path::class.java)
+                    ?: TransactionsApi::class.java.getAnnotation(Path::class.java)
+                )?.value.orEmpty()
+            val method = TransactionsApi::class.java.methods
                 .single { it.name == "initiateTransaction" }
                 .getAnnotation(Path::class.java)
                 ?.value

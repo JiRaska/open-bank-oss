@@ -18,6 +18,7 @@
 | `V3__create_audit_outbox.sql` | Creates `audit_outbox` (BIGSERIAL `id` PK, unique `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus `(status, created_at)` and `aggregate_id` indexes. **Removed by V16** — see below. |
 | `V4__hibernate_sequences.sql` | Creates `audit_entries_seq` and `audit_outbox_seq` (`INCREMENT BY 50`) required by PanacheEntity id allocation. Rollback: `DROP SEQUENCE audit_entries_seq, audit_outbox_seq;`. |
 | `V16__drop_audit_outbox.sql` | Drops `audit_outbox` and `audit_outbox_seq` — the transactional-outbox apparatus built on top of it had zero writers anywhere in the service (#5126). Rollback recreates the table/indexes/sequence as of V8 (see the migration's own comment). |
+| `V17__widen_audit_identity_columns.sql` | Widens `event_type`, `aggregate_id`, `actor_id`, `source_service`, `correlation_id` and `session_id` on `audit_entries` from `VARCHAR(100)` to `VARCHAR(512)`, so a long producer value is stored verbatim instead of failing the INSERT and dead-lettering. Metadata-only: no table rewrite, and every stored `record_hash` is untouched. Rollback: forward-only once a row exceeds 100 characters. |
 
 ## Tables
 
@@ -27,18 +28,18 @@
 |---|---|---|
 | `id` | BIGSERIAL PK | Surrogate; ids allocated from `audit_entries_seq` |
 | `entry_id` | UUID, unique, not null | Logical entry id (exposed in API) |
-| `event_type` | VARCHAR(100) | Producer event name |
+| `event_type` | VARCHAR(512) | Producer event name |
 | `aggregate_type` | VARCHAR(50) | ACCOUNT / PARTY / TRANSACTION / CONSENT / KYC_CASE / UNKNOWN |
-| `aggregate_id` | VARCHAR(100) | Indexed; primary query key |
-| `actor_id` | VARCHAR(100), null | Who triggered the event |
+| `aggregate_id` | VARCHAR(512) | Indexed; primary query key |
+| `actor_id` | VARCHAR(512), null | Who triggered the event |
 | `actor_type` | VARCHAR(50), null | Actor classification |
 | `payload` | TEXT, not null | Original event JSON, verbatim |
-| `source_service` | VARCHAR(100) | Originating service |
-| `correlation_id` | VARCHAR(100), null | Trace correlation |
+| `source_service` | VARCHAR(512) | Originating service |
+| `correlation_id` | VARCHAR(512), null | Trace correlation |
 | `occurred_at` | TIMESTAMPTZ | Business time — real only when `occurred_at_source = 'EVENT'` |
 | `recorded_at` | TIMESTAMPTZ, default NOW() | Ingest time |
 | `occurred_at_source` | VARCHAR(8), null | (V11) `EVENT` = producer sent `occurredAt`; `INGEST` = it did not, so `occurred_at` is ingest time (an upper bound); NULL = pre-V11 row, treat as `INGEST` |
-| `session_id` | VARCHAR(100), null | (V2) |
+| `session_id` | VARCHAR(512), null | (V2) |
 | `user_agent` | VARCHAR(500), null | (V2) |
 | `ip_address` | VARCHAR(45), null | (V2) — IPv4/IPv6 |
 | `data_sensitivity` | VARCHAR(20), default INTERNAL | (V2) PUBLIC/INTERNAL/CONFIDENTIAL/RESTRICTED |
@@ -70,3 +71,10 @@ See [06 — Compliance](./06-compliance.md) for the lawful-basis and erasure ana
 
 - **10 years**, enforced two ways: a per-row `retention_until = occurred_at + INTERVAL '10 years'` set by the `trg_audit_retention` trigger, and the service property `openbank.gdpr.audit-retention-days: 3650`.
 - Deletion before `retention_until` is not just policy — the DB-level delete rule blocks it entirely. Purge after expiry is an operational concern (a separate, audited maintenance job), not an ad-hoc `DELETE`.
+
+
+## Bank-own transfer rail status (ADR-0344 phase 1b)
+
+audit-service also reads `openbank.swift.institution-transfers`, swift-service's status of each bank-own transfer. It is money-path: each status is a transfer the rail executed. Rows are attributed to `swift-service` through the shared `TopicProducers` table, and the audit KafkaUser holds Read on the topic (`kafka-audit-mtls.yaml`).
+
+audit-service also subscribes to `openbank.accounts.account.status-changed` and `openbank.accounts.savings-withdrawal.approved` (#9073), both attributed to `account-service` through `TopicProducers`. The subscriptions land before account-service moves those events off `openbank.accounts.account.created`, so no event is missed during the switch; the audit KafkaUser holds Read on both topics.

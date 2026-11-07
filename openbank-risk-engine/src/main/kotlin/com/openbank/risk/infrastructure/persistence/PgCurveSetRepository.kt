@@ -9,8 +9,8 @@ import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.domain.curve.Curve
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurvePillar
+import com.openbank.risk.domain.curve.CurveQuote
 import com.openbank.risk.domain.curve.CurveSet
-import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.model.Provenance
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -26,21 +26,17 @@ import java.util.UUID
 @ApplicationScoped
 class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
 
-    override suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>) {
+    override suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<CurveQuote>>) {
         write(set, quotes, INSERT_SET)
     }
 
-    override suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean =
+    override suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<CurveQuote>>): Boolean =
         write(set, quotes, INSERT_SET_IF_ABSENT)
 
     /** True when [insertSet] stored the set row; quotes and pillars are written only then. */
-    private suspend fun write(
-        set: CurveSet,
-        quotes: Map<CurveIndex, List<MoneyMarketQuote>>,
-        insertSet: String,
-    ): Boolean {
+    private suspend fun write(set: CurveSet, quotes: Map<CurveIndex, List<CurveQuote>>, insertSet: String): Boolean {
         val quoteRows = quotes.flatMap { (index, qs) ->
-            qs.map { Tuple.tuple(listOf(set.id, index.name, it.tenor.code, it.simpleRate)) }
+            qs.map { Tuple.tuple(listOf(set.id, index.name, it.code, it.rate, it.instrument.name)) }
         }
         val pillarRows = set.curves.flatMap { (index, curve) ->
             curve.pillars.map { Tuple.tuple(listOf(set.id, index.name, it.date, it.zeroRate)) }
@@ -101,6 +97,11 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
         )
     }
 
+    override suspend fun latestPerDayBetween(from: LocalDate, to: LocalDate): List<CurveSet> =
+        pool.preparedQuery(SELECT_LATEST_PER_DAY).execute(Tuple.of(from, to)).awaitSuspending()
+            .map { it.getUUID("id") }
+            .mapNotNull { findById(it) }
+
     override suspend fun latestIdFor(asOf: LocalDate): UUID? =
         pool.preparedQuery(SELECT_LATEST_FOR).execute(Tuple.of(asOf)).awaitSuspending().firstOrNull()?.getUUID("id")
 
@@ -109,7 +110,8 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
             "INSERT INTO curve_set (id, as_of, provenance, source, recorded_at) VALUES ($1, $2, $3, $4, $5)"
         const val INSERT_SET_IF_ABSENT = "$INSERT_SET ON CONFLICT (id) DO NOTHING"
         const val INSERT_QUOTE =
-            "INSERT INTO curve_set_quote (curve_set_id, curve_index, tenor, simple_rate) VALUES ($1, $2, $3, $4)"
+            "INSERT INTO curve_set_quote (curve_set_id, curve_index, tenor, simple_rate, instrument) " +
+                "VALUES ($1, $2, $3, $4, $5)"
         const val INSERT_PILLAR =
             "INSERT INTO curve_set_pillar (curve_set_id, curve_index, pillar_date, zero_rate) VALUES ($1, $2, $3, $4)"
         const val SELECT_RECENT =
@@ -119,6 +121,9 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
                 "WHERE ($2::date IS NULL OR s.as_of = $2::date) ORDER BY s.recorded_at DESC, s.id LIMIT $1"
         const val SELECT_LATEST_FOR =
             "SELECT id FROM curve_set WHERE as_of = $1 ORDER BY recorded_at DESC, id LIMIT 1"
+        const val SELECT_LATEST_PER_DAY =
+            "SELECT DISTINCT ON (as_of) id, as_of FROM curve_set WHERE as_of BETWEEN $1 AND $2 " +
+                "ORDER BY as_of, recorded_at DESC, id"
         const val SELECT_SET = "SELECT id, as_of, provenance, source, recorded_at FROM curve_set WHERE id = $1"
         const val SELECT_PILLARS =
             "SELECT curve_index, pillar_date, zero_rate FROM curve_set_pillar WHERE curve_set_id = $1 " +

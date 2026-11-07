@@ -16,13 +16,11 @@ import java.util.UUID
  * - [CHALLENGE] — require (re-)SCA / step-up before execution.
  * - [REVIEW]    — hold the payment, open an operator review case (four-eyes release, ADR-0068).
  * - [DECLINE]   — reject with a customer-safe reason code.
+ *
+ * Declared once in `openbank-libs-fincrime` (ADR-0353 D4), shared with the rails. Its consumer-only
+ * value `UNKNOWN` is never produced here and never put on the wire (FraudResource refuses it).
  */
-enum class FraudVerdict {
-    ALLOW,
-    CHALLENGE,
-    REVIEW,
-    DECLINE,
-}
+typealias FraudVerdict = com.openbank.libs.fincrime.FraudVerdict
 
 /**
  * Payment context handed to the scorer. Pure value object — the four payment surfaces populate it
@@ -56,6 +54,14 @@ data class ScoreRequest(
 /**
  * Scoring result. [score] is a deterministic numeric risk score (0 = no risk); [verdict] is the
  * mapped contract outcome; [reasons] explain which rules fired; [ruleVersion] pins the exact
- * versioned rule set that produced this verdict for the audit trail and RTS Art. 18 baseline.
+ * versioned rule set that produced this verdict for the audit trail and RTS Art. 18 baseline;
+ * [thresholdSetVersion] pins the money-threshold set it was evaluated against (ADR-0347), null when
+ * none was active (the fail-closed path). Together they reconstruct any verdict.
  */
-data class FraudScore(val verdict: FraudVerdict, val score: Int, val reasons: List<String>, val ruleVersion: String)
+data class FraudScore(
+    val verdict: FraudVerdict,
+    val score: Int,
+    val reasons: List<String>,
+    val ruleVersion: String,
+    val thresholdSetVersion: Int? = null,
+)

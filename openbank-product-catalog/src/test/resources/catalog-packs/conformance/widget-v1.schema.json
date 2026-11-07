@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.conformance.widget:1",
+  "$comment": "Test-only pack (#13429): proves a pack the kernel has never heard of can declare its own approval roles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["readiness"],
+  "properties": {
+    "readiness": { "type": "string", "enum": ["DRAFTING", "READY"] }
+  }
+}

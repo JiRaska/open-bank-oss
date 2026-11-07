@@ -9,8 +9,10 @@ import com.openbank.billing.application.port.out.LedgerPostingPort
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.domain.FeeReversalCommand
 import com.openbank.billing.infrastructure.outbox.LedgerOutboxEventPublisher
+import com.openbank.billing.infrastructure.outbox.UnauthorisedRebillException
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -56,7 +58,7 @@ class LedgerOutboxEventPublisherTest {
     private fun payload(idempotencyKey: String = "fee-2026-07-acc-1-f1-CZK") =
         "{\"schemaVersion\":1,\"idempotencyKey\":\"$idempotencyKey\",\"cycleId\":\"2026-07\"," +
             "\"accountId\":\"acc-1\",\"feeId\":\"f1\",\"amount\":\"150.00\",\"currency\":\"CZK\"," +
-            "\"description\":\"Fee charge: Maintenance\"}"
+            "\"description\":\"Fee charge: Maintenance\",\"accountingClass\":\"CUSTOMER_DEPOSIT_SAVINGS\"}"
 
     @Test
     fun `publish posts the deserialized command to the ledger and marks the fee POSTED with the journal id`(): Unit =
@@ -68,7 +70,12 @@ class LedgerOutboxEventPublisherTest {
             coEvery { ledger.post(capture(commandSlot)) } returns journalId
             coEvery { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload()))
+            LedgerOutboxEventPublisher(
+                ledger,
+                assessments,
+                noOpEmitter(),
+                SimpleMeterRegistry(),
+            ).publish(entry(payload()))
 
             coVerify(exactly = 1) { ledger.post(any()) }
             coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
@@ -81,13 +88,158 @@ class LedgerOutboxEventPublisherTest {
         }
 
     @Test
+    fun `the accounting class in the payload reaches the ledger command and the legacy counter stays zero`(): Unit =
+        runBlocking {
+            val ledger = mockk<LedgerPostingPort>()
+            val assessments = mockk<BillingAssessmentRepository>()
+            val meters = SimpleMeterRegistry()
+            val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+            coEvery { ledger.post(capture(commandSlot)) } returns UUID.randomUUID()
+            coEvery { assessments.markPosted(any(), any()) } returns Unit
+
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(payload()))
+
+            assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_SAVINGS")
+            assertThat(meters.find("openbank.billing.fee.post.legacy_payload").counter()).isNull()
+        }
+
+    @Test
+    fun `a row written before accounting classes still posts, as the demand deposit class, and is counted`(): Unit =
+        runBlocking {
+            val ledger = mockk<LedgerPostingPort>()
+            val assessments = mockk<BillingAssessmentRepository>()
+            val meters = SimpleMeterRegistry()
+            val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+            coEvery { ledger.post(capture(commandSlot)) } returns UUID.randomUUID()
+            coEvery { assessments.markPosted(any(), any()) } returns Unit
+            val legacy = payload().replace(",\"accountingClass\":\"CUSTOMER_DEPOSIT_SAVINGS\"", "")
+            assertThat(legacy).doesNotContain("accountingClass")
+
+            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(legacy))
+
+            assertThat(commandSlot.captured.accountingClass).isEqualTo("CUSTOMER_DEPOSIT_DEMAND")
+            assertThat(meters.get("openbank.billing.fee.post.legacy_payload").counter().count()).isEqualTo(1.0)
+        }
+
+    // ADR-0342 D4: a closed accounting day cannot be retried into, so the fee is FAILED at once and
+    // the row completes; BillingCloseParticipationScheduler then reports the cycle's day REFUSED.
+    @Test
+    fun `a closed-day 409 marks the fee FAILED, completes the row and is counted`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val meters = SimpleMeterRegistry()
+        coEvery { ledger.post(any()) } throws jakarta.ws.rs.WebApplicationException(
+            jakarta.ws.rs.core.Response.status(409)
+                .entity("{\"code\":\"ACCOUNTING_DAY_CLOSED\",\"message\":\"day is LOCKED\"}").build(),
+        )
+        coEvery { assessments.markFailed(any()) } returns Unit
+
+        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters).publish(entry(payload()))
+
+        coVerify(exactly = 1) { assessments.markFailed("fee-2026-07-acc-1-f1-CZK") }
+        coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+        assertThat(meters.get("openbank.billing.fee.post.closed_day_refusals").counter().count()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `any other 409 still propagates for the outbox to retry`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        coEvery { ledger.post(any()) } throws jakarta.ws.rs.WebApplicationException(
+            jakarta.ws.rs.core.Response.status(409).entity("{\"code\":\"IDEMPOTENCY_CONFLICT\"}").build(),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry())
+                    .publish(entry(payload()))
+            }
+        }.isInstanceOf(jakarta.ws.rs.WebApplicationException::class.java)
+        coVerify(exactly = 0) { assessments.markFailed(any()) }
+    }
+
+    // Runbook 0033: a re-bill posts under its own new key and settles the ORIGINAL fee row.
+    @Test
+    fun `a re-bill row posts under the new key and marks the original fee POSTED`(): Unit = runBlocking {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val journalId = UUID.randomUUID()
+        val commandSlot: CapturingSlot<FeeJournalCommand> = slot()
+        coEvery { ledger.post(capture(commandSlot)) } returns journalId
+        coEvery { assessments.markPosted(any(), any()) } returns Unit
+        val rebill = payload("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-1-f1-CZK\"}")
+
+        // Approved: the store holds exactly this (new key -> original) pairing.
+        val approved = com.openbank.billing.application.port.out.FeeRebillPort { rebillKey, originalKey ->
+            rebillKey == "fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03" && originalKey == "fee-2026-07-acc-1-f1-CZK"
+        }
+        LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), SimpleMeterRegistry(), approved)
+            .publish(entry(rebill))
+
+        assertThat(commandSlot.captured.idempotencyKey).isEqualTo("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+        coVerify(exactly = 1) { assessments.markPosted("fee-2026-07-acc-1-f1-CZK", journalId) }
+    }
+
+    // #13709 review: an outbox row is just text. A hand-written row naming any `rebillOf` must not
+    // settle that fee: without an approved billing_fee_rebill record it is refused BEFORE the ledger
+    // sees it, counted, and nothing is marked.
+    @Test
+    fun `a hand-written re-bill row with no approved record is refused before posting and counted`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val meters = SimpleMeterRegistry()
+        val forged = payload("fee-2026-07-acc-9-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-9-f1-CZK\"}")
+        val nothingApproved = com.openbank.billing.application.port.out.FeeRebillPort { _, _ -> false }
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter(), meters, nothingApproved)
+                    .publish(entry(forged))
+            }
+        }.isInstanceOf(UnauthorisedRebillException::class.java)
+
+        coVerify(exactly = 0) { ledger.post(any()) }
+        coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
+        assertThat(meters.get("openbank.billing.fee.rebill.refused").counter().count()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `the store-less constructor refuses every re-bill (fail closed)`() {
+        val ledger = mockk<LedgerPostingPort>()
+        val assessments = mockk<BillingAssessmentRepository>()
+        val rebill = payload("fee-2026-07-acc-1-f1-CZK:rebill:2026-07-03")
+            .replace("}", ",\"rebillOf\":\"fee-2026-07-acc-1-f1-CZK\"}")
+
+        assertThatThrownBy {
+            runBlocking {
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(entry(rebill))
+            }
+        }.isInstanceOf(UnauthorisedRebillException::class.java)
+        coVerify(exactly = 0) { ledger.post(any()) }
+    }
+
+    @Test
     fun `a ledger failure propagates and does not mark the fee posted`() {
         val ledger = mockk<LedgerPostingPort>()
         val assessments = mockk<BillingAssessmentRepository>()
         coEvery { ledger.post(any()) } throws RuntimeException("ledger down")
 
         assertThatThrownBy {
-            runBlocking { LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(entry(payload())) }
+            runBlocking {
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(entry(payload()))
+            }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
         coVerify(exactly = 0) { assessments.markPosted(any(), any()) }
@@ -126,7 +278,12 @@ class LedgerOutboxEventPublisherTest {
                 assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId)
             } returns Unit
 
-            LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
+            LedgerOutboxEventPublisher(
+                ledger,
+                assessments,
+                noOpEmitter(),
+                SimpleMeterRegistry(),
+            ).publish(reversalEntry(reversalPayload()))
 
             coVerify(exactly = 1) { ledger.postReversal(any()) }
             coVerify(exactly = 1) { assessments.markReversed("fee-2026-07-acc-1-f1-CZK", reversalJournalId) }
@@ -146,7 +303,12 @@ class LedgerOutboxEventPublisherTest {
 
         assertThatThrownBy {
             runBlocking {
-                LedgerOutboxEventPublisher(ledger, assessments, noOpEmitter()).publish(reversalEntry(reversalPayload()))
+                LedgerOutboxEventPublisher(
+                    ledger,
+                    assessments,
+                    noOpEmitter(),
+                    SimpleMeterRegistry(),
+                ).publish(reversalEntry(reversalPayload()))
             }
         }.isInstanceOf(RuntimeException::class.java).hasMessageContaining("ledger down")
 
@@ -175,7 +337,12 @@ class LedgerOutboxEventPublisherTest {
         every { emitter.sendMessage(capture(messageSlot)) } returns Uni.createFrom().voidItem()
         val payload = "{\"eventType\":\"AnnualFeeSummaryReady\",\"accountId\":\"acc-1\"}"
 
-        LedgerOutboxEventPublisher(ledger, assessments, emitter).publish(annualSummaryEntry(payload))
+        LedgerOutboxEventPublisher(
+            ledger,
+            assessments,
+            emitter,
+            SimpleMeterRegistry(),
+        ).publish(annualSummaryEntry(payload))
 
         coVerify(exactly = 0) { ledger.post(any()) }
         coVerify(exactly = 0) { ledger.postReversal(any()) }

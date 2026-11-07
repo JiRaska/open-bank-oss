@@ -8,10 +8,9 @@
 # silently never resolve (see the comment there). This ConfigMap supplies them
 # instead as a Quarkus external config source.
 #
-# Why a properties FILE and not env vars: this mirrors the pre-existing pattern already used
-# for transaction-service's payment-scheme-accepted channel (transaction-service-msg-override.yaml).
-# A properties file carries the exact hyphenated keys unambiguously, avoiding any reliance on
-# MicroProfile Config's env-var-name reverse-mapping for channel discovery.
+# Why a properties FILE and not env vars: a properties file carries the exact hyphenated keys
+# unambiguously, avoiding any reliance on MicroProfile Config's env-var-name reverse-mapping for
+# channel discovery.
 #
 # Correction (round 2): an earlier version of this comment first cited a nonexistent issue
 # #2649, then over-corrected to claim env vars are "independently verified to work" here — that

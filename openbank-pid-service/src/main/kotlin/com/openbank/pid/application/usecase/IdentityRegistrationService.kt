@@ -9,7 +9,6 @@ import com.openbank.libs.identity.RodneCislo
 import com.openbank.pid.application.port.`in`.RegisterIdentityCommand
 import com.openbank.pid.application.port.`in`.RegisterIdentityUseCase
 import com.openbank.pid.application.port.out.PartyRepository
-import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.ContactAttributes
 import com.openbank.pid.domain.model.CoreAttributes
 import com.openbank.pid.domain.model.ExternalId
@@ -100,7 +99,8 @@ class IdentityRegistrationService(
             kycLevel = KycLevel.NONE,
             kycCompletedAt = null,
             kycExpiresAt = null,
-            amlRiskScore = AmlRiskScore.LOW,
+            // ADR-0353 D2: a wallet PID presentation proves identity, never risk — no rating here.
+            amlRiskScore = null,
             pepFlag = false,
             sanctionsFlag = false,
             uboVerifiedAt = null,

@@ -6,6 +6,7 @@ package com.openbank.sepa.application.usecase
 
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.domain.error.Unavailable
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.iso20022.Pacs004Reader
 import com.openbank.libs.observability.DomainMetrics
@@ -14,6 +15,7 @@ import com.openbank.sepa.application.port.`in`.HandlePaymentReturnCommand
 import com.openbank.sepa.application.port.`in`.ListSepaPaymentsQuery
 import com.openbank.sepa.application.port.`in`.SepaPaymentUseCase
 import com.openbank.sepa.application.port.`in`.TransitionSepaPaymentStatusCommand
+import com.openbank.sepa.application.port.out.ReversalOutcome
 import com.openbank.sepa.application.port.out.ReversalPort
 import com.openbank.sepa.application.port.out.ReversalUnavailableException
 import com.openbank.sepa.application.port.out.SepaPaymentEventPublisher
@@ -24,6 +26,7 @@ import com.openbank.sepa.domain.event.RETURN_EVIDENCE_EVENT_TYPE
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaRejectReason
+import com.openbank.sepa.domain.model.SepaReturnIntent
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
@@ -250,8 +253,7 @@ class SepaPaymentService(
     /**
      * Handles an inbound pacs.004 payment return from the clearing simulator (ADR-0109).
      * Parses the XML, resolves the original payment by endToEndId, triggers a ledger reversal
-     * in transaction-service (best-effort: failure is logged, transition still proceeds),
-     * and advances the payment to RETURNED.
+     * in transaction-service under a durable intent. Only a proven reversal advances to RETURNED.
      */
     override suspend fun handlePaymentReturn(command: HandlePaymentReturnCommand): SepaPayment {
         val returnMsg = try {
@@ -269,50 +271,78 @@ class SepaPaymentService(
         // Idempotent: already returned
         if (payment.status == SepaPaymentStatus.RETURNED) return payment
 
-        val txId = payment.transactionId
-        var reversalPerformed = false
-        var reversalTransactionId: UUID? = null
-        if (txId != null) {
-            try {
-                val reversal = reversalPort.reverseTransaction(
-                    transactionId = txId,
-                    idempotencyKey = "sepa-reversal-${payment.id}",
-                    reason = returnMsg.returnReasonCode ?: "return",
-                )
-                reversalPerformed = reversal.reversed
-                reversalTransactionId = reversal.reversalTransactionId.takeIf { reversal.reversed }
-            } catch (ex: ReversalUnavailableException) {
-                log.warnf(
-                    ex,
-                    "Reversal unavailable for payment %s — transitioning to RETURNED without ledger reversal",
-                    payment.id,
-                )
-            }
-        } else {
-            log.warnf(
-                "No transactionId on payment %s — transitioning to RETURNED without ledger reversal",
-                payment.id,
+        // ADR-0111 permits a return after settlement (COMPLETED). Validate before ledger IO;
+        // the domain transition itself additionally requires the resolved intent for that state.
+        if (payment.status !in setOf(SepaPaymentStatus.PROCESSING, SepaPaymentStatus.COMPLETED)) {
+            throw InvalidSepaPaymentStateTransitionException(
+                "Payment cannot transition to RETURNED from ${payment.status}",
             )
         }
-
-        return persistTransition(
-            payment,
-            SepaPaymentStatus.RETURNED,
-            null,
-            returnMsg.returnReasonCode,
-            // The evidence record and the transition commit together (issue #6056). `reversalPerformed`
-            // is the measured outcome of the call above, not the intent — an evidence record that
-            // claims a reversal a `ReversalUnavailableException` prevented would be worse than none.
-            evidencePayload = eventPublisher.returnEvidencePayload(
-                payment = payment,
-                originalEndToEndId = endToEndId,
-                returnReasonCode = returnMsg.returnReasonCode,
+        val pending = paymentRepository.beginReturn(
+            payment.id,
+            SepaReturnIntent(
+                originalTransactionId = payment.transactionId,
+                firstReceivedAt = Instant.now(clock),
+                reasonCode = returnMsg.returnReasonCode,
                 actorId = command.actorId,
                 actorType = command.actorType,
                 correlationId = command.correlationId,
-                reversalPerformed = reversalPerformed,
-                reversalTransactionId = reversalTransactionId,
             ),
+        )
+        // Another request may have completed while this request waited on the aggregate lock.
+        if (pending.status == SepaPaymentStatus.RETURNED) return pending
+        val intent = checkNotNull(pending.returnIntent)
+        val reversal = reverseReturn(pending)
+        val resolved = pending.copy(
+            returnIntent = intent.copy(
+                resolvedAt = Instant.now(clock),
+                reversalTransactionId = reversal.reversalTransactionId,
+            ),
+        )
+        return persistTransition(
+            resolved,
+            SepaPaymentStatus.RETURNED,
+            null,
+            intent.reasonCode,
+            // The resolved marker, terminal status and both outbox rows commit together (#6056).
+            evidencePayload = eventPublisher.returnEvidencePayload(
+                payment = resolved,
+                originalEndToEndId = resolved.endToEndId,
+                returnReasonCode = intent.reasonCode,
+                actorId = intent.actorId,
+                actorType = intent.actorType,
+                correlationId = intent.correlationId,
+                reversalPerformed = true,
+                reversalTransactionId = reversal.reversalTransactionId,
+            ),
+        )
+    }
+
+    private suspend fun reverseReturn(pending: SepaPayment): ReversalOutcome {
+        val intent = checkNotNull(pending.returnIntent)
+        val txId = intent.originalTransactionId
+            ?: unresolvedReturn(pending.id, "UNRESOLVED_ORIGINAL_TRANSACTION")
+        val reversal = try {
+            reversalPort.reverseTransaction(
+                transactionId = txId,
+                idempotencyKey = intent.idempotencyKey(pending.id),
+                reason = intent.reasonCode ?: "return",
+            )
+        } catch (ex: ReversalUnavailableException) {
+            unresolvedReturn(pending.id, "REVERSAL_UNPROVEN", ex)
+        }
+        if (!reversal.reversed || reversal.reversalTransactionId == null) {
+            unresolvedReturn(pending.id, "REVERSAL_UNPROVEN")
+        }
+        return reversal
+    }
+
+    private suspend fun unresolvedReturn(paymentId: UUID, cause: String, failure: Throwable? = null): Nothing {
+        paymentRepository.markReturnUnresolved(paymentId, cause)
+        throw Unavailable(
+            clientMessage = "Payment return requires reconciliation; repeat only the original return",
+            internalDetail = "SEPA return $paymentId: $cause",
+            cause = failure,
         )
     }
 

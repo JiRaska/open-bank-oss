@@ -1,0 +1,1 @@
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"><FIToFICstmrCdtTrf><GrpHdr><MsgId>M1</MsgId></GrpHdr><CdtTrfTxInf><PmtId><BICFI>BN<!DOCTYPE x PUBLIC "" "http://foo">rAgt><DbtrAcct><Id><IBAN>DE89370400440532013000</IBAN></Id></DbtrAcct></CdtTrfTxInf></FIToFICstmrCdtTrf></Document>

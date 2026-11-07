@@ -10,6 +10,7 @@ import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.UntiedSnapshotException
 import com.openbank.risk.domain.model.InvalidLoanContractException
+import com.openbank.risk.domain.valuation.ComputationTimeoutException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
@@ -41,6 +42,23 @@ class ExceptionMappers {
     fun invalidLoan(e: InvalidLoanContractException): Response = Response.status(Response.Status.BAD_GATEWAY)
         .entity(mapOf("error" to e.message))
         .build()
+
+    /**
+     * ADR-0344 D8: a pricing / valuation / VaR computation ran past its configured wall-clock budget
+     * and was stopped. 503 with a stable code, so a caller can tell "too expensive right now" from a
+     * defect; the work is not retried here.
+     */
+    @ServerExceptionMapper
+    fun computationTimeout(e: ComputationTimeoutException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity(
+                mapOf(
+                    "error" to "COMPUTATION_TIMEOUT",
+                    "operation" to e.operation,
+                    "budgetMillis" to e.budget.toMillis(),
+                ),
+            )
+            .build()
 
     /** ADR-0314 D3: an UNTIED run is never rendered — the caller gets the breaks instead. */
     @ServerExceptionMapper

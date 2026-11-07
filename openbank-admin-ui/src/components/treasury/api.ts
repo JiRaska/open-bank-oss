@@ -8,7 +8,7 @@
 // service account would be refused outright (ACTOR_NOT_PERMITTED, 403).
 import type { z } from 'zod'
 import { svcUrl } from '@/lib/services/bff'
-import { getJson, type Loaded } from '@/components/balance-sheet/api'
+import { getJson, type Loaded } from '@/lib/services/resourceClient'
 import { nostroStatementSchema, type NostroStatement as NostroStatementOut } from '@/components/treasury/contracts'
 
 export const TREASURY = 'treasury-service'

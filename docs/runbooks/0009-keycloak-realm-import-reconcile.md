@@ -127,8 +127,11 @@ survives in it.
    ANALYTICS_SINK_CLIENT_SECRET=... BILLING_CLIENT_SECRET=... DOCUMENT_CLIENT_SECRET=... PARTY_CLIENT_SECRET=... \
    COPILOT_CLIENT_SECRET=... CAMPAIGN_CLIENT_SECRET=... DELEGATION_CLIENT_SECRET=... \
    AGENT_CLIENT_SECRET=... MCP_CLIENT_SECRET=... STATEMENT_CLIENT_SECRET=... \
-   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
+   SYNTHETIC_CATALOG_READ_CLIENT_SECRET=... SYNTHETIC_FX_READ_CLIENT_SECRET=... TREASURY_CLIENT_SECRET=... FINREP_CLIENT_SECRET=... \
+   TAX_REPORTING_CLIENT_SECRET=... LEDGER_PENSION_CO_CLIENT_SECRET=... PENSION_FUND_CLIENT_SECRET=... \
+   SYNTHETIC_LEDGER_SEED_CLIENT_SECRET=... MERGE_RECORDER_CI_CLIENT_SECRET=... \
    DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
+   MARKETING_USER_PASSWORD=... \
    ADMIN_HOST=admin.openbank.local \
      ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
 
@@ -345,6 +348,23 @@ confirmation) moves to the agent's identity with **no** upstream grant, so it st
 If a charter later gains that capability, add the upstream read rule in the same change;
 `AgentMachineGrantCharterAlignmentTest` and `McpMachineGrantCharterAlignmentTest` fail until you do.
 
+### Catalog readers (product-catalog would-DENY triage)
+
+The published catalog no longer admits the shared `openbank-services` principal. Four readers move
+to their own identity with the `catalog:read` scope, granted by name in
+`product_catalog_rest_ext.rego` (`service-named-catalog-read`).
+
+| Keycloak client | Live change | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|---|
+| `openbank-card-issuance` | **new client** + service-account user (ROLE_API) | `keycloak/card-issuance-service` | `card-issuance-service-m2m-oidc` (payments) | `CARD_ISSUANCE_CLIENT_SECRET` |
+| `openbank-document` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+| `openbank-billing` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+| `openbank-lending` | add default client scope `catalog:read` | unchanged | unchanged | unchanged |
+
+Order: create the card-issuance client and seed its KV entry BEFORE the gitops change syncs (its env
+ref is `optional: false`); add the three scopes BEFORE the service images that select the named
+client deploy, or their catalog reads lose `CATALOG_SCOPE_READ` and stay denied once enforced.
+
 ### Tax reporting — pension read models (#12425)
 
 Same recipe, same script, one client. tax-reporting-service is not yet deployed by gitops, so no
@@ -359,6 +379,34 @@ ExternalSecret exists for it; when its component is added, the consuming env var
 pension-fund-service admits `pension-fund.reporting.read` and pension-service admits
 `pension.reporting.aggregate` for this identity alone among machines; it reaches nothing else on
 either service.
+
+### Pension company ledger instance (ledger-pension-co)
+
+Same recipe, one client, with one difference: **no `add-roles` step**. The instance used to project
+the bank's `account-service` KV entry, which is the shared `openbank-services` secret. Its own
+client replaces that copy. The ledger module registers an OIDC-filtered rest client
+(FX revaluation), so the Deployment must carry a provisioned secret. But that job is switched off
+for this instance, so the service account holds no realm role and is granted nothing upstream.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-ledger-pension-co` | `keycloak/ledger-pension-co` | `ledger-service-oidc` (ledger-pension-co) | `LEDGER_PENSION_CO_CLIENT_SECRET` |
+| `openbank-pension-fund` | `keycloak/pension-fund-service` | `pension-fund-service-m2m-oidc` (pension-fund) | `PENSION_FUND_CLIENT_SECRET` |
+
+```sh
+jq '.clients[] | select(.clientId=="openbank-ledger-pension-co") | del(.secret)' \
+  openbank-infra/gitops/components/keycloak/realm-template.json \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-ledger-pension-co --fields id --format csv --noquotes)
+# NO add-roles step. The service account must hold no realm role.
+$KC get clients/$ID/client-secret -r openbank | jq -j .value \
+  | bao kv put openbank/keycloak/ledger-pension-co client_id="$ID" client_secret=-
+```
+
+Verify without revealing: the service account's `role-mappings/realm` holds no `ROLE_*` role, and the
+stored secret length equals Keycloak's. Seed it BEFORE the manifest syncs, because the env ref is
+required. Then `kubectl -n ledger-pension-co annotate externalsecret ledger-service-oidc force-sync="$(date +%s)" --overwrite`
+must report `SecretSynced`, and the ledger pod must roll and become Ready.
 
 ### Treasury deal postings (ADR-0315)
 
@@ -423,6 +471,31 @@ Verify without revealing: `$KC get clients/$ID/default-client-scopes -r openbank
 reports `SecretSynced`. Acceptance is the next scheduled Job exiting 0 with all three checks passing
 (200, JSON, array). Before the KV entry exists the CronJob still runs (its secret ref is
 `optional: true`) and fails red with `credential absent` in its log, never a crash loop.
+
+### Synthetic fx-read client (`fx:read`)
+
+Same shape as the catalog-read client above: a scope plus one secretless-placeholder client, no
+realm role, secret generated by Keycloak and piped to Vault.
+
+| Keycloak object | Source | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|---|
+| client scope `fx:read` | `.clientScopes[]` entry in `realm-template.json` | none | none | none |
+| client `openbank-synthetic-fx-read` | `.clients[]` entry in `realm-template.json` | `keycloak/synthetic-fx-read` | `journey-fx-read-oidc` (observability) | `SYNTHETIC_FX_READ_CLIENT_SECRET` |
+
+```sh
+T=openbank-infra/gitops/components/keycloak/realm-template.json
+jq '.clientScopes[] | select(.name=="fx:read")' "$T" | $KC create client-scopes -r openbank -f -
+jq '.clients[] | select(.clientId=="openbank-synthetic-fx-read") | del(.secret)' "$T" \
+  | $KC create clients -r openbank -f -
+ID=$($KC get clients -r openbank -q clientId=openbank-synthetic-fx-read --fields id --format csv --noquotes)
+# NO add-roles step. The service account must hold no realm role.
+$KC get clients/$ID/client-secret -r openbank | jq -r .value \
+  | bao kv put openbank/keycloak/synthetic-fx-read client_id=openbank-synthetic-fx-read client_secret=-
+```
+
+Verify: `default-client-scopes` lists exactly `basic`, `profile` and `fx:read` (`profile` carries `preferred_username`, which the rego `machine_named` grant matches); the service account holds no
+`ROLE_*` mapping; `kubectl -n observability annotate externalsecret journey-fx-read-oidc force-sync="$(date +%s)" --overwrite`
+reports `SecretSynced`.
 
 The template declares `clientScopes`, and a realm import that declares **any** client scope skips
 Keycloak's built-in defaults (`basic`, `roles`, `profile`, ...). The template therefore carries the

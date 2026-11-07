@@ -5,6 +5,8 @@
 package com.openbank.ledger.infrastructure.rest
 
 import com.openbank.ledger.application.usecase.AccountingDayNotFoundException
+import com.openbank.ledger.application.usecase.CloseParticipantForbiddenException
+import com.openbank.ledger.application.usecase.CloseParticipantNotDeclaredException
 import com.openbank.ledger.application.usecase.ClosedAccountingDayException
 import com.openbank.ledger.application.usecase.ClosedFiscalPeriodException
 import com.openbank.ledger.application.usecase.ClosedPeriodConflictException
@@ -16,8 +18,10 @@ import com.openbank.ledger.application.usecase.JournalNotFoundException
 import com.openbank.ledger.application.usecase.JournalReversalConflictException
 import com.openbank.ledger.application.usecase.YearCloseConflictException
 import com.openbank.ledger.application.usecase.YearCloseNotFoundException
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
 import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.LedgerValidationException
+import com.openbank.libs.close.AccountingDayClosed
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.Response.Status.CONFLICT
@@ -137,7 +141,14 @@ class AccountingDayNotFoundExceptionMapper : ExceptionMapper<AccountingDayNotFou
 @Provider
 class ClosedAccountingDayExceptionMapper : ExceptionMapper<ClosedAccountingDayException> {
     override fun toResponse(exception: ClosedAccountingDayException): Response = Response.status(CONFLICT)
-        .entity(mapOf("error" to (exception.message ?: "Accounting day is closed")))
+        .entity(
+            // `code` lets a day-close participant tell this refusal from any other 409 and report
+            // it as a REFUSED outcome rather than a failed job (ADR-0342 D4).
+            mapOf(
+                "error" to (exception.message ?: "Accounting day is closed"),
+                "code" to AccountingDayClosed.ERROR_CODE,
+            ),
+        )
         .type(MediaType.APPLICATION_JSON)
         .build()
 }
@@ -186,3 +197,31 @@ class FrozenPeriodExceptionMapper : ExceptionMapper<FrozenPeriodException> {
 // mapper for a libs-owned JDK type is a per-request lottery, not a reliable override. Ledger's
 // 422/409 status codes are still ledger-specific — they're just reached through a dedicated
 // domain exception type now, which JAX-RS resolves unambiguously.
+
+// 404 (ADR-0342 D2): the named day-close participant is not declared in configuration.
+@Provider
+class CloseParticipantNotDeclaredExceptionMapper : ExceptionMapper<CloseParticipantNotDeclaredException> {
+    override fun toResponse(exception: CloseParticipantNotDeclaredException): Response = Response.status(NOT_FOUND)
+        .entity(mapOf("error" to (exception.message ?: "Participant not declared")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}
+
+// 403 (ADR-0342 D2): the caller is not the service-account declared for that participant.
+@Provider
+class CloseParticipantForbiddenExceptionMapper : ExceptionMapper<CloseParticipantForbiddenException> {
+    override fun toResponse(exception: CloseParticipantForbiddenException): Response =
+        Response.status(Response.Status.FORBIDDEN)
+            .entity(mapOf("error" to (exception.message ?: "Forbidden")))
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+}
+
+// 409 (ADR-0342 D3): enforce mode keeps the day in CUTOFF until reports or explicit waivers complete it.
+@Provider
+class CloseParticipantsPendingExceptionMapper : ExceptionMapper<CloseParticipantsPendingException> {
+    override fun toResponse(exception: CloseParticipantsPendingException): Response = Response.status(CONFLICT)
+        .entity(mapOf("error" to (exception.message ?: "Day-close participants are pending")))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
+}

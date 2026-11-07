@@ -23,7 +23,7 @@ const DEPLOYED = {
     namespaces: ['openbank'],
   },
 }
-const NOT_DEPLOYED = { available: false, temporalDeployed: false, metrics: null }
+const NOT_DEPLOYED = { available: true, temporalDeployed: false, metrics: null }
 
 function Providers({ children }: { children: React.ReactNode }) {
   return React.createElement(SessionProvider, null, React.createElement(LanguageProvider, null, children))
@@ -67,6 +67,61 @@ describe('temporal workflow flow page', () => {
     render(React.createElement(Providers, null, React.createElement(TemporalFlowPage)))
     // the curated sagas still render (they are documented, not live)
     await waitFor(() => expect(screen.getByText('Domestic payments')).toBeInTheDocument())
-    expect(screen.getByText(/not deployed/i)).toBeInTheDocument()
+    expect(screen.getByText(/not detected by prometheus/i)).toBeInTheDocument()
+  })
+
+  it('keeps deployment unknown when the API returns null', async () => {
+    vi.stubGlobal('fetch', mockFetch({ available: true, temporalDeployed: null, metrics: null }))
+    render(React.createElement(Providers, null, React.createElement(TemporalFlowPage)))
+
+    await waitFor(() => expect(screen.getByText(/status is unavailable/i)).toBeInTheDocument())
+    expect(screen.queryByText(/not detected by prometheus/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not deployed/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps deployment unknown when the status request is non-OK', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null', { status: 200 })
+      if (String(input).includes('/api/temporal/status')) return new Response('', { status: 503 })
+      return new Response('{}', { status: 200 })
+    }))
+    render(React.createElement(Providers, null, React.createElement(TemporalFlowPage)))
+
+    await waitFor(() => expect(screen.getByText(/status is unavailable/i)).toBeInTheDocument())
+    expect(screen.queryByText(/not detected by prometheus/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not deployed/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps deployment unknown when the status request fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/api/auth/session')) return new Response('null', { status: 200 })
+      if (String(input).includes('/api/temporal/status')) throw new TypeError('network unavailable')
+      return new Response('{}', { status: 200 })
+    }))
+    render(React.createElement(Providers, null, React.createElement(TemporalFlowPage)))
+
+    await waitFor(() => expect(screen.getByText(/status is unavailable/i)).toBeInTheDocument())
+    expect(screen.queryByText(/not detected by prometheus/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/not deployed/i)).not.toBeInTheDocument()
+  })
+
+  it('shows partial metrics and unknown workflow types when their query failed', async () => {
+    vi.stubGlobal('fetch', mockFetch({
+      available: true,
+      temporalDeployed: true,
+      degraded: true,
+      metrics: {
+        workflows: { scheduled1h: 5, completed1h: 4, failed1h: null, timedOut1h: 0 },
+        latency: { activityScheduleToStartMs: null, workflowTaskScheduleToStartMs: null, serverRequestP99Ms: null },
+        namespaces: ['openbank'],
+        workflowTypes: null,
+      },
+    }))
+    render(React.createElement(Providers, null, React.createElement(TemporalFlowPage)))
+
+    expect(await screen.findByText(/some metrics are unavailable/i)).toBeInTheDocument()
+    expect(screen.getByText(/workflow types could not be verified/i)).toBeInTheDocument()
+    expect(screen.queryByText(/no workflow completed in the last hour/i)).not.toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 })

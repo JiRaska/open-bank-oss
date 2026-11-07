@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.push
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.security.EgressDeniedException
 import com.openbank.libs.security.EgressRequest
 import com.openbank.libs.security.EgressResolver
 import com.openbank.libs.security.SafeHttpClient
@@ -92,9 +93,13 @@ class FcmPushSender {
         if (acct.projectId.isBlank()) {
             return Uni.createFrom().item(PushResult.failed("CONFIG", "FCM projectId not configured"))
         }
+        // A send exception may follow FCM acceptance. Keep the PENDING notification in doubt;
+        // the consumer dead-letters the request instead of asserting a definitive failure.
         return accessToken(acct)
             .chain { token -> sendMessage(acct, token, message) }
-            .onFailure().recoverWithItem { e -> PushResult.failed("FCM_ERROR", e.message) }
+            // A policy denial happens before any request is sent, so its failure is definitive.
+            .onFailure(EgressDeniedException::class.java)
+            .recoverWithItem { denied -> PushResult.failed("EGRESS_DENIED", denied.message) }
     }
 
     private fun accessToken(acct: ServiceAccount): Uni<String> {

@@ -10,7 +10,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
-import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { PageHeader, ShortId, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import {
   disputeDaysRemaining,
   isDisputeSlaBreached,
@@ -71,6 +71,7 @@ export default function DisputesPage() {
                 idle: t('dispute-service spí (scale-to-zero), probouzí se…', 'dispute-service idle (scaled to zero), waking…'),
                 down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             <button type="button" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit seznam sporů', 'Refresh disputes')} className="btn btn-secondary btn-sm">
@@ -145,7 +146,7 @@ export default function DisputesPage() {
                   <tr key={d.id}>
                     <td className="mono" style={{ fontWeight: 600 }}>{d.reference}</td>
                     <td style={{ color: 'var(--text-secondary)' }}>{d.disputeType}</td>
-                    <td className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{d.transactionId?.slice(0, 8)}…</td>
+                    <td><ShortId value={d.transactionId} copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')} /></td>
                     <td style={{ fontWeight: 600 }}>
                       {(d.amount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {d.currency}
                     </td>

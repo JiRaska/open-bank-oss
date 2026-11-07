@@ -77,8 +77,9 @@ class PartyEntity : PanacheEntityBase {
     @Column(name = "kyc_expires_at")
     var kycExpiresAt: OffsetDateTime? = null
 
-    @Column(name = "aml_risk_score", nullable = false, length = 20)
-    lateinit var amlRiskScore: String
+    // Deprecated, nullable since V14 (ADR-0353 D2).
+    @Column(name = "aml_risk_score", length = 20)
+    var amlRiskScore: String? = null
 
     @Column(name = "pep_flag", nullable = false)
     var pepFlag: Boolean = false

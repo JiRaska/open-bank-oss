@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+# WorkflowLivenessStale (prometheus-rules-workflow-liveness.yaml) on the pension company's ledger
+# instance (ADR-0337, #12500).
+#
+# ledger-pension-co runs ledger-service with every bank-only cron switched off. Since
+# ScheduleSwitch, a switched-off job registers NO liveness series (SwitchedOffSchedulerLivenessIT
+# asserts the registry; this file asserts what the rule does with what is left). Two groups:
+#
+#   1. the instance as it now scrapes: only the journal-partition job (ON, daily, succeeding) has a
+#      heartbeat -> quiet across 3 days of uptime;
+#   2. the shape it scraped before the fix: the hourly tie-out freshness watchdog's gauge, seeded
+#      at boot and never reset because the job never runs -> fires. This is the negative case —
+#      it is what group 1 would read if the switch did not suppress registration, and it proves
+#      group 1 is quiet because the series is gone, not because the rule cannot fire here.
+#
+# eval_time is 72h, past 2x every interval used, so "quiet" cannot be an early-eval artefact.
+rule_files:
+  - prometheus-rules-workflow-liveness.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # Daily job, succeeding every 24h: age is a sawtooth that never passes 86400 s.
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="ledger-pension-co",workflow="ledger-journal-partition-maintenance"}'
+        values: '0+60x1439 0+60x1439 0+60x1439 0+60x60'
+      - series: 'openbank_workflow_expected_interval_seconds{namespace="ledger-pension-co",workflow="ledger-journal-partition-maintenance"}'
+        values: '86400x4380'
+    alert_rule_test:
+      - eval_time: 72h
+        alertname: WorkflowLivenessStale
+        exp_alerts: []
+      - eval_time: 72h
+        alertname: WorkflowLivenessHeartbeatAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_workflow_last_success_age_seconds{namespace="ledger-pension-co",workflow="ledger-tieout-freshness"}'
+        values: '0+60x4380'
+      - series: 'openbank_workflow_expected_interval_seconds{namespace="ledger-pension-co",workflow="ledger-tieout-freshness"}'
+        values: '3600x4380'
+    # Asserted on ALERTS rather than exp_alerts so the test pins the firing series, not the
+    # rule's long description text.
+    promql_expr_test:
+      - expr: ALERTS{alertname="WorkflowLivenessStale", alertstate="firing"}
+        eval_time: 72h
+        exp_samples:
+          - labels: 'ALERTS{alertname="WorkflowLivenessStale", alertstate="firing", namespace="ledger-pension-co", severity="warning", team="platform", workflow="ledger-tieout-freshness"}'
+            value: 1

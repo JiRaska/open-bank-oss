@@ -51,6 +51,11 @@ class DelegatedReadTest {
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
         Response.ok("""{"id":"$accountId","partyId":"$ownerParty"}""").build()
 
+    private fun page(vararg rows: String): String {
+        val pagination = """{"limit":50,"hasNextPage":false,"nextCursor":null,"totalCount":${rows.size}}"""
+        return """{"data":[${rows.joinToString(",")}],"pagination":$pagination}"""
+    }
+
     private fun granted(yes: Boolean) = Response.ok("""{"granted":$yes}""").build()
 
     @Test
@@ -151,8 +156,10 @@ class DelegatedReadTest {
         val mine = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
             [{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs",
@@ -161,13 +168,16 @@ class DelegatedReadTest {
         ).build()
         every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, owner)
 
-        val resp = resourceFor(upstream, grantee).listAccounts()
+        val resp = resourceFor(upstream, grantee).listAccounts(null)
         val body = ObjectMapper().readTree(resp.entity.toString())
 
-        assertThat(body).hasSize(2)
-        assertThat(body[0].path("sharedWithMe").asBoolean(false)).isFalse()
-        assertThat(body[1].path("id").asText()).isEqualTo(theirs.toString())
-        assertThat(body[1].path("sharedWithMe").asBoolean(false)).isTrue()
+        val data = body.path("data")
+        assertThat(data).hasSize(2)
+        assertThat(data[0].path("sharedWithMe").asBoolean(false)).isFalse()
+        assertThat(data[1].path("id").asText()).isEqualTo(theirs.toString())
+        assertThat(data[1].path("sharedWithMe").asBoolean(false)).isTrue()
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(2)
+        assertThat(body.path("pagination").path("hasNextPage").asBoolean(true)).isFalse()
     }
 
     @Test
@@ -176,8 +186,10 @@ class DelegatedReadTest {
         val mine = UUID.randomUUID()
         val theirs = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
             """
             [{"status":"OFFERED","resourceType":"ACCOUNT","resourceId":"$theirs",
@@ -185,9 +197,10 @@ class DelegatedReadTest {
             """.trimIndent().replace("\n", ""),
         ).build()
 
-        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
 
-        assertThat(body).hasSize(1)
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
     }
 
     @Test
@@ -195,14 +208,136 @@ class DelegatedReadTest {
         val grantee = UUID.randomUUID()
         val mine = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
-        every { upstream.get(match { it.contains("accounts?partyId=$grantee") }, any()) } returns
-            Response.ok("""[{"id":"$mine","partyId":"$grantee"}]""").build()
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
+            Response.ok(page("""{"id":"$mine","partyId":"$grantee"}""")).build()
         every { upstream.get(match { it.contains("/delegations/grantee/") }, any()) } throws
             RuntimeException("connection refused")
 
         // The customer's own money must not vanish because a secondary service is down.
-        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts().entity.toString())
-        assertThat(body).hasSize(1)
-        assertThat(body[0].path("id").asText()).isEqualTo(mine.toString())
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("data")[0].path("id").asText()).isEqualTo(mine.toString())
+    }
+
+    @Test
+    fun `an account already in the page is not duplicated by its grant`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
+            Response.ok(page("""{"id":"$theirs","partyId":"$grantee"}""")).build()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
+            """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
+        ).build()
+        every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns accountJson(theirs, grantee)
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+    }
+
+    private fun sharedSetup(grantee: UUID, theirs: UUID, body: String): UpstreamClient {
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.getToService("http://account", "/api/v1/accounts", mapOf("partyId" to grantee.toString()), any())
+        } returns
+            Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
+        every { upstream.get(match { it.contains("/delegations/grantee/$grantee") }, any()) } returns Response.ok(
+            """[{"status":"ACTIVE","resourceType":"ACCOUNT","resourceId":"$theirs","capabilities":["ACCOUNT_READ_BALANCES"]}]""",
+        ).build()
+        every { upstream.get(match { it.contains("/accounts/$theirs") }, any()) } returns Response.ok(body).build()
+        return upstream
+    }
+
+    @Test
+    fun `a cursor page does not get shared accounts or a bumped totalCount`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"id":"$theirs","partyId":"${UUID.randomUUID()}"}""")
+        every {
+            upstream.getToService(
+                "http://account",
+                "/api/v1/accounts",
+                mapOf("partyId" to grantee.toString(), "cursor" to "abc"),
+                any(),
+            )
+        } returns
+            Response.ok(page("""{"id":"${UUID.randomUUID()}","partyId":"$grantee"}""")).build()
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts("abc").entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+        verify(exactly = 0) { upstream.get(match { it.contains("/delegations/grantee/") }, any()) }
+    }
+
+    @Test
+    fun `an account body whose id differs from the granted id is dropped`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"id":"${UUID.randomUUID()}","partyId":"x"}""")
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
+        assertThat(body.path("pagination").path("totalCount").asInt()).isEqualTo(1)
+    }
+
+    @Test
+    fun `an account body with no id is dropped`() {
+        val grantee = UUID.randomUUID()
+        val theirs = UUID.randomUUID()
+        val upstream = sharedSetup(grantee, theirs, """{"partyId":"x"}""")
+
+        val body = ObjectMapper().readTree(resourceFor(upstream, grantee).listAccounts(null).entity.toString())
+
+        assertThat(body.path("data")).hasSize(1)
+    }
+
+    @Test
+    fun `the cursor is passed separately from the selected profile and authority`() {
+        val grantee = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.getToService(any(), any(), any(), any()) } returns Response.ok(page()).build()
+
+        resourceFor(upstream, grantee).listAccounts("a b+c")
+
+        verify {
+            upstream.getToService(
+                "http://account",
+                "/api/v1/accounts",
+                mapOf("partyId" to grantee.toString(), "cursor" to "a b+c"),
+                grantee.toString(),
+            )
+        }
+    }
+
+    @Test
+    fun `cursor pages use the verified active profile in both query and party header`() {
+        val human = UUID.randomUUID()
+        val company = UUID.randomUUID()
+        for (profile in listOf(human, company)) {
+            val upstream = mockk<UpstreamClient>()
+            every { upstream.getToService(any(), any(), any(), any()) } returns Response.ok(page()).build()
+            val resource = resourceFor(upstream, human).apply {
+                actingForResolver = mockk {
+                    every { resolve(human, null) } returns profile
+                }
+            }
+            resource.listAccounts("opaque&partyId=$human")
+            verify(exactly = 1) {
+                upstream.getToService(
+                    "http://account",
+                    "/api/v1/accounts",
+                    mapOf("partyId" to profile.toString(), "cursor" to "opaque&partyId=$human"),
+                    profile.toString(),
+                )
+            }
+            verify(exactly = 0) { upstream.get(any(), any()) }
+        }
     }
 }

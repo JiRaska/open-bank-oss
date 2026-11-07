@@ -9,6 +9,12 @@
       "releaseNotes": "https://www.postgresql.org/docs/release/{version}/"
     },
     {
+      "id": "clickhouse",
+      "eolProduct": "clickhouse",
+      "versionSource": "unknown",
+      "releaseNotes": "https://github.com/ClickHouse/ClickHouse/releases"
+    },
+    {
       "id": "kafka",
       "eolProduct": "apache-kafka",
       "versionSource": "unknown",
@@ -24,8 +30,7 @@
     {
       "id": "valkey",
       "eolProduct": "valkey",
-      "versionSource": "gitops",
-      "imageGrep": "valkey/valkey",
+      "versionSource": "unknown",
       "releaseNotes": "https://github.com/valkey-io/valkey/releases"
     },
     {
@@ -89,6 +94,72 @@
       "versionSource": "gitops",
       "imageGrep": "kafbat/kafka-ui",
       "releaseNotes": "https://github.com/kafbat/kafka-ui/releases"
+    },
+    {
+      "id": "alertmanager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "otel-collector",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "pyrra",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "goalert",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "ntfy",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "temporal",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "keda",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "argocd",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "kyverno",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "cert-manager",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
+    },
+    {
+      "id": "karpenter",
+      "eolProduct": null,
+      "versionSource": "unknown",
+      "releaseNotes": null
     }
   ]
 }

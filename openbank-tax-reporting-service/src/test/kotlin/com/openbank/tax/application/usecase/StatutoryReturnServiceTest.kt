@@ -7,6 +7,7 @@ package com.openbank.tax.application.usecase
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnCatalogueSource
 import com.openbank.tax.application.port.out.ReturnDataPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -23,6 +24,7 @@ import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
 import com.openbank.tax.infrastructure.returns.StatutoryReturnDeadlineScheduler
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -94,7 +96,7 @@ class StatutoryReturnServiceTest {
             definition: ReturnDefinition,
             entityId: String,
             period: ReportingPeriod,
-        ) = values ?: throw ReturnDataUnavailableException("unbound")
+        ) = ReturnAssemblyData(values ?: throw ReturnDataUnavailableException("unbound"))
     }
 
     private val repo = InMemoryRepo()
@@ -228,14 +230,19 @@ class StatutoryReturnServiceTest {
         val domainMetrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns liveness
         }
-        StatutoryReturnDeadlineScheduler(service(start = LocalDate.of(2026, 6, 30)), metrics, domainMetrics)
-            .also { it.registerLiveness() }
+        StatutoryReturnDeadlineScheduler(
+            service(start = LocalDate.of(2026, 6, 30)),
+            metrics,
+            domainMetrics,
+            SimpleMeterRegistry(),
+            ReportingEntities("company", listOf("fund-a", "fund-b"), LocalDate.of(2026, 6, 30)),
+        ).also { it.registerLiveness() }
             .refresh()
         assertThat(published).isEqualTo(5)
     }
 
     @Test
-    fun `the scheduler cannot record success or zero breaches without reporting configuration`(): Unit = runBlocking {
+    fun `the scheduler is skipped as unconfigured without reporting configuration`(): Unit = runBlocking {
         var published = -1
         val metrics = object : StatutoryReturnMetricsPort {
             override fun recordBreaches(count: Int) {
@@ -246,12 +253,20 @@ class StatutoryReturnServiceTest {
         val domainMetrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns liveness
         }
-        val scheduler = StatutoryReturnDeadlineScheduler(service(start = null), metrics, domainMetrics)
-            .also { it.registerLiveness() }
+        val registry = SimpleMeterRegistry()
+        val scheduler = StatutoryReturnDeadlineScheduler(
+            service(start = null),
+            metrics,
+            domainMetrics,
+            registry,
+            ReportingEntities("company", listOf("fund-a", "fund-b"), null),
+        ).also { it.registerLiveness() }
 
-        assertThatThrownBy { runBlocking { scheduler.refresh() } }
-            .isInstanceOf(ReturnDataUnavailableException::class.java)
+        scheduler.refresh()
+
+        // Skipped, not failed: no zero breach count, no success, and the unconfigured flag says why.
         assertThat(published).isEqualTo(-1)
+        assertThat(registry.find("openbank_workflow_unconfigured").gauge()?.value()).isEqualTo(1.0)
         verify(exactly = 0) { liveness.recordSuccess() }
     }
 }

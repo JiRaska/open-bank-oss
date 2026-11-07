@@ -1,0 +1,121 @@
+# SPDX-License-Identifier: Apache-2.0
+# Daily, off-peak: every money-path admin screen on the DEPLOYED sandbox must send an
+# unauthenticated visitor to SSO. Named "auth-gate" on purpose — it is not a screen-behaviour test
+# and uses no credentials (#13171). One small job; the 106 stubbed specs stay in the PR lane.
+# A second job, `session-smoke`, signs in through the real Keycloak form as the least-privilege e2e
+# operator (realm roles ROLE_VIEWER + ROLE_AUDITOR) and smoke-tests each money-path screen read-only.
+# Its password exists ONLY as the ADMIN_UI_E2E_PASSWORD Actions secret; without it the job skips with
+# a visible job-summary notice instead of passing as if it had tested something.
+name: Admin UI deployed auth-gate
+
+on:
+  schedule:
+    - cron: '47 4 * * *'   # 04:47 UTC, outside the busy PR window
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/admin-ui-deployed-auth-gate.yml'
+      - 'openbank-admin-ui/e2e/deployed-auth-gate.spec.ts'
+      - 'openbank-admin-ui/playwright.deployed.config.ts'
+      - 'openbank-admin-ui/playwright.deployed-session.config.ts'
+      - 'openbank-admin-ui/e2e/deployed-session.setup.ts'
+      - 'openbank-admin-ui/e2e/deployed-session.spec.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-ui-deployed-auth-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  auth-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - working-directory: openbank-admin-ui
+        run: npm ci --no-audit --no-fund
+      # The specs use Playwright's request context only: no browser binary is needed.
+      - working-directory: openbank-admin-ui
+        env:
+          CI: 'true'
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/auth-gate/deployed-auth-gate.xml
+        run: npx playwright test --config playwright.deployed.config.ts
+      - if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service openbank-admin-ui --component openbank-admin-ui \
+            --out openbank-admin-ui/build/test-intelligence/run-deployed-auth-gate.json
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-admin-ui-deployed-auth-gate-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run-deployed-auth-gate.json
+          retention-days: 30
+          if-no-files-found: error
+
+  session-smoke:
+    # Scheduled/dispatched only: a pull_request from a fork gets no secrets, and a PR run would
+    # sign in to the sandbox on every edit to this file.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ADMIN_UI_E2E_USERNAME: ${{ vars.ADMIN_UI_E2E_USERNAME || 'e2e-operator@openbank.local' }}
+      ADMIN_UI_E2E_PASSWORD: ${{ secrets.ADMIN_UI_E2E_PASSWORD }}
+    steps:
+      - id: secret
+        run: |
+          if [ -z "${ADMIN_UI_E2E_PASSWORD}" ]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Authenticated e2e NOT RUN::ADMIN_UI_E2E_PASSWORD secret is not set; no screen was tested."
+            {
+              echo "## Authenticated admin-ui e2e: NOT RUN"
+              echo
+              echo "The \`ADMIN_UI_E2E_PASSWORD\` Actions secret is not set, so no money-path screen was"
+              echo "signed in to or tested. This is a skip, not a pass. Provision the e2e operator's"
+              echo "password (#13171) to enable the lane."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.secret.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.secret.outputs.present == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - if: steps.secret.outputs.present == 'true'
+        working-directory: openbank-admin-ui
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - if: steps.secret.outputs.present == 'true'
+        working-directory: openbank-admin-ui
+        env:
+          CI: 'true'
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: build/test-results/deployed-session/deployed-session.xml
+        run: npx playwright test --config playwright.deployed-session.config.ts
+      # The stored session is a live credential: never leave it on the runner past the run.
+      - if: always() && steps.secret.outputs.present == 'true'
+        run: rm -rf openbank-admin-ui/build/deployed-session
+      - if: always() && steps.secret.outputs.present == 'true'
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service openbank-admin-ui --component openbank-admin-ui \
+            --out openbank-admin-ui/build/test-intelligence/run-deployed-session.json
+      - if: always() && steps.secret.outputs.present == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-intelligence-run-openbank-admin-ui-deployed-session-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-admin-ui/build/test-intelligence/run-deployed-session.json
+          retention-days: 30
+          if-no-files-found: error

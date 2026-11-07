@@ -9,10 +9,13 @@
 // hardened — derived from GitOps + a representative Dockerfile (cluster-topology.json), gaps shown
 // honestly. Styled in a Kubernetes / container idiom; written to be readable by a non-expert.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { localize, type Bilingual, type Localized } from '@/lib/i18n/bilingual'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
@@ -20,23 +23,28 @@ import {
 
 type Status = 'live' | 'partial' | 'planned'
 
-interface Namespace { name: string; group: string; role: string; declared: boolean }
-interface Group { id: string; label: string; labelEn: string; color: string; icon: string; blurb: string }
-interface Layer { id: string; label: string; icon: string; status: Status; analogy: string; summary: string; controls: string[]; adr: string[]; detailRoute?: string }
-interface AnatomyStep { id: string; label: string; status: Status; detail: string; adr: string[] }
-interface PvR { item: string; plan: string; reality: string; status: Status }
-interface Topology {
+// Wire shape: user-visible text arrives as { cs, en } (scripts/generate-cluster-topology.mjs);
+// the page resolves it once per language via localize() and renders plain strings.
+interface NamespaceWire { name: string; group: string; role: Bilingual; declared: boolean }
+interface GroupWire { id: string; label: string; labelEn: string; color: string; icon: string; blurb: Bilingual }
+interface LayerWire { id: string; label: Bilingual; icon: string; status: Status; analogy: Bilingual; summary: Bilingual; controls: string[]; adr: string[]; detailRoute?: string }
+interface AnatomyStepWire { id: string; label: Bilingual; status: Status; detail: Bilingual; adr: string[] }
+interface PvRWire { item: Bilingual; plan: Bilingual; reality: Bilingual; status: Status }
+interface TopologyWire {
   generatedAt: string | null
   counts: { namespaces?: number; networkPolicies?: number; externalSecrets?: number; clusterPolicies?: number }
-  groups: Group[]
-  namespaces: Namespace[]
-  securityLayers: Layer[]
-  imageAnatomy: { multiStage?: boolean; buildBase?: string; runtimeBase?: string; steps: AnatomyStep[] }
-  planVsReality: PvR[]
+  groups: GroupWire[]
+  namespaces: NamespaceWire[]
+  securityLayers: LayerWire[]
+  imageAnatomy: { multiStage?: boolean; buildBase?: string; runtimeBase?: string; steps: AnatomyStepWire[] }
+  planVsReality: PvRWire[]
 }
+type Topology = Localized<TopologyWire>
+type Namespace = Localized<NamespaceWire>
+type Layer = Localized<LayerWire>
 
 const STATUS: Record<Status, { cs: string; en: string; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live: { cs: 'Live', en: 'Live', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  live: { cs: 'Deklarováno', en: 'Declared', color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
   partial: { cs: 'Částečně', en: 'Partial', color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
   planned: { cs: 'Plánováno', en: 'Planned', color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
@@ -154,27 +162,59 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
 export default function ClusterDossierPage() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [topo, setTopo] = useState<Topology | null>(null)
+  const [rawTopo, setTopo] = useState<TopologyWire | null>(null)
+  const topo = useMemo<Topology | null>(() => (rawTopo ? localize(rawTopo, language) : null), [rawTopo, language])
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeLayer, setActiveLayer] = useState<string | null>(null)
+  const [activeLayer, setActiveLayer] = useState<string | null | undefined>(undefined)
   const [openNs, setOpenNs] = useState<string | null>(null)
+  const activeRequest = useRef<AbortController | null>(null)
 
   const load = useCallback(async () => {
+    activeRequest.current?.abort()
+    const controller = new AbortController()
+    activeRequest.current = controller
     setLoading(true)
     try {
-      const r = await fetch('/api/cluster/topology', { cache: 'no-store' })
+      const r = await fetch('/api/cluster/topology', { cache: 'no-store', signal: controller.signal })
       if (!r.ok) throw new Error('Cluster topology is unavailable')
-      const d = await r.json() as Topology & { source?: string }
+      const response = await r.json() as TopologyWire & { source?: string; contentSource?: ContentSourceMetadata }
+      const d = response
+      if (activeRequest.current !== controller || controller.signal.aborted) return
       if (d.source === 'unavailable' || !Array.isArray(d.groups) || !Array.isArray(d.namespaces)
         || !Array.isArray(d.securityLayers) || !Array.isArray(d.imageAnatomy?.steps)
         || !Array.isArray(d.planVsReality)) throw new Error('Invalid cluster topology')
       setTopo(d)
-      setActiveLayer(d.securityLayers?.[0]?.id ?? null)
-    } catch { setTopo(null) } finally { setLoading(false) }
+      setContentSource(response.contentSource ?? null)
+      setActiveLayer(current => current === null || d.securityLayers.some(layer => layer.id === current)
+        ? current
+        : d.securityLayers[0]?.id ?? null)
+    } catch (error) {
+      if (activeRequest.current === controller && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setTopo(null)
+        setContentSource(null)
+      }
+    } finally {
+      if (activeRequest.current === controller) {
+        activeRequest.current = null
+        setLoading(false)
+      }
+    }
   }, [])
   useEffect(() => {
     const initialLoad = window.setTimeout(() => { void load() }, 0)
-    return () => window.clearTimeout(initialLoad)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void load()
+    }
+    const interval = window.setInterval(refreshWhenVisible, 5 * 60_000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearTimeout(initialLoad)
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      activeRequest.current?.abort()
+      activeRequest.current = null
+    }
   }, [load])
 
   const nsByGroup = useMemo(() => {
@@ -195,24 +235,25 @@ export default function ClusterDossierPage() {
           </>}
         title={t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
         subtitle={t(
-              'Jak je platforma rozdělená po namespaces, jak je zabezpečená (obrana do hloubky) a jak je poskládaný a zabezpečený výchozí image — plán vs. realita, odvozeno z GitOpsu (ADR-0081).',
-              'How the platform is split across namespaces, how it is secured (defense in depth), and how the default service image is built and hardened — plan vs reality, derived from GitOps (ADR-0081).',
+              'Přehled deklarací v GitOpsu a zdrojovém Dockerfile; neověřuje aktuální stav clusteru (ADR-0081).',
+              'A view of GitOps and source Dockerfile declarations; it does not verify current cluster state (ADR-0081).',
             )}
         icon={<Boxes aria-hidden="true" size={20} style={{ color: K8S_BLUE }} />}
         actions={<button onClick={load} disabled={loading} type="button" aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
+      <ContentSourceNote source={contentSource} />
 
       {!loading && !topo && <DataUnavailable kind="error" feature={t('topologie clusteru', 'cluster topology')} lang={language} />}
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
         {[
-          { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('doménová izolace', 'domain isolation'), tone: 'var(--success-text)' },
-          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('nasazeno, aktivace probíhá', 'deployed, activation in progress'), tone: 'var(--warning-text)' },
-          { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('nic v gitu', 'none in git'), tone: 'var(--success-text)' },
-          { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('image-verify (Audit)', 'image-verify (Audit)'), tone: 'var(--warning-text)' },
+          { label: t('Namespaces', 'Namespaces'), value: c.namespaces ?? '—', Icon: Boxes, note: t('položky modelu repozitáře', 'repository model entries'), tone: 'var(--success-text)' },
+          { label: t('NetworkPolicies', 'NetworkPolicies'), value: c.networkPolicies ?? '—', Icon: Network, note: t('deklarace v GitOpsu', 'declared in GitOps'), tone: 'var(--warning-text)' },
+          { label: t('External Secrets', 'External Secrets'), value: c.externalSecrets ?? '—', Icon: Key, note: t('deklarace v GitOpsu', 'declared in GitOps'), tone: 'var(--success-text)' },
+          { label: t('Admission policies', 'Admission policies'), value: c.clusterPolicies ?? '—', Icon: Shield, note: t('deklarace v GitOpsu', 'declared in GitOps'), tone: 'var(--warning-text)' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
@@ -228,7 +269,7 @@ export default function ClusterDossierPage() {
       {/* ── 1) Namespace map ── */}
       <SectionTitle icon={Boxes} title={t('1 · Mapa namespaces — „patra banky"', '1 · Namespace map — "floors of the bank"')} />
       <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14, maxWidth: 760 }}>
-        {t('Každá doména běží ve vlastním zapečeném namespace. Klikni na kostku pro roli a stav izolace.', 'Each domain runs in its own sealed namespace. Click a tile for its role and isolation state.')}
+        {t('Mapa namespace odvozená z repozitáře a kurátorovaných rolí; skutečné nasazení ověř v infrastruktuře. Klikni na kostku pro deklarovanou roli.', 'Namespace map derived from repository declarations and curated roles; check Infrastructure for deployed state. Click a tile for its declared role.')}
       </p>
       <div style={{ display: 'grid', gap: 18, marginBottom: 32 }}>
         {(topo?.groups ?? []).map(g => {
@@ -264,7 +305,7 @@ export default function ClusterDossierPage() {
                         <div id={panelId} role="region" aria-label={nsItem.name} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                           {nsItem.role}
                           <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-secondary)' }}>
-                            {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy nasazeny, fleet-wide aktivace probíhá (#854)', 'NetworkPolicies deployed, fleet-wide activation in progress (#854)') : t('zatím bez NetworkPolicy', 'no NetworkPolicy yet')}
+                            {t('Síťové deklarace: ', 'NetworkPolicy declarations: ')}{(c.networkPolicies ?? 0) > 0 ? t('v GitOpsu (nasazení zde není ověřeno)', 'in GitOps (deployment is not verified here)') : t('žádné v GitOpsu', 'none in GitOps')}
                           </div>
                         </div>
                       )}
@@ -281,7 +322,7 @@ export default function ClusterDossierPage() {
       <SectionTitle icon={Shield} title={t('2 · Obrana do hloubky — „vrstvy ochranky"', '2 · Defense in depth — "layers of security"')} />
       <div style={{ display: 'grid', gridTemplateColumns: '240px minmax(0,1fr)', gap: 24, alignItems: 'center', marginBottom: 32 }}>
         <div style={{ display: 'flex', justifyContent: 'center' }}>
-          {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer} onPick={setActiveLayer} lang={language} />}
+          {topo && <DefenseRings layers={topo.securityLayers} active={activeLayer ?? null} onPick={setActiveLayer} lang={language} />}
         </div>
         <div style={{ display: 'grid', gap: 8 }}>
           {(topo?.securityLayers ?? []).map((l, i) => {
@@ -289,13 +330,13 @@ export default function ClusterDossierPage() {
             const on = activeLayer === l.id
             return (
               <div key={l.id} className="card" style={{ padding: 14, borderLeft: `3px solid ${STATUS[l.status].color}`, boxShadow: on ? '0 0 0 1px var(--accent)' : undefined }}>
-                <div role="button" tabIndex={0} aria-expanded={on} aria-label={`${l.label} — ${on ? t('Sbalit vrstvu', 'Collapse layer') : t('Rozbalit vrstvu', 'Expand layer')}`}
+                <div role="button" tabIndex={0} aria-expanded={on}
                   onClick={() => setActiveLayer(current => current === l.id ? null : l.id)}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveLayer(current => current === l.id ? null : l.id) } }}
                   style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0, cursor: 'pointer' }}>
-                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-tertiary)', width: 18 }}>{i + 1}</span>
+                  <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-tertiary)', width: 18 }}>{i + 1}</span>{' '}
                   <LI size={16} style={{ color: K8S_BLUE }} />
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{l.label}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{l.label}</span>{' '}
                   <StatusPill s={l.status} lang={language} />
                   <ChevronRight size={14} style={{ color: 'var(--text-tertiary)', transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
                 </div>
@@ -329,14 +370,14 @@ export default function ClusterDossierPage() {
       </div>
 
       {/* ── 4) Plan vs reality ── */}
-      <SectionTitle icon={AlertTriangle} title={t('4 · Plán vs. realita', '4 · Plan vs reality')} />
+      <SectionTitle icon={AlertTriangle} title={t('4 · Cíl vs. deklarace v repozitáři', '4 · Target vs. repository declarations')} />
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', background: 'var(--surface-2)' }}>
               <th style={{ padding: '8px 14px' }}>{t('Kontrola', 'Control')}</th>
               <th style={{ padding: '8px 14px' }}>{t('Plán', 'Plan')}</th>
-              <th style={{ padding: '8px 14px' }}>{t('Realita', 'Reality')}</th>
+              <th style={{ padding: '8px 14px' }}>{t('Evidence v repozitáři', 'Repository evidence')}</th>
               <th style={{ padding: '8px 14px' }}>{t('Stav', 'Status')}</th>
             </tr>
           </thead>
@@ -355,8 +396,8 @@ export default function ClusterDossierPage() {
 
       <p style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <FileText size={12} />
-        {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
-        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
+        {t('Odvozeno z GitOpsu a zdrojového Dockerfile; jde o deklarovaný obsah, ne živé ověření clusteru.', 'Derived from GitOps and source Dockerfile; this is declared content, not a live cluster check.')}
+        {topo?.generatedAt && <span> · {t('vstupní evidence aktualizována', 'source evidence as of')} {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
       </p>
     </div>
   )

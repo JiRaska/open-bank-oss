@@ -45,6 +45,11 @@ class CounterpartyEntity : PanacheEntity() {
 @Entity
 @Table(name = "deals")
 class DealEntity : PanacheEntity() {
+    /** Optimistic lock (V21): a stale copy of the deal row fails at flush instead of overwriting it. */
+    @jakarta.persistence.Version
+    @Column(name = "row_version", nullable = false)
+    var rowVersion: Long = 0
+
     @Column(name = "deal_id", nullable = false, unique = true)
     lateinit var dealId: UUID
 
@@ -127,6 +132,40 @@ class DealEntity : PanacheEntity() {
     @Column(name = "fx_side")
     var fxSide: String? = null
 
+    /** ADR-0344 (V18). */
+    @Column(name = "kind", nullable = false)
+    var kind: String = "ACTUAL"
+
+    @Column(name = "book_id")
+    var bookId: String? = null
+
+    @Column(name = "legs_json", columnDefinition = "TEXT")
+    var legsJson: String? = null
+
+    @Column(name = "leg_schema_version")
+    var legSchemaVersion: Int? = null
+
+    @Column(name = "header_json", columnDefinition = "TEXT")
+    var headerJson: String? = null
+
+    @Column(name = "header_schema_version")
+    var headerSchemaVersion: Int? = null
+
+    @Column(name = "deal_version", nullable = false)
+    var dealVersion: Int = 1
+
+    @Column(name = "schedule_version", nullable = false)
+    var scheduleVersion: Int = 0
+
+    @Column(name = "schedule_hash")
+    var scheduleHash: String? = null
+
+    @Column(name = "security_isin")
+    var securityIsin: String? = null
+
+    @Column(name = "last_changed_by")
+    var lastChangedBy: String? = null
+
     @Column(name = "fx_counter_amount")
     var fxCounterAmount: BigDecimal? = null
 
@@ -190,6 +229,14 @@ class DealJournalEntity : PanacheEntity() {
 
     @Column(name = "posted_at", nullable = false)
     lateinit var postedAt: Instant
+
+    /** The journal's value day (V26): the accounting day the day-close report counts it under. */
+    @Column(name = "value_date")
+    var valueDate: java.time.LocalDate? = null
+
+    /** `class|role|currency|glAccountId` per line: the accounts the ledger resolved, for a later reversal. */
+    @Column(name = "resolved_accounts", columnDefinition = "TEXT")
+    var resolvedAccounts: String? = null
 }
 
 /** A client Idempotency-Key and the command it produced; unique on the key. */

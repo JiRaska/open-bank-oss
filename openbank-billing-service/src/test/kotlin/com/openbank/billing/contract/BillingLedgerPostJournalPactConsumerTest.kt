@@ -16,7 +16,6 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.billing.domain.FeeJournalCommand
 import com.openbank.billing.infrastructure.client.BillingJournalFactory
-import com.openbank.billing.infrastructure.client.BillingLedgerConfig
 import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -68,10 +67,6 @@ class BillingLedgerPostJournalPactConsumerTest {
 
     private val accountId = "99999999-9999-9999-9999-999999999999"
 
-    private val accounts = object : BillingLedgerConfig.Gl {
-        override fun feeReceivable(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000000002")
-        override fun feeIncome(): UUID = UUID.fromString("a0000000-0000-0000-0000-000000004003")
-    }
     private val systemActorId = UUID.fromString("00000000-0000-0000-0000-0000000000bb")
     private val entryDate = LocalDate.parse("2026-07-01")
 
@@ -83,6 +78,7 @@ class BillingLedgerPostJournalPactConsumerTest {
         amount = BigDecimal("150.00"),
         currency = "CZK",
         description = "Fee charge: Maintenance",
+        accountingClass = "CUSTOMER_DEPOSIT_DEMAND",
     )
 
     // Same Jackson stack the real REST client (`quarkus-rest-client-reactive-jackson`) serializes
@@ -91,7 +87,7 @@ class BillingLedgerPostJournalPactConsumerTest {
     private val objectMapper = ObjectMapper().registerKotlinModule()
 
     private val requestBody: String = objectMapper.writeValueAsString(
-        BillingJournalFactory.buildRequest(feeCommand, accounts, systemActorId, entryDate),
+        BillingJournalFactory.buildRequest(feeCommand, systemActorId, entryDate),
     )
 
     @Pact(consumer = "openbank-billing-service", provider = "openbank-ledger-service")
@@ -117,6 +113,35 @@ class BillingLedgerPostJournalPactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    /**
+     * ADR-0279: every changed contract test needs a 401 negative interaction. Shares
+     * `NEGATIVE_AUTH_STATE` ("no valid M2M identity is presented") with the other M2M consumers,
+     * replayed by ledger's `LedgerNegativeAuthProviderVerificationTest` (no `@TestSecurity` there).
+     */
+    @Pact(consumer = "openbank-billing-service", provider = "openbank-ledger-service")
+    fun rejectsFeeJournalWithMissingToken(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST a fee-charge journal with a missing or expired token")
+        .path("/api/v1/journals")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "rejectsFeeJournalWithMissingToken")
+    fun `a fee journal is refused with 401 when the caller has no valid identity`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/journals")
+            .then()
+            .statusCode(401)
+    }
 
     @Test
     @PactTestFor(pactMethod = "postBillingFeeJournalPact")

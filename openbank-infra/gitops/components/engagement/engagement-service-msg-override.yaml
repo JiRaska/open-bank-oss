@@ -2,7 +2,7 @@
 # (LendingArrearsEventConsumer, PartyErasureConsumer — ADR-0220 D3.5) as an external Quarkus
 # config source. A dotted leaf map key under mp.messaging.incoming.<channel> in YAML never
 # resolves to the plain MicroProfile Config property SmallRye reads (ADR-0137 pattern, see
-# transaction-service-msg-override.yaml). config_ordinal=500 forces this source to outrank the
+# card-issuance-service-msg-override.yaml). config_ordinal=500 forces this source to outrank the
 # baked application.yaml (~254). Loaded via QUARKUS_CONFIG_LOCATIONS on the Deployment.
 apiVersion: v1
 kind: ConfigMap

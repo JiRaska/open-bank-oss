@@ -10,8 +10,7 @@
 # granted Read/Describe on — every poll got a silent GroupAuthorizationException until it landed
 # inside Quarkus's synchronous startup window and became a fatal crash-loop.
 #
-# This mirrors the pre-existing pattern already used for transaction-service's
-# payment-scheme-accepted channel (transaction-service-msg-override.yaml). A properties file
+# This mirrors the pre-existing pattern already used for card-issuance-service's party-events-in channel (card-issuance-service-msg-override.yaml). A properties file
 # carries the exact hyphenated/dotted property name unambiguously, avoiding any reliance on
 # MicroProfile Config's env-var-name reverse-mapping for channel discovery.
 #
@@ -29,7 +28,7 @@
 #
 # A properties FILE carries the exact hyphenated/dotted property name unambiguously (no YAML
 # flattening, no env-var reverse-mapping) — the same proven pattern already live for
-# transaction-service (see transaction-service-msg-override.yaml in the payments component).
+# card-issuance-service (see card-issuance-service-msg-override.yaml in the payments component).
 # config_ordinal=500 outranks the baked application.yaml (~254).
 apiVersion: v1
 kind: ConfigMap

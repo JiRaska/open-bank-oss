@@ -42,6 +42,15 @@ object SecureXml {
         throw SAXException("external entity resolution is disabled ($systemId)")
     }
 
+    // Used ONLY for empty output documents, never for parsing. JAXP builders are not
+    // thread-safe, so serialize the tiny newDocument call; document mutation stays local
+    // to each caller. This avoids rebuilding and validating a parser for every message.
+    private val emptyDocumentBuilder by lazy { documentBuilder() }
+
+    /** A fresh, empty DOM, isolated from every other document and every input parser. */
+    @JvmStatic
+    fun newDocument(): Document = synchronized(emptyDocumentBuilder) { emptyDocumentBuilder.newDocument() }
+
     /** A DOM factory with every XXE vector closed. */
     @JvmStatic
     @JvmOverloads

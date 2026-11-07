@@ -11,6 +11,7 @@ import com.openbank.libs.iso20022.Iso20022Validator
 import com.openbank.libs.iso20022.Pacs002Reader
 import com.openbank.libs.iso20022.Pacs008Builder
 import com.openbank.libs.iso20022.PaymentStatus
+import com.openbank.libs.iso20022.PaymentTypeInformation
 import com.openbank.libs.iso20022.SettlementMethod
 import com.openbank.sepainstant.application.port.out.SchemeGatewayPort
 import com.openbank.sepainstant.application.port.out.SchemeGatewayUnavailableException
@@ -88,6 +89,9 @@ class SchemeGatewayAdapter(
             creditorName = payment.creditorName,
             creditorIban = payment.creditorIban,
             remittanceInfo = payment.remittanceInfo,
+            // EPC SCT Inst rulebook (#13663): SvcLvl/Cd=SEPA and LclInstrm/Cd=INST. This rail only
+            // ever sends SCT Inst, so the value is fixed rather than derived.
+            paymentTypeInformation = PaymentTypeInformation.SEPA_INSTANT,
         )
     }
 

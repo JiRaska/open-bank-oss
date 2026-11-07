@@ -49,7 +49,6 @@ internal object PensionInput {
         mapOf(
             "productLine" to oneOf(node, "productLine", PRODUCT_LINES),
             "jurisdiction" to matching(node, "jurisdiction", JURISDICTION),
-            "providerEntityId" to uuid(node, "providerEntityId"),
             "providerType" to oneOf(node, "providerType", PROVIDER_TYPES),
             "schedule" to schedule(node.path("schedule")),
         )
@@ -233,12 +232,6 @@ internal object PensionInput {
 
     private fun matching(node: JsonNode, field: String, pattern: Regex, label: String = field): String =
         requireNotNull(node.text(field)?.takeIf(pattern::matches)) { "$label is missing or malformed" }
-
-    private fun uuid(node: JsonNode, field: String): String =
-        uuidOf(requireNotNull(node.text(field)) { "$field is required" }, field)
-
-    private fun uuidOf(raw: String, field: String): String =
-        requireNotNull(runCatching { UUID.fromString(raw) }.getOrNull()) { "$field must be a UUID" }.toString()
 
     private fun date(raw: String, field: String): LocalDate =
         requireNotNull(runCatching { LocalDate.parse(raw) }.getOrNull()) { "$field must be an ISO date" }

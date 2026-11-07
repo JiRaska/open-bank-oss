@@ -1,0 +1,211 @@
+{
+  "consumer": {
+    "name": "openbank-agent-service"
+  },
+  "interactions": [
+    {
+      "description": "GET an FX pair fx-service does not publish, via the fx_get_rate tool",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/fx/rates/USD/JPY"
+      },
+      "response": {
+        "body": {
+          "error": "string"
+        },
+        "generators": {
+          "body": {
+            "$.error": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.error": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "GET the EUR/CZK rate behind the fx_get_rate tool",
+      "providerStates": [
+        {
+          "name": "an EUR/CZK rate exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/fx/rates/EUR/CZK"
+      },
+      "response": {
+        "body": {
+          "askRate": 100.0,
+          "baseCurrency": "EUR",
+          "bidRate": 100.0,
+          "quoteCurrency": "CZK"
+        },
+        "generators": {
+          "body": {
+            "$.askRate": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$.bidRate": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.askRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.bidRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the rate board behind the fx_list_rates tool",
+      "providerStates": [
+        {
+          "name": "an EUR/CZK rate exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/fx/rates"
+      },
+      "response": {
+        "body": [
+          {
+            "askRate": 100.0,
+            "baseCurrency": "string",
+            "bidRate": 100.0,
+            "quoteCurrency": "string"
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[*].askRate": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].baseCurrency": {
+              "size": 20,
+              "type": "RandomString"
+            },
+            "$[*].bidRate": {
+              "digits": 10,
+              "type": "RandomDecimal"
+            },
+            "$[*].quoteCurrency": {
+              "size": 20,
+              "type": "RandomString"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].askRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].baseCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].bidRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$[*].quoteCurrency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fx-service"
+  }
+}

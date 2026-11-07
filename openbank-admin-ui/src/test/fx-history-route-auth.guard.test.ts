@@ -23,11 +23,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
  */
 
 const mockAuth = vi.fn()
+const discoveryState = vi.hoisted(() => ({ resolution: null as any }))
 vi.mock('@/auth', () => ({ auth: () => mockAuth() }))
 vi.mock('@/lib/discovery', () => ({
   inCluster: () => true,
-  discoverServices: async () => ([{ name: 'fx-service', namespace: 'fx', ready: true, scaledToZero: false }]),
-  resolveInClusterBaseUrl: async () => 'http://fx-service.fx.svc:8119',
+  resolveInClusterService: async () => discoveryState.resolution ?? ({ state: 'found', service: { name: 'fx-service', namespace: 'fx', port: 8119, ready: true, scaledToZero: false }, baseUrl: 'http://fx-service.fx.svc:8119', coverage: 'complete' }),
 }))
 
 async function callRoute(query = '?base=EUR&quote=CZK') {
@@ -44,6 +44,7 @@ describe('GET /api/fx/history relays the operator bearer', () => {
 
   beforeEach(() => {
     vi.resetModules()
+    discoveryState.resolution = null
     fetchSpy = vi.fn(async (url: string) => new Response(JSON.stringify([]), { status: 200 }))
     vi.stubGlobal('fetch', fetchSpy)
   })
@@ -79,6 +80,17 @@ describe('GET /api/fx/history relays the operator bearer', () => {
     const { status, body } = await callRoute()
     expect(status).toBe(502)
     expect(body.error).toBe('upstream_error')
+  })
+
+  it('returns an explicit discovery failure instead of an empty history on partial absence', async () => {
+    discoveryState.resolution = { state: 'unknown', coverage: 'partial' }
+    mockAuth.mockResolvedValue({ user: { accessToken: 'operator-token' } })
+
+    const { status, body } = await callRoute()
+
+    expect(status).toBe(503)
+    expect(body.error).toBe('discovery_unavailable')
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('treats a successful but empty history as success, not as an error', async () => {

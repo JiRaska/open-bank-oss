@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey fx-rates-read → fx-service (:8119), read-only synthetic edge.
+#
+# Same ownership shape as networkpolicy-product-catalog-synthetic-journey.yaml: it lives
+# with the observability component because that is the ArgoCD Application that owns and
+# renders the journey CronJob. It selects a target in the fx namespace, which Kubernetes
+# permits; gen-network-policies.py derives edges from long-lived Deployments and cannot
+# see a CronJob, so this edge is hand-maintained. NetworkPolicies are additive; the
+# generated allow-list is untouched.
+#
+# The journey performs exactly one authenticated GET on the rate sheet
+# (GET /api/v1/fx/rates), as the synthetic-only client openbank-synthetic-fx-read
+# (fx:read scope → FX_SCOPE_READ; token edge in
+# networkpolicy-keycloak-synthetic-fx-journey.yaml). It carries no ServiceAccount token.
+# Port 8119 is the fx-service HTTP API; the management port remains governed by the
+# generated Prometheus rule. Removing this file rolls back the edge and makes the journey
+# fail closed with a connection timeout.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fx-ingress-synthetic-read-journey
+  namespace: fx
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: fx-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/component: journey
+              openbank.tech/journey: fx-rates-read
+      ports:
+        - protocol: TCP
+          port: 8119

@@ -5,8 +5,8 @@
 package com.openbank.fraud.integration
 
 import com.openbank.fraud.it.PostgresRedisTestResource
-import com.openbank.fraud.it.TraceContractProfile
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile

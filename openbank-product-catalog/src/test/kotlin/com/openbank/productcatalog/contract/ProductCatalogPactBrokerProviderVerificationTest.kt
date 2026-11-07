@@ -4,20 +4,27 @@
 
 package com.openbank.productcatalog.contract
 
+import au.com.dius.pact.core.model.UrlPactSource
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
+import au.com.dius.pact.provider.junitsupport.AllowOverridePactUrl
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.domain.ProductIds
+import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
@@ -53,9 +60,13 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR", "CATALOG_SCOPE_READ"])
 @Provider("openbank-product-catalog")
 @PactBroker
+@AllowOverridePactUrl
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class ProductCatalogPactBrokerProviderVerificationTest {
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @Inject
     lateinit var catalogFixtures: CatalogPactProviderFixtures
@@ -65,13 +76,29 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        System.getenv("HISTORICAL_PACT_URL")?.let { expectedUrl ->
+            check(System.getProperty("pact.filter.pacturl") == expectedUrl) {
+                "Historical Pact URL was not forwarded to the test JVM"
+            }
+            check(System.getProperty("pact.filter.consumers") == "openbank-admin-ui") {
+                "Historical Pact consumer filter was not forwarded to the test JVM"
+            }
+            val pact = requireNotNull(context?.pact) { "Historical Pact verification has no Pact context" }
+            val source = requireNotNull(pact.source as? UrlPactSource) {
+                "Historical Pact verification did not load a URL source"
+            }
+            check(source.url == expectedUrl) { "Historical Pact verification loaded an unexpected URL" }
+            check(pact.consumer.name == "openbank-admin-ui") { "Historical Pact has an unexpected consumer" }
+        }
         context?.target = HttpTestTarget("localhost", testPort.toInt())
     }
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        withCatalogPactConsumerIdentity(testIdentityAssociation, context?.consumer?.name) {
+            context?.verifyInteraction()
+        }
     }
 
     /**
@@ -98,15 +125,22 @@ class ProductCatalogPactBrokerProviderVerificationTest {
             .then().statusCode(404)
     }
 
-    /**
-     * No seeding: `CURRENT_PERSONAL` carries four seeded fees in `ProductSeed` on every boot.
-     * Keep this broker replay state in lock-step with the always-on `@PactFolder` verifier so a
-     * newly published billing pact cannot pass on a PR and then strand at `can-i-deploy`.
-     */
+    /** Assert the real seeded schedule; never replace it with consumer-shaped fixture data. */
     @State("a product with fees exists for code CURRENT_PERSONAL")
     fun feeBearingProductIsSeeded() {
-        // Intentionally empty — see the KDoc above.
+        val product = ProductSeed.products.single { it.code == "CURRENT_PERSONAL" }
+        val monthlyFee = product.fees.single { it.name == "Monthly Fee" }
+        val id = ProductIds.canonicalId(product.id)
+        given().accept("application/json").get("/api/v1/products/$id/fees")
+            .then().statusCode(200)
+            .body("find { it.name == 'Monthly Fee' }.type", equalTo(monthlyFee.type))
+            .body("find { it.name == 'Monthly Fee' }.amount", equalTo(monthlyFee.amount.toFloat()))
+            .body("find { it.name == 'Monthly Fee' }.currency", equalTo(monthlyFee.currency))
+            .body("find { it.name == 'Monthly Fee' }.waivable", equalTo(monthlyFee.waivable))
     }
+
+    @State("a published v1-projected deposit revision exists for billing")
+    fun publishedLegacyDepositRevisionExists() = catalogFixtures.publishedLegacyDepositRevisionExists()
 
     /**
      * The pact-pinned UUID is deliberately absent from `ProductSeed`; the seeded catalogue
@@ -114,6 +148,37 @@ class ProductCatalogPactBrokerProviderVerificationTest {
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
     fun unknownProductIdNotFound() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: `ProductCatalogSeeder` persists the whole canonical
+     * catalogue from `ProductSeed` on first boot, so the assistant consumer's `list_products`
+     * state is satisfied by every boot. The list is a global array — the pact pins per-row
+     * shape, never count or order.
+     */
+    @State("the canonical catalog products are seeded")
+    fun canonicalCatalogProductsAreSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: `prod-001` is `SAVINGS_STANDARD` in `ProductSeed` on
+     * every boot — ACTIVE, with two seeded fees (the assistant consumer's `get_product` /
+     * `get_product_fees` states).
+     */
+    @State("a product exists with id prod-001")
+    fun pactProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * Keep-in-sync with the folder twin: the pact-pinned UUID is deliberately absent from
+     * `ProductSeed`; the seeded catalogue already satisfies the assistant consumer's negative
+     * `get_product` state.
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000eee")
+    fun agentUnknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
     }
 
@@ -145,4 +210,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @State("a published DIP strategy revision has separate legal and product approvals")
     fun publishedPensionStrategyApprovalsExist() = catalogFixtures.publishedPensionStrategyApprovalsExist()
+
+    @State("a published pension-savings revision with a 0.80 percent management fee exists")
+    fun publishedPensionFundFeeRevisionExists() = catalogFixtures.publishedPensionFundFeeRevisionExists()
 }

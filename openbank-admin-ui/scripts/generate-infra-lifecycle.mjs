@@ -15,8 +15,9 @@
 
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { fileURLToPath, pathToFileURL } from 'url'
+import { sourceDate, preserveDerivedTimestamp } from './lib/source-date.mjs'
+import { withRequestSendTrace } from './request-send-trace.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -118,7 +119,7 @@ async function fetchEol(product) {
   return { error: lastErr }
 }
 
-async function main() {
+async function generateInfraLifecycle() {
   const reg = JSON.parse(readFileSync(REGISTRY, 'utf8'))
   const files = existsSync(GITOPS) ? walkFiles(GITOPS) : []
   if (!files.length) console.warn(`[infra-lifecycle] WARN: no GitOps files under ${GITOPS}`)
@@ -150,14 +151,19 @@ async function main() {
     generatedAt: sourceDate(REPO, INPUTS),
     components,
   }
-  writeFileSync(OUT, JSON.stringify(out, null, 2))
+  writeFileSync(OUT, JSON.stringify(preserveDerivedTimestamp(OUT, out, 'generatedAt'), null, 2))
   console.log(`[infra-lifecycle] ${components.length} components (${eolHits} with lifecycle feed) → ${OUT}`)
   // Fail loud if NOTHING resolved — a snapshot with no lifecycle feeds at all means the
   // upstream fetch is broken, and we must not bake a hollow file (the governance lesson).
   if (eolHits === 0) {
     console.error('[infra-lifecycle] ERROR: zero lifecycle feeds resolved (endoflife.date unreachable?).')
-    process.exit(1)
+    return false
   }
+  return true
 }
 
-main()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  withRequestSendTrace('infra_lifecycle', 'none', true, generateInfraLifecycle)
+    .then(ok => { if (!ok) process.exitCode = 1 })
+    .catch(error => { console.error(error); process.exitCode = 1 })
+}

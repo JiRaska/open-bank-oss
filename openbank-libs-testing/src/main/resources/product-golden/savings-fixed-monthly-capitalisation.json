@@ -1,0 +1,228 @@
+{
+  "name": "savings-fixed-monthly-capitalisation",
+  "description": "Fixed 3.65 % ACT/365 on 10 000 EUR: 1.000000 accrues per day at scale 6, the month-end capitalisation posts 3.00 at the currency scale, and the next accrual runs on the capitalised balance.",
+  "revision": {
+    "irVersion": 1,
+    "productCode": "SAV-GOLD-FIXED",
+    "currency": "EUR",
+    "interest": {
+      "ruleId": "interest.base",
+      "rateType": "FIXED",
+      "dayCount": "ACT_365_FIXED",
+      "accrualCadence": "DAILY",
+      "capitalisationCadence": "MONTHLY",
+      "accrualRounding": "INTEREST_ACCRUAL",
+      "postingRounding": "LEDGER_POSTING",
+      "rate": "0.0365"
+    },
+    "fees": [],
+    "hooks": {
+      "onOpen": [
+        {
+          "ruleId": "open.schedule-accrual",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "ACCRUAL",
+            "cadence": "DAILY"
+          }
+        },
+        {
+          "ruleId": "open.schedule-capitalisation",
+          "action": {
+            "type": "SCHEDULE",
+            "hook": "scheduled",
+            "tag": "CAPITALISATION",
+            "cadence": "MONTHLY"
+          }
+        }
+      ],
+      "scheduled": [
+        {
+          "ruleId": "scheduled.accrue",
+          "trigger": "ACCRUAL",
+          "action": {
+            "type": "ACCRUE_INTEREST"
+          }
+        },
+        {
+          "ruleId": "scheduled.capitalise",
+          "trigger": "CAPITALISATION",
+          "action": {
+            "type": "CAPITALISE_INTEREST"
+          }
+        }
+      ]
+    }
+  },
+  "clock": {
+    "zone": "UTC"
+  },
+  "state": {
+    "currency": "EUR",
+    "balance": "10000.00",
+    "accruedInterest": "0.000000",
+    "openedOn": "2026-01-01"
+  },
+  "steps": [
+    {
+      "at": "2026-01-01T00:00:00Z",
+      "hook": "onOpen",
+      "expected": [
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-accrual",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "ACCRUAL",
+          "cadence": "DAILY",
+          "at": null
+        },
+        {
+          "type": "SCHEDULE",
+          "ruleId": "open.schedule-capitalisation",
+          "irVersion": 1,
+          "hook": "scheduled",
+          "tag": "CAPITALISATION",
+          "cadence": "MONTHLY",
+          "at": null
+        }
+      ]
+    },
+    {
+      "at": "2026-01-29T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-01-30T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-01-31T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000000",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-01-31T23:30:00Z",
+      "hook": "scheduled",
+      "tag": "CAPITALISATION",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "scheduled.capitalise",
+          "irVersion": 1,
+          "narrative": "interest capitalisation",
+          "lines": [
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "DEBIT",
+              "amount": "3.00",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT",
+              "direction": "CREDIT",
+              "amount": "3.00",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "at": "2026-02-01T23:00:00Z",
+      "hook": "scheduled",
+      "tag": "ACCRUAL",
+      "expected": [
+        {
+          "type": "POST",
+          "ruleId": "interest.base",
+          "irVersion": 1,
+          "narrative": "interest accrual",
+          "lines": [
+            {
+              "accountingClass": "INTEREST_EXPENSE",
+              "direction": "DEBIT",
+              "amount": "1.000300",
+              "currency": "EUR"
+            },
+            {
+              "accountingClass": "ACCRUED_INTEREST_PAYABLE",
+              "direction": "CREDIT",
+              "amount": "1.000300",
+              "currency": "EUR"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

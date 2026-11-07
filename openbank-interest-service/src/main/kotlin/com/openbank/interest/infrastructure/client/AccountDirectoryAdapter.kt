@@ -16,9 +16,9 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * **Fail-open** [AccountDirectoryPort] adapter over [AccountServiceClient]. Every upstream failure
- * degrades (empty page / null balance) and is logged, never thrown — see the port's contract for
- * why a degraded accrual tick beats a crashed scheduler.
+ * [AccountDirectoryPort] adapter over [AccountServiceClient]. A balance failure degrades to null
+ * (counted per account as unavailable by the accrual run); a listing failure is PROPAGATED, because
+ * an empty or truncated account list is otherwise indistinguishable from "nothing to accrue".
  */
 @ApplicationScoped
 class AccountDirectoryAdapter : AccountDirectoryPort {
@@ -43,13 +43,12 @@ class AccountDirectoryAdapter : AccountDirectoryPort {
                 nextCursor = resp.pagination.nextCursor.takeIf { resp.pagination.hasNextPage },
             )
         }
-        .onFailure().recoverWithItem { e ->
-            log.warnf(
-                "account-service /active unavailable (cursor=%s); accruing nobody this page: %s",
-                cursor,
-                e.message,
-            )
-            AccountPage(emptyList(), null)
+        // NOT fail-open: an empty page is only a valid answer to a SUCCESSFUL call. Swallowing the
+        // error here shortened the account list silently, and a run over a truncated list (or an
+        // empty one) is indistinguishable from a run with nothing to do - it was reported as RAN.
+        // The caller turns the failure into an "unavailable" outcome.
+        .onFailure().invoke { e ->
+            log.warnf("account-service /active unavailable (cursor=%s): %s", cursor, e.message)
         }
 
     override fun bookedBalance(accountId: UUID): Uni<BalanceSnapshot?> = client.getBalance(accountId)

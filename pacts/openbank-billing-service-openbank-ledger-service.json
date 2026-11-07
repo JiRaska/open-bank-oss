@@ -4,6 +4,54 @@
   },
   "interactions": [
     {
+      "description": "POST a fee-charge journal with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "createdBy": "00000000-0000-0000-0000-0000000000bb",
+          "description": "Fee charge: Maintenance",
+          "entryDate": "2026-07-01",
+          "idempotencyKey": "fee-2026-07-pact-001-maintenance-CZK",
+          "lines": [
+            {
+              "accountingClass": "CUSTOMER_DEPOSIT_DEMAND",
+              "accountingRole": "PRINCIPAL",
+              "amount": 150.00,
+              "baseAmount": 150.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "side": "DEBIT",
+              "subAccountId": "99999999-9999-9999-9999-999999999999"
+            },
+            {
+              "accountingClass": "FEE_INCOME_ACCOUNT",
+              "accountingRole": "FEE_INCOME",
+              "amount": 150.00,
+              "baseAmount": 150.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "side": "CREDIT",
+              "subAccountId": null
+            }
+          ],
+          "transactionId": "61032cf1-5aff-3102-93ca-fd8f781d0cac",
+          "valueDate": "2026-07-01"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/journals"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST a balanced two-line CZK fee-charge journal",
       "providerStates": [
         {
@@ -18,20 +66,22 @@
           "idempotencyKey": "fee-2026-07-pact-001-maintenance-CZK",
           "lines": [
             {
+              "accountingClass": "CUSTOMER_DEPOSIT_DEMAND",
+              "accountingRole": "PRINCIPAL",
               "amount": 150.00,
               "baseAmount": 150.00,
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
-              "glAccountId": "a0000000-0000-0000-0000-000000000002",
               "side": "DEBIT",
               "subAccountId": "99999999-9999-9999-9999-999999999999"
             },
             {
+              "accountingClass": "FEE_INCOME_ACCOUNT",
+              "accountingRole": "FEE_INCOME",
               "amount": 150.00,
               "baseAmount": 150.00,
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
-              "glAccountId": "a0000000-0000-0000-0000-000000004003",
               "side": "CREDIT",
               "subAccountId": null
             }

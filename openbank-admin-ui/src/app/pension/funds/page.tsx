@@ -22,7 +22,7 @@ import { fundUrl, getJson, PENSION_FUND, sendJson } from '@/components/pension/a
 import { fundListSchema, navListSchema, navPublicationSchema, navSchema, type Fund, type Nav } from '@/components/pension/contracts'
 import { canDecideNav, refusalText, statusLabel } from '@/components/pension/model'
 import { PAGE_SIZE } from '@/components/pension/PensionQueue'
-import { principalNameFromToken } from '@/components/balance-sheet/model'
+import { principalNameFromToken } from '@/lib/auth/principal'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 

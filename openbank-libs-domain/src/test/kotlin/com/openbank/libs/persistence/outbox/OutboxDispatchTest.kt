@@ -570,12 +570,15 @@ class OutboxDispatchTest {
         val repo = FakeRepoV2(rows)
 
         val result = runBlocking {
-            OutboxDispatch.drain(repo, batchSize = 10, budget = Duration.ofMillis(150)) { _ -> delay(60) }
+            // Spend the budget inside the first full batch. A busy runner may spend more time,
+            // but cannot make this full batch finish before the budget expires.
+            OutboxDispatch.drain(repo, batchSize = 10, budget = Duration.ofMillis(100)) { row ->
+                if (row.eventType == "slow.1") delay(200)
+            }
         }
 
-        assertThat(result.claimed).describedAs("more than one batch ran").isGreaterThan(10)
-        assertThat(result.claimed).describedAs("but nowhere near the whole table").isLessThan(500)
-        assertThat(repo.claims.get()).isLessThan(50)
+        assertThat(result.claimed).describedAs("the first full batch spent the budget").isEqualTo(10)
+        assertThat(repo.claims.get()).describedAs("no re-claim after the budget expired").isEqualTo(1)
     }
 
     @Test

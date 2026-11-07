@@ -267,7 +267,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
         const val MANIFEST_COLUMNS =
             "engine_version, capital_set_id, capital_set_version, liquidity_set_id, liquidity_set_version, " +
                 "irrbb_shock_set_version, irrbb_shock_source, min_reserves_set_id, min_reserves_set_version, " +
-                "behavioural_model_id, behavioural_model_version"
+                "behavioural_model_id, behavioural_model_version, curve_model_version, valuation_model_version"
         const val SELECT_RUN =
             "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count, requested_by, " +
                 "ledger_cut_off, $MANIFEST_COLUMNS FROM snapshot_run"
@@ -275,7 +275,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             "INSERT INTO snapshot_run (id, as_of, recorded_at, input_hash, provenance, status, " +
                 "position_count, mismatch_count, requested_by, ledger_cut_off, $MANIFEST_COLUMNS) " +
                 "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, " +
-                "$20, $21) ON CONFLICT (as_of, input_hash) DO NOTHING"
+                "$20, $21, $22, $23) ON CONFLICT (as_of, input_hash) DO NOTHING"
         const val INSERT_MISMATCH =
             "INSERT INTO snapshot_tie_out_mismatch (run_id, gl_account_code, currency, ledger_net, positions_net) " +
                 "VALUES ($1, $2, $3, $4, $5)"
@@ -334,6 +334,8 @@ private fun manifestColumns(v: ModelVersions?): List<String?> = listOf(
     v?.minReservesSetVersion,
     v?.behaviouralModelId,
     v?.behaviouralModelVersion,
+    v?.curveModelVersion,
+    v?.valuationModelVersion,
 )
 
 /** A historic row (recorded before V6) has no engine version, and so no versions at all. */
@@ -351,5 +353,7 @@ private fun readModelVersions(row: Row): ModelVersions? {
         minReservesSetVersion = row.getString("min_reserves_set_version"),
         behaviouralModelId = row.getString("behavioural_model_id"),
         behaviouralModelVersion = row.getString("behavioural_model_version"),
+        curveModelVersion = row.getString("curve_model_version"),
+        valuationModelVersion = row.getString("valuation_model_version"),
     )
 }

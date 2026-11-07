@@ -8,10 +8,6 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.hibernate.reactive.panache)
     implementation(libs.quarkus.hibernate.reactive.panache.base)
     implementation(libs.quarkus.reactive.pg.client)
@@ -19,16 +15,11 @@ dependencies {
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.scheduler)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.redis.client)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.cache)
     implementation(libs.kotlinx.coroutines.core)
@@ -43,9 +34,7 @@ dependencies {
 
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
-    testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     // Test-only (#5705): CampaignMetricsAdapterTest asserts the alert expressions in
     // gitops/components/campaign/prometheus-rules.yaml against a real Prometheus scrape, so the
@@ -57,7 +46,6 @@ dependencies {
     // 1.14.5 -> 1.17.0 for GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH DoS; the 1.14.x line has no
     // fix), and this literal — not quarkus-bom's constraint — is what dependency-review scans.
     testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
-    testImplementation(libs.rest.assured.kotlin)
     // Consumer-driven contract against consent-service (ADR-0063). campaign-service reads the
     // suppression list and the consent check on every outbound touch, and both were unverified:
     // `GET /api/v1/suppressions/party/{partyId}` answered 500 on EVERY call from the day it

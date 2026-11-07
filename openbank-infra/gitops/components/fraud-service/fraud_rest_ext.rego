@@ -7,12 +7,13 @@
 #   fraud.score       — POST /api/v1/fraud/score: score a payment intent, return a
 #                       verdict (ALLOW/CHALLENGE/REVIEW/DECLINE). The only write
 #                       endpoint (ADR-0084 §1).
-#   fraud.review.read — GET /api/v1/fraud/review-queue: analyst work queue. Covered
-#                       by base operator-read-any / compliance-read-any (*.read
-#                       suffix) — no rule needed here. NOTE (#3734): that base rule
-#                       also admits the M2M identities to this read, the same
-#                       pre-existing fleet-wide read over-grant tracked separately;
-#                       this PR tightens WRITES only.
+#   fraud.review.read — GET /api/v1/fraud/review-queue: human analyst work queue.
+#                       The action-scoped prohibition below vetoes machine callers.
+#   fraud.thresholds.propose / .decide / .read — /api/v1/fraud/thresholds/**: four-eyes
+#                       administration of the money-threshold set (ADR-0347). Risk and
+#                       compliance staff only; operators and every machine principal are
+#                       excluded. maker != checker is enforced in Kotlin from the JWT subject
+#                       (FraudThresholdActivationService) and again by a CHECK constraint.
 #
 # Base rest.rego contributes nothing to fraud.score (a non-read action with no
 # resource path parameter), so BOTH write allow paths live in this extension.
@@ -41,8 +42,20 @@ allowed_reasons contains "operator-fraud-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	startswith(input.action, "fraud.")
+	# ADR-0347: changing a fraud control's figures is a risk-function decision, not an ops one.
+	not startswith(input.action, "fraud.thresholds.")
+}
+
+# ADR-0347: risk/compliance staff administer the threshold set. ROLE_ADMIN is kept for parity
+# with the resource's @RolesAllowed; the four-eyes rule itself is not a role question.
+allowed_reasons contains "risk-fraud-thresholds" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_RISK", "ROLE_COMPLIANCE", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not principal_is_machine
+	input.action in {"fraud.thresholds.propose", "fraud.thresholds.decide", "fraud.thresholds.read"}
 }
 
 # M2M payment surfaces calling the real-time scoring gate: fx-service invokes
@@ -62,7 +75,7 @@ allowed_reasons contains "operator-fraud-write" if {
 # service sharing the client would also match this rule for fraud.score.
 allowed_reasons contains "service-fraud-scoring" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-services"
+	machine_named("service-account-openbank-services")
 	input.action == "fraud.score"
 }
 
@@ -75,6 +88,21 @@ allowed_reasons contains "service-fraud-scoring" if {
 # legitimate scoring caller (service-fraud-scoring above) — interest (#3698) could
 # prohibit every service-account because no M2M writer exists there; fraud cannot.
 prohibited if {
-	input.principal.id == "service-account-openbank-edge"
+	machine_named("service-account-openbank-edge")
 	input.action == "fraud.score"
+}
+
+# Analyst review is staff-only, including when a generic read grant matches.
+# Reuse the phase-two classifier: absent or invalid markers are not staff.
+# Other services' generic reads and the named fraud.score grant are unchanged.
+prohibited if {
+	input.action == "fraud.review.read"
+	principal_is_machine
+}
+
+# No machine principal may propose, approve or even read the threshold set (ADR-0347) — checked
+# at the allow head, so it beats a future role_action_matrix grant or a generic read reason.
+prohibited if {
+	startswith(input.action, "fraud.thresholds.")
+	principal_is_machine
 }

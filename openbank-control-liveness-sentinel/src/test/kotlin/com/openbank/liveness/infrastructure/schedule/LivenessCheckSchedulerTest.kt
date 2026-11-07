@@ -5,13 +5,18 @@
 
 package com.openbank.liveness.infrastructure.schedule
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.liveness.application.port.incoming.RunLivenessCheckUseCase
 import com.openbank.liveness.domain.model.RunTrigger
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -70,5 +75,47 @@ class LivenessCheckSchedulerTest {
         repeat(3) { scheduler.runScheduledCheck() }
 
         assertThat(scheduler.fireCount).isEqualTo(3)
+    }
+
+    private fun heartbeatScheduler(registry: MeterRegistry): LivenessCheckScheduler {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns true
+        every { instance.get() } returns registry
+        return scheduler().also {
+            it.metrics = DomainMetrics().apply { registryInstance = instance }
+            it.registerHeartbeat()
+        }
+    }
+
+    private fun successRecorded(registry: MeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "liveness-sentinel-check")
+        .gauge()
+        ?.value()
+
+    @Test
+    fun `the heartbeat exists from boot and flips only after a dispatched check`(): Unit = runBlocking {
+        every { temporalConfig.enabled() } returns true
+        coEvery { runCheck.startDetached(any()) } returns "liveness-check-scheduled"
+        val registry = SimpleMeterRegistry()
+        val scheduler = heartbeatScheduler(registry)
+        // Registered but not yet succeeded: the series WatcherHeartbeatAbsent needs is present.
+        assertThat(successRecorded(registry)).isEqualTo(0.0)
+
+        scheduler.runScheduledCheck()
+
+        assertThat(successRecorded(registry)).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a skipped check on a Temporal-disabled pod does not read as a success`(): Unit = runBlocking {
+        every { temporalConfig.enabled() } returns false
+        val registry = SimpleMeterRegistry()
+        val scheduler = heartbeatScheduler(registry)
+
+        scheduler.runScheduledCheck()
+
+        assertThat(scheduler.fireCount).isEqualTo(1)
+        assertThat(successRecorded(registry)).isEqualTo(0.0)
     }
 }

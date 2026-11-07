@@ -25,7 +25,12 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.time.Instant
 import java.util.UUID
+
+// Customer-edge fetches one lookahead row for a 100-item global page.
+private const val MAX_NOTIFICATION_PAGE_SIZE = 101
+private const val KEYSET_PAGE_MODE = "KEYSET"
 
 @Path("/api/v1/notifications")
 @Produces(MediaType.APPLICATION_JSON)
@@ -43,11 +48,24 @@ class NotificationResource {
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("beforeCreatedAt") beforeCreatedAt: String? = null,
+        @QueryParam("beforeId") beforeId: UUID? = null,
     ): Response {
+        if ((beforeCreatedAt == null) != (beforeId == null) || beforeCreatedAt != null && partyId == null) {
+            return Response.status(Response.Status.BAD_REQUEST).build()
+        }
+        val beforeInstant = beforeCreatedAt?.let { raw ->
+            val parsed = runCatching { Instant.parse(raw) }.getOrNull()
+            parsed ?: return Response.status(Response.Status.BAD_REQUEST).build()
+        }
         val boundedPage = page.coerceAtLeast(0)
-        val boundedSize = size.coerceIn(1, 100)
+        val boundedSize = size.coerceIn(1, MAX_NOTIFICATION_PAGE_SIZE)
         val (items, total, unreadCount) = if (partyId != null) {
-            repo.pageByParty(partyId, boundedPage, boundedSize)
+            if (beforeInstant != null && beforeId != null) {
+                repo.pageByPartyBefore(partyId, beforeInstant, beforeId, boundedSize)
+            } else {
+                repo.pageByParty(partyId, boundedPage, boundedSize)
+            }
         } else {
             val (allItems, allTotal) = repo.pageAll(boundedPage, boundedSize)
             Triple(allItems, allTotal, null)
@@ -60,10 +78,12 @@ class NotificationResource {
                         "partyId" to n.partyId,
                         "channel" to n.channel,
                         "template" to n.template,
+                        "templateRevision" to n.templateRevision,
                         "recipient" to n.recipient,
                         "subject" to n.subject,
                         "status" to n.status,
                         "sentAt" to n.sentAt,
+                        "visibleAt" to n.visibleAt,
                         "readAt" to n.readAt,
                         "createdAt" to n.createdAt,
                     )
@@ -72,6 +92,7 @@ class NotificationResource {
                 "page" to boundedPage,
                 "size" to boundedSize,
                 "unreadCount" to unreadCount,
+                "pageMode" to if (beforeInstant != null) KEYSET_PAGE_MODE else "OFFSET",
             ),
         ).build()
     }
@@ -113,11 +134,13 @@ class NotificationResource {
         "partyId" to n.partyId,
         "channel" to n.channel,
         "template" to n.template,
+        "templateRevision" to n.templateRevision,
         "recipient" to n.recipient,
         "subject" to n.subject,
         "body" to bodyForRead(n.template, n.body),
         "status" to n.status,
         "sentAt" to n.sentAt,
+        "visibleAt" to n.visibleAt,
         "readAt" to n.readAt,
         "createdAt" to n.createdAt,
     )

@@ -8,7 +8,7 @@
 // four-eyes check compares two real people.
 import type { z } from 'zod'
 import { svcUrl } from '@/lib/services/bff'
-import { getJson, type Loaded } from '@/components/balance-sheet/api'
+import { getJson, type Loaded } from '@/lib/services/resourceClient'
 
 export const PENSION = 'pension-service'
 export const PENSION_FUND = 'pension-fund-service'
@@ -19,7 +19,7 @@ export const pensionUrl = (path: string, query?: Record<string, string>) =>
   svcUrl(PENSION, `/api/v2/pension${path}`, query)
 
 export const fundUrl = (path: string, query?: Record<string, string>) =>
-  svcUrl(PENSION_FUND, `/api/v1${path}`, query)
+  svcUrl(PENSION_FUND, `/api/v2${path}`, query)
 
 /** A write's outcome. `code` is the service's own refusal (`{error}`), rendered readably. */
 export type WriteResult<T> =

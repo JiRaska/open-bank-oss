@@ -81,6 +81,20 @@ interface SendPage {
   size: number
 }
 
+interface BulkRun {
+  id: string
+  state: 'PREPARING' | 'RUNNING' | 'HELD' | 'COMPLETED'
+  audienceCount: number | null
+  snapshotAt: string | null
+  admitted: number
+  failures: number
+  pageSize: number
+  lastError: string | null
+  lastResumedBy?: string | null
+  lastResumedAt?: string | null
+  updatedAt: string
+}
+
 interface Experiment {
   holdoutPercent: number
   treatment: { assigned: number; converted: number; conversionRate: number | null }
@@ -118,6 +132,7 @@ type Detail = {
   incentives: { reserved: number; committed: number; released: number; expired: number } | null
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
+  bulkRuns?: BulkRun[]
   entryCatalogues?: {
     cadences: { cadence: string; humanForm: string; zone: string }[]
     triggers: { trigger: string; humanForm: string }[]
@@ -189,6 +204,27 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       .finally(() => setLoading(false))
   }, [id, reloadToken])
 
+  const hasRunningBulkRun = detail?.bulkRuns?.some(run => run.state === 'PREPARING' || run.state === 'RUNNING') ?? false
+  useEffect(() => {
+    if (!hasRunningBulkRun || !id) return
+    const timer = window.setInterval(() => {
+      fetch(`/api/campaigns/${encodeURIComponent(id)}/bulk-runs`)
+        .then(response => response.json())
+        .then((result: { state: string; runs: BulkRun[] }) => {
+          setDetail(previous => previous && ({
+            ...previous,
+            bulkRuns: result.state === 'ok' ? result.runs : previous.bulkRuns,
+            sources: { ...previous.sources, bulkRuns: result.state },
+          }))
+        })
+        .catch(() => setDetail(previous => previous && ({
+          ...previous,
+          sources: { ...previous.sources, bulkRuns: 'unreachable' },
+        })))
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [hasRunningBulkRun, id])
+
   const c = detail?.campaign
 
   // The bundle carries page 0; every later page and every filter change comes from the dedicated
@@ -211,6 +247,27 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const actionCloseFocusOverrideRef = useRef<HTMLElement | null>(null)
   const campaignWorkspaceRef = useRef<HTMLElement>(null)
   const [duplicating, setDuplicating] = useState(false)
+  const [resumingRun, setResumingRun] = useState<string | null>(null)
+
+  const resumeBulkRun = async (runId: string) => {
+    if (!id) return
+    setResumingRun(runId)
+    setActionError(null)
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(id)}/bulk-runs/${encodeURIComponent(runId)}/resume`, {
+        method: 'POST',
+      })
+      const result = await response.json() as { state?: string; error?: string }
+      if (result.state !== 'ok') {
+        setActionError(result.error ?? t('Běh se nepodařilo obnovit.', 'The run could not be resumed.'))
+      }
+      setReloadToken(token => token + 1)
+    } catch {
+      setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.'))
+    } finally {
+      setResumingRun(null)
+    }
+  }
 
   /**
    * Reuse does not change the source campaign. The server makes a separate DRAFT owned by this
@@ -304,7 +361,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       pause: t('Pozastavit', 'Pause'),
       resume: t('Obnovit', 'Resume'),
       close: t('Uzavřít', 'Close'),
-      enrol: t('Zařadit publikum', 'Enrol audience'),
+      enrol: t('Spustit dávkové zařazení', 'Start batch enrolment'),
     })[a] ?? a
 
   const loadSends = (page: number, outcome: string) => {
@@ -887,6 +944,39 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           </section>
 
           <section className="space-y-2">
+            <h2 className="text-sm font-semibold">{t('Dávkové zařazení', 'Batch enrolment')}</h2>
+            {detail?.sources?.bulkRuns !== 'ok' ? (
+              <DataUnavailable
+                kind={detail?.sources?.bulkRuns === 'unauthorized' ? 'unauthorized' : detail?.sources?.bulkRuns === 'not_deployed' ? 'not_deployed' : 'unreachable'}
+                service="Campaign-service"
+                feature={t('Dávkové zařazení', 'Batch enrolment')}
+                dense
+              />
+            ) : detail.bulkRuns?.length ? (
+              <div className="space-y-2">
+                {detail.bulkRuns.map(run => (
+                  <div key={run.id} className="rounded-lg border p-3 text-sm" data-bulk-run={run.id}>
+                    <div className="flex items-center justify-between gap-3">
+                      <StatusBadge status={run.state} tone={run.state === 'HELD' ? 'danger' : run.state === 'COMPLETED' ? 'success' : 'neutral'} />
+                      <span className="text-muted-foreground">{new Date(run.updatedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</span>
+                    </div>
+                    <p>{t('Zařazeno', 'Admitted')}: {run.admitted.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')} · {t('Chyby', 'Failures')}: {run.failures}</p>
+                    <p className="text-xs text-muted-foreground">{t('Zmrazené publikum', 'Frozen audience')}: {run.audienceCount == null ? t('připravuje se', 'preparing') : run.audienceCount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}{run.snapshotAt ? ` · ${new Date(run.snapshotAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}` : ''}</p>
+                    <p className="text-xs text-muted-foreground">{t('Limit', 'Budget')}: {run.pageSize} {t('za minutu', 'per minute')}{run.lastError ? ` · ${run.lastError}` : ''}</p>
+                    {run.audienceCount != null && <p className="text-xs text-muted-foreground">{t('Dolní mez zařazení', 'Admission lower bound')}: {Math.ceil(run.audienceCount / run.pageSize).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')} {t('sdílených minutových slotů; bez času doručení a prokliků', 'shared one-minute slots; excludes delivery and clicks')}</p>}
+                    {run.lastResumedBy && <p className="text-xs text-muted-foreground">{t('Obnovil', 'Resumed by')}: {run.lastResumedBy}{run.lastResumedAt ? ` · ${new Date(run.lastResumedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}` : ''}</p>}
+                    {run.state === 'HELD' && c.state === 'ACTIVE' && (
+                      <button type="button" className="mt-2 rounded border px-3 py-1" disabled={resumingRun === run.id} onClick={() => resumeBulkRun(run.id)}>
+                        {t('Obnovit po kontrole', 'Resume after review')}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : <p className="text-sm text-muted-foreground">{t('Zatím žádný běh.', 'No run yet.')}</p>}
+          </section>
+
+          <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Zařazení', 'Enrolments')}</h2>
             {detail?.sources?.enrolments !== 'ok' ? (
               <DataUnavailable
@@ -1073,7 +1163,7 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, closeFocusO
   const label = ({
     submit: t('Odeslat ke schválení', 'Submit for approval'),
     activate: t('Schválit a spustit', 'Approve and activate'),
-    enrol: t('Zařadit publikum', 'Enrol audience'),
+    enrol: t('Spustit dávkové zařazení', 'Start batch enrolment'),
     pause: t('Pozastavit kampaň', 'Pause campaign'),
     resume: t('Obnovit kampaň', 'Resume campaign'),
     close: t('Uzavřít kampaň', 'Close campaign'),
@@ -1081,7 +1171,7 @@ function CampaignActionReviewDialog({ campaign, action, busy, error, closeFocusO
   const impact = ({
     submit: t('Koncept předáte k nezávislému schválení. Kampaň se ještě neaktivuje ani nic neodešle.', 'The draft moves to independent approval. The campaign is not activated and nothing is sent yet.'),
     activate: t('Kampaň se stane aktivní. Autor ji nemůže schválit sám; služba znovu ověří čtyři oči.', 'The campaign becomes active. Its maker cannot self-approve; the service rechecks four-eyes.'),
-    enrol: t('Aktuálně způsobilí členové schváleného publika budou zařazeni do této aktivní cesty. Souhlas a kontaktní ochrany se vyhodnocují při každém odeslání.', 'Currently eligible members of the approved audience will enter this active journey. Consent and contact protections are evaluated for every send.'),
+    enrol: t('Zařazení poběží po omezených dávkách. Start vyžaduje změřený kapacitní limit v campaign-service; průběh uvidíte na detailu kampaně.', 'Enrolment runs in bounded batches. Starting requires a measured capacity limit in campaign-service; progress appears on the campaign detail.'),
     pause: t('Nový průchod se pozastaví, dokud kampaň znovu neobnovíte. Dosavadní auditní stopa zůstane zachována.', 'Further progression pauses until the campaign is resumed. Existing audit history remains intact.'),
     resume: t('Pozastavená cesta znovu pokračuje podle své uložené definice a ochranných pravidel.', 'The paused journey resumes under its stored definition and protection rules.'),
     close: t('Kampaň se uzavře a tato lifecycle akce není běžně vratná. Dosavadní výsledky a auditní stopa zůstanou dostupné.', 'The campaign closes and this lifecycle action is not normally reversible. Existing outcomes and audit history remain available.'),

@@ -3,24 +3,42 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
-import { Shield, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Shield, Info, RefreshCw } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
 
 type ComplianceItem = { req: Bilingual; status: string; note: Bilingual }
-type ComplianceArea = { id: string; title: Bilingual; authority: Bilingual; items: ComplianceItem[] }
+type ComplianceArea = { id: string; title: Bilingual; authority: Bilingual; status: string; items: ComplianceItem[] }
+type ControlSummary = {
+  id: string
+  title: string
+  evidence: string
+  evidenceSource?: string
+  status: string
+  declaredStatus: string
+  derivedFrom?: string
+  signalState?: 'true' | 'false' | 'unknown'
+  live?: boolean
+}
+type ControlSnapshot = {
+  status: 'available' | 'unavailable'
+  controls: ControlSummary[]
+  posture: { source: string; collectedAt: string | null } | null
+  contentSource?: ContentSourceMetadata
+}
 
-// The area-level verdict is DERIVED from its own line items, never typed beside them: FATCA/CRS
-// and EBA ICT were hand-labelled "Compliant" while every / several of their items were warnings.
-// (The per-item ok/warn/fail verdicts are editorial assessments of code and legal state and have
-// no machine source - the ADR index records decision/delivery status, not control coverage.)
-function areaStatus(items: readonly ComplianceItem[]): 'compliant' | 'partial' | 'gap' {
-  if (items.some(i => i.status === 'fail')) return 'gap'
-  return items.every(i => i.status === 'ok') ? 'compliant' : 'partial'
+// Only exact control references from the authoritative catalogue are linked.
+// A link documents scope; it does not establish regulatory compliance.
+const REQUIREMENT_CONTROL_REFERENCES: Record<string, string[]> = {
+  'Sanctions list screening': ['sanctions-screening'],
+  'Immutable audit log': ['audit-trail'],
 }
 
 const COMPLIANCE_AREAS: ComplianceArea[] = [
@@ -28,117 +46,143 @@ const COMPLIANCE_AREAS: ComplianceArea[] = [
     id: 'psd2',
     title: ['PSD2 / RTS on SCA', 'PSD2 / RTS on SCA'],
     authority: ['EBA + ECB', 'EBA + ECB'],
+    status: 'unknown',
     items: [
-      { req: ['SCA pro platby nad 30 EUR', 'SCA for payments over 30 EUR'], status: 'ok', note: ['sca-service implementuje OTP + FIDO2', 'sca-service implements OTP + FIDO2'] },
-      { req: ['Správa souhlasů (AIS/PIS/CBPII)', 'Consent management (AIS/PIS/CBPII)'], status: 'ok', note: ['consent-service s limitem frequency_per_day', 'consent-service with frequency_per_day limit'] },
-      { req: ['Registrace a validace TPP', 'TPP registration and validation'], status: 'ok', note: ['tpp-registry-service se synchronizací EBA registru', 'tpp-registry-service with EBA register sync'] },
-      { req: ['Berlin Group NextGenPSD2 API', 'Berlin Group NextGenPSD2 API'], status: 'ok', note: ['psd2-service implementuje standard', 'psd2-service implements the standard'] },
-      { req: ['Redirect URI v záznamu souhlasu', 'Redirect URI in the consent record'], status: 'ok', note: ['migrace V2 přidala redirect_uri', 'V2 migration added redirect_uri'] },
-      { req: ['Charge bearer SLEV pro SEPA', 'Charge bearer SLEV for SEPA'], status: 'ok', note: ['migrace V2 + constraint', 'V2 migration + constraint'] },
-      { req: ['End-to-end ID v SEPA platbách', 'End-to-end ID in SEPA payments'], status: 'ok', note: ['end_to_end_id NOT NULL v DB', 'end_to_end_id NOT NULL in DB'] },
+      { req: ['SCA pro platby nad 30 EUR', 'SCA for payments over 30 EUR'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Správa souhlasů (AIS/PIS/CBPII)', 'Consent management (AIS/PIS/CBPII)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Registrace a validace TPP', 'TPP registration and validation'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Berlin Group NextGenPSD2 API', 'Berlin Group NextGenPSD2 API'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Redirect URI v záznamu souhlasu', 'Redirect URI in the consent record'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Charge bearer SLEV pro SEPA', 'Charge bearer SLEV for SEPA'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['End-to-end ID v SEPA platbách', 'End-to-end ID in SEPA payments'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'aml',
     title: ['AML / 5AMLD / 6AMLD', 'AML / 5AMLD / 6AMLD'],
     authority: ['EBA + FAÚ (CZ)', 'EBA + FAÚ (CZ)'],
+    status: 'unknown',
     items: [
-      { req: ['PEP screening zákazníků', 'PEP screening of customers'], status: 'warn', note: ['pep_category — sloupec bez čtenáře v kódu, issue #2370', 'pep_category — column has no code reader, issue #2370'] },
-      { req: ['Screening sankčních seznamů', 'Sanctions list screening'], status: 'warn', note: ['matched_list — sloupec bez čtenáře v kódu, issue #2370', 'matched_list — column has no code reader, issue #2370'] },
-      { req: ['Sledování podání SAR', 'SAR filing tracking'], status: 'warn', note: ['sar_filed, sar_filed_at, sar_reference — sloupec bez čtenáře v kódu, issue #2370', 'sar_filed, sar_filed_at, sar_reference — column has no code reader, issue #2370'] },
-      { req: ['Eskalace na MLRO', 'MLRO escalation'], status: 'warn', note: ['escalated_at, escalated_to_mlro — sloupec bez čtenáře v kódu, issue #2370', 'escalated_at, escalated_to_mlro — column has no code reader, issue #2370'] },
-      { req: ['Dokumentace false positive', 'False positive documentation'], status: 'warn', note: ['false_positive_by, false_positive_reason — sloupec bez čtenáře v kódu, issue #2370', 'false_positive_by, false_positive_reason — column has no code reader, issue #2370'] },
-      { req: ['AML screening transakcí', 'AML screening of transactions'], status: 'ok', note: ['flag aml_screened v transactions + sepa + domestic, monitoring přes fraud-service', 'aml_screened flag in transactions + sepa + domestic, monitoring via fraud-service'] },
-      { req: ['Rizikové hodnocení zákazníka', 'Customer risk rating'], status: 'warn', note: ['risk_rating — sloupec bez čtenáře v kódu, issue #2370', 'risk_rating — column has no code reader, issue #2370'] },
+      { req: ['PEP screening zákazníků', 'PEP screening of customers'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Screening sankčních seznamů', 'Sanctions list screening'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Sledování podání SAR', 'SAR filing tracking'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Eskalace na MLRO', 'MLRO escalation'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Dokumentace false positive', 'False positive documentation'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['AML screening transakcí', 'AML screening of transactions'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Rizikové hodnocení zákazníka', 'Customer risk rating'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'kyc',
     title: ['KYC / CDD / EDD', 'KYC / CDD / EDD'],
     authority: ['EBA AML Guidelines + FATF', 'EBA AML Guidelines + FATF'],
+    status: 'unknown',
     items: [
-      { req: ['Úroveň due diligence (SDD/CDD/EDD)', 'Due diligence level (SDD/CDD/EDD)'], status: 'warn', note: ['due_diligence_level — sloupec bez čtenáře v kódu, issue #2370', 'due_diligence_level — column has no code reader, issue #2370'] },
-      { req: ['Prohlášení o původu prostředků', 'Source of funds declaration'], status: 'ok', note: ['source_of_funds + source_of_wealth V2', 'source_of_funds + source_of_wealth V2'] },
-      { req: ['Účel obchodního vztahu', 'Business purpose'], status: 'ok', note: ['business_purpose V2', 'business_purpose V2'] },
-      { req: ['Plánování periodické revize', 'Periodic review scheduling'], status: 'warn', note: ['next_review_date — sloupec bez čtenáře v kódu, issue #2370', 'next_review_date — column has no code reader, issue #2370'] },
-      { req: ['Vlastní prohlášení PEP', 'PEP self-declaration'], status: 'ok', note: ['pep_declaration v kyc_cases V2', 'pep_declaration in kyc_cases V2'] },
-      { req: ['Sledování skutečného majitele', 'Beneficial owner tracking'], status: 'ok', note: ['beneficial_owner_id V2', 'beneficial_owner_id V2'] },
-      { req: ['Očekávaný obrat', 'Expected turnover'], status: 'ok', note: ['expected_turnover + currency V2', 'expected_turnover + currency V2'] },
+      { req: ['Úroveň due diligence (SDD/CDD/EDD)', 'Due diligence level (SDD/CDD/EDD)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Prohlášení o původu prostředků', 'Source of funds declaration'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Účel obchodního vztahu', 'Business purpose'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Plánování periodické revize', 'Periodic review scheduling'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Vlastní prohlášení PEP', 'PEP self-declaration'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Sledování skutečného majitele', 'Beneficial owner tracking'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Očekávaný obrat', 'Expected turnover'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'gdpr',
     title: ['GDPR', 'GDPR'],
     authority: ['ÚOOÚ (CZ) + EDPB', 'ÚOOÚ (CZ) + EDPB'],
+    status: 'unknown',
     items: [
-      { req: ['Časové razítko explicitního souhlasu', 'Explicit consent timestamp'], status: 'warn', note: ['gdpr_consent_at/_version (party-service V2) — sloupec bez čtenáře v kódu, issue #2370', 'gdpr_consent_at/_version (party-service V2) — column has no code reader, issue #2370'] },
-      { req: ['Marketingový souhlas', 'Marketing consent'], status: 'warn', note: ['Souhlas vlastní consent-service jako per-kanálové scopes (ADR-0198/0205, grantee party-service:marketing-comms); party-service jen forwarduje a projektuje z Kafka eventů. Send-path zatím fail-closed, ne skutečná kontrola consentu — issue #2369', 'consent-service owns the consent as per-channel scopes (ADR-0198/0205, grantee party-service:marketing-comms); party-service only forwards and projects from Kafka events. Send path is fail-closed for now, not a real consent check — issue #2369'] },
-      { req: ['Právo na výmaz (anonymizace a kaskáda)', 'Right to erasure (anonymise and cascade)'], status: 'ok', note: ['ADR-0118: party-service anonymizuje in-place, kyc/notification/card-issuance kaskádují (issue #268 uzavřen)', 'ADR-0118: party-service anonymises in-place, kyc/notification/card-issuance cascade (issue #268 closed)'] },
-      { req: ['Politika uchovávání dat', 'Data retention policy'], status: 'warn', note: ['data_retention_until (accounts + parties V2) — sloupec bez čtenáře v kódu, issue #2370', 'data_retention_until (accounts + parties V2) — column has no code reader, issue #2370'] },
-      { req: ['Klasifikace citlivosti dat', 'Data sensitivity classification'], status: 'warn', note: ['data_sensitivity (audit_entries V2) — sloupec bez čtenáře v kódu, issue #2370', 'data_sensitivity (audit_entries V2) — column has no code reader, issue #2370'] },
-      { req: ['Smlouva o zpracování osobních údajů (GDPR)', 'GDPR Data Processing Agreement'], status: 'warn', note: ['Vyžaduje právní dokumentaci (mimo scope systému)', 'Requires legal documentation (outside system scope)'] },
-      { req: ['Právo na přístup (Art. 15)', 'Right of access (Art. 15)'], status: 'ok', note: ['GET /api/v1/parties/{id}/gdpr-export agreguje party+kyc+cards (issue #268 uzavřen); subjekt si ho vyžádá sám přes GET /customer/v1/privacy/gdpr-export (issue #8421)', 'GET /api/v1/parties/{id}/gdpr-export aggregates party+kyc+cards (issue #268 closed); the subject reaches it themselves via GET /customer/v1/privacy/gdpr-export (issue #8421)'] },
-      { req: ['Přenositelnost dat (Art. 20)', 'Data portability (Art. 20)'], status: 'ok', note: ['ADR-0204 rozhodl rozsah i formát (filtrovaná projekce Art. 15 exportu, jen consent/contract basis) a Art. 20(2) přímý přenos zamítl; GET /api/v1/parties/{id}/gdpr-portability-export postaven, subjekt jej dosáhne přes GET /customer/v1/privacy/portability-export (issue #8421)', 'ADR-0204 decided scope and format (a filtered projection of the Art. 15 export, consent/contract basis only) and declined Art. 20(2) direct transmission; GET /api/v1/parties/{id}/gdpr-portability-export is built and the subject reaches it via GET /customer/v1/privacy/portability-export (issue #8421)'] },
+      { req: ['Časové razítko explicitního souhlasu', 'Explicit consent timestamp'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Marketingový souhlas', 'Marketing consent'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Právo na výmaz (anonymizace a kaskáda)', 'Right to erasure (anonymise and cascade)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Politika uchovávání dat', 'Data retention policy'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Klasifikace citlivosti dat', 'Data sensitivity classification'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Smlouva o zpracování osobních údajů (GDPR)', 'GDPR Data Processing Agreement'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Právo na přístup (Art. 15)', 'Right of access (Art. 15)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Přenositelnost dat (Art. 20)', 'Data portability (Art. 20)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'eba-ict',
     title: ['EBA ICT Risk Guidelines', 'EBA ICT Risk Guidelines'],
     authority: ['EBA', 'EBA'],
+    status: 'unknown',
     items: [
-      { req: ['Neměnný audit log', 'Immutable audit log'], status: 'ok', note: ['no_update_audit + no_delete_audit RULE v DB V2', 'no_update_audit + no_delete_audit RULE in DB V2'] },
-      { req: ['10letá retence auditu', '10-year audit retention'], status: 'warn', note: ['retention_until — sloupec bez čtenáře v kódu, issue #2370', 'retention_until — column has no code reader, issue #2370'] },
-      { req: ['Označování bezpečnostních událostí', 'Security event flagging'], status: 'warn', note: ['is_security_event — sloupec bez čtenáře v kódu, issue #2370', 'is_security_event — column has no code reader, issue #2370'] },
-      { req: ['Actor ID v auditním záznamu', 'Actor ID in the audit record'], status: 'ok', note: ['actor_id + actor_type v transactions V2', 'actor_id + actor_type in transactions V2'] },
-      { req: ['Logování IP adresy', 'IP address logging'], status: 'ok', note: ['ip_address v transactions, sepa, domestic, consent V2', 'ip_address in transactions, sepa, domestic, consent V2'] },
-      { req: ['Sledování session', 'Session tracking'], status: 'ok', note: ['session_id v audit_entries V2', 'session_id in audit_entries V2'] },
-      { req: ['Correlation ID', 'Correlation ID'], status: 'ok', note: ['correlation_id v transactions V2', 'correlation_id in transactions V2'] },
+      { req: ['Neměnný audit log', 'Immutable audit log'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['10letá retence auditu', '10-year audit retention'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Označování bezpečnostních událostí', 'Security event flagging'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Actor ID v auditním záznamu', 'Actor ID in the audit record'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Logování IP adresy', 'IP address logging'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Sledování session', 'Session tracking'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Correlation ID', 'Correlation ID'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'cnb',
     title: ['Regulace ČNB (CZ)', 'CNB Regulation (CZ)'],
     authority: ['Česká národní banka', 'Czech National Bank'],
+    status: 'unknown',
     items: [
-      { req: ['Konstantní symbol (platební styk)', 'Constant symbol (payment system)'], status: 'ok', note: ['constant_symbol s regex constraint V2', 'constant_symbol with regex constraint V2'] },
-      { req: ['Specifický symbol', 'Specific symbol'], status: 'ok', note: ['specific_symbol v domestic_payments V2', 'specific_symbol in domestic_payments V2'] },
-      { req: ['Výkaznický kód ČNB', 'CNB reporting code'], status: 'warn', note: ['cnb_reporting_code — sloupec bez čtenáře v kódu, issue #2370', 'cnb_reporting_code — column has no code reader, issue #2370'] },
-      { req: ['Monitoring dormance', 'Dormancy monitoring'], status: 'warn', note: ['dormancy_date — sloupec bez čtenáře v kódu, issue #2370', 'dormancy_date — column has no code reader, issue #2370'] },
-      { req: ['Přidělení IBAN', 'IBAN allocation'], status: 'ok', note: ['sloupec iban + unique index v accounts V2', 'iban column + unique index in accounts V2'] },
-      { req: ['Regulatorní výkaznický kód', 'Regulatory reporting code'], status: 'warn', note: ['regulatory_reporting_code — sloupec bez čtenáře v kódu, issue #2370', 'regulatory_reporting_code — column has no code reader, issue #2370'] },
-      { req: ['Záznamy 10 let po uzavření', 'Records for 10 years after closure'], status: 'warn', note: ['data_retention_until (accounts V2) — sloupec bez čtenáře v kódu, stejný jako řádek „Politika uchovávání dat“, issue #2370', 'data_retention_until (accounts V2) — column has no code reader, same as the "Data retention policy" row, issue #2370'] },
+      { req: ['Konstantní symbol (platební styk)', 'Constant symbol (payment system)'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Specifický symbol', 'Specific symbol'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Výkaznický kód ČNB', 'CNB reporting code'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Monitoring dormance', 'Dormancy monitoring'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Přidělení IBAN', 'IBAN allocation'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Regulatorní výkaznický kód', 'Regulatory reporting code'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Záznamy 10 let po uzavření', 'Records for 10 years after closure'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
   {
     id: 'fatca-crs',
     title: ['FATCA / CRS', 'FATCA / CRS'],
     authority: ['IRS + OECD', 'IRS + OECD'],
+    status: 'unknown',
     items: [
-      { req: ['FATCA status zákazníka', 'Customer FATCA status'], status: 'warn', note: ['fatca_status — sloupec bez čtenáře v kódu, issue #2370', 'fatca_status — column has no code reader, issue #2370'] },
-      { req: ['CRS status zákazníka', 'Customer CRS status'], status: 'warn', note: ['crs_status — sloupec bez čtenáře v kódu, issue #2370', 'crs_status — column has no code reader, issue #2370'] },
-      { req: ['Identifikace US person', 'US person identification'], status: 'warn', note: ['fatca_status — sloupec bez čtenáře v kódu, issue #2370', 'fatca_status — column has no code reader, issue #2370'] },
-      { req: ['CRS reporting', 'CRS reporting'], status: 'warn', note: ['Automatický export CRS reportu chybí (ruční proces)', 'Automated CRS report export is missing (manual process)'] },
+      { req: ['FATCA status zákazníka', 'Customer FATCA status'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['CRS status zákazníka', 'Customer CRS status'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['Identifikace US person', 'US person identification'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
+      { req: ['CRS reporting', 'CRS reporting'], status: 'unknown', note: ['Není přiřazen ověřený řídicí důkaz.', 'No verified control evidence is mapped.'] },
     ],
   },
 ]
 
 const STATUS_CONFIG: Record<string, { label: Bilingual; color: string; bg: string; border: string; icon: React.ReactNode }> = {
-  compliant: { label: ['V souladu', 'Compliant'], color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', icon: <CheckCircle2 size={14} /> },
-  partial:   { label: ['Částečně', 'Partial'],    color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', icon: <AlertTriangle size={14} /> },
-  gap:       { label: ['Mezera', 'Gap'],          color: 'var(--danger-text)', bg: 'var(--danger-bg)', border: 'var(--danger-border)', icon: <XCircle size={14} /> },
+  unknown: { label: ['Neověřeno', 'Unverified'], color: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)', icon: <Info size={14} /> },
 }
 
 const ITEM_STATUS = {
-  ok:   { color: 'var(--success-text)', icon: <CheckCircle2 size={12} /> },
-  warn: { color: 'var(--warning-text)', icon: <AlertTriangle size={12} /> },
-  fail: { color: 'var(--danger-text)', icon: <XCircle size={12} /> },
+  unknown: { color: 'var(--text-tertiary)', icon: <Info size={12} /> },
 }
 
 export default function CompliancePage() {
   const { t } = useLanguage()
   const totalItems = COMPLIANCE_AREAS.flatMap(a => a.items).length
-  const okItems = COMPLIANCE_AREAS.flatMap(a => a.items).filter(i => i.status === 'ok').length
-  const warnItems = COMPLIANCE_AREAS.flatMap(a => a.items).filter(i => i.status === 'warn').length
+  const [snapshot, setSnapshot] = useState<ControlSnapshot | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshError, setRefreshError] = useState(false)
+
+  const refreshControls = useCallback(async () => {
+    setLoading(true)
+    setRefreshError(false)
+    try {
+      const response = await fetch('/api/compliance/controls', { cache: 'no-store' })
+      if (!response.ok) throw new Error('control snapshot unavailable')
+      setSnapshot(await response.json() as ControlSnapshot)
+    } catch {
+      setSnapshot(null)
+      setRefreshError(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void refreshControls() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshControls])
+
+  const controlsById = new Map((snapshot?.controls ?? []).map(control => [control.id, control]))
 
   return (
     <div className="docs-printable">
@@ -149,25 +193,26 @@ export default function CompliancePage() {
             <span className="breadcrumb-current">{t('Report compliance', 'Compliance Report')}</span>
           </>}
         title={t('Report compliance', 'Compliance Report')}
-        subtitle={t('EBA · ČNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · připravenost na audit', 'EBA · CNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · audit readiness')}
+        subtitle={t('Oblasti přehledu: EBA · ČNB · PSD2 · GDPR · AML · FATCA/CRS', 'Report areas: EBA · CNB · PSD2 · GDPR · AML · FATCA/CRS')}
         icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
         actions={<PrintDocumentButton />}
       />
 
-      {/* Summary */}
+      <ContentSourceNote source={snapshot?.contentSource} />
+
+      {/* Scope summary: these editorial requirements are not assessed as legal compliance. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px', marginBottom: '24px' }}>
         {([
-          { id: 'compliant', label: ['V souladu', 'Compliant'] as Bilingual, value: okItems, total: totalItems, color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)' },
-          { id: 'warnings', label: ['Upozornění', 'Warnings'] as Bilingual, value: warnItems, total: totalItems, color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)' },
-          { id: 'coverage', label: ['Pokrytí', 'Coverage'] as Bilingual, value: `${Math.round(okItems/totalItems*100)}%`, total: null, color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
-          { id: 'frameworks', label: ['Rámce', 'Frameworks'] as Bilingual, value: COMPLIANCE_AREAS.length, total: null, color: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' },
+          { id: 'requirements', label: ['Požadavky v redakčním přehledu', 'Editorial requirements listed'] as Bilingual, value: totalItems, color: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--info-border)' },
+          { id: 'unverified', label: ['Bez ověřeného mapování', 'Without verified mapping'] as Bilingual, value: totalItems, color: 'var(--text-tertiary)', bg: 'var(--surface-2)', border: 'var(--border)' },
+          { id: 'frameworks', label: ['Oblasti přehledu', 'Report areas'] as Bilingual, value: COMPLIANCE_AREAS.length, color: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)' },
         ]).map(stat => (
           <div key={stat.id} style={{
             padding: '16px', background: stat.bg, border: `1px solid ${stat.border}`,
             borderRadius: 'var(--r-lg)',
           }}>
             <div style={{ fontSize: '24px', fontWeight: 700, color: stat.color }}>
-              {stat.value}{stat.total ? <span style={{ fontSize: '14px' }}>/{stat.total}</span> : ''}
+              {stat.value}
             </div>
             <div style={{ fontSize: '12px', color: stat.color, fontWeight: 600, marginTop: '2px' }}>{t(...stat.label)}</div>
           </div>
@@ -182,14 +227,48 @@ export default function CompliancePage() {
       }}>
         <Info size={14} style={{ color: 'var(--info-text)', flexShrink: 0, marginTop: '1px' }} />
         <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-          {t('Tento report reflektuje technickou implementaci databázových schémat a API. Plná regulatorní compliance vyžaduje také právní dokumentaci, interní politiky, školení zaměstnanců a pravidelné audity. Doporučujeme konzultaci s regulatorním právníkem před podáním žádosti o bankovní licenci u ČNB.', 'This report reflects the technical implementation of database schemas and APIs. Full regulatory compliance also requires legal documentation, internal policies, staff training and regular audits. We recommend consulting a regulatory lawyer before applying for a banking licence with the CNB.')}
+          {t('Tento přehled je redakční inventář oblastí. Neprokazuje právní shodu ani provozní účinnost kontrol. Řídicí katalog níže odděluje deklarovaný stav od dostupných odvozených signálů; signál je buildový snímek manifestů, nikoli živá kontrola clusteru.', 'This page is an editorial inventory of topics. It does not establish legal compliance or operating effectiveness. The control catalogue below separates declared status from available derived signals; the signal is a build-time manifest snapshot, not a live cluster check.')}
         </div>
       </div>
+
+      <section className="card" style={{ padding: '18px', marginBottom: '20px' }} aria-label={t('Katalog kontrol', 'Control catalogue')}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '16px', color: 'var(--text-primary)' }}>{t('Řídicí katalog', 'Control catalogue')}</h2>
+            <p style={{ margin: '5px 0 0', color: 'var(--text-secondary)', fontSize: '12px' }}>
+              {snapshot?.posture?.collectedAt
+                ? t(`Snímek manifestů pořízen ${snapshot.posture.collectedAt}.`, `Manifest snapshot collected ${snapshot.posture.collectedAt}.`)
+                : t('Časové razítko snímku není dostupné.', 'Snapshot timestamp is unavailable.')}
+            </p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => void refreshControls()} disabled={loading}>
+            <RefreshCw size={14} /> {t('Obnovit katalog', 'Refresh catalogue')}
+          </button>
+        </div>
+        {loading ? <p role="status">{t('Načítám katalog…', 'Loading catalogue…')}</p> : null}
+        {refreshError || snapshot?.status === 'unavailable' ? (
+          <p role="status" style={{ color: 'var(--warning-text)' }}>{t('Katalog nebo snímek odvozených signálů není dostupný; stav je neznámý.', 'The catalogue or derived-signal snapshot is unavailable; status is unknown.')}</p>
+        ) : null}
+        {snapshot?.posture ? <p style={{ margin: '8px 0', fontSize: '11px', color: 'var(--text-tertiary)' }}>{snapshot.posture.source}</p> : null}
+        {snapshot?.controls.map(control => (
+          <div key={control.id} style={{ borderTop: '1px solid var(--border)', padding: '10px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+              <strong style={{ color: 'var(--text-primary)', fontSize: '13px' }}>{control.title}</strong>
+              <span style={{ color: control.status === 'unknown' ? 'var(--text-tertiary)' : 'var(--info-text)', fontSize: '11px', fontWeight: 700 }}>
+                {t(`Deklarováno: ${control.declaredStatus}; odvozeno: ${control.status}`, `Declared: ${control.declaredStatus}; derived: ${control.status}`)}
+                {control.derivedFrom ? ` · ${control.signalState ?? 'unknown'}` : ''}
+              </span>
+            </div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '4px' }}>{control.evidence}</div>
+            {control.evidenceSource ? <div style={{ color: 'var(--text-tertiary)', fontSize: '11px', marginTop: '3px' }}>{control.evidenceSource}</div> : null}
+          </div>
+        ))}
+      </section>
 
       {/* Compliance areas */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         {COMPLIANCE_AREAS.map(area => {
-          const cfg = STATUS_CONFIG[areaStatus(area.items)]
+          const cfg = STATUS_CONFIG[area.status as keyof typeof STATUS_CONFIG]
           return (
             <div key={area.id} className="card" style={{ overflow: 'hidden' }}>
               {/* Header */}
@@ -228,7 +307,7 @@ export default function CompliancePage() {
                             {t(...item.req)}
                           </td>
                           <td style={{ padding: '8px 0', fontSize: '12px', color: 'var(--text-tertiary)', textAlign: 'right' }}>
-                            {t(...item.note)}
+                            {REQUIREMENT_CONTROL_REFERENCES[item.req[1]]?.map(id => controlsById.get(id)?.title ?? id).join(', ') || t(...item.note)}
                           </td>
                         </tr>
                       )

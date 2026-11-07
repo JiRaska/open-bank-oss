@@ -11,6 +11,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -42,6 +44,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(1)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `a maker must obtain approval before revoking a credential`() {
         seedDevices()
         approvalId = given().delete(path(firstDevice)).then().statusCode(202)
@@ -54,6 +63,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(2)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `the maker cannot approve their own revocation`() {
         requireApproval()
         given().contentType("application/json").body(mapOf("approve" to true))
@@ -63,6 +79,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(3)
     @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-checker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-checker"),
+        ],
+    )
     fun `a distinct checker approves the exact revocation target`() {
         requireApproval()
         given().contentType("application/json").body(mapOf("approve" to true))
@@ -76,6 +99,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(4)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `approval for one device cannot revoke another device of the same party`() {
         requireApproval()
         given().header("X-Approval-Id", approvalId).delete(path(secondDevice)).then().statusCode(202)
@@ -85,6 +115,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(5)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `the original approved target can be revoked exactly once`() {
         requireApproval()
         given().header("X-Approval-Id", approvalId).delete(path(firstDevice)).then().statusCode(204)
@@ -96,6 +133,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(6)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `enrollment is parked before writing its credential`() {
         enrollmentApprovalId = given().contentType("application/json").body(enrollment)
             .post(enrollmentPath()).then().statusCode(202).extract().path("approvalId")
@@ -105,6 +149,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(7)
     @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-checker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-checker"),
+        ],
+    )
     fun `checker can list and approve the pending enrollment`() {
         assertThat(enrollmentApprovalId).isNotBlank()
         val pending: List<String> = given().get("/api/v1/sca/approvals?limit=200").then()
@@ -118,6 +169,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(8)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `changed credential key algorithm or party cannot borrow enrollment approval`() {
         assertThat(enrollmentApprovalId).isNotBlank()
         val variants = listOf(
@@ -143,6 +201,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(9)
     @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-checker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-checker"),
+        ],
+    )
     fun `approval endpoint rejects missing bodies unknown ids and repeated decisions`() {
         given().contentType("application/json").body("null")
             .patch("/api/v1/sca/approvals/$enrollmentApprovalId").then().statusCode(400)
@@ -164,6 +229,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(11)
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
     fun `edge self service enrollment retains its existing policy exemption`() {
         given().contentType("application/json")
             .body(enrollment + ("credentialId" to "edge-${UUID.randomUUID()}"))
@@ -173,6 +245,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(12)
     @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "5f0c2a8e-7d1b-4c3e-9a6f-2b8d4e1c7a90"),
+            Claim(key = "azp", value = "openbank-services"),
+            Claim(key = "preferred_username", value = "service-account-openbank-services"),
+        ],
+    )
     fun `shared service consume reaches domain validation under its existing exemption`() {
         given().contentType("application/json").body(mapOf("partyId" to party))
             .post("/api/v1/sca/challenges/${UUID.randomUUID()}/consume").then().statusCode(404)
@@ -190,6 +269,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(14)
     @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-checker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-checker"),
+        ],
+    )
     fun `checker can inspect the authorization after it leaves the pending queue`() {
         assertThat(enrollmentApprovalId).isNotBlank()
         given().get("/api/v1/sca/approvals/$enrollmentApprovalId").then().statusCode(200)
@@ -202,6 +288,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(15)
     @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-checker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-checker"),
+        ],
+    )
     fun `the summary a checker reads is the one bound at creation, not re-derived after execution`() {
         requireApproval()
         // Rendered while the device was active; it has since been revoked by this approval, and the
@@ -224,6 +317,13 @@ class ScaFourEyesFlowIT {
     @Test
     @Order(16)
     @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "sca-test-maker"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "sca-test-maker"),
+        ],
+    )
     fun `a parked consume shows the creditor masked to its last four characters`() {
         val iban = "CZ6508000000192000145399"
         val parked: String = given().contentType("application/json")

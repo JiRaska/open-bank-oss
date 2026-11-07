@@ -66,7 +66,7 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start=true`):
 | `V4__hibernate_sequences.sql` | Sequences `aml_cases_seq`, `aml_outbox_seq` (INCREMENT BY 50) — Panache id allocation under `generation:none` | `DROP SEQUENCE aml_cases_seq, aml_outbox_seq;` |
 | `V5__amount_check_constraints.sql` | CHECK `amount IS NULL OR amount > 0`; CHECK `match_score` in 0..100 | drop the two constraints |
 
-> The `V4` sequence migration fixes the known Hibernate-Reactive + Panache id-allocation defect (BIGSERIAL only creates `<table>_id_seq`, but Panache expects `<table>_seq`). A `HibernateSequenceGuardTest` guards against regressions.
+> The `V4` sequence migration fixes the known Hibernate-Reactive + Panache id-allocation defect (BIGSERIAL only creates `<table>_id_seq`, but Panache expects `<table>_seq`). The CI gate `hibernate-sequence-guard` guards against regressions.
 
 ## Indexes
 

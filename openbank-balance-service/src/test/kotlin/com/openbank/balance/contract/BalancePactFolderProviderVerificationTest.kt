@@ -101,6 +101,9 @@ class BalancePactFolderProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: io.quarkus.test.security.TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -149,7 +152,33 @@ class BalancePactFolderProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // ADR-0340 B1 (mirror of the party/account twins): the CRS/FATCA balance replay must
+        // present the verified service-account-openbank-tax-reporting identity — rego admits
+        // balance.read for that principal only, so the class-level pact-verifier identity
+        // would answer 403.
+        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+            testIdentityAssociation.setTestIdentity(taxReportingIdentity())
+        }
         context?.verifyInteraction()
+    }
+
+    /** The replay identity for the CRS/FATCA balance interaction: the verified service-account
+     * JWT the rego rule admits (#12448 — name bound to the service-account username, azp present). */
+    private fun taxReportingIdentity(): io.quarkus.security.runtime.QuarkusSecurityIdentity {
+        val name = "service-account-openbank-tax-reporting"
+        val jwt = object : org.eclipse.microprofile.jwt.JsonWebToken {
+            private val claims = mapOf(
+                "azp" to "openbank-tax-reporting",
+                "preferred_username" to name,
+                "sub" to "tax-reporting-sa-subject",
+            )
+
+            override fun getName(): String = name
+            override fun getClaimNames(): Set<String> = claims.keys
+            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
+        }
+        return io.quarkus.security.runtime.QuarkusSecurityIdentity.builder().setPrincipal(jwt)
+            .addRole("ROLE_API").build()
     }
 
     /**

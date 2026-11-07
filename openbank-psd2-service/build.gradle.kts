@@ -7,22 +7,12 @@ plugins {
 }
 
 dependencies {
-    implementation(enforcedPlatform(libs.quarkus.bom))
-
-    implementation(libs.quarkus.kotlin)
-    implementation(libs.quarkus.resteasy.reactive)
-    implementation(libs.quarkus.resteasy.reactive.jackson)
-    implementation(libs.quarkus.smallrye.health)
-    implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
-    implementation(libs.quarkus.oidc)
     // Outbound M2M bearer for the consent-service REST client (issue #1500) — oidc-client
     // client_credentials on openbank-services, attached by OidcClientRequestReactiveFilter.
     implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.quarkus.rest.client.reactive)
     implementation(libs.quarkus.rest.client.reactive.jackson)
-    implementation(libs.quarkus.config.yaml)
-    implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.redis.client)
     implementation("io.quarkus:quarkus-scheduler")
@@ -44,10 +34,7 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
-    testImplementation(libs.quarkus.junit5)
-    testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    testImplementation(libs.rest.assured.kotlin)
     // Boot smoke-test (Psd2BootSmokeIT): per-job Testcontainers Postgres + Valkey and the
     // in-memory Kafka connector, so a real Quarkus boot + Flyway runs in CI (issue #578).
     testImplementation(libs.smallrye.reactive.messaging.inmemory)

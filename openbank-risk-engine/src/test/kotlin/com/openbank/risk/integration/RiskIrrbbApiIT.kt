@@ -7,6 +7,7 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
@@ -14,7 +15,6 @@ import com.openbank.risk.domain.Fixtures.lendingLoan
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.domain.Fixtures.tb
 import com.openbank.risk.domain.model.LedgerInputs
-import com.openbank.risk.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -152,7 +152,7 @@ class RiskIrrbbApiIT {
         val flat = body["dataGaps"].single {
             it["code"].asText() == "CURVE_EXTRAPOLATED_FLAT" && it["curveIndex"].asText() == "ESTR"
         }
-        assertThat(flat["lastPillarDate"].asText()).isEqualTo("2026-11-28")
+        assertThat(flat["lastPillarDate"].asText()).isEqualTo("2026-11-30")
         assertThat(flat["flowsBeyond"].asInt()).isPositive()
         assertThat(body["dataGaps"].map { it["code"].asText() })
             .contains("PREPAYMENT_NOT_MODELLED", "NMD_BEHAVIOUR_SIMPLIFIED")

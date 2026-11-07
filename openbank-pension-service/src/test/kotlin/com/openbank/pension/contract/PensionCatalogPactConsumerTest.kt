@@ -66,7 +66,7 @@ class PensionCatalogPactConsumerTest {
                 revision.uuid("offeringId", UUID.fromString(OFFERING_ID))
                 revision.numberType("number", 1)
                 revision.stringValue("state", "PUBLISHED")
-                revision.stringMatcher("pensionApprovalDigest", "[0-9a-f]{64}", DIGEST)
+                revision.stringMatcher("approvalDigest", "[0-9a-f]{64}", DIGEST)
                 revision.stringValue("makerId", "pact-pension-maker")
                 revision.stringValue("checkerId", "pact-pension-checker")
                 revision.stringType("reason", "independently reviewed DIP strategy fixture")
@@ -97,7 +97,7 @@ class PensionCatalogPactConsumerTest {
     fun approvalsPact(builder: PactDslWithProvider): RequestResponsePact = builder
         .given(STATE)
         .uponReceiving("GET independent legal and product approvals for the exact revision")
-        .path("/api/v2/offerings/$OFFERING_ID/revisions/$REVISION_ID/pension-approvals")
+        .path("/api/v2/offerings/$OFFERING_ID/revisions/$REVISION_ID/approvals")
         .method("GET")
         .willRespondWith()
         .status(200)
@@ -154,7 +154,7 @@ class PensionCatalogPactConsumerTest {
             .get("/api/v2/products/$OFFERING_ID").then().statusCode(200).extract().asString()
         val revision = mapper.readTree(response)
         assertThat(revision.path("id").asText()).isEqualTo(REVISION_ID)
-        assertThat(revision.path("pensionApprovalDigest").asText()).isEqualTo(DIGEST)
+        assertThat(revision.path("approvalDigest").asText()).isEqualTo(DIGEST)
         assertThat(revision.path("content").path("attributes").path("instrumentClasses").size()).isEqualTo(2)
         val legalApproval = """{"role":"LEGAL_COUNSEL","digest":"$DIGEST","approvedAt":"2026-10-08T10:00:00Z"}"""
         val productApproval = """{"role":"PRODUCT_OWNER","digest":"$DIGEST","approvedAt":"2026-10-08T11:00:00Z"}"""
@@ -162,7 +162,7 @@ class PensionCatalogPactConsumerTest {
             object : StrategyCatalogRead {
                 override suspend fun offerings() = listOf(mapper.readTree("""{"id":"$OFFERING_ID"}"""))
                 override suspend fun published(offeringId: UUID, at: OffsetDateTime) = revision
-                override suspend fun pensionApprovals(offeringId: UUID, revisionId: UUID) = listOf(
+                override suspend fun revisionApprovals(offeringId: UUID, revisionId: UUID) = listOf(
                     mapper.readTree(legalApproval),
                     mapper.readTree(productApproval),
                 )
@@ -177,7 +177,7 @@ class PensionCatalogPactConsumerTest {
     @PactTestFor(pactMethod = "approvalsPact")
     fun `exact revision has two distinct role approvals`(mockServer: MockServer) {
         val response = given().baseUri(mockServer.getUrl())
-            .get("/api/v2/offerings/$OFFERING_ID/revisions/$REVISION_ID/pension-approvals")
+            .get("/api/v2/offerings/$OFFERING_ID/revisions/$REVISION_ID/approvals")
             .then().statusCode(200).extract().asString()
         val approvals = mapper.readTree(response)
         assertThat(approvals.map { it.path("role").asText() })

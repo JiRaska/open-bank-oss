@@ -15,6 +15,7 @@ import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.transaction.Transactional
 import kotlinx.coroutines.runBlocking
 import java.time.Clock
 import java.util.UUID
@@ -43,6 +44,7 @@ class ProposalService(
     ProposalQueries,
     DecideProposalUseCase {
 
+    @Transactional(rollbackOn = [Exception::class])
     override fun create(
         title: String,
         rationale: String,
@@ -107,6 +109,7 @@ class ProposalService(
      * the human's recorded sign-off (the operator then acts), ADR-0031 D4. The state guard is
      * pushed into the repository's conditional update, so two concurrent decisions can't both win.
      */
+    @Transactional(rollbackOn = [Exception::class])
     override fun decide(id: UUID, approve: Boolean, decidedBy: String, reason: String?): AgentProposal? {
         val current = repository.findById(id) ?: return null
         require(current.state == ProposalState.PROPOSED) { "Proposal already ${current.state}" }

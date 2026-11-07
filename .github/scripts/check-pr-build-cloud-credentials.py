@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 WORKFLOW = Path(".github/workflows/_service-ci.yml")
+WORKFLOWS = (WORKFLOW, Path(".github/workflows/_service-ci-pr.yml"))
 BUILD_BLOCK = re.compile(
     r"^  build:\n(?P<body>.*?)(?=^  [A-Za-z][A-Za-z0-9_-]*:|\Z)",
     re.MULTILINE | re.DOTALL,
@@ -37,10 +38,10 @@ FORBIDDEN = (
 )
 
 
-def findings(workflow: str) -> list[str]:
+def findings(workflow: str, filename: str = str(WORKFLOW)) -> list[str]:
     match = BUILD_BLOCK.search(workflow)
     if not match:
-        return ["could not locate jobs.build in .github/workflows/_service-ci.yml"]
+        return [f"could not locate jobs.build in {filename}"]
     body = match.group("body")
     return [token for token in FORBIDDEN if token in body]
 
@@ -109,21 +110,22 @@ def main() -> int:
     args = parser.parse_args()
     if args.self_test:
         return self_test()
-    try:
-        source = WORKFLOW.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"::error file={WORKFLOW}::could not read workflow: {exc}")
-        return 1
-    bad = findings(source)
-    if bad:
-        for token in bad:
-            print(
-                f"::error file={WORKFLOW}::PR build job may not contain `{token}`. "
-                "It executes pull-request code; use a trusted post-merge lane or a separately "
-                "reviewed read-only architecture instead."
-            )
-        return 1
-    print("check-pr-build-cloud-credentials: build lane is credential-free")
+    for workflow in WORKFLOWS:
+        try:
+            source = workflow.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"::error file={workflow}::could not read workflow: {exc}")
+            return 1
+        bad = findings(source, str(workflow))
+        if bad:
+            for token in bad:
+                print(
+                    f"::error file={workflow}::PR build job may not contain `{token}`. "
+                    "It executes pull-request code; use a trusted post-merge lane or a separately "
+                    "reviewed read-only architecture instead."
+                )
+            return 1
+    print("check-pr-build-cloud-credentials: both fixed build lanes are credential-free")
     return 0
 
 

@@ -20,7 +20,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ArrowRight, HelpCircle, Leaf } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
+import type { LoyaltyPartyResponse } from '@/lib/loyalty/contracts'
 
 type State =
   | { kind: 'loading' }

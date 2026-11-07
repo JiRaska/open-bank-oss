@@ -111,13 +111,18 @@ class CardResource(private val cardUseCase: CardUseCase) {
     /**
      * A virtual card's synthetic PAN/CVV. `no-store` is mandatory: this body must not sit in a
      * proxy, a browser cache or a service-worker after the one render it was fetched for.
+     *
+     * Machine-only: customer-edge's holder-checked, SCA-gated reveal is the sole caller. Staff roles are
+     * not admitted (no back-office screen shows a PAN), and because card-issuance runs OPA advisory the
+     * named-caller check below is what enforces that, not the `@Authorize` decision.
      */
     @GET
     @Path("/{id}/secure-details")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_OPERATOR")
     @Authorize(action = "card.details.read", resource = "#id")
     @Operation(summary = "Read a virtual card's synthetic PAN/CVV (VIRTUAL and SINGLE_USE only)")
     suspend fun secureDetails(@PathParam("id") id: UUID, @HeaderParam("X-Operator-Id") operatorId: String?): Response {
+        requireCardDetailsReader(securityIdentity)
         val details = cardUseCase.readSecureDetails(ReadSecureDetailsQuery(id, operatorId ?: "unknown"))
         return Response.ok(details.toResponse())
             .header(HttpHeaders.CACHE_CONTROL, "no-store")

@@ -136,9 +136,7 @@ async function fetchPayments(url: string, type: PaymentSource, offset: number): 
     const params = new URLSearchParams({ limit: String(PAYMENT_PAGE_SIZE), offset: String(offset) })
     const res = await fetch(`${url}?${params}`, { signal: AbortSignal.timeout(5000) })
     if (!res.ok) {
-      const failure = res.status === 404
-        ? 'not_deployed'
-        : res.status === 502 ? 'unreachable' : await classifyBffFailure(res)
+      const failure = await classifyBffFailure(res)
       return { ok: false, failure }
     }
     const data = await res.json().catch(() => null)
@@ -732,7 +730,7 @@ function PaymentsContent() {
                 <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
                 <label className="sr-only" htmlFor="payments-sct-search">{t('Hledat SCT platby', 'Search SCT payments')}</label>
                 <input id="payments-sct-search" value={sctSearch} onChange={e => setSctSearch(e.target.value)}
-                  placeholder={t('Hledat IBAN, end-to-end ID, status…', 'Search IBAN, end-to-end ID, status…')}
+                  placeholder={t('Hledat IBAN, referenci platby, stav…', 'Search IBAN, payment reference, status…')}
                   style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                     border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
               </div>
@@ -774,7 +772,7 @@ function PaymentsContent() {
                       <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{p.debtorIban}</td>
                       <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{p.creditorIban}</td>
                       <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{formatAmount(p.amount, p.currency, language)}</td>
-                      <td style={{ padding: '12px 16px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{p.endToEndId}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-tertiary)' }}>{p.endToEndId}{/* raw-id-ok: end-to-end reference is the payer's business reference, not a system id */}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{p.status}</span>
                       </td>
@@ -1154,7 +1152,7 @@ function PaymentsContent() {
               <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <label className="sr-only" htmlFor="payments-search">{t('Hledat platby', 'Search payments')}</label>
               <input id="payments-search" className="input" style={{ paddingLeft: '32px', width: '100%' }}
-                placeholder={t('Hledat podle ID, IBAN, příjemce…', 'Search by ID, IBAN, creditor…')}
+                placeholder={t('Hledat podle příjemce, IBAN nebo částky…', 'Search by creditor, IBAN or amount…')}
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             <div style={{ display: 'flex', gap: '4px' }}>
@@ -1190,7 +1188,6 @@ function PaymentsContent() {
               <caption className="sr-only">{t('SEPA a tuzemské platby dostupné operátorovi', 'SEPA and domestic payments available to the operator')}</caption>
               <thead>
                 <tr>
-                  <th>{t('ID', 'ID')}</th>
                   <th>{t('Typ', 'Type')}</th>
                   <th>{t('Stav', 'Status')}</th>
                   <th>{t('Částka', 'Amount')}</th>
@@ -1202,10 +1199,10 @@ function PaymentsContent() {
               </thead>
               <tbody>
                 {loading && Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i}>{Array.from({ length: 8 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '120px' : '80px' }} /></td>)}</tr>
+                  <tr key={i}>{Array.from({ length: 7 }).map((_, j) => <td key={j}><div className="skeleton" style={{ height: '14px', width: j === 0 ? '120px' : '80px' }} /></td>)}</tr>
                 ))}
                 {!loading && !allVisibleSourcesUnavailable && filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {visibleFailures.length
                       ? t('V dostupném zdroji nebyly nalezeny žádné platby', 'No payments found in the available source')
                       : t('Nebyly nalezeny žádné platby', 'No payments found')}
@@ -1215,10 +1212,9 @@ function PaymentsContent() {
                   <tr key={`${p.type}-${p.id}`} style={{ cursor: 'pointer' }}
                     title={t('Zobrazit detail platby', 'View payment detail')}
                     tabIndex={0}
-                    aria-label={t(`Otevřít detail platby ${p.id.slice(0, 8)}`, `Open payment ${p.id.slice(0, 8)} detail`)}
+                    aria-label={t(`Otevřít detail platby ${p.creditorName ?? p.creditorIban ?? ''}`, `Open payment ${p.creditorName ?? p.creditorIban ?? ''} detail`)}
                     onClick={() => { stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) }}
                     onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) } }}>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{p.id.slice(0, 8)}…</td>
                     <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent-text)' : 'var(--info-text)' }}>{p.type}</span></td>
                     <td>
                       <StatusBadge status={p.status} />

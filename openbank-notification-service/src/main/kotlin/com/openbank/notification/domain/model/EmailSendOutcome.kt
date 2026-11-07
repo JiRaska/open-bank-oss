@@ -5,8 +5,8 @@
 package com.openbank.notification.domain.model
 
 /**
- * Three-state outcome of one EMAIL send (issue #4737), the exact shape [PushSendOutcome] already
- * carries for the push channel — deliberately the same vocabulary rather than a second one.
+ * Three-state observation of one EMAIL handoff. An exception after the send begins is ambiguous:
+ * the relay may have accepted the message before the connection failed.
  *
  * The defect this exists to make impossible: `ReactiveMailer.send` under `quarkus.mailer.mock=true`
  * completes **successfully** without opening an SMTP connection, and the consumer's only question
@@ -39,6 +39,6 @@ enum class EmailSendOutcome {
      */
     MOCKED,
 
-    /** The mailer rejected the message, or the call failed. */
-    FAILED,
+    /** The mailer call failed, but whether the relay accepted the message is unknown. */
+    IN_DOUBT,
 }

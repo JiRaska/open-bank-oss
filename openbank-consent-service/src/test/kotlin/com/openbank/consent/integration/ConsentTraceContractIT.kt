@@ -5,8 +5,8 @@
 package com.openbank.consent.integration
 
 import com.openbank.consent.it.ConsentPostgresRedisTestResource
-import com.openbank.consent.it.TraceContractProfile
 import com.openbank.libs.testing.trace.RecordingSpanExporter
+import com.openbank.libs.testing.trace.TraceContractProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile

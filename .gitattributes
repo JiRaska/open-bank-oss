@@ -58,6 +58,10 @@ yarn.lock           linguist-generated=true
 node_modules/**     linguist-vendored=true
 **/build/**         linguist-generated=true
 
+# Preserve Kotlin's canonical ABI dump format, including its final declaration separator.
+# checkKotlinAbi still compares these generated snapshots exactly.
+openbank-libs-*/api/*.api linguist-generated=true whitespace=-blank-at-eof
+
 # YAML block indentation must precede Rego's tabs so the generated policy retains
 # exactly the source bytes after YAML decoding.
 openbank-infra/gitops/components/pricing/pricing-opa-bundle.yaml whitespace=-space-before-tab

@@ -32,6 +32,7 @@ aws s3 sync "$SITE" "s3://$BUCKET" \
 aws s3 sync "$SITE" "s3://$BUCKET" \
   --exclude "*" \
   --include "*.html" \
+  --exclude "pay/*" \
   --content-type "text/html; charset=utf-8" \
   --cache-control "public, max-age=0, must-revalidate"
 
@@ -60,6 +61,16 @@ aws s3 cp "$SITE/.well-known/apple-app-site-association" \
   --content-type "application/json" \
   --cache-control "public, max-age=3600"
 
-# 6) Bust the edge cache.
+# 6) SPAYD-URI pay links (ADR pending; pilot). The QR carries https://open-bank.tech/pay/v1?SPD*…
+#    and iOS/Android open it in an app from the association files above; this page is only the
+#    fallback for a phone with no such app. The URL has NO extension, so each page is uploaded to
+#    its extensionless key with an explicit text/html — S3 would otherwise serve it as octet-stream.
+for page in v1 v1/9998 v1/9999; do
+  aws s3 cp "$SITE/pay/${page}.html" "s3://$BUCKET/pay/${page}" \
+    --content-type "text/html; charset=utf-8" \
+    --cache-control "public, max-age=0, must-revalidate"
+done
+
+# 7) Bust the edge cache.
 aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*" >/dev/null
 echo "✓ deployed — https://open-bank.tech"

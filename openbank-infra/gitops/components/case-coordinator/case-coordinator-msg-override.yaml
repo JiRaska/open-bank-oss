@@ -6,7 +6,7 @@
 # as a properties file via QUARKUS_CONFIG_LOCATIONS keeps the committed YAML defaults viable
 # for local dev/tests while guaranteeing the deployed pod uses the correct values.
 #
-# See transaction-service-msg-override.yaml (#2945) and the AGENTS.md Kafka dotted-key bullet
+# See card-issuance-service-msg-override.yaml (#2945) and the AGENTS.md Kafka dotted-key bullet
 # for the fleet-wide rationale.
 apiVersion: v1
 kind: ConfigMap

@@ -1,6 +1,6 @@
 # API
 
-The REST contract is formalized in [`openapi.yaml`](../../openapi.yaml) (`Notification Service API`, OpenAPI 3.1.0, `info.version 1.2.0`). All endpoints are under `/api/v1` — the URL major version equals `openbank.api.version` (`1`), per [ADR 0048](../../../../docs/adr/0048-two-version-axes.md). The interactive Swagger UI is served at `/api/docs`, the raw spec at `/q/openapi`.
+The REST contract is formalized in [`openapi.yaml`](../../openapi.yaml) (`Notification Service API`, OpenAPI 3.1.0, `info.version 1.15.0`). All endpoints are under `/api/v1` — the URL major version equals `openbank.api.version` (`1`), per [ADR 0048](../../../../docs/adr/0048-two-version-axes.md). The interactive Swagger UI is served at `/api/docs`, the raw spec at `/q/openapi`.
 
 > The bulk of business traffic is **not** REST — it is the Kafka consumer (`openbank.notification.requests`). The REST surface is for device registration, read access, and the dispatch-control break-glass workflow.
 
@@ -23,7 +23,9 @@ For dispatch-control, the **actor identity is taken from the authenticated JWT s
 
 List notifications, paginated. Query params: `partyId` (uuid, optional), `page` (default 0), `size` (default 20, clamped 1..100). The OpenAPI spec also documents `status` and `offset`/`limit`; the implementation uses `page`/`size` and filters by `partyId`.
 
-Returns `{ items: [...], total, unreadCount, page, size }`. `total` and `unreadCount` cover the selected party's full history, independent of the returned page. Created-time and ID ordering remains stable when timestamps match. Each item: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
+Returns `{ items: [...], total, unreadCount, page, size, pageMode }`. `total` and `unreadCount` cover the selected party's full history, independent of the returned page. Created-time and ID ordering remains stable when timestamps match. Each item: `id, partyId, channel, template, recipient, subject, status, sentAt, createdAt`.
+
+Party-scoped history accepts `beforeCreatedAt` and `beforeId` together for stable keyset paging under new arrivals. A cursor response has `pageMode: KEYSET`, which the customer edge requires before using that page; a provider without keyset support fails closed.
 
 ### `GET /api/v1/notifications/{id}`
 
@@ -86,3 +88,17 @@ There is **no `Idempotency-Key` layer** on this service. The inbound Kafka path 
 - **Release:** `version.txt = 0.4.0`, owned by release-please. The two are independent and must not be forced equal.
 
 > **Spec note:** `openapi.yaml` `servers[0].url` lists port `8125`; the service actually listens on `8112` (see `application.yaml`). Treat `8112` as authoritative; the spec server URL is a stale example.
+
+## Managed notification templates: who may do what
+
+`/api/v1/notification-templates` (ADR-0333 D6) splits drafting from publishing:
+
+| Endpoint | OPA action | Roles |
+|---|---|---|
+| `POST /` (create draft) | `commstemplate.create` | `ROLE_OPERATOR`, `ROLE_ADMIN` |
+| `GET /`, `GET /{id}` | `commstemplate.read` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /preview` | `commstemplate.preview` | `ROLE_OPERATOR`, `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+| `POST /{id}/publish` | `commstemplate.publish` | `ROLE_COMMS_APPROVER`, `ROLE_ADMIN` |
+
+Machine identities are refused on every action, whatever role they carry. Publishing also
+refuses the revision's own maker with `409`, including an administrator.

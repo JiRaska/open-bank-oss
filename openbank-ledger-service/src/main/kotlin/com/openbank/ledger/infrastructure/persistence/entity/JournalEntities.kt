@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -66,6 +67,24 @@ class JournalEntryEntity : PanacheEntityBase {
      */
     @Column(name = "synthetic", nullable = false)
     var synthetic: Boolean = false
+
+    @Column(name = "origin_kind")
+    var originKind: String? = null
+
+    @Column(name = "origin_record_id")
+    var originRecordId: UUID? = null
+
+    @Column(name = "origin_submitter")
+    var originSubmitter: String? = null
+
+    @Column(name = "origin_rail")
+    var originRail: String? = null
+
+    @Column(name = "origin_instruction_type")
+    var originInstructionType: String? = null
+
+    @Column(name = "origin_reversal_of_transaction_id")
+    var originReversalOfTransactionId: UUID? = null
 }
 
 data class JournalEntryEntityId(val id: UUID = UUID.randomUUID(), val entryDate: LocalDate = LocalDate.EPOCH) :
@@ -154,6 +173,30 @@ class LedgerIdempotencyEntity : PanacheEntityBase {
 
     @Column(name = "journal_entry_date", nullable = false)
     var journalEntryDate: LocalDate = LocalDate.EPOCH
+
+    @Column(name = "created_at", nullable = false)
+    var createdAt: Instant = Instant.now()
+}
+
+/** ADR-0341 D3: read-only view of `accounting_class_gl_map`; the table changes by migration only. */
+@Entity
+@Table(name = "accounting_class_gl_map")
+class AccountingClassGlMapEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id")
+    var id: UUID = Ids.newId()
+
+    @Column(name = "accounting_class", nullable = false)
+    var accountingClass: String = ""
+
+    @Column(name = "role", nullable = false)
+    var role: String = ""
+
+    @Column(name = "currency_code", nullable = false, columnDefinition = "char(3)")
+    var currencyCode: String = ""
+
+    @Column(name = "gl_account_id", nullable = false)
+    var glAccountId: UUID = Ids.newId()
 
     @Column(name = "created_at", nullable = false)
     var createdAt: Instant = Instant.now()

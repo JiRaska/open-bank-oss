@@ -4,11 +4,15 @@
 
 'use client'
 import { useEffect, useState, useCallback, type CSSProperties } from 'react'
-import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
+import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, HelpCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
+import type { ContentSourceMetadata } from '@/lib/evidence/contentSource'
 import { buildRegistry } from '@/lib/services/registry'
+import { domainColor, domainLabel } from '@/lib/governance/domains'
+import { aggregateNamedWorkloadStatuses } from '@/lib/health/workloadHealth'
 
 // Card → Kubernetes Deployment/Service name (the BFF's canonical key, ADR-0056).
 // `specId` is the repo module directory (so the code-derived catalog lookup below can
@@ -20,10 +24,9 @@ function k8sName(svc: { specId: string | null; k8sName?: string }): string {
   return svc.specId ? svc.specId.replace(/^openbank-/, '') : 'product-catalog'
 }
 
-// A catalog card. Modules with editorial prose (EDITORIAL below) carry a group and a
-// hand-written description; modules discovered ONLY from the code-derived catalog
-// (ADR-0029 D3) are rendered with `derived: true` and the facts the catalog actually
-// knows (api title, versions) — no hardcoded group.
+// A catalog card. Business ownership always comes from the canonical registry.
+// Editorial prose supplies display names and descriptions only; newly discovered
+// modules retain the same ownership contract without requiring editorial entries.
 interface Service {
   id: string
   name: string
@@ -47,6 +50,16 @@ interface EventTopic {
   color: string
 }
 
+function validEventTopic(value: unknown): value is EventTopic {
+  if (!value || typeof value !== 'object') return false
+  const row = value as Record<string, unknown>
+  return typeof row.channel === 'string' && row.channel.length > 0 && typeof row.topic === 'string' && row.topic.length > 0
+    && (row.description === null || typeof row.description === 'string')
+    && Array.isArray(row.publishers) && row.publishers.every(item => typeof item === 'string')
+    && Array.isArray(row.consumers) && row.consumers.every(item => typeof item === 'string')
+    && typeof row.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(row.color)
+}
+
 // Title-case a k8s short name for display, e.g. `lending-service` → `Lending Service`.
 function prettyName(short: string): string {
   return short
@@ -56,40 +69,40 @@ function prettyName(short: string): string {
     .join(' ')
 }
 
-// Editorial PROSE overlay (display name, group, description) keyed by registry id - NOT the service
+// Editorial PROSE overlay (display name and description) keyed by registry id - NOT the service
 // list. The page renders one card per runnable catalog module (buildRegistry over
 // /api/catalog/services); a module with no entry here still gets a card (`derived`), with the OpenAPI
 // title as its description. Ports, module names and workload names are never typed: they come from
 // the catalog (application.yaml / build scripts).
-const EDITORIAL: Record<string, { name: string; group: string; version: string; desc: string }> = {
-  'account': { name: 'Account Service', group: 'Core Banking', version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)' },
-  'ledger': { name: 'Ledger Service', group: 'Core Banking', version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)' },
-  'transaction': { name: 'Transaction Service', group: 'Core Banking', version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)' },
-  'balance': { name: 'Balance Service', group: 'Core Banking', version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)' },
-  'product-catalog': { name: 'Product Catalog', group: 'Core Banking', version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)' },
-  'pid': { name: 'PID Service', group: 'Identity', version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)' },
-  'consent': { name: 'Consent Service', group: 'PSD2', version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)' },
-  'psd2': { name: 'PSD2 Service', group: 'PSD2', version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)' },
-  'tpp-registry': { name: 'TPP Registry', group: 'PSD2', version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)' },
-  'agent': { name: 'Agent Service (MCP)', group: 'Platform', version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)' },
-  'sca': { name: 'SCA Service', group: 'PSD2', version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)' },
-  'party': { name: 'Party Service', group: 'Identity', version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)' },
-  'notification': { name: 'Notification Service', group: 'Platform', version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)' },
-  'audit': { name: 'Audit Service', group: 'Compliance', version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)' },
-  'kyc': { name: 'KYC Service', group: 'Compliance', version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)' },
-  'sepa-payment': { name: 'SEPA Payment', group: 'Payments', version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)' },
-  'domestic-payment': { name: 'Domestic Payment', group: 'Payments', version: 'v1', desc: 'Czech domestic payments (Local clearing network)' },
-  'aml': { name: 'AML Service', group: 'Compliance', version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)' },
-  'card-issuance': { name: 'Card Issuance Service', group: 'Cards', version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)' },
-  'fx': { name: 'FX Service', group: 'Core Banking', version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)' },
-  'security-scanner': { name: 'Security Scanner', group: 'Platform', version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)' },
-  'standing-order': { name: 'Standing Order Service', group: 'Payments', version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)' },
-  'swift': { name: 'SWIFT Service', group: 'Payments', version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)' },
-  'sanctions': { name: 'Sanctions Service', group: 'Compliance', version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)' },
-  'clearing': { name: 'Clearing Service', group: 'Payments', version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)' },
-  'interest': { name: 'Interest Service', group: 'Core Banking', version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)' },
-  'dispute': { name: 'Dispute Service', group: 'Cards', version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)' },
-  'sepa-instant': { name: 'SEPA Instant Service', group: 'Payments', version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)' },
+const EDITORIAL: Record<string, { name: string; version: string; desc: string }> = {
+  'account': { name: 'Account Service', version: 'v1', desc: 'Account lifecycle, IBAN, authorizations (Core system for bank accounts)' },
+  'ledger': { name: 'Ledger Service', version: 'v1', desc: 'GL accounts, journal entries, double-entry (Financial book of record)' },
+  'transaction': { name: 'Transaction Service', version: 'v1', desc: 'Transaction processing, partitioned storage (Payment execution engine)' },
+  'balance': { name: 'Balance Service', version: 'v1', desc: 'Real-time balances, holds management (Current funds availability)' },
+  'product-catalog': { name: 'Product Catalog', version: 'v1', desc: 'Banking products, pricing, limits (Product definitions and fees)' },
+  'pid': { name: 'PID Service', version: 'v1', desc: 'Party identity documents, external IDs (Identity resolution)' },
+  'consent': { name: 'Consent Service', version: 'v1', desc: 'PSD2 consent management, AIS/PIS/CBPII (Open Banking user approvals)' },
+  'psd2': { name: 'PSD2 Service', version: 'v1', desc: 'Berlin Group NextGenPSD2 API gateway (Regulated API interface)' },
+  'tpp-registry': { name: 'TPP Registry', version: 'v1', desc: 'Third Party Provider registry, EBA sync (Verified external consumers)' },
+  'agent': { name: 'Agent Service (MCP)', version: 'v1', desc: 'AI agent MCP server, OpenBank tools (Intelligent assistant backend)' },
+  'sca': { name: 'SCA Service', version: 'v1', desc: 'Strong Customer Authentication, OTP (Multi-factor auth provider)' },
+  'party': { name: 'Party Service', version: 'v1', desc: 'Customer/company master data, PEP flags (Central customer record)' },
+  'notification': { name: 'Notification Service', version: 'v1', desc: 'Email/SMS/Push notifications (Omnichannel delivery)' },
+  'audit': { name: 'Audit Service', version: 'v1', desc: 'Immutable audit trail, EBA ICT Risk (Regulated action logging)' },
+  'kyc': { name: 'KYC Service', version: 'v1', desc: 'KYC/CDD/EDD case management (Know Your Customer reviews)' },
+  'sepa-payment': { name: 'SEPA Payment', version: 'v1', desc: 'SEPA Credit Transfer, SCT Inst (Euro-zone standard payments)' },
+  'domestic-payment': { name: 'Domestic Payment', version: 'v1', desc: 'Czech domestic payments (Local clearing network)' },
+  'aml': { name: 'AML Service', version: 'v1', desc: 'AML screening, sanctions, SAR filing (Anti-Money Laundering engine)' },
+  'card-issuance': { name: 'Card Issuance Service', version: 'v1', desc: 'Card issuance and lifecycle management (Physical and virtual cards)' },
+  'fx': { name: 'FX Service', version: 'v1', desc: 'Foreign exchange rates and conversion (Currency trading engine)' },
+  'security-scanner': { name: 'Security Scanner', version: 'v1', desc: 'Continuous vulnerability scanning (Infrastructure security)' },
+  'standing-order': { name: 'Standing Order Service', version: 'v1', desc: 'Recurring payments and scheduled transfers (Automated clearing)' },
+  'swift': { name: 'SWIFT Service', version: 'v1', desc: 'SWIFT MT/MX messaging (International wire transfers)' },
+  'sanctions': { name: 'Sanctions Service', version: 'v1', desc: 'Real-time sanctions list screening (Embargo & blocklist checks)' },
+  'clearing': { name: 'Clearing Service', version: 'v1', desc: 'Interbank clearing and settlement (Payment finality)' },
+  'interest': { name: 'Interest Service', version: 'v1', desc: 'Interest calculation and accrual (Yield and fee engine)' },
+  'dispute': { name: 'Dispute Service', version: 'v1', desc: 'Card disputes and chargebacks (Fraud recovery process)' },
+  'sepa-instant': { name: 'SEPA Instant Service', version: 'v1', desc: 'Real-time EUR payment processing (SCT Inst clearing)' },
 }
 
 // Czech translations for the editorial SERVICES `desc` prose, keyed by service id.
@@ -126,31 +139,7 @@ const SERVICE_DESC_CS: Record<string, string> = {
   'sepa-instant':    'Zpracování okamžitých EUR plateb v reálném čase (Clearing SCT Inst)',
 }
 
-// Czech labels for the fixed set of service groups (also used as GROUP_COLORS keys
-// and filter values, so the English string stays the canonical key).
-const GROUP_LABELS_CS: Record<string, string> = {
-  'Core Banking': 'Jádrové bankovnictví',
-  'Identity':     'Identita',
-  'Compliance':   'Compliance',
-  'Payments':     'Platby',
-  'PSD2':         'PSD2',
-  'Platform':     'Platforma',
-  'Cards':        'Karty',
-  'Other':        'Ostatní',
-}
-
 const SPEC_BASE_URL = 'https://raw.githubusercontent.com/JiRaska/open-bank-oss/main'
-
-const GROUP_COLORS: Record<string, string> = {
-  'Core Banking': '#2563eb',
-  'Identity':     '#059669',
-  'Compliance':   '#dc2626',
-  'Payments':     '#7c3aed',
-  'PSD2':         '#d97706',
-  'Platform':     '#6b7280',
-  'Cards':        '#d02571',
-  'Other':        '#64748b',
-}
 
 const METHOD_COLORS: Record<string, { bg: string, text: string, border: string }> = {
   get: { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe' },
@@ -222,7 +211,7 @@ interface OpenAPIDoc {
 // deployed in this environment (most of the 33-service fleet in the sandbox)
 // from one that IS deployed but failed its readiness probe. Showing the former
 // as a red "Offline" reads as "the app is broken" — see ADR-0056 / graceful-state.
-type Health = 'up' | 'not_deployed' | 'down'
+type Health = 'up' | 'not_deployed' | 'down' | 'unknown'
 
 interface ServiceStatus {
   health: Health
@@ -241,7 +230,8 @@ interface ServiceStatus {
 // static probe in local dev). Probing `/q/health/ready` via the BFF made every
 // deployed service 404 → read as "down", which is exactly the bug being fixed.
 interface HealthSnapshot {
-  byContainer: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
+  services?: { name: string; container?: string; namespace?: string; status: 'UP' | 'DOWN' | 'UNKNOWN' }[]
+  byContainer?: Record<string, { status: 'UP' | 'DOWN' | 'UNKNOWN' }>
   source: string
 }
 
@@ -258,16 +248,19 @@ async function loadHealthSnapshot(): Promise<HealthSnapshot | null> {
   }
 }
 
-// Map a service's k8s name to tri-state health. A service the discovery feed
-// never listed simply isn't deployed in this environment (neutral); a listed
-// service that isn't UP is genuinely down. The snapshot key differs by source
-// (discovery → `account-service`, static probe → `openbank-account-service`),
-// so try both forms.
+// Aggregate all discovered workloads representing the catalog service. The
+// canonical services array takes precedence over legacy aliases, which can be
+// omitted when a bare container name is ambiguous across namespaces.
 function healthFor(snap: HealthSnapshot | null, k8s: string): Health {
-  if (!snap) return 'not_deployed'
-  const entry = snap.byContainer[k8s] ?? snap.byContainer[`openbank-${k8s}`]
+  if (!snap) return 'unknown'
+  if (Array.isArray(snap.services)) {
+    const aliases = new Set([k8s, `openbank-${k8s}`])
+    const status = aggregateNamedWorkloadStatuses(snap.services, aliases)
+    return status === 'UP' ? 'up' : status === 'DOWN' ? 'down' : 'unknown'
+  }
+  const entry = snap.byContainer?.[k8s] ?? snap.byContainer?.[`openbank-${k8s}`]
   if (!entry) return 'not_deployed'
-  return entry.status === 'UP' ? 'up' : 'down'
+  return entry.status === 'UP' ? 'up' : entry.status === 'DOWN' ? 'down' : 'unknown'
 }
 
 const resolveRef = (ref: string, openapi: OpenAPIDoc | null): OpenAPISchema | undefined => {
@@ -423,7 +416,7 @@ function MethodDetailView({ path, method, operation, openapi }: { path: string, 
 }
 
 export default function ApiCatalogPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [statuses, setStatuses] = useState<Record<string, ServiceStatus>>({})
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -440,6 +433,7 @@ export default function ApiCatalogPage() {
   // above — rendered as cards so the catalog is COMPLETE, not
   // silently truncated to the hand-maintained subset.
   const [services, setServices] = useState<Service[]>([])
+  const [contentSource, setContentSource] = useState<ContentSourceMetadata | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -507,7 +501,9 @@ export default function ApiCatalogPage() {
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (!alive || !data?.available || !Array.isArray(data.services)) return
+        if (!alive || !data) return
+        setContentSource(data.contentSource ?? null)
+        if (!data.available || !Array.isArray(data.services)) return
         const map: Record<string, { releaseVersion: string | null; apiVersion: string | null; moneyPath: boolean; gaps: string[] }> = {}
         for (const s of data.services) {
           map[s.name] = { releaseVersion: s.releaseVersion ?? null, apiVersion: s.apiVersion ?? null, moneyPath: !!s.moneyPath, gaps: s.gaps ?? [] }
@@ -525,7 +521,7 @@ export default function ApiCatalogPage() {
             id: r.id,
             name: ed?.name ?? prettyName(r.container),
             port: r.port,
-            group: ed?.group ?? 'Other',
+            group: r.group,
             version: ed?.version ?? (api?.apiVersion ? `v${String(api.apiVersion).split('.')[0]}` : 'v1'),
             desc: ed?.desc ?? api?.apiTitle ?? '',
             specId: r.container,
@@ -546,18 +542,33 @@ export default function ApiCatalogPage() {
   // application.yaml (scripts/generate-events.mjs), replacing a hand-maintained
   // array that drifted the same way the AsyncAPI document itself drifted (#4761:
   // 15 of ~23 topic names were fiction). Falls back to an empty, honest list.
-  const [events, setEvents] = useState<EventTopic[]>([])
+  const [eventContent, setEventContent] = useState<{ topics: EventTopic[]; source: ContentSourceMetadata | null }>({ topics: [], source: null })
+  const events = eventContent.topics
+  const eventsSource = eventContent.source
+  const [eventsRevision, setEventsRevision] = useState(0)
   useEffect(() => {
     let alive = true
     fetch('/api/events', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : null)
+      .then(r => { if (!r.ok) throw new Error(`Event source HTTP ${r.status}`); return r.json() })
       .then(data => {
-        if (!alive || !data?.available || !Array.isArray(data.topics)) return
-        setEvents(data.topics)
+        if (!alive) return
+        const source = data?.contentSource
+        if (data?.available !== true || !Array.isArray(data.topics) || !data.topics.every(validEventTopic)
+          || !source || !['published', 'image-baked', 'unavailable'].includes(source.source)
+          || !['ready', 'stale', 'unavailable'].includes(source.status)
+          || !(source.sourceSha === null || typeof source.sourceSha === 'string')
+          || !(source.sourceCollectedAt === null || typeof source.sourceCollectedAt === 'string')
+          || typeof source.fetchedAt !== 'string') throw new Error('Event source response is unusable')
+        setEventContent({ topics: data.topics, source })
       })
-      .catch(() => { /* events snapshot absent — async tab shows the empty state */ })
+      .catch(() => {
+        if (alive) setEventContent(previous => ({ ...previous, source: previous.source
+          ? { ...previous.source, status: 'stale', detail: 'Event source refresh failed' }
+          : { source: 'unavailable', status: 'unavailable', sourceSha: null, sourceCollectedAt: null,
+            imageBuiltAt: null, fetchedAt: new Date().toISOString(), detail: 'Event source refresh failed' } }))
+      })
     return () => { alive = false }
-  }, [])
+  }, [eventsRevision])
 
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
   const allServices = services
@@ -572,8 +583,7 @@ export default function ApiCatalogPage() {
       .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
   })
 
-  // Translate a group key (kept canonical/English as the GROUP_COLORS + filter key).
-  const groupLabel = (g: string) => g === 'all' ? t('Vše', 'All') : t(GROUP_LABELS_CS[g] ?? g, g)
+  const groupLabel = (group: string) => group === 'all' ? t('Vše', 'All') : domainLabel(group, language === 'cs' ? 'cs' : 'en')
 
   return (
     <div>
@@ -586,11 +596,13 @@ export default function ApiCatalogPage() {
         title={t('API Katalog', 'API Catalog')}
         subtitle={t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}
         icon={<FileCode aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading}>
+        actions={<button type="button" className="btn btn-secondary" onClick={() => { setEventsRevision(revision => revision + 1); void load() }} disabled={loading} aria-busy={loading}>
             <RefreshCw aria-hidden="true" size={13} className={loading ? 'animate-spin' : ''} />
             {t('Obnovit', 'Refresh')}
           </button>}
       />
+
+      <ContentSourceNote source={contentSource} />
 
       {/* Tabs */}
       <div role="group" aria-label={t('Typ API dokumentace', 'API documentation type')} style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>
@@ -632,9 +644,9 @@ export default function ApiCatalogPage() {
           <button key={g} type="button" aria-pressed={groupFilter === g} onClick={() => setGroupFilter(g)}
             style={{
               padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
-              border: `1px solid ${groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--border)'}`,
-              background: groupFilter === g ? (GROUP_COLORS[g] || 'var(--accent-strong)') : 'var(--surface)',
-              color: groupFilter === g ? '#fff' : 'var(--text-secondary)',
+              border: `1px solid ${groupFilter === g ? 'var(--accent-strong)' : 'var(--border)'}`,
+              background: groupFilter === g ? 'var(--accent-strong)' : 'var(--surface)',
+              color: groupFilter === g ? 'var(--accent-strong-text)' : 'var(--text-secondary)',
               cursor: 'pointer', fontFamily: 'inherit',
             }}>{groupLabel(g)}</button>
         ))}
@@ -678,7 +690,7 @@ export default function ApiCatalogPage() {
         {filtered.map(svc => {
           const status = statuses[svc.id]
           const isExpanded = expanded === svc.id
-          const groupColor = GROUP_COLORS[svc.group] || '#6b7280'
+          const groupColor = domainColor(svc.group)
           const k8s = k8sName(svc)
           // Real, code-derived facts (ADR-0029 D3) overlaid on the editorial card.
           const cat = catalog[svc.specId ?? 'openbank-product-catalog']
@@ -710,6 +722,8 @@ export default function ApiCatalogPage() {
                   <CheckCircle2 size={14} style={{ color: 'var(--success)', flexShrink: 0 }} aria-label={t('Online', 'Online')} />
                 ) : status?.health === 'not_deployed' ? (
                   <MinusCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-label={t('Není nasazeno v tomto prostředí', 'Not deployed in this environment')} />
+                ) : status?.health === 'unknown' ? (
+                  <HelpCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} aria-label={t('Stav není znám', 'Health status unknown')} />
                 ) : (
                   <XCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0 }} aria-label={t('Offline', 'Offline')} />
                 )}
@@ -720,8 +734,8 @@ export default function ApiCatalogPage() {
                     <span className="api-group-chip" style={{
                       '--api-group-color': groupColor,
                       fontSize: '10px', fontWeight: 600, padding: '2px 6px',
-                      background: `${groupColor}15`,
-                      borderRadius: '4px', border: `1px solid ${groupColor}30`,
+                      background: `color-mix(in srgb, ${groupColor} 8%, transparent)`,
+                      borderRadius: '4px', border: `1px solid color-mix(in srgb, ${groupColor} 18%, transparent)`,
                     } as CSSProperties}>{groupLabel(svc.group)}</span>
                     <span style={{
                       fontSize: '10px', fontFamily: 'JetBrains Mono, monospace',
@@ -816,7 +830,9 @@ export default function ApiCatalogPage() {
                           <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                             {status.health === 'not_deployed'
                               ? t('Služba není v tomto prostředí nasazená — OpenAPI spec se načte, jakmile poběží.', 'Service is not deployed in this environment — the OpenAPI spec loads once it is running.')
-                              : t('Žádné endpointy (služba offline nebo OpenAPI nedostupné).', 'No endpoints (service offline or OpenAPI unavailable).')}
+                              : status.health === 'unknown'
+                                ? t('Stav služby není znám; endpointy nelze ověřit.', 'Service health is unknown; endpoints could not be verified.')
+                                : t('Žádné endpointy (služba offline nebo OpenAPI nedostupné).', 'No endpoints (service offline or OpenAPI unavailable).')}
                           </div>
                         ) : status.paths.map((path, i) => {
                           const docPaths = status.openapi?.paths || {}
@@ -922,6 +938,7 @@ export default function ApiCatalogPage() {
 
       {activeTab === 'async' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <ContentSourceNote source={eventsSource} />
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
               <Zap size={16} style={{ color: '#7c3aed' }} />
@@ -943,8 +960,8 @@ export default function ApiCatalogPage() {
             {events.length === 0 && (
               <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
                 {t(
-                  'Tabulka topics se generuje z docs/asyncapi/openbank-events.yaml při buildu — v tomto prostředí není k dispozici.',
-                  'The topic table is generated from docs/asyncapi/openbank-events.yaml at build time — not bundled in this environment.',
+                  'Tabulka topics se odvozuje z revidovaného zdroje AsyncAPI — v tomto prostředí není k dispozici.',
+                  'The topic table is derived from reviewed AsyncAPI source — it is unavailable in this environment.',
                 )}
               </p>
             )}

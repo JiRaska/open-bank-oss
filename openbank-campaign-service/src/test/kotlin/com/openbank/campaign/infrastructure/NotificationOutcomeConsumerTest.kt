@@ -46,6 +46,14 @@ class NotificationOutcomeConsumerTest {
         /** Fail this many times, then succeed — the transient failure the retry exists for. */
         var failuresBeforeSuccess = 0
 
+        override suspend fun reserveHandoff(
+            sendId: UUID,
+            campaignId: UUID,
+            partyId: UUID,
+            stepOrder: Int,
+            channel: com.openbank.campaign.domain.model.Channel,
+        ) = Unit
+
         override suspend fun applyDeliveryOutcome(
             sendId: UUID,
             outcome: String,

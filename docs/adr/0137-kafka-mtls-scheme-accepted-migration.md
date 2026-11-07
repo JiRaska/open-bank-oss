@@ -197,3 +197,7 @@ startup-crash risk; #698 replaces it with a mounted properties file +
   overrides too, not just whole-channel definition)
 - #2664 (Pact gate blocking the image rebuild), #2665 (fleet-wide gate flip)
 - ADR-0005 / OpenBao + External Secrets (the cross-namespace secret pattern)
+
+## Addendum (2026-10-17)
+
+The `payment.scheme-accepted` topic this ADR locked down was removed together with its consumer, DLQ, rail Write ACLs and the transaction-service msg-override ConfigMap: no service ever produced to it and rail settlement runs over REST per ADR-0108. The mTLS listener, per-service KafkaUsers and deny-by-default ACL model decided here are unchanged and still in force.

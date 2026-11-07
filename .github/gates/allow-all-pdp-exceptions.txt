@@ -3,3 +3,8 @@
 # construction (or openbank-libs-testing dependency) under src/main was judged safe despite the
 # gate's default rule. Add a reason as a comment above the entry and get it reviewed in the PR
 # that adds it — same convention as the fleet's other gate baseline files.
+# openbank-products (ADR-0352 §5/§11): a content module and CLI, not a service — no Quarkus, no
+# application.yaml, no deployment, no PolicyDecisionPoint consumer anywhere in its graph. The golden
+# scenario runner lives in openbank-libs-testing by ADR-0352 §5 and `obp test` / `obp diff` run it
+# offline, so the module's main classpath needs it. Nothing authz-related is reachable from it.
+openbank-products/build.gradle.kts:31

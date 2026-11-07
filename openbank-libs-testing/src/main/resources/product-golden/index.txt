@@ -1,0 +1,7 @@
+# ADR-0352 golden scenarios (phase 1; move to openbank-products in phase 2). One file per line.
+savings-fixed-monthly-capitalisation.json
+savings-tiered-crossing-a-tier.json
+savings-bonus-predicate-event-window.json
+fee-with-waiver.json
+term-deposit-maturity-and-early-withdrawal.json
+preposting-reject-insufficient-funds.json

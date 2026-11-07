@@ -5,12 +5,18 @@
 package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.AccountingDayUseCase
+import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.OpenAccountingDayCommand
 import com.openbank.ledger.application.port.`in`.TransitionAccountingDayCommand
 import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
+import com.openbank.ledger.domain.model.CloseCompleteness
+import com.openbank.ledger.domain.model.CloseParticipantsPendingException
+import com.openbank.ledger.domain.model.CloseParticipationRecord
+import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
@@ -32,6 +38,9 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Behaviour of the accounting-day reconciler (ADR-0207 increment 2) against a fixed clock.
@@ -52,6 +61,13 @@ class AccountingDaySchedulerTest {
     private val tieOutRuns = mockk<TieOutRunRepository>()
     private val useCase = mockk<AccountingDayUseCase>(relaxed = true)
     private val tieOutRunner = mockk<TieOutScheduler>(relaxed = true)
+    private val participation = mockk<CloseParticipationUseCase>()
+    private var participantsMode = CloseParticipantsConfig.MODE_OFF
+
+    private val participantsConfig = object : CloseParticipantsConfig {
+        override fun participantsMode(): String = participantsMode
+        override fun participants(): Map<String, CloseParticipantsConfig.Participant> = emptyMap()
+    }
 
     private val scheduler = AccountingDayScheduler(
         dayRepository,
@@ -65,6 +81,12 @@ class AccountingDaySchedulerTest {
         domainMetrics = noOpDomainMetrics()
         meterRegistry = SimpleMeterRegistry()
         tieOutScheduler = tieOutRunner
+        closeParticipation = participation
+        closeParticipantsConfig = participantsConfig
+    }
+
+    init {
+        every { participation.declaredParticipants() } returns setOf("interest")
     }
 
     private fun noOpDomainMetrics(): DomainMetrics {
@@ -175,6 +197,165 @@ class AccountingDaySchedulerTest {
             )
         }
     }
+
+    /** Yesterday in CUTOFF with an OK post-cutoff tie-out: only the participant check can hold it. */
+    private fun yesterdayEligibleForTieOut(): LocalDate {
+        val yesterday = today.minusDays(1)
+        coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.OPEN) } returns emptyList()
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.CUTOFF) } returns listOf(
+            day(yesterday, AccountingDayStatus.CUTOFF, cutoffAt = Instant.parse("2026-08-06T22:05:00Z")),
+        )
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns
+            tieOutRun(yesterday, TieOutRunStatus.OK, runAt = Instant.parse("2026-08-07T04:00:00Z"))
+        coEvery { participation.completeness(yesterday) } returns
+            CloseCompleteness(yesterday, expected = setOf("interest"), reported = emptyMap())
+        return yesterday
+    }
+
+    @Test
+    fun `ENFORCE holds a tied-out-eligible day while a declared participant is missing`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        yesterdayEligibleForTieOut()
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 0) { useCase.transition(any()) }
+        assertThat(
+            scheduler.meterRegistry.counter(
+                AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                "outcome",
+                "held",
+                "mode",
+                "enforce",
+            ).count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `ENFORCE holds a day whose only participant REFUSED - the interest was not posted`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            expected = setOf("interest"),
+            reported = mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.REFUSED, 0, 3, "3 posting(s) refused",
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                ),
+            ),
+        )
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 0) { useCase.transition(any()) }
+    }
+
+    @Test
+    fun `a CR LF in a participant name cannot forge a log line in the completeness warning`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_SHADOW
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns
+            CloseCompleteness(yesterday, expected = setOf("interest\r\nFORGED level=ERROR"), reported = emptyMap())
+        val lines = mutableListOf<String>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                lines += record.message
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val jul = JulLogger.getLogger(AccountingDayScheduler::class.java.name)
+        jul.addHandler(handler)
+        try {
+            scheduler.reconcile()
+        } finally {
+            jul.removeHandler(handler)
+        }
+        val rendered = lines.joinToString("\n")
+        assertThat(rendered).contains("interest__FORGED level=ERROR")
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\nFORGED")
+    }
+
+    @Test
+    fun `SHADOW counts the would-hold and still ties the day out`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_SHADOW
+        val yesterday = yesterdayEligibleForTieOut()
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { useCase.transition(match { it.businessDate == yesterday }) }
+        assertThat(
+            scheduler.meterRegistry.counter(
+                AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                "outcome",
+                "would_hold",
+                "mode",
+                "shadow",
+            ).count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `ENFORCE hands the declared participants to the transition so completeness is re-judged in its transaction`():
+        Unit =
+        runBlocking {
+            participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+            val yesterday = yesterdayEligibleForTieOut()
+            coEvery { participation.completeness(yesterday) } returns
+                CloseCompleteness(yesterday, setOf("interest"), emptyMap()).let { empty ->
+                    empty.copy(
+                        reported = mapOf(
+                            "interest" to CloseParticipationRecord(
+                                yesterday, "interest", ParticipationOutcome.RAN, 0, 1, null,
+                                "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                            ),
+                        ),
+                    )
+                }
+
+            scheduler.reconcile()
+
+            coVerify(exactly = 1) {
+                useCase.transition(
+                    match {
+                        it.businessDate == yesterday && it.to == AccountingDayStatus.TIED_OUT
+                    },
+                )
+            }
+        }
+
+    @Test
+    fun `a REFUSED report landing between the check and the transition holds the day and is counted`(): Unit =
+        runBlocking {
+            participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+            val yesterday = yesterdayEligibleForTieOut()
+            coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+                yesterday,
+                setOf("interest"),
+                mapOf(
+                    "interest" to CloseParticipationRecord(
+                        yesterday, "interest", ParticipationOutcome.RAN, 0, 1, null,
+                        "service-account-openbank-interest", Instant.parse("2026-08-07T01:30:00Z"), false,
+                    ),
+                ),
+            )
+            // The repository's in-transaction re-read found the REFUSED row that overtook the check.
+            coEvery { useCase.transition(any()) } throws CloseParticipantsPendingException(setOf("interest"))
+
+            scheduler.reconcile()
+
+            assertThat(
+                scheduler.meterRegistry.counter(
+                    AccountingDayScheduler.PARTICIPANTS_DECISIONS,
+                    "outcome",
+                    "held",
+                    "mode",
+                    "enforce",
+                ).count(),
+            ).isEqualTo(1.0)
+        }
 
     @Test
     fun `CUTOFF day stays put on a BREAK verdict and on a pre-cutoff OK`(): Unit = runBlocking {

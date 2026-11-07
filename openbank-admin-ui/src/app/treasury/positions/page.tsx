@@ -15,7 +15,7 @@ import { EmptyState, PageHeader, StatusBadge } from '@/components/ui'
 import { getJson, treasuryUrl } from '@/components/treasury/api'
 import { positionsSchema, type Positions } from '@/components/treasury/contracts'
 import { DATE_SHORTCUTS, addDays, basisOf, isEmptyPosition, longDate } from '@/components/treasury/positions'
-import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
+import { bankToday, isIsoDate } from '@/lib/format/bankDate'
 import { formatCurrency } from '@/lib/utils'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 

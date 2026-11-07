@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.persistence.repository
 
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
+import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
@@ -31,6 +32,7 @@ import java.util.UUID
 @Suppress("TooManyFunctions", "TooGenericExceptionCaught")
 class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymentOutboxRepositoryImpl) :
     DomesticPaymentRepository,
+    DomesticBookingWrites,
     PanacheRepository<DomesticPaymentEntity> {
 
     override suspend fun save(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment = try {
@@ -167,31 +169,48 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
     }
 
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
-        Panache.withTransaction {
-            Panache.getSession().flatMap { session ->
-                session.createQuery(
-                    "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
-                    DomesticPaymentEntity::class.java,
-                ).setParameter("paymentId", payment.id)
-                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
-                    .singleResultOrNull
-                    .invoke { entity ->
-                        requireNotNull(entity) { "Domestic payment ${payment.id} disappeared during update" }
-                        check(payment.aggregateRevision == entity.aggregateRevision + 1) {
-                            "Stale domestic payment revision ${payment.aggregateRevision}; " +
-                                "current revision is ${entity.aggregateRevision}"
-                        }
-                        entity.status = payment.status.name
-                        entity.rejectReason = payment.rejectReason?.name
-                        entity.rejectDetail = payment.rejectDetail
-                        entity.submittedAt = payment.submittedAt
-                        entity.settledAt = payment.settledAt
-                        entity.updatedAt = payment.updatedAt
-                        entity.aggregateRevision = payment.aggregateRevision
+        writeLifecycle(payment, outboxMessage)
+
+    override suspend fun acceptForBooking(payment: DomesticPayment, outbox: OutboxMessage): DomesticPayment =
+        writeLifecycle(payment, outbox, acceptedBooking = true)
+
+    override suspend fun completeBooking(
+        payment: DomesticPayment,
+        transactionId: UUID,
+        outbox: OutboxMessage,
+    ): DomesticPayment = writeLifecycle(payment, outbox, provenTransactionId = transactionId)
+
+    private suspend fun writeLifecycle(
+        payment: DomesticPayment,
+        outboxMessage: OutboxMessage,
+        acceptedBooking: Boolean = false,
+        provenTransactionId: UUID? = null,
+    ): DomesticPayment = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                DomesticPaymentEntity::class.java,
+            ).setParameter("paymentId", payment.id)
+                .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .invoke { entity ->
+                    requireNotNull(entity) { "Domestic payment ${payment.id} disappeared during update" }
+                    check(payment.aggregateRevision == entity.aggregateRevision + 1) {
+                        "Stale domestic payment revision ${payment.aggregateRevision}; " +
+                            "current revision is ${entity.aggregateRevision}"
                     }
-                    .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
-            }
-        }.awaitSuspending()
+                    entity.applyBookingTransition(payment, acceptedBooking, provenTransactionId)
+                    entity.status = payment.status.name
+                    entity.rejectReason = payment.rejectReason?.name
+                    entity.rejectDetail = payment.rejectDetail
+                    entity.submittedAt = payment.submittedAt
+                    entity.settledAt = payment.settledAt
+                    entity.updatedAt = payment.updatedAt
+                    entity.aggregateRevision = payment.aggregateRevision
+                }
+                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+        }
+    }.awaitSuspending()
 
     // #4218. Its own transaction, deliberately: the point of the marker is to survive a failure of
     // the update() above, so it must not share a transaction with anything that can roll back.

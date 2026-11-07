@@ -155,7 +155,7 @@ allowed_reasons contains "dispute-staff-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
-	not startswith(input.principal.id, "service-account-")
+	not principal_is_machine
 	input.action in {
 		"dispute.update",
 		"dispute.resolve",
@@ -177,6 +177,18 @@ allowed_reasons contains "dispute-staff-write" if {
 # (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
 allowed_reasons contains "service-agent-dispute-read" if {
 	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-agent"
+	machine_named("service-account-openbank-agent")
+	input.action in {"dispute.list", "dispute.read"}
+}
+
+# Oversight read by a human ROLE_AUDITOR (advisory would-DENY triage, 2026-11-04). admin-ui gates
+# /disputes on `compliance:view` = [ADMIN, COMPLIANCE, AUDITOR] (caller-audit item 6), so an auditor
+# IS an intended consumer, yet no reason granted it: the advisory log recorded 64 would-DENY for
+# dispute.list from a VIEWER+AUDITOR user. Pure ROLE_VIEWER stays a deliberate non-grant (item 6).
+# Read plane only, human principals only.
+allowed_reasons contains "dispute-auditor-read" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_AUDITOR" in input.principal.roles
 	input.action in {"dispute.list", "dispute.read"}
 }

@@ -7,6 +7,8 @@ package com.openbank.flakytest.application.usecase
 
 import com.openbank.flakytest.application.port.incoming.AnalyzeTestIntelligenceUseCase
 import com.openbank.flakytest.application.port.incoming.GetFindingsUseCase
+import com.openbank.flakytest.application.port.incoming.GetOperatorWorkflowStatusUseCase
+import com.openbank.flakytest.application.port.incoming.OperatorWorkflowStatus
 import com.openbank.flakytest.application.port.incoming.RunFlakyTestCheckUseCase
 import com.openbank.flakytest.application.port.out.FindingRepository
 import com.openbank.flakytest.application.port.out.LlmDiagnosisPort
@@ -20,14 +22,20 @@ import com.openbank.flakytest.domain.model.RunTrigger
 import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import com.openbank.flakytest.domain.model.TestIntelligenceComponentInput
 import com.openbank.libs.temporal.TemporalConfig
+import io.grpc.Status
+import io.grpc.StatusRuntimeException
 import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.api.trace.Tracer
+import io.temporal.api.common.v1.WorkflowExecution
 import io.temporal.api.enums.v1.WorkflowIdReusePolicy
+import io.temporal.api.workflowservice.v1.DescribeWorkflowExecutionRequest
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.NotFoundException
+import jakarta.ws.rs.ServiceUnavailableException
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.nio.charset.StandardCharsets
@@ -37,8 +45,10 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 @ApplicationScoped
+@Suppress("TooManyFunctions")
 class FlakyTestHunterService(
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
@@ -47,6 +57,7 @@ class FlakyTestHunterService(
     private val clock: Clock,
     private val tracer: Tracer,
 ) : RunFlakyTestCheckUseCase,
+    GetOperatorWorkflowStatusUseCase,
     GetFindingsUseCase,
     AnalyzeTestIntelligenceUseCase {
 
@@ -81,6 +92,41 @@ class FlakyTestHunterService(
             log.infof("Sweep workflow %s already exists; not starting a second (trigger=%s)", workflowId, trigger)
         }
         return workflowId
+    }
+
+    override fun getStatus(workflowId: String): OperatorWorkflowStatus {
+        requireRecentOperatorWorkflowId(workflowId, Instant.now(clock))
+        val request = DescribeWorkflowExecutionRequest.newBuilder()
+            .setNamespace(temporalConfig.namespace())
+            .setExecution(WorkflowExecution.newBuilder().setWorkflowId(workflowId))
+            .build()
+        val info = try {
+            workflowClient.workflowServiceStubs.blockingStub()
+                .withDeadlineAfter(TEMPORAL_STATUS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .describeWorkflowExecution(request)
+                .workflowExecutionInfo
+        } catch (error: StatusRuntimeException) {
+            if (error.status.code == Status.Code.NOT_FOUND) throw NotFoundException("Workflow not found")
+            throw ServiceUnavailableException("Workflow status is temporarily unavailable")
+        }
+        return OperatorWorkflowStatus(
+            workflowId = workflowId,
+            status = info.status.name.removePrefix("WORKFLOW_EXECUTION_STATUS_"),
+        )
+    }
+
+    private fun requireRecentOperatorWorkflowId(workflowId: String, now: Instant) {
+        val match = OPERATOR_WORKFLOW_ID.matchEntire(workflowId)
+            ?: throw IllegalArgumentException("Invalid operator workflow id")
+        val requestedDay = try {
+            LocalDate.parse(match.groupValues[1], DateTimeFormatter.ISO_LOCAL_DATE)
+        } catch (_: java.time.DateTimeException) {
+            throw IllegalArgumentException("Invalid operator workflow date")
+        }
+        val today = now.atZone(ZoneOffset.UTC).toLocalDate()
+        require(requestedDay == today || requestedDay == today.minusDays(1)) {
+            "Only today's or yesterday's operator workflow can be queried"
+        }
     }
 
     /**
@@ -320,6 +366,9 @@ class FlakyTestHunterService(
         private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC)
         private val OPERATOR_IDEMPOTENCY_KEY =
             Regex("^flaky-test-hunter-operator-manual-([0-9]{4}-[0-9]{2}-[0-9]{2})$")
+        private val OPERATOR_WORKFLOW_ID =
+            Regex("^flaky-test-hunter-check-operator_manual-([0-9]{4}-[0-9]{2}-[0-9]{2})$")
+        private const val TEMPORAL_STATUS_TIMEOUT_SECONDS = 3L
 
         /**
          * The id that makes a detached start idempotent for the day.

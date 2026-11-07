@@ -26,7 +26,7 @@ quarkus:
     # GET /api/v1/campaigns was 500. Same fix, same reason, as fx-service.
     physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
   # Backs the four-eyes approval store (libs' RedisApprovalStore, produced by
-  # ApprovalConfig). Without it the ReactiveRedisDataSource bean is inactive and the
+  # RedisApprovalStoreProducer). Without it the ReactiveRedisDataSource bean is inactive and the
   # app cannot start — the deployed pod died with InactiveBeanException. Overridden
   # per environment via QUARKUS_REDIS_HOSTS.
   redis:
@@ -100,11 +100,6 @@ quarkus:
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
   # PodMonitor scrapes the same port. Without this block nothing listens there, so the
   # pod never goes ready and the liveness probe restarts it forever.
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   log:
     level: INFO
 
@@ -132,6 +127,10 @@ quarkus:
   authz:
     enforce: false
   openbank:
+    authz:
+      # Contract tests have no OPA sidecar; do not spend 500 ms per advisory call.
+      opa-pdp-producer:
+        enabled: false
     campaign:
       # HTTP contract tests exercise a seeded, complete local projection. Production stays
       # fail-closed until a reviewed rollout/catch-up confirmation enables this read model.
@@ -150,7 +149,25 @@ quarkus:
         tls-configuration-name: referral-service
 
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (BUILD-time switch). The pod
+  # already runs the OPA sidecar with campaign-opa-bundle, but without this bean every @Authorize
+  # call took the interceptor's `no PolicyDecisionPoint bean` branch, so the sidecar was never
+  # asked and the advisory log could never show a would-DENY. Enforcement stays as deployed
+  # (AUTHZ_ENFORCE=false in gitops) until that log is clean.
+  authz:
+    opa-pdp-producer:
+      enabled: true
+  # Four-eyes ApprovalStore (ADR-0155): BUILD-time switch for libs-runtime's
+  # RedisApprovalStoreProducer, which replaced this service's own RedisApprovalStoreProducer. Removing it
+  # removes the ApprovalStore bean, and with it four-eyes.
+  approval:
+    store: redis
   temporal:
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}

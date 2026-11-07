@@ -6,7 +6,7 @@
 // without rendering, and so every page agrees on who may do what.
 import type { Tone } from '@/components/ui/tone'
 import { hasPermission } from '@/lib/auth/roles'
-import { isIsoDate } from '@/components/balance-sheet/model'
+import { isIsoDate } from '@/lib/format/bankDate'
 import { CNB_COUNTERPARTY_ID, type Counterparty, type Deal, type DealProduct, type DealState, type MatchType, type Product } from './contracts'
 import type { WriteResult } from './api'
 

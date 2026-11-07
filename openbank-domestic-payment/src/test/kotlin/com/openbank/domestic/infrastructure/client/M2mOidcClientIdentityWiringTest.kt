@@ -4,13 +4,11 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.libs.testing.oidc.M2mOidcClientIdentityWiringConformance
 import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.filter.OidcClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.junit.jupiter.api.Test
-import org.yaml.snakeyaml.Yaml
 
 /**
  * #10486 batch 2: this service's money-path writes are made as its OWN principal,
@@ -21,23 +19,22 @@ import org.yaml.snakeyaml.Yaml
  * `openbank-domestic-payment` and its own secret variable (a missing named client fails the first call, not
  * the build).
  */
-class M2mOidcClientIdentityWiringTest {
+class M2mOidcClientIdentityWiringTest : M2mOidcClientIdentityWiringConformance() {
 
-    private val oidcClient: Map<*, *> = run {
-        val doc = Yaml().load<Map<String, Any>>(
-            javaClass.classLoader.getResourceAsStream("application.yaml")!!,
-        )
-        (doc["quarkus"] as Map<*, *>)["oidc-client"] as Map<*, *>
-    }
+    override val clientId = "openbank-domestic-payment"
+
+    override val namedClients: List<Class<*>> = listOf(AmlServiceClient::class.java)
 
     @Test
-    fun `the settlement adapter injects the named m2m oidc-client`() {
+    fun `the transaction-service client mints its bearer from the named m2m oidc-client`() {
+        // #13224: the token is attached by the filter on the generated client, not by hand in the adapter.
+        val named = TransactionServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
+        assertThat(named).describedAs("@OidcClientFilter on TransactionServiceClient").isNotNull
+        assertThat(named.value).isEqualTo(oidcClientName)
         val qualifiers = SettlementAdapter::class.java.declaredConstructors.single().parameterAnnotations
             .flatMap { it.toList() }
             .filterIsInstance<NamedOidcClient>()
-        assertThat(qualifiers.map { it.value })
-            .describedAs("SettlementAdapter must mint its bearer from the named client, not the shared default")
-            .containsExactly(M2M)
+        assertThat(qualifiers).describedAs("SettlementAdapter must not mint a bearer by hand").isEmpty()
     }
 
     @Test
@@ -46,36 +43,5 @@ class M2mOidcClientIdentityWiringTest {
             c.parameterAnnotations.flatMap { it.toList() }.filterIsInstance<NamedOidcClient>()
         }
         assertThat(qualifiers).describedAs("AccountServiceClient is a read edge, not migrated in batch 2").isEmpty()
-    }
-
-    @Test
-    fun `the named m2m oidc-client authenticates as openbank-domestic-payment with its own secret`() {
-        val m2m = oidcClient[M2M] as Map<*, *>
-        assertThat(m2m["client-id"]).isEqualTo("openbank-domestic-payment")
-        val secret = (m2m["credentials"] as Map<*, *>)["secret"] as String
-        assertThat(secret).startsWith("\${OIDC_M2M_CLIENT_SECRET:")
-        assertThat(((m2m["grant"] as Map<*, *>)["type"])).isEqualTo("client")
-    }
-
-    @Test
-    fun `the default client stays the shared one until the remaining edges migrate`() {
-        assertThat(oidcClient["client-id"]).isEqualTo("openbank-services")
-    }
-
-    @Test
-    fun `the AML case open selects the named m2m oidc-client and not the default one`() {
-        // #10486 batch 3: aml-service admits ROLE_API on POST /aml/cases only for named callers.
-        val named = AmlServiceClient::class.java.getAnnotation(OidcClientFilter::class.java)
-        assertThat(named).describedAs("@OidcClientFilter on AmlServiceClient").isNotNull
-        assertThat(named.value).isEqualTo(M2M)
-        assertThat(
-            AmlServiceClient::class.java.getAnnotationsByType(RegisterProvider::class.java).map { it.value.java },
-        )
-            .describedAs("the default-client filter would re-attach the shared principal's token")
-            .doesNotContain(OidcClientRequestReactiveFilter::class.java)
-    }
-
-    private companion object {
-        const val M2M = "m2m"
     }
 }

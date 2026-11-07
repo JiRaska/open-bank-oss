@@ -113,6 +113,11 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (replaced this service's own AuthzProducer;
+    # same opa.url / opa.path / opa.timeout-ms keys and defaults). BUILD-time switch.
+    opa-pdp-producer:
+      enabled: true
   outbox:
     # Defaults to FALSE fleet-wide. Without this line the holding lifecycle never leaves
     # wealth_outbox: no error, attempt_count stays 0, every consumer stays permanently empty.
@@ -130,9 +135,7 @@ openbank:
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
-  # A Duration, not a millisecond Long: see AuthzProducer for why the Kotlin field cannot carry
-  # an initializer, which a primitive would need.
-  timeout: "${OPA_TIMEOUT:PT0.5S}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
 
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"

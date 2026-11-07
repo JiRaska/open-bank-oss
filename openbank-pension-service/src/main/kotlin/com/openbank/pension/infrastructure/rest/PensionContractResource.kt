@@ -28,6 +28,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.util.UUID
@@ -65,7 +66,14 @@ class PensionContractResource {
         @HeaderParam("X-Customer-Party-Id") party: String?,
         @QueryParam("status") status: ContractStatus?,
         @QueryParam("limit") @DefaultValue("50") limit: Int,
-    ): List<ContractResponse> = contracts.list(access.readerFor(party), status, limit).map(ContractResponse::from)
+        @Parameter(
+            description = "Staff free-text search: contract or participant party id fragment, " +
+                "participant birth date (ISO or bare digits), product line, or payment reference",
+        )
+        @QueryParam("q") query: String?,
+    ): List<ContractResponse> = contracts
+        .list(access.readerFor(party), status, limit, query)
+        .map(ContractResponse::from)
 
     @GET
     @Path("/{id}")

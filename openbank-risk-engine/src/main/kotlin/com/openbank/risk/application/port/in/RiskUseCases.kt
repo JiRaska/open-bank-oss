@@ -4,15 +4,18 @@
 
 package com.openbank.risk.application.port.`in`
 
+import com.openbank.libs.finance.leg.LegSpec
 import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.application.port.out.SnapshotRunSummary
 import com.openbank.risk.domain.capital.CapitalParameters
 import com.openbank.risk.domain.capital.CapitalResult
+import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.cashflow.BehaviouralModel
+import com.openbank.risk.domain.cashflow.CashFlow
 import com.openbank.risk.domain.cashflow.SnapshotCashFlows
 import com.openbank.risk.domain.curve.CurveIndex
+import com.openbank.risk.domain.curve.CurveQuote
 import com.openbank.risk.domain.curve.CurveSet
-import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.IrrbbReportingAggregate
 import com.openbank.risk.domain.irrbb.IrrbbResult
@@ -31,6 +34,11 @@ import com.openbank.risk.domain.reserves.MaintenanceCalendar
 import com.openbank.risk.domain.reserves.MinReserveParameters
 import com.openbank.risk.domain.reserves.MinReserveResult
 import com.openbank.risk.domain.reserves.PeriodAveraging
+import com.openbank.risk.domain.valuation.BucketSet
+import com.openbank.risk.domain.valuation.DealValuation
+import com.openbank.risk.domain.valuation.ReportProvenance
+import com.openbank.risk.domain.valuation.SensitivityResult
+import com.openbank.risk.domain.valuation.VarFigures
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -61,7 +69,7 @@ data class CreateCurveSetCommand(
     val asOf: LocalDate,
     val provenance: Provenance,
     val source: String,
-    val quotes: Map<CurveIndex, List<MoneyMarketQuote>>,
+    val quotes: Map<CurveIndex, List<CurveQuote>>,
 )
 
 interface CurveSetUseCase {
@@ -195,4 +203,94 @@ data class LimitAnalysis(
 interface LimitUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
     suspend fun evaluate(runId: UUID): LimitAnalysis
+}
+
+/** Stateless pre-trade pricing (ADR-0344 D8): legs priced on a curve set, nothing persisted. */
+data class PricingCommand(
+    val asOf: LocalDate,
+    val curveSetId: UUID?,
+    val reportingCurrency: String,
+    val legs: List<LegSpec>,
+)
+
+data class PricingResult(
+    val asOf: LocalDate,
+    val curveSetId: UUID,
+    val reportingCurrency: String,
+    val provenance: ReportProvenance,
+    val valuation: DealValuation,
+    val sensitivity: SensitivityResult,
+    val fxRates: Map<String, FxRateUsed>,
+)
+
+/**
+ * What every snapshot valuation read shares: the run, the curve set, the book filter, the
+ * provenance badge and the input hash — `sha256` over the run's input hash, the curve set, the
+ * model versions, the FX rates used and every deal's legs (libs-finance schedule hash) and stored
+ * flow version. The same hash reproduces byte-identical output (ADR-0314 D2).
+ */
+data class ValuationContext(
+    val run: SnapshotRun,
+    val curveSetId: UUID,
+    val bookId: String?,
+    val reportingCurrency: String,
+    val provenance: ReportProvenance,
+    val valuationInputHash: String,
+    val fxRates: Map<String, FxRateUsed>,
+)
+
+/** Book totals, or the gap that prevents stating them over a partial book. */
+data class BookTotals(val pv: BigDecimal, val accrued: BigDecimal, val clean: BigDecimal, val dirty: BigDecimal)
+
+data class SnapshotValuation(
+    val context: ValuationContext,
+    val deals: List<DealValuation>,
+    val book: BookTotals?,
+    val dataGap: String?,
+)
+
+data class SnapshotSensitivity(
+    val context: ValuationContext,
+    val buckets: BucketSet,
+    val result: SensitivityResult?,
+    val dataGap: String?,
+)
+
+data class VarAnalysis(
+    val context: ValuationContext,
+    val confidence: BigDecimal,
+    val horizonDays: Int,
+    val minimumScenarios: Int,
+    val windowFrom: LocalDate,
+    val windowTo: LocalDate,
+    val scenarioCount: Int,
+    val skippedScenarios: Int,
+    val figures: VarFigures?,
+    val dataGap: String?,
+)
+
+/** Net present value of the own book per currency (ADR-0344 functional baseline: FX position). */
+data class FxPositionLine(
+    val currency: String,
+    val position: BigDecimal,
+    val positionReporting: BigDecimal,
+    val fxRate: BigDecimal,
+    val fxDelta: BigDecimal,
+)
+
+data class FxPositionAnalysis(val context: ValuationContext, val lines: List<FxPositionLine>, val dataGap: String?)
+
+interface ValuationUseCase {
+    suspend fun price(command: PricingCommand): PricingResult
+
+    suspend fun valuation(runId: UUID, bookId: String?, curveSetId: UUID?): SnapshotValuation
+
+    suspend fun sensitivity(runId: UUID, bookId: String?, curveSetId: UUID?, buckets: BucketSet): SnapshotSensitivity
+
+    suspend fun valueAtRisk(runId: UUID, bookId: String?, confidence: BigDecimal, horizonDays: Int): VarAnalysis
+
+    suspend fun fxPosition(runId: UUID, bookId: String?, curveSetId: UUID?): FxPositionAnalysis
+
+    /** PLANNED deals' flows after [asOf] for the liquidity forecast (ADR-0344 D2), projected on [curveSet]. */
+    suspend fun plannedFlows(asOf: LocalDate, curveSet: CurveSet): List<CashFlow>
 }

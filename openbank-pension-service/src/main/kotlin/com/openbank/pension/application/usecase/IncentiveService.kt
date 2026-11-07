@@ -12,10 +12,12 @@ import com.openbank.pension.application.port.out.ContractFundingView
 import com.openbank.pension.application.port.out.ContractNotFoundException
 import com.openbank.pension.application.port.out.ContractReferenceRepository
 import com.openbank.pension.application.port.out.ContributionRepository
+import com.openbank.pension.application.port.out.IncentiveClaimEvent
 import com.openbank.pension.application.port.out.IncentiveClaimRepository
 import com.openbank.pension.application.port.out.IncentiveLedgerRepository
 import com.openbank.pension.application.port.out.ParticipantNotificationKind
 import com.openbank.pension.application.port.out.ParticipantNotifier
+import com.openbank.pension.application.port.out.PensionMetrics
 import com.openbank.pension.application.port.out.StateIncentiveClaimPort
 import com.openbank.pension.application.port.out.TaxCertificateDocumentPort
 import com.openbank.pension.application.port.out.TaxYearSummaryRepository
@@ -80,6 +82,7 @@ class IncentiveService(
     private val contributionService: ContributionService,
     private val clock: Clock,
     private val notifier: ParticipantNotifier,
+    private val metrics: PensionMetrics = PensionMetrics.NONE,
 ) {
     private val log = Logger.getLogger(IncentiveService::class.java)
 
@@ -174,6 +177,12 @@ class IncentiveService(
                 val reference = adapter.transmit(batch)
                 val stored = if (reference != null) batch.copy(channelReference = reference) else batch
                 if (stored != batch) batches.update(stored)
+                metrics.incentiveClaims(
+                    IncentiveClaimEvent.SUBMITTED,
+                    group.size,
+                    group.fold(BigDecimal.ZERO) { sum, c -> sum + c.claimedAmount },
+                    group.first().currency,
+                )
                 filed += stored
             } else {
                 log.warnf(
@@ -225,8 +234,10 @@ class IncentiveService(
                     ),
                 )
                 notifyIncentive(ParticipantNotificationKind.INCENTIVE_RECEIVED, received, amount)
+                metrics.incentiveClaims(IncentiveClaimEvent.RECEIVED, 1, amount, claim.currency)
             } else {
                 claims.update(claim.reject(line.reason ?: "rejected without a stated reason", now()))
+                metrics.incentiveClaims(IncentiveClaimEvent.REJECTED, 1, claim.claimedAmount, claim.currency)
             }
         }
         val open = batch.claimIds.mapNotNull { claims.findById(it) }.any { it.status == ClaimStatus.SUBMITTED }
@@ -248,6 +259,7 @@ class IncentiveService(
         claims.update(returned)
         ledger.append(ledgerEntry(returned, LedgerEntryKind.RETURNED, requireNotNull(claim.receivedAmount)))
         notifyIncentive(ParticipantNotificationKind.INCENTIVE_RETURNED, returned, requireNotNull(claim.receivedAmount))
+        metrics.incentiveClaims(IncentiveClaimEvent.RETURNED, 1, claim.receivedAmount, claim.currency)
         return returned
     }
 

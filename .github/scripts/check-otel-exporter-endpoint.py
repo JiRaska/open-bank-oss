@@ -86,7 +86,7 @@ def audit(root: Path) -> tuple[list[str], int]:
     examined = 0
     for manifest in sorted((root / COMPONENTS).rglob("*.yaml")):
         try:
-            docs = list(yaml.safe_load_all(manifest.read_text()))
+            docs = gatelib.load_yaml_all(manifest)
         except yaml.YAMLError:
             continue  # malformed YAML is yamllint's to report, not this gate's
         for doc in docs:
@@ -146,22 +146,41 @@ def self_test() -> int:
     ]
     failed = 0
     for label, dep, env, cfg, want_finding, want_subjects in cases:
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            comp = root / COMPONENTS / "demo"
-            comp.mkdir(parents=True)
-            (comp / "demo-service.yaml").write_text(DEPLOYMENT.format(extra=env))
-            module = root / "openbank-demo-service"
-            (module / "src/main/resources").mkdir(parents=True)
-            (module / "build.gradle.kts").write_text(
-                "dependencies {\n" + ("    implementation(libs.quarkus.opentelemetry)\n" if dep else "") + "}\n"
-            )
-            if cfg:
-                (module / "src/main/resources/application.yaml").write_text(cfg)
-            got, examined = audit(root)
-            ok = bool(got) == want_finding and examined == want_subjects
-            print(f"{'ok  ' if ok else 'FAIL'} {label} (findings={len(got)}, subjects={examined})")
-            failed += not ok
+        # Parse all documents: flow-style, aliases and later Deployments must retain coverage.
+        for style in ("block", "flow", "multi-document aliases"):
+            text = DEPLOYMENT.format(extra=env)
+            multiplier = 1
+            if style != "block":
+                document = yaml.safe_load(text)
+                if style == "multi-document aliases":
+                    first = document["spec"]["template"]["spec"]["containers"][0]
+                    document["spec"]["template"]["spec"]["containers"].append(
+                        dict(first, name="second-service"),
+                    )
+                    multiplier = 2
+                text = yaml.safe_dump(document, default_flow_style=(style == "flow"))
+                if multiplier == 2:
+                    assert "&id" in text and "*id" in text  # shared env list is a real alias
+                    text = "kind: ConfigMap\ndata: {note: 'not a Deployment'}\n---\n" + text
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                comp = root / COMPONENTS / "demo"
+                comp.mkdir(parents=True)
+                (comp / "demo-service.yaml").write_text(text)
+                module = root / "openbank-demo-service"
+                (module / "src/main/resources").mkdir(parents=True)
+                (module / "build.gradle.kts").write_text(
+                    "dependencies {\n" + ("    implementation(libs.quarkus.opentelemetry)\n" if dep else "") + "}\n"
+                )
+                if cfg:
+                    (module / "src/main/resources/application.yaml").write_text(cfg)
+                got, examined = audit(root)
+                expected_subjects = want_subjects * multiplier
+                expected_findings = expected_subjects if want_finding else 0
+                ok = len(got) == expected_findings and examined == expected_subjects
+                print(f"{'ok  ' if ok else 'FAIL'} {style}: {label} "
+                      f"(findings={len(got)}, subjects={examined})")
+                failed += not ok
     if failed:
         print(f"self-test: {failed} case(s) failed", file=sys.stderr)
         return 1

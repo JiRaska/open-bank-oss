@@ -97,5 +97,7 @@ rootDir.listFiles { f ->
 gradle.beforeProject {
     buildscript.configurations.configureEach {
         resolutionStrategy.force("org.freemarker:freemarker:2.3.35")
+        // GHSA-xxph-c9ww-hj94: project/plugin forces do not reach this independent classpath.
+        resolutionStrategy.force("com.google.guava:guava:33.7.2-jre")
     }
 }

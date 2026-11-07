@@ -43,11 +43,6 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
-  management:
-    enabled: true
-    port: 8085
-    host: 0.0.0.0
-    root-path: /q
   shutdown:
     timeout: 30S
 
@@ -85,6 +80,9 @@ openbank:
     provisioning-cron: "0 30 2 * * ?"
 
 "%test":
+  openbank:
+    outbox:
+      dispatch-enabled: false
   quarkus:
     datasource:
       username: openbank

@@ -59,8 +59,8 @@ class OnboardingFunnelPublisher(
             // Low-cardinality counter (step & action are closed allow-lists, validated by the
             // resource before we get here) so an alert can watch the sign conversion rate live.
             // Base name has NO _total suffix — the Prometheus registry appends it, so this is
-            // scraped as `onboarding_funnel_events_total{step,action}`.
-            meterRegistry.counter("onboarding_funnel_events", "step", step, "action", action)
+            // scraped as `openbank_onboarding_funnel_events_total{step,action}`.
+            meterRegistry.counter("openbank.onboarding.funnel.events", "step", step, "action", action)
                 .increment()
             val payload = objectMapper.createObjectNode()
             payload.put("sessionId", sessionId)

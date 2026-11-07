@@ -15,10 +15,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 
 interface TemporalMetrics {
   workflows: {
-    scheduled1h: number
-    completed1h: number
-    failed1h: number
-    timedOut1h: number
+    scheduled1h: number | null
+    completed1h: number | null
+    failed1h: number | null
+    timedOut1h: number | null
   }
   latency: {
     activityScheduleToStartMs: number | null
@@ -37,8 +37,9 @@ interface TemporalMetrics {
 
 interface StatusData {
   available: boolean
-  temporalDeployed: boolean
+  temporalDeployed: boolean | null
   metrics: TemporalMetrics | null
+  degraded?: boolean
 }
 
 type Tab = 'overview' | 'migration' | 'metrics' | 'architecture'
@@ -268,12 +269,18 @@ export default function TemporalPage() {
     try {
       const res = await fetch('/api/temporal/status')
       if (res.ok) {
-        setStatus(await res.json() as StatusData)
+        const data = await res.json() as Partial<StatusData>
+        setStatus({
+          available: data.available === true,
+          temporalDeployed: data.temporalDeployed === true ? true : data.temporalDeployed === false ? false : null,
+          metrics: data.metrics ?? null,
+          degraded: data.degraded === true,
+        })
       } else {
-        setStatus({ available: false, temporalDeployed: false, metrics: null })
+        setStatus({ available: false, temporalDeployed: null, metrics: null })
       }
     } catch {
-      setStatus({ available: false, temporalDeployed: false, metrics: null })
+      setStatus({ available: false, temporalDeployed: null, metrics: null })
     } finally {
       setLoading(false)
       setLastRefresh(new Date())
@@ -311,20 +318,24 @@ export default function TemporalPage() {
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   padding: '6px 12px', borderRadius: '20px',
-                  background: status.temporalDeployed ? 'var(--success-bg)' : 'var(--warning-bg)',
-                  border: `1px solid ${status.temporalDeployed ? 'var(--success-border)' : 'var(--warning-border)'}`,
+                  background: status.temporalDeployed === true && !status.degraded ? 'var(--success-bg)' : 'var(--warning-bg)',
+                  border: `1px solid ${status.temporalDeployed === true && !status.degraded ? 'var(--success-border)' : 'var(--warning-border)'}`,
                   fontSize: '12px', fontWeight: 600,
-                  color: status.temporalDeployed ? 'var(--success-text)' : 'var(--warning-text)',
+                  color: status.temporalDeployed === true && !status.degraded ? 'var(--success-text)' : 'var(--warning-text)',
                 }}>
                   <div style={{
                     width: '6px', height: '6px', borderRadius: '50%',
-                    background: status.temporalDeployed ? 'var(--success-text)' : 'var(--warning-text)',
+                    background: status.temporalDeployed === true && !status.degraded ? 'var(--success-text)' : 'var(--warning-text)',
                   }} />
-                  {status.temporalDeployed
-                    ? t('Provozní', 'Running')
-                    : status.available
-                      ? t('Workers: aktif, metriky: inicializace', 'Workers: active, metrics: initialising')
-                      : t('Prometheus nedostupný', 'Prometheus unavailable')}
+                  {status.temporalDeployed === true && status.degraded
+                    ? t('Temporal: metriky částečně dostupné', 'Temporal metrics partially available')
+                    : status.temporalDeployed === true
+                    ? t('Metriky Temporal nalezeny', 'Temporal metrics observed')
+                    : !status.available
+                      ? t('Prometheus nedostupný', 'Prometheus unavailable')
+                      : status.temporalDeployed === false
+                        ? t('Temporal nebyl v Prometheu nalezen', 'Temporal not detected by Prometheus')
+                        : t('Stav Temporal není znám', 'Temporal deployment status unknown')}
                 </div>
               )}
               <button
@@ -578,7 +589,20 @@ export default function TemporalPage() {
               </div>
             )}
 
-            {status?.available && !status.temporalDeployed && (
+            {status?.available && status.temporalDeployed === true && status.degraded && (
+              <div role="status" style={{
+                padding: '16px', borderRadius: '10px',
+                background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
+                display: 'flex', gap: '10px', alignItems: 'center',
+              }}>
+                <AlertTriangle size={16} color="var(--warning-text)" />
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  {t('Některé dotazy na metriky selhaly. Neověřené hodnoty jsou zobrazeny jako nedostupné.', 'Some metric queries failed. Unverified values are shown as unavailable.')}
+                </span>
+              </div>
+            )}
+
+            {status?.available && status.temporalDeployed === false && (
               <div style={{
                 padding: '16px', borderRadius: '10px',
                 background: 'var(--accent-bg)', border: '1px solid var(--accent-border)',

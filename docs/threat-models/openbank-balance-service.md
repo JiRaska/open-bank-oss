@@ -49,13 +49,13 @@ Assets protected, in priority order:
                 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-Trust boundaries: (1) caller → REST/port (mTLS + OIDC + OPA); (3) service → Postgres;
+Trust boundaries: (1) caller → REST/port (OIDC + OPA; no mesh mTLS, #1914); (3) service → Postgres;
 (4/5) service → Kafka / ledger-service REST.
 Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation math are unit-testable.
 
 ## 3. Authn / Authz
 
-- Service-to-service callers authenticated (mTLS + OIDC); OPA policy gates credit / debit / hold (ADR-0034).
+- Service-to-service callers present OIDC bearer tokens; OPA policy gates credit / debit / hold (ADR-0034). The configured REST hops use HTTP, without mesh mTLS (#1914).
 - Money-moving endpoints are role-gated: `@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)`
   on credit/debit/hold/initialize, supervisor/admin on overdraft-limit override; **no endpoint is
   `@PermitAll`** (locked by `BalanceSecurityContractTest`). On top of role gating, every endpoint now
@@ -76,7 +76,7 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 
 | # | Element | Threat (STRIDE) | Mitigation | Residual |
 |---|---------|-----------------|------------|----------|
-| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | mTLS + OIDC; reject anonymous; bearer JWT (Keycloak); role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Cannot distinguish the M2M callers that share the `openbank-services` client identity (see §3 residual risk) |
+| S1 | REST/port in | **Spoofing** — unauthenticated caller posts a credit/debit, or forges identity | OIDC bearer JWT (Keycloak) rejects anonymous callers; role-gated mutations; OPA fine-grained authz (ADR-0018/0034) now **enforced** on every balance endpoint | Shared `openbank-services` client identity does not distinguish M2M callers; REST transport mTLS is not enforced (#1914) |
 | T1 | Cover check | **Tampering** — manipulated request authorizes an unfunded debit / negative balance | Server-side overdraft evaluation against stored limit; available = booked − holds + overdraft; optimistic locking / row versioning; per-currency rows; pure-domain, unit-tested | Low |
 | T2 | Balance rows | **Tampering** — direct DB mutation desynchronizes from ledger | App-only write path; DB creds in Vault (ADR-0017); **Phase A reconciliation** detects drift vs ledger deposit-control per currency | Drift detected, not prevented — by design (projection); Phase D cutover hardens |
 | R1 | Movements | **Repudiation** — actor denies a balance change it applied | AuditEvent per credit/debit/hold; movements carry origin/actor + idempotency key; outbox event with correlation id; reconciliation run timestamped/persisted | Strengthen with signed audit (ADR-0029) — *planned* |
@@ -84,7 +84,7 @@ Domain layer has zero framework imports (ADR-0002); overdraft + reconciliation m
 | I2 | Domain metrics | **Information disclosure** — domain metrics leak PII / enable per-account inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the outbox-backlog gauge (`openbank.outbox.backlog`) is tagged only by `service="balance"` — never an account id, IBAN, currency-pocket value, balance, or party id. The gauge reads a read-only `count(*)` of PENDING/FAILED outbox rows refreshed off the Prometheus scrape thread by a scheduled tick (no per-scrape reactive query); `/q/metrics` is cluster-internal | Low |
 | D1 | Reconciliation / writes | **DoS** — hold exhaustion / write storm / expensive tie-out scans | Rate limits; idempotency drops retries; per-currency aggregation; scheduled reconciliation cadence; reactive non-blocking stack | Gateway rate-limit — infra scope |
 | E1 | Roles | **Elevation** — read role triggers a debit / raises own overdraft | Deny-by-default; explicit role for money movement; cover check cannot mutate; OPA now enforced (a viewer/read-only reason never grants `balance.credit`/`balance.debit`) | Low |
-| T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Authenticated ledger-service inside trust mesh; reconciliation compares against ledger as golden source, flags mismatch | mTLS/service-identity hardening — infra scope |
+| T3 | Ledger client | **Tampering / spoofing of source** — projection trusts a forged ledger response | Reconciliation compares against ledger as golden source and flags mismatch; the configured ledger REST URL uses HTTP, so this hop has no mesh-authenticated transport | mTLS/service-identity hardening — infra scope (#1914) |
 
 ## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
 
@@ -177,7 +177,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `balance_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
-  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  #10952). The service-local a per-service AuthzProducer (since consolidated into libs-runtime `OpaPolicyDecisionPointProducer`) is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
   `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
   property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
@@ -296,7 +296,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 - **2026-07-12** — Wired the four-eyes (maker-checker) enforcement *mechanism* (ADR-0155) onto
   `balance.credit`/`balance.debit`, mirroring the account-service rollout (issue #413). New
-  `ApprovalConfig` (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
+  ApprovalConfig (since consolidated into libs-runtime `RedisApprovalStoreProducer`) (`RedisApprovalStore` producer) and `PATCH /api/v1/balances/approvals/{id}`
   checker-decide endpoint (`@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)`, `@Authorize(action =
   "balance.approval.decide")`); two new exception mappers (`SelfApprovalNotAllowedMapper` → 403,
   `InvalidApprovalStateMapper` → 409). Also adds balance-service's **first** Redis dependency (a
@@ -354,7 +354,7 @@ also be deleted (nothing else in balance-service depends on it).
 - **2026-05-30** — Added `balances_seq`, `balance_holds_seq`, `balance_outbox_seq` (Hibernate fix);
   added `assertj` test dep for the guard. Additive DDL only — no new flow/surface/boundary.
   Risk class = **availability** (missing sequence breaks all balance writes), mitigated by
-  `HibernateSequenceGuardTest`. Rollback: `DROP SEQUENCE`.
+  the `hibernate-sequence-guard` gate (`.github/scripts/check-hibernate-sequence-guard.py`). Rollback: `DROP SEQUENCE`.
 - **2026-09-05** — Input validation hardened on the reconciliation trigger
   (`POST /api/v1/balances/reconciliation`): a blank `asOf` now means "omitted" and a malformed one
   is rejected as 400 (`IllegalArgumentException` via libs-runtime `CommonExceptionMappers`) where a
@@ -370,7 +370,7 @@ also be deleted (nothing else in balance-service depends on it).
   guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
   the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
   `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
-  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  codes and JSON field names are unchanged; ApprovalResourceMappingTest (since replaced by the shared `ApprovalEndpointConformance` suite) covers the mapping.
   **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
@@ -461,3 +461,50 @@ columns), so a stored row cannot fail to load; a sandbox read-only check on 2026
 off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
 `ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
 No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+### 2026-10-06 — Customer opt-in low-balance alerts (ADR-0333)
+
+The customer-edge checks direct account ownership before reading or writing one pocket's alert
+threshold; a delegated balance reader cannot opt in the owner. Balance-service independently checks
+account-service ownership against the JWT-derived party header. OPA grants the new alert actions
+only to the edge service identity, with a deny rule for every other identity. Threshold and rearm
+margin pass the kernel `Money` parser before persistence. The setting is absent by default, and the
+event evaluator is separately disabled by default during rollout.
+
+`BALANCE_UPDATED` is only a wake-up. The evaluator first finds an enabled setting, checks current
+ownership, then locks the current pocket and setting in a fixed order. It computes effective
+available funds after future-dated credits, applies downward crossing, hysteresis and cooldown,
+and commits the state transition with a stable-key inbox request in the same balance outbox
+transaction. Late or replayed balance events therefore do not reuse their stale amount or create a
+second alert. The inbox copy includes no amount, account number or link; the customer reads current
+balance through the authenticated account route. An ownership mismatch produces no alert. Broker
+or notification-service failure leaves the outbox retryable; the notification consumer deduplicates
+the stable request key.
+
+Residual risk: account ownership is checked immediately before the balance transaction but is not
+locked across services, so a transfer in that interval can race the decision. The customer-facing
+inbox still enforces party-scoped reads. The first rollout uses inbox only; a generic push and
+verified account deep link require a separate app-route contract and provider capacity proof.
+Rollback: disable `openbank.balance.low-alerts-enabled`, let pending outbox requests drain or
+reconcile them, then revert code. The preference table can be retained for later restoration; the
+V16 migration contains its explicit drop sequence.
+
+- **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## Active-holds read boundary
+
+`GET /api/v1/balances/{accountId}/holds` adds a read of hold ids, amounts, currencies,
+reasons, references and lifecycle timestamps for agent-service's `get_balance_holds` tool.
+Cross-account disclosure reveals financial metadata even though this endpoint moves no money.
+The handler retains the sibling read role gate (API/viewer/operator/admin) and `balance.read`
+OPA check. With `X-Customer-Party-Id` from trusted customer-edge, the account-service owner must
+match; unknown accounts and mismatches receive the same 404. Without that header this is the
+existing service-reader path: header absence is not proof of retail ownership. Do not treat
+coarse ROLE_API admission or test identities as evidence of a verified production caller.
+
+The repository excludes released holds and expiry at/before the injected service clock.
+It does not release the expired reservation or change available/reserved balances, and emits no
+outbox event. Consumers must not infer released funds from an absent row. Tests cover real
+HTTP/DB filtering and unchanged rows, anonymous/wrong-role rejection, and owner-guard delegation;
+consumer/provider Pact replay pins the response and the missing-identity refusal. These checks
+do not replace review of trusted header provenance, live OPA policy or production credentials.

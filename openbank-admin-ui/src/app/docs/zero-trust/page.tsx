@@ -18,6 +18,7 @@ import {
 import { loadSecurityPosture } from '@/lib/governance/security'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
+import { ContentSourceNote } from '@/components/docs/ContentSourceNote'
 
 export const dynamic = 'force-dynamic'
 
@@ -242,6 +243,7 @@ export default async function ZeroTrustPage() {
           </Link>
         </div>}
       />
+      <ContentSourceNote source={posture.contentSource} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
         {/* Left: nested perimeters */}

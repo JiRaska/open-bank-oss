@@ -21,6 +21,17 @@ platform runs as a sidecar — the same relationship the OPA sidecar has to the 
 call it. `openbank-document-service` (a separate, concurrently-developed Kotlin service) is
 the only expected caller; this image ships and versions independently of it.
 
+## Font decoder dependency
+
+Inline WOFF2 fonts reach the Brotli decoder through `fonttools[woff]`.
+`requirements.in` requires Brotli >=1.2.1 for GHSA-9v8h-qqgm-4m35; regenerate
+the hash-locked `requirements.txt` in the pinned Python 3.14 image after changes.
+The WOFF2 tests cover font round-trip compatibility and recovery after invalid
+input; dependency scanning enforces the known patched decoder version.
+Services CI runs the full Python suite in the `test` Docker target as the runtime
+user with external networking disabled, and requires its result in `all-green`.
+The default `production` target excludes pytest and the test suite.
+
 ## Running locally
 
 ```bash

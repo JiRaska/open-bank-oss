@@ -17,6 +17,33 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
+    fun findByDeduplicationKey(key: UUID): Uni<NotificationEntity?> = Panache.withSession {
+        find("deduplicationKey", key).firstResult()
+    }
+
+    /** Includes ambiguous provider handoffs; no terminal outcome has been committed for these rows. */
+    fun countStalePending(cutoff: Instant): Uni<Long> = Panache.withSession {
+        count("status = ?1 and createdAt < ?2", "PENDING", cutoff)
+    }
+
+    /**
+     * The same population as [countStalePending], split by channel. The total alone cannot say
+     * which adapter left a row without an outcome, and answering that used to need a read of the
+     * production table.
+     */
+    fun countStalePendingByChannel(cutoff: Instant): Uni<Map<String, Long>> = Panache.withSession {
+        Panache.getSession().chain { session ->
+            session.createSelectionQuery(
+                "select n.channel, count(n) from NotificationEntity n " +
+                    "where n.status = :status and n.createdAt < :cutoff group by n.channel",
+                Array<Any>::class.java,
+            )
+                .setParameter("status", "PENDING")
+                .setParameter("cutoff", cutoff)
+                .resultList
+        }
+    }.map { rows: List<Array<Any>> -> rows.associate { row -> row[0] as String to (row[1] as Number).toLong() } }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 
@@ -38,6 +65,27 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
             }
         }.awaitSuspending()
 
+    /** Keyset paging keeps an arriving row from shifting a later global inbox page. */
+    suspend fun pageByPartyBefore(
+        partyId: UUID,
+        beforeCreatedAt: Instant,
+        beforeId: UUID,
+        size: Int,
+    ): Triple<List<NotificationEntity>, Long, Long> = Panache.withSession {
+        val query = find(
+            "partyId = ?1 and (createdAt < ?2 or (createdAt = ?2 and notificationId < ?3)) " +
+                "order by createdAt desc, notificationId desc",
+            partyId,
+            beforeCreatedAt,
+            beforeId,
+        )
+        find("partyId", partyId).count().flatMap { total ->
+            find("partyId = ?1 and readAt is null", partyId).count().flatMap { unread ->
+                query.page(0, size).list().map { items -> Triple(items, total, unread) }
+            }
+        }
+    }.awaitSuspending()
+
     suspend fun pageAll(page: Int, size: Int): Pair<List<NotificationEntity>, Long> = Panache.withSession {
         val query = findAll()
         query.count().flatMap { total -> query.page(page, size).list().map { items -> items to total } }
@@ -58,17 +106,6 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
 
     suspend fun deleteByPartyId(partyId: UUID): Long =
         Panache.withTransaction { delete("partyId", partyId) }.awaitSuspending()
-
-    /**
-     * ContactPolicyGate's `sendsInWindow` counter (ADR-0219 D4/D1), backed by this service's own
-     * durable log — same "slice 1" convention as campaign-service's send log, since no shared
-     * Valkey counter exists yet. [templates] narrows to one [com.openbank.notification.domain.model.NotificationCategory]'s
-     * template names (MARKETING today) rather than every send, matching the gate's own send cap
-     * being a marketing-specific budget, not a count of every notification this party received.
-     */
-    suspend fun countSince(partyId: UUID, templates: List<String>, since: Instant): Int = Panache.withSession {
-        count("partyId = ?1 and template in ?2 and createdAt >= ?3", partyId, templates, since)
-    }.awaitSuspending().toInt()
 
     /**
      * Mark one notification read (idempotent). partyId scopes the UPDATE so the edge's

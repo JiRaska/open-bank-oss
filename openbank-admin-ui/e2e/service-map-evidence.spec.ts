@@ -17,7 +17,7 @@ test('Service Map verifies independent evidence then purges it at the authorizat
   await signInAsOperator(context, baseURL!)
   let unauthorized = false
   await page.route('**/api/services/health', route => route.fulfill({
-    status: 200, contentType: 'application/json', body: JSON.stringify({ services: [{ port: 8100, status: 'UP' }] }),
+    status: 200, contentType: 'application/json', body: JSON.stringify({ source: 'kubernetes', discoveryStatus: 'complete', services: [{ name: 'account-service', port: 8100, status: 'UP', reachable: true }] }),
   }))
   await page.route('**/api/services/governance', route => {
     return route.fulfill(unauthorized

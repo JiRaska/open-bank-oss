@@ -236,5 +236,93 @@ class CarryOverTests(unittest.TestCase):
                                      [decision(1, 'approve', APPROVED, when='2026-10-10T08:00:00Z')]))
 
 
+# ---- derived content (OPA bundles, policy-checksum annotations) in carry-over --------------
+BUNDLE = 'openbank-infra/gitops/components/fx-service/fx-opa-bundle.yaml'
+MANIFEST = 'openbank-infra/gitops/components/fx-service/fx-service.yaml'
+REGO = 'openbank-infra/opa/policies/rest.rego'
+
+
+def f(name, patch_text, sha, status='modified'):
+    return dict(filename=name, status=status, patch=patch_text, sha=sha)
+
+
+def checksum_hunk(start, value, extra=''):
+    return (f'@@ -{start},5 +{start},5 @@ spec:\n   template:\n     metadata:\n'
+            f'-        openbank.tech/policy-checksum: "0000aaaa"\n'
+            f'+        openbank.tech/policy-checksum: "{value}"\n{extra}       labels:')
+
+
+def rego_patch(line='+allow if input.x'):
+    return f(REGO, f'@@ -1 +1,2 @@\n package openbank.rest\n{line}', 'c' * 40)
+
+
+APPROVED_DERIVED = [rego_patch(),
+                    f(BUNDLE, '@@ -40 +40 @@\n-  old\n+  bundle-v1', '5' * 40),
+                    f(MANIFEST, checksum_hunk(30, '1111bbbb'), '6' * 40),
+                    f('openbank-libs/governance/rules-opa-data.yaml', '@@ -1 +1 @@\n-a\n+b', '9' * 40)]
+
+
+def regenerated(*replace):
+    """The same author change after main's policy edits: bundle content, checksum values,
+    rules-opa-data and hunk offsets all moved. `replace` swaps in further entries."""
+    out = [rego_patch(),
+           f(BUNDLE, '@@ -52 +52 @@\n-  older\n+  bundle-v2', '7' * 40),
+           f(MANIFEST, checksum_hunk(44, '2222cccc'), '8' * 40),
+           f('openbank-libs/governance/rules-opa-data.yaml', '@@ -3 +3 @@\n-c\n+d', '0' * 40)]
+    by_name = {e['filename']: e for e in out}
+    for e in replace:
+        by_name[e['filename']] = e
+    return list(by_name.values())
+
+
+class DerivedCarryOverTests(unittest.TestCase):
+    def allows(self, head_patch):
+        with patch.dict(guard.os.environ, {}, clear=True), \
+                patch.object(guard, '_gh', side_effect=FakeGitHub(
+                    {HEAD: [APPROVED, M1]}, {APPROVED: APPROVED_DERIVED, HEAD: head_patch},
+                    [decision(1, 'approve', APPROVED)])):
+            return guard.owner_approval_allows(N, [REGO, BUNDLE, MANIFEST])
+
+    def test_da_only_bundle_checksum_and_offsets_differ_allows(self):
+        self.assertTrue(self.allows(regenerated()))
+
+    def test_db_rego_source_line_differs_denies(self):
+        self.assertFalse(self.allows(regenerated(rego_patch('+allow if true'))))
+
+    def test_dc_manifest_non_checksum_line_differs_denies(self):
+        evil = f(MANIFEST, checksum_hunk(44, '2222cccc', '+        sidecar.istio.io/inject: "false"\n'),
+                 '8' * 40)
+        self.assertFalse(self.allows(regenerated(evil)))
+
+    def test_dc2_manifest_checksum_and_other_change_in_separate_hunk_denies(self):
+        evil = f(MANIFEST, checksum_hunk(44, '2222cccc') + '\n@@ -90 +90 @@\n-  replicas: 2\n+  replicas: 0',
+                 '8' * 40)
+        self.assertFalse(self.allows(regenerated(evil)))
+
+    def test_dd_new_non_derived_file_denies(self):
+        self.assertFalse(self.allows(regenerated() + [f('openbank-fx-service/X.kt', '+x', 'b' * 40, 'added')]))
+
+    def test_dd2_rules_yaml_change_denies(self):
+        self.assertFalse(self.allows(regenerated() + [
+            f('openbank-libs/governance/rules.yaml', '@@ -1 +1 @@\n-a\n+b', 'b' * 40)]))
+
+    def test_dd3_rename_from_source_into_derived_name_stays_compared(self):
+        moved = dict(f(BUNDLE.replace('fx-opa', 'x-opa'), '', 'b' * 40, 'renamed'),
+                     previous_filename='openbank-libs/governance/rules.yaml')
+        self.assertFalse(self.allows(regenerated() + [moved]))
+
+    def test_dd4_derived_only_approval_does_not_carry(self):
+        only = [e for e in APPROVED_DERIVED if e['filename'] != REGO]
+        with patch.dict(guard.os.environ, {}, clear=True), \
+                patch.object(guard, '_gh', side_effect=FakeGitHub(
+                    {HEAD: [APPROVED, M1]}, {APPROVED: only, HEAD: only},
+                    [decision(1, 'approve', APPROVED)])):
+            self.assertFalse(guard.owner_approval_allows(N, [BUNDLE]))
+
+    def test_de_derived_file_without_patch_is_still_undetermined(self):
+        with self.assertRaises(guard.Undetermined):
+            self.allows(regenerated(dict(filename=BUNDLE, status='modified', sha='7' * 40)))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -41,8 +41,16 @@ class StatutoryReturnTest {
         "total_equity" to BigDecimal("1400000.00"),
     )
 
-    private fun assembled(values: Map<String, BigDecimal> = goodValues) =
-        StatutoryReturn.assemble(catalogue, balanceSheet, "fund-conservative", july, 1, values, "maker", at)
+    private fun assembled(values: Map<String, BigDecimal> = goodValues) = StatutoryReturn.assemble(
+        catalogue,
+        balanceSheet,
+        "fund-conservative",
+        july,
+        1,
+        values,
+        by = "maker",
+        at = at,
+    )
 
     @Test
     fun `golden - canonical content and hash are fixed, order- and scale-independent`() {
@@ -182,5 +190,96 @@ class StatutoryReturnTest {
             ReportingPeriod.lastEndedBefore(Periodicity.MONTH, LocalDate.of(2026, 9, 30)).label,
         ).isEqualTo("2026-08")
         assertThat(ReportingPeriod.lastEndedBefore(Periodicity.YEAR, today).label).isEqualTo("2025")
+    }
+
+    // --- ADR-0340: line-based returns (CRS/FATCA) ---
+
+    private val crsDefinition = ReturnDefinition(
+        code = "CRS",
+        name = "CRS",
+        scope = ReturnScope.COMPANY,
+        periodicity = Periodicity.YEAR,
+        deadlineDaysAfterPeriodEnd = 181,
+        datapoints = listOf("reportable_persons", "reportable_accounts"),
+        rules = emptyList(),
+        legalBasis = "test",
+        lineSchema = listOf("holder_name", "tin", "interest_credited"),
+    )
+    private val crsCatalogue = ReturnCatalogue("cz-tax-information-exchange", 1, "CZ", false, listOf(crsDefinition))
+
+    private fun crsLine(tin: String? = "123456789") = ReturnLine(
+        linkedMapOf("holder_name" to "Pact Tax Resident", "tin" to tin, "interest_credited" to "100.00"),
+    )
+
+    private fun assembledCrs(lines: List<ReturnLine> = listOf(crsLine())) = StatutoryReturn.assemble(
+        crsCatalogue,
+        crsDefinition,
+        "company",
+        ReportingPeriod(Periodicity.YEAR, LocalDate.of(2026, 12, 31)),
+        1,
+        mapOf("reportable_persons" to BigDecimal.ONE, "reportable_accounts" to BigDecimal.ONE),
+        lines,
+        "maker",
+        at,
+    )
+
+    @Test
+    fun `lines are part of the attested content hash`() {
+        val withLine = assembledCrs()
+        val withoutLine = assembledCrs(emptyList())
+        assertThat(withLine.contentHash).isNotEqualTo(withoutLine.contentHash)
+        // A null tin must not collapse into a missing key: the canonical rendering carries the key.
+        assertThat(
+            StatutoryReturn.canonicalContent(
+                withLine.catalogueId,
+                withLine.catalogueVersion,
+                withLine.returnCode,
+                withLine.entityId,
+                withLine.period,
+                withLine.revision,
+                withLine.datapoints,
+                listOf(crsLine(tin = null)),
+            ),
+        ).contains("line[0].tin=null")
+    }
+
+    @Test
+    fun `a line whose fields do not match the catalogue schema is refused`() {
+        assertThatThrownBy {
+            assembledCrs(listOf(ReturnLine(mapOf("holder_name" to "X", "tin" to "1"))))
+        }
+            .isInstanceOf(ReturnValidationException::class.java)
+            .satisfies({ e ->
+                assertThat((e as ReturnValidationException).findings.map { it.ruleId }).containsExactly("SCHEMA")
+            })
+    }
+
+    @Test
+    fun `a figure-only return refuses lines`() {
+        assertThatThrownBy {
+            StatutoryReturn.assemble(
+                catalogue,
+                balanceSheet,
+                "fund-conservative",
+                july,
+                1,
+                goodValues,
+                lines = listOf(crsLine()),
+                by = "maker",
+                at = at,
+            )
+        }
+            .isInstanceOf(ReturnValidationException::class.java)
+            .satisfies({ e ->
+                assertThat((e as ReturnValidationException).findings.map { it.ruleId }).containsExactly("SCHEMA")
+            })
+    }
+
+    @Test
+    fun `lines changed after attestation cannot be submitted`() {
+        val approved = assembledCrs().approve("checker", at)
+        val tampered = approved.copy(lines = listOf(crsLine(tin = "999")))
+        assertThatThrownBy { tampered.submit("REF", "checker", at) }
+            .isInstanceOf(TaxConflictException::class.java).hasMessageContaining("attested hash")
     }
 }

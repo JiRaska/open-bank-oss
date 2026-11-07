@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+# ADR-0333 D4: a provider handoff can be ambiguous after the notification row commits.
+# PENDING is neither SENT nor FAILED. The count comes from notification-service's database;
+# each replica reports the same rows, so max() avoids multiplying the result by pod count.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-notification-pending-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.notification.pending
+      rules:
+        - alert: NotificationOutcomeStuckPending
+          expr: max(openbank_notification_pending_stale{service="notification"}) > 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A notification has no terminal outcome after 15 minutes"
+            description: >-
+              At least one notification remains PENDING after its handoff window. The provider
+              may have accepted it, so do not resend automatically. Reconcile the row with the
+              provider and the notification request dead-letter queue before deciding whether
+              a new customer contact is needed.
+        - alert: NotificationPendingOutcomeCountUnavailable
+          expr: min(openbank_notification_pending_stale{service="notification"}) < 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Notification pending-outcome evidence is unavailable"
+            description: >-
+              The notification-service cannot read its stale PENDING count. Check database
+              connectivity and the metric refresh job; a missing reading cannot establish that
+              all provider handoffs have a terminal outcome.

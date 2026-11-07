@@ -63,6 +63,7 @@ export default function StandingOrdersPage() {
                 idle: t('standing-order spí (scale-to-zero), probouzí se…', 'standing-order idle (scaled to zero), waking…'),
                 down: t('standing-order-service neodpovídá', 'standing-order-service is not responding'),
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
+                unknown: t('Stav nasazení nelze ověřit', 'Deployment status is unknown'),
               }}
             />
             <button

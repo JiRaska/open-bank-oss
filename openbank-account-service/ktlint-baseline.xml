@@ -563,8 +563,4 @@
     <file name="src/test/kotlin/com/openbank/account/integration/TestBalanceQueryPort.kt">
         <error line="35" column="38" source="standard:trailing-comma-on-call-site" />
     </file>
-    <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
-        <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
-        <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
 </baseline>

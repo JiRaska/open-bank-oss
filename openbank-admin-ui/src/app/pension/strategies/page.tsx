@@ -24,7 +24,7 @@ import {
   type Allocation, type Fund, type Strategy, type StrategyChange,
 } from '@/components/pension/contracts'
 import { allocationProblem, canApplyChange, canDecideChange, refusalText, statusLabel } from '@/components/pension/model'
-import { principalNameFromToken } from '@/components/balance-sheet/model'
+import { principalNameFromToken } from '@/lib/auth/principal'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 

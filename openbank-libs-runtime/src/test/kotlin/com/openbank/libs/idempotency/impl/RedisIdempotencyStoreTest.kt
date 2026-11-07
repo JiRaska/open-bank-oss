@@ -8,7 +8,9 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.IdempotencyKeyReusedExceptionMapper
 import com.openbank.libs.api.error.IdempotencyRequestInProgressExceptionMapper
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.ReserveResult
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -19,13 +21,24 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.redis.client.Response
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Binds an `Idempotency-Key` to its request fingerprint. The Redis commands are backed by an
@@ -48,6 +61,44 @@ class RedisIdempotencyStoreTest {
     private val first = RequestFingerprint.of("POST", "/api/v1/payments", """{"amount":"10.00"}""")
     private val other = RequestFingerprint.of("POST", "/api/v1/payments", """{"amount":"9999.00"}""")
 
+    // Log capture (same idiom as OutboxSentRetentionJobTest): the once-vs-always branches in
+    // decode are the operational-signal half of the legacy/corrupt telemetry (the metric counts,
+    // the log line is what an on-call reads), so these tests pin the level and the one-shot
+    // behaviour, not just the outcome.
+    private val julLogger = JulLogger.getLogger("com.openbank.libs.idempotency.impl.RedisIdempotencyStore")
+    private val captured = ConcurrentLinkedQueue<LogRecord>()
+    private var originalLevel: Level? = null
+    private var originalUseParentHandlers = true
+    private val handler = object : Handler() {
+        override fun publish(record: LogRecord) {
+            captured += record
+        }
+        override fun flush() = Unit
+        override fun close() = Unit
+    }
+
+    @BeforeEach
+    fun attachHandler() {
+        originalLevel = julLogger.level
+        originalUseParentHandlers = julLogger.useParentHandlers
+        captured.clear()
+        julLogger.level = Level.ALL
+        julLogger.useParentHandlers = false
+        julLogger.addHandler(handler)
+    }
+
+    @AfterEach
+    fun detachHandler() {
+        julLogger.removeHandler(handler)
+        julLogger.level = originalLevel
+        julLogger.useParentHandlers = originalUseParentHandlers
+    }
+
+    private fun loggedText(): String = captured.joinToString(" | ") {
+        val params = it.parameters
+        if (params.isNullOrEmpty()) it.message ?: "" else String.format(it.message, *params)
+    }
+
     @Test
     fun `same key and same fingerprint replays the stored response`(): Unit = runBlocking {
         store.save("k1", first, 201, """{"id":"p|1"}""")
@@ -61,6 +112,18 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
+    fun `response at the byte limit remains replayable but one byte over does not`(): Unit = runBlocking {
+        val small = RedisIdempotencyStore(redis(), clock, maxResponseBytes = 8)
+
+        small.save("exact", first, 201, "12345678")
+        assertThat(small.lookup("exact", first)!!.responseBody).isEqualTo("12345678")
+
+        small.save("over", first, 201, "123456789")
+        assertThat(small.reserve("over", first)).isEqualTo(ReserveResult.Mismatch)
+        assertThat(backing["idempotency:over"]).doesNotContain("123456789")
+    }
+
+    @Test
     fun `same key with a different payload is refused`(): Unit = runBlocking {
         store.save("k1", first, 201, """{"id":"p1"}""")
 
@@ -71,6 +134,62 @@ class RedisIdempotencyStoreTest {
     @Test
     fun `unknown key is a miss`(): Unit = runBlocking {
         assertThat(store.lookup("nope", first)).isNull()
+    }
+
+    @Test
+    fun `invalid fingerprints cannot claim or write a record`(): Unit = runBlocking {
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.reserve("invalid", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+            assertThatThrownBy { runBlocking { store.save("invalid", hash, 201, "{}") } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+        }
+    }
+
+    @Test
+    fun `invalid fingerprints cannot release another request marker`(): Unit = runBlocking {
+        store.reserve("held", first)
+        val marker = backing["idempotency:held"]
+        listOf("", "bad|hash").forEach { hash ->
+            assertThatThrownBy { runBlocking { store.release("held", hash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing["idempotency:held"]).isEqualTo(marker)
+            assertThat(store.reserve("held", first)).isEqualTo(ReserveResult.InFlight)
+        }
+    }
+
+    @Test
+    fun `truncated completed records are neither replayed nor overwritten`(): Unit = runBlocking {
+        listOf("v2|", "v2|$first", "v2|$first|201", "v2|$first|201|2026-09-01T00:00Z").forEach { raw ->
+            backing["idempotency:truncated"] = raw
+            assertThat(store.get("truncated")).isNull()
+            assertThat(store.reserve("truncated", first)).isEqualTo(ReserveResult.Mismatch)
+            assertThat(backing["idempotency:truncated"]).isEqualTo(raw)
+        }
+    }
+
+    @Test
+    fun `HTTP status boundaries and empty body decode faithfully`(): Unit = runBlocking {
+        listOf(100, 599).forEach { status ->
+            backing["idempotency:boundary"] = "v2|$first|$status|2026-09-01T00:00Z|"
+            val record = store.lookup("boundary", first)!!
+            assertThat(record.statusCode).isEqualTo(status)
+            assertThat(record.responseBody).isEmpty()
+            assertThat(record.requestHash).isEqualTo(first)
+        }
+    }
+
+    @Test
+    fun `invalid status or timestamp refuses replay`(): Unit = runBlocking {
+        listOf("99|2026-09-01T00:00Z", "600|2026-09-01T00:00Z", "bad|2026-09-01T00:00Z", "200|bad").forEach { fields ->
+            val raw = "v2|$first|$fields|{}"
+            backing["idempotency:corrupt"] = raw
+            assertThatThrownBy { runBlocking { store.lookup("corrupt", first) } }
+                .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+            assertThat(backing["idempotency:corrupt"]).isEqualTo(raw)
+        }
     }
 
     @Test
@@ -93,6 +212,46 @@ class RedisIdempotencyStoreTest {
         store.reserve("old", first)
 
         assertThat(meters.counter(RedisIdempotencyStore.LEGACY_METRIC).count()).isEqualTo(2.0)
+    }
+
+    @Test
+    fun `the first legacy read is announced at info, later ones at debug`(): Unit = runBlocking {
+        backing["idempotency:l1"] = "201|2026-09-01T00:00:00Z|{}"
+        backing["idempotency:l2"] = "202|2026-09-01T00:00:00Z|{}"
+
+        store.get("l1")
+        val infoAfterFirst = captured.count {
+            it.level == Level.INFO && (it.message ?: "").contains("legacy layout")
+        }
+        assertThat(infoAfterFirst).describedAs("info lines after the first legacy read").isEqualTo(1)
+        assertThat(loggedText()).contains("never replayed (legacy layout)")
+
+        store.get("l2")
+        val infoAfterSecond = captured.count {
+            it.level == Level.INFO && (it.message ?: "").contains("legacy layout")
+        }
+        assertThat(infoAfterSecond).describedAs("info lines stay one-shot across reads").isEqualTo(infoAfterFirst)
+        assertThat(captured.count { it.level == Level.FINE }).describedAs("second read demoted to debug").isEqualTo(1)
+    }
+
+    @Test
+    fun `a corrupt record is refused loudly once, then quietly`(): Unit = runBlocking {
+        backing["idempotency:c1"] = "v2|$first|not-a-status|2026-09-26T10:00:00Z|body"
+        backing["idempotency:c2"] = "v2|$first|200|not-a-timestamp|body"
+
+        assertThatThrownBy { runBlocking { store.get("c1") } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+        val errorsAfterFirst = captured.count {
+            it.level == Level.SEVERE && (it.message ?: "").contains("undecodable")
+        }
+        assertThat(errorsAfterFirst).describedAs("error lines after the first corrupt read").isEqualTo(1)
+
+        assertThatThrownBy { runBlocking { store.get("c2") } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+        val errorsAfterSecond = captured.count {
+            it.level == Level.SEVERE && (it.message ?: "").contains("undecodable")
+        }
+        assertThat(errorsAfterSecond).describedAs("the one-shot flag suppresses the repeat").isEqualTo(errorsAfterFirst)
     }
 
     @Test
@@ -147,6 +306,82 @@ class RedisIdempotencyStoreTest {
         store.release("k1", first)
         assertThat(store.reserve("k1", first)).isInstanceOf(ReserveResult.Replay::class.java)
     }
+
+    @Test
+    fun `scoped rollout blocks matching legacy work and releases its temporary claim`(): Unit = runBlocking {
+        val scope = IdempotencyScope("payments", "test-principal")
+        val timestamp = "2026-09-26T10:00Z"
+        listOf(
+            "inflight|$first|$timestamp" to ReserveResult.InFlight,
+            "v2|$first|201|$timestamp|{}" to ReserveResult.Mismatch,
+        ).forEach { (legacy, expected) ->
+            backing["idempotency:rollout"] = legacy
+
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(expected)
+            assertThat(backing).doesNotContainKey("idempotency:${scope.storeKey("rollout")}")
+            assertThat(backing["idempotency:rollout"]).isEqualTo(legacy)
+
+            backing.remove("idempotency:rollout")
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.Reserved)
+            store.release(scope, "rollout", first)
+        }
+    }
+
+    @Test
+    fun `scoped rollout retains its claim when legacy work belongs to another fingerprint`(): Unit = runBlocking {
+        val scope = IdempotencyScope("payments", "test-principal")
+        val timestamp = "2026-09-26T10:00Z"
+        listOf(
+            "inflight|$other|$timestamp",
+            "v2|$other|201|$timestamp|{}",
+            "201|$timestamp|{}",
+        ).forEach { legacy ->
+            backing["idempotency:rollout"] = legacy
+
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.Reserved)
+            assertThat(store.reserve(scope, "rollout", first, 300)).isEqualTo(ReserveResult.InFlight)
+            assertThat(backing["idempotency:rollout"]).isEqualTo(legacy)
+            store.save(scope, "rollout", first, 201, "scoped response", 86400)
+            assertThat(store.lookup(scope.storeKey("rollout"), first)!!.responseBody).isEqualTo("scoped response")
+            backing.remove("idempotency:${scope.storeKey("rollout")}")
+        }
+    }
+
+    @Test
+    fun `Redis failures after suspension propagate instead of becoming successful misses or writes`(): Unit =
+        runBlocking {
+            listOf("get", "legacy save", "save", "reserve", "release").forEach { name ->
+                supervisorScope {
+                    val read = CompletableFuture<String>()
+                    val command = CompletableFuture<Response>()
+                    val values = mockk<ReactiveValueCommands<String, String>>()
+                    every { values.get(any()) } returns Uni.createFrom().completionStage(read)
+                    val redis = mockk<ReactiveRedisDataSource>()
+                    every { redis.value(String::class.java) } returns values
+                    every { redis.execute("EVAL", *anyVararg()) } returns Uni.createFrom().completionStage(command)
+                    val failingStore = RedisIdempotencyStore(redis, clock)
+                    val result = async(start = CoroutineStart.UNDISPATCHED) {
+                        when (name) {
+                            "get" -> failingStore.get("failure")
+                            "legacy save" -> failingStore.save("failure", 201, "{}")
+                            "save" -> failingStore.save("failure", first, 201, "{}")
+                            "reserve" -> failingStore.reserve("failure", first)
+                            "release" -> failingStore.release("failure", first)
+                        }
+                    }
+                    assertThat(result.isCompleted).describedAs(name).isFalse()
+
+                    val failure = IllegalStateException("Redis unavailable during $name")
+                    read.completeExceptionally(failure)
+                    command.completeExceptionally(failure)
+
+                    val propagated = runCatching { result.await() }.exceptionOrNull()
+                    assertThat(propagated).describedAs(name)
+                        .isInstanceOf(IllegalStateException::class.java)
+                        .hasMessage(failure.message)
+                }
+            }
+        }
 
     @Test
     fun `reuse maps to 409 IDEMPOTENCY_KEY_REUSED without echoing the key`() {
