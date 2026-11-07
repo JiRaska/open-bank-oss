@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.9.0...devops-agent-v0.10.0) (2026-11-07)
+
+
+### Features
+
+* **devops-agent:** retain delivery shadow observations ([#15072](https://github.com/JiRaska/open-bank-oss/issues/15072)) ([e181fd7](https://github.com/JiRaska/open-bank-oss/commit/e181fd7567f4ff1d1e589d374dbfea22045c2b02))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.4...devops-agent-v0.9.0) (2026-11-07)
+
+
+### Features
+
+* **devops-agent:** expose read-only delivery throughput ([#15054](https://github.com/JiRaska/open-bank-oss/issues/15054)) ([bc659ab](https://github.com/JiRaska/open-bank-oss/commit/bc659ab3e4e2cf791cdd2779c22f54c973ac06e4))
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.3...devops-agent-v0.8.4) (2026-10-14)
 
 

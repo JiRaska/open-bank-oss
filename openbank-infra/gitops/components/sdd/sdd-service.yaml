@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sdd-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "39accd045416ab40"
+        openbank.tech/policy-checksum: "40cf570d7ea73d65"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sdd-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-3b1311c5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-45b874d6@sha256:45f9274fe1d34561038a300759ceb7990462cf01e1e27ad77f50887a1dcd82ff
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

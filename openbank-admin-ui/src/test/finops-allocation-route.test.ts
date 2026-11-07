@@ -117,6 +117,21 @@ describe('GET /api/finops/allocation', () => {
     expect(second.collectedAt).toBe('2026-06-03T00:00:00Z')
   })
 
+  it('joins a registered workload alias to current published ownership, without guessing unknown services', async () => {
+    mockFiles({ cost: COST, footprints: JSON.stringify({ footprints: [
+      { service: 'security-scanner-service', cpuMillis: 250, memMiB: 512 },
+      { service: 'unregistered-service', cpuMillis: 250, memMiB: 512 },
+    ] }) })
+    readSnapshot.mockResolvedValue({ status: 'ready', provenance: { sourceSha: 'c'.repeat(40) },
+      snapshot: { content: { governance: { services: [{ serviceName: 'security-scanner', dataDomain: 'risk' }] } } },
+    })
+    const { GET } = await import('../app/api/finops/allocation/route')
+    const body = await (await GET()).json()
+    expect(body.byService.find((row: { service: string }) => row.service === 'security-scanner-service').domain).toBe('risk')
+    expect(body.unmapped).toEqual(['unregistered-service'])
+    expect(body.byDomain.find((row: { domain: string }) => row.domain === 'risk').amount).toBeGreaterThan(0)
+  })
+
   it('labels the image governance fallback stale and rejects unknown domain values', async () => {
     mockFiles({ cost: COST, footprints: FOOTPRINTS })
     const { GET } = await import('../app/api/finops/allocation/route')
@@ -127,7 +142,7 @@ describe('GET /api/finops/allocation', () => {
     })
     const unknown = await (await GET()).json()
     expect(unknown.unmapped).toContain('account-service')
-    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('platform')
+    expect(unknown.byService.find((row: { service: string }) => row.service === 'account-service').domain).toBe('unclassified')
   })
 
   it('keeps domains unmapped when neither published nor image governance is available', async () => {
@@ -136,7 +151,7 @@ describe('GET /api/finops/allocation', () => {
     const { GET } = await import('../app/api/finops/allocation/route')
     const body = await (await GET()).json()
     expect(body.unmapped).toEqual(['account-service', 'ledger-service'])
-    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'platform' })])
+    expect(body.byDomain).toEqual([expect.objectContaining({ domain: 'unclassified' })])
     expect(body.governanceSource).toMatchObject({ source: 'unavailable', status: 'unavailable' })
   })
 

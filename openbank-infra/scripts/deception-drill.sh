@@ -79,7 +79,7 @@ SECRET=$(python3 -c 'import json,sys;print(json.loads(sys.argv[1])["aws_secret_a
 unset creds
 FIRED_key=$(now)
 FIRED_delivery=$FIRED_key
-env -u AWS_PROFILE AWS_ACCESS_KEY_ID="$AKID" AWS_SECRET_ACCESS_KEY="$SECRET" AWS_REGION="$REGION" \
+env -u AWS_PROFILE -u AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID="$AKID" AWS_SECRET_ACCESS_KEY="$SECRET" AWS_REGION="$REGION" \
   AWS_EXECUTION_ENV="$UA" aws sts get-caller-identity --region "$REGION" --query Arn --output text >/dev/null
 # The identity is not printed: this output is posted to a public issue on failure.
 say "watched key: called"

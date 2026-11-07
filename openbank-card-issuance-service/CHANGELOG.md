@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.7](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.6...card-issuance-service-v0.28.7) (2026-11-06)
+
+
+### Bug Fixes
+
+* **card-issuance:** read the product catalog as openbank-card-issuance, not the shared client ([#14829](https://github.com/JiRaska/open-bank-oss/issues/14829)) ([21c2d78](https://github.com/JiRaska/open-bank-oss/commit/21c2d7820c201e8f3a5e255ef3d4caabfa364657))
+
 ## [0.28.6](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.28.5...card-issuance-service-v0.28.6) (2026-10-26)
 
 
