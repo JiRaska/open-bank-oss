@@ -299,6 +299,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/check-test-script-reachability.py",    # names merge-train in its text; a lenient copy must not ride a train
     ".github/scripts/test-merge-train-carrier-lock.py",     # exercises the carrier library
     ".github/scripts/test-merge-train-main-red-freshness.py",  # exercises settle / the strict lane
     ".github/scripts/test-merge-train-owner-approval.py",   # exercises the owner-approval writer
@@ -330,6 +331,9 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/test-merge-train-close-linked-issues.py",
     ".github/scripts/test-merge-train-publish-siblings.py",
     ".github/scripts/test_runtime_resource_inputs.py",
+    # Wired into gates.yaml by #14701 (ci-script-tests-previously-unreachable).
+    ".github/scripts/test-finrep-historical-workflow.py",
+    ".github/scripts/test-prove-finrep-historical-checkout.py",
 )
 # JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
 # workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
