@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: Apache-2.0
+-- SPDX-License-Identifier: AGPL-3.0-only
 -- Additive shadow history only. No finding, approval, CI or deployment state is changed.
 -- Rollback: disable sampling and roll back the application image; retain this additive table.
 -- Destructive schema rollback (separate operator decision): DROP TABLE delivery_observations;

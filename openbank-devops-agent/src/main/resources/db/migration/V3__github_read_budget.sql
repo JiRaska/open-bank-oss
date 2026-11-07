@@ -1,4 +1,4 @@
--- SPDX-License-Identifier: Apache-2.0
+-- SPDX-License-Identifier: AGPL-3.0-only
 -- Rollback: roll back the application, retaining these additive budget tables.
 -- Dropping github_read_requests and github_read_budget is a separate operator decision.
 CREATE TABLE github_read_budget (

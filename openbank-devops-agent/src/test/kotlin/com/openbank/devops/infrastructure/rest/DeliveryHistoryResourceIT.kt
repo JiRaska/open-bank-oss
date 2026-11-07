@@ -32,6 +32,7 @@ import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -268,5 +269,73 @@ class DeliveryHistoryResourceIT {
             }
         }
         assertThat(reserveBudget()).isTrue()
+    }
+
+    @Test
+    @TestSecurity(user = "writer", roles = ["ROLE_ADMIN"])
+    fun `reservation clock is sampled after waiting for the shared lock`() {
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            connection().use { holder ->
+                holder.createStatement().use { q ->
+                    q.executeUpdate("DELETE FROM github_read_requests")
+                    q.executeUpdate("UPDATE github_read_budget SET blocked_until = NULL")
+                }
+                holder.autoCommit = false
+                holder.createStatement().use { q ->
+                    q.executeUpdate(
+                        "UPDATE github_read_budget SET reservation_serial = reservation_serial + 1 WHERE id = 1",
+                    )
+                }
+                val pending = executor.submit(Callable { reserveBudget(false) })
+                awaitBudgetLockWaiter()
+                val releasedAt = databaseTime(holder)
+                holder.commit()
+                assertThat(pending.get(5, TimeUnit.SECONDS)).isTrue()
+                assertThat(onlyBudgetRequestTime()).isAfterOrEqualTo(releasedAt)
+            }
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    private fun awaitBudgetLockWaiter() {
+        val deadline = Instant.now().plusSeconds(5)
+        var waiting = false
+        while (!waiting && Instant.now().isBefore(deadline)) {
+            waiting = budgetLockWaiterExists()
+            if (!waiting) Thread.sleep(20)
+        }
+        assertThat(waiting).describedAs("the HTTP transaction must actually wait for our database lock").isTrue()
+    }
+
+    private fun databaseTime(c: java.sql.Connection): Instant = c.createStatement().use { q ->
+        q.executeQuery("SELECT clock_timestamp()").use { rs ->
+            rs.next()
+            rs.getTimestamp(1).toInstant()
+        }
+    }
+
+    private fun onlyBudgetRequestTime(): Instant = connection().use { c ->
+        c.createStatement().use { q ->
+            q.executeQuery("SELECT requested_at FROM github_read_requests").use { rs ->
+                assertThat(rs.next()).isTrue()
+                val timestamp = rs.getTimestamp(1).toInstant()
+                assertThat(rs.next()).isFalse()
+                timestamp
+            }
+        }
+    }
+
+    private fun budgetLockWaiterExists(): Boolean = connection().use { c ->
+        c.createStatement().use { q ->
+            q.executeQuery(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() " +
+                    "AND wait_event_type = 'Lock' AND query LIKE 'UPDATE github_read_budget SET reservation_serial%')",
+            ).use { rs ->
+                rs.next()
+                rs.getBoolean(1)
+            }
+        }
     }
 }

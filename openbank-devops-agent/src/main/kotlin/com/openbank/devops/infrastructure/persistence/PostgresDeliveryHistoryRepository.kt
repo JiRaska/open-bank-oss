@@ -7,11 +7,11 @@ import com.openbank.devops.application.port.out.DeliveryHistoryRepository
 import com.openbank.devops.domain.model.DeliveryObservation
 import com.openbank.devops.domain.model.DeliveryOverview
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.future.await
 import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Duration
-import java.util.UUID
 
 @ApplicationScoped
 class PostgresDeliveryHistoryRepository(
@@ -30,7 +30,7 @@ class PostgresDeliveryHistoryRepository(
                     VALUES (:id, :repo, :slot, :observed, :recorded, :version, :schema, CAST(CAST(:payload AS text) AS jsonb))
                     ON CONFLICT (repository, slot_start) DO NOTHING
                 """.trimIndent(),
-            ).setParameter("id", UUID.randomUUID())
+            ).setParameter("id", Ids.newId())
                 .setParameter("repo", sample.repository)
                 .setParameter("slot", observation.slotStart)
                 .setParameter("observed", sample.observedAt)
