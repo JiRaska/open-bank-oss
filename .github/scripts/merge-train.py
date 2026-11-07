@@ -3218,6 +3218,7 @@ JOB_MUST = {
               ("build reports drops", "has_drops: ${{ steps.build.outputs.has_drops }}")],
     "publish": [(f"publish: {a}", b) for a, b in _ISOLATION] + [("publish takes the bundle", "actions/download-artifact@"),
                                                               ("publish runs publish", "\" publish"),
+                                                              ("publish copies the admission gate beside its script", "check-security-checklist.py merge_train_carrier.py"),
                                                               ("publish also runs on drops alone (notices)",
                                                                "needs.build.outputs.has_drops == 'true'")],
     "settle": [(f"settle: {a}", b) for a, b in _ISOLATION] + [("settle runs settle", "\" settle"),
