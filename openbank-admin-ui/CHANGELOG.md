@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.0...admin-ui-v4.4.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui,mcp-service:** align remaining domain consumers ([#15040](https://github.com/JiRaska/open-bank-oss/issues/15040)) ([7e5b6d5](https://github.com/JiRaska/open-bank-oss/commit/7e5b6d552d94dd952dc1e5e0a549439e87896a18))
+
 ## [4.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.3.0...admin-ui-v4.4.0) (2026-11-07)
 
 
