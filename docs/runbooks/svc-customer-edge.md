@@ -5,7 +5,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 # Runbook — openbank-customer-edge
 
-> Operational runbook for the `customer-edge` service. Data domain **platform**,
+> Operational runbook for the `customer-edge` service. Data domain **channels**,
 > classification **confidential**, datastore **Redis**.
 
 ## Service identity
@@ -14,7 +14,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 |---|---|
 | Service | `openbank-customer-edge` |
 | HTTP port | `8128` |
-| Data domain | platform |
+| Data domain | channels |
 | Datastore | Redis (database `—`) |
 | Classification | confidential |
 | Retention | passkeys until revoked; all other Redis keys 30 days or less |

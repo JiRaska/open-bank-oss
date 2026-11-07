@@ -30,7 +30,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              domain: payments
+              domain: cards
               service: card-processing
               outcome: SKIPPED_DISABLED
             exp_annotations:
@@ -71,7 +71,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              domain: payments
+              domain: cards
             exp_annotations:
               summary: Most network-token reads are being served from the bank's mirror
               subject_period: continuous
@@ -104,7 +104,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: warning
-              domain: payments
+              domain: cards
             exp_annotations:
               summary: Every network-token provisioning attempt is being refused
               subject_period: continuous
@@ -134,7 +134,7 @@ tests:
         exp_alerts:
           - exp_labels:
               severity: critical
-              domain: payments
+              domain: cards
               service: card-processing
             exp_annotations:
               summary: Card ledger posting remains unconfirmed after retries
@@ -163,7 +163,7 @@ tests:
       exp_alerts:
       - exp_labels:
           severity: warning
-          domain: payments
+          domain: cards
           service: card-processing
           outcome: FAILED
         exp_annotations:

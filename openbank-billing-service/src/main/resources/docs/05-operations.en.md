@@ -104,3 +104,12 @@ idempotent by cycle id and never overlaps a running sweep.
 increments `openbank_billing_fee_post_closed_day_refusals_total`. Alert `BillingFeeRefusedIntoClosedDay`
 fires. Recover with runbook `0033-billing-fee-refused-into-closed-day.md` (four-eyes re-bill under a new
 key recorded in `billing_fee_rebill`).
+
+## Product-catalog reads use this service's own identity
+
+The published-revision read (`ProductCatalogRestClient`, `GET /api/v2/legacy-products/{productId}/published-revision`) is sent with the named OIDC client `m2m`, which authenticates as `openbank-billing` (ROLE_API plus the
+`catalog:read` scope), not as the shared `openbank-services` client. product-catalog grants
+`catalog.read` to this identity by name (`service-named-catalog-read`); it deliberately refuses the
+shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
+denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
+client selection.

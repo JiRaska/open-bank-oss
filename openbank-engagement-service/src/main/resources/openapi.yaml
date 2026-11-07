@@ -23,11 +23,106 @@ info:
     NBA ranking — content returns in catalogue order until ADR-0201's model graduates from shadow
     (D5). The customer app reaches these endpoints only through customer-edge, whose narrowly
     scoped M2M policy injects the authoritative party id.
-  version: 1.7.0
+  version: 1.8.0
 tags:
   - name: Surfaces
   - name: Eligibility
 paths:
+  /api/v1/game/admin/catalog:
+    get:
+      operationId: gameAdminCatalog
+      summary: Read the audited Lion Quest catalogue (operator, admin, compliance)
+      responses:
+        '200':
+          description: Current catalogue; revision must be returned unchanged when saving
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GameCatalog'}
+        '401': {description: Authentication required}
+        '403': {description: Staff role required}
+    put:
+      operationId: updateGameAdminCatalog
+      summary: Atomically replace the catalogue and audit actor and before/after values (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GameCatalog'}
+      responses:
+        '200':
+          description: Saved catalogue with incremented revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GameCatalog'}
+        '400': {description: Invalid catalogue}
+        '401': {description: Authentication required}
+        '403': {description: Admin role required}
+        '409': {description: Revision changed; reload before saving}
+  /api/v1/game/admin/audit:
+    get:
+      operationId: gameAdminAudit
+      summary: Read the last fifty catalogue changes (admin or compliance)
+      responses:
+        '200':
+          description: Audit records including revision, actor, changedAt and before/after catalogues
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items:
+                  type: object
+                  properties:
+                    revision: {type: integer, format: int64}
+                    actor: {type: string}
+                    changedAt: {type: string, format: date-time}
+                    before: {$ref: '#/components/schemas/GameCatalog'}
+                    after: {$ref: '#/components/schemas/GameCatalog'}
+        '401': {description: Authentication required}
+        '403': {description: Admin or compliance role required}
+  /api/v1/game/levels:
+    get:
+      operationId: customerGameCatalog
+      summary: Evaluate visible chapters against stored completions and awards; edge injects party
+      parameters:
+        - {name: partyId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: beta, in: query, schema: {type: boolean, default: false}, description: Presentation hint for testing builds; grants no banking entitlement}
+      responses:
+        '200':
+          description: Available chapters and server-evaluated unlock state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revision, levels]
+                properties:
+                  revision: {type: integer, format: int64}
+                  levels:
+                    type: array
+                    maxItems: 30
+                    items:
+                      type: object
+                      required: [level, unlocked, completed]
+                      properties:
+                        level: {$ref: '#/components/schemas/GameLevel'}
+                        unlocked: {type: boolean}
+                        completed: {type: boolean}
+        '400': {description: Missing or invalid party}
+        '401': {description: Authentication required}
+        '403': {description: Edge or staff role required}
+  /api/v1/game/levels/{levelId}/completion:
+    post:
+      operationId: completeGameChapter
+      summary: Record completion idempotently after server admission; never awards points or money
+      parameters:
+        - {name: levelId, in: path, required: true, schema: {type: string}}
+        - {name: partyId, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: beta, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '204': {description: Completion recorded or already recorded}
+        '400': {description: Invalid party}
+        '401': {description: Authentication required}
+        '403': {description: Chapter unavailable, locked, or caller not authorized}
   /api/v1/eligibility/adverse-states:
     get:
       tags: [Eligibility]
@@ -110,6 +205,38 @@ paths:
           description: unknown slot or event type
 components:
   schemas:
+    GameRequirement:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [NONE, PREVIOUS_LEVEL, EARN_SOURCE]}
+        source: {type: string, nullable: true, enum: [EDUCATIONAL_CONTENT_COMPLETION, SAVINGS_GOAL_DEPOSIT, LOGIN_STREAK, ON_TIME_REPAYMENT]}
+        count: {type: integer, minimum: 1, maximum: 1000, default: 1}
+        hintCs: {type: string, maxLength: 160}
+        hintEn: {type: string, maxLength: 160}
+    GameLevel:
+      type: object
+      required: [id, theme, order, titleCs, titleEn, state]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        theme: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        order: {type: integer, minimum: 0, maximum: 99}
+        titleCs: {type: string, minLength: 1, maxLength: 80}
+        titleEn: {type: string, minLength: 1, maxLength: 80}
+        state: {type: string, enum: [OFF, BETA, LIVE]}
+        startsAt: {type: string, format: date-time, nullable: true}
+        endsAt: {type: string, format: date-time, nullable: true}
+        requirement: {$ref: '#/components/schemas/GameRequirement'}
+    GameCatalog:
+      type: object
+      required: [revision, levels]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        levels:
+          type: array
+          minItems: 1
+          maxItems: 30
+          items: {$ref: '#/components/schemas/GameLevel'}
     AdverseStateResponse:
       type: object
       required: [partyId, adverseStates]

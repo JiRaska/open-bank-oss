@@ -129,6 +129,8 @@ quarkus:
   # No boot-time or daily policy-rate fetch from cnb.cz in tests; an IT re-enables it explicitly.
   openbank:
     cnb:
+      # No boot-time ČNB fixing fetch either; CnbFixingStartupCatchUpIT re-enables it.
+      startup-every: "off"
       policy-rates:
         ingestion-cron: "0 0 0 1 1 ? 2099"
         startup-every: "off"
