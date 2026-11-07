@@ -643,9 +643,32 @@ jobs:
           digest=$(jq -er '."openbank-communication-service"' <<< "$DIGESTS")
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
           mkdir -p image-evidence
+          . openbank-infra/scripts/lib/cosign-attest.sh
+          bin="$(resolve_cosign_v2)"
+          image="${ECR_REGISTRY}/openbank-communication-service@${digest}"
+          "$bin" verify --key "$COSIGN_KEY" "$image" > image-evidence/signature.json
+          "$bin" verify-attestation --key "$COSIGN_KEY" --type cyclonedx "$image" > image-evidence/sbom-envelopes.json
+          "$bin" verify-attestation --key "$COSIGN_KEY" --type slsaprovenance "$image" > image-evidence/provenance-envelopes.json
+          jq -e -s --arg digest "${digest#sha256:}" --arg source "$SOURCE_COMMIT" \
+            --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
+            --arg invocation "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}" '
+            any(.[]; (.payload | @base64d | fromjson) as $s |
+              any($s.subject[]; .digest.sha256 == $digest) and
+              $s.predicateType == "https://slsa.dev/provenance/v0.2" and
+              ($s.predicate.metadata.buildInvocationId // $s.predicate.metadata.buildInvocationID) == $invocation and
+              $s.predicate.invocation.configSource.digest.sha1 == $workflow and
+              $s.predicate.invocation.configSource.entryPoint == ".github/workflows/communication-image-only.yml" and
+              any($s.predicate.materials[]; .digest.sha1 == $source))
+            ' image-evidence/provenance-envelopes.json
+          jq -e -s --arg digest "${digest#sha256:}" '
+            any(.[]; (.payload | @base64d | fromjson) as $s |
+              any($s.subject[]; .digest.sha256 == $digest) and
+              $s.predicate.bomFormat == "CycloneDX" and
+              ($s.predicate.components | length) > 0)
+            ' image-evidence/sbom-envelopes.json
           trivy image --platform linux/arm64 --scanners vuln --format json \
             --output image-evidence/scan.json "${ECR_REGISTRY}/openbank-communication-service@${digest}"
-          jq -n --arg source "$SOURCE_COMMIT" --arg workflow "$GITHUB_SHA" \
+          jq -n --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
             --arg digest "$digest" --arg run "$GITHUB_RUN_ID" \
             '{source:$source,workflow:$workflow,digest:$digest,run:$run,contractQualification:"separate-required-verdict",deploymentPerformed:false}' \
             > image-evidence/identity.json
