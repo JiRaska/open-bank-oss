@@ -804,3 +804,10 @@ backdated postings and reversals invalidate qualification without rewriting the 
 postings dated after the evaluated day do not. Legacy runs without a read watermark stay unknown.
 The count query runs over journal history and must be measured at production volume before
 activation; the implementation does not claim a production latency or a completed live month.
+
+The journal population check also retains an order-independent SHA-256 multiset fingerprint of
+committed journal ids. Archive removal plus the same number of new postings cannot reuse a count
+as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting the whole set.
+Capture computes this before excluding writers, under the transition transaction's relation lock,
+then verifies the short count check under the writer barrier. Production-volume CPU and monthly
+read latency still require measurement before rollout; this is a consistency check, not a signature.

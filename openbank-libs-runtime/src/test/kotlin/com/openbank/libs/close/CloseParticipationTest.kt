@@ -30,6 +30,9 @@ class CloseParticipationTest {
         assertThat(first.sourceRunId).matches("[a-f0-9]{64}")
         assertThat(replay.sourceRunId).isEqualTo(first.sourceRunId)
         assertThat(newer.sourceRunId).isNotEqualTo(first.sourceRunId)
+        val implicitSkip = CloseParticipationAssembler.assemble(day, emptySet(), emptyList())!!
+        val literalSkip = CloseParticipationAssembler.assemble(day, emptySet(), emptyList(), skipReason = "null")!!
+        assertThat(implicitSkip.sourceRunId).isNotEqualTo(literalSkip.sourceRunId)
     }
 
     private val day = LocalDate.of(2026, 10, 1)

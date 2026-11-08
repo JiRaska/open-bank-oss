@@ -91,7 +91,7 @@ object CloseParticipationAssembler {
     }
 
     private fun sourceId(values: List<Any?>): String {
-        val canonical = values.joinToString("") { value -> value.toString().let { "${it.length}:$it" } }
+        val canonical = values.joinToString("") { value -> value?.toString()?.let { "${it.length}:$it" } ?: "-1:" }
         return java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
     }
