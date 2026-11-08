@@ -204,7 +204,7 @@ def generate(repo, output, env, extra_arguments=()):
     expected = [f'shard-{i // PROJECTS_PER_SHARD:02}' for i in range(0, len(modules), PROJECTS_PER_SHARD)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
-                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
+                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.1',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
     for i in range(0, len(modules), PROJECTS_PER_SHARD):
