@@ -185,17 +185,16 @@ class InterestCloseParticipationSchedulerTest {
         registry: MeterRegistry,
         at: Clock = clock,
         capitalizationCron: String = "0 0 2 1 * ?",
-    ) =
-        InterestCloseParticipationScheduler(
-            closeJobRuns = runs,
-            sink = sink,
-            meterRegistry = SimpleMeterRegistry(),
-            clock = at,
-            domainMetrics = metricsOver(registry),
-            accrualCron = "0 0 1 * * ?",
-            capitalizationCron = capitalizationCron,
-            lookbackDays = 3,
-        ).also { it.onStart(StartupEvent()) }
+    ) = InterestCloseParticipationScheduler(
+        closeJobRuns = runs,
+        sink = sink,
+        meterRegistry = SimpleMeterRegistry(),
+        clock = at,
+        domainMetrics = metricsOver(registry),
+        accrualCron = "0 0 1 * * ?",
+        capitalizationCron = capitalizationCron,
+        lookbackDays = 3,
+    ).also { it.onStart(StartupEvent()) }
 
     @Test
     fun `liveness is recorded only when the ledger accepted the reports`() {
