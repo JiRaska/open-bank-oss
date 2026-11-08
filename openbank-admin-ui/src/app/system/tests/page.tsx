@@ -20,6 +20,9 @@ import type {
 import {
   TestIntelligenceFlow, testIntelligenceCollectionUnavailable,
 } from '@/components/testing/TestIntelligenceFlow'
+import workspaceStyles from '@/components/testing/workspace/TestWorkspace.module.css'
+import { TestIntelligenceWorkspace } from '@/components/testing/workspace/TestIntelligenceWorkspace'
+import { TestAttentionList } from '@/components/testing/workspace/TestAttentionList'
 import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
@@ -200,6 +203,7 @@ function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport;
  * explanation must not hide the actual missing proof on a different tab.
  */
 function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
+  const [visibleLimit, setVisibleLimit] = useState(25)
   const { t } = useLanguage()
   const requiredControlGaps = (report.requiredControls ?? []).filter(control => control.state !== 'passed')
   const unprojectedRequiredControlGaps = Math.max(0, (report.totals.requiredControlGaps ?? 0) - requiredControlGaps.length)
@@ -291,7 +295,7 @@ function EvidenceGapQueue({ report, selectTab }: { report: TestIntelligenceRepor
   if (gaps.length === 0) return null
   return <section aria-label={t('Fronta mezer důkazů', 'Evidence gap queue')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, var(--warning-border) 40%, var(--border))', borderRadius: 14, padding: 16, background: 'linear-gradient(135deg, color-mix(in srgb, var(--warning-bg) 70%, var(--surface-1)), var(--surface-1))' }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline', marginBottom: 10 }}><div><strong>{t('Fronta skutečných mezer důkazů', 'Real evidence-gap queue')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Odvozeno z aktuálního reportu — ne backlog podle dojmu. Otevři položku pro zdroj, plán a hranici tvrzení.', 'Derived from the current report — not an impression-based backlog. Open an item for its source, plan and claim boundary.')}</div></div><span style={{ color: 'var(--warning-text)', fontWeight: 750 }}>{gaps.length}</span></div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'start', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 9 }}>{gaps.slice(0, visibleLimit).map(gap => <button key={gap.id} type="button" onClick={() => selectTab(gap.tab)} style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'start', gap: 8, padding: 11, textAlign: 'left', cursor: 'pointer', border: '1px solid var(--border)', borderRadius: 9, background: 'var(--surface-1)' }}><span><strong style={{ fontSize: 12 }}>{gap.title}</strong><span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 11, lineHeight: 1.35, marginTop: 4 }}>{gap.detail}</span></span><StateBadge state={gap.state} /></button>)}</div>{gaps.length > visibleLimit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setVisibleLimit(visibleLimit + 25)}>{t('Zobrazit dalších 25', 'Show 25 more')}</button>}
   </section>
 }
 
@@ -417,7 +421,7 @@ function Execution({ report }: { report: TestIntelligenceReport }) {
   )
 }
 
-function TestCases({ report }: { report: TestIntelligenceReport }) {
+function TestCases({ report, onOpenTest }: { report: TestIntelligenceReport; onOpenTest: (item: TestCaseHistory) => void }) {
   const { t, language } = useLanguage()
   const [filter, setFilter] = useState<TestTriageFilter>('all')
   const [query, setQuery] = useState('')
@@ -426,6 +430,7 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
   const wasted = report.testCases.reduce((sum, item) => sum + item.wastedDurationMs, 0)
   const impact = report.testImpact
   const visibleTests = useMemo(() => filterTestCases(report.testCases, filter, query), [report.testCases, filter, query])
+  const [visibleLimit, setVisibleLimit] = useState(25)
   const filters: Array<{ id: TestTriageFilter; label: string }> = [
     { id: 'all', label: t('Vše', 'All') },
     { id: 'failing', label: t('Selhává', 'Failing') },
@@ -464,15 +469,15 @@ function TestCases({ report }: { report: TestIntelligenceReport }) {
         t('Míra selhání', 'Failure rate'), t('Průměrné trvání', 'Avg duration'),
         t('Čas neúspěšných běhů', 'Failed runtime'), t('Otisk', 'Fingerprint'),
       ].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
-      <tbody>{visibleTests.map(item => <tr key={item.fingerprint}>
+      <tbody>{visibleTests.slice(0, visibleLimit).map(item => <tr key={item.fingerprint}>
         <td style={tdStyle}><TestCaseStateBadge state={item.state} /></td>
-        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t('Poslední běh:', 'Last run:')} {formatTimestamp(item.lastObservedAt, language)}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: 'var(--warning-text)', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
+        <td style={{ ...tdStyle, minWidth: 230 }}><button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenTest(item)}>{item.name}</button><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{t('Poslední běh:', 'Last run:')} {formatTimestamp(item.lastObservedAt, language)}</div>{item.retryFlaky && item.failedAttemptCount !== undefined && item.failedAttemptDurationMs !== undefined && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}><div>{t(`${item.failedAttemptCount} neúspěšných retry pokusů · ${item.failedAttemptDurationMs} ms`, `${item.failedAttemptCount} failed retry attempt(s) · ${item.failedAttemptDurationMs} ms`)}</div>{item.retryRun && <a href={item.retryRun.url} target="_blank" rel="noreferrer" style={{ color: 'var(--warning-text)', fontWeight: 650 }}>{item.retryRun.workflow} · {item.retryRun.id} / {item.retryRun.attempt} · {item.retryRun.commit.slice(0, 7)}</a>}</div>}{item.sameCommitTransitions > 0 && <div style={{ color: 'var(--warning-text)', fontSize: 10, marginTop: 3 }}>{t(`${item.sameCommitTransitions} změn pass/fail na stejném commitu`, `${item.sameCommitTransitions} same-commit pass/fail transition(s)`)}</div>}</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10, maxWidth: 260, overflowWrap: 'anywhere' }}>{item.testDefinitionPath ?? t('nenahlášeno', 'not reported')}</td>
         <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
         <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
         <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>{item.fingerprint}</td>
       </tr>)}</tbody>
-    </table>{report.testCases.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div> : visibleTests.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Žádná testová definice neodpovídá vybrané triage. Filtr neznamená změnu CI verdiktu.', 'No test definition matches the selected triage. Filtering does not change the CI verdict.')}</div> : null}</div>
+    </table>{visibleTests.length > visibleLimit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => setVisibleLimit(visibleLimit + 25)}>{t('Zobrazit dalších 25', 'Show 25 more')}</button>}{report.testCases.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div> : visibleTests.length === 0 ? <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Žádná testová definice neodpovídá vybrané triage. Filtr neznamená změnu CI verdiktu.', 'No test definition matches the selected triage. Filtering does not change the CI verdict.')}</div> : null}</div>
   </div>
 }
 
@@ -692,9 +697,8 @@ function AiAssurance({ report }: { report: TestIntelligenceReport }) {
 }
 
 export default function TestIntelligencePage() {
-  const { language, t } = useLanguage()
-  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [tab, setTab] = useState<Tab>('posture')
+  const { t } = useLanguage()
+  const [tab, setTab] = useState<Tab>('tests')
   const [report, setReport] = useState<TestIntelligenceReport | null>(null)
   const [loading, setLoading] = useState(true)
   const testLoading = loading
@@ -737,29 +741,26 @@ export default function TestIntelligencePage() {
     { id: 'ai-assurance', label: t('AI assurance', 'AI assurance'), icon: <Bot size={13} /> },
   ]
 
-  return <div style={{ padding: '28px 32px', maxWidth: 1600, animation: 'fadeIn 0.2s ease-out' }}>
-    <PageHeader
+  return <div className={workspaceStyles.page}>
+
+    <PageHeader className={workspaceStyles.pageHeader}
       breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span className="breadcrumb-current">{t('Test Intelligence', 'Test Intelligence')}</span></div>}
       icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
       title={t('Test Intelligence', 'Test Intelligence')}
-      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, trace kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, trace contracts, mutation, performance, and sandbox synthetic journeys.')}
+      subtitle={t('Co jsme ověřili, s jakým výsledkem a co potřebuje pozornost.', 'Understand what was tested, the outcome and what needs attention.')}
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
-    {report && <EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
-    {report && <TestOverviewPanel report={report} selectTab={setTab} />}
-    {report && <AssuranceBoard report={report} selectTab={setTab} />}
-    {report && <EvidenceGapQueue report={report} selectTab={setTab} />}
-    {report && <details style={{ marginBottom: 18 }}><summary style={{ cursor: 'pointer', fontWeight: 650, color: 'var(--text-secondary)', marginBottom: 10 }}>{t('Jak testování funguje (architektura vrstev)', 'How testing works (layer architecture)')}</summary><TestIntelligenceFlow report={report} /></details>}
-    {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid var(--warning-border)', borderRadius: 8, padding: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
-    <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
-            aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
-    {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <>
-      {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
-      {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}
-      {tab === 'clients' && <ClientExperiences report={report} />}
-      {tab === 'ai-assurance' && <AiAssurance report={report} />}
-    </> : <div style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný.', 'Report is unavailable.')}</div>}
-    {report && <LazyTestAgentPanel />}
-    {report && <div style={{ marginTop: 18, color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Schéma', 'Schema')} v{report.schemaVersion} · {t('sesbíráno', 'collected')} {new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.collectedAt))} · {t('absence se nikdy nevykresluje jako nula', 'absence is never rendered as zero')}</div>}
+    {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <TestIntelligenceWorkspace
+      report={report}
+      freshness={<EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
+      attention={(openComponent, openRuns) => <><TestAttentionList report={report} onOpen={openComponent} onOpenRuns={openRuns} /><LazyTestAgentPanel /></>}
+      learning={<TestIntelligenceFlow report={report} />}
+      renderRuns={openTest => <div style={{ display: 'grid', gap: 16 }}>
+        <label style={{ display: 'grid', gap: 6, maxWidth: 360 }}>{t('Podrobný pohled na důkazy', 'Detailed evidence view')}<select className="form-select" value={tab} onChange={event => setTab(event.target.value as Tab)}>{tabs.map(tabDef => <option key={tabDef.id} value={tabDef.id}>{tabDef.label}</option>)}</select></label>
+        {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} onOpenTest={openTest} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
+        {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}{tab === 'clients' && <ClientExperiences report={report} />}{tab === 'ai-assurance' && <AiAssurance report={report} />}
+        <details><summary>{t('Souhrny běhů a mapy všech vrstev', 'Run summaries and cross-layer maps')}</summary><TestOverviewPanel report={report} selectTab={setTab} /><AssuranceBoard report={report} selectTab={setTab} /><EvidenceGapQueue report={report} selectTab={setTab} /></details>
+      </div>}
+    /> : <div role="status" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný. Můžete jej zkusit obnovit.', 'The report is unavailable. You can try refreshing it.')}</div>}
   </div>
 }

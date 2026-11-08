@@ -6,6 +6,7 @@ import { execFileSync as nodeExecFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES } from '../../openbank-admin-ui/src/lib/evidence/testIntelligenceSnapshot.ts'
 import { validateEvidenceManifest } from '../../openbank-admin-ui/src/lib/evidence/publishedSnapshot.ts'
 
 const SOURCE_SHA = /^[0-9a-f]{40}$/
@@ -155,9 +156,11 @@ export function publishEvidenceSnapshot({
   if (typeof validateSnapshot !== 'function' || typeof snapshotCollectedAt !== 'function') throw new Error('dataset validation contract is required')
   if (typeof bucket !== 'string' || !bucket.trim()) throw new Error('EVIDENCE_BUCKET is required')
   const safePrefix = validatePrefix(prefix)
-  // Only reviewed repository content contains the bounded Markdown corpora.
-  const maxInputBytes = ['admin-ui/content', 'admin-ui/content/domains-v1'].includes(safePrefix)
-    ? 8 * 1024 * 1024 : MAX_INPUT_BYTES
+  // Retained per-test provenance and reviewed Markdown corpora have explicit dataset bounds.
+  const maxInputBytes = safePrefix === 'admin-ui/test-intelligence'
+    ? TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES
+    : ['admin-ui/content', 'admin-ui/content/domains-v1'].includes(safePrefix)
+      ? 8 * 1024 * 1024 : MAX_INPUT_BYTES
   const sourceSha = env.EVIDENCE_SOURCE_SHA ?? env.GITHUB_SHA
   if (typeof sourceSha !== 'string' || !SOURCE_SHA.test(sourceSha)) throw new Error('publication source SHA must be a full 40-character lowercase SHA')
   const runId = parsePositiveInteger(env.GITHUB_RUN_ID, 'GITHUB_RUN_ID')
