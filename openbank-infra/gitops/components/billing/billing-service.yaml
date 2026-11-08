@@ -61,10 +61,12 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
             # `verify`. Declared here so gen-network-policies.py derives the billing -> vault:8200 edge.
-            # Verification stays at the application default `disabled` (nothing compared, counted) until
-            # billing's verify-only role exists; then set BILLING_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            # Verification uses the OpenBao role `billing-ir-verify` (Transit verify only). Rollback:
+            # remove BILLING_PRODUCT_SHADOW_VERIFICATION_MODE (application default `disabled`, nothing compared).
             - name: BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
               value: https://openbao.vault.svc:8200
+            - name: BILLING_PRODUCT_SHADOW_VERIFICATION_MODE
+              value: openbao
             - name: QUARKUS_OIDC_CLIENT_ID
               value: openbank-services
             - name: OIDC_CLIENT_SECRET
