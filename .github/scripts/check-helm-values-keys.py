@@ -158,12 +158,30 @@ _GH_RELEASE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/releases/downloa
 
 
 def _github_api_get(url: str, accept: str) -> bytes:
+    """GET an api.github.com URL. The token is sent to api.github.com ONLY: an asset
+    download answers 302 to a presigned CDN URL, which is followed by hand WITHOUT the
+    Authorization header (urllib would otherwise re-send it to the redirect target)."""
+    import urllib.error
     import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
     headers = {"Accept": accept, "User-Agent": "openbank-ci-helm-values-gate"}
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as err:
+        if err.code not in (301, 302, 303, 307, 308) or not err.headers.get("Location"):
+            raise
+        target = err.headers["Location"]
+    plain = {"Accept": accept, "User-Agent": headers["User-Agent"]}
+    with urllib.request.urlopen(urllib.request.Request(target, headers=plain), timeout=120) as resp:
         return resp.read()
 
 
@@ -199,7 +217,9 @@ def _fetch_via_github_api(chart: str, repo_url: str, version: str,
         asset = next(a for a in release.get("assets", []) if a.get("name") == name)
         data = _github_api_get(asset["url"], "application/octet-stream")
         digest = entry.get("digest")
-        if digest and hashlib.sha256(data).hexdigest() != digest:
+        if not digest:
+            return f"fallback: repo index carries no digest for {name}; refusing an unverified chart"
+        if hashlib.sha256(data).hexdigest() != digest:
             return f"fallback: sha256 of {name} does not match the repo index digest"
         with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
             tar.extractall(chart_root, filter="data")
