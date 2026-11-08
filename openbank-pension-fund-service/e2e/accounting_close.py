@@ -166,7 +166,9 @@ class Fixture:
         env = dict(os.environ, POSTGRES_PASSWORD=self.db_password)
         self.container = run(["docker", "run", "-d", "--name", name, "-e", "POSTGRES_PASSWORD",
                               "-e", "POSTGRES_USER=fixture", "-p", "127.0.0.1::5432", "postgres:18.6"], env=env)
-        self.until(lambda: subprocess.run(["docker", "exec", self.container, "pg_isready", "-U", "fixture"],
+        # The image's temporary init server accepts only Unix sockets and is then restarted.
+        # Wait for TCP so database creation cannot race that deliberate shutdown.
+        self.until(lambda: subprocess.run(["docker", "exec", self.container, "pg_isready", "-h", "127.0.0.1", "-U", "fixture"],
                                          capture_output=True).returncode == 0, "Postgres starts")
         self.db_port = int(run(["docker", "port", self.container, "5432/tcp"]).rsplit(":", 1)[1])
         for db in ["fund_admin", "fund_book", "company_book"]:
@@ -401,7 +403,8 @@ class Fixture:
             before = self.call(base, day_path + "/participants")["participants"][0]["reportedAt"]
             time.sleep(2)
             after = self.call(base, day_path + "/participants")["participants"][0]["reportedAt"]
-            self.check("unchanged source receipts preserve work watermark " + book_id, before == after)
+            label = "fund" if base == fund_book else "company"
+            self.check("unchanged source receipts preserve " + label + " work watermark", before == after)
             self.call(base, day_path + "/transitions/TIED_OUT", "POST")
         self.check("separate maker-checker proof closes each own book", True)
         journal_body = {"bookId": fund, "fundId": fund, "navId": nav, "valuationDate": today, "amount": 0.80, "currency": "CZK"}
@@ -410,24 +413,47 @@ class Fixture:
         self.check("closed-day replay adds no journal or duplicate fee amount", fees_once())
         self.call(company_book, "/api/v1/ledger/pension-accounting/management-fees", "POST", journal_body, token=source, status=409)
         self.check("wrong-book routing is refused", True)
-        for base in [fund_book, company_book]:
-            self.check("a single fixture day cannot certify a calendar month " + base.rsplit(":", 1)[-1],
+        books = [("fund", fund_book, "fund_book"), ("company", company_book, "company_book")]
+        for label, base, _ in books:
+            self.check("a single fixture day cannot certify the " + label + " calendar month",
                        not self.call(base, "/api/v1/ledger/close-readiness")["eligibleForEnforcement"])
+
+        # New pending source work must revoke a prior RAN even on an already closed day,
+        # including when the book already has a delivered fee and no new journal is posted.
+        snapshots = {db: self.sql(db, "SELECT row_to_json(e)::text FROM ledger_close_evidence e") for _, _, db in books}
+        self.call(admin, f"/api/v2/funds/{fund}/navs", "POST", {
+            "valuationDate": today, "positions": [], "cash": 36600, "otherLiabilities": 0}, status=201)
+        for label, base, database in books:
+            self.until(lambda base=base: self.call(base, day_path + "/participants")["participants"][0]["outcome"] == "REFUSED",
+                       label + " source revokes completion after close")
+            refusal = self.call(base, day_path + "/participants")["participants"][0]
+            self.check(label + " pending correction revokes completion without claiming journals", refusal["journalsPosted"] == 0)
+            self.check(label + " late refusal preserves frozen close evidence",
+                       self.sql(database, "SELECT row_to_json(e)::text FROM ledger_close_evidence e") == snapshots[database])
+            count = self.sql(database, "SELECT count(*) FROM ledger_close_participation")
+            time.sleep(2)
+            self.check(label + " repeated refusal preserves its source receipt",
+                       self.sql(database, "SELECT count(*) FROM ledger_close_participation") == count)
+        self.check("pending valuation creates no new journal or cash movement", fees_once())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, help="Write assertion names only; no credentials or endpoints")
     args = parser.parse_args()
+    if args.report:
+        args.report.write_text(json.dumps({"status": "running", "passed": [], "productionEvidence": False}) + "\n")
     with tempfile.TemporaryDirectory(prefix="openbank-accounting-e2e-") as directory:
         fixture = Fixture(directory)
         try:
             fixture.scenario()
-            result = {"passed": fixture.passed, "productionEvidence": False}
+            result = {"status": "passed", "passed": fixture.passed, "productionEvidence": False}
             if args.report:
                 args.report.write_text(json.dumps(result, indent=2) + "\n")
             print(f"PASS {len(fixture.passed)} assertions; generated local fixtures only", flush=True)
         except Exception:
+            if args.report:
+                args.report.write_text(json.dumps({"status": "failed", "passed": fixture.passed, "productionEvidence": False}) + "\n")
             for log in fixture.dir.glob("*.log"):
                 print(f"--- {log.name}: last diagnostic lines ---", flush=True)
                 print("\n".join(log.read_text(errors="replace").splitlines()[-18:]), flush=True)

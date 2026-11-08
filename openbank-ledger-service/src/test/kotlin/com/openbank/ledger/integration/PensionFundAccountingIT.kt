@@ -194,13 +194,13 @@ class PensionFundAccountingIT {
     }
 
     @Test
-    @Order(3)
+    @Order(6)
     @TestSecurity(user = "own-book-operator", roles = ["ROLE_OPERATOR"])
     fun `pending lookup recovers a cutoff older than seven days without exposing balances`() {
         val old = clock.today().minusDays(40)
         val path = "/api/v1/ledger/accounting-days/$old"
-        given().post(path).then().statusCode(201)
-        given().post("$path/transitions/CUTOFF").then().statusCode(200)
+        given().contentType("application/json").post(path).then().statusCode(201)
+        given().contentType("application/json").post("$path/transitions/CUTOFF").then().statusCode(200)
         given().get("/api/v1/ledger/pension-accounting/closing-days").then().statusCode(200)
             .body("size()", equalTo(1)).body("[0].businessDate", equalTo(old.toString()))
             .body("[0].status", equalTo("CUTOFF"))

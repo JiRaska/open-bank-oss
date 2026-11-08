@@ -19,7 +19,8 @@ pension_fund_source_allowed if {
 	machine_named("service-account-openbank-pension-fund")
 	"ROLE_API" in input.principal.roles
 	input.action == "ledger.close.participate"
-	input.resource == "pension-fund"
+	input.resource.type == "ledger"
+	input.resource.id == "pension-fund"
 }
 
 allowed_reasons contains "service-pension-fund-own-book-purpose" if {

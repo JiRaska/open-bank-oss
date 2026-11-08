@@ -64,7 +64,8 @@ ledger_pension_co_fee_action if {
 
 ledger_pension_co_fee_action if {
 	input.action == "ledger.close.participate"
-	input.resource == "pension-fund"
+	input.resource.type == "ledger"
+	input.resource.id == "pension-fund"
 }
 
 ledger_pension_co_fee_source if {

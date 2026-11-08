@@ -817,6 +817,9 @@ Pension reconciliation compares the entire enabled own chart (including zero bal
 foreign/disabled accounts with activity, and stores a read start plus committed journal watermark.
 Independent verified interactive issuer subjects propose and approve once. The purpose-specific
 OPA grants do not give the NAV producer generic journal posting, reversal or balance access.
+Participation grants require the actual typed OPA resource: type `ledger` and the caller's own
+participant id. Bare strings, another resource type and another participant fail closed. The bank
+and pension policy fixtures use the same resource shape emitted by the runtime PDP adapter.
 The registered runtime Flyway callback checks and binds database identity before any chart SQL.
 Changing kind/id, reusing a pension database as the bank, or assigning an unbound database with
 journal history fails startup. The company chart is the reviewed mounted source, selected by an

@@ -31,6 +31,9 @@ remains pending, starts the company and recovers without duplicate fee journals.
 that source completion cannot replace each book's full-chart maker/checker reconciliation,
 that stable source retransmission preserves its work watermark, and that both books can close
 independently. Wrong-book requests fail and a single fixture day cannot qualify a full month.
+After close, a newly calculated correction must revoke source completion in both books without
+claiming another posted journal. Repeated refusals preserve their receipt and the original frozen
+close evidence remains unchanged. Policies consume the actual typed OPA resource (`type`, `id`).
 
 The JSON report contains assertion names only. This is executable test evidence, not a live
 operating month, chart approval, deployment approval or permission to enable enforcement.

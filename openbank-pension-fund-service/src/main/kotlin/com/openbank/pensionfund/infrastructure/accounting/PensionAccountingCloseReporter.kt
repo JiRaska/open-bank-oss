@@ -75,7 +75,7 @@ class PensionAccountingCloseReporter(
                     day.businessDate,
                     PensionCloseReport(
                         if (ready) "RAN" else "REFUSED",
-                        source.sumOf { it.journalsPosted },
+                        if (ready) source.sumOf { it.journalsPosted } else 0,
                         source.sumOf { it.sourceNavs },
                         if (ready) null else blockers.joinToString(","),
                         if (!ready) {

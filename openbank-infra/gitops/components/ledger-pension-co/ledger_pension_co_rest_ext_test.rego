@@ -185,14 +185,14 @@ test_verified_fee_source_may_report_only_its_participation if {
 	rest.allow.allow with input as {
 		"principal": pension_fund_client,
 		"action": "ledger.close.participate",
-		"resource": "pension-fund",
+		"resource": {"type": "ledger", "id": "pension-fund"},
 	}
 		with data.rules as rules_mock
 	every participant in {"interest", "billing", "pension-company-cash", "pension-company-operations", ""} {
 		not rest.allow.allow with input as {
 			"principal": pension_fund_client,
 			"action": "ledger.close.participate",
-			"resource": participant,
+			"resource": {"type": "ledger", "id": participant},
 		}
 			with data.rules as rules_mock
 	}
@@ -218,7 +218,7 @@ test_fee_source_requires_verified_client_marker_and_role if {
 	] {
 		p := object.union(pension_fund_client, claims)
 		every action in {"ledger.pension.fee", "ledger.pension.inspect", "ledger.close.participate"} {
-			not rest.allow.allow with input as {"principal": p, "action": action, "resource": "pension-fund"}
+			not rest.allow.allow with input as {"principal": p, "action": action, "resource": {"type": "ledger", "id": "pension-fund"}}
 				with data.rules as rules_mock
 		}
 	}
@@ -230,7 +230,7 @@ test_fee_source_requires_verified_client_marker_and_role if {
 test_other_machines_and_tax_cannot_enter_pension_accounting if {
 	every machine in {tax_reporting, shared_client, pension_client} {
 		every action in {"ledger.pension.fee", "ledger.pension.inspect", "ledger.pension.reconcile", "ledger.close.participate"} {
-			not rest.allow.allow with input as {"principal": machine, "action": action, "resource": "pension-fund"}
+			not rest.allow.allow with input as {"principal": machine, "action": action, "resource": {"type": "ledger", "id": "pension-fund"}}
 				with data.rules as rules_mock
 		}
 	}
@@ -250,4 +250,12 @@ test_reconciliation_does_not_accept_machine_or_unmarked_staff if {
 	unmarked := object.remove(staff, {"service_account"})
 	not rest.allow.allow with input as {"principal": unmarked, "action": "ledger.pension.reconcile"}
 		with data.rules as rules_mock
+}
+
+# Actual OPA wire input is ResourceRef {type, id}; malformed or cross-purpose shapes fail closed.
+test_participation_requires_the_typed_ledger_resource if {
+	every resource in ["pension-fund", {"type": "fund", "id": "pension-fund"}, {"id": "pension-fund"}, {}] {
+		not rest.allow.allow with input as {"principal": pension_fund_client, "action": "ledger.close.participate", "resource": resource}
+			with data.rules as rules_mock
+	}
 }

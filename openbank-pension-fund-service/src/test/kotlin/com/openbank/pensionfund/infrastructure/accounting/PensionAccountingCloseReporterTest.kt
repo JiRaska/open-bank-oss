@@ -16,8 +16,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.URI
-import java.time.LocalDate
 import java.time.Clock
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Optional
 import java.util.UUID
@@ -60,7 +60,7 @@ class PensionAccountingCloseReporterTest {
             oldDay,
             "PENSION_FUND",
             sourceNavs = 2,
-            journalsPosted = 0,
+            journalsPosted = 1,
             blockers = listOf("PENDING_NAV_APPROVAL"),
             sourceRunId = "a".repeat(64),
         )
@@ -102,12 +102,19 @@ class PensionAccountingCloseReporterTest {
         coEvery { fundClient.pendingDays() } returns emptyList()
         coEvery { fundClient.days(any(), any()) } returns listOf(PensionClosingDay(auditDay, "TIED_OUT"))
         coEvery { evidence.day(fundId, auditDay, "PENSION_FUND") } returns FundAccountingDayEvidence(
-            fundId, auditDay, "PENSION_FUND", 1, 0, listOf("PENDING_NAV_APPROVAL"), "b".repeat(64),
+            fundId,
+            auditDay,
+            "PENSION_FUND",
+            1,
+            1,
+            listOf("PENDING_NAV_APPROVAL"),
+            "b".repeat(64),
         )
 
         assertThat(runCatching { reporter.report() }.exceptionOrNull()).isSameAs(unavailable)
         assertThat(reportDates).containsExactly(auditDay)
         assertThat(reports.single().outcome).isEqualTo("REFUSED")
+        assertThat(reports.single().journalsPosted).isZero()
         coVerify(exactly = 1) { evidence.day(fundId, auditDay, "PENSION_FUND") }
     }
 

@@ -25,17 +25,17 @@ fund_shared := {
 
 test_only_own_purposes_are_admitted if {
 	every action in {"ledger.pension.fee", "ledger.pension.inspect", "ledger.close.participate"} {
-		rest.allow.allow with input as {"principal": fund_source, "action": action, "resource": "pension-fund"}
+		rest.allow.allow with input as {"principal": fund_source, "action": action, "resource": {"type": "ledger", "id": "pension-fund"}}
 			with data.rules as fund_rules
 	}
 }
 
 test_nav_source_cannot_post_arbitrary_journals_or_read_balances if {
 	every action in {"ledger.create", "ledger.reverse", "ledger.read", "ledger.list", "ledger.approve", "ledger.pension.reconcile"} {
-		not rest.allow.allow with input as {"principal": fund_source, "action": action, "resource": "pension-fund"}
+		not rest.allow.allow with input as {"principal": fund_source, "action": action, "resource": {"type": "ledger", "id": "pension-fund"}}
 			with data.rules as fund_rules
 	}
-	not rest.allow.allow with input as {"principal": fund_source, "action": "ledger.close.participate", "resource": "interest"}
+	not rest.allow.allow with input as {"principal": fund_source, "action": "ledger.close.participate", "resource": {"type": "ledger", "id": "interest"}}
 		with data.rules as fund_rules
 }
 
@@ -56,4 +56,12 @@ test_interactive_operator_can_reconcile if {
 	staff := {"type": "HUMAN", "id": "accountant", "service_account": false, "roles": ["ROLE_OPERATOR"]}
 	rest.allow.allow with input as {"principal": staff, "action": "ledger.pension.reconcile"}
 		with data.rules as fund_rules
+}
+
+# Actual OPA wire input is ResourceRef {type, id}; malformed or cross-purpose shapes fail closed.
+test_participation_requires_the_typed_ledger_resource if {
+	every resource in ["pension-fund", {"type": "fund", "id": "pension-fund"}, {"id": "pension-fund"}, {}] {
+		not rest.allow.allow with input as {"principal": fund_source, "action": "ledger.close.participate", "resource": resource}
+			with data.rules as fund_rules
+	}
 }
