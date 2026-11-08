@@ -44,6 +44,24 @@ data class CloseJobRun(
 /** Folds a participant's job runs for one day into the report it sends (ADR-0342 D1/D4). */
 object CloseParticipationAssembler {
 
+    /** Revisit the entire period eligible for monthly readiness, preserving a longer recovery window. */
+    fun reportingFrom(today: LocalDate, lookbackDays: Long): LocalDate {
+        require(lookbackDays > 0) { "lookbackDays must be positive" }
+        return minOf(today.minusDays(lookbackDays), today.withDayOfMonth(1).minusMonths(1))
+    }
+
+    /** An unfinished source must revoke an earlier positive report, even before another journal exists. */
+    fun incomplete(
+        businessDate: LocalDate,
+        reason: String,
+        sourceIdentity: Collection<String>,
+    ): CloseParticipationReport = CloseParticipationReport(
+        businessDate = businessDate,
+        outcome = CloseOutcome.REFUSED,
+        reason = reason,
+        sourceRunId = sourceId(listOf(businessDate, "incomplete", reason) + sourceIdentity.sorted()),
+    )
+
     /**
      * @param expectedJobs the jobs that were due on [businessDate]. A due job with no run means the
      *   participant has NOT finished the day, and the answer is `null` — nothing is reported, so the
