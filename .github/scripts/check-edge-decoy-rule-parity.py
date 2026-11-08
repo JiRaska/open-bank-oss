@@ -32,6 +32,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 DECOY_PREFIX = "edge-decoys-"
@@ -39,8 +41,14 @@ READER_RE = re.compile(r'route_name=~"httproute/(?P<ns>[^/"]+)/(?P<name>[^/"]+)/
 
 
 def _docs(path: Path):
+    text = path.read_text(encoding="utf-8")
     try:
-        yield from (d for d in yaml.safe_load_all(path.read_text(encoding="utf-8")) if d)
+        docs = gatelib.loads_all(text, pure_python=True)
+    except yaml.YAMLError:
+        # Retain streaming partial documents and the original diagnostic for malformed YAML.
+        docs = yaml.safe_load_all(text)
+    try:
+        yield from (d for d in docs if d)
     except yaml.YAMLError as ex:
         sys.stderr.write(f"::error file={path}::not parseable YAML: {ex}\n")
         yield from ()
@@ -115,6 +123,33 @@ def selftest() -> int:
             return 1
         if not any("edge-decoys-targeted" in f and "no HTTPRoute" in f for f in bad):
             print("SELFTEST FAIL: a reader of a missing route was not reported")
+            return 1
+    # Cache reads must observe same-size/same-mtime rewrites and return isolated objects.
+    import contextlib
+    import io
+    import os
+
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = Path(tmp) / "input.yaml"
+        fixture.write_text("kind: Before\n", encoding="utf-8")
+        stamp = fixture.stat()
+        first = list(_docs(fixture))
+        first[0]["kind"] = "poison"
+        if list(_docs(fixture)) != [{"kind": "Before"}]:
+            print("SELFTEST FAIL: a caller mutated a cached document")
+            return 1
+        fixture.write_text("kind: After!\n", encoding="utf-8")
+        os.utime(fixture, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+        if list(_docs(fixture)) != [{"kind": "After!"}]:
+            print("SELFTEST FAIL: same-size/same-mtime rewrite returned stale YAML")
+            return 1
+        # The original generator yields valid documents preceding a malformed tail.
+        fixture.write_text("kind: Kept\n---\ninvalid: [\n", encoding="utf-8")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            partial = list(_docs(fixture))
+        if partial != [{"kind": "Kept"}] or "not parseable YAML" not in errors.getvalue():
+            print("SELFTEST FAIL: malformed-tail handling lost partial documents or its error")
             return 1
     print(f"check-edge-decoy-rule-parity --selftest: OK — {subjects} pair(s) clean; "
           "both an unread route and a route-less reader are reported")
