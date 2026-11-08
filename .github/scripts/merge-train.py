@@ -608,8 +608,7 @@ def extra_verdict(states: list[str | None]) -> str | None:
 
 
 def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
-    """Only the App's owner decision can admit a codex PR: the latest one on this exact head, or (ADR-0343
-    2026-10-29) the newest on any head approval_chain() links it to through pure main-update merges.
+    """Only the App's owner decision on this exact head can admit a codex PR.
 
     app_statuses() authenticates the producer and SHA. The canonical description additionally
     binds the PR number, so two PRs sharing a head cannot borrow each other's approval.
@@ -620,19 +619,20 @@ def owner_approval_valid(number: int, ref: str, app: dict | None) -> bool:
             and (app or {}).get(OWNER_APPROVAL_CONTEXT) == ("success", f"owner-approved PR #{number}"))
 
 
-APPROVAL_CHAIN_MAX = 16   # update merges an approval may survive; a longer run of them needs a re-approval
+APPROVAL_CHAIN_MAX = 16   # heads inspected for live withdrawal; never approval inheritance
 
 
 def approval_chain(git, base: str, head: str) -> list[str]:
-    """`head`, then each earlier head an owner approval may have been given on and still cover.
+    """`head`, then earlier pure main-update heads whose revocations may still withdraw intent.
 
     Walks first parents back from `head` while the commit is a pure main-update merge: exactly two
     parents, the second reachable from `base` (main brought in nothing but main), and its tree equal to
     the tree `git merge-tree --write-tree` computes from the two parents — conflict-free and with no
     edit smuggled into the merge. The walk stops at the first commit that is anything else (a push, a
-    hand-resolved conflict, a merge of a non-main branch), so an approval on any listed head covers
-    exactly the delta the owner reviewed. Deterministic and local: commits are immutable, so the chain
-    is a git fact, not a verdict; the decisions on it are always read live (owner_decision)."""
+    hand-resolved conflict, a merge of a non-main branch), so only withdrawals on the verified
+    main-update chain are considered. Deterministic and local: commits are immutable, so the chain
+    is a git fact, not approval inheritance. Only the current head may supply an approval;
+    decisions on the walk are read live to preserve newer revocations (owner_decision)."""
     chain, c = [head], head
     while len(chain) < APPROVAL_CHAIN_MAX:
         parents = git("rev-list", "--parents", "-n", "1", c, check=False).stdout.split()
@@ -660,14 +660,22 @@ def remember_approval_chain(gh, git, base: str, head: str) -> list[str]:
 
 
 def owner_decision(gh, chain: list[str]) -> tuple[str, str] | None:
-    """The NEWEST App owner decision on any head of the chain, read live: a revoke posted on an earlier
-    head after an approval on a later one still revokes. None = no decision anywhere."""
-    best = None
+    """Current-head approval only; a newer revoke on the proven main-update chain still withdraws it.
+
+    An ancestor approval never grants admission or overrides a current-head decision. A fresh
+    current-head approval may supersede an older active revoke, but not a later one. As before,
+    each head contributes its latest authenticated decision, not superseded status history."""
+    current, revoke = None, None
     for sha in chain:
         rec = gh.app_status_latest(sha, OWNER_APPROVAL_CONTEXT)
-        if rec is not None and (best is None or rec[0] > best[0]):
-            best = rec
-    return (best[1], best[2]) if best else None
+        if rec is None:
+            continue
+        if sha == chain[0]:
+            current = rec
+        if rec[1] == "failure" and (revoke is None or rec[0] > revoke[0]):
+            revoke = rec
+    decision = revoke if revoke and (current is None or revoke[0] > current[0]) else current
+    return (decision[1], decision[2]) if decision else None
 
 
 def with_owner_decision(gh, app: dict, chain: list[str]) -> dict:
@@ -732,7 +740,7 @@ def qualifies(pr: dict, required: list[str], checks: dict[str, str | None],
         return False, "head is a fork"
     ref = pr.get("head_ref") or ""
     if not owner_approval_valid(pr.get("number"), ref, app):
-        return False, "codex PR needs owner approval on this head or one it updated from main"
+        return False, "codex PR needs owner approval on this exact head"
     for f in pr.get("files") or []:
         if unsafe_path(f):
             return False, "a path contains a control character — manual lane, never a train"
@@ -5481,8 +5489,8 @@ def self_test() -> int:
                   and gh.app_statuses(h).get(STATUS_CONTEXT, ("", ""))[1].startswith("strict lane:"), str(gh.merged))
             reset()
 
-            # An approval survives an update that brought in only main (#13613): the train's update-branch
-            # merge must not void it, and nothing else may ride on it. Negative cases first.
+            # Every new head needs its own approval, including a pure main update. Topology still
+            # bounds inherited revocations; it never grants approval. Negative cases first.
             def owner_updated(case):
                 """Approve #70 on H, move main, then give the PR head H' per `case`."""
                 gh.add_pr(70, "codex/owner-feature", "2026-01-01")
@@ -5537,7 +5545,10 @@ def self_test() -> int:
             check("owner chain: the clean update is a main-only merge of H",
                   remember_approval_chain(gh, Git(clone("chain")), gh.main_sha(), h1)[:2] == [h1, h0])
             drain()
-            check("owner chain: approval on H survives a clean update merge with main", gh.merged == [70], str(gh.merged))
+            check("owner chain: approval on H does not cover a clean update merge with main", gh.merged == [], str(gh.merged))
+            gh.post_status(h1, "success", "owner-approved PR #70", OWNER_APPROVAL_CONTEXT)
+            drain()
+            check("owner chain: fresh approval on updated H merges through the normal lane", gh.merged == [70], str(gh.merged))
             reset()
             gh.g("branch", "-f", "codex/owner-feature", "p1")
 

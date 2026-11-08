@@ -145,7 +145,8 @@ class RunnerTests(unittest.TestCase):
                        GITHUB_DEPENDENCY_GRAPH_JOB_ID='123',
                        GITHUB_DEPENDENCY_GRAPH_JOB_CORRELATOR=IDENTITY['job']['correlator'],
                        GITHUB_DEPENDENCY_GRAPH_WORKSPACE=str(root),
-                       DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS='^(detachedConfiguration.*|classpath)$')
+                       DEPENDENCY_GRAPH_EXCLUDE_CONFIGURATIONS='^(detachedConfiguration.*|classpath)$',
+                       DEPENDENCY_GRAPH_PLUGIN_VERSION='1.5.1')
             for key in ('DEPENDENCY_GRAPH_INCLUDE_PROJECTS', 'DEPENDENCY_GRAPH_EXCLUDE_PROJECTS',
                         'DEPENDENCY_GRAPH_INCLUDE_CONFIGURATIONS'):
                 env.pop(key, None)
@@ -155,6 +156,10 @@ class RunnerTests(unittest.TestCase):
                 env['DEPENDENCY_GRAPH_INCLUDE_PROJECTS'] = ':only-one'
             if case == 'merge-ref':
                 env['GITHUB_DEPENDENCY_GRAPH_REF'] = env['GITHUB_REF']
+            if case == 'unpinned-plugin':
+                env.pop('DEPENDENCY_GRAPH_PLUGIN_VERSION')
+            if case == 'garbage-plugin-pin':
+                env['DEPENDENCY_GRAPH_PLUGIN_VERSION'] = 'latest'
             calls = []
 
             timeouts = []
@@ -214,6 +219,10 @@ class RunnerTests(unittest.TestCase):
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case in ('unpinned-plugin', 'garbage-plugin-pin'):
+                        # The pin guard must fire BEFORE any Gradle resolution; otherwise the
+                        # later shard-identity check would raise too and the case is vacuous.
+                        self.assertEqual(calls, [], 'refuse an unpinned plugin before resolving anything')
                     if case in ('wrong-snapshot', 'wrong-detector'):
                         self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
@@ -244,7 +253,8 @@ class RunnerTests(unittest.TestCase):
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
                      'wrong-receipt', 'wrong-snapshot', 'wrong-detector',
-                     'duplicate-snapshot', 'merge-ref', 'mixed-detector'):
+                     'duplicate-snapshot', 'merge-ref', 'mixed-detector',
+                     'unpinned-plugin', 'garbage-plugin-pin'):
             with self.subTest(case=case):
                 self.run_case(case)
 
@@ -259,6 +269,14 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('always()', submission)
         self.assertNotIn('continue-on-error', submission)
         self.assertIn('/merged.json', submission)
+
+    def test_workflow_pins_the_plugin_version_the_tests_expect(self):
+        # The pin lives in the workflow; setup-gradle's init script and the generator both read
+        # it. Drift between the pin and the fixture identity would make these tests vacuous.
+        source = (Path(__file__).resolve().parents[2] / 'workflows/dependency-submission.yml').read_text()
+        import re as _re
+        pins = _re.findall(r'^\s+DEPENDENCY_GRAPH_PLUGIN_VERSION: "([0-9.]+)"$', source, _re.M)
+        self.assertEqual(pins, [IDENTITY['detector']['version']])
 
 
 if __name__ == '__main__':

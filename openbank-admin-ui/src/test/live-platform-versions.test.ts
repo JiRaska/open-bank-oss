@@ -182,6 +182,38 @@ describe('live snapshot from mocked Prometheus', () => {
     expect(s.components.karpenter).toEqual([{ version: '1.14.1', count: 1, observedAt: fixedNow.toISOString() }])
   })
 
+  it('reads the Keycloak version from a spec tag only when the running digest matches it', async () => {
+    const digest = 'c'.repeat(64)
+    const s = await fetchLiveSnapshot(mockProm({ images: [row({
+      image: `sha256:${'a'.repeat(64)}`,
+      image_id: `registry.example/openbank-keycloak@sha256:${digest}`,
+      image_spec: `registry.example/openbank-keycloak:26.8.1-optimized-b9cfb2907c9b@sha256:${digest}`,
+      namespace: 'iam', container: 'keycloak',
+    }, fixedNow.getTime() / 1000)] }), () => fixedNow)
+    expect(s.components.keycloak).toEqual([
+      { version: '26.8.1', count: 1, observedAt: fixedNow.toISOString(), source: 'prometheus-runtime-digest-verified-tag' },
+    ])
+  })
+
+  it('does not trust a spec tag whose pinned digest differs from the running one', async () => {
+    const s = await fetchLiveSnapshot(mockProm({ images: [row({
+      image: `sha256:${'a'.repeat(64)}`,
+      image_id: `registry.example/openbank-keycloak@sha256:${'d'.repeat(64)}`,
+      image_spec: `registry.example/openbank-keycloak:26.8.1-optimized@sha256:${'e'.repeat(64)}`,
+      namespace: 'iam', container: 'keycloak',
+    }, fixedNow.getTime() / 1000)] }), () => fixedNow)
+    expect(s.components.keycloak).toBeUndefined()
+  })
+
+  it('marks a version digest-verified only when every sample of it is', () => {
+    const at = fixedNow.toISOString()
+    const agg = aggregateImages([
+      { image: 'r/openbank-keycloak:26.8.1-optimized@sha256:' + 'f'.repeat(64), verified: true, count: 1, observedAt: at },
+      { image: 'quay.io/keycloak/keycloak:26.8.1', count: 1, observedAt: at },
+    ])
+    expect(agg.keycloak).toEqual([{ version: '26.8.1', count: 2, observedAt: at }])
+  })
+
   it('does not infer Keycloak or Karpenter versions from desired image tags', async () => {
     const s = await fetchLiveSnapshot(mockProm({ images: [row({
       image: `sha256:${'a'.repeat(64)}`,
