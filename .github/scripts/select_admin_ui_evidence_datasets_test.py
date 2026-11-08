@@ -81,5 +81,22 @@ class DatasetSelectionTests(unittest.TestCase):
         self.assertIn("fetch-depth: ${{ matrix.dataset == 'test-intelligence' && '0' || '1' }}", source)
 
 
+class SupersededSourceSkipTest(unittest.TestCase):
+    """A workflow_run for a commit main has moved past must not start a collector."""
+
+    def test_superseded_workflow_run_selects_no_dataset_and_skips_publish(self) -> None:
+        import yaml
+
+        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / "workflows" / "admin-ui-evidence.yml").read_text())
+        jobs = workflow["jobs"]
+        resolve = next(step["run"] for step in jobs["authorize-source"]["steps"] if step.get("id") == "source")
+        check = resolve.index("git ls-remote --exit-code origin refs/heads/main")
+        self.assertLess(resolve.index('if [ "$EVENT_NAME" = workflow_run ]'), check)
+        self.assertLess(check, resolve.index("datasets='[]'"))
+        self.assertLess(resolve.index("datasets='[]'"), resolve.index('echo "datasets=$datasets"'))
+        # An empty matrix is a workflow error, so the publish job itself must be skipped.
+        self.assertIn("needs.authorize-source.outputs.datasets != '[]'", jobs["publish"]["if"])
+
+
 if __name__ == "__main__":
     unittest.main()
