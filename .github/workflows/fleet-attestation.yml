@@ -57,6 +57,9 @@ jobs:
       - name: Classifier selftest
         run: .github/scripts/check-fleet-attestations.sh --selftest
 
+      - name: Bounded development pilot source controls
+        run: python3 .github/scripts/test-agent-pilot-source.py
+
   verify:
     name: Verify fleet attestations
     runs-on: ubuntu-latest
