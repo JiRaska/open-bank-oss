@@ -103,7 +103,15 @@ class InterestCloseParticipationSchedulerTest {
         ran(oct1, InterestCloseJobs.CAPITALIZATION, items = 5, journals = 5)
         scheduler.reportDays(today).await().indefinitely()
         assertThat(delivered.single { it.businessDate == oct1 })
-            .isEqualTo(CloseParticipationReport(oct1, CloseOutcome.RAN, journalsPosted = 5, itemsProcessed = 12))
+            .isEqualTo(
+                CloseParticipationReport(
+                    oct1,
+                    CloseOutcome.RAN,
+                    journalsPosted = 5,
+                    itemsProcessed = 12,
+                    exercisedJobs = setOf("accrual", "capitalization"),
+                ),
+            )
 
         ran(
             oct1,
