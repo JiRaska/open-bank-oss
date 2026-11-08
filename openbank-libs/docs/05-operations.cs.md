@@ -39,6 +39,12 @@ Pro nedůvěryhodné XML používejte `SecureXml` z `openbank-libs-domain`; vyd�
 
 Klienti interních služeb s injektovaným JDK `HttpClient` (LLM gateway, obsahový guard, embeddingy, flagd a OPA sidecar) používají `BoundedBodyHandlers.ofString()` místo neomezeného `BodyHandlers.ofString()`. Výchozí limit činí 4 MiB; při jeho překročení handler ukončí odběr odpovědi a volání selže s `IOException`. Externí odchozí provoz patří přes `SafeHttpClient`, který omezuje tělo odpovědi a kontroluje cílové hosty.
 
+### Životní cyklus HTTP odpovědi
+
+Interní HTTP adaptéry a transport OpenBao omezují příjem celého těla odpovědi nakonfigurovaným časovým limitem požadavku. Platí kratší limit požadavku nebo transportu; velikostní limity odpovědi se nemění. Vypršení limitu nebo přerušení vlákna vyžádá zrušení původního JDK přenosu.
+
+Suspendující adaptéry OPA a LLM propagují do blokujícího přenosu také zrušení korutiny volajícího. Zrušení pokračuje k volajícímu a nepřevádí se na výpadek politiky ani náhradní hodnotu. Používá se existující coroutine IO dispatcher, bez samostatného executorového či časovačového poolu. Běžné transportní chyby zachovávají dosavadní chybovou politiku jednotlivých adaptérů.
+
 ## Účast na závěrce dne (ADR-0342)
 
 `com.openbank.libs.close` (v `openbank-libs-runtime`) je strana účastníka kontraktu závěrky dne s ledgerem: `CloseParticipationAssembler` skládá uložené běhy úloh služby do jednoho hlášení za účetní den a `CloseParticipationReporter` ho doručuje, aniž by kdy shodil volající úlohu. Běh, který byl odmítnut nebo částečně selhal, se složí na `REFUSED`, což ledger bere jako NEÚPLNÉ: den zůstane v `CUTOFF`, dokud účastník nenahlásí `RAN` nebo ho operátor nepromině. Obchodní data musí pocházet z `AccountingClock`, nikdy z UTC beanu `Clock`.

@@ -40,3 +40,9 @@ Pro nedůvěryhodné XML používejte `SecureXml` z `openbank-libs-domain`; vyd�
 `SafeHttpClient` z `openbank-libs-runtime` při HTTPS ověřuje certifikační řetězec pomocí JVM a kontroluje hostname. Testovací kořeny stále procházejí platformním PKIX trust managerem; volající nemůže předat vlastní trust manager ani TLS kontext.
 
 Klienti interních služeb, kteří potřebují injektovaný JDK `HttpClient` (LLM gateway, obsahový guard, embeddingy, flagd a OPA sidecar), používají `BoundedBodyHandlers.ofString()` místo neomezeného `BodyHandlers.ofString()`. Výchozí limit je 4 MiB; po překročení handler zruší odběr odpovědi a volání selže s `IOException`. Pro externí odchozí provoz používejte `SafeHttpClient`, který má vlastní limit těla a politiku cílových hostů.
+
+### Životní cyklus HTTP odpovědi
+
+Interní HTTP adaptéry a transport OpenBao omezují příjem celého těla odpovědi nakonfigurovaným časovým limitem požadavku. Platí kratší limit požadavku nebo transportu; velikostní limity odpovědi se nemění. Vypršení limitu nebo přerušení vlákna vyžádá zrušení původního JDK přenosu.
+
+Suspendující adaptéry OPA a LLM propagují do blokujícího přenosu také zrušení korutiny volajícího. Zrušení pokračuje k volajícímu a nepřevádí se na výpadek politiky ani náhradní hodnotu. Používá se existující coroutine IO dispatcher, bez samostatného executorového či časovačového poolu. Běžné transportní chyby zachovávají dosavadní chybovou politiku jednotlivých adaptérů.

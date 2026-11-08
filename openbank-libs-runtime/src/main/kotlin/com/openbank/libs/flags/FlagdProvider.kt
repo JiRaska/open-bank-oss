@@ -7,6 +7,7 @@ package com.openbank.libs.flags
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.security.BoundedBodyHandlers
+import com.openbank.libs.security.HttpExchangeDeadline
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -73,7 +74,7 @@ class FlagdProvider(
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
 
-        val response = runCatching { http.send(request, BoundedBodyHandlers.ofString()) }
+        val response = runCatching { HttpExchangeDeadline.send(http, request, BoundedBodyHandlers.ofString()) }
             .getOrElse {
                 return FlagEvaluation(
                     flag,

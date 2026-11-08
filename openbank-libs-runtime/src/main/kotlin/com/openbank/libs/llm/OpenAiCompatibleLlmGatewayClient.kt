@@ -9,8 +9,8 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.security.BoundedBodyHandlers
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.openbank.libs.security.HttpExchangeDeadline
+import kotlinx.coroutines.CancellationException
 import org.jboss.logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
@@ -118,9 +118,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                 .build()
             // Blocking send off the event loop.
-            val resp = withContext(Dispatchers.IO) {
-                http.send(request, BoundedBodyHandlers.ofString())
-            }
+            val resp = HttpExchangeDeadline.sendCancellable(http, request, BoundedBodyHandlers.ofString())
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("LLM backend %s returned HTTP %d", baseUrl, resp.statusCode())
                 metrics.recordCall(
@@ -143,6 +141,8 @@ class OpenAiCompatibleLlmGatewayClient(
                 provider,
             )
             parsed.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (ex: Exception) {
             log.warnf("LLM call failed: %s", ex.message)
             metrics.recordCall(

@@ -9,6 +9,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URI
 import java.net.http.HttpClient
+import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
@@ -57,6 +58,15 @@ class OpenBaoTransport(
         require(!relative.startsWith("/")) { "relative OpenBao path expected" }
         return base.resolve(relative)
     }
+
+    /**
+     * Bound the complete exchange, including a body that stops after its headers.
+     * Cancellation targets the original JDK exchange so the blocked body reader and
+     * connection are released. No executor or additional timeout budget is introduced.
+     */
+    @Suppress("ThrowsCount") // Distinct timeout, interruption and original transport failures.
+    internal fun send(request: HttpRequest): HttpResponse<String> =
+        HttpExchangeDeadline.send(httpClient, request, boundedBody(), requestTimeout)
 
     companion object {
         const val DEFAULT_REQUEST_TIMEOUT_SECONDS = 10L

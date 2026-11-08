@@ -18,6 +18,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -29,7 +30,8 @@ class FlagdProviderTest {
         val response = mockk<HttpResponse<String>>()
         every { response.statusCode() } returns status
         every { response.body() } returns body
-        every { http.send(any(), any<HttpResponse.BodyHandler<String>>()) } returns response
+        every { http.sendAsync(any(), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.completedFuture(response)
         return FlagdProvider(httpClient = http)
     }
 
@@ -116,7 +118,8 @@ class FlagdProviderTest {
     @Test
     fun `evaluate is fail-static when the sidecar is unreachable`() {
         val http = mockk<HttpClient>()
-        every { http.send(any(), any<HttpResponse.BodyHandler<String>>()) } throws IOException("connection refused")
+        every { http.sendAsync(any(), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.failedFuture(IOException("connection refused"))
         val p = FlagdProvider(httpClient = http)
 
         val eval = p.double("flag", default = 0.5)
@@ -179,7 +182,8 @@ class FlagdProviderTest {
         every { response.statusCode() } returns 200
         every { response.body() } returns """{"value":true,"reason":"TARGETING_MATCH"}"""
         val req = slot<HttpRequest>()
-        every { http.send(capture(req), any<HttpResponse.BodyHandler<String>>()) } returns response
+        every { http.sendAsync(capture(req), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.completedFuture(response)
 
         // Spy the mapper to capture the serialized OFREP request body structure.
         val mapper = spyk(ObjectMapper())
@@ -205,7 +209,8 @@ class FlagdProviderTest {
         every { response.statusCode() } returns 200
         every { response.body() } returns """{"value":true,"reason":"STATIC"}"""
         val req = slot<HttpRequest>()
-        every { http.send(capture(req), any<HttpResponse.BodyHandler<String>>()) } returns response
+        every { http.sendAsync(capture(req), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.completedFuture(response)
 
         // No baseUrl arg → DEFAULT_BASE_URL.
         FlagdProvider(httpClient = http).boolean("flag", false)
