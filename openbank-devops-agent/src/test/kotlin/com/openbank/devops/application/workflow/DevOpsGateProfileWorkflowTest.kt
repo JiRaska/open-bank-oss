@@ -48,10 +48,17 @@ class DevOpsGateProfileWorkflowTest {
         profile: CiGateProfileEvidence,
         calls: MutableList<String>,
         failProfile: Boolean = false,
+        profileOnly: Boolean = false,
+        emitAdvisory: Boolean = false,
+        failAdvisory: Boolean = false,
     ) {
         val worker = env.newWorker("devops-profile-test")
         worker.registerWorkflowImplementationTypes(
-            if (legacy) LegacyDevOpsAnalysisWorkflowImpl::class.java else DevOpsAnalysisWorkflowImpl::class.java,
+            when {
+                legacy -> LegacyDevOpsAnalysisWorkflowImpl::class.java
+                profileOnly -> ProfileOnlyDevOpsAnalysisWorkflowImpl::class.java
+                else -> DevOpsAnalysisWorkflowImpl::class.java
+            },
         )
         val collect = object : CollectSignalsActivity {
             override fun collectCiPipelineSignals(): Map<String, Double> = emptyMap()
@@ -95,7 +102,22 @@ class DevOpsGateProfileWorkflowTest {
                 return profile
             }
         }
-        worker.registerActivitiesImplementations(collect, detect, diagnosis, activity)
+        val advisory = object : CpuOptimizationAdvisoryActivity {
+            override fun assess(profile: CiGateProfileEvidence): DevOpsFinding? {
+                calls.add("advisory")
+                if (failAdvisory) throw ApplicationFailure.newNonRetryableFailure("fixture unavailable", "Fixture")
+                return if (emitAdvisory) {
+                    finding.copy(
+                        id = "cpu-advisory",
+                        severity = FindingSeverity.WARNING,
+                        status = FindingStatus.DIAGNOSED,
+                    )
+                } else {
+                    null
+                }
+            }
+        }
+        worker.registerActivitiesImplementations(collect, detect, diagnosis, activity, advisory)
         env.start()
     }
 
@@ -137,6 +159,7 @@ class DevOpsGateProfileWorkflowTest {
                 "profile",
                 "diagnose",
                 "propose",
+                "advisory",
             )
         }
     }
@@ -191,6 +214,49 @@ class DevOpsGateProfileWorkflowTest {
             environment().use { replay ->
                 WorkflowReplayer.replayWorkflowExecution(history, replay, DevOpsAnalysisWorkflowImpl::class.java)
             }
+        }
+    }
+
+    @Test
+    fun `profile-only history replays with the new advisory activity version disabled`() {
+        environment().use { env ->
+            val calls = mutableListOf<String>()
+            val profile = CiGateProfileEvidence("example/repo", at, DeliveryEvidenceState.UNAVAILABLE)
+            registerActivities(env, legacy = false, profile = profile, calls = calls, profileOnly = true)
+            val workflow = stub(env)
+            workflow.runAnalysis(RunTrigger.OPERATOR_MANUAL)
+            val history = env.workflowClient.fetchHistory(WorkflowStub.fromTyped(workflow).execution.workflowId)
+            environment().use { replay ->
+                WorkflowReplayer.replayWorkflowExecution(history, replay, DevOpsAnalysisWorkflowImpl::class.java)
+            }
+            assertThat(calls).doesNotContain("advisory")
+        }
+    }
+
+    @Test
+    fun `advisory enters report without another diagnosis or proposal`() {
+        environment().use { env ->
+            val calls = mutableListOf<String>()
+            val profile = CiGateProfileEvidence("example/repo", at, DeliveryEvidenceState.PARTIAL)
+            registerActivities(env, false, profile, calls, emitAdvisory = true)
+            val result = stub(env).runAnalysis(RunTrigger.OPERATOR_MANUAL)
+            assertThat(result.findingsDetected.map { it.id }).containsExactly("fixture", "cpu-advisory")
+            assertThat(result.findingsProposed).isEqualTo(1)
+            assertThat(calls.count { it == "diagnose" }).isEqualTo(1)
+            assertThat(calls.count { it == "propose" }).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `advisory storage failure preserves the existing findings and profile`() {
+        environment().use { env ->
+            val calls = mutableListOf<String>()
+            val profile = CiGateProfileEvidence("example/repo", at, DeliveryEvidenceState.PARTIAL)
+            registerActivities(env, false, profile, calls, failAdvisory = true)
+            val result = stub(env).runAnalysis(RunTrigger.OPERATOR_MANUAL)
+            assertThat(result.findingsDetected.map { it.id }).containsExactly("fixture")
+            assertThat(result.ciGateProfile).isEqualTo(profile)
+            assertThat(result.findingsProposed).isEqualTo(1)
         }
     }
 }
