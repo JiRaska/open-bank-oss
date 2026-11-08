@@ -19,6 +19,32 @@ data class CloseParticipationReport(
     /** Stable identity of persisted source receipts; retransmission must not advance ledger work time. */
     val sourceRunId: String? = null,
 ) {
+    /** Keep already compiled callers of the original constructor/default bridge linkable. */
+    constructor(
+        businessDate: LocalDate,
+        outcome: CloseOutcome,
+        journalsPosted: Int = 0,
+        itemsProcessed: Int = 0,
+        reason: String? = null,
+    ) : this(businessDate, outcome, journalsPosted, itemsProcessed, reason, emptySet(), null)
+
+    /** The original copy/default bridge must preserve the new immutable source evidence too. */
+    fun copy(
+        businessDate: LocalDate = this.businessDate,
+        outcome: CloseOutcome = this.outcome,
+        journalsPosted: Int = this.journalsPosted,
+        itemsProcessed: Int = this.itemsProcessed,
+        reason: String? = this.reason,
+    ): CloseParticipationReport = CloseParticipationReport(
+        businessDate,
+        outcome,
+        journalsPosted,
+        itemsProcessed,
+        reason,
+        exercisedJobs,
+        sourceRunId,
+    )
+
     init {
         require(journalsPosted >= 0 && itemsProcessed >= 0) { "counts must be non-negative" }
         require(outcome == CloseOutcome.RAN || !reason.isNullOrBlank()) { "$outcome requires a reason" }
