@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ee0646bd905ce64e"
+        openbank.tech/policy-checksum: "e2a5674409532d75"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-3f6acead@sha256:1c814e6cb4a7aaece5ef5c4c202f385e644bca2132612b025d5fc34d76adc100
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-2e500af2@sha256:4b4d3fce4a6da0f07ae283b7062572ac0e39600c16ab6734550b56284c125352
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

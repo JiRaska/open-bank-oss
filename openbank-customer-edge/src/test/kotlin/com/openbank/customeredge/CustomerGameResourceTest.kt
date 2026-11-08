@@ -79,4 +79,22 @@ class CustomerGameResourceTest {
         assertThat(response.status).isEqualTo(503)
         assertThat(response.entity.toString()).doesNotContain("private")
     }
+
+    @Test
+    fun `editor capable app receives playable content and capability is forwarded`() {
+        every { upstream.getToService(any(), any(), any(), party.toString()) } returns Response.ok(
+            """{"revision":3,"levels":[{"level":{"id":"new_course","theme":"embankment","order":3,"titleCs":"N","titleEn":"E","state":"BETA","content":{"schema":1,"levelEnd":6000}},"unlocked":true,"completed":false}]}""",
+        ).build()
+        val response = resource.levels(true, null, 1)
+        val json = ObjectMapper().valueToTree<com.fasterxml.jackson.databind.JsonNode>(response.entity)
+        assertThat(json["levels"][0]["content"]["levelEnd"].asInt()).isEqualTo(6000)
+        verify {
+            upstream.getToService(
+                "https://engagement.test",
+                "/api/v1/game/levels",
+                mapOf("partyId" to party.toString(), "beta" to "true", "contentSchema" to "1"),
+                party.toString(),
+            )
+        }
+    }
 }

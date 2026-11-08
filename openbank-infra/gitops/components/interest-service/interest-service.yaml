@@ -25,7 +25,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "28bf32df833131bc"
+        openbank.tech/policy-checksum: "1f9f8bac2d8fa03f"
     spec:
       # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
       # workload, not to every pod running as `default` in the namespace.
@@ -84,10 +84,12 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
             # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8203 edge.
-            # Verification stays at the application default `disabled` (nothing compared, counted) until
-            # interest's verify-only role exists; then set INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            # MODE=openbao verifies through interest's verify-only role (runbook 0027); the application
+            # default `disabled` compares nothing and counts verification_disabled.
             # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
             # ESO and the in-namespace jobs. Same interest-internal-tls CA, mounted at /mnt/openbao-tls.
+            - name: INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE
+              value: openbao
             - name: INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
               value: https://openbao.vault.svc:8203
             - name: OPENBANK_INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_CA_FILE

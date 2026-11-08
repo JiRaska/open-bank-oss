@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.customeredge.infrastructure.rest
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import io.smallrye.common.annotation.Blocking
@@ -29,12 +30,16 @@ class CustomerGameResource(
     @GET
     @Blocking
     @Authorize(action = "customer.game.read")
-    fun levels(@QueryParam("beta") beta: Boolean, @HeaderParam("X-Acting-For") actingFor: String?): Response {
+    fun levels(
+        @QueryParam("beta") beta: Boolean,
+        @HeaderParam("X-Acting-For") actingFor: String?,
+        @QueryParam("contentSchema") contentSchema: Int? = null,
+    ): Response {
         val party = parties.resolve(actingFor).toString()
         upstream.getToService(
             serviceUrl,
             "/api/v1/game/levels",
-            mapOf("partyId" to party, "beta" to beta.toString()),
+            catalogueQuery(party, beta, contentSchema),
             party,
         ).use { response ->
             if (response.status !=
@@ -55,22 +60,33 @@ class CustomerGameResource(
                 return Response.status(Response.Status.BAD_GATEWAY).build()
             }
             val levels = node.path("levels").map { entry ->
-                val level = entry.path("level")
-                val validIdentity =
-                    level.path("id").isTextual && level.path("theme").isTextual && level.path("order").isInt
-                val validState = entry.path("unlocked").isBoolean && entry.path("completed").isBoolean
-                if (!validIdentity || !validState) return Response.status(Response.Status.BAD_GATEWAY).build()
-                buildMap<String, Any> {
-                    for (key in listOf("id", "theme", "order", "titleCs", "titleEn", "state")) put(key, level.path(key))
-                    put("requirement", level.path("requirement"))
-                    put("unlocked", entry.path("unlocked"))
-                    put("completed", entry.path("completed"))
-                }
+                projectGameLevel(entry) ?: return Response.status(Response.Status.BAD_GATEWAY).build()
             }
             return Response.ok(
                 mapOf("revision" to node.path("revision"), "levels" to levels),
             ).header("Cache-Control", "no-store").build()
         }
+    }
+
+    private fun projectGameLevel(entry: JsonNode): Map<String, Any>? {
+        val level = entry.path("level")
+        val validIdentity =
+            level.path("id").isTextual && level.path("theme").isTextual && level.path("order").isInt
+        val validState = entry.path("unlocked").isBoolean && entry.path("completed").isBoolean
+        if (!validIdentity || !validState) return null
+        return buildMap<String, Any> {
+            for (key in listOf("id", "theme", "order", "titleCs", "titleEn", "state")) put(key, level.path(key))
+            put("requirement", level.path("requirement"))
+            if (level.hasNonNull("content")) put("content", level.path("content"))
+            put("unlocked", entry.path("unlocked"))
+            put("completed", entry.path("completed"))
+        }
+    }
+
+    private fun catalogueQuery(party: String, beta: Boolean, contentSchema: Int?): Map<String, String> = buildMap {
+        put("partyId", party)
+        put("beta", beta.toString())
+        if (contentSchema == 1) put("contentSchema", "1")
     }
 
     @POST

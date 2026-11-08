@@ -190,6 +190,7 @@ class GitHubProposalAdapter(private val config: FlakyTestHunterConfig) : GitHubP
             url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubRepo()}$path",
             headers = mapOf(
                 "Authorization" to "Bearer ${config.githubToken().orElse("")}",
+                "User-Agent" to "openbank-flaky-test-hunter",
                 "Accept" to "application/vnd.github+json",
                 "X-GitHub-Api-Version" to "2022-11-28",
                 "Content-Type" to "application/json",

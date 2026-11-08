@@ -50,6 +50,15 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
             .build(),
     )
 
+    private val cpuAdvisory = Workflow.newActivityStub(
+        CpuOptimizationAdvisoryActivity::class.java,
+        ActivityOptions.newBuilder()
+            .setStartToCloseTimeout(Duration.ofSeconds(30))
+            .setScheduleToCloseTimeout(Duration.ofMinutes(1))
+            .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(2).build())
+            .build(),
+    )
+
     override fun runAnalysis(trigger: RunTrigger): DevOpsRunReport {
         val runId = Workflow.randomUUID().toString()
         val startedAt = Instant.ofEpochMilli(Workflow.currentTimeMillis())
@@ -88,15 +97,30 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
             }
         }
 
+        // Separate version marker preserves both pre-profile and profile-only histories.
+        val advisory = if (Workflow.getVersion("devops-cpu-advisory", Workflow.DEFAULT_VERSION, 1) == 1 &&
+            profile != null
+        ) {
+            try {
+                cpuAdvisory.assess(profile)
+            } catch (failure: ActivityFailure) {
+                if (failure.cause is CanceledFailure) throw failure
+                null
+            }
+        } else {
+            null
+        }
+        val reportFindings = diagnosed + listOfNotNull(advisory)
+
         val completedAt = Instant.ofEpochMilli(Workflow.currentTimeMillis())
 
         return DevOpsRunReport(
             runId = runId,
             startedAt = startedAt,
             completedAt = completedAt,
-            findingsDetected = diagnosed,
-            findingsProposed = diagnosed.count { it.status == FindingStatus.PROPOSED },
-            doraMetricsAtRisk = diagnosed.mapNotNull { it.doraMetricImpacted }.distinct().size,
+            findingsDetected = reportFindings,
+            findingsProposed = reportFindings.count { it.status == FindingStatus.PROPOSED },
+            doraMetricsAtRisk = reportFindings.mapNotNull { it.doraMetricImpacted }.distinct().size,
             tokensUsed = 0,
             trigger = trigger,
             ciGateProfile = profile,

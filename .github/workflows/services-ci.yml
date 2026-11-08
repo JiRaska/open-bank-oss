@@ -44,7 +44,13 @@ on:
   # failure, opens an actionable tracking issue so a rotting fleet is caught in <24h.
   schedule:
     - cron: "0 3 * * *" # 03:00 UTC daily
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Optional single Gradle module to verify on demand; blank retains the full-fleet run."
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -127,6 +133,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
+          REQUESTED_SERVICE: ${{ inputs.service }}
         run: |
           set -euo pipefail
           # Scope selection lives in a checked-in script (self-tested by the
