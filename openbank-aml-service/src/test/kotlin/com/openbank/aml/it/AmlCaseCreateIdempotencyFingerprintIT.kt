@@ -4,10 +4,13 @@
 
 package com.openbank.aml.it
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.usecase.AmlCaseService
+import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
 import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
 import io.mockk.coEvery
@@ -26,6 +29,7 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.restassured.response.Response
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
@@ -51,6 +55,12 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
     @Inject
     lateinit var useCase: AmlCaseUseCase
+
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var idempotencyStore: IdempotencyStore
 
     @Test
     @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
@@ -265,6 +275,90 @@ class AmlCaseCreateIdempotencyFingerprintIT {
         val again = post(key, body(party, "ALERT-A"))
         assertThat(again.statusCode).isEqualTo(201)
         assertThat(again.jsonPath().getString("id")).isEqualTo(first)
+        assertThat(caseCount(party)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-sepa-payment", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-sepa-payment"),
+            Claim(key = "sub", value = "sepa-service-subject"),
+            Claim(key = "preferred_username", value = "service-account-openbank-sepa-payment"),
+        ],
+    )
+    fun `another admitted payment service cannot squat a domestic fraud review key`() {
+        val party = UUID.randomUUID()
+        val key = "aml-${UUID.randomUUID()}-FRAUD_REVIEW"
+
+        assertThat(post(key, body(party, "FRAUD_REVIEW")).statusCode).isEqualTo(403)
+        assertThat(caseCount(party)).isZero()
+        val scoped = "idempotency:" + IdempotencyScope("aml-service", "service-account-openbank-sepa-payment").storeKey(key)
+        assertThat(redis.key().exists(scoped).await().indefinitely()).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
+    fun `staff create permission does not reserve the domestic fraud review namespace`() {
+        val party = UUID.randomUUID()
+        val key = "aml-${UUID.randomUUID()}-FRAUD_REVIEW"
+
+        assertThat(post(key, body(party, "FRAUD_REVIEW")).statusCode).isEqualTo(403)
+        assertThat(caseCount(party)).isZero()
+        val scoped = "idempotency:" + IdempotencyScope("aml-service", "u-compliance").storeKey(key)
+        assertThat(redis.key().exists(scoped).await().indefinitely()).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = "u-compliance", roles = ["ROLE_COMPLIANCE"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "sub", value = "u-compliance"),
+            Claim(key = "preferred_username", value = "u-compliance"),
+        ],
+    )
+    fun `an existing Redis replay cannot bypass the reserved fraud review namespace`() {
+        val party = UUID.randomUUID()
+        val key = "aml-${UUID.randomUUID()}-FRAUD_REVIEW"
+        val json = body(party, "FRAUD_REVIEW")
+        val request = objectMapper.readValue(json, CreateAmlCaseRequest::class.java)
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/aml/cases", request)
+        runBlocking {
+            idempotencyStore.save(IdempotencyScope("aml-service", "u-compliance"), key, hash, 201, "{}", 60)
+        }
+
+        val response = post(key, json)
+        assertThat(response.statusCode).isEqualTo(403)
+        assertThat(response.header("X-Idempotency-Replayed")).isNull()
+        assertThat(caseCount(party)).isZero()
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-domestic-payment", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-domestic-payment"),
+            Claim(key = "sub", value = "domestic-service-subject"),
+            Claim(key = "preferred_username", value = "service-account-openbank-domestic-payment"),
+        ],
+    )
+    fun `domestic payment creates and retries its reserved fraud review key`() {
+        val party = UUID.randomUUID()
+        val key = "aml-${UUID.randomUUID()}-FRAUD_REVIEW"
+        val first = create(key, body(party, "FRAUD_REVIEW"), expect = 201)
+
+        val replay = post(key, body(party, "FRAUD_REVIEW"))
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.header("X-Idempotency-Replayed")).isEqualTo("true")
+        assertThat(replay.jsonPath().getString("id")).isEqualTo(first)
         assertThat(caseCount(party)).isEqualTo(1)
     }
 
