@@ -103,7 +103,8 @@ class TieOutSchedulerTest {
         val account = control("2100")
         val watermark = mockk<JournalReadWatermark>()
         scheduler.journalWatermark = watermark
-        coEvery { watermark.countThrough(day) } returns 7L
+        coEvery { watermark.populationThrough(day) } returns
+            com.openbank.ledger.infrastructure.persistence.repository.JournalPopulation(7, "a".repeat(64))
         coEvery { glAccounts.findByCode(any()) } returns null
         coEvery { glAccounts.findByCode("2100") } returns account
         coEvery { ledger.getControlAccountTieOut(any()) } returns listOf(tieOut(account.id, BigDecimal.ZERO))
@@ -116,9 +117,9 @@ class TieOutSchedulerTest {
         assertThat(saved.captured.journalCount).isEqualTo(7L)
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.OK)
         coVerifyOrder {
-            watermark.countThrough(day)
+            watermark.populationThrough(day)
             ledger.getControlAccountTieOut(any())
-            watermark.countThrough(day)
+            watermark.populationThrough(day)
             runs.save(any())
         }
     }
@@ -130,7 +131,8 @@ class TieOutSchedulerTest {
         val watermark = mockk<JournalReadWatermark>()
         scheduler.journalWatermark = watermark
         var committed = 7L
-        coEvery { watermark.countThrough(day) } answers { committed }
+        coEvery { watermark.populationThrough(day) } answers
+            { com.openbank.ledger.infrastructure.persistence.repository.JournalPopulation(committed, "a".repeat(64)) }
         coEvery { glAccounts.findByCode(any()) } returns null
         coEvery { glAccounts.findByCode("2100") } returns account
         coEvery { ledger.getControlAccountTieOut(any()) } answers {
@@ -145,7 +147,7 @@ class TieOutSchedulerTest {
         assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.OK)
         assertThat(saved.captured.startedAt).isEqualTo(clock.instant())
         assertThat(saved.captured.journalCount).isNull()
-        coVerify(exactly = 2) { watermark.countThrough(day) }
+        coVerify(exactly = 2) { watermark.populationThrough(day) }
     }
 
     @Test

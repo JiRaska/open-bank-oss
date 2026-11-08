@@ -105,6 +105,7 @@ class DayCloseParticipantsIT {
                 TieOutRunRecord(
                     UUID.randomUUID(), date, at, TieOutRunStatus.OK, 4, 0, 0,
                     startedAt = at, journalCount = journalWatermark.countThrough(date),
+                    journalFingerprint = journalWatermark.populationThrough(date).fingerprint,
                 ),
             )
         }
@@ -143,6 +144,7 @@ class DayCloseParticipantsIT {
                     errors = 0,
                     startedAt = cutoffAt.plus(Duration.ofMinutes(30)),
                     journalCount = journalWatermark.countThrough(date),
+                    journalFingerprint = journalWatermark.populationThrough(date).fingerprint,
                 ),
             )
             val opened = AccountingDayRecord.open(date, cutoffAt.minus(Duration.ofDays(1)), SEED_ACTOR)

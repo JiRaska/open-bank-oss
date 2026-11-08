@@ -825,3 +825,9 @@ prove their contents, approve a statutory chart or supply missing custody/paymen
 receipt hashes prevent transport replay from claiming newer work; they do not grant source actors
 permission to invent a completed business job. Keep production rollout staged and observe a full
 representative calendar month before considering enforcement.
+The journal population check also retains an order-independent SHA-256 multiset fingerprint of
+committed journal ids. Archive removal plus the same number of new postings cannot reuse a count
+as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting the whole set.
+Capture computes this before excluding writers, under the transition transaction's relation lock,
+then verifies the short count check under the writer barrier. Production-volume CPU and monthly
+read latency still require measurement before rollout; this is a consistency check, not a signature.
