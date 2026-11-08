@@ -42,7 +42,7 @@ jobs:
   drill:
     name: deception-drill
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -109,12 +109,25 @@ jobs:
               '',
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             ].join('\n')
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...context.repo, issue_number, per_page: 100,
-            })
-            const prior = comments.find(c => c.body && c.body.includes(MARKER))
-            if (prior) {
-              await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
-            } else {
-              await github.rest.issues.createComment({ ...context.repo, issue_number, body })
+            // The summary needs no API call, so the verdict survives an exhausted token budget.
+            await core.summary.addRaw(body).write()
+            // This token's rate limit is shared with the whole repository: wait it out, bounded.
+            const isRateLimit = e => (e.status === 403 || e.status === 429) && /rate limit/i.test(e.message)
+            for (let attempt = 1; ; attempt++) {
+              try {
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  ...context.repo, issue_number, per_page: 100,
+                })
+                const prior = comments.find(c => c.body && c.body.includes(MARKER))
+                if (prior) {
+                  await github.rest.issues.updateComment({ ...context.repo, comment_id: prior.id, body })
+                } else {
+                  await github.rest.issues.createComment({ ...context.repo, issue_number, body })
+                }
+                break
+              } catch (e) {
+                if (attempt >= 4 || !isRateLimit(e)) throw e
+                core.warning(`rate limited posting the drill verdict, attempt ${attempt} of 4`)
+                await new Promise(r => setTimeout(r, 150000))
+              }
             }

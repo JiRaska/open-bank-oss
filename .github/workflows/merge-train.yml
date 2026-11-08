@@ -85,6 +85,8 @@ jobs:
     name: settle finished trains (App token, git only)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Main-only environment holding the branch-updater App key (deployment branch policy: main).
+    environment: merge-train-branch-update
     permissions:
       contents: read
     outputs:
@@ -97,6 +99,20 @@ jobs:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
+      # update-branch only: the GitOps App lacks workflows permission, so GitHub refuses (403) to merge
+      # main into a PR when main changed a workflow file. Optional: a failed mint leaves the output
+      # empty and update-branch falls back to GH_TOKEN.
+      - name: Mint the branch-updater App token (update-branch only)
+        id: branch_updater_token
+        continue-on-error: true
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.BRANCH_UPDATER_APP_ID }}
+          private-key: ${{ secrets.BRANCH_UPDATER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
@@ -107,6 +123,7 @@ jobs:
         id: settle
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          UPDATE_BRANCH_TOKEN: ${{ steps.branch_updater_token.outputs.token }}
           GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}  # an id, not a credential; the guard pins the ruleset to it
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           SHADOW: ${{ env.MERGE_TRAIN_SHADOW == 'true' && '--shadow' || '' }}

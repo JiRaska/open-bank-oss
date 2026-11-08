@@ -299,6 +299,7 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/check-agent-pr-guard.py",              # agent-pr-guard: the train reads it as a refusal
     ".github/scripts/check-agent-bounded-write-surface.py", # reads branch protection on main
     ".github/scripts/check-merged-past-red-check.py",       # reads the rulesets
+    ".github/scripts/check-test-script-reachability.py",    # names merge-train in its text; a lenient copy must not ride a train
     ".github/scripts/test-merge-train-carrier-lock.py",     # exercises the carrier library
     ".github/scripts/test-merge-train-main-red-freshness.py",  # exercises settle / the strict lane
     ".github/scripts/test-merge-train-owner-approval.py",   # exercises the owner-approval writer
@@ -330,6 +331,9 @@ PRIVILEGED_GATE_CODE = FRESHNESS_GATE_CODE + (
     ".github/scripts/test-merge-train-close-linked-issues.py",
     ".github/scripts/test-merge-train-publish-siblings.py",
     ".github/scripts/test_runtime_resource_inputs.py",
+    # Wired into gates.yaml by #14701 (ci-script-tests-previously-unreachable).
+    ".github/scripts/test-finrep-historical-workflow.py",
+    ".github/scripts/test-prove-finrep-historical-checkout.py",
 )
 # JUDGE paths (strict carrier): everything CI or gate configuration READS to decide a verdict — every
 # workflow and action (a member editing ci.yml or a reusable workflow can neuter a required check), the
@@ -1593,7 +1597,8 @@ def api_stats_line(mode: str) -> str:
             f"resource={API_STATS['resource'] or '?'}")
 
 
-def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
+def api(method: str, path: str, body: dict | None = None, token: str | None = None) -> tuple[int, object]:
+    """`token` overrides GH_TOKEN for this one call (only update_branch passes one)."""
     data = json.dumps(body).encode() if body is not None else None
     memo = (method == "GET" and _MEMO_SCOPE[0] > 0 and not _DECIDING[0]
             and GET_MEMO_RE.match(path) is not None)
@@ -1606,7 +1611,7 @@ def api(method: str, path: str, body: dict | None = None) -> tuple[int, object]:
         req = urllib.request.Request(API + path, method=method, data=data)
         req.add_header("Accept", "application/vnd.github+json")
         req.add_header("X-GitHub-Api-Version", "2022-11-28")
-        req.add_header("Authorization", f"Bearer {os.environ['GH_TOKEN']}")
+        req.add_header("Authorization", f"Bearer {token or os.environ['GH_TOKEN']}")
         API_STATS["sent"] += 1
         try:
             status, raw, _h = _http_open(req, 30)
@@ -2075,8 +2080,15 @@ class GitHub:
         return data if isinstance(data, list) else None
 
     def update_branch(self, n: int, head: str) -> bool:
-        """Merge main into the PR branch, pinned to the head the strict lane judged."""
-        code, detail = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head})
+        """Merge main into the PR branch, pinned to the head the strict lane judged.
+
+        Uses UPDATE_BRANCH_TOKEN (a dedicated App holding `workflows: write`) when settle minted one: the
+        GitOps App lacks that permission, so GitHub refuses with 403 whenever main changed a workflow file
+        since the PR's base. Empty (mint failed / key unset) falls back to GH_TOKEN — today's behaviour."""
+        override = os.environ.get("UPDATE_BRANCH_TOKEN", "")
+        log(f"#{n:>6} update-branch credential: {'branch-updater App' if override else 'GH_TOKEN (GitOps App)'}")
+        code, detail = api("PUT", f"/repos/{self.repo}/pulls/{int(n)}/update-branch", {"expected_head_sha": head},
+                           token=override or None)
         if code != 202:
             log(f"#{n:>6} update-branch answered {code}: {json.dumps(detail)[:300]}")
         return code == 202
@@ -3842,12 +3854,23 @@ JOB_MUST = {
                                                            # the carrier branch from its own run and carries the cap.
                                                            ("settle names the strict carrier from its run id", '--run-id "${{ github.run_id }}"'),
                                                            ("settle names the strict carrier from its attempt", '--attempt "${{ github.run_attempt }}"'),
-                                                           ("settle carries the strict batch cap", "STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}")],
+                                                           ("settle carries the strict batch cap", "STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}"),
+                                                           # update-branch credential: a dedicated App with workflows: write,
+                                                           # held in a main-only environment, narrowed at mint, optional.
+                                                           ("settle runs in the main-only branch-update environment", "environment: merge-train-branch-update"),
+                                                           ("settle mints the branch-updater token", "app-id: ${{ secrets.BRANCH_UPDATER_APP_ID }}"),
+                                                           ("branch-updater token narrowed: contents", "permission-contents: write"),
+                                                           ("branch-updater token narrowed: pull requests", "permission-pull-requests: write"),
+                                                           ("branch-updater token narrowed: workflows", "permission-workflows: write"),
+                                                           ("a failed branch-updater mint degrades, never fails settle", "continue-on-error: true"),
+                                                           ("settle hands the branch-updater token to update-branch", "UPDATE_BRANCH_TOKEN: ${{ steps.branch_updater_token.outputs.token }}")],
 }
 JOB_FORBID = {
-    "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_")],
+    "build": [("build must not mint the App token", "create-github-app-token"), ("build must not see App secrets", "GITOPS_APP_"),
+              ("build must not see the branch-updater key", "BRANCH_UPDATER_"), ("build never gets UPDATE_BRANCH_TOKEN", "UPDATE_BRANCH_TOKEN")],
     "publish": [("publish runs no repo script", "python3 .github/"), ("publish runs no generator", "regen-derived.sh"),
-                ("publish installs no opa", "openpolicyagent.org"), ("publish installs no pyyaml", "install-pyyaml")],
+                ("publish installs no opa", "openpolicyagent.org"), ("publish installs no pyyaml", "install-pyyaml"),
+                ("publish must not see the branch-updater key", "BRANCH_UPDATER_"), ("publish never gets UPDATE_BRANCH_TOKEN", "UPDATE_BRANCH_TOKEN")],
     "settle": [("settle runs no repo script", "python3 .github/"), ("settle runs no generator", "regen-derived.sh"),
                ("settle takes no artifact", "download-artifact"), ("settle installs no opa", "openpolicyagent.org")],
 }
@@ -3891,6 +3914,33 @@ def owner_approval_declaration_errors(text: str) -> list[str]:
     return errors
 
 
+BRANCH_UPDATER_MARK = "BRANCH_UPDATER_"
+
+
+def workflow_texts() -> dict[str, str]:
+    d = WORKFLOW.parent
+    return {f.name: f.read_text() for f in sorted(d.glob("*.y*ml"))} if d.is_dir() else {}
+
+
+BRANCH_UPDATER_ENV = "merge-train-branch-update"
+
+
+def branch_updater_spread_errors(texts: dict[str, str]) -> list[str]:
+    """The branch-updater App key (workflows: write) may be reached from merge-train.yml ONLY.
+    Its secrets are environment-scoped, so `secrets: inherit` or `toJSON(secrets)` cannot hand them to
+    another job: only a job that declares the environment receives them. Two ways in, both checked —
+    naming the secret, or declaring the environment (which yields it under any spelling)."""
+    out = []
+    for name, text in sorted(texts.items()):
+        if name == WORKFLOW.name:
+            continue
+        if BRANCH_UPDATER_MARK in text:
+            out.append(f"{name} references {BRANCH_UPDATER_MARK}* — that key belongs to merge-train.yml's settle job alone")
+        if BRANCH_UPDATER_ENV in text:
+            out.append(f"{name} names the {BRANCH_UPDATER_ENV} environment — a job declaring it receives the branch-updater key")
+    return out
+
+
 def check_declaration() -> int:
     if not WORKFLOW.exists():
         print(f"::error::{WORKFLOW} missing")
@@ -3915,7 +3965,8 @@ def check_declaration() -> int:
         fails.append("no job may read the event payload (github.event.* / github.head_ref): triggers carry no authority")
     if code.count("actions/checkout@") != len(re.findall(r"^\s+ref: main\s*$", code, re.MULTILINE)):
         fails.append("every actions/checkout must pin `ref: main` (pull_request_target/workflow_run run with secrets)")
-    if "contents: write" in code:
+    # Line-anchored: the branch-updater mint's `permission-contents: write` narrows an App token, not GITHUB_TOKEN.
+    if re.search(r"^\s*contents:\s*write\b", code, re.MULTILINE):
         fails.append("GITHUB_TOKEN must stay read-only (writes use the App token)")
     for job in JOB_MUST:
         sec = jobs.get(job)
@@ -3927,10 +3978,11 @@ def check_declaration() -> int:
     rules = pathlib.Path(RULES_FILE)
     if not parse_extra_gates(rules.read_text() if rules.exists() else ""):
         fails.append(f"{RULES_FILE}: merge_train.extra_gates must declare at least one check (parsed as empty)")
+    fails += branch_updater_spread_errors(workflow_texts())
     fails += owner_approval_declaration_errors(OWNER_APPROVAL_WORKFLOW.read_text() if OWNER_APPROVAL_WORKFLOW.exists() else "")
     for f in fails:
         print(f"::error::merge-train.yml declaration: {f}")
-    n = len(TOP) + 7 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
+    n = len(TOP) + 8 + sum(len(v) for v in JOB_MUST.values()) + sum(len(v) for v in JOB_FORBID.values())
     print(f"SUBJECTS={n}")
     print("merge-train declaration OK" if not fails else f"{len(fails)} declaration failure(s)")
     return 1 if fails else 0
@@ -3966,7 +4018,8 @@ SYN_GENERATOR_SRC = (
     "os.makedirs('derived',exist_ok=True)\n"
     "pathlib.Path('derived/index.txt').write_text('\\n'.join(sorted(os.listdir('services')))+'\\n')\n"
     "pathlib.Path(os.environ.get('PROBE_OUT') or os.devnull).write_text("
-    "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'keys': sorted(os.environ)}))\n"
+    "json.dumps({'GH_TOKEN': os.environ.get('GH_TOKEN',''), 'UPDATE_BRANCH_TOKEN': os.environ.get('UPDATE_BRANCH_TOKEN',''), "
+    "'keys': sorted(os.environ)}))\n"
     # Like regen-derived.sh's run_bundles: execute every bundle generator, at ANY depth.
     "import fnmatch,subprocess\n"
     "for r,_,fs in os.walk('openbank-infra/gitops'):\n"
@@ -4309,7 +4362,7 @@ def _synthetic_origin(root: str) -> None:
     g("init", "-q", "-b", "main")
     # A fixture origin is cloned repeatedly while it is still being committed to. Git's detached auto-gc
     # (triggered by those commits) packs and prunes loose objects in the background, so a concurrent
-    # `git clone` copying them fails with "failed to copy file ... No such file or directory". Never gc.
+    # `git clone` copying them fails with "failed to copy file ... No such file or directory". Never auto-gc.
     g("config", "gc.auto", "0")
     g("config", "maintenance.auto", "false")
     w("services/s1.txt", "s1\n")
@@ -4399,6 +4452,112 @@ def _synthetic_origin(root: str) -> None:
     # Referenced scripts ride alone: named by path in a workflow, or by bare basename only.
     pr("pRG", {".github/scripts/run-gates.py": "print('gates2')\n"})
     pr("pFoo", {".github/scripts/lib/foo.sh": "echo foo2\n"})
+
+
+def _pack_synthetic_origin(root: str) -> None:
+    # Bootstrap once, before any clones exist. Keep even unreachable objects: later fixture
+    # mutations still use ordinary independent local clones, with auto-gc disabled throughout.
+    sh(["git", "repack", "-a", "-d", "--keep-unreachable", "--no-cruft", "--threads=1"],
+       cwd=root, env=base_env())
+
+
+def _clone_synthetic_origin(origin: str, destination: str) -> subprocess.CompletedProcess:
+    return sh(["git", "clone", "-q", "--branch", "main", origin, destination], env=base_env(), check=False)
+
+
+def packed_fixture_self_test(check) -> None:
+    """Packing changes representation only, including old packed unreachable objects."""
+    with tempfile.TemporaryDirectory() as root:
+        origin = os.path.join(root, "origin")
+        os.mkdir(origin)
+        git = Git(origin)
+        git("init", "-q", "-b", "main")
+        git("config", "gc.auto", "0")
+        git("config", "maintenance.auto", "false")
+        tracked = pathlib.Path(origin, "tracked.txt")
+        tracked.write_text("base\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "base")
+        payload = pathlib.Path(root, "unreachable.txt")
+        payload.write_text("packed unreachable\0payload\n")
+        packed = git("hash-object", "-w", str(payload)).stdout.strip()
+        git("update-ref", "refs/tags/fixture-blob", packed)
+        git("repack", "-a", "-d", "--no-cruft", "--threads=1")
+        git("update-ref", "-d", "refs/tags/fixture-blob")
+        objects = pathlib.Path(origin, ".git", "objects")
+        check("fixture pack: old unreachable blob starts packed-only",
+              not (objects / packed[:2] / packed[2:]).exists())
+        payload.write_text("loose unreachable\0payload\n")
+        loose = git("hash-object", "-w", str(payload)).stdout.strip()
+        check("fixture pack: new unreachable blob starts loose",
+              (objects / loose[:2] / loose[2:]).is_file())
+        tracked.write_text("reachable loose commit\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "reachable loose")
+
+        def inventory():
+            # Tree objects contain raw binary ids; compare the complete byte stream without decoding.
+            SPAWNS[0] += 1
+            return subprocess.run(["git", "cat-file", "--batch-all-objects", "--batch"],
+                                  cwd=origin, env=base_env(), capture_output=True, check=True).stdout
+
+        def state(directory):
+            d = pathlib.Path(directory)
+            return tuple((d / rel).read_bytes() for rel in (".git/HEAD", ".git/index", "tracked.txt"))
+
+        # Distinct staged and unstaged states must survive packing too.
+        tracked.write_text("staged only\n")
+        git("add", "tracked.txt")
+        tracked.write_text("unstaged only\n")
+        before_objects = inventory()
+        before_refs = git("for-each-ref", "--format=%(refname)%00%(objectname)").stdout
+        before_state = state(origin)
+        before_loose = len(list(objects.glob("[0-9a-f][0-9a-f]/*")))
+        _pack_synthetic_origin(origin)
+        check("fixture pack: all object ids, types, sizes and contents unchanged", inventory() == before_objects)
+        check("fixture pack: all refs unchanged",
+              git("for-each-ref", "--format=%(refname)%00%(objectname)").stdout == before_refs)
+        check("fixture pack: HEAD, index and worktree unchanged", state(origin) == before_state)
+        check("fixture pack: redundant loose copies removed and pack created",
+              len(list(objects.glob("[0-9a-f][0-9a-f]/*"))) < before_loose
+              and bool(list((objects / "pack").glob("*.pack"))))
+        for oid, expected in ((packed, "packed unreachable\0payload\n"),
+                              (loose, "loose unreachable\0payload\n")):
+            check("fixture pack: unreachable content retained " + oid[:8],
+                  git("cat-file", "blob", oid).stdout == expected)
+
+        first, peer = os.path.join(root, "first"), os.path.join(root, "peer")
+        for clone in (first, peer):
+            result = _clone_synthetic_origin(origin, clone)
+            if result.returncode:
+                raise RuntimeError("self-test packed fixture: clone failed: " + result.stderr[-400:])
+        first_git, peer_git = Git(first), Git(peer)
+        peer_state = state(peer)
+        origin_head = git("rev-parse", "HEAD").stdout.strip()
+        peer_head = peer_git("rev-parse", "HEAD").stdout.strip()
+        pathlib.Path(first, "tracked.txt").write_text("first clone only\n")
+        first_git("add", "tracked.txt"); first_git("commit", "-q", "-m", "first only")
+        first_head = first_git("rev-parse", "HEAD").stdout.strip()
+        check("fixture clone: peer and origin refs, index and worktree isolated",
+              git("rev-parse", "HEAD").stdout.strip() == origin_head
+              and peer_git("rev-parse", "HEAD").stdout.strip() == peer_head
+              and state(origin) == before_state and state(peer) == peer_state)
+        check("fixture clone: clone-only object absent from peer and origin",
+              git("cat-file", "-e", first_head, check=False).returncode != 0
+              and peer_git("cat-file", "-e", first_head, check=False).returncode != 0)
+        tracked.write_text("future origin only\n")
+        git("add", "tracked.txt"); git("commit", "-q", "-m", "future origin")
+        future = git("rev-parse", "HEAD").stdout.strip()
+        future_blob = git("rev-parse", "HEAD:tracked.txt").stdout.strip()
+        check("fixture clone: future origin commit and blob absent before fetch",
+              all(peer_git("cat-file", "-e", oid, check=False).returncode != 0 for oid in (future, future_blob))
+              and peer_git("rev-parse", "origin/main").stdout.strip() == origin_head)
+        peer_git("fetch", "-q", "origin", "main")
+        check("fixture clone: future objects arrive only after fetch",
+              all(peer_git("cat-file", "-e", oid, check=False).returncode == 0 for oid in (future, future_blob))
+              and peer_git("rev-parse", "origin/main").stdout.strip() == future)
+        check("fixture clone: fetch leaves local HEAD, index and worktree unchanged",
+              peer_git("rev-parse", "HEAD").stdout.strip() == peer_head and state(peer) == peer_state)
+        check("fixture clone: no alternates in origin or either clone",
+              not any(pathlib.Path(d, ".git/objects/info/alternates").exists() for d in (origin, first, peer)))
 
 
 def git_memo_self_test(check) -> None:
@@ -4590,6 +4749,55 @@ def retry_planner_self_test(check) -> None:
 SELF_TEST_SPAWN_CEILING = 16200
 
 
+
+def branch_updater_self_test(check) -> None:
+    """update-branch credential choice (dedicated App with `workflows`, else GH_TOKEN) and the key-spread guard."""
+    saved = (globals()["_http_open"], os.environ.get("GH_TOKEN"), os.environ.get("UPDATE_BRANCH_TOKEN"), dict(_GET_MEMO))
+    seen: list[tuple[str, str]] = []
+
+    def fake_open(req, timeout):
+        seen.append((req.get_method(), req.get_header("Authorization") or ""))
+        return 202, b"{}", {}
+    globals()["_http_open"] = fake_open
+    try:
+        gh = GitHub("o/r", "main", "")
+        os.environ["GH_TOKEN"] = "ghs_GITOPS_FIXTURE"
+        os.environ["UPDATE_BRANCH_TOKEN"] = "ghs_UPDATER_FIXTURE"
+        ok = gh.update_branch(7, "a" * 40)
+        check("update-branch: the dedicated branch-updater token is used when set",
+              ok and seen[-1:] == [("PUT", "Bearer ghs_UPDATER_FIXTURE")], str(seen))
+        os.environ["UPDATE_BRANCH_TOKEN"] = ""
+        ok = gh.update_branch(7, "a" * 40)
+        check("update-branch: an empty branch-updater token (mint failed) falls back to GH_TOKEN",
+              ok and seen[-1:] == [("PUT", "Bearer ghs_GITOPS_FIXTURE")], str(seen))
+        os.environ["UPDATE_BRANCH_TOKEN"] = "ghs_UPDATER_FIXTURE"
+        api("GET", "/repos/o/r/pulls/7")
+        check("update-branch token: no other call carries it", seen[-1:] == [("GET", "Bearer ghs_GITOPS_FIXTURE")], str(seen))
+        env = generator_env()
+        check("generator env: UPDATE_BRANCH_TOKEN is stripped like GH_TOKEN",
+              "UPDATE_BRANCH_TOKEN" not in env and not any("TOKEN" in k for k in env), str(sorted(env)))
+    finally:
+        globals()["_http_open"] = saved[0]
+        for k, v in (("GH_TOKEN", saved[1]), ("UPDATE_BRANCH_TOKEN", saved[2])):
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        _GET_MEMO.clear()
+        _GET_MEMO.update(saved[3])
+    wf = "jobs:\n  settle:\n    steps:\n      - with:\n          app-id: ${{ secrets.BRANCH_UPDATER_APP_ID }}\n"
+    check("key spread: BRANCH_UPDATER_ only in merge-train.yml is clean",
+          branch_updater_spread_errors({"merge-train.yml": wf, "ci.yml": "jobs: {}\n"}) == [])
+    check("key spread: BRANCH_UPDATER_ in another workflow fails (must-fail)",
+          len(branch_updater_spread_errors({"merge-train.yml": wf, "deploy.yml": wf})) == 1)
+    check("key spread: another workflow declaring the environment fails, under any secret spelling",
+          len(branch_updater_spread_errors({"merge-train.yml": wf,
+                                            "x.yml": "jobs:\n  j:\n    environment: merge-train-branch-update\n"
+                                                     "    steps:\n      - run: echo '${{ toJSON(secrets) }}'\n"})) == 1)
+    check("key spread: the real tree is clean", branch_updater_spread_errors(workflow_texts()) == [],
+          str(branch_updater_spread_errors(workflow_texts())))
+
+
 def self_test() -> int:
     fails: list[str] = []
     last_reservation: dict = {}   # ct / now / activity of the latest reservation_at, for a failing case's message
@@ -4601,7 +4809,9 @@ def self_test() -> int:
             fails.append(f"{label}: {detail} [clock: time.time={time.time():.0f} last_reservation={last_reservation}]")
 
     retry_planner_self_test(check)
+    branch_updater_self_test(check)
     git_memo_self_test(check)
+    packed_fixture_self_test(check)
 
     freshness = subprocess.run(
         [sys.executable, ".github/scripts/test-merge-train-main-red-freshness.py"],
@@ -5182,8 +5392,9 @@ def self_test() -> int:
             check(f"admission (real gate): {label} -> {'admit' if want else 'refuse'}", (got is None) == want, str(got))
 
     # ---- real git, real ticks ----------------------------------------------------------------
-    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP")}
-    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "RUNNER_TEMP": "/runner/temp"})
+    saved = {k: os.environ.get(k) for k in ("GH_TOKEN", "GITHUB_TOKEN", "RUNNER_TEMP", "UPDATE_BRANCH_TOKEN")}
+    os.environ.update({"GH_TOKEN": "ghs_SELFTEST_MUST_NOT_LEAK", "GITHUB_TOKEN": "ghs_2", "RUNNER_TEMP": "/runner/temp",
+                       "UPDATE_BRANCH_TOKEN": "ghs_UPDATER_MUST_NOT_LEAK"})
     try:
         env = generator_env()
         check("generator env: no *TOKEN*, no RUNNER_TEMP, isolated git config",
@@ -5191,6 +5402,7 @@ def self_test() -> int:
         with _synthetic_clock(), tempfile.TemporaryDirectory() as root:
             origin = os.path.join(root, "origin")
             _synthetic_origin(origin)
+            _pack_synthetic_origin(origin)
             gh = FakeGitHub(origin, root)
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
@@ -5202,7 +5414,7 @@ def self_test() -> int:
             def clone(tag):
                 counter[0] += 1
                 d = os.path.join(root, f"{tag}-{counter[0]}")
-                r = sh(["git", "clone", "-q", "--branch", "main", origin, d], env=base_env(), check=False)
+                r = _clone_synthetic_origin(origin, d)
                 if r.returncode != 0:
                     raise RuntimeError(f"self-test fixture: git clone failed: {r.stderr.strip()[-400:]}")
                 return d
@@ -5620,6 +5832,8 @@ def self_test() -> int:
             rec = json.loads(pathlib.Path(probe).read_text())
             check("exfiltration probe: the generator saw no GH_TOKEN and no *TOKEN* key",
                   rec["GH_TOKEN"] == "" and not any("TOKEN" in k for k in rec["keys"]), str(rec)[:160])
+            check("exfiltration probe: the generator saw no UPDATE_BRANCH_TOKEN (branch-updater App, workflows: write)",
+                  rec.get("UPDATE_BRANCH_TOKEN", "missing") == "", str(rec)[:160])
             reset()
 
             # A baseline edit under a generator overlay root: the overlay puts main's GENERATORS

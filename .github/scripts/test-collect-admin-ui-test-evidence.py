@@ -463,7 +463,7 @@ class SyntheticStagingTests(unittest.TestCase):
             raise COLLECTOR.CollectionError("GitHub API failed (HTTP 502)")
         payloads, warnings = COLLECTOR.synthetic_payloads("org/repo", fetch_json, lambda url: b"")
         self.assertEqual(payloads, {})
-        self.assertEqual(len([w for w in warnings if "unreadable" in w]), 2)
+        self.assertEqual(len([w for w in warnings if "unreadable" in w]), 3)
 
 
 class CollectionTests(unittest.TestCase):
