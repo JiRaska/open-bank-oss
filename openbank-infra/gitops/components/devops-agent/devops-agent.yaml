@@ -35,7 +35,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: devops-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-devops-agent:sandbox-2e500af2@sha256:1a3478a9fd93ab70156c8494a5271cc772fd9afa6c56c7cc93111045e96a0c11
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-devops-agent:sandbox-9d795c2b@sha256:04f61b6d3a3772892016f6413ced0085f3a3faa07ca15989c211f74358f44d3b
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

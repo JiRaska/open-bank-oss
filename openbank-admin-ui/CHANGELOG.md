@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.7.0...admin-ui-v4.7.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** require system:view for the test explanation API ([#15282](https://github.com/JiRaska/open-bank-oss/issues/15282)) ([6b7d703](https://github.com/JiRaska/open-bank-oss/commit/6b7d7038048d427489459d4c1be4a46a2aaed222))
+
 ## [4.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.6.0...admin-ui-v4.7.0) (2026-11-08)
 
 
