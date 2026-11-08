@@ -25,11 +25,23 @@ on:
     paths:
       - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
+      - ".github/scripts/private-platform-command.py"
+      - ".github/scripts/test-private-platform-output.py"
+      - ".github/scripts/private-credential-action-output.cjs"
+      - ".github/scripts/test-private-credential-action-output.py"
+      - ".github/scripts/check-admin-ui-evidence-plan.py"
+      - ".github/scripts/test-admin-ui-evidence-plan.py"
   push:
     branches: [main]
     paths:
       - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
+      - ".github/scripts/private-platform-command.py"
+      - ".github/scripts/test-private-platform-output.py"
+      - ".github/scripts/private-credential-action-output.cjs"
+      - ".github/scripts/test-private-credential-action-output.py"
+      - ".github/scripts/check-admin-ui-evidence-plan.py"
+      - ".github/scripts/test-admin-ui-evidence-plan.py"
   workflow_dispatch:
     inputs:
       scope:
@@ -69,7 +81,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Test private platform output
-        run: python3 .github/scripts/test-private-platform-output.py
+        run: |
+          python3 .github/scripts/test-private-platform-output.py
+          python3 .github/scripts/test-private-credential-action-output.py
 
       # These masked settings mirror the existing roles and region; no fallback
       # to an ambient identity. Configure them before enabling this workflow.
@@ -88,6 +102,10 @@ jobs:
 
       - name: Configure AWS credentials (OIDC, read-only plan role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        # Preserve the pinned authentication action and runner control files.
+        # Only masking commands reach stdout; action diagnostics stay private.
+        env:
+          NODE_OPTIONS: '${{ env.NODE_OPTIONS }} --require="${{ github.workspace }}/.github/scripts/private-credential-action-output.cjs"'
         with:
           role-to-assume: ${{ env.PLATFORM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
@@ -230,7 +248,9 @@ jobs:
         run: python3 .github/scripts/test-admin-ui-evidence-plan.py
 
       - name: Test private platform output
-        run: python3 .github/scripts/test-private-platform-output.py
+        run: |
+          python3 .github/scripts/test-private-platform-output.py
+          python3 .github/scripts/test-private-credential-action-output.py
 
       # These masked settings mirror the existing roles and region; no fallback
       # to an ambient identity. Configure them before enabling this workflow.
@@ -249,6 +269,10 @@ jobs:
 
       - name: Configure AWS credentials (OIDC, admin apply role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        # Preserve the pinned authentication action and runner control files.
+        # Only masking commands reach stdout; action diagnostics stay private.
+        env:
+          NODE_OPTIONS: '${{ env.NODE_OPTIONS }} --require="${{ github.workspace }}/.github/scripts/private-credential-action-output.cjs"'
         with:
           role-to-assume: ${{ env.PLATFORM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
