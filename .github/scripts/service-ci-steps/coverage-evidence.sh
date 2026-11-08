@@ -49,11 +49,6 @@ for source in sorted(raw_dir.glob('*.ic')):
     saved = target / source.name
     publish(saved, raw, source)
     files.append({'name': source.name, 'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()})
-# The Kover/IntelliJ agent records WHY a save failed (e.g. OutOfMemoryError in its shutdown
-# hook) only here; without it a truncated .ic carries no cause.
-agent_log = raw_dir / 'coverage-error.log'
-if agent_log.is_file() and not agent_log.is_symlink():
-    publish(target / agent_log.name, agent_log.read_bytes(), agent_log)
 publish(target / 'invalid.json', (json.dumps({
     'reason': 'coverage-run-incomplete' if phase == 'incomplete' else 'kover-coverage-load-failed',
     'phase': phase, 'files': files,
