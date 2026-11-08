@@ -31,6 +31,8 @@ backfill-release-evidence.yml|job:backfill|contents
 backfill-release-evidence.yml|job:backfill|id-token
 branch-cleanup.yml|job:delete-closed-deploy-branch|contents
 branch-cleanup.yml|job:prune-stale-branches|contents
+# ADR-0366 mirror; IAM trust pins main + this workflow file, push limited to ci-artifacts/* repos.
+ci-artifact-mirror.yml|job:mirror|id-token
 ci.yml|job:app-status|pull-requests
 credential-inventory.yml|job:inventory|issues
 db-backup-associations.yml|job:live-check|id-token
