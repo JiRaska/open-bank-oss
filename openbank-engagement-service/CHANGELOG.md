@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.0...engagement-service-v0.15.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **engagement:** give the test JVM 2g so Kover's shutdown save stops OOMing ([#15245](https://github.com/JiRaska/open-bank-oss/issues/15245)) ([a45e222](https://github.com/JiRaska/open-bank-oss/commit/a45e222c24e5d382815f56900162cbda7643a80d))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.14.5...engagement-service-v0.15.0) (2026-11-06)
 
 

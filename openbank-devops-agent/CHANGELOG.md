@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.10.0...devops-agent-v0.11.0) (2026-11-08)
+
+
+### Features
+
+* **devops-agent:** collect verified CI gate profiles in daily reports ([#15203](https://github.com/JiRaska/open-bank-oss/issues/15203)) ([2e500af](https://github.com/JiRaska/open-bank-oss/commit/2e500af2efc3229f6ed6845f55ae5a4310d9710e))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.9.0...devops-agent-v0.10.0) (2026-11-07)
 
 
