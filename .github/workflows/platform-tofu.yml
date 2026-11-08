@@ -1,7 +1,7 @@
 # Platform OpenTofu (ADR-0060). Applies sandbox-platform from CI so a merged infra change
 # is no longer left for a laptop `tofu apply`.
 #
-#   pull_request / push -> `plan` job: read-only `tofu plan` to the job summary
+#   pull_request / push -> read-only plan; only a fixed result reaches the public summary
 #       (PLAN role, batch lane). On a PR this is the pre-merge preview.
 #   workflow_dispatch   -> `apply` job: manual "Run workflow" on main (deploy
 #       lane, admin APPLY role). It re-plans with `-out=tfplan` and applies THAT
@@ -11,7 +11,7 @@
 # Why manual dispatch, not auto-on-merge: a reviewer-gated GitHub Environment is
 # the stronger design, but environment protection rules need GitHub Pro/Team on a
 # private repo (Free returns 422 — ADR-0060). So the gate is: a human dispatches
-# the apply (write access required) after reading the PR's plan preview, and the
+# the apply (write access required) after privately reviewing the proposed plan, and the
 # admin APPLY role's trust is pinned to THIS workflow file on main
 # (job_workflow_ref) so nothing else can assume it. Upgrade to an Environment
 # gate if the plan allows.
@@ -49,11 +49,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: eu-north-1
+  AWS_REGION: ${{ secrets.PLATFORM_TOFU_AWS_REGION }}
   TOFU_VERSION: "1.12.1"
   ENV_DIR: openbank-infra/aws/envs/sandbox-platform
-  PLAN_ROLE: arn:aws:iam::265175468565:role/openbank-ci-tofu-plan
-  APPLY_ROLE: arn:aws:iam::265175468565:role/openbank-ci-tofu-apply
 
 jobs:
   plan:
@@ -65,15 +63,35 @@ jobs:
     runs-on: ubuntu-latest # hosted-first (public repo, free); OIDC plan role unchanged (ADR-0060)
     timeout-minutes: 20
     env:
+      PLATFORM_ROLE: ${{ secrets.PLATFORM_TOFU_PLAN_ROLE }}
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Test private platform output
+        run: python3 .github/scripts/test-private-platform-output.py
+
+      # These masked settings mirror the existing roles and region; no fallback
+      # to an ambient identity. Configure them before enabling this workflow.
+      - name: Require masked platform configuration
+        run: |
+          if [ -z "$PLATFORM_ROLE" ] || [ -z "$AWS_REGION" ]; then
+            echo "::error::Masked platform configuration is required."
+            exit 1
+          fi
+          # Register the account before STS can emit an error containing it.
+          if [[ ! "$PLATFORM_ROLE" =~ ^arn:aws:iam::([0-9]{12}):role/[A-Za-z0-9_+=,.@/-]+$ ]]; then
+            echo "::error::Masked platform role configuration is invalid."
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "${BASH_REMATCH[1]}"
+
       - name: Configure AWS credentials (OIDC, read-only plan role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.PLAN_ROLE }}
+          role-to-assume: ${{ env.PLATFORM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       # The custom ARC runner image ships docker/jq/yq/trivy but NOT the AWS CLI,
       # and the kubernetes/helm/kubectl providers authenticate via
@@ -108,24 +126,13 @@ jobs:
 
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
-        run: tofu init -input=false
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage init -- tofu init -input=false
 
       - name: tofu plan (read-only, no lock)
         working-directory: ${{ env.ENV_DIR }}
         run: |
-          set -o pipefail
-          tofu plan -input=false -lock=false -no-color -detailed-exitcode \
-            2>&1 | tee /tmp/plan.txt && code=0 || code=$?
-          {
-            echo "### \`tofu plan\` — ${ENV_DIR}"
-            if [ "$code" = "2" ]; then echo "_Changes pending._";
-            elif [ "$code" = "0" ]; then echo "_No changes._";
-            else echo "_Plan errored (exit $code)._"; fi
-            echo '```'
-            tail -c 60000 /tmp/plan.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          [ "$code" = "1" ] && exit 1 || exit 0
+          python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage preview -- \
+            tofu plan -input=false -lock=false -no-color -detailed-exitcode
 
   # ── Infracost cost delta ───────────────────────────────────────────────────
   # Posts a PR comment with the AWS cost delta introduced by this change.
@@ -206,6 +213,7 @@ jobs:
     # remains the job_workflow_ref pin + manual dispatch on main (ADR-0060).
     environment: platform-apply
     env:
+      PLATFORM_ROLE: ${{ secrets.PLATFORM_TOFU_APPLY_ROLE }}
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
       PLAN_SCOPE: ${{ inputs.scope || 'platform' }}
     steps:
@@ -221,11 +229,30 @@ jobs:
       - name: Test evidence plan guard
         run: python3 .github/scripts/test-admin-ui-evidence-plan.py
 
+      - name: Test private platform output
+        run: python3 .github/scripts/test-private-platform-output.py
+
+      # These masked settings mirror the existing roles and region; no fallback
+      # to an ambient identity. Configure them before enabling this workflow.
+      - name: Require masked platform configuration
+        run: |
+          if [ -z "$PLATFORM_ROLE" ] || [ -z "$AWS_REGION" ]; then
+            echo "::error::Masked platform configuration is required."
+            exit 1
+          fi
+          # Register the account before STS can emit an error containing it.
+          if [[ ! "$PLATFORM_ROLE" =~ ^arn:aws:iam::([0-9]{12}):role/[A-Za-z0-9_+=,.@/-]+$ ]]; then
+            echo "::error::Masked platform role configuration is invalid."
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "${BASH_REMATCH[1]}"
+
       - name: Configure AWS credentials (OIDC, admin apply role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
-          role-to-assume: ${{ env.APPLY_ROLE }}
+          role-to-assume: ${{ env.PLATFORM_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: true
 
       # The custom ARC runner image ships docker/jq/yq/trivy but NOT the AWS CLI,
       # and the kubernetes/helm/kubectl providers authenticate via
@@ -260,7 +287,7 @@ jobs:
 
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
-        run: tofu init -input=false
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage init -- tofu init -input=false
 
       # Re-plan to a file and apply THAT file in the same job: the executed change
       # is exactly this plan, computed against current locked state. If state moved
@@ -269,6 +296,7 @@ jobs:
         working-directory: ${{ env.ENV_DIR }}
         run: |
           set -o pipefail
+          umask 077
           targets=()
           if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
             targets=(
@@ -286,18 +314,16 @@ jobs:
             # -json can fail on such state after a targeted plan succeeds).
             plan_json="$(mktemp "$RUNNER_TEMP/admin-ui-evidence-plan.XXXXXX.jsonl")"
             trap 'rm -f "$plan_json"' EXIT
-            tofu plan -input=false -lock-timeout=300s -json -out=tfplan "${targets[@]}" > "$plan_json"
+            # stdout is typed input to the existing strict guard, not public output.
+            plan_error="$(mktemp "$RUNNER_TEMP/private-platform-plan-error.XXXXXX")"
+            tofu plan -input=false -lock-timeout=300s -json -out=tfplan "${targets[@]}" > "$plan_json" 2> "$plan_error"
             sha256sum tfplan > tfplan.sha256
-            python3 "$GITHUB_WORKSPACE/.github/scripts/check-admin-ui-evidence-plan.py" --ui-stream "$plan_json" | tee /tmp/apply-plan.txt
+            python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage evidence-guard -- \
+              python3 "$GITHUB_WORKSPACE/.github/scripts/check-admin-ui-evidence-plan.py" --ui-stream "$plan_json"
           else
-            tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan "${targets[@]}" 2>&1 | tee /tmp/apply-plan.txt
+            python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage plan -- \
+              tofu plan -input=false -lock-timeout=300s -no-color -out=tfplan "${targets[@]}"
           fi
-          {
-            echo "### \`tofu apply\` plan — ${ENV_DIR}"
-            echo '```'
-            tail -c 60000 /tmp/apply-plan.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: tofu apply (saved plan)
         working-directory: ${{ env.ENV_DIR }}
@@ -305,4 +331,5 @@ jobs:
           if [ "$PLAN_SCOPE" = "admin-ui-evidence" ]; then
             sha256sum --check tfplan.sha256
           fi
-          tofu apply -input=false -no-color -lock-timeout=300s tfplan
+          python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage apply -- \
+            tofu apply -input=false -no-color -lock-timeout=300s tfplan
