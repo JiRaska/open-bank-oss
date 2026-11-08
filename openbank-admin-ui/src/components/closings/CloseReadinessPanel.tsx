@@ -79,6 +79,8 @@ export function CloseReadinessPanel() {
       case 'WAIVED': return t(`Operátorská výjimka: ${name}`, `Operator waiver: ${name}`)
       case 'NO_SUCCESSFUL_JOB': return t(`Chybí doložené zpracování: ${name} / ${job}`, `No evidenced processing: ${name} / ${job}`)
       case 'NO_POST_CUTOFF_TIEOUT': return t('Chybí úspěšný tie-out po cutoffu', 'No successful post-cutoff tie-out')
+      case 'JOURNALS_CHANGED_AFTER_CLOSE': return t('Účetní zápisy se po uzavření změnily', 'Accounting entries changed after close')
+      case 'SOURCE_EVIDENCE_CHANGED_AFTER_CLOSE': return t('Účastník po uzavření změnil podklady', 'Participant evidence changed after close')
       case 'JOB_REQUIREMENTS_INCOMPLETE': return t('Nejsou úplně deklarovány požadované běhy', 'Required job declaration is incomplete')
       case 'JOB_REQUIREMENTS_CHANGED': return t('Změnily se požadované běhy', 'Required jobs changed')
       case 'CHECK_DISABLED': return t('Kontrola byla vypnuta', 'Check was disabled')

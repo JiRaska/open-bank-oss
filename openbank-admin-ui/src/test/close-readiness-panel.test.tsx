@@ -37,6 +37,17 @@ it('clears a previous positive verdict when refreshing becomes unavailable', asy
   expect(screen.queryByText(/Monthly evidence is complete/)).not.toBeInTheDocument()
 })
 
+it('explains when later accounting and source changes invalidate the monthly proof', async () => {
+  const changed = { ...evidence, days: evidence.days.map((day, index) => ({ ...day,
+    blockers: index === 0 ? ['JOURNALS_CHANGED_AFTER_CLOSE', 'SOURCE_EVIDENCE_CHANGED_AFTER_CLOSE'] : [],
+  })) }
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(changed))))
+  render(<LanguageProvider><CloseReadinessPanel /></LanguageProvider>)
+  expect(await screen.findByText(/Accounting entries changed after close/)).toBeInTheDocument()
+  expect(screen.getByText(/Participant evidence changed after close/)).toBeInTheDocument()
+  expect(screen.queryByText(/Monthly evidence is complete/)).not.toBeInTheDocument()
+})
+
 it('rejects malformed and contradictory positive evidence', () => {
   expect(parseCloseReadiness(evidence)).not.toBeNull()
   expect(parseCloseReadiness({ ...evidence, eligibleForEnforcement: true })).toBeNull()
