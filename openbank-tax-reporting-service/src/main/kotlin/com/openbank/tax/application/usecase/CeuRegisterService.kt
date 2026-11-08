@@ -18,6 +18,18 @@ enum class CeuObservation { RECORDED, DUPLICATE, UNPLACEABLE }
 @ApplicationScoped
 class CeuRegisterService(private val repository: CeuRegisterRepository) {
 
+    suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): CeuObservation =
+        if (repository.classifyParty(
+                partyId,
+                synthetic,
+                recordedAt,
+            )
+        ) {
+            CeuObservation.RECORDED
+        } else {
+            CeuObservation.DUPLICATE
+        }
+
     suspend fun record(fact: RegisterFact): CeuObservation =
         if (repository.append(fact)) CeuObservation.RECORDED else CeuObservation.DUPLICATE
 

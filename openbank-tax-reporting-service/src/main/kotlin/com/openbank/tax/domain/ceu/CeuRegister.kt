@@ -130,15 +130,25 @@ data class RegisterSnapshot(
          * never saw open) is ignored rather than invented — the account is not in the register
          * until its opening is known.
          */
-        fun fold(facts: Collection<RegisterFact>, validOn: LocalDate, knownAt: Instant): RegisterSnapshot {
+        fun fold(
+            facts: Collection<RegisterFact>,
+            validOn: LocalDate,
+            knownAt: Instant,
+            syntheticParties: Set<UUID> = emptySet(),
+        ): RegisterSnapshot {
             val visible = facts
                 .filter { !it.recordedAt.isAfter(knownAt) && !it.effectiveOn.isAfter(validOn) }
                 .sortedWith(compareBy<RegisterFact>({ it.effectiveOn }, { it.recordedAt }, { it.eventId }))
 
-            val syntheticAccounts = visible
-                .filter { it is RegisterFact.AccountOpened && it.synthetic }
-                .map { it.accountId }
-                .toSet()
+            // An account is synthetic when its opening event was tainted OR its holder is a
+            // party-service SYNTHETIC party (ADR-0252 classification). The second catches a canary
+            // account whose opening request lost its taint on the way.
+            val syntheticAccounts = (
+                visible.filter { it is RegisterFact.AccountOpened && it.synthetic }.map { it.accountId } +
+                    visible.filterIsInstance<RegisterFact.RelationStarted>()
+                        .filter { it.role == CeuRole.HOLDER && it.partyId in syntheticParties }
+                        .map { it.accountId }
+                ).toSet()
 
             val opened = mutableMapOf<UUID, RegisterFact.AccountOpened>()
             val closedOn = mutableMapOf<UUID, LocalDate>()
@@ -151,7 +161,11 @@ data class RegisterSnapshot(
                     is RegisterFact.AccountOpened -> if (!fact.synthetic) opened.putIfAbsent(fact.accountId, fact)
                     is RegisterFact.AccountClosed -> closedOn[fact.accountId] = fact.effectiveOn
                     is RegisterFact.RelationStarted ->
-                        if (fact.synthetic) droppedRelations++ else relations[fact.relationId] = fact
+                        if (fact.synthetic || fact.partyId in syntheticParties) {
+                            droppedRelations++
+                        } else {
+                            relations[fact.relationId] = fact
+                        }
                     is RegisterFact.RelationEnded -> relations.remove(fact.relationId)
                 }
             }
@@ -170,7 +184,15 @@ data class RegisterSnapshot(
                     persons = persons,
                 )
             }
-            return RegisterSnapshot(validOn, knownAt, accounts, syntheticAccounts.size, droppedRelations)
+            return RegisterSnapshot(
+                validOn,
+                knownAt,
+                accounts,
+                syntheticAccounts.count { id ->
+                    visible.any { it is RegisterFact.AccountOpened && it.accountId == id }
+                },
+                droppedRelations,
+            )
         }
     }
 }

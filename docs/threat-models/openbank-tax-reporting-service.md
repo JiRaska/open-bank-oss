@@ -26,6 +26,7 @@ operator / auditor ──(OIDC)──▶ admin-ui ──(bearer)──▶ tax-re
 tax-reporting-service ──(OIDC machine bearer; production mTLS prerequisite)──▶ pension-company ledger
 account-service   ──outbox──▶ openbank.accounts.account.created ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
 delegation-service ──outbox──▶ openbank.delegation.events       ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
+party-service      ──outbox──▶ openbank.party.events            ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ classification)
 ```
 
 Trust boundaries: Kafka (mTLS, the `tax-reporting-service` KafkaUser holds Read on the source topic
@@ -115,7 +116,8 @@ by the follow-up #12500 and require rollout verification before company-books re
   KafkaUser grants are Read on both source topics and Write on their two dead-letter topics only.
   Two risks carried forward: (1) **synthetic leakage** — an ADR-0252-tainted account reported to
   ČNB would be a misstatement to a central register; tainted facts are recorded with their flag and
-  excluded at snapshot time with a counted drop, and the header parse is fail-to-real (an absent or
+  excluded at snapshot time with a counted drop, and a party-service `SYNTHETIC` classification
+  excludes the party's accounts and ties even when the account or grant event was untainted; and the header parse is fail-to-real (an absent or
   malformed header reads as real, so leakage is bounded by canary activity, never suppression of
   real accounts); (2) **dead-lettered register events** — a parked AccountCreated is an account
   missing from the next overview until replayed, the same shape as a parked remittance above.

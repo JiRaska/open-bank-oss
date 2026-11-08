@@ -14,7 +14,7 @@
 -- synthetic carries the ADR-0252 taint of the producing event; a tainted fact never reaches a
 -- return, and the fold counts what it drops.
 --
--- Rollback: DROP TABLE ceu_register_fact; (no other table references it).
+-- Rollback: DROP TABLE ceu_register_fact; DROP TABLE ceu_party_classification; (nothing else references them).
 CREATE TABLE ceu_register_fact (
     event_id       UUID         PRIMARY KEY,
     fact_type      VARCHAR(32)  NOT NULL,
@@ -35,3 +35,12 @@ CREATE TABLE ceu_register_fact (
 
 CREATE INDEX ix_ceu_fact_time ON ceu_register_fact (effective_on, recorded_at);
 CREATE INDEX ix_ceu_fact_relation ON ceu_register_fact (relation_id) WHERE relation_id IS NOT NULL;
+
+-- party-service's ADR-0252 classification per party (immutable once created). A SYNTHETIC holder
+-- makes its accounts synthetic and a SYNTHETIC disposer drops from real accounts, even when the
+-- producing account or delegation event carried no taint.
+CREATE TABLE ceu_party_classification (
+    party_id    UUID        PRIMARY KEY,
+    synthetic   BOOLEAN     NOT NULL,
+    recorded_at TIMESTAMPTZ NOT NULL
+);

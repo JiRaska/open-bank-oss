@@ -65,6 +65,18 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.party.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.tax-reporting.ceu-party-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.dlq.tax-reporting.ceu-account-events-in
           patternType: literal
         operations: [Write, Describe]

@@ -27,12 +27,14 @@ import java.time.ZoneId
 import java.util.UUID
 
 /**
- * Feeds the CEÚ register projection (ADR-0367 D7, #15292) from two streams:
+ * Feeds the CEÚ register projection (ADR-0367 D7, #15292) from three streams:
  *
  *  - `openbank.accounts.account.created` — AccountCreated (account + its HOLDER), AccountClosed,
  *    and AccountStatusChanged to CLOSED;
  *  - `openbank.delegation.events` — DelegationActivated on an ACCOUNT resource starts a DISPOSER
- *    tie; Revoked / Expired / Renounced / Suspended end it, Reinstated restarts it.
+ *    tie; Revoked / Expired / Renounced / Suspended end it, Reinstated restarts it;
+ *  - `openbank.party.events` — the party's ADR-0252 classification, so a SYNTHETIC holder or
+ *    disposer is excluded even when the account or grant event itself was not tainted.
  *
  * The ADR-0252 taint is read from the Kafka HEADER, never the payload, and only an exact `true`
  * counts (fail-to-real, [SyntheticTaint.isTainted]). Tainted facts are still RECORDED — dropping
@@ -123,6 +125,23 @@ class CeuRegisterEventConsumer(
         }
     }
 
+    /**
+     * party-service lifecycle envelopes carry `classification` (CUSTOMER | SYNTHETIC, ADR-0252).
+     * SYNTHETIC is also inferred from the record's taint header, fail-to-real otherwise.
+     */
+    @Incoming("ceu-party-events-in")
+    suspend fun consumeParty(record: ConsumerRecord<String, String>) {
+        val type = eventType(record)
+        if (type !in PARTY_TYPES) return count(STREAM_PARTY, OUTCOME_IGNORED)
+        val node = decode(record, STREAM_PARTY)
+        val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull()
+            ?: malformed(STREAM_PARTY)
+        val synthetic = node.path("classification").asText() == "SYNTHETIC" ||
+            SyntheticTaint.isTainted(header(record, OutboxKafkaHeaders.HEADER_SYNTHETIC))
+        val now = Instant.now(clock)
+        store(STREAM_PARTY, partyId) { service.classifyParty(partyId, synthetic, now) }
+    }
+
     private fun accountFacts(type: String, node: JsonNode, eventId: UUID, synthetic: Boolean): List<RegisterFact> {
         val accountId = UUID.fromString(node.path("aggregateId").asText())
         val on = occurredOn(node)
@@ -181,11 +200,6 @@ class CeuRegisterEventConsumer(
             ?: runCatching { objectMapper.readTree(record.value()).path("eventType").asText(null) }.getOrNull()
             ?: ""
 
-    /** `ce-id` when present; otherwise a hash of the record bytes, which is stable across redelivery. */
-    private fun eventId(record: ConsumerRecord<String, String>): UUID =
-        header(record, OutboxKafkaHeaders.HEADER_EVENT_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-            ?: UUID.nameUUIDFromBytes((record.value() ?: "").toByteArray(StandardCharsets.UTF_8))
-
     private fun occurredOn(node: JsonNode): LocalDate = localDate(Instant.parse(node.path("occurredAt").asText()))
 
     private fun count(stream: String, outcome: String) {
@@ -193,6 +207,11 @@ class CeuRegisterEventConsumer(
     }
 
     companion object {
+        /** `ce-id` when present; otherwise a hash of the record bytes, which is stable across redelivery. */
+        private fun eventId(record: ConsumerRecord<String, String>): UUID =
+            header(record, OutboxKafkaHeaders.HEADER_EVENT_ID)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+                ?: UUID.nameUUIDFromBytes((record.value() ?: "").toByteArray(StandardCharsets.UTF_8))
+
         private fun header(record: ConsumerRecord<String, String>, name: String): String? =
             record.headers().lastHeader(name)?.let { String(it.value(), StandardCharsets.UTF_8) }
 
@@ -208,6 +227,8 @@ class CeuRegisterEventConsumer(
         private val DELEGATION_START_TYPES = setOf("DelegationActivated", "DelegationReinstated")
         private val DELEGATION_END_TYPES =
             setOf("DelegationRevoked", "DelegationExpired", "DelegationRenounced", "DelegationSuspended")
+        private val PARTY_TYPES = setOf("PARTY_CREATED", "PARTY_UPDATED")
+        private const val STREAM_PARTY = "party"
         private const val STREAM_ACCOUNT = "account"
         private const val STREAM_DELEGATION = "delegation"
         private const val OUTCOME_IGNORED = "ignored"

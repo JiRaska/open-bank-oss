@@ -60,8 +60,25 @@ class CeuRegisterFactEntity : PanacheEntityBase {
     var synthetic: Boolean = false
 }
 
+@Entity
+@Table(name = "ceu_party_classification")
+class CeuPartyClassificationEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "party_id")
+    var partyId: UUID = UUID(0L, 0L)
+
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
+
+    @Column(name = "recorded_at", nullable = false)
+    var recordedAt: Instant? = null
+}
+
 @ApplicationScoped
-class PanacheCeuRegisterRepository :
+class PanacheCeuPartyClassificationRepository : PanacheRepositoryBase<CeuPartyClassificationEntity, UUID>
+
+@ApplicationScoped
+class PanacheCeuRegisterRepository(private val parties: PanacheCeuPartyClassificationRepository) :
     CeuRegisterRepository,
     PanacheRepositoryBase<CeuRegisterFactEntity, UUID> {
 
@@ -75,6 +92,27 @@ class PanacheCeuRegisterRepository :
     override suspend fun startOf(relationId: UUID): RegisterFact.RelationStarted? = Panache.withSession {
         find("relationId = ?1 and factType = ?2 order by recordedAt", relationId, STARTED).firstResult()
     }.awaitSuspending()?.toDomain() as? RegisterFact.RelationStarted
+
+    override suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean =
+        Panache.withTransaction {
+            parties.findById(partyId).onItem().transformToUni { existing ->
+                if (existing != null) {
+                    Uni.createFrom().item(false)
+                } else {
+                    parties.persist(
+                        CeuPartyClassificationEntity().also {
+                            it.partyId = partyId
+                            it.synthetic = synthetic
+                            it.recordedAt = recordedAt
+                        },
+                    ).map { true }
+                }
+            }
+        }.awaitSuspending()
+
+    override suspend fun syntheticParties(knownAt: Instant): Set<UUID> = Panache.withSession {
+        parties.list("synthetic = true and recordedAt <= ?1", knownAt)
+    }.awaitSuspending().map { it.partyId }.toSet()
 
     override suspend fun factsUpTo(validOn: LocalDate, knownAt: Instant): List<RegisterFact> = Panache.withSession {
         list("effectiveOn <= ?1 and recordedAt <= ?2", validOn, knownAt)

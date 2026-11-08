@@ -155,4 +155,26 @@ class CeuRegisterTest {
         assertThat(w.to).isEqualTo(LocalDate.parse("2026-11-08"))
         assertThatThrownBy { ReportingWindow(monday, monday, monday) }.isInstanceOf(TaxValidationException::class.java)
     }
+
+    @Test
+    fun `a SYNTHETIC party drops the accounts it holds and its ties to real accounts, even untainted`() {
+        val canary = UUID.randomUUID()
+        val canaryAccount = UUID.randomUUID()
+        val facts = listOf(
+            opened(),
+            tie(acc, holder, CeuRole.HOLDER),
+            tie(UUID.randomUUID(), canary, CeuRole.DISPOSER),
+            opened(id = canaryAccount),
+            tie(canaryAccount, canary, CeuRole.HOLDER, account = canaryAccount),
+        )
+
+        val snapshot = RegisterSnapshot.fold(facts, mon, t0, syntheticParties = setOf(canary))
+
+        assertThat(snapshot.accounts.keys).containsExactly(acc)
+        assertThat(snapshot.accounts.getValue(acc).persons.map { it.partyId }).containsExactly(holder)
+        assertThat(snapshot.droppedSyntheticAccounts).isEqualTo(1)
+        assertThat(snapshot.droppedSyntheticRelations).isEqualTo(1)
+        // Negative control: without the classification the same facts report the canary account.
+        assertThat(RegisterSnapshot.fold(facts, mon, t0).accounts.keys).contains(canaryAccount)
+    }
 }

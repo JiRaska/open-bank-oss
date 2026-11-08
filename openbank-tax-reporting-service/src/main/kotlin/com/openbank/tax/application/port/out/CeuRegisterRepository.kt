@@ -17,6 +17,12 @@ interface CeuRegisterRepository {
     /** The first observed start of [relationId], or null if none has been observed. */
     suspend fun startOf(relationId: UUID): RegisterFact.RelationStarted?
 
+    /** Record a party's ADR-0252 classification; the first observation wins (it is immutable). */
+    suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean
+
+    /** Parties classified SYNTHETIC as known at [knownAt]. */
+    suspend fun syntheticParties(knownAt: Instant): Set<UUID>
+
     /** Every fact a snapshot for [validOn] known at [knownAt] could need. */
     suspend fun factsUpTo(validOn: LocalDate, knownAt: Instant): List<RegisterFact>
 }

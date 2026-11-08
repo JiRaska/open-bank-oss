@@ -169,6 +169,18 @@ mp:
         topic: openbank.delegation.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-party-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-party-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

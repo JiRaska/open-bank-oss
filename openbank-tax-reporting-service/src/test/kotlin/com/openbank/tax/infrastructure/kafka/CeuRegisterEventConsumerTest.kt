@@ -35,6 +35,13 @@ class CeuRegisterEventConsumerTest {
             facts.values.filterIsInstance<RegisterFact.RelationStarted>().firstOrNull { it.relationId == relationId }
 
         override suspend fun factsUpTo(validOn: LocalDate, knownAt: Instant): List<RegisterFact> = facts.values.toList()
+
+        val parties = linkedMapOf<UUID, Boolean>()
+
+        override suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean =
+            parties.putIfAbsent(partyId, synthetic) == null
+
+        override suspend fun syntheticParties(knownAt: Instant): Set<UUID> = parties.filterValues { it }.keys
     }
 
     private val repo = FakeRepository()
@@ -131,4 +138,16 @@ class CeuRegisterEventConsumerTest {
         }
         assertThat(repo.facts).isEmpty()
     }
+
+    @Test
+    fun `party classification SYNTHETIC is recorded, CUSTOMER is real, other party events ignored`(): Unit =
+        runBlocking {
+            val canary = UUID.randomUUID()
+            val customer = UUID.randomUUID()
+            consumer.consumeParty(record("PARTY_CREATED", """{"partyId":"$canary","classification":"SYNTHETIC"}"""))
+            consumer.consumeParty(record("PARTY_CREATED", """{"partyId":"$customer","classification":"CUSTOMER"}"""))
+            consumer.consumeParty(record("PARTY_ERASED", """{"partyId":"${UUID.randomUUID()}"}"""))
+            assertThat(repo.syntheticParties(Instant.MAX)).containsExactly(canary)
+            assertThat(repo.parties).hasSize(2)
+        }
 }
