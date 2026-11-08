@@ -146,14 +146,15 @@ spec:
               value: "false"
             # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
             # The OpenBao address is declared here so gen-network-policies.py derives the
-            # accounts -> vault:8203 egress. The MODE stays at the application default `disabled`
-            # (publish-ir answers 409, nothing is signed) until the Transit key `product-ir-publish`
-            # and this service's kubernetes-auth role are provisioned; then set
-            # CATALOG_IR_SIGNING_MODE=openbao here. `hmac` refuses to boot in this launch mode.
+            # accounts -> vault:8203 egress. MODE=openbao signs with Transit key `product-ir-publish`
+            # through this service's kubernetes-auth role (runbook 0027); the application default
+            # `disabled` makes publish-ir answer 409. `hmac` refuses to boot in this launch mode.
             # Consumers (phase 3) get verify-only roles.
             # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
             # ESO and the in-namespace jobs. The CA is the one in this pod's own internal-tls
             # Secret — same ClusterIssuer — and the client trusts ONLY it for this leg.
+            - name: CATALOG_IR_SIGNING_MODE
+              value: openbao
             - name: CATALOG_IR_SIGNING_OPENBAO_ADDRESS
               value: https://openbao.vault.svc:8203
             - name: OPENBANK_CATALOG_IR_SIGNING_OPENBAO_CA_FILE
