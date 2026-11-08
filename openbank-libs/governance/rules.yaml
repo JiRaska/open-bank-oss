@@ -279,6 +279,14 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-01-17"   # ADR-0342: enforce once billing and lending participants have landed through it
     ci_producer: ".github/scripts/check-close-participants.py"
+  ci_artifact_fetch_via_resolver:
+    detect: ["curl / wget / helm pull / helm repo add of github.com/*/releases/download, *.github.io or openpolicyagent.org/downloads under .github/, outside fetch-artifact.py"]
+    require:
+      - "external CI tools and charts are fetched through .github/scripts/fetch-artifact.py, sha256-verified against ci/artifacts.lock (#15216)"
+    gate: ci-artifact-fetch-via-resolver
+    enforced: advisory
+    target_enforce_date: "2027-02-08"   # #15216 rollout step 4: enforce once the remaining direct downloads are migrated
+    ci_producer: ".github/scripts/check-artifact-fetch-via-resolver.py"
   money_rounding_inline_construction:
     detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
     require:
