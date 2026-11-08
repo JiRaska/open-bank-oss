@@ -78,8 +78,8 @@ Usage:
 
 from __future__ import annotations
 
-import functools
 import hashlib
+import os
 import pathlib
 import re
 import shutil
@@ -87,8 +87,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.parse
-import urllib.request
 
 import yaml
 
@@ -134,92 +132,12 @@ def _render(chart_dir: str, values: dict) -> str | None:
     try:
         proc = subprocess.run(
             ["helm", "template", "gate-probe", chart_dir, "-f", values_path],
-            check=False, capture_output=True,
+            capture_output=True,
             text=True,
         )
     finally:
         pathlib.Path(values_path).unlink(missing_ok=True)
     return proc.stdout if proc.returncode == 0 else None
-
-
-@functools.lru_cache(maxsize=32)
-def _repository_index(repo_url: str) -> dict:
-    with urllib.request.urlopen(repo_url.rstrip("/") + "/index.yaml", timeout=20) as response:
-        index = yaml.safe_load(response.read())
-    if not isinstance(index, dict) or not isinstance(index.get("entries"), dict):
-        raise TypeError("chart repository index has no entries mapping")
-    return index
-
-
-def _pull_github_release(chart: str, repo_url: str, version: str,
-                         chart_root: pathlib.Path, stderr: str) -> bool:
-    """Recover a GitHub asset transport failure, bound to the original Helm index.
-
-    A matching release filename alone is insufficient: require the requested chart
-    version, exact resolved URL and SHA-256 from its repository index, then ask
-    Helm to validate the downloaded chart identity. Integrity failures are fatal;
-    unavailable transports retain the ordinary bounded pull retry behavior.
-    """
-    match = re.search(r"failed to fetch (https://github\.com/\S+)", stderr)
-    if not match or not isinstance(repo_url, str) or not repo_url.startswith("https://"):
-        return False
-    url = match.group(1)
-    parsed = urllib.parse.urlsplit(url)
-    parts = parsed.path.split("/")
-    if (parsed.netloc != "github.com" or parsed.query or parsed.fragment or len(parts) != 7
-            or parts[3:5] != ["releases", "download"]):
-        return False
-    owner, repo, tag, asset = [urllib.parse.unquote(part) for part in
-                              [parts[1], parts[2], parts[5], parts[6]]]
-    if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", owner)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", repo)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./+-]*", tag)
-            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.+-]*\.tgz", asset)):
-        return False
-    try:
-        index = _repository_index(repo_url)
-    except OSError:
-        return False
-    entries = index["entries"].get(chart, [])
-    if not isinstance(entries, list):
-        raise TypeError(f"invalid repository entries for {chart}")
-    digests = {
-        entry.get("digest") for entry in entries if isinstance(entry, dict)
-        and str(entry.get("version")) == version
-        and isinstance(entry.get("urls"), list)
-        and any(isinstance(candidate, str) and
-                urllib.parse.urljoin(repo_url.rstrip("/") + "/", candidate) == url
-                for candidate in entry["urls"])
-    }
-    if len(digests) != 1 or not all(isinstance(digest, str) and
-                                   re.fullmatch(r"[a-fA-F0-9]{64}", digest)
-                                   for digest in digests):
-        raise ValueError(f"cannot bind release asset to {chart}@{version} repository SHA-256")
-    expected = next(iter(digests)).lower()
-    with tempfile.TemporaryDirectory(prefix="helm-release-api-") as directory:
-        archive = pathlib.Path(directory) / "chart.tgz"
-        try:
-            download = subprocess.run(
-                ["gh", "release", "download", tag, "--repo", f"github.com/{owner}/{repo}",
-                 "--pattern", asset, "--output", str(archive)],
-                check=False, capture_output=True, text=True, timeout=60,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return False
-        if download.returncode != 0:
-            return False
-        if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
-            raise ValueError(f"release API SHA-256 mismatch for {chart}@{version}")
-        metadata = subprocess.run(["helm", "show", "chart", str(archive)],
-                                  check=False, capture_output=True, text=True, timeout=30)
-        identity = yaml.safe_load(metadata.stdout) if metadata.returncode == 0 else None
-        if (not isinstance(identity, dict) or identity.get("name") != chart
-                or str(identity.get("version")) != version):
-            raise ValueError(f"release API chart identity mismatch for {chart}@{version}")
-        chart_root.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(archive), str(chart_root / "verified-release-chart.tgz"))
-    print(f"Verified release API fallback for {chart}@{version}")
-    return True
 
 
 def _pull_ref(chart: str, repo_url: str) -> list[str]:
@@ -236,6 +154,83 @@ def _pull_ref(chart: str, repo_url: str) -> list[str]:
     return ["helm", "pull", chart, "--repo", repo_url]
 
 
+_PREFER_API = False
+# One `helm pull` normally takes 1-3 s; a frontend outage made it hang ~60 s per try.
+PULL_ATTEMPT_TIMEOUT_SECONDS = 30
+_GH_RELEASE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$")
+
+
+def _github_api_get(url: str, accept: str) -> bytes:
+    """GET an api.github.com URL. The token is sent to api.github.com ONLY: an asset
+    download answers 302 to a presigned CDN URL, which is followed by hand WITHOUT the
+    Authorization header (urllib would otherwise re-send it to the redirect target)."""
+    import urllib.error
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            return None
+
+    headers = {"Accept": accept, "User-Agent": "openbank-ci-helm-values-gate"}
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+            return resp.read()
+    except urllib.error.HTTPError as err:
+        if err.code not in (301, 302, 303, 307, 308) or not err.headers.get("Location"):
+            raise
+        target = err.headers["Location"]
+    plain = {"Accept": accept, "User-Agent": headers["User-Agent"]}
+    with urllib.request.urlopen(urllib.request.Request(target, headers=plain), timeout=120) as resp:
+        return resp.read()
+
+
+def _fetch_via_github_api(chart: str, repo_url: str, version: str,
+                          chart_root: pathlib.Path) -> str | None:
+    """Fallback when `helm pull` fails: resolve the chart archive URL from the repo's
+    index.yaml and, if it is a GitHub release asset, download it through the REST API.
+
+    github.com's web frontend can answer 504 for `/releases/download/` while the API and
+    the asset CDN keep working (measured 2026-11-08, #15216). The API route
+    (`/repos/{o}/{r}/releases/assets/{id}`, Accept: application/octet-stream) redirects
+    straight to the asset CDN. Returns None on success, or a reason string.
+    """
+    import io
+    import json
+    import tarfile
+    import urllib.request
+    if repo_url.startswith("oci://") or "://" not in repo_url:
+        return "fallback: OCI source has no index.yaml"
+    try:
+        with urllib.request.urlopen(f"{repo_url.rstrip('/')}/index.yaml", timeout=60) as resp:
+            index = yaml.safe_load(resp.read())
+        entry = next(e for e in (index.get("entries") or {}).get(chart, [])
+                     if str(e.get("version")) == version)
+        archive_url = (entry.get("urls") or [""])[0]
+        match = _GH_RELEASE.match(archive_url)
+        if not match:
+            return f"fallback: archive is not a GitHub release asset ({archive_url})"
+        owner, repo, tag, name = match.groups()
+        release = json.loads(_github_api_get(
+            f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}",
+            "application/vnd.github+json"))
+        asset = next(a for a in release.get("assets", []) if a.get("name") == name)
+        data = _github_api_get(asset["url"], "application/octet-stream")
+        digest = entry.get("digest")
+        if not digest:
+            return f"fallback: repo index carries no digest for {name}; refusing an unverified chart"
+        if hashlib.sha256(data).hexdigest() != digest:
+            return f"fallback: sha256 of {name} does not match the repo index digest"
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            tar.extractall(chart_root, filter="data")
+        return None
+    except Exception as exc:  # noqa: BLE001 - every failure here is a network/lookup failure
+        return f"fallback failed: {exc}"
+
+
 def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Path,
                  attempts: int = PULL_RETRY_ATTEMPTS,
                  backoff_seconds: float = PULL_RETRY_BACKOFF_SECONDS) -> str | None:
@@ -244,35 +239,43 @@ def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Pat
     Only retries the network fetch — a chart that pulls fine and then fails the
     values-key comparison is a different failure and is never routed through here.
     """
+    global _PREFER_API
+    if _PREFER_API and _fetch_via_github_api(chart, repo_url, version, chart_root) is None:
+        return None
     last_stderr = ""
     for attempt in range(1, attempts + 1):
-        pull = subprocess.run(
-            [*_pull_ref(chart, repo_url), "--version", version,
-             "--untar", "--untardir", str(chart_root)],
-            check=False, capture_output=True, text=True,
-        )
+        try:
+            pull = subprocess.run(
+                [*_pull_ref(chart, repo_url), "--version", version,
+                 "--untar", "--untardir", str(chart_root)],
+                capture_output=True, text=True, timeout=PULL_ATTEMPT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            last_stderr = f"helm pull timed out after {PULL_ATTEMPT_TIMEOUT_SECONDS}s"
+            break  # a hung upstream will not recover within this run's budget
         if pull.returncode == 0:
             return None
         last_stderr = pull.stderr.strip()
-        if attempt == 1 and _pull_github_release(chart, repo_url, version, chart_root, last_stderr):
-            return None
+        if "504" in last_stderr or "Gateway Time" in last_stderr:
+            break  # gateway outage, not a flake: retrying only spends the hard timeout
         if attempt < attempts:
             time.sleep(backoff_seconds * attempt)
-    return last_stderr
+    fallback = _fetch_via_github_api(chart, repo_url, version, chart_root)
+    if fallback is None:
+        # The direct route is down and the API route works: go to the API first for the
+        # rest of this run instead of paying the retry budget on every chart (a 22-chart
+        # run otherwise exceeds the gate's hard timeout during a frontend outage).
+        _PREFER_API = True
+        print(f"::notice::helm-values-key-effect fetched {chart}@{version} via the GitHub "
+              "REST API after `helm pull` failed (#15216)")
+        return None
+    return f"{last_stderr}\n{fallback}"
 
 
 def ignored_top_level_keys(chart_dir: str, values: dict) -> list[str] | None:
     """Top-level keys of `values` that the chart at chart_dir demonstrably ignores."""
-    chart_path = pathlib.Path(chart_dir)
-    schema_path = chart_path / "values.yaml"
-    if chart_path.is_file():
-        defaults = subprocess.run(["helm", "show", "values", chart_dir],
-                                  check=False, capture_output=True, text=True)
-        if defaults.returncode != 0:
-            return None
-        schema = yaml.safe_load(defaults.stdout)
-    else:
-        schema = yaml.safe_load(schema_path.read_text()) if schema_path.exists() else {}
+    schema_path = pathlib.Path(chart_dir) / "values.yaml"
+    schema = yaml.safe_load(schema_path.read_text()) if schema_path.exists() else {}
     schema = schema or {}
 
     baseline = _render(chart_dir, values)
@@ -351,15 +354,13 @@ def check_fleet() -> int:
                     )
                     continue
 
-            archive = chart_root / "verified-release-chart.tgz"
             chart_yamls = list(chart_root.glob("*/Chart.yaml"))
-            if not archive.is_file() and not chart_yamls:
+            if not chart_yamls:
                 print(f"FAIL {name}: pulled {chart}@{version} but found no Chart.yaml",
                       file=sys.stderr)
                 return 1
 
-            chart_input = archive if archive.is_file() else chart_yamls[0].parent
-            ignored = ignored_top_level_keys(str(chart_input), values)
+            ignored = ignored_top_level_keys(str(chart_yamls[0].parent), values)
             if ignored is None:
                 print(f"FAIL {name}: `helm template` failed for {chart}@{version}",
                       file=sys.stderr)
@@ -423,9 +424,9 @@ def _self_test_unreachable_is_not_a_finding() -> str | None:
     every reachable source still checked. Systemic outages are caught by `min_subjects`
     instead, because `checked` no longer counts what could not be pulled.
     """
-    import contextlib
     import io
-    from unittest import mock
+    import unittest.mock as mock
+    import contextlib
 
     sources = [
         ("reachable-a", "chart-a", "https://example.invalid/a", "1.0.0", {"k": 1}),
@@ -472,7 +473,7 @@ def _self_test_pull_retry() -> str | None:
 
     Returns None on success, or a description of what went wrong.
     """
-    from unittest import mock
+    import unittest.mock as mock
 
     # Case 1: every attempt fails (a genuinely unreachable/renamed repo) — must retry
     # exactly PULL_RETRY_ATTEMPTS times, not "forever", and must return an error.
@@ -515,91 +516,6 @@ def _self_test_pull_retry() -> str | None:
     return None
 
 
-def _self_test_release_fallback() -> str | None:
-    import copy
-    import unittest
-    from unittest import mock
-
-    test = unittest.TestCase()
-    url = "https://github.com/probe/charts/releases/download/probe-1.0.0/probe-1.0.0.tgz"
-    failure = f"Error: failed to fetch {url} : 504 Gateway Time-out"
-    payload = b"verified chart archive fixture"
-    index = {"entries": {"probe": [{"version": "1.0.0", "urls": [url],
-                                    "digest": hashlib.sha256(payload).hexdigest()}]}}
-    metadata = {"name": "probe", "version": "1.0.0"}
-    calls = []
-
-    def run(command, **_kwargs):
-        calls.append(command)
-        result = _FakeCompletedProcess(0)
-        if command[:3] == ["gh", "release", "download"]:
-            pathlib.Path(command[command.index("--output") + 1]).write_bytes(payload)
-        elif command[:3] == ["helm", "show", "chart"]:
-            result.stdout = yaml.safe_dump(metadata)
-        else:
-            raise AssertionError(f"unexpected fallback command: {command}")
-        return result
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="helm-release-selftest-") as directory:
-            root = pathlib.Path(directory)
-            with mock.patch(f"{__name__}._repository_index", return_value=index), \
-                 mock.patch("subprocess.run", side_effect=run):
-                target = root / "verified"
-                test.assertTrue(_pull_github_release("probe", "https://example.invalid/charts",
-                                                     "1.0.0", target, failure))
-                test.assertEqual((target / "verified-release-chart.tgz").read_bytes(), payload)
-                test.assertEqual(calls[0][calls[0].index("--repo") + 1], "github.com/probe/charts")
-
-            for bad_url in [url.replace("github.com", "example.invalid"),
-                            url + "?redirect=elsewhere", url.replace("probe-1.0.0.tgz", "*.tgz")]:
-                with mock.patch(f"{__name__}._repository_index") as fetch, \
-                     mock.patch("subprocess.run") as execute:
-                    test.assertFalse(_pull_github_release("probe", "https://example.invalid/charts",
-                                                          "1.0.0", root / "untrusted",
-                                                          f"failed to fetch {bad_url} : 504"))
-                    fetch.assert_not_called()
-                    execute.assert_not_called()
-
-            for field, value in [("version", "9.0.0"), ("urls", [url + ".other"]),
-                                 ("digest", "not-a-sha256"), ("digest", "0" * 64)]:
-                changed = copy.deepcopy(index)
-                changed["entries"]["probe"][0][field] = value
-                with mock.patch(f"{__name__}._repository_index", return_value=changed), \
-                     mock.patch("subprocess.run", side_effect=run), test.assertRaises(ValueError):
-                    _pull_github_release("probe", "https://example.invalid/charts", "1.0.0",
-                                         root / "invalid-binding", failure)
-                test.assertFalse((root / "invalid-binding").exists())
-
-            for field, value in [("name", "another-chart"), ("version", "9.0.0")]:
-                original = metadata[field]
-                metadata[field] = value
-                with mock.patch(f"{__name__}._repository_index", return_value=index), \
-                     mock.patch("subprocess.run", side_effect=run), test.assertRaises(ValueError):
-                    _pull_github_release("probe", "https://example.invalid/charts", "1.0.0",
-                                         root / "invalid-identity", failure)
-                metadata[field] = original
-                test.assertFalse((root / "invalid-identity").exists())
-
-            with mock.patch(f"{__name__}._repository_index", return_value=index), \
-                 mock.patch("subprocess.run", return_value=_FakeCompletedProcess(1)):
-                test.assertFalse(_pull_github_release("probe", "https://example.invalid/charts",
-                                                      "1.0.0", root / "unavailable", failure))
-            with mock.patch("subprocess.run", return_value=_FakeCompletedProcess(1, failure)) as pull, \
-                 mock.patch(f"{__name__}._pull_github_release", return_value=True):
-                test.assertIsNone(_pull_chart("probe", "https://example.invalid/charts", "1.0.0",
-                                              root / "recovered", backoff_seconds=0))
-                test.assertEqual(pull.call_count, 1)
-            with mock.patch("subprocess.run", return_value=_FakeCompletedProcess(1, failure)), \
-                 mock.patch(f"{__name__}._pull_github_release", side_effect=ValueError("integrity")), \
-                 test.assertRaises(ValueError):
-                _pull_chart("probe", "https://example.invalid/charts", "1.0.0",
-                             root / "fatal", backoff_seconds=0)
-    except AssertionError as exc:
-        return str(exc)
-    return None
-
-
 def self_test() -> int:
     """Offline detector self-test: a synthetic chart with one honoured and one ignored key,
     plus a network-free check of the retry/backoff path (#5094).
@@ -629,11 +545,6 @@ def self_test() -> int:
     retry_error = _self_test_pull_retry()
     if retry_error is not None:
         print(f"FAIL self-test (network retry): {retry_error}", file=sys.stderr)
-        return 1
-
-    release_error = _self_test_release_fallback()
-    if release_error is not None:
-        print(f"FAIL self-test (release fallback): {release_error}", file=sys.stderr)
         return 1
 
     unreachable_error = _self_test_unreachable_is_not_a_finding()
@@ -669,13 +580,6 @@ def self_test() -> int:
         # ...and MUST NOT flag the key it does read.
         if "honoured" in ignored:
             print("FAIL self-test: detector flagged 'honoured' (known negative)", file=sys.stderr)
-            return 1
-
-        package = subprocess.run(["helm", "package", str(chart), "--destination", str(tmp)],
-                                 check=False, capture_output=True, text=True)
-        archive = tmp / "probe-0.0.1.tgz"
-        if package.returncode != 0 or ignored_top_level_keys(str(archive), values) != ignored:
-            print("FAIL self-test: verified archive and unpacked chart checks differ", file=sys.stderr)
             return 1
 
         print("PASS self-test: detector flags an ignored key and clears an honoured one; "
