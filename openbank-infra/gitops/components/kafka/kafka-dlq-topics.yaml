@@ -935,6 +935,38 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-tax-reporting-service :: channel `ceu-account-events-in`
+# A record here is an account change missing from the CEÚ register projection until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.ceu-account-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-tax-reporting-service :: channel `ceu-delegation-events-in`
+# A record here is a disposer change missing from the CEÚ register projection until replayed.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.tax-reporting.ceu-delegation-events-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-swift-service :: channel `treasury-payments-in` (bank-own transfer releases, contract 9.3)
 # A record here is a treasury payment release the rail refused or could not process. A refused one
 # has already been answered with a REJECTED status when its paymentId was readable; a transient

@@ -140,6 +140,35 @@ mp:
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0367 / #15292: the CEÚ register projection (CeuRegisterEventConsumer). Same consumer
+      # group as above (quarkus.application.name), same DLQ shape; the topic CRs and ACLs are in
+      # openbank-infra/gitops/components/{kafka,tax-reporting}/. auto.offset.reset stays `latest`:
+      # the register's starting state is an explicit initial full load, never a topic replay whose
+      # completeness depends on retention.
+      ceu-account-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-account-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-delegation-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-delegation-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"

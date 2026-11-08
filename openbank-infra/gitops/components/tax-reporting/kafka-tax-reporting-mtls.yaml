@@ -49,3 +49,29 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # ADR-0367 / #15292: the CEÚ register projection reads account lifecycle and delegation
+      # (disposer) events, each with its own dead-letter topic (components/kafka/kafka-dlq-topics.yaml).
+      - resource:
+          type: topic
+          name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.tax-reporting.ceu-account-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.tax-reporting.ceu-delegation-events-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"

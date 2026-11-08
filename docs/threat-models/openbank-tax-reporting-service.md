@@ -24,6 +24,8 @@ interest-service ──outbox──▶ openbank.interest.accrual.event ──(Ka
                                          openbank.dlq.tax-reporting.withholding-remitted-in ◀──┘      └── OPA sidecar (localhost:8181)
 operator / auditor ──(OIDC)──▶ admin-ui ──(bearer)──▶ tax-reporting-service
 tax-reporting-service ──(OIDC machine bearer; production mTLS prerequisite)──▶ pension-company ledger
+account-service   ──outbox──▶ openbank.accounts.account.created ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
+delegation-service ──outbox──▶ openbank.delegation.events       ──(Kafka mTLS, own group)──▶ tax-reporting-service (CEÚ register)
 ```
 
 Trust boundaries: Kafka (mTLS, the `tax-reporting-service` KafkaUser holds Read on the source topic
@@ -105,3 +107,15 @@ by the follow-up #12500 and require rollout verification before company-books re
 - There is no alert yet on the dead-letter topic's depth. One dead-lettered remittance means an
   understated return. That alert, and a replay procedure, belong with the first operational
   review after deploy.
+
+- **CEÚ register projection (ADR-0367, #15292).** The service now reads account lifecycle and
+  delegation events into `ceu_register_fact`, an append-only bitemporal projection holding
+  identifiers only (account, party, grant ids; account number; currency). No name, birth number or
+  address is stored; CEÚ person data is to be read from party-service at render time. The new
+  KafkaUser grants are Read on both source topics and Write on their two dead-letter topics only.
+  Two risks carried forward: (1) **synthetic leakage** — an ADR-0252-tainted account reported to
+  ČNB would be a misstatement to a central register; tainted facts are recorded with their flag and
+  excluded at snapshot time with a counted drop, and the header parse is fail-to-real (an absent or
+  malformed header reads as real, so leakage is bounded by canary activity, never suppression of
+  real accounts); (2) **dead-lettered register events** — a parked AccountCreated is an account
+  missing from the next overview until replayed, the same shape as a parked remittance above.
