@@ -295,6 +295,11 @@ spec:
         - name: openbao-tls
           secret:
             secretName: billing-openbao-client-tls
+            # optional: billing is a money-path replicas:1 recreate rollout, and this Secret is only
+            # read for ca.crt by the product-IR shadow verifier (mode `disabled` by default). A
+            # not-yet-issued Certificate must not hold the pod in ContainerCreating; with mode
+            # `openbao` and no CA file the verifier fails closed at construction instead.
+            optional: true
 ---
 apiVersion: v1
 kind: ServiceAccount
