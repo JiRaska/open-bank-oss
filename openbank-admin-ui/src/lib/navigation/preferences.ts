@@ -13,6 +13,11 @@ const DEFAULTS: Preferences = { area: '', compact: false, width: 280, pins: [], 
 const cache = new Map<string, { raw: string | null; value: Preferences; memoryOnly?: boolean }>()
 const EVENT = 'openbank:navigation-preferences'
 
+/** One rule for write (togglePin) and read (parse): same query slice, same check. */
+function isPinnable(pin: PinnedView): boolean {
+  return pin.href === pin.pathname ||
+    (pin.href.startsWith(`${pin.pathname}?`) && isPersistableViewQuery(pin.href.slice(pin.pathname.length + 1)))
+}
 export function parsePreferences(raw: string | null): Preferences {
   try {
     const data = JSON.parse(raw ?? '{}')
@@ -20,9 +25,8 @@ export function parsePreferences(raw: string | null): Preferences {
       pin && typeof pin.href === 'string' && pin.href.length <= 4096 &&
       typeof pin.label === 'string' && pin.label.length <= 100 &&
       ALL_NAV.some(item => item.href === pin.pathname) &&
-      (pin.href === pin.pathname || (pin.href.startsWith(`${pin.pathname}?`) &&
-        // Drops pins saved before identifiers were excluded from capture.
-        isPersistableViewQuery(pin.href.slice(pin.pathname.length + 1)))),
+      // Also drops pins saved before identifiers were excluded from capture.
+      isPinnable(pin),
     ).slice(0, 12) : []
     return {
       area: typeof data.area === 'string' ? data.area : '', compact: data.compact === true,
@@ -68,7 +72,7 @@ export function useNavigationPreferences() {
     selectArea: (area: string) => update(current => current.area === area ? current : { ...current, area }),
     toggleCompact: () => update(current => ({ ...current, compact: !current.compact })),
     setWidth: (width: number) => update(current => ({ ...current, width })),
-    togglePin: (pin: PinnedView) => update(current => !isPersistableViewQuery(pin.href.split('?')[1] ?? '') ? current : ({ ...current, pins: current.pins.some(item => item.href === pin.href)
+    togglePin: (pin: PinnedView) => update(current => !isPinnable(pin) ? current : ({ ...current, pins: current.pins.some(item => item.href === pin.href)
       ? current.pins.filter(item => item.href !== pin.href) : current.pins.length < 12 ? [...current.pins, pin] : current.pins })),
     recordPage: (href: string) => update(current => current.recentPages[0] === href ? current : {
       ...current, recentPages: [href, ...current.recentPages.filter(item => item !== href)].slice(0, 6),

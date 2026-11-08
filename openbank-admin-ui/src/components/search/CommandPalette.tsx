@@ -181,12 +181,14 @@ function OpenCommandPalette({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      // Ignore only keys typed into ANOTHER editable control. Focus commonly rests on the
-      // dialog container after a mouse click, and arrows/Enter must still drive the list.
+      // Ignore only keys aimed at ANOTHER interactive control (an editable field, or a button
+      // whose Enter/Space must run its own click). Focus commonly rests on the dialog
+      // container after a mouse click, and arrows/Enter must still drive the list there.
       const target = e.target
       const editable = target instanceof HTMLElement && target !== inputRef.current &&
         (target.isContentEditable || target instanceof HTMLInputElement ||
-          target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)
+          target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement ||
+          target instanceof HTMLButtonElement)
       if (e.isComposing || editable) return
       if (e.key === 'ArrowDown') {
         e.preventDefault()

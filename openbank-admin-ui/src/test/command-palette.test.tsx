@@ -136,6 +136,17 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     expect(push).not.toHaveBeenCalled()
   })
 
+  it('leaves Enter on a focused button inside the dialog to that button', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('textbox'), 'nov')
+    await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy(), { timeout: 2000 })
+    const button = document.createElement('button')
+    screen.getByRole('dialog').appendChild(button)
+    fireEvent.keyDown(button, { key: 'Enter' })
+    expect(push).not.toHaveBeenCalled()
+  })
+
   // #3886 regression, deterministic. The flake (`push` never called, 2.6% of CI runs) was the
   // rare, load-dependent form of this: a keydown reaching the palette while `shown` is still
   // empty. ArrowDown used to compute `Math.min(a + 1, shown.length - 1)` = -1, deselecting every

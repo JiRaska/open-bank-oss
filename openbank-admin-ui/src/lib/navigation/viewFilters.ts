@@ -4,17 +4,31 @@ import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 export const CAPTURE_VIEW = 'openbank:capture-view'
 /**
- * Filter keys a pinned view may persist. A pin lives in localStorage and outlives
- * sign-out, so it must never carry a customer identifier (IBAN, BBAN, account id,
- * counterparty, payment references). Allow-list, not deny-list: a filter added to a
- * page later is dropped from the pin until someone decides it is non-identifying.
+ * Filters a pinned view may persist, each with the only value SHAPE it may carry. A pin lives
+ * in localStorage and outlives sign-out, so it must never hold a customer identifier (IBAN,
+ * BBAN, account id, counterparty, payment references). Keys AND values are checked: a key
+ * check alone lets `status=<IBAN>` through, because the restore path copies any URL string
+ * into page state. Allow-list, not deny-list: a filter added later is dropped from the pin
+ * until someone decides it is non-identifying and gives it a shape. Enum shapes admit no
+ * digits, which is what keeps an IBAN or account number out of them.
  */
-export const PERSISTABLE_VIEW_FILTERS: ReadonlySet<string> = new Set(['status', 'type', 'dateFrom', 'dateTo'])
-/** True when every query parameter of a pinned href is safe to keep at rest. */
+const PERSISTABLE_VIEW_FILTERS: ReadonlyMap<string, RegExp> = new Map([
+  ['status', /^[A-Z_]{1,32}$/],
+  ['type', /^[A-Z_]{1,32}$/],
+  ['tab', /^[a-z][a-z-]{0,31}$/],
+  ['dateFrom', /^\d{4}-\d{2}-\d{2}$/],
+  ['dateTo', /^\d{4}-\d{2}-\d{2}$/],
+  ['amountMin', /^\d{1,12}(\.\d{1,2})?$/],
+  ['amountMax', /^\d{1,12}(\.\d{1,2})?$/],
+])
+export function isPersistableViewFilter(key: string, value: string): boolean {
+  if (key === 'view') return value === 'saved'
+  return PERSISTABLE_VIEW_FILTERS.get(key)?.test(value) ?? false
+}
+/** True when every query parameter of a pinned href's query (text after `?`) is safe at rest. */
 export function isPersistableViewQuery(search: string): boolean {
-  for (const key of new URLSearchParams(search).keys()) {
-    if (key !== 'view' && !PERSISTABLE_VIEW_FILTERS.has(key)) return false
-  }
+  if (search.includes('#') || search.includes('?')) return false
+  for (const [key, value] of new URLSearchParams(search)) if (!isPersistableViewFilter(key, value)) return false
   return true
 }
 /** Capture only page-owned filters when the operator explicitly pins a view. */
@@ -34,7 +48,7 @@ export function useViewFilters(fields: Record<string, [string, (value: string) =
   useEffect(() => {
     const capture = () => {
       const params = new URLSearchParams()
-      for (const [key, [value]] of Object.entries(live.current)) if (value && PERSISTABLE_VIEW_FILTERS.has(key)) params.set(key, value)
+      for (const [key, [value]] of Object.entries(live.current)) if (value && isPersistableViewFilter(key, value)) params.set(key, value)
       if (params.size) params.set('view', 'saved')
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${params.size ? `?${params}` : ''}`)
     }
