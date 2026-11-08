@@ -167,6 +167,8 @@ jobs:
           persist-credentials: false
 
       - name: Install OPA
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # regen-derived.sh --all runs gen-agents-opa-data.py, which evaluates the real policy and
           # refuses to write unless every decision matches, so `opa` is not optional.
@@ -180,7 +182,10 @@ jobs:
             *)              SUFFIX="linux_amd64";         OPA_SHA256="23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb" ;;
           esac
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
-            "https://github.com/open-policy-agent/opa/releases/download/v1.21.1/opa_${SUFFIX}"
+            "https://openpolicyagent.org/downloads/v1.21.1/opa_${SUFFIX}" || \
+            gh release download v1.21.1 --repo open-policy-agent/opa \
+              --pattern "opa_${SUFFIX}" --output "$HOME/bin/opa" --clobber
+          unset GH_TOKEN
           echo "${OPA_SHA256}  $HOME/bin/opa" | sha256sum -c - \
             || { echo "::error::OPA v1.21.1 download failed checksum verification"; exit 1; }
           chmod +x "$HOME/bin/opa"
