@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { loadStatutoryReturns, type ReturnBreach, type ReturnCapability, type StatutoryReturn } from '@/components/regulatory/statutoryReturns'
+import { ceuFilings, loadStatutoryReturns, type ReturnBreach, type ReturnCapability, type StatutoryReturn } from '@/components/regulatory/statutoryReturns'
 
 type Snapshot = { capability: ReturnCapability; returns: StatutoryReturn[]; breaches: ReturnBreach[] }
 type State = { status: 'loading' } | { status: 'error'; kind: UnavailableKind } | { status: 'ready'; data: Snapshot }
@@ -51,6 +51,7 @@ export default function StatutoryReturnsPage() {
                 {item.returnCode} · {item.entityId} · {item.period} · {item.kind} · {t('termín', 'due')} {item.dueDate}
               </li>)}</ul>}
         </section>
+        <CeuSection returns={state.data.returns} />
         <section aria-labelledby="returns-heading" className="card" style={{ padding: 20 }}>
           <h2 id="returns-heading">{t('Revize výkazů', 'Return revisions')}</h2>
           {state.data.returns.length === 0 ? <p>{t('API zatím nevrátilo žádnou sestavenou revizi.', 'The API has not returned any built revision yet.')}</p> :
@@ -62,5 +63,44 @@ export default function StatutoryReturnsPage() {
         </section>
       </>}
     </div>
+  )
+}
+
+/** ADR-0367 pilot: the CEÚ daily change overview, read-only. Approval, SDAT delivery and ČNB's answer are recorded in the backend. */
+function CeuSection({ returns }: { returns: StatutoryReturn[] }) {
+  const { t } = useLanguage()
+  const filings = ceuFilings(returns)
+  const show = (value: number | null) => (value === null ? t('neuvedeno', 'not reported') : String(value))
+  return (
+    <section aria-labelledby="ceu-heading" className="card" style={{ padding: 20, marginBottom: 16 }}>
+      <h2 id="ceu-heading">{t('CEÚ – denní přehled změn (ČNB)', 'CEÚ – daily change overview (ČNB)')}</h2>
+      <p>{t('Každý pracovní den do 12:00 přehled změn účtů za období od předchozího pracovního dne. Syntetičtí zákazníci jsou vždy vyloučeni a jejich počet je uveden.',
+        'Every working day by 12:00, the account changes since the previous working day. Synthetic customers are always excluded and their count is shown.')}</p>
+      {filings.length === 0 ? <p>{t('API zatím nevrátilo žádný přehled CEÚ.', 'The API has not returned any CEÚ overview yet.')}</p> :
+        <table className="table">
+          <thead>
+            <tr>
+              <th>{t('Období do', 'Window end')}</th>
+              <th>{t('Stav', 'Status')}</th>
+              <th>{t('Změny', 'Changes')}</th>
+              <th>{t('Vyloučené syntetické účty / vazby', 'Excluded synthetic accounts / ties')}</th>
+              <th>{t('Reference SDAT', 'SDAT reference')}</th>
+              <th>{t('Odpověď ČNB', 'ČNB answer')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filings.map(item => (
+              <tr key={item.id}>
+                <td>{item.window}{item.initialLoad ? ` · ${t('úvodní plné načtení', 'initial full load')}` : ''}</td>
+                <td>{item.status} · {t('revize', 'revision')} {item.revision}</td>
+                <td>{show(item.changes)}</td>
+                <td>{show(item.syntheticAccountsDropped)} / {show(item.syntheticRelationsDropped)}</td>
+                <td>{item.submissionReference ?? '—'}</td>
+                <td>{item.acknowledgement ?? '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>}
+    </section>
   )
 }
