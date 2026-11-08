@@ -335,6 +335,72 @@ class DayCloseParticipantsIT {
 
     @Test
     @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `persisted source receipt retries preserve reconciliation and stale work cannot undo a waiver`() {
+        val date = LocalDate.of(2019, 9, 18)
+        seedManualDay(date)
+        val command = ReportParticipationCommand(
+            date,
+            "interest",
+            ParticipationOutcome.RAN,
+            1,
+            1,
+            null,
+            INTEREST_PRINCIPAL,
+            sourceRunId = "a".repeat(64),
+        )
+        val first = onEventLoop { participation.report(command) }
+        recordFreshTieOut(date)
+        val replay = onEventLoop { participation.report(command) }
+        assertThat(replay.reportedAt).isEqualTo(first.reportedAt)
+        assertThat(onEventLoop { participation.completeness(date) }.lastWorkReportAt).isEqualTo(first.reportedAt)
+        onEventLoop {
+            participation.report(
+                command.copy(
+                    outcome = ParticipationOutcome.REFUSED,
+                    journalsPosted = 0,
+                    reason = "later run refused",
+                    sourceRunId = "b".repeat(64),
+                ),
+            )
+        }
+        onEventLoop { participation.waive(WaiveParticipationCommand(date, "interest", "reviewed exception", "owner")) }
+        assertThat(onEventLoop { participation.report(command) }.outcome).isEqualTo(ParticipationOutcome.WAIVED)
+        assertThatThrownBy { onEventLoop { participation.report(command.copy(itemsProcessed = 2)) } }
+            .isInstanceOf(com.openbank.ledger.domain.model.LedgerConflictException::class.java)
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `a new persisted source run with the same counts still needs a new reconciliation`() {
+        val date = LocalDate.of(2019, 9, 19)
+        seedManualDay(date)
+        val command = ReportParticipationCommand(
+            date,
+            "interest",
+            ParticipationOutcome.RAN,
+            1,
+            1,
+            null,
+            INTEREST_PRINCIPAL,
+            sourceRunId = "a".repeat(64),
+        )
+        onEventLoop { participation.report(command) }
+        recordFreshTieOut(date)
+        onEventLoop { participation.report(command.copy(sourceRunId = "b".repeat(64))) }
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        recordFreshTieOut(date)
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
     fun `manual HTTP tie-out cannot use reconciliation older than completed fee work`() {
         val date = LocalDate.of(2019, 9, 10)
         seedManualDay(date)

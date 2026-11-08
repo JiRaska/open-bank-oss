@@ -70,8 +70,12 @@ data class CloseParticipationRecord(
     val reportedAt: Instant,
     val late: Boolean,
     val exercisedJobs: Set<String> = emptySet(),
+    val sourceRunId: String? = null,
 ) {
     init {
+        requireValid(sourceRunId == null || sourceRunId.matches(Regex("[a-f0-9]{64}"))) {
+            "sourceRunId must be a SHA-256 source receipt identity"
+        }
         requireValid(
             exercisedJobs.size <= MAX_EXERCISED_JOBS &&
                 exercisedJobs.all {
