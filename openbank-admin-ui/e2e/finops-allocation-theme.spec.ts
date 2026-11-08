@@ -31,6 +31,10 @@ const allocation = {
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
+  await page.route('**/api/build-info', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ version: '4.4.1', gitSha: 'abcdef1234567890', buildDate: '2026-11-07T12:00:00Z' }),
+  }))
   await page.route('**/api/finops/allocation', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(allocation) }))
 })
 
@@ -38,12 +42,6 @@ test.describe('/finops/allocation — semantic theme', () => {
   for (const theme of ['light', 'dark'] as const) {
     test(`${theme} theme preserves source-backed showback and WCAG A/AA`, async ({ page }) => {
       await page.goto('/finops/allocation')
-      await page.evaluate(selectedTheme => {
-        document.documentElement.classList.toggle('dark', selectedTheme === 'dark')
-        document.documentElement.dataset.theme = selectedTheme
-      }, theme)
-      await page.waitForTimeout(300)
-
       await expect(page.getByRole('heading', { level: 1, name: /Cost Allocation|Rozpad nákladů/i })).toBeVisible()
       await expect(page.getByText('payment-service')).toBeVisible()
       await expect(page.getByText(/Payment execution|Provedení platby/i)).toBeVisible()
@@ -51,6 +49,16 @@ test.describe('/finops/allocation — semantic theme', () => {
       await expect(page.getByText(/per-flow sum can exceed 100%|součet přes procesy proto může přesáhnout 100 %/i)).toBeVisible()
 
       await expect(page.getByRole('region', { name: /Cost domain classification source|Zdroj klasifikace nákladových domén/i })).toBeVisible()
+
+      const buildBadge = page.getByRole('banner').getByRole('link', { name: /v4\.4\.1.*abcdef1/ })
+      await expect(buildBadge).toBeVisible()
+      await expect(buildBadge).toHaveAttribute('href', '/docs/release-notes/admin-ui')
+
+      const themeToggle = page.getByRole('banner').getByRole('button', { name: /Switch to the .* theme|Přepnout na .* motiv/i })
+      if (theme === 'dark') await themeToggle.click()
+      await expect(themeToggle).toHaveAttribute('aria-pressed', String(theme === 'dark'))
+      if (theme === 'dark') await expect(page.locator('html')).toHaveClass(/\bdark\b/)
+      else await expect(page.locator('html')).not.toHaveClass(/\bdark\b/)
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

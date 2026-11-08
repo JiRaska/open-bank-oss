@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { hasPermission, permissionForPath, ROLES } from '@/lib/auth/roles'
 
 const page = fs.readFileSync(path.join(process.cwd(), 'src/app/approvals/page.tsx'), 'utf8')
-const sidebar = fs.readFileSync(path.join(process.cwd(), 'src/components/layout/Sidebar.tsx'), 'utf8')
+const sidebar = fs.readFileSync(path.join(process.cwd(), 'src/lib/navigation/catalog.ts'), 'utf8')
 const header = fs.readFileSync(path.join(process.cwd(), 'src/components/layout/Header.tsx'), 'utf8')
 
 describe('approval inbox RBAC truthfulness', () => {

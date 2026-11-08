@@ -146,6 +146,7 @@ def trusted_deploy_run(run: dict, repo_slug: str) -> bool:
 SYNTHETIC_PRODUCERS = (
     (".github/workflows/admin-ui-browser-synthetic.yml", "test-intelligence-run-openbank-admin-ui-"),
     (".github/workflows/synthetic-journeys.yml", "test-intelligence-run-openbank-platform-"),
+    (".github/workflows/admin-ui-deployed-auth-gate.yml", "test-intelligence-run-openbank-admin-ui-deployed-session-"),
 )
 # Enough completed runs for collect-test-intelligence.mjs to tell a fresh failure from a
 # recovery (retainActionableFailure) without downloading the whole 30-day history.

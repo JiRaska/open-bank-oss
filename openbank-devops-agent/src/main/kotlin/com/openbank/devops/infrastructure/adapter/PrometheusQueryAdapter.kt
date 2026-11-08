@@ -6,34 +6,14 @@
 package com.openbank.devops.infrastructure.adapter
 
 import com.openbank.devops.application.port.out.PrometheusQueryPort
+import com.openbank.devops.infrastructure.client.PrometheusRestClient
 import com.openbank.devops.infrastructure.config.DevOpsConfig
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.QueryParam
 import kotlinx.coroutines.future.await
 import org.eclipse.microprofile.rest.client.RestClientBuilder
 import org.jboss.logging.Logger
 import java.net.URI
 import java.time.Instant
-
-@Path("/api/v1")
-interface PrometheusRestClient {
-    @GET
-    @Path("/query")
-    fun queryInstant(
-        @QueryParam("query") query: String,
-    ): java.util.concurrent.CompletableFuture<PrometheusInstantResult>
-
-    @GET
-    @Path("/query_range")
-    fun queryRange(
-        @QueryParam("query") query: String,
-        @QueryParam("start") start: String,
-        @QueryParam("end") end: String,
-        @QueryParam("step") step: String,
-    ): java.util.concurrent.CompletableFuture<PrometheusRangeResult>
-}
 
 data class PrometheusInstantResult(val status: String, val data: PrometheusInstantData)
 

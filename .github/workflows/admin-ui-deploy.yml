@@ -99,9 +99,16 @@ jobs:
     # could not recognise the self-generated `chore(admin-ui): deploy ...` commit and
     # rebuilt the image again. Resolve the exact producer SHA before allocating the
     # arm64/OIDC build job and expose one closed boolean to the downstream job.
+    # head_branch alone is the TRIGGERING run's branch name, which a fork PR from a branch
+    # named `main` also carries. Require a same-repository push run as well. The checkout
+    # below is refs/heads/main regardless, so this is defence in depth: a fork event must
+    # not be able to start (or occupy the concurrency group of) a secret-bearing deploy.
     if: >-
       github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # Readiness runs are serialized so overlapping CI/Pact/Services-CI completions
@@ -178,7 +185,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
-        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ steps.source.outputs.source_sha }}" "$EVENT_NAME"
+          ADMISSION_SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "$ADMISSION_SOURCE_SHA" "$EVENT_NAME"
 
   build-push:
     name: Build + push admin-ui
@@ -255,7 +263,8 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           GH_TOKEN: ${{ env.GITOPS_APP_ID == '' && github.token || steps.read_token.outputs.token }}
-        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "${{ needs.deploy-source.outputs.source_sha }}" "$EVENT_NAME"
+          ADMISSION_SOURCE_SHA: ${{ needs.deploy-source.outputs.source_sha }}
+        run: bash .github/scripts/check-admin-ui-deploy-admission.sh "$ADMISSION_SOURCE_SHA" "$EVENT_NAME"
 
       - name: Checkout mobile RUM capability metadata
         if: ${{ steps.build_admission.outputs.proceed == 'true' && env.APP_RO_TOKEN != '' }}
@@ -676,6 +685,12 @@ jobs:
             if [ -n "${synthetic_run_id}" ]; then
               api "https://api.github.com/repos/${REPO}/actions/runs/${synthetic_run_id}/artifacts?per_page=100" \
                 | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-platform-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
+            fi
+            deployed_session_run_id="$(api "https://api.github.com/repos/${REPO}/actions/workflows/admin-ui-deployed-auth-gate.yml/runs?branch=main&status=completed&per_page=1" \
+              | python3 -c "import json,sys; a=[r for r in json.load(sys.stdin).get('workflow_runs',[]) if r.get('head_branch') == 'main']; print(a[0]['id'] if a else '')" 2>/dev/null || true)"
+            if [ -n "${deployed_session_run_id}" ]; then
+              api "https://api.github.com/repos/${REPO}/actions/runs/${deployed_session_run_id}/artifacts?per_page=100" \
+                | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-openbank-admin-ui-deployed-session-') and not a['expired'] and (a.get('workflow_run') or {}).get('head_branch') == 'main']" 2>/dev/null || true
             fi
             for page in 1 2 3 4 5; do
               api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \

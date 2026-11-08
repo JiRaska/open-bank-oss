@@ -20,6 +20,8 @@
 # --token-file contains the freshly minted Authorization header; env token is test/local
 # fallback only. Never log or put a bearer token in a process argument.
 import argparse
+import contextlib
+import io
 import json
 import os
 import re
@@ -283,6 +285,21 @@ def verify_stored(payload, stored):
             raise ValueError("stored authorization differs: " + key)
 
 
+def read_only_backend(args, payload=None):
+    """Observe capabilities and optionally an existing row; never create or repair one."""
+    base_url = (os.environ.get("AGENT_SERVICE_URL") or "").strip()
+    token, _ = resolve_token(args.token_file)
+    if not base_url or token is None:
+        raise ValueError("read configuration unavailable")
+    capability = read_backend(base_url, token, "/capabilities")
+    if (type(capability.get("evidenceSchemaVersion")) is not int
+            or capability["evidenceSchemaVersion"] != 2
+            or capability.get("policyPrAuthorization") is not True):
+        raise ValueError("unsupported read capabilities")
+    if payload is not None:
+        verify_stored(payload, read_backend(base_url, token, f"/{payload['prNumber']}"))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="record a human merge of an agent PR")
     parser.add_argument("--event", help="pull_request closed event JSON (default: $GITHUB_EVENT_PATH)")
@@ -290,10 +307,42 @@ def main(argv=None):
     parser.add_argument("--agents", default=AGENTS_REGISTRY, help="governance agents.yaml charter registry")
     parser.add_argument("--token-file", help="0600 file holding 'Authorization: Bearer <token>' "
                                              "(workflow-minted client_credentials token)")
-    parser.add_argument("--dry-run", action="store_true", help="print the payload, never POST")
+    operation = parser.add_mutually_exclusive_group()
+    operation.add_argument("--dry-run", action="store_true", help="print the payload, never POST")
+    operation.add_argument("--read-capabilities", action="store_true", help="owner/main: GET capabilities only")
+    operation.add_argument("--read-existing", action="store_true", help="owner/main: verify an existing --pr row using GET only")
     parser.add_argument("--pr", type=int, help="backfill one canonical merged PR from GitHub (main workflow only)")
     parser.add_argument("--verify-record", action="store_true", help="require schema capability and committed read-back")
     args = parser.parse_args(argv)
+
+    if args.read_capabilities or args.read_existing:
+        # Backend data, addresses and exception text must never enter public read-mode logs.
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                result = execute(args)
+            except Exception:
+                result = 1
+        print("record-agent-merge: read-only verification " + ("passed" if result == 0 else "failed"),
+              file=sys.stdout if result == 0 else sys.stderr)
+        return result
+    return execute(args)
+
+
+def execute(args):
+    if args.read_capabilities or args.read_existing:
+        if args.event or args.verify_record:
+            return 1
+        if args.read_existing and args.pr is None:
+            return 1
+        if args.read_capabilities:
+            if args.pr is not None:
+                return 1
+            repo = os.environ.get("GITHUB_REPOSITORY", "")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+                return 1
+            authorize_backfill(repo, GitHub(), os.environ)
+            read_only_backend(args)
+            return 0
 
     event_path = args.event or os.environ.get("GITHUB_EVENT_PATH", "")
     try:
@@ -337,6 +386,8 @@ def main(argv=None):
     author = ((pull.get("user") or {}).get("login")) or ""
     agent_id = decide_agent_id(branch, author, agent_accounts, agent_ids)
     if agent_id is None:
+        if args.read_existing:
+            return 1
         print(f"record-agent-merge: PR #{(pull.get('number'))} (branch '{branch}', author "
               f"'{author}') is not agent-authored — nothing to record.")
         return 0
@@ -367,6 +418,10 @@ def main(argv=None):
 
     if args.dry_run:
         print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if args.read_existing:
+        read_only_backend(args, payload)
         return 0
 
     base_url = (os.environ.get("AGENT_SERVICE_URL") or "").strip()

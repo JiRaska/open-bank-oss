@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 import fnmatch
+import json
 import os
 import re
 import subprocess
@@ -69,6 +70,131 @@ print(json.dumps(dict(check_runs=rows)))
 """
 
 
+# The workflow's six current request shapes. Unknown arguments still execute the
+# original fake CLI; this is a test-only startup optimization, not an API allowlist.
+_GH_VECTORS = (
+    ("api", "repos/example/repo/compare/base...head", "--jq", ".merge_base_commit.sha"),
+    ("api", "repos/example/repo/compare/base...head"),
+    ("api", "repos/example/repo/compare/1e009deab5085b19d3977d53f5b634a8c7f5a548...mergebase", "--jq", ".status"),
+    ("api", "--paginate", "repos/example/repo/commits/mergebase/check-runs?per_page=100"),
+    ("api", "--paginate", "repos/example/repo/commits/head/check-runs?per_page=100"),
+    ("api", "-i", "repos/example/repo/dependency-graph/compare/" + "a" * 40 + "...head"),
+)
+_GH_REPLAY_SETUP = r'''import contextlib, io, json, os, pathlib, shlex, sys
+config = json.load(sys.stdin)
+program = compile(config["source"], config["original"], "exec")
+call_file = pathlib.Path(config["call_file"])
+os.environ["CASE"] = config["case"]
+os.environ["CALLS"] = str(call_file)
+lines = ["#!/bin/sh", "set -eu"]
+for argv in config["vectors"]:
+    call_file.write_bytes(b"")
+    sys.argv = [config["original"], *argv]
+    stdout, stderr = io.StringIO(), io.StringIO()
+    status = 0
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        try:
+            exec(program, {"__name__": "__main__", "__file__": config["original"]})
+        except SystemExit as result:
+            status = result.code if result.code is not None else 0
+    if not isinstance(status, int) or not 0 <= status <= 255:
+        raise ValueError("fake CLI must return an integer exit status")
+    outputs = (call_file.read_bytes().decode("utf-8"), stdout.getvalue(), stderr.getvalue())
+    if any("\0" in value for value in outputs):
+        raise ValueError("binary fake CLI output cannot be replayed by the shell")
+    condition = [f'[ "${{CASE-}}" = {shlex.quote(config["case"])} ]', f'[ "$#" -eq {len(argv)} ]']
+    condition += [f'[ "${{{index}}}" = {shlex.quote(argument)} ]' for index, argument in enumerate(argv, 1)]
+    lines.append("if " + " && ".join(condition) + "; then")
+    lines.append("  printf '%s' " + shlex.quote(outputs[0]) + ' >> "$CALLS"')
+    lines.append("  printf '%s' " + shlex.quote(outputs[1]))
+    lines.append("  printf '%s' " + shlex.quote(outputs[2]) + " >&2")
+    lines.append(f"  exit {status}")
+    lines.append("fi")
+lines.append("exec " + shlex.quote(config["original"]) + ' "$@"')
+sys.stdout.buffer.write(("\n".join(lines) + "\n").encode("utf-8"))
+'''
+
+
+def _install_gh(root, case, *, vectors=_GH_VECTORS, source=GH):
+    # Only GH is pure in CASE+argv. DIFF_GH reads its call count and must never
+    # use this replay. Each test owns its setup process, responses and call log.
+    original = root / "gh"
+    original.write_text(source)
+    original.chmod(0o755)
+    directory = root / "gh-replay"
+    directory.mkdir()
+    config = dict(source=source, original=str(original), case=case,
+                  vectors=vectors, call_file=str(root / "gh-setup-calls"))
+    # Keep the generator binary: text-mode newline conversion would corrupt a
+    # response containing CRLF. No caller environment, argv or stream is mutated.
+    result = subprocess.run(
+        ["python3", "-c", _GH_REPLAY_SETUP], input=json.dumps(config).encode("utf-8"),
+        capture_output=True, check=True, timeout=HARNESS_TIMEOUT,
+    )
+    shim = directory / "gh"
+    shim.write_bytes(result.stdout)
+    shim.chmod(0o755)
+    return directory
+
+
+class FixtureReplayTests(unittest.TestCase):
+    def test_exact_arguments_and_partial_error_output_are_replayed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            executions = root / "executions"
+            source = """#!/usr/bin/env python3
+import json, os, sys
+args = sys.argv[1:]
+with open(os.environ['CALLS'], 'a') as out: out.write(json.dumps(args)+'\\n')
+with open(EXECUTIONS, 'a') as out: out.write('run\\n')
+sys.stdout.write(json.dumps([os.environ['CASE'], args])+'\\r\\n\\n')
+sys.stderr.write('partial error\\r\\n\\n')
+sys.exit(7)
+""".replace("EXECUTIONS", repr(str(executions)))
+            vectors = (("a b", "c"), ("a", "b c"), ("",), ("quote'\"*?[]\n", "žluťoučký"))
+            before = {key: os.environ.get(key) for key in ("CASE", "CALLS")}
+            shim = _install_gh(root, "known", vectors=vectors, source=source) / "gh"
+            calls = root / "calls"
+            self.assertFalse(calls.exists(), "precomputation must not write the caller's log")
+            self.assertEqual(before, {key: os.environ.get(key) for key in before})
+            env = dict(os.environ, CASE="known", CALLS=str(calls))
+            for argv in vectors:
+                result = subprocess.run([str(shim), *argv], env=env, capture_output=True, timeout=HARNESS_TIMEOUT)
+                self.assertEqual(result.returncode, 7)
+                self.assertEqual(result.stdout, (json.dumps(["known", list(argv)]) + "\r\n\n").encode())
+                self.assertEqual(result.stderr, b"partial error\r\n\n")
+            self.assertEqual(len(executions.read_text().splitlines()), len(vectors))
+            # Neither a new argument boundary nor a new CASE may hit an old response.
+            for case, argv in (("known", ("unseen", "")), ("other", vectors[0])):
+                result = subprocess.run([str(shim), *argv], env=dict(env, CASE=case),
+                                        capture_output=True, timeout=HARNESS_TIMEOUT)
+                self.assertEqual(result.returncode, 7)
+                self.assertEqual(result.stdout, (json.dumps([case, list(argv)]) + "\r\n\n").encode())
+                self.assertEqual(result.stderr, b"partial error\r\n\n")
+            self.assertEqual(len(executions.read_text().splitlines()), len(vectors) + 2)
+            self.assertEqual([json.loads(line) for line in calls.read_text().splitlines()],
+                             [list(argv) for argv in vectors] + [["unseen", ""], list(vectors[0])])
+
+    def test_real_fixture_preserves_nonzero_queries_and_unknown_case_fallback(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shim = _install_gh(root, "partial-api-failure") / "gh"
+            calls = root / "calls"
+            env = dict(os.environ, CASE="partial-api-failure", CALLS=str(calls))
+            known = ("api", "--paginate", "repos/example/repo/commits/head/check-runs?per_page=100")
+            unknown = ("api", "repos/example/repo/commits/head/check-runs?per_page=100")
+            results = [subprocess.run([str(shim), *argv], env=env, capture_output=True,
+                                      timeout=HARNESS_TIMEOUT) for argv in (known, unknown)]
+            self.assertEqual([(result.returncode, result.stdout, result.stderr) for result in results],
+                             [(1, results[0].stdout, b"")] * 2)
+            self.assertIn(b'Submit fleet dependency graph', results[0].stdout)
+            result = subprocess.run([str(shim), *known], env=dict(env, CASE="valid"),
+                                    capture_output=True, timeout=HARNESS_TIMEOUT)
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, results[0].stdout, b""))
+            self.assertEqual([json.loads(line) for line in calls.read_text().splitlines()],
+                             [list(known), list(unknown), list(known)])
+
+
 class BasisTests(unittest.TestCase):
     def assert_cases_fail(self, cases):
         # Each case owns its temporary gh shim and call log. Run independent
@@ -111,13 +237,11 @@ class BasisTests(unittest.TestCase):
         script = textwrap.dedent("\n".join(lines))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            gh = root / "gh"
-            gh.write_text(GH)
-            gh.chmod(0o755)
+            gh_directory = _install_gh(root, case)
             calls = root / "calls"
             env = dict(
                 os.environ,
-                PATH=directory + os.pathsep + os.environ["PATH"],
+                PATH=str(gh_directory) + os.pathsep + directory + os.pathsep + os.environ["PATH"],
                 CASE=case,
                 CALLS=str(calls),
                 GITHUB_REPOSITORY="example/repo",
@@ -181,14 +305,15 @@ class BasisTests(unittest.TestCase):
             # The final basis recheck sleeps in Python, not in the shell. Keep
             # the bounded production delays while making negative tests fast.
             (root / "sitecustomize.py").write_text("import time\ntime.sleep = lambda _: None\n")
-            for name, body in [("gh", GH), ("sleep", "#!/bin/sh\nexit 0\n")]:
+            gh_directory = _install_gh(root, case)
+            for name, body in [("sleep", "#!/bin/sh\nexit 0\n")]:
                 p = root / name
                 p.write_text(body)
                 p.chmod(0o755)
             calls = root / "calls"
             env = dict(
                 os.environ,
-                PATH=directory + os.pathsep + os.environ["PATH"],
+                PATH=str(gh_directory) + os.pathsep + directory + os.pathsep + os.environ["PATH"],
                 PYTHONPATH=directory + os.pathsep + os.environ.get("PYTHONPATH", ""),
                 CASE=case,
                 CALLS=str(calls),
