@@ -10,17 +10,27 @@
 #
 # OpenTofu owns the repositories and the push role; the bytes are pushed by
 # .github/workflows/ci-artifact-mirror.yml (.github/scripts/mirror-ci-artifacts.py).
-# A lock entry whose name is not listed below makes that workflow go red with a
-# pointer here: ECR Public does not create a repository on push, and the push
-# role is deliberately unable to create one.
+# ECR Public does not create a repository on push, and the push role is deliberately
+# unable to create one, so the repository set is DERIVED from ci/artifacts.lock: one
+# repository per entry name, named exactly as the resolver's `mirror_ref` names it
+# (an explicit `mirror` field wins; otherwise the lower-cased name with characters
+# outside [a-z0-9._/-] replaced by `-`). A new lock entry therefore needs a
+# `tofu apply`, and nothing else. `oras` is added here because it bootstraps the
+# mirror workflow and is not a lock entry. Until the lock exists on main
+# (ADR-0366 step 1), only `oras` is planned.
 
 locals {
+  ci_artifact_lock_path = "${path.module}/../../../../ci/artifacts.lock"
+  # A malformed lock fails the plan loudly (jsondecode); only an ABSENT lock is tolerated.
+  ci_artifact_lock_names = fileexists(local.ci_artifact_lock_path) ? tolist([
+    for a in jsondecode(file(local.ci_artifact_lock_path)).artifacts :
+    try(a.mirror, null) != null
+    ? regex("^(.*):[^:]*$", a.mirror)[0]
+    : replace(lower(a.name), "/[^a-z0-9._\\/-]/", "-")
+  ]) : tolist([])
+
   # One repository per lock entry NAME (versions and platforms are tags).
-  ci_artifact_mirror_names = toset([
-    "oras",
-    "gitleaks",
-    "prometheus",
-  ])
+  ci_artifact_mirror_names = toset(concat(["oras"], local.ci_artifact_lock_names))
   ci_artifact_mirror_prefix       = "ci-artifacts"
   ci_artifact_mirror_workflow_ref = "${local.ci_github_repo}/.github/workflows/ci-artifact-mirror.yml@refs/heads/main"
 }
