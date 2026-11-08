@@ -189,3 +189,5 @@ Reporter obnovuje dokončené dny od dřívější z hranice nastaveného zotave
 kalendářního měsíce. Stejný uložený výsledek zachovává zdrojovou identitu i časový mezník ledgeru.
 Nové hlášení zneplatní původní měsíční důkaz; zpětně neopraví neúplnou uzávěrku. Nasazovací hold
 a shadow pozorování zůstávají do vyhodnocení celého živého měsíce a provozní ceny tohoto čtení.
+
+Uložené vlastnictví úlohy přežívá změnu cronu: nastavení kapitalizace na `off` nepřevede existující odmítnutý běh na SKIPPED. Odmítnutí dál zadržuje uzávěrku; úspěšné opakování zachová důkaz provedené práce i při vypnutém cronu.

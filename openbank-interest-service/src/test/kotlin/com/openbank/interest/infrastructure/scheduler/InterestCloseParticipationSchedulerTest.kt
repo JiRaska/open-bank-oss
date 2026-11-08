@@ -99,6 +99,44 @@ class InterestCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `turning capitalization off cannot erase its persisted refusal or successful work`() {
+        val day = LocalDate.of(2026, 10, 1)
+        ran(day, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        ran(
+            day,
+            InterestCloseJobs.CAPITALIZATION,
+            items = 0,
+            journals = 0,
+            refused = 1,
+            reason = "ACCOUNTING_DAY_CLOSED",
+        )
+        val off = schedulerWith(
+            { _, report ->
+                delivered += report
+                Uni.createFrom().item(Unit)
+            },
+            SimpleMeterRegistry(),
+            capitalizationCron = "off",
+        )
+        off.reportDays(today).await().indefinitely()
+        val refused = delivered.last { it.businessDate == day }
+        assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(refused.reason).contains("ACCOUNTING_DAY_CLOSED")
+        assertThat(refused.journalsPosted).isZero()
+
+        ran(day, InterestCloseJobs.CAPITALIZATION, items = 3, journals = 2)
+        off.reportDays(today).await().indefinitely()
+        val completed = delivered.last { it.businessDate == day }
+        assertThat(completed.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(completed.journalsPosted).isEqualTo(2)
+        assertThat(completed.exercisedJobs).containsExactlyInAnyOrder(
+            InterestCloseJobs.ACCRUAL,
+            InterestCloseJobs.CAPITALIZATION,
+        )
+        assertThat(completed.sourceRunId).isNotEqualTo(refused.sourceRunId)
+    }
+
+    @Test
     fun `a newly due job without a receipt revokes RAN and unchanged refusal is not resent`() {
         val day = LocalDate.of(2026, 10, 1)
         ran(day, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)

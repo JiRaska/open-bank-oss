@@ -103,8 +103,9 @@ class InterestCloseParticipationScheduler(
         return closeJobRuns.findBetween(from, to).flatMap { runs ->
             val reports = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }
                 .map { day ->
-                    val due = dueJobs(day)
                     val forDay = runs.filter { it.businessDate == day }
+                    // Turning a cron off cannot erase an already owned, unfinished job.
+                    val due = dueJobs(day) + forDay.map { it.job }
                     CloseParticipationAssembler.assemble(day, due, forDay, skipReason = SKIP_REASON)
                         ?: CloseParticipationAssembler.incomplete(
                             day,

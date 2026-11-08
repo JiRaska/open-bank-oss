@@ -189,3 +189,5 @@ the start of the previous calendar month. Retries of unchanged persisted work re
 identity and do not move the ledger work watermark. A later changed receipt invalidates a frozen
 monthly proof; it cannot repair an already incomplete close. Keep the deployment hold and staged
 shadow observation until the full live month and source-scan performance have been reviewed.
+
+Persisted job ownership survives a cron change: setting capitalization to `off` cannot turn an existing refused run into SKIPPED. Its refusal continues to hold close; a completed retry retains its exercised-job evidence even while the cron remains off.
