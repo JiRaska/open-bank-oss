@@ -31,6 +31,7 @@ import com.openbank.pensionfund.domain.model.UnitHolding
 import com.openbank.pensionfund.domain.model.UnitOrder
 import com.openbank.pensionfund.domain.model.UnitTransaction
 import com.openbank.pensionfund.domain.model.UnitTransactionType
+import com.openbank.pensionfund.infrastructure.accounting.PensionAccountingOutbox
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -86,6 +87,7 @@ class PanachePensionFundStore(
                 changes.orders.forEach { o -> writes += { session.merge(o.toEntity()).flatMap { session.flush() } } }
                 changes.holdings.forEach { h -> writes += { session.merge(h.toEntity()) } }
                 changes.transactions.forEach { t -> writes += { session.merge(t.toEntity()) } }
+                writes += { persistAccountingIntents(session, changes) }
                 changes.navPositions.forEach { p -> writes += { session.persist(p.toEntity()) } }
                 changes.classificationCorrections.forEach { c ->
                     writes += {
@@ -109,6 +111,25 @@ class PanachePensionFundStore(
                     .flatMap { session.flush() }
             }
         }.awaitSuspending()
+    }
+
+    private fun persistAccountingIntents(
+        session: org.hibernate.reactive.mutiny.Mutiny.Session,
+        changes: StoreChanges,
+    ): Uni<Void> = changes.managementFees.fold(Uni.createFrom().voidItem()) { acc, fee ->
+        acc.flatMap {
+            session.persist(
+                PensionAccountingOutbox.pending().also {
+                    it.eventId = fee.navId
+                    it.aggregateId = fee.fundId
+                    it.eventType = "PensionManagementFeeAccrued.v1"
+                    it.synthetic = changes.synthetic
+                    it.payload = json.writeValueAsString(fee)
+                    it.createdAt = checkNotNull(changes.navs.first { nav -> nav.id == fee.navId }.publishedAt)
+                    it.updatedAt = it.createdAt
+                },
+            )
+        }
     }
 
     /** The holding row serializes reservations across instances and with settlement writes. */

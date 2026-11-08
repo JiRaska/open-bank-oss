@@ -3,10 +3,7 @@
 
 package com.openbank.ledger.application.usecase
 
-import io.smallrye.config.ConfigMapping
-
 /** Each required product job must have a successful persisted receipt in the observed month. */
-@ConfigMapping(prefix = "openbank.ledger.close.readiness")
 interface CloseReadinessConfig {
     fun requiredJobs(): Map<String, Set<String>>
 }

@@ -112,6 +112,11 @@ openbank:
     opa-pdp-producer:
       enabled: true
   pension-fund:
+    accounting:
+      # Source intents are always retained; delivery needs reviewed book bindings and TLS.
+      delivery-enabled: "${PENSION_ACCOUNTING_DELIVERY_ENABLED:false}"
+      poll-interval: "${PENSION_ACCOUNTING_POLL_INTERVAL:5s}"
+      funds: {}
     strategy-change:
       # Days between approval (participants notified) and the earliest effective date. A
       # deployment default only; the statutory value belongs to the jurisdiction pack (ADR-0334 §3).

@@ -19,7 +19,6 @@ import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.security.sanitizeForLog
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
-import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
@@ -41,7 +40,6 @@ import java.time.LocalDate
  * The map key is the participant name a product service reports under; [Participant.principal] is
  * the ONE verified service-account allowed to report for it.
  */
-@ConfigMapping(prefix = "openbank.ledger.close")
 interface CloseParticipantsConfig {
 
     /**

@@ -1,0 +1,28 @@
+# Segregated accounting close E2E
+
+Build the actual fast jars, then run the local three-application scenario:
+
+```sh
+./gradlew :openbank-ledger-service:quarkusBuild :openbank-pension-fund-service:quarkusBuild
+python3 openbank-pension-fund-service/e2e/accounting_close.py --report /tmp/pension-accounting-e2e.json
+```
+
+Requires JDK 25, Docker with the `postgres:18.6` image, Python 3.10+, OpenSSL and OPA.
+The runner starts only loopback listeners and a uniquely named temporary PostgreSQL container.
+It cleans up its own processes, container, generated keys and credentials on exit.
+It accepts no production address or credential. Nothing provisions a cloud resource.
+
+The fund service, fund ledger and company ledger are real packaged applications. Each has its
+own database. Real OPA policies authorize real signed fixture JWTs; the accounting HTTP client
+uses mutual TLS and verifies the generated CA. The only external-source doubles are a local
+OIDC issuer and a pinned catalog revision. Custody receipt and unit recognition are explicit,
+attributable fixture postings through the ledger API; fee publication infers no cash settlement.
+
+The scenario withholds the company ledger until the fund leg has committed, proves the source
+remains pending, starts the company and recovers without duplicate fee journals. It then proves
+that source completion cannot replace each book's full-chart maker/checker reconciliation,
+that stable source retransmission preserves its work watermark, and that both books can close
+independently. Wrong-book requests fail and a single fixture day cannot qualify a full month.
+
+The JSON report contains assertion names only. This is executable test evidence, not a live
+operating month, chart approval, deployment approval or permission to enable enforcement.

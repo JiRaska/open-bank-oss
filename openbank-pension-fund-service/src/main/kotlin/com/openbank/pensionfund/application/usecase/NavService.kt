@@ -15,6 +15,7 @@ import com.openbank.pensionfund.application.port.StoreChanges
 import com.openbank.pensionfund.domain.model.ForwardPricer
 import com.openbank.pensionfund.domain.model.FundStatus
 import com.openbank.pensionfund.domain.model.InstrumentClass
+import com.openbank.pensionfund.domain.model.ManagementFeeAccrual
 import com.openbank.pensionfund.domain.model.NavCalculator
 import com.openbank.pensionfund.domain.model.NavInput
 import com.openbank.pensionfund.domain.model.NavPosition
@@ -53,6 +54,8 @@ class NavService(
     private val clock: Clock,
     private val metrics: PensionFundMetrics,
 ) {
+    @jakarta.inject.Inject
+    var taint: com.openbank.libs.web.SyntheticTaintContext? = null
     suspend fun calculate(fundId: UUID, request: NavCalculationRequest, actor: String): NavRecord {
         val fund = store.fund(fundId) ?: throw NotFoundException("fund $fundId not found")
         check(fund.status == FundStatus.ACTIVE) { "fund $fundId is closed" }
@@ -153,6 +156,7 @@ class NavService(
             if (published.isCorrection) {
                 publishCorrection(
                     published,
+                    fund.currency,
                 )
             } else {
                 publishAndSettle(published, isin, fund.currency)
@@ -195,6 +199,8 @@ class NavService(
                 orders = orders,
                 transactions = transactions,
                 holdings = holdings.values.toList(),
+                managementFees = listOf(ManagementFeeAccrual.from(nav, currency)),
+                synthetic = taint?.tainted == true,
             ),
         )
         orders.filter { it.status == OrderStatus.SETTLED }.forEach { metrics.order(isin, it.type, OrderStatus.SETTLED) }
@@ -238,7 +244,7 @@ class NavService(
         }
     }
 
-    private suspend fun publishCorrection(correction: NavRecord): NavPublication {
+    private suspend fun publishCorrection(correction: NavRecord, currency: String): NavPublication {
         val originalId = checkNotNull(correction.correctsNavId)
         val original = nav(originalId)
         check(original.status == NavStatus.PUBLISHED) { "NAV $originalId is no longer the published one" }
@@ -256,6 +262,8 @@ class NavService(
                 navs = listOf(original.supersede(), correction),
                 transactions = corrections.map { it.transaction },
                 holdings = holdings.values.toList(),
+                managementFees = listOf(ManagementFeeAccrual.from(correction, currency, original)),
+                synthetic = taint?.tainted == true,
             ),
         )
         return NavPublication(correction, 0, corrections)

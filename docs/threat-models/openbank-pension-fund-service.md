@@ -184,3 +184,29 @@ Accepted; revisit if creation volume grows.
 audit personal data and have no TTL. Retention owner: the pension-fund-service owner. Review date:
 2027-02-05 (decide expiry or pseudonymised snapshots, keeping a window long enough that deleting a
 receipt cannot re-enable a duplicate write).
+
+### ADR-0365 — segregated NAV fee accounting and close evidence
+
+NAV publication and its source intent commit together. The shared outbox claim/backoff protocol
+and source idempotency prevent a lost acknowledgement or a second worker from duplicating a fee.
+Fund and company receipts are independent; a partial delivery, disabled delivery or a historical
+NAV without an intent cannot report complete. An immutable fund-to-company binding prevents
+configuration changes from transferring an old receipt to another book. Pending calculated NAVs
+and corrections remain visible blockers. Stable source receipt hashes survive polling and restarts.
+
+The client verifies book/source/population in the acknowledgement and refuses redirects. Production
+accounting requires the named mTLS configuration and its own OIDC client token. A fee is an expense
+and payable in the fund and a receivable and income in the company; it creates no cash settlement.
+A negative correction requires its completed original in the same destination and population.
+
+Each book owns reconciliation and close. Cash, custody, units, payments and the company's own
+operations require source references and a complete independently approved source balance; the
+NAV fee producer cannot certify these other facts. Only verified interactive issuer subjects may
+make/check this reconciliation, with distinct immutable subjects required. The bank rejects this
+purpose, and bank machine identities are vetoed on both pension book policies.
+
+Residual risks: the chart and source references require professional review; a reference is an
+attributable attestation, not automatic validation of an external document. Historical opening and
+cutover evidence and a due-calendar adapter remain prerequisites for existing funds. Retain source
+intents/receipts with financial history; the service owner must approve retention before go-live.
+Delivery remains disabled by default and deployment/enforcement require a complete live month.

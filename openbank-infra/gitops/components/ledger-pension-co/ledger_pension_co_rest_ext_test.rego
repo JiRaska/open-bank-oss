@@ -165,3 +165,89 @@ test_absent_tax_marker_keeps_narrow_legacy_compatibility if {
 		not rest.allow.allow with input as {"principal": tax_reporting, "action": action} with data.rules as rules_mock
 	}
 }
+
+pension_fund_client := {
+	"type": "HUMAN",
+	"id": "service-account-openbank-pension-fund",
+	"roles": ["ROLE_API"],
+	"service_account": true,
+	"client_id": "openbank-pension-fund",
+}
+
+test_verified_fee_source_may_accrue_and_inspect_own_accounting if {
+	every action in {"ledger.pension.fee", "ledger.pension.inspect"} {
+		rest.allow.allow with input as {"principal": pension_fund_client, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_verified_fee_source_may_report_only_its_participation if {
+	rest.allow.allow with input as {
+		"principal": pension_fund_client,
+		"action": "ledger.close.participate",
+		"resource": "pension-fund",
+	}
+		with data.rules as rules_mock
+	every participant in {"interest", "billing", "pension-company-cash", "pension-company-operations", ""} {
+		not rest.allow.allow with input as {
+			"principal": pension_fund_client,
+			"action": "ledger.close.participate",
+			"resource": participant,
+		}
+			with data.rules as rules_mock
+	}
+}
+
+test_fee_source_cannot_borrow_other_ledger_or_reconciliation_actions if {
+	every action in {
+		"ledger.read", "ledger.list", "ledger.create", "ledger.reverse", "ledger.trigger",
+		"ledger.replay", "ledger.approve", "ledger.close.inspect", "ledger.close.draft", "ledger.pension.reconcile",
+	} {
+		not rest.allow.allow with input as {"principal": pension_fund_client, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_fee_source_requires_verified_client_marker_and_role if {
+	every claims in [
+		{"client_id": "openbank-other"},
+		{"service_account": false},
+		{"service_account": null},
+		{"service_account": "true"},
+		{"roles": ["ROLE_OPERATOR"]},
+	] {
+		p := object.union(pension_fund_client, claims)
+		every action in {"ledger.pension.fee", "ledger.pension.inspect", "ledger.close.participate"} {
+			not rest.allow.allow with input as {"principal": p, "action": action, "resource": "pension-fund"}
+				with data.rules as rules_mock
+		}
+	}
+	legacy := object.remove(pension_fund_client, {"service_account", "client_id"})
+	not rest.allow.allow with input as {"principal": legacy, "action": "ledger.pension.fee"}
+		with data.rules as rules_mock
+}
+
+test_other_machines_and_tax_cannot_enter_pension_accounting if {
+	every machine in {tax_reporting, shared_client, pension_client} {
+		every action in {"ledger.pension.fee", "ledger.pension.inspect", "ledger.pension.reconcile", "ledger.close.participate"} {
+			not rest.allow.allow with input as {"principal": machine, "action": action, "resource": "pension-fund"}
+				with data.rules as rules_mock
+		}
+	}
+}
+
+test_verified_human_operator_may_reconcile_company_books if {
+	rest.allow.allow with input as {"principal": staff, "action": "ledger.pension.reconcile"}
+		with data.rules as rules_mock
+}
+
+test_reconciliation_does_not_accept_machine_or_unmarked_staff if {
+	every marker in [{"service_account": true, "client_id": "openbank-other"}, {"service_account": null}] {
+		p := object.union(staff, marker)
+		not rest.allow.allow with input as {"principal": p, "action": "ledger.pension.reconcile"}
+			with data.rules as rules_mock
+	}
+	unmarked := object.remove(staff, {"service_account"})
+	not rest.allow.allow with input as {"principal": unmarked, "action": "ledger.pension.reconcile"}
+		with data.rules as rules_mock
+}

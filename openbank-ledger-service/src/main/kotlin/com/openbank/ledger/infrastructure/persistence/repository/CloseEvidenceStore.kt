@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.ledger.application.port.out.CloseEvidenceRepository
 import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.application.usecase.CloseReadinessConfig
+import com.openbank.ledger.application.usecase.PensionBookIdentity
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.ClosedDayParticipation
@@ -30,6 +31,7 @@ class CloseEvidenceStore(
     private val participantsConfig: CloseParticipantsConfig,
     private val readinessConfig: CloseReadinessConfig,
     private val clock: Clock,
+    private val book: PensionBookIdentity,
 ) : CloseEvidenceRepository {
     override suspend fun findMonth(from: LocalDate, to: LocalDate): List<ClosedDayParticipation> = Panache.withSession {
         Panache.getSession().flatMap { session ->
@@ -61,6 +63,8 @@ class CloseEvidenceStore(
             ),
             tieOutRunId = row[TIE_OUT_RUN]?.let { UUID.fromString(it.toString()) },
             postingsUnchanged = row[POSTINGS_UNCHANGED] == true,
+            bookKind = row[BOOK_KIND].toString(),
+            bookId = row[BOOK_ID]?.let { UUID.fromString(it.toString()) },
         )
     }
 
@@ -73,6 +77,8 @@ class CloseEvidenceStore(
                     .setParameter("d", record.businessDate)
                     .setParameter("at", clock.instant())
                     .setParameter("mode", participantsConfig.participantsMode())
+                    .setParameter("bookKind", book.kind.name)
+                    .setParameter("bookId", book.bookId)
                     .setParameter(
                         "expected",
                         objectMapper.writeValueAsString(
@@ -104,14 +110,16 @@ class CloseEvidenceStore(
         const val EXPECTED_JOBS = 5
         const val TIE_OUT_RUN = 6
         const val POSTINGS_UNCHANGED = 7
+        const val BOOK_KIND = 8
+        const val BOOK_ID = 9
         const val CAPTURE_SQL = "INSERT INTO ledger_close_evidence " +
             "(business_date, observed_at, mode, expected_principals, expected_jobs, tie_out_run_id, " +
-            "reports, journal_count) " +
+            "reports, journal_count, book_kind, book_id) " +
             "VALUES (:d, :at, :mode, CAST(CAST(:expected AS text) AS jsonb), " +
             "CAST(CAST(:expectedJobs AS text) AS jsonb), " +
             "(SELECT t.id FROM (SELECT id, status, run_at, started_at, journal_count, " +
             "accounts_checked, breaks, errors " +
-            "FROM ledger_tieout_runs WHERE as_of = :d " +
+            "FROM ledger_tieout_runs WHERE as_of = :d AND control_kind = :bookKind " +
             "ORDER BY run_at DESC, id DESC LIMIT 1) t WHERE t.status = 'OK' AND t.accounts_checked > 0 " +
             "AND t.breaks = 0 AND t.errors = 0 AND t.run_at <= :at AND t.started_at >= " +
             "GREATEST((SELECT cutoff_at FROM ledger_accounting_day WHERE business_date = :d), " +
@@ -123,12 +131,12 @@ class CloseEvidenceStore(
             "'exercisedJobs', p.exercised_jobs)), '[]'::jsonb) " +
             "FROM (SELECT DISTINCT ON (participant) participant, outcome, reported_by, reason, exercised_jobs " +
             "FROM ledger_close_participation WHERE business_date = :d ORDER BY participant, seq DESC) p), " +
-            "(SELECT count(*) FROM journal_entries WHERE entry_date <= :d))"
+            "(SELECT count(*) FROM journal_entries WHERE entry_date <= :d), :bookKind, :bookId)"
 
         const val READ_SQL = "SELECT business_date, observed_at, mode, " +
             "CAST(expected_principals AS text), CAST(reports AS text), CAST(expected_jobs AS text), tie_out_run_id, " +
             "COALESCE(e.journal_count = (SELECT count(*) FROM journal_entries j " +
-            "WHERE j.entry_date <= e.business_date), false) FROM ledger_close_evidence e " +
+            "WHERE j.entry_date <= e.business_date), false), book_kind, book_id FROM ledger_close_evidence e " +
             "WHERE business_date >= :fromDate AND business_date <= :toDate ORDER BY business_date"
     }
 }

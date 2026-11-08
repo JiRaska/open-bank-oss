@@ -18,6 +18,8 @@ data class ClosedDayParticipation(
     val expectedJobs: Map<String, Set<String>>,
     val tieOutRunId: UUID?,
     val postingsUnchanged: Boolean = true,
+    val bookKind: String = "BANK",
+    val bookId: UUID? = null,
 )
 
 data class ClosedParticipantReport(
@@ -39,6 +41,8 @@ data class CloseReadiness(
     val eligibleForEnforcement: Boolean,
     val blockers: List<String>,
     val days: List<CloseReadinessDay>,
+    val bookKind: String = "BANK",
+    val bookId: UUID? = null,
 ) {
     companion object {
         fun evaluate(

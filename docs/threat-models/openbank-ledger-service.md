@@ -796,3 +796,23 @@ set) apply equally to the new `ledger.approval.decide` action.
   audit-data access/retention obligations as participation history; no such values enter metrics.
   Rollback retains the additive table and history. This read does not activate enforcement,
   release deployment holds or attest pension-company/fund accounting mappings.
+
+### ADR-0365 — purpose-bound pension books
+
+The pension fee endpoint rejects the bank, mismatched fund/book ids, unverified client identity,
+changed source payloads, missing correction bases and untrusted synthetic classification. The
+first receipt binds the database to its book; later configuration cannot reassign it. Idempotent
+POSTED and NO_POSTING receipts remain distinct and retained after a software rollback.
+
+Pension reconciliation compares the entire enabled own chart (including zero balances), rejects
+foreign/disabled accounts with activity, and stores a read start plus committed journal watermark.
+Independent verified interactive issuer subjects propose and approve once. The purpose-specific
+OPA grants do not give the NAV producer generic journal posting, reversal or balance access.
+At-close snapshots retain book identity; a bank verdict or another book's snapshot cannot qualify
+this book. Exceptions remain attributable waivers and never qualify a month for promotion.
+
+Residual: external source references are professional attestations. The implementation does not
+prove their contents, approve a statutory chart or supply missing custody/payment adapters. Source
+receipt hashes prevent transport replay from claiming newer work; they do not grant source actors
+permission to invent a completed business job. Keep production rollout staged and observe a full
+representative calendar month before considering enforcement.

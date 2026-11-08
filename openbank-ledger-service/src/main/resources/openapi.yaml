@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.31.0
+  version: 1.32.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -36,6 +36,115 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/ledger/pension-accounting/identity:
+    get:
+      summary: Inspect the configured identity of this segregated ledger book
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Book identity; a BANK response cannot accept pension accounting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionBookIdentity'}
+        '401': {description: Unauthenticated}
+        '403': {description: Missing dedicated book-inspection grant}
+  /api/v1/ledger/pension-accounting/closing-days:
+    get:
+      summary: Read bounded accounting-day states without access to journals or balances
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: from, in: query, required: true, schema: {type: string, format: date}}
+        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+      responses:
+        '200':
+          description: At most 32 date states in a range spanning at most 31 days
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 32
+                items:
+                  type: object
+                  required: [businessDate, status]
+                  properties:
+                    businessDate: {type: string, format: date}
+                    status: {type: string, enum: [OPEN, CUTOFF, TIED_OUT, LOCKED]}
+        '400': {description: Missing or invalid date range}
+        '401': {description: Unauthenticated}
+        '403': {description: Missing dedicated book-inspection grant}
+  /api/v1/ledger/pension-accounting/management-fees:
+    post:
+      summary: Accrue one approved NAV fee in this fund or company book
+      description: >
+        Requires the verified pension-fund client and a dedicated purpose grant. The bank and
+        mismatched book/fund identities refuse the request. A stable NAV key binds the normalized
+        payload before posting; changed replays conflict. A correction requires a completed original
+        receipt of the same fund and population. No cash moves. Posting date is assigned once from
+        the current accounting day; a later closed-day refusal remains pending for reviewed recovery.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: false
+          schema: {type: string}
+          description: Honored only for an explicitly trusted verified client; rejected if trust is missing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionFeePostingRequest'}
+      responses:
+        '200':
+          description: Retained POSTED or explicit NO_POSTING receipt; replay returns the original journal
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionFeePostingResponse'}
+        '400': {description: Missing or malformed body}
+        '401': {description: Unauthenticated}
+        '403': {description: Caller is not the verified pension-fund client or lacks the purpose grant}
+        '409': {description: Wrong book, changed replay, missing original, untrusted taint, or closed posting date}
+        '422': {description: Unsupported currency, amount, date, or missing reviewed accounting map}
+  /api/v1/ledger/pension-accounting/reconciliations:
+    post:
+      summary: Propose an independent source reconciliation of the entire pension chart
+      description: A verified interactive accountant supplies opaque source evidence references and every enabled account balance.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PensionReconciliationProposal'}
+      responses:
+        '200':
+          description: Immutable proposal id; no success verdict has been issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionReconciliationId'}
+        '400': {description: Missing or malformed body}
+        '401': {description: Unauthenticated}
+        '403': {description: A verified interactive accountant and reconciliation grant are required}
+        '409': {description: Wrong or reassigned book}
+        '422': {description: Incomplete source references or unsupported source balance}
+  /api/v1/ledger/pension-accounting/reconciliations/{id}/approve:
+    post:
+      summary: Independently verify source balances against this book and retain its read proof
+      description: >
+        A different verified interactive accountant approves once. The entire enabled own chart,
+        including zero balances, must match; foreign or disabled accounts with activity refuse the
+        proof. Writers are excluded during the read and verdict commit. This is an own-book control,
+        never a bank deposit-control tie-out, and does not waive missing product completion.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Approved own-book reconciliation id
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PensionReconciliationId'}
+        '401': {description: Unauthenticated}
+        '403': {description: A verified interactive accountant and reconciliation grant are required}
+        '409': {description: Same checker, already approved, wrong book, or source balances do not match}
   /api/v1/ledger/close-readiness:
     get:
       tags: [AccountingDay]
@@ -1448,6 +1557,56 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    PensionBookIdentity:
+      type: object
+      required: [kind, bookId]
+      properties:
+        kind: {type: string, enum: [BANK, PENSION_COMPANY, PENSION_FUND]}
+        bookId: {type: [string, 'null'], format: uuid}
+    PensionFeePostingRequest:
+      type: object
+      required: [bookId, fundId, navId, valuationDate, amount, currency]
+      properties:
+        bookId: {type: string, format: uuid}
+        fundId: {type: string, format: uuid}
+        navId: {type: string, format: uuid}
+        valuationDate: {type: string, format: date}
+        amount: {type: number, multipleOf: 0.01}
+        currency: {type: string, enum: [CZK]}
+        correctsNavId: {type: [string, 'null'], format: uuid}
+    PensionFeePostingResponse:
+      type: object
+      required: [bookId, navId, postingDate, outcome, journalId, synthetic]
+      properties:
+        bookId: {type: string, format: uuid}
+        navId: {type: string, format: uuid}
+        postingDate: {type: string, format: date}
+        outcome: {type: string, enum: [POSTED, NO_POSTING]}
+        journalId: {type: [string, 'null'], format: uuid}
+        synthetic: {type: boolean}
+    PensionReconciliationProposal:
+      type: object
+      required: [bookId, businessDate, sourceReferences, expectedBalances]
+      properties:
+        bookId: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        sourceReferences:
+          type: object
+          minProperties: 5
+          maxProperties: 6
+          description: Fund needs cash, units, custody, nav, fees, settlements; company needs bank, receivables, portfolio, expenses, tax
+          additionalProperties: {type: string, minLength: 1, maxLength: 256}
+        expectedBalances:
+          type: object
+          minProperties: 1
+          maxProperties: 200
+          description: Every enabled own-book CZK account, debit-positive, including zero accounts
+          additionalProperties: {type: number, multipleOf: 0.01}
+    PensionReconciliationId:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, format: uuid}
     JournalOriginInput:
       type: object
       description: >
@@ -1620,6 +1779,8 @@ components:
       type: object
       required: [month, expectedParticipants, observedDays, requiredDays, eligibleForEnforcement, blockers, days]
       properties:
+        bookKind: {type: string, enum: [BANK, PENSION_COMPANY, PENSION_FUND]}
+        bookId: {type: [string, 'null'], format: uuid}
         month: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
         expectedParticipants:
           type: array
