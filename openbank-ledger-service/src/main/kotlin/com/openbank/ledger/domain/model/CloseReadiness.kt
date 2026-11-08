@@ -18,6 +18,7 @@ data class ClosedDayParticipation(
     val expectedJobs: Map<String, Set<String>>,
     val tieOutRunId: UUID?,
     val postingsUnchanged: Boolean = true,
+    val sourceEvidenceUnchanged: Boolean = true,
 )
 
 data class ClosedParticipantReport(
@@ -107,6 +108,7 @@ data class CloseReadiness(
         ): List<String> = buildList {
             if (tieOutRunId == null) add("NO_POST_CUTOFF_TIEOUT")
             if (!postingsUnchanged) add("JOURNALS_CHANGED_AFTER_CLOSE")
+            if (!sourceEvidenceUnchanged) add("SOURCE_EVIDENCE_CHANGED_AFTER_CLOSE")
             if (expectedJobs != jobs) add("JOB_REQUIREMENTS_CHANGED")
             if (mode !in setOf("shadow", "enforce")) add("CHECK_DISABLED")
             if (expectedPrincipals != expected) add("PARTICIPANTS_CHANGED")
