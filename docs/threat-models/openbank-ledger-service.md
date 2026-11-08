@@ -796,3 +796,11 @@ set) apply equally to the new `ledger.approval.decide` action.
   audit-data access/retention obligations as participation history; no such values enter metrics.
   Rollback retains the additive table and history. This read does not activate enforcement,
   release deployment holds or attest pension-company/fund accounting mappings.
+The retained verdict records reconciliation start and the committed journal count through its
+business date. Writers take a shared advisory lock; only the short close capture takes it
+exclusively, so normal postings remain concurrent. A run that overlaps a journal commit cannot
+qualify. Monthly readiness compares the retained count to current immutable journal history:
+backdated postings and reversals invalidate qualification without rewriting the original evidence;
+postings dated after the evaluated day do not. Legacy runs without a read watermark stay unknown.
+The count query runs over journal history and must be measured at production volume before
+activation; the implementation does not claim a production latency or a completed live month.
