@@ -11,7 +11,7 @@ const page = read('app/docs/spayd-uri/page.tsx')
 describe('Camera QR (SPAYD-URI) docs page', () => {
   it('is reachable from the docs hub, the sidebar and the QRlessPay page', () => {
     expect(read('components/docs/DocsHub.tsx')).toContain("href: '/docs/spayd-uri'")
-    expect(read('components/layout/Sidebar.tsx')).toContain("href: '/docs/spayd-uri'")
+    expect(read('lib/navigation/catalog.ts')).toContain("href: '/docs/spayd-uri'")
     expect(read('app/docs/qrlesspay/page.tsx')).toContain('href="/docs/spayd-uri"')
   })
 

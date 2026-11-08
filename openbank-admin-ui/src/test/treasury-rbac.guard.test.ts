@@ -13,7 +13,7 @@ import { personaForRoles, workspaceFor } from '@/lib/auth/persona'
 
 const root = resolve(__dirname, '..')
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
-const sidebar = read('components/layout/Sidebar.tsx')
+const sidebar = read('lib/navigation/catalog.ts')
 const resource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/TreasuryResource.kt')
 const cashFlowResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/CashFlowResource.kt')
 const referenceResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/ReferenceResource.kt')

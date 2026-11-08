@@ -11,6 +11,7 @@ import type { Page } from '@playwright/test'
  * "stable", not "waited".
  */
 const STABLE_FRAMES = 10
+let shellObservation = 0
 
 /**
  * Wait until the operator shell has settled to exactly one `#main-content` landmark.
@@ -34,13 +35,23 @@ const STABLE_FRAMES = 10
  *
  * And the reason a simple `toHaveCount(1)` does not work either: the count is already 1 at
  * t=0, so it passes before the window opens. The condition has to be stability, not a
- * single observation. Once settled it never reopened (0 of 20 samples on each of 5 routes).
+ * single observation. The client-session completion barrier also excludes a later identity transition.
  */
-export async function waitForSettledShell(page: Page): Promise<void> {
-  await page.waitForFunction(frames => {
-    const w = window as unknown as { __obShellStableFrames?: number }
+export async function waitForSettledShell(page: Page, options: { waitForSession?: boolean } = {}): Promise<void> {
+  const observation = ++shellObservation
+  // Keep session completion and frame counting in one retryable browser poll: a redirect
+  // may replace the execution context between separate evaluate calls.
+  await page.waitForFunction(({ frames, observation, waitForSession }) => {
+    const w = window as unknown as { __obShellStableFrames?: number; __obShellObservation?: number }
+    if (w.__obShellObservation !== observation) {
+      w.__obShellObservation = observation
+      w.__obShellStableFrames = 0
+    }
+    const sessionResolved = !waitForSession || performance.getEntriesByType('resource').some(entry =>
+      /\/api\/auth\/session(?:\?|$)/.test(entry.name),
+    )
     const count = document.querySelectorAll('#main-content').length
-    w.__obShellStableFrames = count === 1 ? (w.__obShellStableFrames ?? 0) + 1 : 0
-    return (w.__obShellStableFrames ?? 0) >= frames
-  }, STABLE_FRAMES)
+    w.__obShellStableFrames = sessionResolved && count === 1 ? (w.__obShellStableFrames ?? 0) + 1 : 0
+    return w.__obShellStableFrames >= frames
+  }, { frames: STABLE_FRAMES, observation, waitForSession: options.waitForSession !== false })
 }

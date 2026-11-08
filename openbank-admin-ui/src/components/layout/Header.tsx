@@ -4,20 +4,45 @@
 
 'use client'
 
-import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X, Moon, Sun, UserRound } from 'lucide-react'
+import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X, Moon, Sun, UserRound, Star } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useTheme } from '@/lib/theme/useTheme'
+import { usePathname } from 'next/navigation'
+import { currentNavigation, isNavLocked } from '@/lib/navigation/catalog'
+import { useNavigationPreferences } from '@/lib/navigation/preferences'
+import { CAPTURE_VIEW } from '@/lib/navigation/viewFilters'
 import { CommandPalette } from '@/components/search/CommandPalette'
+import * as Dialog from '@radix-ui/react-dialog'
+import type { PinnedView } from '@/lib/navigation/preferences'
 import styles from './Header.module.css'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
 export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
   const { data: session } = useSession()
+  const pathname = usePathname()
+  const [pinDraft, setPinDraft] = useState<PinnedView | null>(null)
+  const preferences = useNavigationPreferences()
+  const destination = currentNavigation(pathname)
+  const supportsSavedFilters = pathname === '/accounts' || pathname === '/transactions'
+  const pinCurrentView = () => {
+    if (!destination || destination.href !== pathname) return
+    window.dispatchEvent(new Event(CAPTURE_VIEW))
+    const href = window.location.pathname + window.location.search
+    const filtered = window.location.search.length > 0
+    const existing = preferences.pins.find(pin => pin.href === href)
+    if (existing) { preferences.togglePin(existing); return }
+    setPinDraft({ href, pathname, label: t(destination.nameCs, destination.nameEn) + (filtered ? t(' · filtrovaný pohled', ' · filtered view') : '') })
+  }
+  useEffect(() => {
+    if (destination) preferences.recordPage(destination.href)
+  // Record only a route transition; preference changes must not reorder history.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, session?.user?.id])
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggle: toggleTheme } = useTheme()
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -109,12 +134,12 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
       <button
         type="button"
         onClick={() => setPaletteOpen(true)}
-        aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
+        aria-label={t('Rychlé hledání (⌘K): Najít stránku, klienta nebo se zeptat…', 'Quick search (⌘K): Find a page, customer or ask…')}
         aria-keyshortcuts="Meta+K Control+K"
         className={styles.searchTrigger}
       >
         <Search size={14} aria-hidden="true" />
-        <span style={{ fontSize: '13px' }}>{t('Rychlé hledání', 'Quick search')}</span>
+        <span style={{ fontSize: '13px' }}>{t('Najít stránku, klienta nebo se zeptat…', 'Find a page, customer or ask…')}</span>
         {' '}<kbd aria-hidden="true" style={{
           fontSize: '10px', padding: '1px 5px',
           background: 'var(--surface-3)', border: '1px solid var(--border)',
@@ -123,6 +148,29 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
       </button>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
+      {destination?.href === pathname && !isNavLocked(destination, roles) && <button type="button"
+        onClick={pinCurrentView} className={styles.headerLink}
+        aria-label={t('Připnout nebo odepnout aktuální pohled', 'Pin or unpin current view')}
+        title={supportsSavedFilters ? t('Uložit stránku včetně aktuálních filtrů do mého prostoru', 'Save the page and current filters to my workspace') : t('Uložit stránku do mého prostoru', 'Save the page to my workspace')}>
+        <Star size={16} aria-hidden="true" fill={preferences.pins.some(pin => pin.pathname === pathname) ? 'currentColor' : 'none'} />
+      </button>}
+      <Dialog.Root open={pinDraft !== null} onOpenChange={value => { if (!value) setPinDraft(null) }}>
+        <Dialog.Portal>
+          <Dialog.Overlay style={{ position: 'fixed', inset: 0, zIndex: 110, background: 'rgba(0,0,0,.35)' }} />
+          <Dialog.Content style={{ position: 'fixed', zIndex: 111, left: '50%', top: '25vh', transform: 'translateX(-50%)', width: 380, maxWidth: '90vw', padding: 24, borderRadius: 12, border: '1px solid var(--border)', background: 'var(--surface)', boxShadow: 'var(--shadow-lg)' }}>
+            <Dialog.Title style={{ fontSize: 16, fontWeight: 600 }}>{t('Připnout pohled', 'Pin view')}</Dialog.Title>
+            <Dialog.Description style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '8px 0 16px' }}>{t('Pojmenujte si zkratku. Uloží se v tomto prohlížeči pro váš účet.', 'Name your shortcut. It is saved in this browser for your account.')} {supportsSavedFilters ? t('Zahrnuje aktuálně zadané filtry.', 'Includes the currently entered filters.') : t('Uloží se odkaz na stránku.', 'Saves a link to the page.')}</Dialog.Description>
+            <form onSubmit={event => { event.preventDefault(); if (pinDraft?.label.trim()) { preferences.togglePin({ ...pinDraft, label: pinDraft.label.trim() }); setPinDraft(null) } }}>
+              <label style={{ fontSize: 12 }}>{t('Název pohledu', 'View name')}<input value={pinDraft?.label ?? ''} maxLength={100} onChange={event => setPinDraft(current => current ? { ...current, label: event.target.value } : null)} style={{ width: '100%', marginTop: 6, padding: 10, background: 'var(--surface)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 6 }} /></label>
+              {preferences.pins.length >= 12 && <p role="status" style={{ fontSize: 12 }}>{t('Máte připnutých 12 pohledů. Nejprve některý odepněte.', 'You have 12 pinned views. Unpin one first.')}</p>}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <Dialog.Close type="button" className="btn btn-secondary">{t('Zrušit', 'Cancel')}</Dialog.Close>
+                <button type="submit" className="btn btn-primary" disabled={!pinDraft?.label.trim() || preferences.pins.length >= 12}>{t('Připnout', 'Pin')}</button>
+              </div>
+            </form>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       {/* Actions */}
       <div className={styles.actions}>
         {build && (

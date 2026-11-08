@@ -38,7 +38,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // permission-filtered shell so its first paint already carries the operator's roles.
   // Without this the client useSession() resolves a moment later and the whole console
   // nav re-painted on top of the user (measured 0.12+ workspace CLS, see Sidebar).
-  const initialRoles: string[] | null = (await auth())?.user?.roles ?? null
+  const initialSession = await auth()
+  const initialRoles: string[] | null = initialSession?.user?.roles ?? null
+  const initialOperatorId = initialSession?.user?.id ?? null
 
   const registry = initialRoles ? getRegistry() : []
   const ownership = initialRoles ? (await currentDomainOwnership(registry)).byModule : new Map<string, DomainGroup>()
@@ -49,7 +51,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang={initialLanguage} className={initialTheme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <body>
-        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme} initialRoles={initialRoles} initialDomainOwnership={initialDomainOwnership}>{children}</AppProviders>
+        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme} initialRoles={initialRoles} initialOperatorId={initialOperatorId} initialDomainOwnership={initialDomainOwnership}>{children}</AppProviders>
       </body>
     </html>
   )

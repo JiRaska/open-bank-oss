@@ -15,7 +15,7 @@ import dependency_snapshot as subject
 SHA = '1' * 40
 IDENTITY = {'version': 0, 'sha': SHA, 'ref': 'refs/heads/example',
                 'job': {'id': '123', 'correlator': 'Dependency submission-submit'},
-                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
+                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.1',
                               'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
 
 
@@ -54,13 +54,42 @@ class MergeTests(unittest.TestCase):
                 self.merge({'one': snapshot(), 'two': part})
 
     def test_unexpected_detector_is_rejected(self):
-        for detector in ({'name': 'other', 'version': '1.5.0', 'url': IDENTITY['detector']['url']},
+        for detector in ({'name': 'other', 'version': '1.5.1', 'url': IDENTITY['detector']['url']},
                          {'name': IDENTITY['detector']['name'], 'version': 'latest', 'url': IDENTITY['detector']['url']},
-                         {'name': IDENTITY['detector']['name'], 'version': '1.5.0', 'url': 'https://example.invalid'}):
+                         {'name': IDENTITY['detector']['name'], 'version': '1.5.1', 'url': 'https://example.invalid'}):
             part = snapshot()
             part['detector'] = detector
             with self.subTest(detector=detector), self.assertRaisesRegex(ValueError, 'detector'):
                 self.merge({'one': part, 'two': snapshot()})
+
+    def test_nested_identity_changes_are_rejected(self):
+        mutations = (
+            lambda part: part.update(version=1),
+            lambda part: part.update(sha='2' * 40),
+            lambda part: part.update(ref='refs/heads/other'),
+            lambda part: part['job'].update(id='124'),
+            lambda part: part['job'].update(correlator='other'),
+            lambda part: part['detector'].update(version='1.5.0'),
+            lambda part: part['detector'].update(version='1.5.2'),
+            # The GitHub snapshot schema has no repository field. Repository targeting
+            # belongs to the caller's API endpoint, not a self-declared payload field.
+            lambda part: part.update(repository='other/repository'),
+        )
+        for mutate in mutations:
+            part = snapshot()
+            mutate(part)
+            with self.subTest(mutation=mutations.index(mutate)), self.assertRaises(ValueError):
+                self.merge({'one': snapshot(), 'two': part})
+
+    def test_explicit_historical_detector_identity_is_preserved(self):
+        historical_identity = copy.deepcopy(IDENTITY)
+        historical_identity['detector']['version'] = '1.5.0'
+        historical = snapshot()
+        historical['detector']['version'] = '1.5.0'
+        result = subject.merge_snapshots({'one': historical}, ['one'], historical_identity)
+        self.assertEqual(result['detector']['version'], '1.5.0')
+        with self.assertRaises(ValueError):
+            subject.merge_snapshots({'one': historical}, ['one'], IDENTITY)
 
     def test_conflicting_package_or_manifest(self):
         part = snapshot()
@@ -148,7 +177,7 @@ class RunnerTests(unittest.TestCase):
                 reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
                 part = snapshot()
                 if case == 'mixed-detector' and len(calls) == 2:
-                    part['detector']['version'] = '1.5.1'
+                    part['detector']['version'] = '1.5.0'
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
                 if case == 'wrong-detector':
