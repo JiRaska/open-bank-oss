@@ -25,7 +25,12 @@ jobů. Režim shadow a existující deployment holds trvají do dokončení měs
 Starší hlášení zůstávají přijímána, ale měsíční připravenost nepotvrdí. Historii nedopočítávejte,
 nenulujte čítač kvůli schválení a nespouštějte finanční job jen pro zaplnění důkazu.
 
-Knihy penzijní společnosti a majetek účastníků fondů mají odlišné vlastníky a hranice. Penzijní
-moduly zatím neposkytují účetní mapování a GL posting potřebné k účasti na účetní uzávěrce.
-Publikace NAV ani úspěšný plánovač je nenahradí. Před aktivací kontrol potřebují vlastní mapované
-zdroje, tie-out autoritu a úplnou uzávěrku.
+Knihy penzijní společnosti a fondů používají oddělené, trvale svázané identity knih.
+ADR-0365 navrhuje nepeněžní accrual poplatku: náklad/závazek fondu a pohledávku/výnos společnosti.
+Publikace NAV ukládá trvalý záměr doručení a samostatná potvrzení obou knih. Čekající doručení
+odmítne dokončení i po uzavření dne. Doručení nenahradí odsouhlasení celého účetního plánu:
+nezávisle dodané zůstatky musí schválit jiný ověřený účetní před uzavřením vlastní knihy.
+Návrh mapování vyžaduje odborné účetní schválení a celý živý měsíční cyklus; jiné zdroje se z NAV
+neodvozují. Opakované poplatky používají navId jako Idempotency-Key, návrhy odsouhlasení vlastní
+klíč a schválení id návrhu. Retry nevytvoří další kontrolu. Existující knihy potřebují schválený
+počáteční stav a přechod před zapnutím doručování.

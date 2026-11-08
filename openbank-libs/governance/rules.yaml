@@ -4675,6 +4675,8 @@ security_sensitive_paths:
   openbank-ledger-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
+      - "src/main/kotlin/**/Pension*.kt"
       # ADR-0342 D2: binds each day-close participant report to one verified service-account
       # and records the operator `sub` on a waiver.
       - "src/main/kotlin/**/CloseParticipationResource.kt"

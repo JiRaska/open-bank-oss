@@ -29,7 +29,11 @@ import java.time.LocalDate
 interface PensionBookClient : AutoCloseable {
     @POST
     @Path("/api/v1/ledger/pension-accounting/management-fees")
-    suspend fun post(@HeaderParam("x-openbank-synthetic") synthetic: String?, request: FeePosting): FeeDeliveryReceipt
+    suspend fun post(
+        @HeaderParam("x-openbank-synthetic") synthetic: String?,
+        request: FeePosting,
+        @HeaderParam("Idempotency-Key") key: String,
+    ): FeeDeliveryReceipt
 
     @GET
     @Path("/api/v1/ledger/pension-accounting/identity")

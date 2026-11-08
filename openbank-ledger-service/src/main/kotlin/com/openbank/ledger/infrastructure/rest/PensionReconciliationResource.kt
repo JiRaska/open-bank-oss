@@ -10,6 +10,7 @@ import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -27,18 +28,29 @@ class PensionReconciliationResource(
     @POST
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "ledger.pension.reconcile", resource = "")
-    suspend fun propose(request: PensionReconciliationProposal?): Map<String, UUID> {
+    suspend fun propose(
+        request: PensionReconciliationProposal?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Map<String, UUID> {
         val actor = checkerSubject()
         requireNotNull(request) { "a request body is required" }
-        return mapOf("id" to reconciliations.propose(request, actor))
+        require(request.sourceReferences.values.none { it == null } && request.expectedBalances.values.none { it == null }) {
+            "Source references and expected balances must not contain null values"
+        }
+        return mapOf(
+            "id" to reconciliations.propose(request, actor, requireNotNull(key) { "Idempotency-Key is required" }),
+        )
     }
 
     @POST
     @Path("/{id}/approve")
     @RolesAllowed(Roles.OPERATOR)
     @Authorize(action = "ledger.pension.reconcile", resource = "#id")
-    suspend fun approve(@PathParam("id") id: UUID): Map<String, UUID> {
+    suspend fun approve(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): Map<String, UUID> {
         val actor = checkerSubject()
+        require(UUID.fromString(requireNotNull(key) { "Idempotency-Key is required" }) == id) {
+            "Idempotency-Key must equal the reconciliation id"
+        }
         reconciliations.approve(id, actor)
         return mapOf("id" to id)
     }

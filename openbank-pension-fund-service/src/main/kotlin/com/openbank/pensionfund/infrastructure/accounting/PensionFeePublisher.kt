@@ -68,6 +68,7 @@ class PensionFeePublisher(
                     fee.currency,
                     fee.correctsNavId,
                 ),
+                fee.navId.toString(),
             )
         }
         check(receipt.bookId == bookId && receipt.navId == fee.navId) {

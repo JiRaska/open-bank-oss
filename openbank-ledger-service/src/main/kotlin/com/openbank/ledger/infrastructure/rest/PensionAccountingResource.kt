@@ -103,8 +103,11 @@ class PensionAccountingResource(
     suspend fun accrue(
         request: PensionFeePostingRequest?,
         @HeaderParam("x-openbank-synthetic") synthetic: String?,
+        @HeaderParam("Idempotency-Key") key: String?,
     ): PensionFeePostingResponse {
         requireNotNull(request) { "a request body is required" }
+        val navKey = UUID.fromString(requireNotNull(key) { "Idempotency-Key is required" })
+        require(navKey == request.navId) { "Idempotency-Key must equal navId" }
         checkConflict(book.kind != LedgerBookKind.BANK && request.bookId == book.bookId) {
             "Pension accounting destination does not match this book"
         }
@@ -141,7 +144,7 @@ class PensionAccountingResource(
                 taint.tainted,
             ).joinToString("|").toByteArray(Charsets.UTF_8),
         ).joinToString("") { "%02x".format(it) }
-        val receipt = receipts.reserve(request.navId, request.fundId, fingerprint, clock.today(), taint.tainted)
+        val receipt = receipts.reserve(navKey, request.fundId, fingerprint, clock.today(), taint.tainted)
         val journalId = if (receipt.outcome == "PENDING" && normalized.signum() != 0) {
             post(request, receipt.postingDate, normalized)
         } else {

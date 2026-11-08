@@ -1,6 +1,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
--- Expand only. Rollback disables the producer and retains bindings, receipts and journals.
+-- Expand only.
+-- Rollback: disable the producer; retain bindings, receipts, proposals and financial journals.
 CREATE TABLE ledger_book_identity (
     singleton BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton),
     book_kind VARCHAR(32) NOT NULL CHECK (book_kind IN ('PENSION_COMPANY', 'PENSION_FUND')),
@@ -26,6 +27,8 @@ ALTER TABLE ledger_tieout_runs ADD CONSTRAINT ck_ledger_tieout_control_kind
     CHECK (control_kind IN ('BANK', 'PENSION_COMPANY', 'PENSION_FUND'));
 CREATE TABLE ledger_pension_reconciliations (
     id UUID PRIMARY KEY,
+    request_key VARCHAR(512) NOT NULL UNIQUE,
+    request_fingerprint CHAR(64) NOT NULL,
     business_date DATE NOT NULL,
     source_references TEXT NOT NULL,
     expected_balances TEXT NOT NULL,

@@ -14,6 +14,7 @@ import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
+import io.restassured.http.ContentType
 import io.restassured.response.ValidatableResponse
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -159,15 +160,28 @@ class PensionFundAccountingIT {
         ],
     )
     fun `maker proposes complete independently sourced balances but cannot approve them`() {
-        proposal = given().contentType("application/json").body(
-            PensionAccountingFixtures.proposal(
-                PensionAccountingFixtures.FUND,
-                clock.today(),
-                listOf("cash", "units", "custody", "nav", "fees", "settlements"),
-                listOf("PF5110", "PF2110"),
-            ),
-        ).post(RECONCILIATIONS).then().statusCode(200).extract().path("id")
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        val key = UUID.randomUUID().toString()
+        val body = PensionAccountingFixtures.proposal(
+            PensionAccountingFixtures.FUND,
+            clock.today(),
+            listOf("cash", "units", "custody", "nav", "fees", "settlements"),
+            listOf("PF5110", "PF2110"),
+        )
+        proposal = given().contentType("application/json").header("Idempotency-Key", key).body(body)
+            .post(RECONCILIATIONS).then().statusCode(200).extract().path("id")
+        given().contentType("application/json").header("Idempotency-Key", key).body(body)
+            .post(RECONCILIATIONS).then().statusCode(200).body("id", equalTo(proposal))
+        given().contentType("application/json").header("Idempotency-Key", key)
+            .body(body + ("businessDate" to clock.today().minusDays(1).toString()))
+            .post(RECONCILIATIONS).then().statusCode(409)
+        given().contentType("application/json").body(body).post(RECONCILIATIONS).then().statusCode(400)
+        given().contentType("application/json").header("Idempotency-Key", " ").body(body)
+            .post(RECONCILIATIONS).then().statusCode(400)
+        assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_pension_reconciliations"))
+            .isEqualTo("1")
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
         assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_tieout_runs")).isEqualTo("0")
     }
 
@@ -182,7 +196,9 @@ class PensionFundAccountingIT {
         ],
     )
     fun `independent checker records a fund control with immutable read proof once`() {
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
         assertThat(PensionAccountingFixtures.scalar("SELECT control_kind FROM ledger_tieout_runs"))
             .isEqualTo("PENSION_FUND")
         assertThat(
@@ -190,7 +206,10 @@ class PensionFundAccountingIT {
                 "SELECT count(*) FROM ledger_tieout_runs WHERE started_at IS NOT NULL AND journal_count = 0",
             ),
         ).isEqualTo("1")
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
+        assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_tieout_runs")).isEqualTo("1")
     }
 
     @Test
@@ -199,13 +218,54 @@ class PensionFundAccountingIT {
     fun `pending lookup recovers a cutoff older than seven days without exposing balances`() {
         val old = clock.today().minusDays(40)
         val path = "/api/v1/ledger/accounting-days/$old"
-        given().contentType("application/json").post(path).then().statusCode(201)
-        given().contentType("application/json").post("$path/transitions/CUTOFF").then().statusCode(200)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", UUID.randomUUID().toString()).post(path).then().statusCode(201)
+        given().contentType(
+            "application/json",
+        ).header(
+            "Idempotency-Key",
+            UUID.randomUUID().toString(),
+        ).post("$path/transitions/CUTOFF").then().statusCode(200)
         given().get("/api/v1/ledger/pension-accounting/closing-days").then().statusCode(200)
             .body("size()", equalTo(1)).body("[0].businessDate", equalTo(old.toString()))
             .body("[0].status", equalTo("CUTOFF"))
         given().queryParam("from", old.toString())
             .get("/api/v1/ledger/pension-accounting/closing-days").then().statusCode(400)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = "pension-reconciliation-maker", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "pension-maker-subject"),
+            Claim(key = "azp", value = "openbank-admin-ui"),
+            Claim(key = "preferred_username", value = "pension-reconciliation-maker"),
+        ],
+    )
+    fun `null source references and balances are rejected before persisting reconciliation evidence`() {
+        val beforeProposals = PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_pension_reconciliations")
+        val beforeTieouts = PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_tieout_runs")
+        // Raw JSON keeps explicit null map elements on the wire regardless of mapper inclusion settings.
+        val request = { cash: String, balance: String ->
+            """{
+                "bookId":"${PensionAccountingFixtures.FUND}","businessDate":"${clock.today()}",
+                "sourceReferences":{"cash":$cash,"units":"fixture-units","custody":"fixture-custody",
+                    "nav":"fixture-nav","fees":"fixture-fees","settlements":"fixture-settlements"},
+                "expectedBalances":{"PF5110":$balance,"PF2110":0.00}
+            }
+            """.trimIndent()
+        }
+        for ((cash, balance) in listOf("null" to "0.00", "\"fixture-cash\"" to "null")) {
+            given().contentType(ContentType.JSON).header("Idempotency-Key", UUID.randomUUID().toString())
+                .body(request(cash, balance))
+                .post(RECONCILIATIONS).then().statusCode(400)
+            assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_pension_reconciliations"))
+                .isEqualTo(beforeProposals)
+            assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_tieout_runs"))
+                .isEqualTo(beforeTieouts)
+        }
     }
 
     private fun fee(nav: UUID, amount: String = "10.00", original: UUID? = null): ValidatableResponse =
@@ -310,7 +370,7 @@ internal object PensionAccountingFixtures {
         original: UUID? = null,
         synthetic: Boolean = false,
     ): ValidatableResponse {
-        val request = given().contentType("application/json")
+        val request = given().contentType("application/json").header("Idempotency-Key", navId.toString())
         if (synthetic) request.header("x-openbank-synthetic", "true")
         return request.body(
             mapOf(

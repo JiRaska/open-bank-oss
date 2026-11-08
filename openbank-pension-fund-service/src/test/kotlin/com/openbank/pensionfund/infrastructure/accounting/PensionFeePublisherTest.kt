@@ -60,10 +60,10 @@ class PensionFeePublisherTest {
             val receipt = secondArg<FeeDeliveryReceipt>()
             delivered[receipt.navId to firstArg<String>()] = receipt
         }
-        coEvery { fundClient.post(any(), capture(fundRequests)) } answers {
+        coEvery { fundClient.post(any(), capture(fundRequests), any()) } answers {
             acknowledgement(secondArg(), firstArg<String?>() == "true")
         }
-        coEvery { companyClient.post(any(), capture(companyRequests)) } answers {
+        coEvery { companyClient.post(any(), capture(companyRequests), any()) } answers {
             acknowledgement(secondArg(), firstArg<String?>() == "true")
         }
     }
@@ -92,7 +92,7 @@ class PensionFeePublisherTest {
     fun `retry after a company failure preserves the acknowledged fund leg`() {
         val entry = entry()
         var companyAttempts = 0
-        coEvery { companyClient.post(any(), capture(companyRequests)) } answers {
+        coEvery { companyClient.post(any(), capture(companyRequests), any()) } answers {
             companyAttempts++
             if (companyAttempts == 1) error("company unavailable")
             acknowledgement(secondArg(), firstArg<String?>() == "true")
@@ -133,12 +133,12 @@ class PensionFeePublisherTest {
     @Test
     fun `a missing synthetic acknowledgement is rejected before it can certify either book`() {
         val entry = entry(synthetic = true)
-        coEvery { fundClient.post(any(), any()) } answers { acknowledgement(secondArg(), synthetic = false) }
+        coEvery { fundClient.post(any(), any(), any()) } answers { acknowledgement(secondArg(), synthetic = false) }
 
         assertThatThrownBy { runBlocking { publisher.publish(entry) } }
             .isInstanceOf(IllegalStateException::class.java).hasMessageContaining("population")
 
-        coVerify(exactly = 1) { fundClient.post("true", any()) }
+        coVerify(exactly = 1) { fundClient.post("true", any(), any()) }
         verify(exactly = 0) { clients.open(companyUrl) }
         coVerify(exactly = 0) { receipts.save(any(), any()) }
     }

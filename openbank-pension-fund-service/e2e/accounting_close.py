@@ -214,6 +214,10 @@ class Fixture:
 
     def raw_http(self, url, method="GET", body=None, token=None):
         headers = {"Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())}
+        if method == "POST" and url.endswith("/management-fees"):
+            headers["Idempotency-Key"] = str(body["navId"])
+        elif method == "POST" and url.endswith("/approve"):
+            headers["Idempotency-Key"] = url.split("/")[-2]
         if token:
             headers["Authorization"] = "Bearer " + token
         data = json.dumps(body).encode() if body is not None else None
@@ -295,7 +299,7 @@ class Fixture:
             "currency": "CZK", "riskClass": 3, "mandatoryConservative": False,
             "productRevisionId": REVISION, "launchNavPerUnit": 1}, status=201)["id"]
         self.stop(admin_proc)
-        fund_opa = self.opa("fund-book", "openbank-infra/gitops/components/ledger-pension-fund/ledger_pension_fund_rest_ext.rego")
+        fund_opa = self.opa("fund-book", "openbank-infra/gitops/components/ledger/pension-fund-policy/ledger_pension_fund_rest_ext.rego")
         company_opa = self.opa("company-book", "openbank-infra/gitops/components/ledger-pension-co/ledger_pension_co_rest_ext.rego")
         common = {"quarkus.scheduler.enabled": "false", "openbank.ledger.day-lock.mode": "enforce",
                   "openbank.ledger.book.close.participants-mode": "enforce",

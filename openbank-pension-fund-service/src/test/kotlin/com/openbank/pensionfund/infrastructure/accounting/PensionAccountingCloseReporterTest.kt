@@ -3,20 +3,27 @@
 
 package com.openbank.pensionfund.infrastructure.accounting
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.pensionfund.application.port.PensionFundStore
 import com.openbank.pensionfund.domain.model.Fund
 import com.openbank.pensionfund.infrastructure.client.PensionBookClient
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.quarkus.runtime.StartupEvent
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.net.URI
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.Optional
@@ -37,13 +44,29 @@ class PensionAccountingCloseReporterTest {
     private val oldDay = LocalDate.now(ZoneOffset.UTC).minusDays(40)
     private val reportDates = mutableListOf<LocalDate>()
     private val reports = mutableListOf<PensionCloseReport>()
-    private val reporter = PensionAccountingCloseReporter(config, clients, evidence, store, receipts, Clock.systemUTC())
+    private val registry = SimpleMeterRegistry()
+    private val domainMetrics = DomainMetrics().apply {
+        registryInstance = mockk<Instance<MeterRegistry>>().also {
+            every { it.isResolvable } returns true
+            every { it.get() } returns registry
+        }
+    }
+    private val reporter = PensionAccountingCloseReporter(
+        config,
+        clients,
+        evidence,
+        store,
+        receipts,
+        Clock.systemUTC(),
+        domainMetrics,
+    )
 
     init {
         val fund = mockk<Fund>()
         every { fund.id } returns fundId
         coEvery { store.funds() } returns listOf(fund)
         every { config.deliveryEnabled() } returns true
+        every { config.closePollInterval() } returns Duration.ofMinutes(5)
         every { config.companyBookId() } returns Optional.of(companyId)
         every { config.companyUrl() } returns Optional.of(companyUrl)
         every { config.funds() } returns mapOf(fundId.toString() to fundUrl)
@@ -69,6 +92,7 @@ class PensionAccountingCloseReporterTest {
 
     @Test
     fun `company outage preserves an old pending fund report and remains a cron failure`(): Unit = runBlocking {
+        reporter.register(StartupEvent())
         val unavailable = IllegalStateException("company unavailable")
         coEvery { companyClient.identity() } throws unavailable
 
@@ -92,6 +116,7 @@ class PensionAccountingCloseReporterTest {
         coVerify(exactly = 2) { evidence.day(any(), any(), any()) }
         verify(exactly = 2) { fundClient.close() }
         verify(exactly = 2) { companyClient.close() }
+        assertThat(successRecorded()).isEqualTo(0.0)
     }
 
     @Test
@@ -120,6 +145,7 @@ class PensionAccountingCloseReporterTest {
 
     @Test
     fun `cancellation stops polling immediately instead of becoming a destination failure`(): Unit = runBlocking {
+        reporter.register(StartupEvent())
         val cancelled = CancellationException("scheduler stopped")
         coEvery { companyClient.identity() } throws cancelled
 
@@ -129,5 +155,53 @@ class PensionAccountingCloseReporterTest {
         coVerify(exactly = 0) { evidence.day(any(), any(), any()) }
         assertThat(reports).isEmpty()
         verify(exactly = 1) { companyClient.close() }
+        assertThat(successRecorded()).isEqualTo(0.0)
     }
+
+    @Test
+    fun `all destination deliveries record liveness with the configured cadence`(): Unit = runBlocking {
+        every { config.closePollInterval() } returns Duration.ofSeconds(17)
+        coEvery { companyClient.identity() } returns PensionBookDescriptor("PENSION_COMPANY", companyId)
+        coEvery { companyClient.pendingDays() } returns listOf(PensionClosingDay(oldDay, "CUTOFF"))
+        coEvery { companyClient.days(any(), any()) } returns emptyList()
+        coEvery { evidence.day(fundId, oldDay, "PENSION_COMPANY") } returns FundAccountingDayEvidence(
+            fundId,
+            oldDay,
+            "PENSION_COMPANY",
+            2,
+            1,
+            emptyList(),
+            "b".repeat(64),
+        )
+        coEvery { companyClient.report(any(), any()) } returns Unit
+        reporter.register(StartupEvent())
+        assertThat(successRecorded()).isEqualTo(0.0)
+        assertThat(workflowGauge(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)).isEqualTo(17.0)
+
+        reporter.report()
+
+        assertThat(successRecorded()).isEqualTo(1.0)
+        coVerify(exactly = 1) { companyClient.report(oldDay, any()) }
+        coVerify(exactly = 1) { fundClient.report(oldDay, any()) }
+        assertThat(reports.single().outcome).isEqualTo("REFUSED")
+    }
+
+    @Test
+    fun `disabled delivery registers no active heartbeat and performs no polling`(): Unit = runBlocking {
+        every { config.deliveryEnabled() } returns false
+
+        reporter.register(StartupEvent())
+        reporter.report()
+
+        assertThat(successRecorded()).isNull()
+        assertThat(workflowGauge(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)).isNull()
+        verify(exactly = 0) { config.closePollInterval() }
+        verify(exactly = 0) { clients.open(any()) }
+        coVerify(exactly = 0) { store.funds() }
+    }
+
+    private fun workflowGauge(name: String): Double? = registry.find(name)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, PensionAccountingCloseReporter.WORKFLOW).gauge()?.value()
+
+    private fun successRecorded(): Double? = workflowGauge(WorkflowLivenessMetrics.SUCCESS_RECORDED)
 }

@@ -78,12 +78,17 @@ paths:
       summary: Accrue one approved NAV fee in this fund or company book
       description: >
         Requires the verified pension-fund client and a dedicated purpose grant. The bank and
-        mismatched book/fund identities refuse the request. A stable NAV key binds the normalized
+        mismatched book/fund identities refuse the request. Idempotency-Key must equal navId. A stable NAV key binds the normalized
         payload before posting; changed replays conflict. A correction requires a completed original
         receipt of the same fund and population. No cash moves. Posting date is assigned once from
         the current accounting day; a later closed-day refusal remains pending for reviewed recovery.
       security: [{bearerAuth: []}]
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
         - name: x-openbank-synthetic
           in: header
           required: false
@@ -108,7 +113,13 @@ paths:
   /api/v1/ledger/pension-accounting/reconciliations:
     post:
       summary: Propose an independent source reconciliation of the entire pension chart
-      description: A verified interactive accountant supplies opaque source evidence references and every enabled account balance.
+      description: A verified interactive accountant supplies opaque source evidence references and every enabled account balance. Identical retries return the original proposal id.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
       security: [{bearerAuth: []}]
       requestBody:
         required: true
@@ -130,12 +141,17 @@ paths:
     post:
       summary: Independently verify source balances against this book and retain its read proof
       description: >
-        A different verified interactive accountant approves once. The entire enabled own chart,
-        including zero balances, must match; foreign or disabled accounts with activity refuse the
+        A different verified interactive accountant approves once. The same checker may replay without issuing another control. The entire enabled own chart,
+        including zero balances, must match; Idempotency-Key must equal the proposal id; foreign or disabled accounts with activity refuse the
         proof. Writers are excluded during the read and verdict commit. This is an own-book control,
         never a bank deposit-control tie-out, and does not waive missing product completion.
       security: [{bearerAuth: []}]
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string}
+          description: Stable request identity; changed payload replay conflicts
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
         '200':
@@ -145,7 +161,7 @@ paths:
               schema: {$ref: '#/components/schemas/PensionReconciliationId'}
         '401': {description: Unauthenticated}
         '403': {description: A verified interactive accountant and reconciliation grant are required}
-        '409': {description: Same checker, already approved, wrong book, or source balances do not match}
+        '409': {description: Maker is checker, different approval checker, wrong book, or source balances do not match}
   /api/v1/ledger/close-readiness:
     get:
       tags: [AccountingDay]

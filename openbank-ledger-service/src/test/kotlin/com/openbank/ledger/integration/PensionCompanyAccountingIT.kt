@@ -103,7 +103,7 @@ class PensionCompanyAccountingIT {
         ],
     )
     fun `company reconciliation requires its own sources and a separate checker`() {
-        proposal = given().contentType("application/json").body(
+        proposal = given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString()).body(
             PensionAccountingFixtures.proposal(
                 PensionAccountingFixtures.COMPANY,
                 clock.today(),
@@ -111,7 +111,9 @@ class PensionCompanyAccountingIT {
                 listOf("PS1310", "PS6110"),
             ),
         ).post(RECONCILIATIONS).then().statusCode(200).extract().path("id")
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
     }
 
     @Test
@@ -125,7 +127,9 @@ class PensionCompanyAccountingIT {
         ],
     )
     fun `company checker records its own control rather than a bank tieout`() {
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
         assertThat(PensionAccountingFixtures.scalar("SELECT control_kind FROM ledger_tieout_runs"))
             .isEqualTo("PENSION_COMPANY")
         assertThat(
@@ -134,7 +138,9 @@ class PensionCompanyAccountingIT {
                     "AND book_id = '${PensionAccountingFixtures.COMPANY}'",
             ),
         ).isEqualTo("1")
-        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType(
+            "application/json",
+        ).header("Idempotency-Key", proposal).post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
     }
 
     private fun fee(nav: UUID, amount: String = "10.00", original: UUID? = null) = PensionAccountingFixtures.fee(

@@ -69,7 +69,7 @@ class PensionBankIsolationIT {
         assertThat(book.kind).isEqualTo(LedgerBookKind.BANK)
         val before = counts()
 
-        given().contentType("application/json").body(
+        given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString()).body(
             PensionAccountingFixtures.proposal(
                 PensionAccountingFixtures.FUND,
                 clock.today(),

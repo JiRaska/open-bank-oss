@@ -1,6 +1,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
--- Additive, no historical backfill. Rollback disables delivery; retain source facts and receipts.
+-- Additive, no historical backfill.
+-- Rollback: disable delivery; retain source intents, bindings and accounting receipts.
 -- Business evidence survives the transport outbox's ordinary SENT retention.
 CREATE TABLE pension_fund_fee_intents (
     nav_id UUID PRIMARY KEY REFERENCES fund_navs(id),

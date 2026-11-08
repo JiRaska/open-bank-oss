@@ -4,9 +4,13 @@
 package com.openbank.pensionfund.infrastructure.accounting
 
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.pensionfund.application.port.PensionFundStore
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import kotlinx.coroutines.CancellationException
 import org.jboss.logging.Logger
 import java.net.URI
@@ -23,8 +27,16 @@ class PensionAccountingCloseReporter(
     private val store: PensionFundStore,
     private val receipts: FeeDeliveryReceipts,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(javaClass)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun register(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        if (config.deliveryEnabled()) {
+            liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW, config.closePollInterval())
+        }
+    }
 
     @Scheduled(
         every = "\${openbank.pension-fund.accounting.close-poll-interval:5m}",
@@ -55,6 +67,8 @@ class PensionAccountingCloseReporter(
             }
         }
         firstFailure?.let { throw it }
+        // Accepted REFUSED reports are successful delivery; a partial destination failure is not.
+        liveness?.recordSuccess()
     }
 
     private suspend fun reportBook(bookId: UUID, kind: String, url: URI, funds: Set<UUID>) {
@@ -108,4 +122,8 @@ class PensionAccountingCloseReporter(
     }
 
     private data class Destination(val bookId: UUID, val kind: String, val url: URI, val funds: Set<UUID>)
+
+    companion object {
+        const val WORKFLOW = "pension-accounting-close"
+    }
 }

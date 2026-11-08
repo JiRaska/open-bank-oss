@@ -10,7 +10,11 @@ import com.openbank.ledger.application.usecase.PensionBookIdentity
 import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyScope
+import com.openbank.libs.idempotency.RequestFingerprints
 import io.quarkus.hibernate.reactive.panache.Panache
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
@@ -22,9 +26,9 @@ import java.util.UUID
 data class PensionReconciliationProposal(
     val bookId: UUID,
     val businessDate: LocalDate,
-    val sourceReferences: Map<String, String>,
+    val sourceReferences: Map<String, String?>,
     /** Debit-positive, including every enabled account, even accounts with zero balance. */
-    val expectedBalances: Map<String, BigDecimal>,
+    val expectedBalances: Map<String, BigDecimal?>,
 )
 
 /** Independent source attestation plus a comparison to the entire own chart, never bank controls. */
@@ -35,12 +39,12 @@ class PensionBookReconciliation(
     private val receipts: PensionFeeReceipts,
     private val clock: Clock,
 ) {
-    suspend fun propose(proposal: PensionReconciliationProposal, actor: String): UUID {
+    suspend fun propose(proposal: PensionReconciliationProposal, actor: String, requestKey: String): UUID {
         checkConflict(book.kind != LedgerBookKind.BANK && book.bookId == proposal.bookId) { "Wrong pension book" }
         val required = if (book.kind == LedgerBookKind.PENSION_FUND) FUND_SOURCES else COMPANY_SOURCES
         requireValid(proposal.sourceReferences.keys == required) { "Reconciliation requires sources $required" }
         requireValid(
-            proposal.sourceReferences.values.all { value: String? ->
+            proposal.sourceReferences.values.all { value ->
                 !value.isNullOrBlank() &&
                     value.length <= MAX_REFERENCE
             },
@@ -56,25 +60,41 @@ class PensionBookReconciliation(
         val accountCode = if (book.kind == LedgerBookKind.PENSION_FUND) FUND_ACCOUNT_CODE else COMPANY_ACCOUNT_CODE
         requireValid(
             proposal.expectedBalances.all { (code, balance) ->
-                val nullableBalance: BigDecimal? = balance
-                accountCode.matches(code) && nullableBalance != null && nullableBalance.scale() <= 2
+                accountCode.matches(code) && balance != null && balance.scale() <= 2
             },
         ) { "Expected balances require own-book account codes and at most two decimal places" }
+        val sources = proposal.sourceReferences.mapValues { (_, value) -> requireNotNull(value) }
+        val balances = proposal.expectedBalances.mapValues { (_, value) -> requireNotNull(value) }
+        val scopedKey = IdempotencyScope("ledger-pension-reconciliation", actor).storeKey(requestKey)
+        val fingerprint = RequestFingerprints.of(json, "POST", RECONCILIATIONS_PATH, proposal)
         receipts.bindBook()
-        val id = UUID.randomUUID()
-        Panache.withTransaction {
+        val id = Ids.newId()
+        // The proposal and its replay identity commit together; no reservation survives a rollback.
+        return Panache.withTransaction {
             Panache.getSession().flatMap { session ->
                 session.createNativeMutationQuery(
                     "INSERT INTO ledger_pension_reconciliations " +
-                        "(id, business_date, source_references, expected_balances, proposed_by) " +
-                        "VALUES (:id, :date, :sources, :balances, :actor)",
+                        "(id, request_key, request_fingerprint, business_date, source_references, " +
+                        "expected_balances, proposed_by) " +
+                        "VALUES (:id, :key, :fingerprint, :date, :sources, :balances, :actor) " +
+                        "ON CONFLICT (request_key) DO NOTHING",
                 ).setParameter("id", id).setParameter("date", proposal.businessDate)
-                    .setParameter("sources", json.writeValueAsString(proposal.sourceReferences))
-                    .setParameter("balances", json.writeValueAsString(proposal.expectedBalances))
-                    .setParameter("actor", actor).executeUpdate()
+                    .setParameter("key", scopedKey).setParameter("fingerprint", fingerprint)
+                    .setParameter("sources", json.writeValueAsString(sources))
+                    .setParameter("balances", json.writeValueAsString(balances))
+                    .setParameter("actor", actor).executeUpdate().flatMap {
+                        session.createNativeQuery<Array<Any>>(
+                            "SELECT id, request_fingerprint FROM ledger_pension_reconciliations " +
+                                "WHERE request_key = :key",
+                        ).setParameter("key", scopedKey).singleResult.map { stored ->
+                            checkConflict(stored[1].toString() == fingerprint) {
+                                "Idempotency-Key was already used for another reconciliation request"
+                            }
+                            UUID.fromString(stored[0].toString())
+                        }
+                    }
             }
         }.awaitSuspending()
-        return id
     }
 
     suspend fun approve(id: UUID, actor: String) {
@@ -91,8 +111,14 @@ class PensionBookReconciliation(
                     }
                 }.flatMap { proposal ->
                     val date = LocalDate.parse(proposal[0].toString())
-                    checkConflict(proposal[2].toString() != actor && proposal[APPROVED_BY] == null) {
-                        "Reconciliation requires a different checker and may be approved once"
+                    checkConflict(proposal[2].toString() != actor) {
+                        "Reconciliation requires a different checker"
+                    }
+                    proposal[APPROVED_BY]?.let { approvedBy ->
+                        checkConflict(approvedBy.toString() == actor) {
+                            "Reconciliation was approved by another checker"
+                        }
+                        return@flatMap Uni.createFrom().item(0)
                     }
                     val expected: Map<String, BigDecimal> = json.readValue(
                         proposal[1].toString(),
@@ -100,20 +126,7 @@ class PensionBookReconciliation(
                     )
                     session.createNativeQuery<Array<Any?>>(BALANCES_SQL).setParameter("d", date).resultList
                         .flatMap { rows ->
-                            val prefix = if (book.kind == LedgerBookKind.PENSION_FUND) "PF" else "PS"
-                            val actual = rows.associate { it[0].toString() to BigDecimal(it[2].toString()) }
-                            checkConflict(
-                                rows.isNotEmpty() &&
-                                    rows.all {
-                                        it[0].toString().startsWith(prefix) && it[1].toString() == "CZK"
-                                    },
-                            ) { "Book chart contains unsupported or foreign accounts" }
-                            checkConflict(
-                                actual.keys == expected.keys &&
-                                    actual.all { (code, net) ->
-                                        net.compareTo(expected.getValue(code)) == 0
-                                    },
-                            ) { "Source balances do not reconcile to the entire book" }
+                            requireReconciledChart(rows, expected)
                             JournalReadWatermark.readInTransaction(session, date).flatMap { population ->
                                 session.createNativeMutationQuery(
                                     "INSERT INTO ledger_tieout_runs " +
@@ -137,10 +150,22 @@ class PensionBookReconciliation(
         }.awaitSuspending()
     }
 
+    private fun requireReconciledChart(rows: List<Array<Any?>>, expected: Map<String, BigDecimal>) {
+        val prefix = if (book.kind == LedgerBookKind.PENSION_FUND) "PF" else "PS"
+        val actual = rows.associate { it[0].toString() to BigDecimal(it[2].toString()) }
+        checkConflict(
+            rows.isNotEmpty() && rows.all { it[0].toString().startsWith(prefix) && it[1].toString() == "CZK" },
+        ) { "Book chart contains unsupported or foreign accounts" }
+        checkConflict(
+            actual.keys == expected.keys && actual.all { (code, net) -> net.compareTo(expected.getValue(code)) == 0 },
+        ) { "Source balances do not reconcile to the entire book" }
+    }
+
     private companion object {
         const val APPROVED_BY = 3
         const val MAX_REFERENCE = 256
         const val MAX_ACCOUNTS = 200
+        const val RECONCILIATIONS_PATH = "/api/v1/ledger/pension-accounting/reconciliations"
         val FUND_ACCOUNT_CODE = Regex("PF[0-9]{4}")
         val COMPANY_ACCOUNT_CODE = Regex("PS[0-9]{4}")
         val FUND_SOURCES = setOf("cash", "units", "custody", "nav", "fees", "settlements")
