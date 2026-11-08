@@ -240,7 +240,15 @@ class AccountingDayScheduler(
             runStep("tie-out", day.businessDate) {
                 val cutoffAt = day.cutoffAt ?: return@runStep
                 val run = tieOutRunRepository.findLatestFor(day.businessDate)
-                if (needsPostCutoffRun(run?.runAt, cutoffAt)) {
+                val participantWatermark = if (closeParticipantsConfig.participantsMode() ==
+                    CloseParticipantsConfig.MODE_OFF
+                ) {
+                    null
+                } else {
+                    closeParticipation.completeness(day.businessDate).lastWorkReportAt
+                }
+                val completedAfterTieOut = run?.runAt?.let { participantWatermark?.isAfter(it) } == true
+                if (needsPostCutoffRun(run?.runAt, cutoffAt) || completedAfterTieOut) {
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }

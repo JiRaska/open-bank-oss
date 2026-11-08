@@ -1,0 +1,243 @@
+{
+  "consumer": {
+    "name": "openbank-admin-ui"
+  },
+  "interactions": [
+    {
+      "description": "read a bounded historical month of close completeness evidence",
+      "providerStates": [
+        {
+          "name": "ledger has no retained close evidence for February 2000"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/ledger/close-readiness",
+        "query": {
+          "month": [
+            "2000-02"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "blockers": [
+            "STALE_PERIOD"
+          ],
+          "days": [
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-01"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-02"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-03"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-04"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-05"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-06"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-07"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-08"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-09"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-10"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-11"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-12"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-13"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-14"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-15"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-16"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-17"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-18"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-19"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-20"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-21"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-22"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-23"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-24"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-25"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-26"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-27"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-28"
+            },
+            {
+              "blockers": [
+                "NO_CLOSE_EVIDENCE"
+              ],
+              "businessDate": "2000-02-29"
+            }
+          ],
+          "eligibleForEnforcement": false,
+          "month": "2000-02",
+          "observedDays": 0,
+          "requiredDays": 29
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.blockers": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-js": {
+      "version": "17.1.4"
+    },
+    "pactRust": {
+      "ffi": "0.5.7",
+      "models": "1.3.15"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-ledger-service"
+  }
+}

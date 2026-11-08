@@ -45,7 +45,26 @@ class CloseParticipationTest {
         )
         assertThat(
             report,
-        ).isEqualTo(CloseParticipationReport(day, CloseOutcome.RAN, journalsPosted = 4, itemsProcessed = 14))
+        ).isEqualTo(
+            CloseParticipationReport(
+                day,
+                CloseOutcome.RAN,
+                journalsPosted = 4,
+                itemsProcessed = 14,
+                exercisedJobs = setOf("accrual", "capitalization"),
+            ),
+        )
+    }
+
+    @Test
+    fun `an empty successful sweep cannot attest an exercised monthly job`() {
+        val report = CloseParticipationAssembler.assemble(
+            day,
+            setOf("capitalization"),
+            listOf(run("capitalization", 0, 0)),
+        )!!
+        assertThat(report.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(report.exercisedJobs).isEmpty()
     }
 
     @Test

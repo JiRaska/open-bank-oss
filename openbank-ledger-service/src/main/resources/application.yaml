@@ -175,12 +175,18 @@ openbank:
     #
     # Ships in SHADOW for the same reason as the locks above: it counts
     # openbank_ledger_close_participants_decisions_total{outcome="would_hold"} and moves the day
-    # anyway. Flip to enforce once that counter reads zero across a full month (capitalization
-    # runs on the 1st). The list must match rules.yaml: close_participants
+    # anyway. Review GET /api/v1/ledger/close-readiness over a whole completed month before
+    # enforcement; a counter can reset and cannot supply that evidence. The list must match rules.yaml: close_participants
     # (check-close-participants.py). A second ledger deployment for another legal entity
     # (ADR-0337) sets LEDGER_CLOSE_PARTICIPANTS_MODE=off until it declares its own participants.
     close:
       participants-mode: "${LEDGER_CLOSE_PARTICIPANTS_MODE:shadow}"
+      readiness:
+        required-jobs:
+          interest: [accrual, capitalization]
+          lending: [accrual, provisioning]
+          billing: [billing-cycle]
+          treasury: [accrual]
       participants:
         interest:
           principal: service-account-openbank-interest

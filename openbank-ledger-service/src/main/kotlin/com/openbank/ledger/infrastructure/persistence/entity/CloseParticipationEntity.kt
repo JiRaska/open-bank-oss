@@ -10,6 +10,8 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -48,6 +50,10 @@ class CloseParticipationEntity : PanacheEntityBase {
 
     @Column(name = "late", nullable = false)
     var late: Boolean = false
+
+    @JdbcTypeCode(SqlTypes.ARRAY)
+    @Column(name = "exercised_jobs", nullable = false, columnDefinition = "text[]")
+    var exercisedJobs: Array<String> = emptyArray()
 
     /** Database-assigned insertion order; never written by the application. */
     @Column(name = "seq", insertable = false, updatable = false)

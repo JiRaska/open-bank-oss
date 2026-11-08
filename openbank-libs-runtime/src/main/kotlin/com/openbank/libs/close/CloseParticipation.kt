@@ -14,6 +14,8 @@ data class CloseParticipationReport(
     val journalsPosted: Int = 0,
     val itemsProcessed: Int = 0,
     val reason: String? = null,
+    /** Successful persisted job receipts with observed work; an empty sweep cannot qualify a cycle. */
+    val exercisedJobs: Set<String> = emptySet(),
 ) {
     init {
         require(journalsPosted >= 0 && itemsProcessed >= 0) { "counts must be non-negative" }
@@ -79,6 +81,7 @@ object CloseParticipationAssembler {
             outcome = CloseOutcome.RAN,
             journalsPosted = due.sumOf { it.journalsPosted },
             itemsProcessed = due.sumOf { it.itemsProcessed },
+            exercisedJobs = due.filter { it.itemsProcessed > 0 || it.journalsPosted > 0 }.map { it.job }.toSet(),
         )
     }
 }

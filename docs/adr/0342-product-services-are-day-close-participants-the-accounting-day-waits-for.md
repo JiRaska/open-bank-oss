@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [accounting-close, ledger, interest]
 summary: "Calendar-driven product services report a per-accounting-day participation record to ledger-service; a day leaves CUTOFF only when every declared participant reported or an operator waived it, and a refused post is reported."
-followup: "#13167 — billing, lending, treasury, pension and pension-fund participants follow interest one PR each"
+followup: "#13167 — bank participants wired; retain at-close monthly evidence before enforcement; pension-company and participant-fund completion depend on separate event-to-book mappings (ADR-0338)"
 ---
 
 # ADR-0342 — Product services are day-close participants the accounting day waits for
@@ -92,8 +92,11 @@ UTC calendar date. A waiver is accepted only for an existing `CUTOFF` day and a 
 
 **D5 — A shared primitive.** `openbank-libs-runtime` carries the participant side
 (`CloseParticipationReporter`, the record type, the metric) so the six participants differ only in
-what they count. pension-fund reports to its own ledger deployment (ADR-0337), which runs the same
-code with its own participant list.
+what they count. Pension participation must respect the book boundaries in ADR-0337/0338: pension-company books
+and participant-owned fund assets are distinct. Neither pension service currently has the GL
+posting adapter and event-to-book mapping needed to attest accounting completion. A successful NAV
+publication, incentive sweep or payout-recovery tick cannot stand in for that evidence. Do not
+declare either service complete in the bank ledger or reuse the company ledger for fund assets.
 
 ## Alternatives considered
 
@@ -138,9 +141,10 @@ and the services that construct a `CloseParticipationReporter` are the same set.
 ### Delivery check
 
 ```bash
-python3 .github/scripts/check-close-participants.py      # exit 0, "6 participants declared, 6 wired"
+python3 .github/scripts/check-close-participants.py      # exit 0, "4 participant(s) declared, 0 finding(s)"
 git grep -l 'CloseParticipationReporter' -- '*/src/main/**.kt' | cut -d/ -f1 | sort -u
-# expected: interest, billing, lending, treasury, pension, pension-fund services (+ libs-runtime)
+# current bank participants: interest, billing, lending, treasury (+ libs-runtime)
+# Pension books require their own mapped accounting sources and close authority first.
 ```
 
 Live: `select participant, count(*) from ledger_close_participation group by 1` lists every
@@ -161,6 +165,31 @@ declared participant with roughly one row per day since it was wired.
 Increment 1 (#13167, first PR): the libs-runtime primitive, the ledger participation table,
 endpoints, completeness check in shadow mode, interest-service as the first participant, and the
 admin-ui day-end page listing participants. The other five participants follow one PR each.
+
+## At-close evidence and promotion review
+
+`V38__close_participation_evidence.sql` adds one immutable snapshot per accounting day, inserted
+inside the same transaction and participation lock as `CUTOFF -> TIED_OUT` and its outbox event.
+It captures the configured mode, exact participant/principal and required-job declarations,
+latest report outcomes, exercised job names, waiver attribution/reason, and the latest qualifying
+OK tie-out id after cutoff and the latest RAN report watermark. In shadow mode, a manual transition without reconciliation is recorded with no tie-out
+proof and cannot qualify readiness. In enforce mode it is refused atomically. The scheduler
+requests a new tie-out when product work completed after the previous verdict; a later waiver
+does not erase the earlier successful-work watermark. Existing historical days are never backfilled from later reports.
+
+`GET /api/v1/ledger/close-readiness` reviews the preceding completed calendar month, in the bank
+accounting timezone. Every calendar day, including the first day, needs at-close evidence. Missing
+or refused reports, operator waivers, disabled checks, changed declarations, missing post-cutoff
+reconciliation and required jobs without an exercised receipt block eligibility. An exercised
+receipt comes from a persisted successful job run with processed items or posted journals; an empty
+sweep or daily interest accrual alone cannot establish the monthly capitalization/fee cycle.
+Older reports remain accepted but have no exercised-job proof and cannot qualify a month.
+
+The response is evidence for a separately reviewed promotion, not a mode-changing operation or
+live-bank qualification. The default remains shadow. Runtime scope, source/image identities,
+financial correctness, participant availability and rollout holds still require their own review.
+A restarted counter reading zero is no substitute for retained evidence. Querying this endpoint
+on the pension-company deployment cannot establish participant-fund accounting completeness.
 
 ## References
 

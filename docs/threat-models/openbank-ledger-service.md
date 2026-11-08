@@ -782,3 +782,17 @@ set) apply equally to the new `ledger.approval.decide` action.
   reads and may restore false-real classification. Existing journal flags are not rewritten.
   Dedicated caller provisioning and trusted-principals configuration are separate work (#14060);
   live canary seeding and deployed acceptance remain separate operational decisions.
+
+- **2026-11-08 — At-close participation evidence (#13167).** A monthly readiness read is protected by
+  `ledger.read` and the existing authenticated read roles. A new additive table is written only
+  inside the day-transition transaction, under the same day lock as participant reports and
+  waivers; insert failure rolls back the state change and its outbox event. No update or backfill
+  API exists. The snapshot records the configured participant principals, required jobs, latest
+  reports and qualifying post-cutoff tie-out id. Later reports cannot retroactively repair the
+  historical verdict. Missing evidence, disabled checks, waivers, declaration drift and unexercised
+  monthly jobs fail readiness closed. Report identity checks and human-only reasoned waivers
+  remain mandatory, including in advisory authorization mode. Job names are bounded and only
+  RAN may attest them. Snapshots retain operator attribution and waiver reasons under the same
+  audit-data access/retention obligations as participation history; no such values enter metrics.
+  Rollback retains the additive table and history. This read does not activate enforcement,
+  release deployment holds or attest pension-company/fund accounting mappings.

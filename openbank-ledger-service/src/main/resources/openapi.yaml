@@ -20,7 +20,8 @@ info:
   # roles (premium/discount, fair value, revaluation reserve, realised/unrealised result, memo, memo
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
-  version: 1.30.0
+  # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
+  version: 1.31.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -35,6 +36,32 @@ tags:
   - name: ClosedPeriod
 
 paths:
+  /api/v1/ledger/close-readiness:
+    get:
+      tags: [AccountingDay]
+      summary: Whole-month evidence for reviewing close-participant enforcement
+      description: >
+        Read-only proof from immutable snapshots captured atomically at CUTOFF to TIED_OUT.
+        Late reports cannot repair earlier evidence. Missing days, waivers, refused work,
+        disabled checks, changed declarations, missing nonempty OK tie-outs after cutoff and successful participant reports and required jobs without a successful receipt block eligibility.
+        Only the immediately previous completed calendar month can qualify. This response does
+        not activate enforcement or authorize a rollout and covers only this ledger's declared books.
+      security: [{bearerAuth: []}]
+      parameters:
+        - name: month
+          in: query
+          required: false
+          description: Completed calendar month; defaults to the preceding month in Europe/Prague.
+          schema: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+      responses:
+        '200':
+          description: Observed evidence, including explicit gaps; zero observations cannot qualify.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CloseReadiness'}
+        '400': {description: Invalid month or month not yet completed}
+        '401': {description: Unauthenticated}
+        '403': {description: Caller lacks ledger.read}
   /api/v1/journals/history-snapshots:
     post:
       tags: [Ledger]
@@ -1589,10 +1616,39 @@ components:
         balanced: { type: boolean }
         recomputedAt: { type: string, format: date-time }
 
+    CloseReadiness:
+      type: object
+      required: [month, expectedParticipants, observedDays, requiredDays, eligibleForEnforcement, blockers, days]
+      properties:
+        month: {type: string, pattern: '^[0-9]{4}-[0-9]{2}$'}
+        expectedParticipants:
+          type: array
+          items: {type: string}
+        observedDays: {type: integer, minimum: 0, maximum: 31}
+        requiredDays: {type: integer, minimum: 28, maximum: 31}
+        eligibleForEnforcement: {type: boolean}
+        blockers:
+          type: array
+          items: {type: string}
+        days:
+          type: array
+          maxItems: 31
+          items:
+            type: object
+            required: [businessDate, blockers]
+            properties:
+              businessDate: {type: string, format: date}
+              blockers:
+                type: array
+                items: {type: string}
     CloseCompletenessResponse:
       type: object
       required: [businessDate, complete, missing, refused, participants]
       properties:
+        participantsMode:
+          type: string
+          enum: [off, shadow, enforce]
+          description: Configured check mode; incomplete participation blocks transitions only in enforce.
         businessDate: { type: string, format: date }
         complete:
           type: boolean
@@ -1634,6 +1690,12 @@ components:
       type: object
       required: [outcome]
       properties:
+        exercisedJobs:
+          type: array
+          uniqueItems: true
+          maxItems: 16
+          description: Optional successful job names with observed work; empty sweeps and older reports cannot qualify monthly readiness.
+          items: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
         outcome:
           type: string
           enum: [RAN, SKIPPED, REFUSED]

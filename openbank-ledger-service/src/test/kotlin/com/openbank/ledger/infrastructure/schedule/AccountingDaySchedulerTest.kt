@@ -214,6 +214,31 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
+    fun `late completed product work requires a fresh tie-out before the day can advance`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            setOf("interest"),
+            mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.RAN, 2, 2, null,
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T05:00:00Z"), false,
+                ),
+            ),
+        )
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 0) { useCase.transition(any()) }
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns
+            tieOutRun(yesterday, TieOutRunStatus.OK, Instant.parse("2026-08-07T06:00:00Z"))
+        scheduler.reconcile()
+        coVerify(exactly = 1) { useCase.transition(match { it.to == AccountingDayStatus.TIED_OUT }) }
+    }
+
+    @Test
     fun `ENFORCE holds a tied-out-eligible day while a declared participant is missing`(): Unit = runBlocking {
         participantsMode = CloseParticipantsConfig.MODE_ENFORCE
         yesterdayEligibleForTieOut()

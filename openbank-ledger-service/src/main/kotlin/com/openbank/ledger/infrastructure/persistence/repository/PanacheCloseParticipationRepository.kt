@@ -78,6 +78,7 @@ class PanacheCloseParticipationRepository(private val clock: Clock) :
         it.reportedBy = reportedBy
         it.reportedAt = reportedAt
         it.late = late
+        it.exercisedJobs = exercisedJobs.toTypedArray()
     }
 
     private fun CloseParticipationEntity.toDomain() = CloseParticipationRecord(
@@ -90,6 +91,7 @@ class PanacheCloseParticipationRepository(private val clock: Clock) :
         reportedBy = reportedBy,
         reportedAt = reportedAt,
         late = late,
+        exercisedJobs = exercisedJobs.toSet(),
     )
 
     private companion object {

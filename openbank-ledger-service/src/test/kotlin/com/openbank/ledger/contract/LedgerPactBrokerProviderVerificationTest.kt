@@ -112,6 +112,18 @@ class LedgerPactBrokerProviderVerificationTest {
         // verifyPacts clears the authenticated test identity for this interaction.
     }
 
+    @State("ledger has no retained close evidence for February 2000")
+    fun stateWithoutHistoricalCloseEvidence() {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use {
+                it.executeUpdate(
+                    "DELETE FROM ledger_close_evidence " +
+                        "WHERE business_date BETWEEN '2000-02-01' AND '2000-02-29'",
+                )
+            }
+        }
+    }
+
     @State("ledger has frozen monthly trial balance for the reporting date")
     fun stateWithFrozenMonthlyTrialBalance(parameters: Map<String, Any>) {
         FinrepFrozenMonthPactSeed.validateStateParameters(reportingMonth to yearToDate, parameters)

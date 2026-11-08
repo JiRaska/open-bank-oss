@@ -7,6 +7,7 @@ package com.openbank.ledger.infrastructure.rest
 import com.openbank.ledger.application.port.`in`.CloseParticipationUseCase
 import com.openbank.ledger.application.port.`in`.ReportParticipationCommand
 import com.openbank.ledger.application.port.`in`.WaiveParticipationCommand
+import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.libs.authz.Authorize
@@ -48,6 +49,9 @@ import java.time.LocalDate
 class CloseParticipationResource(private val useCase: CloseParticipationUseCase) {
 
     @Inject
+    lateinit var participantsConfig: CloseParticipantsConfig
+
+    @Inject
     lateinit var identity: SecurityIdentity
 
     @GET
@@ -68,6 +72,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 missing = completeness.missing.sorted(),
                 refused = completeness.refused.sorted(),
                 participants = rows,
+                participantsMode = participantsConfig.participantsMode(),
             ),
         ).build()
     }
@@ -96,6 +101,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 itemsProcessed = request.itemsProcessed ?: 0,
                 reason = request.reason,
                 callerPrincipal = ServiceAccountIdentity.verifiedPrincipalName(identity),
+                exercisedJobs = request.exercisedJobs.orEmpty(),
             ),
         )
         return Response.ok(saved.toResponse()).build()
@@ -155,6 +161,7 @@ data class ReportParticipationRequest(
     val journalsPosted: Int?,
     val itemsProcessed: Int?,
     val reason: String?,
+    val exercisedJobs: Set<String>? = null,
 )
 
 data class WaiveParticipationRequest(val reason: String?)
@@ -192,6 +199,7 @@ data class CloseCompletenessResponse(
     val missing: List<String>,
     val refused: List<String>,
     val participants: List<ParticipationResponse>,
+    val participantsMode: String,
 )
 
 private fun CloseParticipationRecord.toResponse() = ParticipationResponse(

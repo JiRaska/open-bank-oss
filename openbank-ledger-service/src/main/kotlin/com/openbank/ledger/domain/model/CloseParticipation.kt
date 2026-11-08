@@ -8,6 +8,8 @@ import com.openbank.libs.close.CloseOutcome
 import java.time.Instant
 import java.time.LocalDate
 
+private const val MAX_EXERCISED_JOBS = 16
+
 /**
  * The ledger's answer for one participant on one accounting day (ADR-0342 D1): either what the
  * participant REPORTED -- the shared [CloseOutcome] owned by libs-domain, not redeclared here -- or
@@ -67,8 +69,20 @@ data class CloseParticipationRecord(
     val reportedBy: String,
     val reportedAt: Instant,
     val late: Boolean,
+    val exercisedJobs: Set<String> = emptySet(),
 ) {
     init {
+        requireValid(
+            exercisedJobs.size <= MAX_EXERCISED_JOBS &&
+                exercisedJobs.all {
+                    it.matches(Regex("[a-z][a-z0-9_-]{0,63}"))
+                },
+        ) {
+            "exercisedJobs must contain at most 16 bounded job names"
+        }
+        requireValid(outcome == ParticipationOutcome.RAN || exercisedJobs.isEmpty()) {
+            "Only RAN can attest completed jobs"
+        }
         requireValid(participant.isNotBlank()) { "A participation record needs a participant name" }
         requireValid(journalsPosted >= 0 && itemsProcessed >= 0) {
             "journalsPosted and itemsProcessed must be non-negative " +
@@ -117,6 +131,10 @@ data class CloseCompleteness(
     val businessDate: LocalDate,
     val expected: Set<String>,
     val reported: Map<String, CloseParticipationRecord>,
+    /** Reconciliation must follow every RAN receipt, including one later superseded by a waiver. */
+    val lastWorkReportAt: Instant? = reported.values
+        .filter { it.participant in expected && it.outcome == ParticipationOutcome.RAN }
+        .maxOfOrNull { it.reportedAt },
 ) {
     val missing: Set<String> get() = expected - reported.keys
 
@@ -141,6 +159,9 @@ data class CloseCompleteness(
                 .filter { it.businessDate == businessDate }
                 .groupBy { it.participant }
                 .mapValues { (_, rows) -> rows.last() }, // [records] is oldest first (insertion order): the last wins
+            lastWorkReportAt = records.filter {
+                it.businessDate == businessDate && it.participant in expected && it.outcome == ParticipationOutcome.RAN
+            }.maxOfOrNull { it.reportedAt },
         )
     }
 }

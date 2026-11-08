@@ -88,6 +88,18 @@ class LedgerPactProviderVerificationTest {
      * If running in isolation the DB is empty → trial-balance returns an empty balanced result,
      * which still satisfies the contract shape (type matchers, not value matchers).
      */
+    @State("ledger has no retained close evidence for February 2000")
+    fun stateWithoutHistoricalCloseEvidence() {
+        dataSource.connection.use { connection ->
+            connection.createStatement().use {
+                it.executeUpdate(
+                    "DELETE FROM ledger_close_evidence " +
+                        "WHERE business_date BETWEEN '2000-02-01' AND '2000-02-29'",
+                )
+            }
+        }
+    }
+
     @State("ledger has frozen monthly trial balance for the reporting date")
     fun stateWithFrozenMonthlyTrialBalance(parameters: Map<String, Any>) {
         FinrepFrozenMonthPactSeed.validateStateParameters(
