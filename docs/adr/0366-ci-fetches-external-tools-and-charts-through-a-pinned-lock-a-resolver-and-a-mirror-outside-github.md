@@ -101,8 +101,8 @@ Rollout runs in four steps:
   fastest tier.
 - **GHCR as the mirror.** Free and already authenticated. Rejected: it shares GitHub's failure
   domain, and independence from that domain is the whole point of the mirror.
-- **A registry on the Hetzner host ADR-0363 runs.** It is outside both GitHub and AWS, and it
-  already exists. Rejected: a single self-operated box, with its TLS, patching and uptime,
+- **A registry on the dedicated host outside AWS that ADR-0363 runs.** It is outside both
+  GitHub and AWS, and it already exists. Rejected: a single self-operated box, with its TLS, patching and uptime,
   would become part of the availability path of required checks. ADR-0363 accepts that box
   only because a cache there fails open, and a mirror does not have that property.
 - **Vendor the artifacts into the repository.** Fully offline. Rejected: several hundred MB of
