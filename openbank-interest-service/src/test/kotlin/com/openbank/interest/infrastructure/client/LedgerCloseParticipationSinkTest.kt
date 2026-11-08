@@ -36,11 +36,13 @@ class LedgerCloseParticipationSinkTest {
                 journalsPosted = 2,
                 itemsProcessed = 3,
                 exercisedJobs = setOf("accrual", "capitalization"),
+                sourceRunId = "a".repeat(64),
             ),
         ).await().indefinitely()
 
         verify(exactly = 1) { client.report("2026-10-01", "interest", any()) }
         val json = mapper.readTree(mapper.writeValueAsBytes(request.captured))
+        assertThat(json.path("sourceRunId").asText()).isEqualTo("a".repeat(64))
         assertThat(json.path("outcome").asText()).isEqualTo("RAN")
         assertThat(json.path("journalsPosted").asInt()).isEqualTo(2)
         assertThat(json.path("itemsProcessed").asInt()).isEqualTo(3)
