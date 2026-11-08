@@ -196,6 +196,8 @@ def latency_findings(declared: set[str], bounds: dict[str, float], p99: dict[str
             findings.append(f"{name}: has a latency bound but is missing from the results")
         elif got is None:
             findings.append(f"{name}: has a latency bound but the result carries no p99 (run it in SampleTime mode)")
+        elif not math.isfinite(got) or got < 0:
+            findings.append(f"{name}: invalid p99 measurement {got} ms — expected a finite nonnegative value")
         elif got >= bounds[name]:
             findings.append(f"{name}: p99 {got:.4f} ms is not below its bound {bounds[name]:.4f} ms")
     return findings
@@ -478,6 +480,12 @@ def _self_test() -> int:
             return rc, b.getvalue()
         for label, args, want, text in [
             ("a p99 over its latency bound is red", (3_000_000.0, {a: {"p99_ms": 2.0}}), 1, "p99 3.0000 ms is not below its bound 2.0000 ms"),
+            ("a p99 exactly at its latency bound is red", (2_000_000.0, {a: {"p99_ms": 2.0}}), 1, "p99 2.0000 ms is not below its bound 2.0000 ms"),
+            ("a NaN p99 is red", (float("nan"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a string NaN p99 is red", ("NaN", {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("an infinite p99 is red", (float("inf"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a negative infinite p99 is red", (float("-inf"), {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
+            ("a negative p99 is red", (-1.0, {a: {"p99_ms": 2.0}}), 1, "invalid p99 measurement"),
             ("a p99 under its latency bound is green", (40_000.0, {a: {"p99_ms": 2.0}}), 0, "bench-alloc-baseline: OK"),
             ("a bounded benchmark without percentiles is red", (1.0, {a: {"p99_ms": 2.0}}, False), 1, "carries no p99"),
             ("a latency bound naming no @Benchmark is red", (1.0, {"com.example.Ghost.x": {"p99_ms": 2.0}}), 1, "latency bound names no @Benchmark"),
