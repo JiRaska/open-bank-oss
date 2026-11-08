@@ -173,7 +173,7 @@ def _fetch_via_github_api(chart: str, repo_url: str, version: str,
     index.yaml and, if it is a GitHub release asset, download it through the REST API.
 
     github.com's web frontend can answer 504 for `/releases/download/` while the API and
-    the asset CDN keep working (measured 2026-11-08, ADR-0366). The API route
+    the asset CDN keep working (measured 2026-11-08, #15216). The API route
     (`/repos/{o}/{r}/releases/assets/{id}`, Accept: application/octet-stream) redirects
     straight to the asset CDN. Returns None on success, or a reason string.
     """
@@ -231,7 +231,7 @@ def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Pat
     fallback = _fetch_via_github_api(chart, repo_url, version, chart_root)
     if fallback is None:
         print(f"::notice::helm-values-key-effect fetched {chart}@{version} via the GitHub "
-              "REST API after `helm pull` failed (ADR-0366)")
+              "REST API after `helm pull` failed (#15216)")
         return None
     return f"{last_stderr}\n{fallback}"
 
