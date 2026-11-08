@@ -281,8 +281,12 @@ class _Handler(socketserver.StreamRequestHandler):
             ok = first.get("stage") == state.stage and first.get("authAlias") == state.auth
             if not ok:
                 state.taint("malformed_lifecycle")
-            state.finish_requested.set()
-            self.wfile.write(b'{"ok":true}\n')
+            # The main thread may exit as soon as it sees the finish event.
+            # A disconnected peer must still trigger shutdown after the write fails.
+            try:
+                self.wfile.write(b'{"ok":true}\n')
+            finally:
+                state.finish_requested.set()
             return
         if first.get("type") != "begin" or not state.begin(first):
             self.wfile.write(b'{"ok":false}\n')

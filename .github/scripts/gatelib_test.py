@@ -86,6 +86,136 @@ class GatelibTest(unittest.TestCase):
         self.assertEqual(gatelib.load_yaml_all(p), list(yaml.safe_load_all(text)))
         self.assertEqual(gatelib.load_yaml(p), {"a": 1})
 
+    def test_python_loader_preserves_directives_tabs_escapes_and_safe_tags(self):
+        import yaml
+
+        cases = [
+            "%YAML 1.3\n---\nkind: ServiceAccount\n",
+            "kind:\tServiceAccount\n",
+            'value: "\\uD800"\n',
+            "a: &one [1, 2]\nb: *one\n---\nwhen: 2026-08-09\n",
+            "value: !!python/object:builtins.object {}\n",
+        ]
+        for text in cases:
+            with self.subTest(text=text):
+                path = self.write("parser.yaml", text)
+                try:
+                    expected = list(yaml.safe_load_all(text))
+                except yaml.YAMLError as error:
+                    with self.assertRaises(type(error)) as caught:
+                        gatelib.load_yaml_all(path, pure_python=True)
+                    self.assertEqual(str(caught.exception), str(error))
+                else:
+                    self.assertEqual(gatelib.load_yaml_all(path, pure_python=True), expected)
+
+    def test_python_and_default_loader_caches_are_separate_in_memory_and_on_disk(self):
+        import os
+        from unittest.mock import patch
+        import yaml
+
+        class DifferentLoader(yaml.SafeLoader):
+            pass
+
+        DifferentLoader.add_constructor(
+            "tag:yaml.org,2002:str", lambda loader, node: "auto:" + loader.construct_scalar(node))
+        cache = self.root / "parser-cache"
+        cache.mkdir()
+        path = self.write("loader.yaml", "key: value\n")
+        with patch.dict(os.environ, {gatelib.CACHE_DIR_ENV: str(cache)}), \
+                patch.object(gatelib, "SafeLoader", DifferentLoader):
+            for _ in range(2):
+                self.assertEqual(gatelib.load_yaml_all(path), [{"auto:key": "auto:value"}])
+                self.assertEqual(gatelib.load_yaml_all(path, pure_python=True), [{"key": "value"}])
+                gatelib.clear()  # next iteration must read both loader-specific disk entries
+            self.assertEqual(len(list(cache.glob("*.marshal"))), 2)
+
+    def test_python_loader_retains_copy_and_content_invalidation(self):
+        path = self.write("python.yaml", "values: [1, 2]\n")
+        first = gatelib.load_yaml_all(path, pure_python=True)
+        first[0]["values"].append(3)
+        self.assertEqual(gatelib.load_yaml_all(path, pure_python=True), [{"values": [1, 2]}])
+        path.write_text("values: [4, 5]\n", encoding="utf-8")
+        self.assertEqual(gatelib.load_yaml_all(path, pure_python=True), [{"values": [4, 5]}])
+
+    def test_security_callers_keep_parser_sensitive_findings(self):
+        import contextlib
+        import importlib.util
+        import io
+
+        def checker(name):
+            path = pathlib.Path(__file__).with_name(name)
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        residency = checker("check-model-residency-claims.py")
+        residency.REPO = self.root
+        residency.GITOPS_ROOT = self.root / "models"
+        self.write("models/env.yaml", "%YAML 1.3\n---\nenv:\n  - name: MODEL_URL\n"
+                   "    value: https://example.invalid\n")
+        index = residency.gitops_env_overrides()
+        findings = residency.endpoint_findings(
+            "model", "${MODEL_URL:http://model.ns.svc.cluster.local}", "fixture", index)
+        self.assertTrue(any("MODEL_URL" in finding and "R4" in finding for finding in findings))
+
+        honey = checker("check-honeytoken-wiring.py")
+        self.write("honey/binding.yaml", "%YAML 1.3\n---\nkind: RoleBinding\nsubjects:\n"
+                   "  - kind: ServiceAccount\n    namespace: fixture\n    name: watched\n")
+        self.assertEqual(honey.bound_subjects(self.root / "honey"), {("fixture", "watched")})
+
+        edge = checker("check-edge-decoy-rule-parity.py")
+        path = self.write("edge/tab.yaml", "kind:\tHTTPRoute\nmetadata:\n"
+                          "  namespace: fixture\n  name: edge-decoys-unread\n")
+        errors = io.StringIO()
+        with contextlib.redirect_stderr(errors):
+            self.assertEqual(list(edge._docs(path)), [])
+        self.assertIn("not parseable YAML", errors.getvalue())
+
+        # The eager cache and streaming fallback must consume the SAME file snapshot.
+        from unittest.mock import patch
+
+        text = "kind: Kept\n---\ninvalid: [\n"
+        errors = io.StringIO()
+        with patch.object(pathlib.Path, "read_text", side_effect=[text, "kind: Changed\n"]) as reads, \
+                contextlib.redirect_stderr(errors):
+            self.assertEqual(list(edge._docs(path)), [{"kind": "Kept"}])
+        self.assertEqual(reads.call_count, 1)
+        self.assertIn("not parseable YAML", errors.getvalue())
+
+    def test_python_cache_cannot_validate_a_default_loader_invalid_input(self):
+        import os
+        from unittest.mock import patch
+        import yaml
+
+        cache = self.root / "namespace-cache"
+        cache.mkdir()
+        text = "key: value\n"
+        normal = self.write("normal.yaml", text)
+        invalid = self.write("invalid.yaml", "yaml.SafeLoader\0" + text)
+        with patch.dict(os.environ, {gatelib.CACHE_DIR_ENV: str(cache)}):
+            self.assertEqual(gatelib.load_yaml_all(normal, pure_python=True), [{"key": "value"}])
+            for _ in range(2):
+                with self.assertRaises(yaml.YAMLError):
+                    gatelib.load_yaml_all(invalid)
+                gatelib.clear()  # repeat against the persisted Python-loader entry
+
+    def test_python_loader_preserves_deep_alias_graphs_without_exposing_cache(self):
+        # Shallow YAML merge entries hide a deep alias graph from the parser's call stack.
+        # SafeLoader accepts this while deepcopy can exceed its own recursion limit.
+        text = "kind: ServiceAccount\nmetadata: {name: watched}\n<<:\n  - {a: &a0 [0]}\n"
+        text += "".join(f"  - {{a: &a{i} [*a{i - 1}]}}\n" for i in range(1, 500))
+        text += "a: *a499\n"
+        path = self.write("aliases.yaml", text)
+        first = gatelib.load_yaml_all(path, pure_python=True)
+        value = first[0]["a"]
+        for _ in range(500):
+            value = value[0]
+        self.assertEqual(value, 0)
+        first[0]["metadata"]["name"] = "poison"
+        second = gatelib.load_yaml_all(path, pure_python=True)
+        self.assertEqual(second[0]["metadata"]["name"], "watched")
+
     def test_empty_file_is_none_not_an_error(self):
         p = self.write("empty.yaml", "")
         self.assertIsNone(gatelib.load_yaml(p))

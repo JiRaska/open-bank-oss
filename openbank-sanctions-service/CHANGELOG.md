@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.4...sanctions-service-v0.18.5) (2026-11-07)
+
+
+### Bug Fixes
+
+* **sanctions:** initialize missing publication state ([#15140](https://github.com/JiRaska/open-bank-oss/issues/15140)) ([454cb53](https://github.com/JiRaska/open-bank-oss/commit/454cb53aa48d4b24795816dcfad6371c98caf414))
+
 ## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.3...sanctions-service-v0.18.4) (2026-11-06)
 
 

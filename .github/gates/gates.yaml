@@ -445,8 +445,10 @@ gates:
         find openbank-infra .github \( -name '*.yaml' -o -name '*.yml' \) -type f | sort
       )
       echo "SUBJECTS=${#files[@]}"
+      batch_size=$(( (${#files[@]} + 7) / 8 ))
+      if (( batch_size < 40 )); then batch_size=40; fi
       printf '%s\0' "${files[@]}" \
-        | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
+        | xargs -0 -P 4 -n "$batch_size" yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
     selftest_exempt: "third-party — shellcheck's own test suite is not ours to run"
@@ -703,7 +705,7 @@ gates:
     budget_seconds: 60   # self-test builds one small git repo (~3 s); the gate itself is one diff + one fetch
     min_subjects: 50   # 75 sandbox image pins under openbank-infra/gitops on 2026-11-03
     needs_base: optional
-    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py"]
+    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py", ".github/scripts/merge_train_carrier.py"]
     selftest: |
       python3 .github/scripts/check-deploy-pin-monotonic.py --self-test
     selftest_expect: pass
@@ -2124,6 +2126,66 @@ gates:
   # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
   # is required while dependency-submission is not. Their wrapper-download retry keeps
   # a transient transport reset from turning into an unrelated governance failure.
+  # A test file nothing runs is a place where a checker and its proof drift with nothing to notice.
+  # test-check-deploy-source-freshness.py sat that way with 3 failures on main (#14697); measured
+  # 2026-11-03: 21 of 132 test files under .github/scripts were named by no gate, workflow or
+  # unittest-discover pattern (14 once one-hop invocations through a wired script are counted).
+  # check-gate-script-registration.py asks the same question for check-* scripts only, by design.
+  - id: test-script-reachability
+    name: "every test script under .github/scripts is run by a gate, a workflow or a discover pattern"
+    group: lint
+    mode: enforced
+    rationale: "A committed test that no gate or workflow runs reads as coverage and is none: test-check-deploy-source-freshness.py rotted unseen with 3 failures on main (#14697), and 20 more test files were in the same state. The discovery patterns select *_test.py and tests/test_*.py only, so a hyphenated test-*.py beside its checker is silently skipped."
+    review_after: "2027-05-03"
+    budget_seconds: 20
+    min_subjects: 100   # 132 test files under .github/scripts on 2026-11-03
+    selftest_inputs: [".github/scripts/check-test-script-reachability.py"]
+    selftest: |
+      python3 .github/scripts/check-test-script-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-test-script-reachability.py --root .
+
+  # The orphans the gate above found, wired here so they run on every PR. Two entries so the slow
+  # deploy-side suites (sbom 57 s, record-deployment 31 s, publication race 12 s measured locally)
+  # do not stretch one shard. Each is a real unittest suite; the gate IS the known-positive.
+  - id: deploy-script-tests-previously-unreachable
+    selftest_exempt: "is-a-test-suite — the run: IS three unittest suites that no gate ran before"
+    name: "deploy-side script tests that were run by nothing until 2026-11-03"
+    group: supplychain
+    mode: enforced
+    rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
+    review_after: "2027-05-03"
+    budget_seconds: 240
+    run: |
+      set -e
+      python3 .github/scripts/test-sbom-effective-model-guard.py
+      python3 .github/scripts/test-resolve-record-deployment-manifests.py
+      python3 .github/scripts/test-deploy-publication-race.py
+
+  - id: ci-script-tests-previously-unreachable
+    selftest_exempt: "is-a-test-suite — the run: IS ten test suites that no gate ran before"
+    name: "CI-selection and tooling script tests that were run by nothing until 2026-11-03"
+    group: lint
+    mode: enforced
+    rationale: "Service-CI path selection, provider task discovery, the armed-PR updater, the k6 baseline, the UI required-build check, DR network-policy generation and the Gradle verification-cache retry all had committed tests that nothing executed; test-service-ci-path-selection.py is the only proof the PR module selector still scopes correctly."
+    review_after: "2027-05-03"
+    budget_seconds: 300   # 161.9 s in CI on 2026-11-07 with the two finrep tests added; ~1.85x
+    run: |
+      set -e
+      python3 .github/scripts/test-communication-image-only.py
+      python3 .github/scripts/test-service-ci-path-selection.py
+      bash .github/scripts/test-service-ci-provider-task-discovery.sh
+      bash .github/scripts/test-service-ci-provider-task-list.sh
+      python3 .github/scripts/test-updater-global-run.py
+      python3 .github/scripts/test-updater-global-slot.py
+      python3 .github/scripts/test-k6-advisory-baseline.py
+      python3 .github/scripts/test-ui-required-build.py
+      python3 .github/scripts/test-dr-network-policy-generation.py
+      python3 .github/scripts/test-historical-admin-ui-pact.py
+      python3 .github/scripts/test-finrep-historical-workflow.py
+      python3 .github/scripts/test-prove-finrep-historical-checkout.py
+      bash .github/scripts/tests/test-retry-gradle-verification-cache.sh
   # A fixture that commits with no identity works on a Mac (git derives one) and fails on the
   # runner (#14697); one that does not neutralise signing fails the other way for anyone whose
   # global config signs. Measured 2026-11-03: 38 git fixtures under .github/scripts, 37 with an
@@ -6015,16 +6077,18 @@ gates:
       python3 .github/scripts/check-threat-model-claims.py --enforce
 
   # Evidence half of threat-model-claims-resolve (#13171): the cited test must have RUN GREEN in the
-  # latest scheduled main envelope. Advisory first (ADR-0144; rules.yaml: threat_model_test_evidence).
+  # latest scheduled main envelope. Ratchet (rules.yaml: threat_model_test_evidence): a finding fails
+  # only when it is new against the baseline AND this PR adds or edits the row citing it, so other
+  # rows, a test going red on main and a push to main all stay warnings. The baseline only shrinks.
   # `--fetch-evidence` is best effort: any gh failure prints UNRESOLVED and exits 0, so a rate limit
-  # never becomes a red PR. The finding output, not the exit code, is the signal (advisory exits 0).
+  # never becomes a red PR.
   # --pr-base skips the ~90 gh calls on a PR that touches no threat model: the answer is main's anyway.
   - id: threat-model-test-evidence
-    name: "threat-model cited tests ran green in the latest run (ADR-0144, advisory)"
+    name: "threat-model cited tests ran green in the latest run (#13171, ratchet)"
     group: security
-    mode: advisory
+    mode: enforced
     needs_base: optional
-    verified: "2026-10-17 — self-test pins red, absent, skipped, stale-green-masking and no-envelope cases"
+    verified: "2026-11-06 — self-test pins red, absent, skipped, stale-green-masking, no-envelope, per-row attribution and baseline-growth cases; CLI run red on a skipped cited id and on an added baseline line"
     min_subjects: 23
     budget_seconds: 180
     rationale: "Resolving a cited test class by name proves it exists, not that it ran or passed: a class excluded from its CI task, skipped for a month or red on main still credited a mitigation. The next-latest envelope answers it."
@@ -6033,7 +6097,7 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
     run: |
-      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}"
+      python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}" --ratchet .github/gates/baselines/threat-model-test-evidence.txt
 
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
@@ -6543,9 +6607,9 @@ gates:
     name: "prod-readiness attestations: format + freshness (#2365, enforced)"
     group: registry
     mode: enforced
-    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test
+    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test && python3 .github/scripts/test_readiness_fuzz_evidence.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-readiness-attestations.py"]
+    selftest_inputs: [".github/scripts/check-readiness-attestations.py", ".github/scripts/readiness_fuzz_evidence.py", ".github/scripts/test_readiness_fuzz_evidence.py"]
     run: |
       # attestations.yaml is the ONLY hand-entered input to the prod-readiness matrix, and
       # nothing read it before this gate. It shipped with `consent-service:` as a service
