@@ -835,3 +835,9 @@ as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting t
 Capture computes this before excluding writers, under the transition transaction's relation lock,
 then verifies the short count check under the writer barrier. Production-volume CPU and monthly
 read latency still require measurement before rollout; this is a consistency check, not a signature.
+
+A newer declared participant receipt also invalidates monthly readiness, including a refusal or
+zero-journal run after close. Frozen reports are never replaced by later success; missing legacy
+receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
+receipt and preserve the proof. Producers must refresh the current and immediately prior month,
+including closed days, and explicitly revoke completion while source work is pending.

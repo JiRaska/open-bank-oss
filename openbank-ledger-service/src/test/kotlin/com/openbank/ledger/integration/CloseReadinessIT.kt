@@ -188,6 +188,39 @@ class CloseReadinessIT {
     }
 
     @Test
+    fun `new source work after close invalidates proof even without a journal`() {
+        closeMonth(omitFirstBilling = false)
+        val day = month.atDay(1)
+        val original = storedEvidence(day)
+        val population = onEventLoopPopulation(day)
+        given().get(READINESS).then().body("eligibleForEnforcement", equalTo(true))
+
+        report(day, "billing", ParticipationOutcome.REFUSED, "b".repeat(64), 0)
+        given().get(READINESS).then().statusCode(200)
+            .body("eligibleForEnforcement", equalTo(false))
+            .body("days[0].blockers", hasItem("SOURCE_EVIDENCE_CHANGED_AFTER_CLOSE"))
+        // Even a successful zero-amount fee run is new work, not a repair of the frozen close.
+        report(day, "billing", ParticipationOutcome.RAN, "c".repeat(64), 0)
+        given().get(READINESS).then().body("eligibleForEnforcement", equalTo(false))
+            .body("days[0].blockers", hasItem("SOURCE_EVIDENCE_CHANGED_AFTER_CLOSE"))
+        assertThat(onEventLoopPopulation(day)).isEqualTo(population)
+        assertThat(storedEvidence(day)).isEqualTo(original)
+    }
+
+    @Test
+    fun `an unchanged source receipt retry preserves the original monthly proof`() {
+        closeMonth(omitFirstBilling = false)
+        val day = month.atDay(1)
+        val original = storedEvidence(day)
+        val receipts = readScalar("SELECT count(*) FROM ledger_close_participation WHERE business_date = '$day'")
+        report(day, "billing")
+        given().get(READINESS).then().statusCode(200).body("eligibleForEnforcement", equalTo(true))
+        assertThat(readScalar("SELECT count(*) FROM ledger_close_participation WHERE business_date = '$day'"))
+            .isEqualTo(receipts)
+        assertThat(storedEvidence(day)).isEqualTo(original)
+    }
+
+    @Test
     fun `no evidence and an incomplete month never present as ready`() {
         given().get(READINESS).then().statusCode(200)
             .body("eligibleForEnforcement", equalTo(false))
@@ -261,19 +294,33 @@ class CloseReadinessIT {
             .then().statusCode(expectedStatus)
     }
 
-    private fun report(date: LocalDate, name: String) {
+    private fun report(
+        date: LocalDate,
+        name: String,
+        outcome: ParticipationOutcome = ParticipationOutcome.RAN,
+        sourceRunId: String = java.security.MessageDigest.getInstance("SHA-256")
+            .digest("$date|$name".toByteArray()).joinToString("") { "%02x".format(it) },
+        count: Int = 1,
+    ) {
         VertxContextSupport.subscribeAndAwait {
             uni(CoroutineScope(Dispatchers.Unconfined)) {
                 participation.report(
                     ReportParticipationCommand(
                         date,
                         name,
-                        ParticipationOutcome.RAN,
-                        1,
-                        1,
-                        null,
+                        outcome,
+                        count,
+                        count,
+                        if (outcome == ParticipationOutcome.REFUSED) "Pending monthly fee work" else null,
                         config.participants().getValue(name).principal(),
-                        readinessConfig.requiredJobs().getValue(name),
+                        if (outcome ==
+                            ParticipationOutcome.RAN
+                        ) {
+                            readinessConfig.requiredJobs().getValue(name)
+                        } else {
+                            emptySet()
+                        },
+                        sourceRunId,
                     ),
                 )
             }

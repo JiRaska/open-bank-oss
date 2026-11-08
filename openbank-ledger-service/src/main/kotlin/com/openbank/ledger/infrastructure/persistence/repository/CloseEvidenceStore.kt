@@ -63,6 +63,7 @@ class CloseEvidenceStore(
             ),
             tieOutRunId = row[TIE_OUT_RUN]?.let { UUID.fromString(it.toString()) },
             postingsUnchanged = row[POSTINGS_UNCHANGED] == true,
+            sourceEvidenceUnchanged = row[SOURCE_EVIDENCE_UNCHANGED] == true,
             bookKind = row[BOOK_KIND].toString(),
             bookId = row[BOOK_ID]?.let { UUID.fromString(it.toString()) },
         )
@@ -123,8 +124,9 @@ class CloseEvidenceStore(
         const val EXPECTED_JOBS = 5
         const val TIE_OUT_RUN = 6
         const val POSTINGS_UNCHANGED = 7
-        const val BOOK_KIND = 8
-        const val BOOK_ID = 9
+        const val SOURCE_EVIDENCE_UNCHANGED = 8
+        const val BOOK_KIND = 9
+        const val BOOK_ID = 10
         const val CAPTURE_SQL = "INSERT INTO ledger_close_evidence " +
             "(business_date, observed_at, mode, expected_principals, expected_jobs, tie_out_run_id, " +
             "reports, journal_count, journal_fingerprint, book_kind, book_id) " +
@@ -151,7 +153,15 @@ class CloseEvidenceStore(
         val READ_SQL = "SELECT business_date, observed_at, mode, " +
             "CAST(expected_principals AS text), CAST(reports AS text), CAST(expected_jobs AS text), tie_out_run_id, " +
             "COALESCE(e.journal_fingerprint = (" + JournalReadWatermark.fingerprintQuery("e.business_date") +
-            "), false), book_kind, book_id FROM ledger_close_evidence e " +
+            "), false), " +
+            // Later source evidence can invalidate this close, never repair its frozen reports.
+            // A legacy snapshot without receipt sequences cannot prove its source stayed unchanged.
+            "NOT EXISTS (SELECT 1 FROM jsonb_object_keys(e.expected_principals) AS declared(participant) " +
+            "WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(e.reports) AS r(report) " +
+            "WHERE r.report->>'participant' = declared.participant AND r.report->>'receiptSeq' IS NOT NULL " +
+            "AND NOT EXISTS (SELECT 1 FROM ledger_close_participation p " +
+            "WHERE p.business_date = e.business_date AND p.participant = declared.participant " +
+            "AND p.seq > CAST(r.report->>'receiptSeq' AS bigint)))), book_kind, book_id FROM ledger_close_evidence e " +
             "WHERE business_date >= :fromDate AND business_date <= :toDate ORDER BY business_date"
     }
 }

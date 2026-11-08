@@ -17,6 +17,46 @@ import java.util.concurrent.atomic.AtomicInteger
 class CloseParticipationTest {
 
     @Test
+    fun `reporting revisits the previous calendar month including leap February`() {
+        assertThat(CloseParticipationAssembler.reportingFrom(LocalDate.of(2026, 11, 8), 3))
+            .isEqualTo(LocalDate.of(2026, 10, 1))
+        assertThat(CloseParticipationAssembler.reportingFrom(LocalDate.of(2024, 3, 31), 3))
+            .isEqualTo(LocalDate.of(2024, 2, 1))
+    }
+
+    @Test
+    fun `reporting preserves a longer configured recovery window and rejects nonpositive windows`() {
+        val today = LocalDate.of(2026, 11, 8)
+        assertThat(CloseParticipationAssembler.reportingFrom(today, 75)).isEqualTo(today.minusDays(75))
+        for (lookback in listOf(0L, -1L)) {
+            assertThatThrownBy { CloseParticipationAssembler.reportingFrom(today, lookback) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("lookbackDays must be positive")
+        }
+    }
+
+    @Test
+    fun `incomplete source identity is stable across retries and ordering and separate from successful work`() {
+        val facts = listOf("accrual:pending", "capitalization:pending")
+        val first = CloseParticipationAssembler.incomplete(day, "due work remains", facts)
+        val retry = CloseParticipationAssembler.incomplete(day, "due work remains", facts)
+        val reordered = CloseParticipationAssembler.incomplete(day, "due work remains", facts.reversed())
+        val changed = CloseParticipationAssembler.incomplete(day, "due work remains", facts + "new-intent")
+        val completed = CloseParticipationAssembler.assemble(day, setOf("accrual"), listOf(run("accrual", 1, 0)))!!
+
+        assertThat(first.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(first.reason).isEqualTo("due work remains")
+        assertThat(first.journalsPosted).isZero()
+        assertThat(first.itemsProcessed).isZero()
+        assertThat(first.exercisedJobs).isEmpty()
+        assertThat(first.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(retry).isEqualTo(first)
+        assertThat(reordered).isEqualTo(first)
+        assertThat(changed.sourceRunId).isNotEqualTo(first.sourceRunId)
+        assertThat(completed.sourceRunId).isNotEqualTo(first.sourceRunId)
+    }
+
+    @Test
     fun `source identity is stable across retries and run ordering but changes for new persisted work`() {
         val a = run("accrual", 10, 0)
         val b = run("capitalization", 4, 4)
