@@ -9,6 +9,7 @@
 #
 # Inputs (env):  EVENT_NAME  github.event_name
 #                BASE_REF    github.base_ref (pull_request only)
+#                REQUESTED_SERVICE  optional one-module workflow_dispatch selection
 #                SELECT_OUT  directory to write results into
 #                GITHUB_OUTPUT  (push only) receives admin-ui-pact-changed=true
 # Outputs:       $SELECT_OUT/changed.txt  space-separated module list (unsorted, may be empty)
@@ -53,6 +54,24 @@ select_modules() {
   # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
   # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
   ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
+  local requested_module valid_requested candidate_module
+  requested_module="${REQUESTED_SERVICE:-}"
+  if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$requested_module" ]; then
+    # A release-only push may not select this service, while deployment still needs its
+    # exact build + contract proof. Reuse the same CI jobs for one operator-requested
+    # module; never turn an invalid request into a full-fleet run or a Gradle argument.
+    valid_requested=false
+    for candidate_module in $ALL; do
+      if [ "$candidate_module" = "$requested_module" ]; then
+        valid_requested=true
+        break
+      fi
+    done
+    if [ "$valid_requested" != true ]; then
+      echo "::error::Scoped dispatch requires exactly one existing Gradle module." >&2
+      return 1
+    fi
+  fi
 
   # The sourced selector is exercised by positive and negative controls before it
   # can select a build matrix. Unknown paths still take the conservative fallback.
@@ -61,7 +80,11 @@ select_modules() {
   pact_build_modules_self_test
   python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
-  if [ "$EVENT_NAME" = "schedule" ] \
+  if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$requested_module" ]; then
+    CHANGED="$requested_module"
+    FILES=""
+    echo "Decision: explicit workflow_dispatch -> verify only $requested_module."
+  elif [ "$EVENT_NAME" = "schedule" ] \
      || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
     echo "Event $EVENT_NAME -> build all modules (full-fleet)."
     CHANGED="$ALL"
@@ -433,12 +456,32 @@ self_test() {
   expect() { # name want got
     if [ "$2" != "$3" ]; then echo "SELF-TEST FAIL: $1: want '$2' got '$3'"; rc=1; else echo "ok: $1 -> '$3'"; fi
   }
-  run() { # event; prints sorted module list
-    ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME="$1" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
+  run() { # event [requested-service]; prints sorted module list
+    ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME="$1" REQUESTED_SERVICE="${2:-}" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
         bash "$root/.github/scripts/service-ci-select-modules.sh" >"$out/log" 2>&1 ) || { echo "SELF-TEST FAIL: run $1 exited non-zero"; cat "$out/log"; rc=1; }
     tr ' ' '\n' < "$out/changed.txt" | grep -v '^$' | sort -u | tr '\n' ' ' || true
   }
-  expect schedule-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run schedule)"
+  reject_dispatch() {
+    if ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME=workflow_dispatch \
+        REQUESTED_SERVICE="$2" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
+        bash "$root/.github/scripts/service-ci-select-modules.sh" >"$out/log" 2>&1 ); then
+      echo "SELF-TEST FAIL: $1 accepted an invalid bounded selection"
+      rc=1
+    elif [ -e "$out/changed.txt" ]; then
+      echo "SELF-TEST FAIL: $1 emitted a build matrix after rejection"
+      rc=1
+    else
+      echo "ok: $1 rejected without a build matrix"
+    fi
+  }
+  expect schedule-builds-all-and-ignores-manual-selector "openbank-a-service openbank-b-service openbank-c-service " "$(run schedule openbank-b-service)"
+  expect default-dispatch-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run workflow_dispatch)"
+  expect bounded-dispatch-builds-only-requested-module "openbank-b-service " "$(run workflow_dispatch openbank-b-service)"
+  reject_dispatch unknown-module openbank-missing-service
+  reject_dispatch multiple-modules 'openbank-a-service openbank-b-service'
+  reject_dispatch path-traversal '../openbank-a-service'
+  reject_dispatch multiline $'openbank-a-service\nopenbank-b-service'
+  reject_dispatch shell-syntax 'openbank-a-service;true'
   expect pr-scopes-to-changed-module-plus-fleet-scanner "openbank-a-service openbank-c-service " "$(run pull_request)"
   # Negative control: a shared build input must widen to the full fleet, not stay scoped.
   echo x > "$repo/build.gradle.kts"
@@ -456,7 +499,7 @@ self_test() {
   echo changelog > "$repo/openbank-b-service/CHANGELOG.md"
   sg_do add openbank-b-service/CHANGELOG.md && sg_do commit -q -m changelog || return 1
   expect push-changelog-builds-only-derived-reader "openbank-c-service " "$(run push)"
-  echo "SUBJECTS=6  # scenarios exercised"
+  echo "SUBJECTS=13  # scenarios exercised"
   return $rc
 }
 
