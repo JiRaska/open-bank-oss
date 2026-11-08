@@ -170,6 +170,24 @@ The taint switches on when that principal is honoured by customer-edge's
 `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS`. It is already listed, inert until step 2 exists.
 Removing it from that list switches the canary back to real, which is the containment lever.
 
+## Passkeys for the staff realm (`openbank`)
+
+The `openbank` realm turns on Keycloak's native passkey support
+(`webAuthnPolicyPasswordlessPasskeysEnabled`). The browser flow does not change:
+username + password (+ OTP for users who configured it) still works, and the demo account
+keeps signing in with a password only. The login page additionally offers a passkey, both
+as username-field autofill (conditional UI) and as a button.
+
+- **Cross-device / QR.** `AuthenticatorAttachment` is `not specified` on purpose. `platform`
+  would refuse the WebAuthn hybrid transport, which is the flow where the desktop browser shows a QR
+  code and the phone camera completes the sign-in with its own passkey.
+- **RP ID is empty**, so it defaults to the Keycloak host the login page is served from. The same
+  template then works for `*.local` and the deployed host.
+- **Enrolment** is per user, opt-in: account console, then *Signing in*, then *Passkey*, then *Set up*.
+  Nothing forces it, so no existing login breaks.
+- The template is imported on cold start only (see above). On a running realm, apply the same
+  attributes with `kcadm.sh update realms/openbank -s webAuthnPolicyPasswordlessPasskeysEnabled=true ...`.
+
 ## Relocated prose
 
 The five comments removed from `customers-realm-template.json`, by path.
