@@ -1,0 +1,121 @@
+# CI artifact mirror (ADR-0366, rollout step 2).
+#
+# Copies every entry of ci/artifacts.lock into ECR Public as an OCI artifact at
+#   public.ecr.aws/<alias>/ci-artifacts/<name>:<version>[-<platform>]
+# so CI can fetch its tools and charts when GitHub Releases / *.github.io are down.
+# The lock's sha256 is the trust anchor: bytes whose digest differs are never pushed.
+# The job goes RED if any entry cannot be mirrored (missing repository, upstream
+# unreachable, digest mismatch), so a lock entry that never reached the mirror is
+# visible on the day it lands.
+#
+# Expected lock schema (ci/artifacts.lock, YAML; created by the ADR-0366 step-1 PR):
+#   artifacts:
+#     - name: gitleaks          # one ECR repo per name: ci-artifacts/<name> (tofu-managed)
+#       version: 8.24.0
+#       platform: linux-amd64   # or "any"
+#       url: https://...        # https only
+#       sha256: <64 lowercase hex>
+# An absent lock is a notice, not a failure.
+#
+# Repository variables (set by the owner after `tofu apply`; no account ids in this file):
+#   CI_ARTIFACT_MIRROR_ROLE_ARN  tofu output ci_artifact_mirror_role_arn
+#   CI_ARTIFACT_MIRROR_ALIAS     the ECR Public registry alias the image mirrors use
+#
+# Logic lives in .github/scripts/mirror-ci-artifacts.py (--selftest covers the
+# sha-mismatch-is-never-pushed case).
+name: CI artifact mirror
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - ci/artifacts.lock
+      - .github/scripts/mirror-ci-artifacts.py
+      - .github/workflows/ci-artifact-mirror.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-artifact-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    if: github.ref == 'refs/heads/main' && github.repository == 'JiRaska/open-bank-oss'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ORAS_VERSION: "1.3.6"
+      ORAS_SHA256: "66fb0ad7206f3f6fa77ed5b552049d364ccf4b50b1684554f731f76302b52ca0"
+      LOCK: ci/artifacts.lock
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test the planner
+        run: python3 .github/scripts/mirror-ci-artifacts.py --selftest
+
+      - name: Check lock and configuration
+        id: pre
+        env:
+          ROLE_ARN: ${{ vars.CI_ARTIFACT_MIRROR_ROLE_ARN }}
+          ALIAS: ${{ vars.CI_ARTIFACT_MIRROR_ALIAS }}
+        run: |
+          if [ ! -f "$LOCK" ]; then
+            echo "::notice::$LOCK does not exist yet (ADR-0366 step 1 not merged); nothing to mirror."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$ROLE_ARN" ] || [ -z "$ALIAS" ]; then
+            echo "::error::repository variables CI_ARTIFACT_MIRROR_ROLE_ARN and CI_ARTIFACT_MIRROR_ALIAS must be set"
+            exit 1
+          fi
+          echo "registry=public.ecr.aws/$ALIAS" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Install oras (pinned by version and sha256)
+        if: steps.pre.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          # Prefer the mirror copy of oras itself once it is there; upstream otherwise.
+          # Either way the bytes must match ORAS_SHA256.
+          tgz="$RUNNER_TEMP/oras.tgz"
+          url="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL --retry 3 -o "$tgz" "$url"
+          echo "${ORAS_SHA256}  $tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/bin"
+          tar -xzf "$tgz" -C "$RUNNER_TEMP/bin" oras
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Plan (anonymous read of the mirror)
+        if: steps.pre.outputs.skip == 'false'
+        env:
+          MIRROR_REGISTRY: ${{ steps.pre.outputs.registry }}
+        run: python3 .github/scripts/mirror-ci-artifacts.py plan --lock "$LOCK"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: steps.pre.outputs.skip == 'false'
+        with:
+          role-to-assume: ${{ vars.CI_ARTIFACT_MIRROR_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Log in to ECR Public
+        if: steps.pre.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          aws ecr-public get-login-password --region us-east-1 \
+            | oras login --username AWS --password-stdin public.ecr.aws
+
+      - name: Mirror missing or stale entries
+        if: steps.pre.outputs.skip == 'false'
+        env:
+          MIRROR_REGISTRY: ${{ steps.pre.outputs.registry }}
+        run: python3 .github/scripts/mirror-ci-artifacts.py apply --lock "$LOCK"
