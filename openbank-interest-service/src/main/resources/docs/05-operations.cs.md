@@ -180,3 +180,12 @@ Před logováním opakovaných pokusů se u výjimek nejistého dokončení zach
 Porovnává se bit po bitu a bez tolerance: denní časové rozlišení ve scale 6 proti `Post` časového rozlišení z IR a HRUBÁ kapitalizace ve scale měny proti `Post` kapitalizace z IR. Srážková daň (ADR-0033) se neporovnává, protože IR v1 pro ni nemá konstrukci. Tyto případy se nikdy neporovnávají a počítají se jako `rule_unmapped`: časové rozlišení podle individuální sazby operátora místo připnuté sazby, TIERED IR s více než jedním pásmem (původní cesta uplatní jednu sazbu na celý zůstatek) a věrnostní bonus. Účet bez připnutí (sazba spravovaná operátorem) se počítá jako `no_ir` s výsledkem `NO_PIN`.
 
 Ověření podpisu nastavuje `openbank.interest.product-shadow.verification.mode`: `disabled` (výchozí; nic se neporovná a každý vstup s IR se počítá jako `verification_disabled`), `openbao` (Transit `verify` na klíči `product-ir-publish` s rolí služby, která má jen `verify`) nebo `hmac` (pouze dev a test; produkční spuštění s ním odmítne nastartovat). Každý `Post` z IR se před porovnáním kontroluje na zachování peněz. Metriky jsou sdílené řady `openbank_product_shadow_*` s `consumer="interest"`. Alerty jsou sdílené `ProductShadowStalled`, `ProductShadowComparedNothing` a `ProductShadowDiverged`. Služba smí přejít na IR až poté, co je rozdíl nulový po celou měsíční periodu v obou scale (ADR-0352 §9–§10).
+
+## Zdrojové důkazy denní uzávěrky
+
+Akruál a kapitalizace jsou samostatné požadované běhy. Chybějící dokončený běh hlásí REFUSED,
+i když tím odvolá dřívější RAN. Prázdný průchod nepotvrzuje skutečně vykonanou peněžní práci.
+Reporter obnovuje dokončené dny od dřívější z hranice nastaveného zotavení a začátku předchozího
+kalendářního měsíce. Stejný uložený výsledek zachovává zdrojovou identitu i časový mezník ledgeru.
+Nové hlášení zneplatní původní měsíční důkaz; zpětně neopraví neúplnou uzávěrku. Nasazovací hold
+a shadow pozorování zůstávají do vyhodnocení celého živého měsíce a provozní ceny tohoto čtení.
