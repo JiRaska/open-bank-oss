@@ -219,6 +219,10 @@ class RunnerTests(unittest.TestCase):
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case in ('unpinned-plugin', 'garbage-plugin-pin'):
+                        # The pin guard must fire BEFORE any Gradle resolution; otherwise the
+                        # later shard-identity check would raise too and the case is vacuous.
+                        self.assertEqual(calls, [], 'refuse an unpinned plugin before resolving anything')
                     if case in ('wrong-snapshot', 'wrong-detector'):
                         self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
