@@ -21,6 +21,37 @@ describe('operator navigation preferences', () => {
     expect(second.result.current.pins).toEqual([])
     expect(second.result.current.width).toBe(280)
   })
+  it('never writes a customer identifier from a pinned view to browser storage', () => {
+    const hook = renderHook(useNavigationPreferences)
+    act(() => hook.result.current.togglePin({ href: '/accounts?iban=CZ6508000000192000145399&status=ACTIVE&view=saved', pathname: '/accounts', label: 'One customer' }))
+    expect(hook.result.current.pins).toEqual([])
+    expect(localStorage.getItem('ob.navigation.v1.operator-one') ?? '').not.toContain('CZ65')
+    act(() => hook.result.current.togglePin({ href: '/accounts?status=ACTIVE&view=saved', pathname: '/accounts', label: 'Active' }))
+    expect(hook.result.current.pins.map(pin => pin.label)).toEqual(['Active'])
+  })
+  it('checks filter VALUES and the whole query, not just the keys', () => {
+    const hook = renderHook(useNavigationPreferences)
+    for (const href of [
+      '/accounts?status=CZ6508000000192000145399&view=saved',
+      '/accounts?dateFrom=CZ65-0800-0000&view=saved',
+      '/accounts?status=ACTIVE?iban=CZ6508000000192000145399',
+      '/accounts?status=ACTIVE#?iban=CZ6508000000192000145399',
+      '/accounts?view=CZ6508000000192000145399',
+      '/accounts?amountMin=1234567890&view=saved',
+    ]) act(() => hook.result.current.togglePin({ href, pathname: '/accounts', label: href }))
+    expect(hook.result.current.pins).toEqual([])
+    expect(localStorage.getItem('ob.navigation.v1.operator-one') ?? '').not.toContain('CZ65')
+    act(() => hook.result.current.togglePin({ href: '/accounts?tab=eom&dateFrom=2026-11-01&view=saved', pathname: '/accounts', label: 'Ok' }))
+    expect(hook.result.current.pins.map(pin => pin.label)).toEqual(['Ok'])
+  })
+  it('drops identifier-bearing pins saved before the exclusion existed', () => {
+    localStorage.setItem('ob.navigation.v1.operator-one', JSON.stringify({ pins: [
+      { href: '/accounts?accountId=a-9&view=saved', pathname: '/accounts', label: 'Legacy' },
+      { href: '/accounts?status=ACTIVE&view=saved', pathname: '/accounts', label: 'Active' },
+    ] }))
+    const hook = renderHook(useNavigationPreferences)
+    expect(hook.result.current.pins.map(pin => pin.label)).toEqual(['Active'])
+  })
   it('accepts preferences immediately using the server identity while session refresh is pending', () => {
     state.loading = true
     const hook = renderHook(useNavigationPreferences, { wrapper: ({ children }: { children: ReactNode }) =>
