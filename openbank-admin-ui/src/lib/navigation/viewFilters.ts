@@ -10,7 +10,8 @@ export const CAPTURE_VIEW = 'openbank:capture-view'
  * check alone lets `status=<IBAN>` through, because the restore path copies any URL string
  * into page state. Allow-list, not deny-list: a filter added later is dropped from the pin
  * until someone decides it is non-identifying and gives it a shape. Enum shapes admit no
- * digits, which is what keeps an IBAN or account number out of them.
+ * digits, which is what keeps an IBAN or account number out of them. Amounts are left out on
+ * purpose: a bare digit string is indistinguishable from an account number.
  */
 const PERSISTABLE_VIEW_FILTERS: ReadonlyMap<string, RegExp> = new Map([
   ['status', /^[A-Z_]{1,32}$/],
@@ -18,8 +19,6 @@ const PERSISTABLE_VIEW_FILTERS: ReadonlyMap<string, RegExp> = new Map([
   ['tab', /^[a-z][a-z-]{0,31}$/],
   ['dateFrom', /^\d{4}-\d{2}-\d{2}$/],
   ['dateTo', /^\d{4}-\d{2}-\d{2}$/],
-  ['amountMin', /^\d{1,12}(\.\d{1,2})?$/],
-  ['amountMax', /^\d{1,12}(\.\d{1,2})?$/],
 ])
 export function isPersistableViewFilter(key: string, value: string): boolean {
   if (key === 'view') return value === 'saved'
