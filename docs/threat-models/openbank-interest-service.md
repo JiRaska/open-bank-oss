@@ -379,3 +379,21 @@ money-path service, not adjacent.
 - **2026-10-23** — **Interest's day-close report is authorized as `ledger.close.participate` (#13167).** The ledger gave the participation PUT its own action (no longer `ledger.create`); `ledger_rest_ext.rego` grants it to `service-account-openbank-interest` for the participant `interest` only. No change in this service: same client, route and identity. Interest keeps `ledger.create` for its journals. Rollback: revert the ledger change.
 
 - **2026-10-24 — Capitalization receipt binding (#13741).** The existing capitalization row now retains the actual journal UUID returned by its ledger posting. The adapter requires `POSTED` plus exact deterministic transaction identity before accepting it; a mismatched or reversed receipt fails instead of binding unrelated evidence. The original posting key, accounting dates, amount calculation, authenticated caller and posting-before-local-commit order are unchanged. No new endpoint, permission or credential is introduced. A null reference remains unknown, including zero postings and historical rows. This is a posting-response link only: it does not authenticate a caller-supplied origin classification or certify complete history. Existing retention/source-erasure policy still applies; no new retention horizon. Rollback reverts receipt propagation while retaining the existing nullable schema field and original idempotent money path.
+
+- **2026-11-09 — Durable day-close source evidence (#13167, ADR-0342).**
+  `LedgerCloseParticipationClient` transports exercised job names and an opaque stable source-run
+  fingerprint alongside the existing daily counts. It keeps the named `ledger` OIDC client
+  (`openbank-interest`) and the existing `ledger.close.participate` grant for participant `interest`
+  only: no new credential, account-read endpoint or monetary write permission is introduced.
+  **Tampering / repudiation:** the source identity derives from persisted job receipts; unchanged
+  retransmission must not advance ledger work time, and a reused identity with different content is
+  rejected. Missing or refused work remains incomplete. A cron change cannot erase a persisted
+  refusal or the evidence of a completed job; it does not act as an operator waiver.
+  **Data / availability:** the added values contain fixed job names, aggregate work and opaque
+  fingerprints, not account/product identifiers or raw exceptions. The bounded export covers the
+  preceding calendar month as well as a longer configured recovery window; unchanged reports are
+  deduplicated. Measure scan/delivery cost at production volume and retain shadow/deployment holds
+  until a complete representative live month and rollout review. The ledger still independently
+  verifies its tie-out and freezes close evidence; this producer cannot authorize enforcement.
+  Rollback retains job receipts and ledger evidence and reverts the producer transport while the
+  deployment hold and shadow posture remain; never manufacture historical receipts for eligibility.
