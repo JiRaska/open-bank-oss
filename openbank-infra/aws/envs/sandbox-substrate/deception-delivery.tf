@@ -62,16 +62,15 @@ data "aws_iam_policy_document" "deception_drill" {
       values   = ["ssm.${var.region}.amazonaws.com"]
     }
   }
-  # GetMetricStatistics has no resource-level permission; namespace-scoped by condition.
+  # GetMetricStatistics supports neither a resource nor a condition key: cloudwatch:namespace
+  # applies to PutMetricData only, so a request never carries it and a StringEquals on it denies
+  # every call. iam simulate-principal-policy says "allowed" if you hand it that key as context,
+  # so the simulator cannot catch this; only a real call can. The grant is therefore account-wide
+  # read of metric values, on a role assumable only by the drill workflow on main.
   statement {
     sid       = "ReadTripwireMetrics"
     actions   = ["cloudwatch:GetMetricStatistics"]
     resources = ["*"]
-    condition {
-      test     = "StringEquals"
-      variable = "cloudwatch:namespace"
-      values   = ["AWS/Events", "AWS/SNS"]
-    }
   }
 }
 
