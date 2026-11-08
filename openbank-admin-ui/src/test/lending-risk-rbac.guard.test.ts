@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 const root = resolve(__dirname, '..')
 const page = readFileSync(resolve(root, 'app/lending/risk/page.tsx'), 'utf8')
 const roles = readFileSync(resolve(root, 'lib/auth/roles.ts'), 'utf8')
-const sidebar = readFileSync(resolve(root, 'components/layout/Sidebar.tsx'), 'utf8')
+const sidebar = readFileSync(resolve(root, 'lib/navigation/catalog.ts'), 'utf8')
 const resource = readFileSync(
   resolve(root, '../../openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/CreditRiskResource.kt'),
   'utf8',

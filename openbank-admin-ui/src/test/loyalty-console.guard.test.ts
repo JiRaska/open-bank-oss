@@ -161,7 +161,7 @@ describe('the console route and its permission agree', () => {
   })
 
   it('the sidebar entry and the route table name the same path and permission', () => {
-    const sidebar = read('components/layout/Sidebar.tsx')
+    const sidebar = read('lib/navigation/catalog.ts')
     expect(sidebar).toMatch(/href: '\/loyalty',\s+icon: Leaf,\s+permission: 'loyalty:view'/)
     expect(read('lib/auth/roles.ts')).toMatch(/\['loyalty:view', \['\/loyalty'\]\]/)
   })

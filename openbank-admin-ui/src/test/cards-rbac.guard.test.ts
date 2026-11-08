@@ -3,7 +3,7 @@ import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const roles = readFileSync(path.resolve(__dirname, '../lib/auth/roles.ts'), 'utf8')
-const sidebar = readFileSync(path.resolve(__dirname, '../components/layout/Sidebar.tsx'), 'utf8')
+const sidebar = readFileSync(path.resolve(__dirname, '../lib/navigation/catalog.ts'), 'utf8')
 const listPage = readFileSync(path.resolve(__dirname, '../app/cards/page.tsx'), 'utf8')
 const detailPage = readFileSync(path.resolve(__dirname, '../app/cards/[id]/page.tsx'), 'utf8')
 
