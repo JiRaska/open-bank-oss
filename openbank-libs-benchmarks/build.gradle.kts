@@ -44,6 +44,7 @@ allOpen {
 
 dependencies {
     jmh(project(":openbank-libs-domain"))
+    jmh(project(":openbank-libs-lending"))
     jmh(project(":openbank-libs-runtime"))
     jmh(project(":openbank-libs-iso20022"))
     // ADR-0352 ProductInterpreterBench: the interpreter (libs-domain), its arithmetic (libs-finance)
