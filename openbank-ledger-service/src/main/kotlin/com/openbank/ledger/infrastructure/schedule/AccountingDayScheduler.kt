@@ -323,12 +323,14 @@ class AccountingDayScheduler(
         }
         if (stale) return true
         if (run == null) return false
-        if (run.startedAt == null || run.journalCount == null) return true
+        if (run.startedAt == null || run.journalCount == null || run.journalFingerprint == null) return true
         if (closeParticipantsConfig.participantsMode() != CloseParticipantsConfig.MODE_OFF) {
             val workAt = closeParticipation.completeness(date).lastWorkReportAt
             if (workAt?.isAfter(run.startedAt) == true) return true
         }
-        return journalWatermark?.countThrough(date)?.let { it != run.journalCount } == true
+        return journalWatermark?.populationThrough(date)?.let {
+            it.count != run.journalCount || it.fingerprint != run.journalFingerprint
+        } == true
     }
 
     /** Bounded per tick by [maxCatchUpDays]; the day transitions on the next tick that sees the verdict. */

@@ -193,7 +193,7 @@ class TieOutScheduler(
     suspend fun runTieOutFor(asOf: LocalDate) {
         log.infof("Sub-ledger tie-out check for %s", asOf)
         val startedAt = Instant.now(clock)
-        val before = journalWatermark?.countThrough(asOf)
+        val before = journalWatermark?.populationThrough(asOf)
         // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
         // the accumulation is the same, but it reads as one expression and CodeQL can actually
         // follow it (mutable captures across a lambda boundary read to it as never-written).
@@ -204,7 +204,7 @@ class TieOutScheduler(
         if (breaks == 0 && errors == 0) {
             log.infof("Sub-ledger tie-out OK for %s", asOf)
         }
-        val after = journalWatermark?.countThrough(asOf)
+        val after = journalWatermark?.populationThrough(asOf)
         recordRun(asOf, checked, breaks, errors, startedAt, before?.takeIf { it == after })
     }
 
@@ -259,7 +259,7 @@ class TieOutScheduler(
         breaks: Int,
         errors: Int,
         startedAt: Instant,
-        journalCount: Long?,
+        population: com.openbank.ledger.infrastructure.persistence.repository.JournalPopulation?,
     ) {
         // BREAK outranks ERROR: a confirmed integrity incident beats an incomplete check.
         val status = when {
@@ -280,7 +280,8 @@ class TieOutScheduler(
                     breaks = breaks,
                     errors = errors,
                     startedAt = startedAt,
-                    journalCount = journalCount,
+                    journalCount = population?.count,
+                    journalFingerprint = population?.fingerprint,
                 ),
             )
         } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {

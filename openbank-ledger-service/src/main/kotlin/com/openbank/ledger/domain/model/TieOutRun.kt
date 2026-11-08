@@ -29,4 +29,6 @@ data class TieOutRunRecord(
     /** Legacy nulls do not establish qualification evidence for the reconciliation read boundary. */
     val startedAt: Instant? = null,
     val journalCount: Long? = null,
+    /** Old runs have an unknown source set and cannot establish qualification evidence. */
+    val journalFingerprint: String? = null,
 )

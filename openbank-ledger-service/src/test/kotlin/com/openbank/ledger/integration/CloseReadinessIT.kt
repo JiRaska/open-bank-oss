@@ -118,6 +118,33 @@ class CloseReadinessIT {
     }
 
     @Test
+    fun `archive removal plus a replacement posting cannot hide behind the same journal count`() {
+        postJournal(LocalDate.of(1971, 1, 1))
+        closeMonth(omitFirstBilling = false)
+        val date = month.atDay(1)
+        val original = storedEvidence(date)
+        val before = onEventLoopPopulation(date)
+        given().get(READINESS).then().body("eligibleForEnforcement", equalTo(true))
+        sql("ALTER TABLE journal_entries DETACH PARTITION journal_entries_default")
+        try {
+            postJournal(date)
+            val after = onEventLoopPopulation(date)
+            assertThat(after.count).isEqualTo(before.count)
+            assertThat(after.fingerprint).isNotEqualTo(before.fingerprint)
+            given().get(READINESS).then().statusCode(200)
+                .body("eligibleForEnforcement", equalTo(false))
+                .body("days[0].blockers", hasItem("JOURNALS_CHANGED_AFTER_CLOSE"))
+            assertThat(storedEvidence(date)).isEqualTo(original)
+        } finally {
+            sql("ALTER TABLE journal_entries ATTACH PARTITION journal_entries_default DEFAULT")
+        }
+    }
+
+    private fun onEventLoopPopulation(date: LocalDate) = VertxContextSupport.subscribeAndAwait {
+        uni(CoroutineScope(Dispatchers.Unconfined)) { journalWatermark.populationThrough(date) }
+    }
+
+    @Test
     fun `posting into the next month preserves the preceding closed month proof`() {
         closeMonth(omitFirstBilling = false)
         val original = storedEvidence(month.atEndOfMonth())
@@ -222,6 +249,7 @@ class CloseReadinessIT {
                     TieOutRunRecord(
                         UUID.randomUUID(), date, at, TieOutRunStatus.OK, 4, 0, 0,
                         startedAt = at, journalCount = journalWatermark.countThrough(date),
+                        journalFingerprint = journalWatermark.populationThrough(date).fingerprint,
                     ),
                 )
             }

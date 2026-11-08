@@ -48,6 +48,7 @@ class PanacheTieOutRunRepository :
         it.errors = errors
         it.startedAt = startedAt
         it.journalCount = journalCount
+        it.journalFingerprint = journalFingerprint
     }
 
     private fun TieOutRunEntity.toDomain() = TieOutRunRecord(
@@ -60,5 +61,6 @@ class PanacheTieOutRunRepository :
         errors = errors,
         startedAt = startedAt,
         journalCount = journalCount,
+        journalFingerprint = journalFingerprint,
     )
 }

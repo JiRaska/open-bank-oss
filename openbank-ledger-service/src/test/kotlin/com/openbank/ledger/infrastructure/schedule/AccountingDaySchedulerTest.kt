@@ -116,6 +116,7 @@ class AccountingDaySchedulerTest {
         errors = if (status == TieOutRunStatus.ERROR) 1 else 0,
         startedAt = runAt,
         journalCount = 0,
+        journalFingerprint = "a".repeat(64),
     )
 
     private fun noDaysInAnyStatus() {
@@ -242,12 +243,13 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
-    fun `a new journal requires fresh proof even when the product report has not changed`(): Unit = runBlocking {
+    fun `a changed journal set with the same count requires fresh proof`(): Unit = runBlocking {
         participantsMode = CloseParticipantsConfig.MODE_ENFORCE
         val yesterday = yesterdayEligibleForTieOut()
         val watermark = mockk<JournalReadWatermark>()
         scheduler.journalWatermark = watermark
-        coEvery { watermark.countThrough(yesterday) } returns 1L
+        coEvery { watermark.populationThrough(yesterday) } returns
+            com.openbank.ledger.infrastructure.persistence.repository.JournalPopulation(0, "b".repeat(64))
         coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
             yesterday,
             setOf("interest"),
@@ -265,7 +267,8 @@ class AccountingDaySchedulerTest {
 
         coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
         coVerify(exactly = 0) { useCase.transition(any()) }
-        coEvery { tieOutRuns.findLatestFor(yesterday) } returns proof.copy(journalCount = 1L)
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns
+            proof.copy(journalCount = 0L, journalFingerprint = "b".repeat(64))
 
         scheduler.reconcile()
 
