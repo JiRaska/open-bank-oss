@@ -62,8 +62,8 @@ class ConsumerPactSourceTest(unittest.TestCase):
         contract = workflow['jobs']['contract']
         stage = next(step for step in contract['steps'] if step.get('name') == 'Stage handed-off consumer pacts into pacts/')
         self.assertEqual(stage['env']['SERVICE'], '${{ inputs.service }}')
-        self.assertEqual(contract['env']['EXPECTED_CONSUMER_SOURCE'], '${{ needs.build.outputs.consumer_source }}')
-        self.assertEqual(workflow['jobs']['build']['outputs']['consumer_source'], '${{ steps.consumer_pacts.outputs.source }}')
+        self.assertEqual(contract['env']['EXPECTED_CONSUMER_SOURCE'], '${{ inputs.ref || github.sha }}')
+        self.assertNotIn('outputs', workflow['jobs']['build'])
 
     def test_historical_source_is_not_caller_version(self):
         self.assertEqual(self.publish()['pacticipantVersionNumber'], self.source)
@@ -83,7 +83,7 @@ class ConsumerPactSourceTest(unittest.TestCase):
 
     def test_missing_or_malformed_source_fails(self):
         for value in ['', 'not-a-sha', 'a' * 40]:
-            self.manifest(lambda d: d.update(source=value))
+            self.manifest(lambda d, value=value: d.update(source=value))
             self.run_helper('stage-handed-off-pacts.sh', ok=False)
 
     def test_source_off_main_fails_even_if_expected(self):

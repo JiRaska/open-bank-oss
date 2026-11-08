@@ -23,11 +23,10 @@ if mode=='collect':
     for name in collected: shutil.copyfile(pathlib.Path('pacts')/name,handoff/name)
     manifest.write_text(json.dumps(dict(schema=1,service=service,source=source,files=collected),sort_keys=True)+'\n')
     (handoff/'manifest.txt').write_text('pact-count='+str(len(collected))+'\n')
-    with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('source='+source+'\n')
 elif mode=='validate':
     d=json.loads(manifest.read_text())
     source=d.get('source','')
-    expected=os.environ.get('EXPECTED_CONSUMER_SOURCE','')
+    expected=subprocess.check_output(['git','rev-parse','--verify','--end-of-options',os.environ.get('EXPECTED_CONSUMER_SOURCE','')+'^{commit}'],text=True).strip()
     if d.get('schema')!=1 or d.get('service')!=service: raise SystemExit('invalid handoff identity')
     if not re.fullmatch(r'[0-9a-f]{40}',source) or source!=expected: raise SystemExit('handoff source does not match build source')
     subprocess.run(['git','merge-base','--is-ancestor',source,'origin/main'],check=True)

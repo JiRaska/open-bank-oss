@@ -109,8 +109,6 @@ jobs:
   # the git-pact (@PactFolder) classes run unconditionally, same as before.
   build:
     name: ${{ inputs.service }} (build)
-    outputs:
-      consumer_source: ${{ steps.consumer_pacts.outputs.source }}
     # The main-only context pilot produces the exact native platform used by deployment.
     # Otherwise a service listed in the repo variable MINI_RUNNER_SERVICES (a JSON array)
     # builds on the owner's Mac mini pool `openbank-mini` (ephemeral Linux arm64 runners,
@@ -359,7 +357,6 @@ jobs:
       # never reached this step — never "this service has no consumer pacts", which is instead
       # expressed by an empty `pact-count` in the manifest (see the download step).
       - name: Collect consumer pacts for hand-off to the contract job
-        id: consumer_pacts
         env:
           SERVICE: ${{ inputs.service }}
         run: bash -e "$SERVICE_CI_HELPERS/consumer-pact-handoff.sh" collect
@@ -502,7 +499,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      EXPECTED_CONSUMER_SOURCE: ${{ needs.build.outputs.consumer_source }}
+      EXPECTED_CONSUMER_SOURCE: ${{ inputs.ref || github.sha }}
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
       # in-cluster ARC runner reaches it over cluster DNS.
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
