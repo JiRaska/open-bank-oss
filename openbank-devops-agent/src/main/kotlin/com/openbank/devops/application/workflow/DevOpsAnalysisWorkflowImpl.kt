@@ -13,6 +13,8 @@ import com.openbank.devops.domain.model.FindingStatus
 import com.openbank.devops.domain.model.RunTrigger
 import io.temporal.activity.ActivityOptions
 import io.temporal.common.RetryOptions
+import io.temporal.failure.ActivityFailure
+import io.temporal.failure.CanceledFailure
 import io.temporal.workflow.Workflow
 import java.time.Duration
 import java.time.Instant
@@ -39,6 +41,15 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
     private val detect = Workflow.newActivityStub(DetectFindingsActivity::class.java, collectOptions)
     private val diagnosePropose = Workflow.newActivityStub(DiagnoseAndProposeActivity::class.java, diagnoseOptions)
 
+    private val ciGateProfile = Workflow.newActivityStub(
+        CiGateProfileActivity::class.java,
+        ActivityOptions.newBuilder()
+            .setStartToCloseTimeout(Duration.ofSeconds(45))
+            .setScheduleToCloseTimeout(Duration.ofMinutes(1))
+            .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(1).build())
+            .build(),
+    )
+
     override fun runAnalysis(trigger: RunTrigger): DevOpsRunReport {
         val runId = Workflow.randomUUID().toString()
         val startedAt = Instant.ofEpochMilli(Workflow.currentTimeMillis())
@@ -51,6 +62,19 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
         allFindings += detect.detect(DetectorId.D4_DEPLOY_HEALTH, collect.collectDeployHealthSignals())
         allFindings += detect.detect(DetectorId.D5_SSDLC_HYGIENE, collect.collectSsdlcSignals())
         allFindings += detect.detect(DetectorId.D6_INCIDENT_RECURRENCE, collect.collectIncidentRecurrenceSignals())
+
+        // Existing histories retain their original activity sequence.
+        val profile = if (Workflow.getVersion("devops-ci-gate-profile", Workflow.DEFAULT_VERSION, 1) == 1) {
+            try {
+                ciGateProfile.collectGateProfile()
+            } catch (failure: ActivityFailure) {
+                if (failure.cause is CanceledFailure) throw failure
+                // Optional read-only collection must not erase the existing detector report.
+                null
+            }
+        } else {
+            null
+        }
 
         // Diagnose (LLM) and, when warranted, draft a durable remediation for the HITL queue.
         val diagnosed = allFindings.map { finding ->
@@ -75,6 +99,7 @@ class DevOpsAnalysisWorkflowImpl : DevOpsAnalysisWorkflow {
             doraMetricsAtRisk = diagnosed.mapNotNull { it.doraMetricImpacted }.distinct().size,
             tokensUsed = 0,
             trigger = trigger,
+            ciGateProfile = profile,
         )
     }
 }

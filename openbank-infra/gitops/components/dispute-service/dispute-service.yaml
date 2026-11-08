@@ -24,7 +24,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-dispute-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6da718e0de9bc685"
+        openbank.tech/policy-checksum: "8f4ddca05caad768"
       labels: {app.kubernetes.io/name: dispute-service, app.kubernetes.io/part-of: dispute}
     spec:
       securityContext:
@@ -35,7 +35,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: dispute-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-b6494671@sha256:d85e87a8cffc454011c5fd056215dc74151a5c6db103f63b27dbb1f27637233b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-dispute-service:sandbox-3f6acead@sha256:c5511c3943ed0ca1c1bd95760db58bec497a1cefa497dc97249f46e1a792ac8d
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8135}

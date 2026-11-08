@@ -37,6 +37,18 @@ dependencies {
     testImplementation(libs.wiremock.standalone)
 }
 
+// Test-JVM heap. The Kover agent serialises its coverage data (~20 MB of .ic for this module)
+// in a JVM shutdown hook, AFTER the last test. On the Gradle default 512m heap that save ran out
+// of memory in about 3 of 7 CI runs: the agent catches the OutOfMemoryError, logs it to
+// coverage-error.log, leaves test.ic truncated, and the JVM still exits 0. Gradle then reports
+// BUILD SUCCESSFUL and coverage-evidence.sh correctly rejects the file (EOFException). Reproduced
+// locally by lowering the heap, which yields "Out of memory error occurred" and a truncated test.ic.
+// This module boots Quarkus three times (default + two @TestProfile) next to Testcontainers and
+// Pact, so the retained heap at shutdown is high. Same per-module 2g as ~20 sibling services.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 // Coverage is ratchet-only (never lower). Without this block koverVerify has no rule to check,
 // so the module's coverage was measured by nobody — and the production-readiness collector
 // scores C2 off the presence of a ratchet, not off a number, which is the honest signal: a

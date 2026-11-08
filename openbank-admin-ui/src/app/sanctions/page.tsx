@@ -98,7 +98,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
         <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>:</span>
         <select id={`sanctions-cron-${list.id}-minute`} aria-label={t('Minuta spouštění', 'Run minute')} value={minute} onChange={e => setMinute(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
-          {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
+          {Array.from({length:60},(_,i)=>i).map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
         </select>
       </div>
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
