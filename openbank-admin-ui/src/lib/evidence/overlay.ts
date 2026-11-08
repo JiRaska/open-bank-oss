@@ -75,6 +75,7 @@ export async function overlayRunningEvidence(
     if (result.status === 'hit') {
       return {
         ...result.posture,
+        domain: posture.domain,
         evidence: [...result.posture.evidence, ...crossSourceEvidence(posture)],
         running: withRunningAge({
           ...base, source: 'running-commit', snapshotCommit: runningCommit, match: true, storeStatus: 'hit',

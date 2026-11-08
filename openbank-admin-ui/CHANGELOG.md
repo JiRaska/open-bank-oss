@@ -1,5 +1,39 @@
 # Changelog
 
+## [4.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.6.0...admin-ui-v4.7.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** make test evidence understandable and explorable ([#15236](https://github.com/JiRaska/open-bank-oss/issues/15236)) ([92a8d4a](https://github.com/JiRaska/open-bank-oss/commit/92a8d4aeea99f4dc084023bfeb25921a2932fc19))
+
+## [4.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.5.1...admin-ui-v4.6.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** add visual Lion Quest course authoring for marketing ([#15227](https://github.com/JiRaska/open-bank-oss/issues/15227)) ([1274803](https://github.com/JiRaska/open-bank-oss/commit/127480353627a49e08d9108cdbc5259305ed32a5))
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve every persisted sanctions schedule minute ([#15237](https://github.com/JiRaska/open-bank-oss/issues/15237)) ([e004f82](https://github.com/JiRaska/open-bank-oss/commit/e004f82afc982fe7452359d4bb232790a3d79d07)), closes [#13062](https://github.com/JiRaska/open-bank-oss/issues/13062)
+* **admin-ui:** show Keycloak and Valkey versions instead of unknown ([#15256](https://github.com/JiRaska/open-bank-oss/issues/15256)) ([0907dc7](https://github.com/JiRaska/open-bank-oss/commit/0907dc74aab39526d5ce22c9daf5bac899371a15)), closes [#15128](https://github.com/JiRaska/open-bank-oss/issues/15128)
+
+## [4.5.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.5.0...admin-ui-v4.5.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** keep palette keys working off-input and keep customer identifiers out of pinned views ([#15206](https://github.com/JiRaska/open-bank-oss/issues/15206)) ([391b3fc](https://github.com/JiRaska/open-bank-oss/commit/391b3fc38d0084335b75c51efdd6e35618f767e4))
+
+## [4.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.3...admin-ui-v4.5.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** unify workspace navigation, saved views and assistant search ([#15114](https://github.com/JiRaska/open-bank-oss/issues/15114)) ([7e6e555](https://github.com/JiRaska/open-bank-oss/commit/7e6e555324882d5cf44287f7a22da0e3bc42ae1b))
+
 ## [4.4.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.2...admin-ui-v4.4.3) (2026-11-07)
 
 

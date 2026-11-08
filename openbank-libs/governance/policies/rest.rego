@@ -260,6 +260,15 @@ operator_read_any_excluded(action) if {
 	action in object.get(data.rules, ["authz", "operator_read_any_excluded_actions"], [])
 }
 
+# Marketing may prepare drafts, but publication is independently checked by the game store revision.
+allowed_reasons contains "marketing-game-catalog-draft" if {
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_ADMIN", "ROLE_MARKETING"}
+    role in input.principal.roles
+    not principal_is_machine
+    input.action in {"engagement.gameCatalog.read", "engagement.gameCatalog.writeDraft"}
+}
+
 # Chapter configuration is an administrator edit, never a machine or customer operation.
 allowed_reasons contains "operator-game-catalog-write" if {
     input.principal.type == "HUMAN"

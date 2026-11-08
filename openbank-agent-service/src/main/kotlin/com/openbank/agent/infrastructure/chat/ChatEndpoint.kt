@@ -49,6 +49,8 @@ class ChatEndpoint {
         val messages: List<ChatTurn?> = emptyList(),
         val model: String? = null,
         val context: String? = null,
+        /** May only narrow the charter: false forbids all tool execution for this turn. */
+        val allowTools: Boolean = true,
     ) {
         /**
          * `IllegalArgumentException` is mapped to 400 by libs-runtime's `CommonExceptionMappers`;
@@ -66,6 +68,8 @@ class ChatEndpoint {
         val toolCalls: List<AgentChatService.ToolCallRecord>,
         /** D4: true when the reply contains a recommended action requiring human confirmation. */
         val isProposal: Boolean = false,
+        /** Server acknowledgement of invocation-specific tool restriction. */
+        val toolsRestricted: Boolean = false,
     )
 
     @GET
@@ -73,6 +77,7 @@ class ChatEndpoint {
     fun models(): Map<String, Any> = mapOf(
         "default" to gateway.defaultModelId(),
         "models" to gateway.availableModels().map { ModelInfo(it.id, it.provider, it.sensitivity.name) },
+        "capabilities" to mapOf("toolFreeChat" to true),
     )
 
     // Plain (non-suspend) resource method: RESTEasy Reactive dispatches it on a worker thread, so the
@@ -85,12 +90,18 @@ class ChatEndpoint {
     @Path("/chat")
     fun chat(request: ChatRequest): ChatResponse = runBlocking {
         val history = request.requireMessages().map { ChatMessage(role = parseRole(it.role), content = it.content) }
-        val outcome = chatService.chat(history = history, modelId = request.model, pageContext = request.context)
+        val outcome = chatService.chat(
+            history = history,
+            modelId = request.model,
+            pageContext = request.context,
+            allowTools = request.allowTools,
+        )
         ChatResponse(
             reply = outcome.reply,
             model = outcome.model,
             toolCalls = outcome.toolCalls,
             isProposal = outcome.isProposal,
+            toolsRestricted = !request.allowTools,
         )
     }
 

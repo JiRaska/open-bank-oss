@@ -4,15 +4,14 @@
 # under GitHub's expanded-workflow size cap. pipefail keeps the inline-step semantics.
 set -o pipefail
 set -euo pipefail
-if [ ! -f pact-handoff/manifest.txt ]; then
-  echo "::error::pact hand-off artifact from the build job has no manifest.txt — treating this as a failed hand-off, not an empty consumer-pact set (the build job always writes one)."
-  exit 1
-fi
-cat pact-handoff/manifest.txt
+git fetch --quiet origin main
+bash "${SERVICE_CI_HELPERS}/consumer-pact-handoff.sh" validate pact-handoff
 mkdir -p pacts
+# Remove only this validated consumer's old files before installing the exact handoff set.
+rm -f pacts/"${SERVICE}"-*.json
 shopt -s nullglob
-files=(pact-handoff/*.json)
-# bash 3.2 (macOS runners) treats an EMPTY array as unbound under `set -u`; the
-# ${files[@]+...} form expands to nothing instead of aborting (consumer-less services).
-for f in ${files[@]+"${files[@]}"}; do cp "$f" pacts/; done
-echo "Staged ${#files[@]} consumer pact file(s) from the build job's hand-off."
+files=(pact-handoff/"${SERVICE}"-*.json)
+for f in ${files[@]+"${files[@]}"}; do
+  cp "$f" pacts/
+done
+bash "${SERVICE_CI_HELPERS}/consumer-pact-handoff.sh" validate pacts

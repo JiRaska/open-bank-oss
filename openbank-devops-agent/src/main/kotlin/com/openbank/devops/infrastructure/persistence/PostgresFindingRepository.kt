@@ -28,6 +28,36 @@ class PostgresFindingRepository(private val sf: Mutiny.SessionFactory) : Finding
             .replaceWith(finding)
             .coAwait()
 
+    override suspend fun saveAdvisoryIfAbsent(finding: DevOpsFinding): DevOpsFinding {
+        require(finding.status == FindingStatus.DIAGNOSED && finding.proposalPrUrl == null)
+        val id = UUID.fromString(finding.id)
+        return sf.withTransaction { session ->
+            session.createNativeQuery<Unit>(
+                """
+                INSERT INTO findings (id, detector, severity, detected_at, title, raw_metric_value,
+                    threshold, affected_resource, root_cause, remediation_kind, proposed_remediation,
+                    status, diagnosed_at)
+                VALUES (:id, :detector, :severity, :at, :title, :cpu, :threshold, :resource,
+                    :evidence, :kind, :plan, :status, :diagnosed)
+                ON CONFLICT (id) DO NOTHING
+                """.trimIndent(),
+            ).setParameter("id", id)
+                .setParameter("detector", finding.detector.name)
+                .setParameter("severity", finding.severity.name)
+                .setParameter("at", finding.detectedAt)
+                .setParameter("title", finding.title)
+                .setParameter("cpu", finding.rawMetricValue)
+                .setParameter("threshold", finding.threshold)
+                .setParameter("resource", finding.affectedResource)
+                .setParameter("evidence", finding.rootCause)
+                .setParameter("kind", finding.remediationKind.name)
+                .setParameter("plan", finding.proposedRemediation)
+                .setParameter("status", finding.status.name)
+                .setParameter("diagnosed", finding.diagnosedAt)
+                .executeUpdate().flatMap { session.find(FindingEntity::class.java, id) }
+        }.map { it.toDomain() }.coAwait()
+    }
+
     override suspend fun update(finding: DevOpsFinding): DevOpsFinding = sf.withTransaction { s ->
         s.find(FindingEntity::class.java, UUID.fromString(finding.id)).flatMap { existing ->
             if (existing != null) {

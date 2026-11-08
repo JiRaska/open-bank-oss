@@ -71,8 +71,11 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "506daeb487b943fc"
+        openbank.tech/policy-checksum: "ed268eb81147cf85"
     spec:
+      # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
+      # workload, not to every pod running as `default` in the namespace.
+      serviceAccountName: product-catalog
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -143,13 +146,19 @@ spec:
               value: "false"
             # ADR-0352 §4: the publish-path signature over an IR-bearing revision's canonical hash.
             # The OpenBao address is declared here so gen-network-policies.py derives the
-            # accounts -> vault:8200 egress. The MODE stays at the application default `disabled`
-            # (publish-ir answers 409, nothing is signed) until the Transit key `product-ir-publish`
-            # and this service's kubernetes-auth role are provisioned; then set
-            # CATALOG_IR_SIGNING_MODE=openbao here. `hmac` refuses to boot in this launch mode.
+            # accounts -> vault:8203 egress. MODE=openbao signs with Transit key `product-ir-publish`
+            # through this service's kubernetes-auth role (runbook 0027); the application default
+            # `disabled` makes publish-ir answer 409. `hmac` refuses to boot in this launch mode.
             # Consumers (phase 3) get verify-only roles.
+            # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
+            # ESO and the in-namespace jobs. The CA is the one in this pod's own internal-tls
+            # Secret — same ClusterIssuer — and the client trusts ONLY it for this leg.
+            - name: CATALOG_IR_SIGNING_MODE
+              value: openbao
             - name: CATALOG_IR_SIGNING_OPENBAO_ADDRESS
-              value: https://openbao.vault.svc:8200
+              value: https://openbao.vault.svc:8203
+            - name: OPENBANK_CATALOG_IR_SIGNING_OPENBAO_CA_FILE
+              value: /mnt/internal-tls/ca.crt
           startupProbe:
             httpGet:
               path: /q/health/ready
@@ -279,6 +288,14 @@ spec:
         - name: opa-bundle
           configMap:
             name: product-catalog-opa-bundle
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: product-catalog
+  namespace: accounts
+  labels:
+    app.kubernetes.io/name: product-catalog
 ---
 apiVersion: v1
 kind: Service

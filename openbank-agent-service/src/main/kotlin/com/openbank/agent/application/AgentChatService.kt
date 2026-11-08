@@ -95,8 +95,19 @@ class AgentChatService {
         val detail: String? = null,
     )
 
-    suspend fun chat(history: List<ChatMessage>, modelId: String?, pageContext: String?): ChatOutcome =
-        run(ASSISTANT_IDENTITY, systemPrompt(pageContext), history, modelId, trigger = "chat")
+    suspend fun chat(
+        history: List<ChatMessage>,
+        modelId: String?,
+        pageContext: String?,
+        allowTools: Boolean = true,
+    ): ChatOutcome = run(
+        ASSISTANT_IDENTITY,
+        systemPrompt(pageContext),
+        history,
+        modelId,
+        trigger = "chat",
+        offeredToolNames = if (allowTools) null else emptySet(),
+    )
 
     /** Run one governed loop turn under [identity]'s charter. See the class doc for callers. */
     suspend fun run(
