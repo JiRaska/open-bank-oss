@@ -424,7 +424,7 @@ class Fixture:
         self.call(admin, f"/api/v2/funds/{fund}/navs", "POST", {
             "valuationDate": today, "positions": [], "cash": 36600, "otherLiabilities": 0}, status=201)
         for label, base, database in books:
-            self.until(lambda base=base: self.call(base, day_path + "/participants")["participants"][0]["outcome"] == "REFUSED",
+            self.until(lambda base=base: self.call(base, day_path + "/participants")["participants"][0]["status"] == "REFUSED",
                        label + " source revokes completion after close")
             refusal = self.call(base, day_path + "/participants")["participants"][0]
             self.check(label + " pending correction revokes completion without claiming journals", refusal["journalsPosted"] == 0)
