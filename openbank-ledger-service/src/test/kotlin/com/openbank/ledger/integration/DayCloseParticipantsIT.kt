@@ -75,6 +75,9 @@ class DayCloseParticipantsIT {
     }
 
     @Inject
+    lateinit var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
+
+    @Inject
     lateinit var tieOutRuns: TieOutRunRepository
 
     @Inject
@@ -97,7 +100,13 @@ class DayCloseParticipantsIT {
 
     private fun recordFreshTieOut(date: LocalDate) {
         onEventLoop {
-            tieOutRuns.save(TieOutRunRecord(UUID.randomUUID(), date, Instant.now(), TieOutRunStatus.OK, 4, 0, 0))
+            val at = Instant.now()
+            tieOutRuns.save(
+                TieOutRunRecord(
+                    UUID.randomUUID(), date, at, TieOutRunStatus.OK, 4, 0, 0,
+                    startedAt = at, journalCount = journalWatermark.countThrough(date),
+                ),
+            )
         }
     }
 
@@ -132,6 +141,8 @@ class DayCloseParticipantsIT {
                     accountsChecked = 4,
                     breaks = 0,
                     errors = 0,
+                    startedAt = cutoffAt.plus(Duration.ofMinutes(30)),
+                    journalCount = journalWatermark.countThrough(date),
                 ),
             )
             val opened = AccountingDayRecord.open(date, cutoffAt.minus(Duration.ofDays(1)), SEED_ACTOR)

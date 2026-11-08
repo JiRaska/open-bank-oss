@@ -129,6 +129,8 @@ class AccountingDayCutoffRecheckIT {
                 accountsChecked = 4,
                 breaks = if (status == TieOutRunStatus.BREAK) 1 else 0,
                 errors = 0,
+                startedAt = runAt,
+                journalCount = 0,
             ),
         )
     }

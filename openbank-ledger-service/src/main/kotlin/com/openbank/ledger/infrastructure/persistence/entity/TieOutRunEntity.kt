@@ -39,4 +39,11 @@ class TieOutRunEntity : PanacheEntityBase {
 
     @Column(name = "errors", nullable = false)
     var errors: Int = 0
+
+    /** Legacy nulls are not qualification evidence. */
+    @Column(name = "started_at")
+    var startedAt: Instant? = null
+
+    @Column(name = "journal_count")
+    var journalCount: Long? = null
 }

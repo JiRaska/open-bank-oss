@@ -12,6 +12,7 @@ import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.testing.lock.NoOpClusterLock
@@ -19,6 +20,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -94,6 +96,57 @@ class TieOutSchedulerTest {
         delta = delta,
         lines = emptyList(),
     )
+
+    @Test
+    fun `unchanged journals preserve the reconciliation read start and count as proof`() {
+        val day = LocalDate.of(2026, 7, 15)
+        val account = control("2100")
+        val watermark = mockk<JournalReadWatermark>()
+        scheduler.journalWatermark = watermark
+        coEvery { watermark.countThrough(day) } returns 7L
+        coEvery { glAccounts.findByCode(any()) } returns null
+        coEvery { glAccounts.findByCode("2100") } returns account
+        coEvery { ledger.getControlAccountTieOut(any()) } returns listOf(tieOut(account.id, BigDecimal.ZERO))
+        val saved = slot<TieOutRunRecord>()
+        coEvery { runs.save(capture(saved)) } answers { saved.captured }
+
+        runBlocking { scheduler.runTieOutFor(day) }
+
+        assertThat(saved.captured.startedAt).isEqualTo(clock.instant())
+        assertThat(saved.captured.journalCount).isEqualTo(7L)
+        assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.OK)
+        coVerifyOrder {
+            watermark.countThrough(day)
+            ledger.getControlAccountTieOut(any())
+            watermark.countThrough(day)
+            runs.save(any())
+        }
+    }
+
+    @Test
+    fun `a journal committed during account reads invalidates count proof even when totals tie out`() {
+        val day = LocalDate.of(2026, 7, 15)
+        val account = control("2100")
+        val watermark = mockk<JournalReadWatermark>()
+        scheduler.journalWatermark = watermark
+        var committed = 7L
+        coEvery { watermark.countThrough(day) } answers { committed }
+        coEvery { glAccounts.findByCode(any()) } returns null
+        coEvery { glAccounts.findByCode("2100") } returns account
+        coEvery { ledger.getControlAccountTieOut(any()) } answers {
+            committed++
+            listOf(tieOut(account.id, BigDecimal.ZERO))
+        }
+        val saved = slot<TieOutRunRecord>()
+        coEvery { runs.save(capture(saved)) } answers { saved.captured }
+
+        runBlocking { scheduler.runTieOutFor(day) }
+
+        assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.OK)
+        assertThat(saved.captured.startedAt).isEqualTo(clock.instant())
+        assertThat(saved.captured.journalCount).isNull()
+        coVerify(exactly = 2) { watermark.countThrough(day) }
+    }
 
     @Test
     fun `persists OK run when every control ties out`() {

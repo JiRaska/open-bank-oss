@@ -55,6 +55,7 @@ class CloseReadinessIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "false",
             "openbank.ledger.close.participants-mode" to "shadow",
+            "openbank.ledger.day-lock.mode" to "shadow",
             "authz.enforce" to "false",
         )
     }
@@ -73,6 +74,9 @@ class CloseReadinessIT {
 
     @Inject
     lateinit var tieOutRuns: TieOutRunRepository
+
+    @Inject
+    lateinit var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
 
     private val month: YearMonth get() = YearMonth.from(accountingClock.today()).minusMonths(1)
 
@@ -96,6 +100,50 @@ class CloseReadinessIT {
         // One natural-key snapshot per day; a repeated transition is refused, not overwritten.
         transition(month.atEndOfMonth(), "TIED_OUT", 409)
         given().get(READINESS).then().body("eligibleForEnforcement", equalTo(true))
+    }
+
+    @Test
+    fun `a later shadow posting invalidates readiness without rewriting the original close evidence`() {
+        closeMonth(omitFirstBilling = false)
+        val day = month.atDay(1)
+        val original = storedEvidence(day)
+        given().get(READINESS).then().statusCode(200).body("eligibleForEnforcement", equalTo(true))
+
+        postJournal(day)
+
+        given().get(READINESS).then().statusCode(200)
+            .body("eligibleForEnforcement", equalTo(false))
+            .body("days[0].blockers", hasItem("JOURNALS_CHANGED_AFTER_CLOSE"))
+        assertThat(storedEvidence(day)).isEqualTo(original)
+    }
+
+    @Test
+    fun `posting into the next month preserves the preceding closed month proof`() {
+        closeMonth(omitFirstBilling = false)
+        val original = storedEvidence(month.atEndOfMonth())
+
+        postJournal(month.plusMonths(1).atDay(1))
+
+        given().get(READINESS).then().statusCode(200).body("eligibleForEnforcement", equalTo(true))
+        assertThat(storedEvidence(month.atEndOfMonth())).isEqualTo(original)
+    }
+
+    @Test
+    fun `a shadow reversal invalidates historical proof while retaining its captured snapshot`() {
+        val day = month.atDay(1)
+        val journal = postJournal(day)
+        closeMonth(omitFirstBilling = false)
+        val original = storedEvidence(day)
+        given().get(READINESS).then().statusCode(200).body("eligibleForEnforcement", equalTo(true))
+
+        given().contentType("application/json").body(
+            mapOf("reason" to "close-readiness reversal proof", "reversedBy" to UUID.randomUUID()),
+        ).post("/api/v1/journals/$journal/reverse").then().statusCode(200)
+
+        given().get(READINESS).then().statusCode(200)
+            .body("eligibleForEnforcement", equalTo(false))
+            .body("days[0].blockers", hasItem("JOURNALS_CHANGED_AFTER_CLOSE"))
+        assertThat(storedEvidence(day)).isEqualTo(original)
     }
 
     @Test
@@ -127,6 +175,7 @@ class CloseReadinessIT {
         val day = month.atDay(1)
         openAndCutoff(day)
         config.participants().keys.forEach { report(day, it) }
+        val outboxBefore = readScalar("SELECT count(*) FROM ledger_outbox")
         sql(
             "CREATE FUNCTION reject_test_close_evidence() RETURNS trigger LANGUAGE plpgsql AS " +
                 "'BEGIN RAISE EXCEPTION ''injected evidence failure''; END'; " +
@@ -137,6 +186,7 @@ class CloseReadinessIT {
             transition(day, "TIED_OUT", 500)
             given().get("$DAYS/$day").then().statusCode(200).body("status", equalTo("CUTOFF"))
             given().get(READINESS).then().body("observedDays", equalTo(0))
+            assertThat(readScalar("SELECT count(*) FROM ledger_outbox")).isEqualTo(outboxBefore)
         } finally {
             sql(
                 "DROP TRIGGER reject_test_close_evidence ON ledger_close_evidence; " +
@@ -167,7 +217,13 @@ class CloseReadinessIT {
     private fun freshTieOut(date: LocalDate) {
         VertxContextSupport.subscribeAndAwait {
             uni(CoroutineScope(Dispatchers.Unconfined)) {
-                tieOutRuns.save(TieOutRunRecord(UUID.randomUUID(), date, Instant.now(), TieOutRunStatus.OK, 4, 0, 0))
+                val at = Instant.now()
+                tieOutRuns.save(
+                    TieOutRunRecord(
+                        UUID.randomUUID(), date, at, TieOutRunStatus.OK, 4, 0, 0,
+                        startedAt = at, journalCount = journalWatermark.countThrough(date),
+                    ),
+                )
             }
         }
     }
@@ -192,6 +248,48 @@ class CloseReadinessIT {
                         readinessConfig.requiredJobs().getValue(name),
                     ),
                 )
+            }
+        }
+    }
+
+    private fun postJournal(date: LocalDate): String {
+        val transaction = UUID.randomUUID()
+        fun line(code: String, side: String) = mapOf(
+            "glAccountId" to readScalar("SELECT id FROM gl_accounts WHERE code = '$code'"),
+            "side" to side,
+            "amount" to "10.00",
+            "currencyCode" to "CZK",
+            "baseAmount" to "10.00",
+            "baseCurrencyCode" to "CZK",
+        )
+        return given().contentType("application/json").body(
+            mapOf(
+                "idempotencyKey" to "close-readiness-$transaction",
+                "transactionId" to transaction,
+                "entryDate" to date.toString(),
+                "valueDate" to date.toString(),
+                "createdBy" to UUID.randomUUID(),
+                "lines" to listOf(line("1100", "DEBIT"), line("4003", "CREDIT")),
+            ),
+        ).post("/api/v1/journals").then().statusCode(201).extract().path("id")
+    }
+
+    private fun storedEvidence(date: LocalDate): String = readScalar(
+        "SELECT CAST(row_to_json(e) AS text) FROM ledger_close_evidence e WHERE business_date = DATE '$date'",
+    )
+
+    private fun readScalar(statement: String): String {
+        val cfg = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            cfg.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            cfg.getValue("quarkus.datasource.username", String::class.java),
+            cfg.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.createStatement().use {
+                it.executeQuery(statement).use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    rows.getString(1)
+                }
             }
         }
     }

@@ -26,4 +26,7 @@ data class TieOutRunRecord(
     val accountsChecked: Int,
     val breaks: Int,
     val errors: Int,
+    /** Legacy nulls do not establish qualification evidence for the reconciliation read boundary. */
+    val startedAt: Instant? = null,
+    val journalCount: Long? = null,
 )
