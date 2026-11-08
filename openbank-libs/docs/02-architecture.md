@@ -15,6 +15,8 @@ flowchart LR
 
 `openbank-libs-domain` obsahuje sdílené doménové primitivy a porty. Jeho build definuje hranici bez frameworku; modul nesmí importovat Quarkus ani CDI. `openbank-libs-runtime` obsahuje frameworkové adaptéry, HTTP resource a CDI zapojení. Konzumentům exportuje doménové typy. Kořenový `openbank-libs` zůstává kompatibilitním zastřešením starších závislostí; zdrojové kódy knihovny již nevlastní.
 
+Doménový runtime ponechává pouze Jackson anotace existujících identifikátorů; JSON engine a Kotlin reflection vlastní explicitně `openbank-libs-runtime`. Tvar identifikátorů na drátě se nemění. Testy používající serializaci nebo reflection deklarují tyto závislosti ve vlastním testovacím scope. Samostatný konzument domény, který tyto nástroje používá, je musí deklarovat sám; konzumenti runtime a kompatibilitního zastřešení je nadále získávají z runtime. Úloha `:openbank-libs-domain:verifyDomainRuntimeDependencies`, zapojená do `check`, ověřuje skutečně vyřešené tranzitivní artefakty a odmítá návrat enginu či reflection do doménového runtime.
+
 Služba vlastní dokumenty v `src/main/resources/docs/`. Společná Gradle konvence při `processResources` vytvoří `00-build.md` a zabalí jej vedle ručně psaných Markdown souborů. `ClasspathMarkdownLoader` čte tyto zdroje z classpath, `DocsCatalog` vybírá jazykové varianty a počítá otisky, `DocsResource` publikuje index, metadata a dokumenty z běžícího buildu. Admin UI čte běžící endpoint přes Kubernetes discovery. Zobrazená dokumentace služby tak odpovídá nasazenému image.
 
 Samotný `openbank-libs` nemá běžící endpoint. Jeho kořenová složka `docs/` je snímkem zabaleným do image Admin UI. Pro aktuální chování za běhu čtěte zdrojové moduly a `/q/openbank/docs` příslušné služby.
