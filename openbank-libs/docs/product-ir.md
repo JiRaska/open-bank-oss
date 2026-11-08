@@ -55,6 +55,10 @@ revision and lets a consumer load it only after verification.
   `IrSigningException` when OpenBao is unavailable, so "could not check" never
   reads as "checked and failed". It is a plain class, not a CDI bean; the
   owning service produces it.
+- `OpenBaoTransport` refuses `http://`. For an OpenBao served under a private
+  CA, `OpenBaoTransport.pemTrustSslContext(caFile)` builds an `SSLContext` that
+  trusts only the CA certificates in that PEM file; hostname verification stays
+  on. Each service passes it through its optional `...openbao.ca-file` setting.
 - `HmacIrSigner` (HMAC-SHA256) is for development and tests only. A shared
   secret cannot show who signed, so a deployment must use the Transit signer.
 - `PinnedRevisionLoader.load(pin)` loads a revision by its full

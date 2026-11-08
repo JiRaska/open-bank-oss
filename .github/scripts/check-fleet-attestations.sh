@@ -607,18 +607,52 @@ resolve_cosign_v2() {
     command -v cosign
     return 0
   fi
-  local os arch bin
+  local os arch bin checksum actual download
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$(uname -m)" in
     aarch64 | arm64) arch=arm64 ;;
     x86_64 | amd64) arch=amd64 ;;
     *) return 1 ;;
   esac
+  # Same release checksums as release-please.yml. Never execute bytes from either
+  # download route (or a previous interrupted cache fill) before checking the pin.
+  case "${COSIGN_VERSION}/${os}-${arch}" in
+    v2.4.3/linux-amd64) checksum=caaad125acef1cb81d58dcdc454a1e429d09a750d1e9e2b3ed1aed8964454708 ;;
+    v2.4.3/linux-arm64) checksum=bd0f9763bca54de88699c3656ade2f39c9a1c7a2916ff35601caf23a79be0629 ;;
+    v2.4.3/darwin-amd64) checksum=98a3bfd691f42c6a5b721880116f89210d8fdff61cc0224cd3ef2f8e55a466fb ;;
+    v2.4.3/darwin-arm64) checksum=edfc761b27ced77f0f9ca288ff4fac7caa898e1e9db38f4dfdf72160cdf8e638 ;;
+    *) echo "ERROR: no pinned cosign checksum for ${COSIGN_VERSION}/${os}-${arch}; set COSIGN_BIN to a trusted v2 binary." >&2; return 1 ;;
+  esac
   bin="${TMPDIR:-/tmp}/cosign-${COSIGN_VERSION}-${os}-${arch}"
-  if [ ! -x "$bin" ]; then
-    curl -fsSL -o "$bin" \
+  if [ -x "$bin" ]; then
+    actual="$(shasum -a 256 "$bin" | awk '{print $1}')" || return 1
+    if [ "$actual" = "$checksum" ]; then
+      printf '%s\n' "$bin"
+      return 0
+    fi
+  fi
+  download="$(mktemp "${bin}.XXXXXX")" || return 1
+  if ! curl -fsSL --retry 1 --retry-delay 1 --max-time 30 -o "$download" \
       "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-${os}-${arch}" \
-      2>/dev/null && chmod +x "$bin" || return 1
+      2>/dev/null; then
+    # gh uses the release-asset REST API, which can remain available while the
+    # github.com release download frontend is down. Keep diagnostics off stdout:
+    # the caller captures stdout as the executable path.
+    if ! gh release download "$COSIGN_VERSION" --repo github.com/sigstore/cosign \
+        --pattern "cosign-${os}-${arch}" --output "$download" --clobber >&2; then
+      rm -f -- "$download"
+      return 1
+    fi
+  fi
+  actual="$(shasum -a 256 "$download" | awk '{print $1}')" || actual=""
+  if [ "$actual" != "$checksum" ]; then
+    echo "ERROR: cosign download failed checksum verification." >&2
+    rm -f -- "$download"
+    return 1
+  fi
+  if ! chmod +x "$download" || ! mv -f -- "$download" "$bin"; then
+    rm -f -- "$download"
+    return 1
   fi
   printf '%s\n' "$bin"
 }

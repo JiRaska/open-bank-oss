@@ -357,14 +357,9 @@ jobs:
       # never reached this step — never "this service has no consumer pacts", which is instead
       # expressed by an empty `pact-count` in the manifest (see the download step).
       - name: Collect consumer pacts for hand-off to the contract job
-        run: |
-          set -euo pipefail
-          mkdir -p pact-handoff
-          shopt -s nullglob
-          files=(pacts/${{ inputs.service }}-*.json)
-          for f in "${files[@]}"; do cp "$f" pact-handoff/; done
-          echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
-          echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: bash -e "$SERVICE_CI_HELPERS/consumer-pact-handoff.sh" collect
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -504,6 +499,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      EXPECTED_CONSUMER_SOURCE: ${{ inputs.ref || github.sha }}
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
       # in-cluster ARC runner reaches it over cluster DNS.
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
@@ -714,6 +710,8 @@ jobs:
           path: pact-handoff
 
       - name: Stage handed-off consumer pacts into pacts/
+        env:
+          SERVICE: ${{ inputs.service }}
         run: bash -e "$SERVICE_CI_HELPERS/stage-handed-off-pacts.sh"
 
       # Publish this service's CONSUMER pacts to the broker (ADR-0092). Reads the files staged

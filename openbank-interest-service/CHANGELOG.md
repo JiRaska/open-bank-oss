@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.27.0...interest-service-v0.28.0) (2026-11-08)
+
+
+### Features
+
+* **infra:** provision OpenBao TLS listener and Transit key for product-IR signing ([#15117](https://github.com/JiRaska/open-bank-oss/issues/15117)) ([35f7501](https://github.com/JiRaska/open-bank-oss/commit/35f7501ca1e47759e8a2df550dafeec1bdec5632))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.26.1...interest-service-v0.27.0) (2026-10-30)
 
 
