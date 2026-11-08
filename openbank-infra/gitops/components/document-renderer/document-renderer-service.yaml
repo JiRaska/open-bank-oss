@@ -52,7 +52,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: document-renderer
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-renderer:sandbox-80b8081f@sha256:d294714d4e761c77f96015a7eefc65f9e141b2ae7fccc710d5a2167cb1ca73ea
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-document-renderer:sandbox-2e500af2@sha256:057c7edc34e9245f42367f76cfaf371efae124c27e74d60eb351bc549efa32b3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

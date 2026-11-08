@@ -8,6 +8,7 @@ package com.openbank.devops.infrastructure.adapter
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.devops.application.port.out.GitHubReadBudget
 import com.openbank.devops.infrastructure.config.DevOpsConfig
+import com.openbank.libs.security.EgressDeniedException
 import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
@@ -23,6 +24,7 @@ import org.assertj.core.api.Assertions.within
 import org.eclipse.microprofile.config.Config
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.net.InetAddress
@@ -46,6 +48,7 @@ class GitHubMetricsAdapterTest {
     private val headers = mutableListOf<String?>()
     private var status = 200
     private var body = "{}"
+    private val responseHeaders = mutableMapOf<String, String>()
 
     private lateinit var config: DevOpsConfig
     private val budget = mockk<GitHubReadBudget>()
@@ -54,6 +57,7 @@ class GitHubMetricsAdapterTest {
     private fun respond(exchange: HttpExchange) {
         paths += exchange.requestURI.toString()
         headers += exchange.requestHeaders.getFirst("Authorization")
+        responseHeaders.forEach { (name, value) -> exchange.responseHeaders.set(name, value) }
         val bytes = body.toByteArray()
         exchange.sendResponseHeaders(status, bytes.size.toLong())
         exchange.responseBody.use { it.write(bytes) }
@@ -69,6 +73,65 @@ class GitHubMetricsAdapterTest {
         it.objectMapper = ObjectMapper()
         it.allowedHosts = listOf("stub.test:${server.address.port};http;private")
         it.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
+    }
+
+    @Test
+    fun `profile readers with no token consume no shared reservation`(): Unit = runBlocking {
+        token("")
+        assertThat(adapter().profileResponse("")).isNull()
+        assertThat(adapter().profileArchive("https://unlisted.invalid/archive")).isNull()
+        coVerify(exactly = 0) { budget.reserve(any()) }
+        assertThat(paths).isEmpty()
+    }
+
+    @Test
+    fun `profile metadata uses observer admission and stops when denied`(): Unit = runBlocking {
+        coEvery { budget.reserve(true) } returns false
+        assertThat(adapter().profileResponse("/actions/artifacts")).isNull()
+        coVerify(exactly = 1) { budget.reserve(true) }
+        assertThat(paths).isEmpty()
+    }
+
+    @Test
+    fun `profile metadata returns binary redirect without following it`(): Unit = runBlocking {
+        status = 302
+        body = "raw\u0000bytes\n"
+        responseHeaders["Location"] = "https://unlisted.invalid/archive"
+        val result = adapter().profileResponse("/actions/artifacts/1/zip")!!
+        assertThat(result.status).isEqualTo(302)
+        assertThat(result.body).isEqualTo(body.toByteArray())
+        assertThat(result.header("location")).isEqualTo("https://unlisted.invalid/archive")
+        assertThat(headers.single()).isEqualTo("Bearer ghp-test")
+        coVerify(exactly = 1) { budget.reserve(true) }
+        assertThat(paths).hasSize(1)
+    }
+
+    @Test
+    fun `archive hop has separate observer admission and never includes authorization`(): Unit = runBlocking {
+        body = "raw\u0000zip\n"
+        val result = adapter().profileArchive("http://stub.test:${server.address.port}/archive")!!
+        assertThat(result.body).isEqualTo(body.toByteArray())
+        assertThat(headers.single()).isNull()
+        assertThat(paths.single()).isEqualTo("/archive")
+        coVerify(exactly = 1) { budget.reserve(true) }
+    }
+
+    @Test
+    fun `unlisted artifact origin is denied without an external HTTP request`() {
+        assertThrows(EgressDeniedException::class.java) {
+            runBlocking { adapter().profileArchive("https://unlisted.invalid/archive") }
+        }
+        assertThat(paths).isEmpty()
+        coVerify(exactly = 1) { budget.reserve(true) }
+    }
+
+    @Test
+    fun `profile throttling shares backoff without retrying`(): Unit = runBlocking {
+        status = 429
+        assertThat(adapter().profileResponse("/actions/artifacts")!!.status).isEqualTo(429)
+        coVerify(exactly = 1) { budget.reserve(true) }
+        coVerify(exactly = 1) { budget.deferUntil(now.plusSeconds(900)) }
+        assertThat(paths).hasSize(1)
     }
 
     @Test

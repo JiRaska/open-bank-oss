@@ -11,6 +11,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  # ADR-0352: server cert for OpenBao's TLS listener (8203); must exist before the openbao pod (re)starts
+  - openbao-tls.yaml
   - dynamic-db-credentials.yaml
   - db-rotation-job.yaml
   # ADR-0031 D3b: short-TTL agent-identity PKI issuer (inert until PR5b grants a consumer)

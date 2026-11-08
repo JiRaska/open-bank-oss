@@ -19,12 +19,14 @@ import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
+import io.vertx.core.Vertx
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.async
 import org.jboss.logging.Logger
 import java.time.Instant
+import java.util.concurrent.Executor
 
 /**
  * ADR-0031 D9 phase-3: every disposition this development agent reaches for a finding —
@@ -164,7 +166,11 @@ open class DiagnoseAndProposeActivityImpl(
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     protected open fun <T> runOnVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
-        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+        val context = requireNotNull(Vertx.currentContext())
+        // A port may suspend on IO. Resume on this same safe duplicated context before
+        // touching persistence again; Unconfined instead continues on the IO thread.
+        val dispatcher = Executor { task -> context.runOnContext { task.run() } }.asCoroutineDispatcher()
+        CoroutineScope(dispatcher).async { block() }.asUni()
     }
 
     private companion object {

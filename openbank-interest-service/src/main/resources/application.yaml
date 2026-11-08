@@ -272,7 +272,7 @@ openbank:
         mode: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
         key-id: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"
         openbao:
-          address: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}"
+          address: "${INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8203}"
   rate-limit:
     enabled: true
     max-concurrent-requests: 200

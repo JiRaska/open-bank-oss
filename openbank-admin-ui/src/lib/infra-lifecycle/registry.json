@@ -24,13 +24,14 @@
       "id": "keycloak",
       "eolProduct": "keycloak",
       "versionSource": "gitops",
-      "imageGrep": "keycloak/keycloak",
+      "imageGrep": "openbank-keycloak",
       "releaseNotes": "https://github.com/keycloak/keycloak/releases/tag/{version}"
     },
     {
       "id": "valkey",
       "eolProduct": "valkey",
-      "versionSource": "unknown",
+      "versionSource": "gitops",
+      "imageGrep": "valkey/valkey",
       "releaseNotes": "https://github.com/valkey-io/valkey/releases"
     },
     {
