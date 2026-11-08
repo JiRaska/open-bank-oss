@@ -41,7 +41,8 @@ VAULT_TOKEN="$(bao print token)" tofu init
 VAULT_TOKEN="$(bao print token)" tofu apply
 ```
 
-Revoke the bootstrap token afterwards if it was a one-off root token.
+Do not revoke the root token unless its replacement is already stored where the break-glass
+procedure expects it.
 
 ## Every later change
 
@@ -155,6 +156,30 @@ curl --cacert <openbank-ca ca.crt> --resolve openbao.vault.svc:8203:127.0.0.1 ht
 **Turning signing on is a separate change.** This provisioning leaves every mode at `disabled`.
 Then set `CATALOG_IR_SIGNING_MODE=openbao` first and the consumers'
 `*_PRODUCT_SHADOW_VERIFICATION_MODE=openbao` after, each in its own PR.
+
+## Break-glass and root-token rotation
+
+**Break-glass through SSO.** The `openbao-breakglass` OIDC role is root-equivalent and is
+the first thing to reach for when a bootstrap-class change is needed:
+
+```sh
+bao login -method=oidc role=openbao-breakglass     # MFA required; 15-minute token
+VAULT_TOKEN="$(bao print token)" tofu apply
+```
+
+It is bound to one Keycloak subject and requires `acr=mfa` on both sides.
+
+**Root-token rotation.** OpenBao 2.5.3+ disables the unauthenticated generate-root endpoints
+by default, so generating a root token from the recovery key takes three steps:
+
+1. A gitops PR sets `disable_unauthed_generate_root_endpoints = false` on the 8200 listener;
+   restart `openbao-0` after it syncs.
+2. Generate a root token with the recovery key from the break-glass secret
+   (`bao operator generate-root -init`, then `-nonce=…` with the key, then `-decode`), and store
+   it where the break-glass procedure expects it.
+3. A second PR sets the option back to `true`; restart again.
+
+A script must never revoke the root token. Revoke only the short-lived tokens it minted itself.
 
 ## What this does NOT cover
 
