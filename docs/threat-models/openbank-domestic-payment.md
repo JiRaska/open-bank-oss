@@ -119,6 +119,13 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-11-08** — **Fraud hold enforced in SANDBOX (#4403).** The sandbox deployment sets
+  `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED` and `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`
+  together; application defaults stay `false`. New availability exposure, not a new trust boundary: while
+  fraud-service is unreachable every payment is held (synthetic verdict) and, absent an analyst decision,
+  rejected after 48 h — fail closed, never a pass. Watch `openbank_fraud_scoring_degraded{service="domestic"}`
+  and `FraudHoldScoringUnavailable`. New metric `openbank_domestic_fraud_hold_duration_seconds{outcome}`
+  (workflow time from HOLD to decision or timeout) carries no payment data. Rollback: both flags `false`.
 - **2026-11-06** — **Fraud holds get a release path (#4403, still default off).** New consumer
   `fraud-hold-resolution-in` reads `openbank.aml.events`; `aml.case.status_changed.v1` gains additive
   `transactionId` and `alertCode`. For a `FRAUD_REVIEW` case CLEARED signals RELEASE and BLOCKED signals

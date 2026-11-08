@@ -11,6 +11,7 @@ import io.temporal.common.RetryOptions
 import io.temporal.workflow.Workflow
 import java.time.Duration
 import java.util.UUID
+import com.uber.m3.util.Duration as TallyDuration
 
 @Suppress("MagicNumber")
 class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
@@ -58,6 +59,15 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
 
         /** A fraud-hold signal the run refused (not holding, another case, already decided). */
         const val IGNORED_FRAUD_SIGNAL_METRIC = "openbank_domestic_fraud_hold_signal_ignored"
+
+        /**
+         * Workflow time from the fraud HOLD to its end, tagged `outcome` = `RELEASED|REJECTED|TIMED_OUT`.
+         * It measures how long the payment WAITED, from the moment the gate held it to the moment
+         * the workflow observed the analyst's decision (or the timeout) — not how long the analyst
+         * worked the case, and not delivery latency of the AML event. Bucketed up to the 48 h
+         * timeout by `FraudHoldDurationMeterFilter`.
+         */
+        const val FRAUD_HOLD_DURATION_METRIC = "openbank_domestic_fraud_hold_duration"
 
         /** A held payment with no analyst decision by then is REJECTED, never released. */
         val FRAUD_HOLD_TIMEOUT: Duration = Duration.ofHours(48)
@@ -168,11 +178,23 @@ class DomesticPaymentWorkflowImpl : DomesticPaymentWorkflow {
         FraudGateAction.REJECT -> FraudRejectCause.DECLINED
         FraudGateAction.HOLD -> {
             awaitingFraudReview = true
+            val heldAtMillis = Workflow.currentTimeMillis()
             val answered = Workflow.await(FRAUD_HOLD_TIMEOUT) { fraudReviewDecision != null }
             awaitingFraudReview = false
-            when {
-                !answered -> FraudRejectCause.HOLD_TIMED_OUT
-                fraudReviewDecision == FraudReviewDecision.RELEASE -> null
+            val outcome = when {
+                !answered -> "TIMED_OUT"
+                fraudReviewDecision == FraudReviewDecision.RELEASE -> "RELEASED"
+                else -> "REJECTED"
+            }
+            // Metrics emitted through the workflow scope are suppressed on replay, so this records
+            // once per hold and adds nothing to the workflow history.
+            Workflow.getMetricsScope()
+                .tagged(mapOf("outcome" to outcome))
+                .timer(FRAUD_HOLD_DURATION_METRIC)
+                .record(TallyDuration.ofMillis((Workflow.currentTimeMillis() - heldAtMillis).toDouble()))
+            when (outcome) {
+                "TIMED_OUT" -> FraudRejectCause.HOLD_TIMED_OUT
+                "RELEASED" -> null
                 else -> FraudRejectCause.REVIEW_REJECTED
             }
         }
