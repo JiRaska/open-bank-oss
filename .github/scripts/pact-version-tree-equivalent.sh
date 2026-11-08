@@ -133,6 +133,35 @@ commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
 # ABSENT vs ABSENT compares equal, which is correct: a path missing from both sides did not move.
 obj_at() { git rev-parse -q --verify "$1:$2" 2>/dev/null || echo ABSENT; }
 
+# Resolve the ordered query list in one Git process, retaining an answer only after
+# the entire response has been validated. A broken/short/extra response is not a
+# pair of missing objects. Independently confirm missing paths with the original
+# lookup: a false `missing` response must never make existing build inputs equal.
+batch_objects() {
+  local queries="$1" rows pending row query object result="" actual
+  # Keep line terminators so command substitution cannot hide extra empty rows.
+  rows="$(printf '%s\n' "$queries" | git cat-file '--batch-check=%(objectname)' 2>/dev/null && printf '\001')" || return 1
+  rows="${rows%$'\001'}"
+  pending="$rows"
+  while IFS= read -r query; do
+    [ -n "$pending" ] || return 1
+    row="${pending%%$'\n'*}"
+    case "$pending" in *$'\n'*) pending="${pending#*$'\n'}" ;; *) return 1 ;; esac
+    if [ "$row" = "$query missing" ]; then
+      actual="$(obj_at "${query%%:*}" "${query#*:}")"
+      [ "$actual" = ABSENT ] || return 1
+      object=ABSENT
+    else
+      case "$row" in ''|*[!0-9a-f]*) return 1 ;; esac
+      [ "${#row}" -eq 40 ] || [ "${#row}" -eq 64 ] || return 1
+      object="$row"
+    fi
+    result="${result:+$result$'\n'}$object"
+  done <<< "$queries"
+  [ -z "$pending" ] || return 1
+  printf '%s\n' "$result"
+}
+
 # Top-level directories that are Gradle modules at this commit.
 # ONE ls-tree over `<every top-level dir>/build.gradle.kts`, not a `git cat-file` per directory:
 # the per-directory loop cost ~7 s of the ~8 s per call (78 modules of ~120 dirs), which made the
@@ -304,8 +333,16 @@ equivalent() {
   # 2. Each of them must be the same git object at both commits. A tree object id is a recursive
   #    hash of the whole subtree, so this is byte-equality of every file under it — including mode
   #    changes and renames, which a name-only diff would not show.
-  for d in $(printf '%s\n' "$scope" | command grep -v '^$' | sort -u); do
-    a="$(obj_at "$pact_sha" "$d")"; b="$(obj_at "$dispatch_sha" "$d")"
+  local ordered_scope queries="" objects
+  ordered_scope="$(printf '%s\n' "$scope" | command grep -v '^$' | sort -u)"
+  for d in $ordered_scope; do
+    queries="${queries:+$queries$'\n'}$pact_sha:$d"$'\n'"$dispatch_sha:$d"
+  done
+  objects="$(batch_objects "$queries")" \
+    || differs "could not read build input objects — refusing an incomplete or invalid Git batch response"
+  for d in $ordered_scope; do
+    a="${objects%%$'\n'*}"; objects="${objects#*$'\n'}"
+    b="${objects%%$'\n'*}"; objects="${objects#*$'\n'}"
     [ "$a" = "$b" ] || differs "${d} differs between ${pact_sha:0:8} and ${dispatch_sha:0:8} (${a:0:8} vs ${b:0:8}) — it is a build input of ${svc}"
   done
 
@@ -578,7 +615,74 @@ selftest() {
       && git rev-parse HEAD)"
   _expect "first augmentation-time build input fails closed when duplicated" DIFFERENT svc-a "$s6c" "$s6g"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 40 cases (31 main + 3 admin/path regressions + 6 self-built) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, augmentation-time auto-deploy inputs (including missing/duplicate refusal for both inputs), unrelated workflow edits, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  # Exercise the actual batch protocol, including a space in the object expression.
+  # `%(rest)` must not be added to the format: it would split at that space.
+  local spaced expected observed query_list
+  spaced="$(_commit 'source with spaces.txt' 'space-bearing object')"
+  query_list="$spaced:svc-a"$'\n'"$spaced:svc-a/src/main/A.kt"$'\n'"$spaced:source with spaces.txt"$'\n'"$spaced:missing-path"
+  expected="$(cd "$tmp" && obj_at "$spaced" svc-a)"$'\n'"$(cd "$tmp" && obj_at "$spaced" svc-a/src/main/A.kt)"$'\n'"$(cd "$tmp" && obj_at "$spaced" 'source with spaces.txt')"$'\n'ABSENT
+  if ! observed="$(cd "$tmp" && batch_objects "$query_list")" || [ "$observed" != "$expected" ]; then
+    echo 'selftest FAIL: real batch tree/blob/space/missing answers differ from individual lookups' >&2; fail=1
+  fi
+
+  # SHA-256 repositories return 64-character object ids, not truncated SHA-1 ids.
+  local sha256_dir="$tmp/sha256" sha256_commit
+  if git init -q --object-format=sha256 "$sha256_dir" 2>/dev/null; then
+    printf 'sha256 object\n' > "$sha256_dir/with spaces.txt"
+    git -C "$sha256_dir" add 'with spaces.txt'
+    git -C "$sha256_dir" -c user.email=selftest@example.com -c user.name=selftest \
+      -c commit.gpgsign=false commit -qm base
+    sha256_commit="$(git -C "$sha256_dir" rev-parse HEAD)"
+    expected="$(cd "$sha256_dir" && obj_at "$sha256_commit" 'with spaces.txt')"
+    if ! observed="$(cd "$sha256_dir" && batch_objects "$sha256_commit:with spaces.txt")" \
+      || [ "${#expected}" -ne 64 ] || [ "$observed" != "$expected" ]; then
+      echo 'selftest FAIL: SHA-256 batch result differs from individual lookup' >&2; fail=1
+    fi
+  else
+    echo 'selftest FAIL: Git does not support the SHA-256 protocol fixture' >&2; fail=1
+  fi
+
+  # Inject failures only at the batch boundary. All other Git operations, including
+  # independent missing-path checks, still run the real Git executable. Check each
+  # malformed response directly at this boundary, without repeating the unrelated
+  # commit/ancestry/dependency checks for every failure of the same helper.
+  local real_git mode out rc
+  real_git="$(command -v git)"
+  mkdir -p "$tmp/bin"
+  cat > "$tmp/bin/git" <<'BATCH_SHIM'
+#!/usr/bin/env bash
+if [ "${1:-}" = cat-file ] && [ "${2:-}" = '--batch-check=%(objectname)' ]; then
+  queries="$(cat)"
+  rows="$(printf '%s\n' "$queries" | "$PBT_REAL_GIT" "$@")" || exit $?
+  case "$PBT_BATCH_FAULT" in
+    nonzero) printf '%s\n' "$rows"; exit 9 ;;
+    short) printf '%s\n' "$rows" | sed '$d' ;;
+    extra) printf '%s\n%s\n' "$rows" "${rows%%$'\n'*}" ;;
+    extra-empty) printf '%s\n\n' "$rows" ;;
+    malformed) printf 'not-an-object-id\n%s\n' "${rows#*$'\n'}" ;;
+    false-missing) printf '%s missing\n%s\n' "${queries%%$'\n'*}" "${rows#*$'\n'}" ;;
+    *) exit 10 ;;
+  esac
+else
+  exec "$PBT_REAL_GIT" "$@"
+fi
+BATCH_SHIM
+  chmod +x "$tmp/bin/git"
+  for mode in nonzero short extra extra-empty malformed false-missing; do
+    out="$(cd "$tmp" && PATH="$tmp/bin:$PATH" PBT_REAL_GIT="$real_git" PBT_BATCH_FAULT="$mode" batch_objects "$query_list" 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] || [ -n "$out" ]; then
+      echo "selftest FAIL: Git batch $mode accepted corrupt data or emitted a partial result: $out (rc=$rc)" >&2; fail=1
+    fi
+  done
+
+  # The caller must turn that single failure contract into a DIFFERENT verdict,
+  # rather than comparing two empty answers. One end-to-end fault proves propagation.
+  out="$(PATH="$tmp/bin:$PATH" PBT_REAL_GIT="$real_git" PBT_BATCH_FAULT=nonzero _run svc-a "$base" "$base" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ] || [[ "$out" != $'DIFFERENT\tcould not read build input objects'* ]]; then
+    echo "selftest FAIL: Git batch failure did not propagate to the verdict: $out (rc=$rc)" >&2; fail=1
+  fi
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: 49 cases — all original 40 production/overlay/resource/self-built verdicts plus batch tree/blob/space/absence, SHA-256, six corrupt-response failures with no partial results, and end-to-end failure propagation; verdict, exit code and failure reason asserted."
   return "$fail"
 }
 
