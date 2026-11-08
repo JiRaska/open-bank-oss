@@ -170,6 +170,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
           # regen-derived.sh --all runs gen-agents-opa-data.py, which evaluates the real policy and
           # refuses to write unless every decision matches, so `opa` is not optional.
           # Pinned + checksum-verified, identical to opa-policy.yml — bump both together.

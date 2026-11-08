@@ -15,7 +15,10 @@ if command -v oasdiff >/dev/null 2>&1 && oasdiff --version 2>/dev/null | grep -q
 fi
 
 curl -fsSL --retry 3 --retry-delay 3 -o /tmp/oasdiff.tar.gz \
-  "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+  "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" || \
+  gh release download "v${OASDIFF_VERSION}" --repo github.com/oasdiff/oasdiff \
+    --pattern "oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz" --output /tmp/oasdiff.tar.gz --clobber
+unset GH_TOKEN GITHUB_TOKEN
 echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
 tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
 sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
