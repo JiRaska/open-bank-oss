@@ -56,3 +56,5 @@ The suspending OPA and LLM adapters also propagate caller coroutine cancellation
 The Hibernate Reactive warm-up (`HibernateReactiveWarmup`) skips entities whose owning bean was removed at build time, such as `ObjectStoreBlobEntity` when `PostgresBlobStore` is absent. Such entities are counted as inactive and are not queried, so the warm-up does not touch tables that the service does not own.
 
 Resource-type warm-up expands each endpoint type into its nested types (container content, map keys and generic bindings, recursively) before building serializers, so a DTO reached only through a type variable such as `Page<List<Dto>>` is warm before readiness rather than on the first request (#12042). Opaque leaves such as `String` and primitives are skipped.
+
+The raw-socket `SafeHttpClient` also enforces its whole-call deadline while sending a request body. One shared daemon closes expired sockets; successful and failed calls immediately remove their pending deadline tasks. Forced expiry disables `SO_LINGER` waiting so it cannot delay other calls’ deadline tasks. Normal completion preserves the socket configuration.

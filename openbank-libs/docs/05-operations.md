@@ -46,3 +46,5 @@ Klienti interních služeb, kteří potřebují injektovaný JDK `HttpClient` (L
 Interní HTTP adaptéry a transport OpenBao omezují příjem celého těla odpovědi nakonfigurovaným časovým limitem požadavku. Platí kratší limit požadavku nebo transportu; velikostní limity odpovědi se nemění. Vypršení limitu nebo přerušení vlákna vyžádá zrušení původního JDK přenosu.
 
 Suspendující adaptéry OPA a LLM propagují do blokujícího přenosu také zrušení korutiny volajícího. Zrušení pokračuje k volajícímu a nepřevádí se na výpadek politiky ani náhradní hodnotu. Používá se existující coroutine IO dispatcher, bez samostatného executorového či časovačového poolu. Běžné transportní chyby zachovávají dosavadní chybovou politiku jednotlivých adaptérů.
+
+Raw-socket transport `SafeHttpClient` uplatňuje limit celého volání také při odesílání těla požadavku. Jeden sdílený daemon uzavírá expirované sockety; dokončená i chybová volání své čekající úlohy ihned odstraňují. Při vynuceném ukončení je vypnuto čekání `SO_LINGER`, aby neblokovalo časové limity ostatních volání. Běžné dokončení nastavení socketu nemění.
