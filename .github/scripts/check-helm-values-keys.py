@@ -79,7 +79,9 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -152,6 +154,60 @@ def _pull_ref(chart: str, repo_url: str) -> list[str]:
     return ["helm", "pull", chart, "--repo", repo_url]
 
 
+_GH_RELEASE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$")
+
+
+def _github_api_get(url: str, accept: str) -> bytes:
+    import urllib.request
+    headers = {"Accept": accept, "User-Agent": "openbank-ci-helm-values-gate"}
+    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=60) as resp:
+        return resp.read()
+
+
+def _fetch_via_github_api(chart: str, repo_url: str, version: str,
+                          chart_root: pathlib.Path) -> str | None:
+    """Fallback when `helm pull` fails: resolve the chart archive URL from the repo's
+    index.yaml and, if it is a GitHub release asset, download it through the REST API.
+
+    github.com's web frontend can answer 504 for `/releases/download/` while the API and
+    the asset CDN keep working (measured 2026-11-08, ADR-0366). The API route
+    (`/repos/{o}/{r}/releases/assets/{id}`, Accept: application/octet-stream) redirects
+    straight to the asset CDN. Returns None on success, or a reason string.
+    """
+    import io
+    import json
+    import tarfile
+    import urllib.request
+    if repo_url.startswith("oci://") or "://" not in repo_url:
+        return "fallback: OCI source has no index.yaml"
+    try:
+        with urllib.request.urlopen(f"{repo_url.rstrip('/')}/index.yaml", timeout=60) as resp:
+            index = yaml.safe_load(resp.read())
+        entry = next(e for e in (index.get("entries") or {}).get(chart, [])
+                     if str(e.get("version")) == version)
+        archive_url = (entry.get("urls") or [""])[0]
+        match = _GH_RELEASE.match(archive_url)
+        if not match:
+            return f"fallback: archive is not a GitHub release asset ({archive_url})"
+        owner, repo, tag, name = match.groups()
+        release = json.loads(_github_api_get(
+            f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}",
+            "application/vnd.github+json"))
+        asset = next(a for a in release.get("assets", []) if a.get("name") == name)
+        data = _github_api_get(asset["url"], "application/octet-stream")
+        digest = entry.get("digest")
+        if digest and hashlib.sha256(data).hexdigest() != digest:
+            return f"fallback: sha256 of {name} does not match the repo index digest"
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+            tar.extractall(chart_root, filter="data")
+        return None
+    except Exception as exc:  # noqa: BLE001 - every failure here is a network/lookup failure
+        return f"fallback failed: {exc}"
+
+
 def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Path,
                  attempts: int = PULL_RETRY_ATTEMPTS,
                  backoff_seconds: float = PULL_RETRY_BACKOFF_SECONDS) -> str | None:
@@ -172,7 +228,12 @@ def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Pat
         last_stderr = pull.stderr.strip()
         if attempt < attempts:
             time.sleep(backoff_seconds * attempt)
-    return last_stderr
+    fallback = _fetch_via_github_api(chart, repo_url, version, chart_root)
+    if fallback is None:
+        print(f"::notice::helm-values-key-effect fetched {chart}@{version} via the GitHub "
+              "REST API after `helm pull` failed (ADR-0366)")
+        return None
+    return f"{last_stderr}\n{fallback}"
 
 
 def ignored_top_level_keys(chart_dir: str, values: dict) -> list[str] | None:
