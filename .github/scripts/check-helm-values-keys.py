@@ -154,6 +154,9 @@ def _pull_ref(chart: str, repo_url: str) -> list[str]:
     return ["helm", "pull", chart, "--repo", repo_url]
 
 
+_PREFER_API = False
+# One `helm pull` normally takes 1-3 s; a frontend outage made it hang ~60 s per try.
+PULL_ATTEMPT_TIMEOUT_SECONDS = 30
 _GH_RELEASE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$")
 
 
@@ -236,20 +239,33 @@ def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Pat
     Only retries the network fetch — a chart that pulls fine and then fails the
     values-key comparison is a different failure and is never routed through here.
     """
+    global _PREFER_API
+    if _PREFER_API and _fetch_via_github_api(chart, repo_url, version, chart_root) is None:
+        return None
     last_stderr = ""
     for attempt in range(1, attempts + 1):
-        pull = subprocess.run(
-            [*_pull_ref(chart, repo_url), "--version", version,
-             "--untar", "--untardir", str(chart_root)],
-            capture_output=True, text=True,
-        )
+        try:
+            pull = subprocess.run(
+                [*_pull_ref(chart, repo_url), "--version", version,
+                 "--untar", "--untardir", str(chart_root)],
+                capture_output=True, text=True, timeout=PULL_ATTEMPT_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            last_stderr = f"helm pull timed out after {PULL_ATTEMPT_TIMEOUT_SECONDS}s"
+            break  # a hung upstream will not recover within this run's budget
         if pull.returncode == 0:
             return None
         last_stderr = pull.stderr.strip()
+        if "504" in last_stderr or "Gateway Time" in last_stderr:
+            break  # gateway outage, not a flake: retrying only spends the hard timeout
         if attempt < attempts:
             time.sleep(backoff_seconds * attempt)
     fallback = _fetch_via_github_api(chart, repo_url, version, chart_root)
     if fallback is None:
+        # The direct route is down and the API route works: go to the API first for the
+        # rest of this run instead of paying the retry budget on every chart (a 22-chart
+        # run otherwise exceeds the gate's hard timeout during a frontend outage).
+        _PREFER_API = True
         print(f"::notice::helm-values-key-effect fetched {chart}@{version} via the GitHub "
               "REST API after `helm pull` failed (#15216)")
         return None
