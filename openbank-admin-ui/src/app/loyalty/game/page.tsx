@@ -14,6 +14,7 @@ import {
   art,
   components,
   courseProblems,
+  courseItem,
   parseCatalog,
   worlds,
   type Catalog,
@@ -22,6 +23,7 @@ import {
   type Level,
 } from '@/lib/game/editor'
 import { ScenePreview } from './ScenePreview'
+import { CourseContents } from './CourseContents'
 import styles from './page.module.css'
 
 async function readCatalog(): Promise<{ value: Catalog } | { kind: BffFailure }> {
@@ -111,12 +113,7 @@ export default function GameCatalogPage() {
   const level = levels.find((l) => l.id === selected)
   const course = level?.content ?? (level ? templates[level.theme] : null)
   const problems = course ? courseProblems(course) : []
-  const selectedItem =
-    item && course
-      ? item.key === 'piggies'
-        ? { x: course.piggies[item.index] }
-        : (course[item.key as keyof Course] as Item[] | undefined)?.[item.index]
-      : null
+  const selectedItem = item && course ? courseItem(course, item.key, item.index) : null
   function modify(next: Level[]) {
     if (!canManage || busy || !catalog) return
     setCatalog({ ...catalog, levels: next })
@@ -176,6 +173,13 @@ export default function GameCatalogPage() {
   }
   function place(x: number, y: number) {
     if (!tool || !course) return
+    if (tool === 'slopes') {
+      const slopes = course.slopes ?? []
+      if (slopes.length >= 200) return
+      changeCourse({ slopes: [...slopes, { x0: x, y0: y, x1: x + 300, y1: y + 90 }] })
+      setItem({ key: 'slopes', index: slopes.length })
+      return
+    }
     if (tool === 'piggies') {
       changeCourse({ piggies: [...course.piggies, x] })
       setItem({ key: 'piggies', index: course.piggies.length })
@@ -228,6 +232,10 @@ export default function GameCatalogPage() {
   const fieldName = (key: string) =>
     ({
       x: t('Vzdálenost od startu', 'Distance from start'),
+      x0: t('Začátek úseku', 'Section start'),
+      x1: t('Konec úseku', 'Section end'),
+      y0: t('Počáteční výška', 'Starting height'),
+      y1: t('Koncová výška', 'Ending height'),
       cx: t('Střed letu', 'Flight centre'),
       y: t('Výška', 'Height'),
       cy: t('Výška letu', 'Flight height'),
@@ -319,7 +327,7 @@ export default function GameCatalogPage() {
             <div className={styles.catalog}>
               {levels
                 .filter((l) => filter === 'ALL' || l.state === filter)
-                .map((l, i) => (
+                .map((l) => (
                   <article className={styles.card} key={l.id}>
                     <button
                       className={styles.cover}
@@ -352,9 +360,10 @@ export default function GameCatalogPage() {
                               <button
                                 className={styles.small}
                                 disabled={
-                                  i === 0 ||
+                                  levels[0].id === l.id ||
                                   busy ||
-                                  (!canPublish && (l.state === 'LIVE' || levels[i - 1]?.state === 'LIVE'))
+                                  (!canPublish &&
+                                    (l.state === 'LIVE' || levels[levels.indexOf(l) - 1]?.state === 'LIVE'))
                                 }
                                 onClick={() => move(l.id, -1)}
                                 aria-label={`${t('Posunout výš', 'Move up')} ${title(l)}`}
@@ -364,9 +373,10 @@ export default function GameCatalogPage() {
                               <button
                                 className={styles.small}
                                 disabled={
-                                  i === levels.length - 1 ||
+                                  levels.at(-1)?.id === l.id ||
                                   busy ||
-                                  (!canPublish && (l.state === 'LIVE' || levels[i + 1]?.state === 'LIVE'))
+                                  (!canPublish &&
+                                    (l.state === 'LIVE' || levels[levels.indexOf(l) + 1]?.state === 'LIVE'))
                                 }
                                 onClick={() => move(l.id, 1)}
                                 aria-label={`${t('Posunout níž', 'Move down')} ${title(l)}`}
@@ -501,7 +511,7 @@ export default function GameCatalogPage() {
                     {components
                       .filter(
                         (c) =>
-                          (!['thieves', 'pigeons', 'rooftopObjects', 'dropZones'].includes(c.key) ||
+                          (!['thieves', 'pigeons', 'rooftopObjects', 'dropZones', 'slopes'].includes(c.key) ||
                             level.theme === 'rooftops') &&
                           (!['bridgePlatforms', 'bridgeTraps'].includes(c.key) || level.theme === 'charles_bridge'),
                       )
@@ -568,6 +578,25 @@ export default function GameCatalogPage() {
                         </div>
                       ))}
                     </div>
+                    <button
+                      className={styles.small}
+                      type="button"
+                      disabled={course.ground.length >= 200 || course.levelEnd + 1600 > 50000}
+                      onClick={() => {
+                        const start =
+                          Number(course.ground.at(-1)?.x1 ?? course.levelEnd) +
+                          (level.theme === 'charles_bridge' ? 380 : 140)
+                        const end = start + 1000
+                        changeCourse({
+                          ground: [...course.ground, { x0: start, x1: end }],
+                          levelEnd: end,
+                          vaultX: end - 300,
+                        })
+                      }}
+                    >
+                      <Plus size={14} />
+                      {t('Přidat úsek za konec trati', 'Add section after the course')}
+                    </button>
                     <label>
                       {t('Umístění cíle', 'Finish location')}
                       <input
@@ -577,6 +606,18 @@ export default function GameCatalogPage() {
                       />
                     </label>
                   </fieldset>
+                )}
+                {course && (
+                  <CourseContents
+                    course={course}
+                    onSelect={(key, index) => {
+                      setItem({ key, index })
+                      setTool(null)
+                      const entry = (course[key as keyof Course] as (Item | number)[])[index]
+                      const x = typeof entry === 'number' ? entry : Number(entry.x ?? entry.cx ?? entry.x0 ?? 0)
+                      setCamera(Math.max(0, Math.min(course.levelEnd - 1800, x - 300)))
+                    }}
+                  />
                 )}
                 {selectedItem && item && (
                   <fieldset
@@ -742,6 +783,36 @@ export default function GameCatalogPage() {
                       }}
                     />
                   </label>
+                  {level.theme === 'charles_bridge' && course && (
+                    <label>
+                      {t('Finálový souboj — vzdálenost od startu', 'Final boss — distance from start')}
+                      <input
+                        type="number"
+                        min={700}
+                        max={course.vaultX - 100}
+                        value={course.paperworkBossX ?? ''}
+                        onChange={(e) =>
+                          changeCourse({ paperworkBossX: e.target.value ? Number(e.target.value) : null })
+                        }
+                      />
+                      <span className={styles.subtle}>
+                        {t(
+                          'Prázdné pole vypne souboj. Boss potřebuje pevnou arénu před cílem.',
+                          'Leave empty to disable. The boss needs a solid arena before the finish.',
+                        )}
+                      </span>
+                    </label>
+                  )}
+                  {level.theme === 'rooftops' && course && (
+                    <label>
+                      {t('Finálový souboj se zlodějem', 'Final pickpocket fight')}
+                      <input
+                        type="checkbox"
+                        checked={course.pickpocketBoss ?? false}
+                        onChange={(e) => changeCourse({ pickpocketBoss: e.target.checked })}
+                      />
+                    </label>
+                  )}
                   <label>
                     {t('Odemčení', 'Unlock')}
                     <select

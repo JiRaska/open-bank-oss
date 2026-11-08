@@ -99,6 +99,13 @@ export const components = [
     asset: 'l02_chimney',
     defaults: { y: 120, w: 100, baseY: 0, kind: 'CHIMNEY' },
   },
+  {
+    key: 'slopes',
+    cs: 'Šikmá střecha',
+    en: 'Roof slope',
+    asset: 'l02_dormer',
+    defaults: { x0: 0, y0: 0, x1: 300, y1: 90 },
+  },
   { key: 'dropZones', cs: 'Padající překážka', en: 'Falling obstacle', asset: 'l02_pot', defaults: { y: 220 } },
 ] as const
 export function parseCatalog(value: unknown): Catalog {
@@ -152,4 +159,25 @@ export function courseProblems(c: Course): string[] {
         }
     }
   return [...new Set(errors)]
+}
+
+// Native LevelSpec serialization omits defaults; viewing an item must not invent a different value.
+const nativeDefaults: Record<string, Item> = {
+  coins: { fake: false },
+  vampires: { boss: false },
+  shields: { y: 0 },
+  thieves: { y: 0 },
+  pigeons: { y: 0 },
+  dropZones: { y: 0 },
+  rooftopObjects: { baseY: 0 },
+  bridgePlatforms: { dx: 0, dy: 0, period: 4, offset: 0, collapseAfter: 0 },
+  bridgeTraps: { direction: 1 },
+}
+export function courseItem(course: Course, key: string, index: number): Item | null {
+  const entries = course[key as keyof Course]
+  if (!Array.isArray(entries)) return null
+  const value = entries[index]
+  if (typeof value === 'number') return { x: value }
+  if (!value || typeof value !== 'object') return null
+  return { ...nativeDefaults[key], ...value }
 }

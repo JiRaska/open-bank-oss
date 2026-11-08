@@ -84,14 +84,14 @@ data class GameCourse(
         require(
             thieves.all { t ->
                 (t["y"]?.let { t.number("y") } ?: 0.0) == 0.0 &&
-                    ground.any { t.number("x") in it.number("x0") + 20..it.number("x1") - 20 }
+                    ground.any { t.number("x") in it.number("x0") + THIEF_MARGIN..it.number("x1") - THIEF_MARGIN }
             },
         )
         require(dropZones.all { it.number("y") > 0 })
         slopes.forEach { s ->
             val dx = s.number("x1") - s.number("x0")
             require(dx > 0 && s.number("y0") >= 0 && s.number("y1") >= 0)
-            require(kotlin.math.abs((s.number("y1") - s.number("y0")) / dx) <= 0.5)
+            require(kotlin.math.abs((s.number("y1") - s.number("y0")) / dx) <= MAX_ROOF_GRADE)
         }
         rooftopObjects.forEach { o ->
             val x = o.number("x")
@@ -112,11 +112,11 @@ data class GameCourse(
             val dx = p.optionalNumber("dx", 0.0)
             val dy = p.optionalNumber("dy", 0.0)
             require(minOf(x, x + dx) >= 0 && maxOf(x, x + dx) + w <= levelEnd)
-            require(minOf(y, y + dy) >= -200 && maxOf(y, y + dy) <= 300)
-            require(kotlin.math.abs(dx) <= 500 && kotlin.math.abs(dy) <= 200)
-            require(p.optionalNumber("period", 4.0) in 2.0..20.0)
-            require(w in 60.0..400.0 && p.optionalNumber("offset", 0.0) in 0.0..1.0)
-            require(p.optionalNumber("collapseAfter", 0.0) in 0.0..2.0)
+            require(minOf(y, y + dy) >= MIN_BRIDGE_HEIGHT && maxOf(y, y + dy) <= MAX_BRIDGE_HEIGHT)
+            require(kotlin.math.abs(dx) <= MAX_BRIDGE_TRAVEL_X && kotlin.math.abs(dy) <= MAX_BRIDGE_TRAVEL_Y)
+            require(p.optionalNumber("period", DEFAULT_BRIDGE_PERIOD) in MIN_BRIDGE_PERIOD..MAX_BRIDGE_PERIOD)
+            require(w in MIN_BRIDGE_WIDTH..MAX_BRIDGE_WIDTH && p.optionalNumber("offset", 0.0) in 0.0..1.0)
+            require(p.optionalNumber("collapseAfter", 0.0) in 0.0..MAX_COLLAPSE_DELAY)
         }
         bridgeTraps.forEach { p ->
             val x = p.number("x")
@@ -124,8 +124,8 @@ data class GameCourse(
             require(p.optionalNumber("direction", 1.0) in listOf(-1.0, 1.0))
         }
         paperworkBossX?.let { x ->
-            require(x.isFinite() && x in 700.0..vaultX - 100)
-            require(ground.any { x - 450 >= it.number("x0") && x + 220 <= it.number("x1") })
+            require(x.isFinite() && x in MIN_BOSS_POSITION..vaultX - BOSS_FINISH_MARGIN)
+            require(ground.any { x - BOSS_FOOT_LEFT >= it.number("x0") && x + BOSS_FOOT_RIGHT <= it.number("x1") })
             require(vampires.none { it["boss"] == true })
         }
         require(!pickpocketBoss || theme == "rooftops" && vampires.count { it["boss"] == true } == 1)
@@ -152,3 +152,20 @@ private const val GAP = 140.0
 private const val MIN_BRIDGE_GAP = 140.0
 private const val MAX_BRIDGE_GAP = 600.0
 private const val VAULT_FOOTING = 60.0
+
+private const val THIEF_MARGIN = 20.0
+private const val MAX_ROOF_GRADE = 0.5
+private const val MIN_BRIDGE_HEIGHT = -200.0
+private const val MAX_BRIDGE_HEIGHT = 300.0
+private const val MAX_BRIDGE_TRAVEL_X = 500.0
+private const val MAX_BRIDGE_TRAVEL_Y = 200.0
+private const val DEFAULT_BRIDGE_PERIOD = 4.0
+private const val MIN_BRIDGE_PERIOD = 2.0
+private const val MAX_BRIDGE_PERIOD = 20.0
+private const val MIN_BRIDGE_WIDTH = 60.0
+private const val MAX_BRIDGE_WIDTH = 400.0
+private const val MAX_COLLAPSE_DELAY = 2.0
+private const val MIN_BOSS_POSITION = 700.0
+private const val BOSS_FINISH_MARGIN = 100.0
+private const val BOSS_FOOT_LEFT = 450.0
+private const val BOSS_FOOT_RIGHT = 220.0

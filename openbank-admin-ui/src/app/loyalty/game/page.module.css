@@ -379,7 +379,7 @@
     font-size: 12px;
     font-weight: 600;
 }
-.page input:not([type='range']),
+.page input:not([type='range']):not([type='checkbox']),
 .page select {
     min-width: 0;
     width: 100%;
@@ -492,4 +492,38 @@
 .bridgeBoss {
     width: 130px;
     height: 170px;
+}
+
+.contentItems {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.slope {
+    position: absolute;
+    height: 8px;
+    background: #bd5a3e;
+    border-bottom: 3px solid #723f31;
+    transform-origin: left bottom;
+    z-index: 3;
+    pointer-events: none;
+}
+.page input[type='checkbox'] {
+    width: 18px;
+    height: 18px;
+    accent-color: #278568;
+}
+
+.crumbleTile {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 12px;
+    border-bottom: 3px solid #723f31;
+    background: repeating-linear-gradient(
+        90deg,
+        #bd5a3e 0 13px,
+        #8a412d 13px 15px
+    );
 }
