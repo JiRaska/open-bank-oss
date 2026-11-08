@@ -51,6 +51,7 @@ allowed_reasons contains "operator-tax-filing-lifecycle" if {
 #   tax.statutory-return.assemble  — POST /assemble              (maker)
 #   tax.statutory-return.approve   — POST /{id}/approve          (checker; attests the content hash)
 #   tax.statutory-return.submit    — POST /{id}/submitted        (records the regulator reference)
+#   tax.statutory-return.acknowledge — POST /{id}/acknowledgement (records the regulator's ack/reject)
 #
 # The verbs are deliberately NOT `read`/`list`: base `operator-read-any` and `compliance-read-any`
 # match on those suffixes for ANY HUMAN-typed principal, which includes the shared
@@ -71,7 +72,12 @@ allowed_reasons contains "operator-statutory-return-lifecycle" if {
 	input.principal.type == "HUMAN"
 	not principal_is_machine
 	"ROLE_OPERATOR" in input.principal.roles
-	input.action in {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
+	input.action in {
+		"tax.statutory-return.assemble",
+		"tax.statutory-return.approve",
+		"tax.statutory-return.submit",
+		"tax.statutory-return.acknowledge",
+	}
 }
 
 # ---------------------------------------------------------------------------------------
@@ -88,16 +94,16 @@ allowed_reasons contains "operator-statutory-return-lifecycle" if {
 # ---------------------------------------------------------------------------------------
 
 allowed_reasons contains "staff-corporate-register-inspect" if {
-    input.principal.type == "HUMAN"
-    not principal_is_machine
-    some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
-    role in input.principal.roles
-    input.action == "tax.corporate-register.inspect"
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action == "tax.corporate-register.inspect"
 }
 
 allowed_reasons contains "operator-corporate-register-change" if {
-    input.principal.type == "HUMAN"
-    not principal_is_machine
-    "ROLE_OPERATOR" in input.principal.roles
-    input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_OPERATOR" in input.principal.roles
+	input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
 }

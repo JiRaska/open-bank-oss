@@ -113,6 +113,15 @@ class StatutoryReturnEntity : PanacheEntityBase {
     @Column(name = "submission_reference")
     var submissionReference: String? = null
 
+    @Column(name = "acknowledged_by")
+    var acknowledgedBy: String? = null
+
+    @Column(name = "acknowledged_at")
+    var acknowledgedAt: Instant? = null
+
+    @Column(name = "acknowledgement")
+    var acknowledgement: String? = null
+
     @Column(name = "version", nullable = false)
     var version: Long = 0L
 }
@@ -126,7 +135,11 @@ class PanacheStatutoryReturnRepository(
 
     override suspend fun insert(statutoryReturn: StatutoryReturn): StatutoryReturn = Panache.withTransaction {
         persist(statutoryReturn.toEntity())
-            .invoke { entity ->
+            // `call`, never `invoke`: invoke discards the returned Uni, so the line persist was
+            // never subscribed and no line was ever stored — a reloaded line return then hashed
+            // differently from what was attested and could not be submitted (found by
+            // CeuDailyOverviewSchedulerIT, #15292).
+            .call { entity ->
                 val lineEntities = statutoryReturn.toLineEntities(entity.id)
                 // An empty persist(Iterable) zips ZERO unis and fails with "The Uni set is empty" —
                 // figure-only returns (pension) carry no lines and must skip the step outright.
@@ -183,7 +196,8 @@ class PanacheStatutoryReturnRepository(
         Panache.withTransaction {
             update(
                 "status = ?1, approvedBy = ?2, approvedAt = ?3, attestedHash = ?4, submittedBy = ?5, " +
-                    "submittedAt = ?6, submissionReference = ?7, version = ?8 where id = ?9 and version = ?10",
+                    "submittedAt = ?6, submissionReference = ?7, acknowledgedBy = ?8, acknowledgedAt = ?9, " +
+                    "acknowledgement = ?10, version = ?11 where id = ?12 and version = ?13",
                 statutoryReturn.status.name,
                 statutoryReturn.approvedBy,
                 statutoryReturn.approvedAt,
@@ -191,6 +205,9 @@ class PanacheStatutoryReturnRepository(
                 statutoryReturn.submittedBy,
                 statutoryReturn.submittedAt,
                 statutoryReturn.submissionReference,
+                statutoryReturn.acknowledgedBy,
+                statutoryReturn.acknowledgedAt,
+                statutoryReturn.acknowledgement,
                 statutoryReturn.version,
                 statutoryReturn.id,
                 expectedVersion,
@@ -232,6 +249,9 @@ class PanacheStatutoryReturnRepository(
         it.submittedBy = submittedBy
         it.submittedAt = submittedAt
         it.submissionReference = submissionReference
+        it.acknowledgedBy = acknowledgedBy
+        it.acknowledgedAt = acknowledgedAt
+        it.acknowledgement = acknowledgement
         it.version = version
     }
 
@@ -260,6 +280,9 @@ class PanacheStatutoryReturnRepository(
         submittedBy = submittedBy,
         submittedAt = submittedAt,
         submissionReference = submissionReference,
+        acknowledgedBy = acknowledgedBy,
+        acknowledgedAt = acknowledgedAt,
+        acknowledgement = acknowledgement,
         version = version,
     )
 

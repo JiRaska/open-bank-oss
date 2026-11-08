@@ -20,6 +20,7 @@ import com.openbank.tax.domain.returns.ReturnScope
 import com.openbank.tax.domain.returns.SignedTerm
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationRule
+import com.openbank.tax.infrastructure.returns.ceu.CeuReturnDataAdapter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -110,7 +111,10 @@ class ReportingEntitiesProducer {
         @ConfigProperty(name = "openbank.statutory-returns.company-id", defaultValue = "company") companyId: String,
         @ConfigProperty(name = "openbank.statutory-returns.fund-ids") fundIds: Optional<List<String>>,
         @ConfigProperty(name = "openbank.statutory-returns.reporting-start") reportingStart: Optional<String>,
+        @ConfigProperty(name = "openbank.ceu.reporting-start") ceuStart: Optional<String>,
     ): ReportingEntities = ReportingEntities(
+        catalogueStarts = ceuStart.map { mapOf(CeuReturnDataAdapter.CATALOGUE_ID to LocalDate.parse(it)) }
+            .orElse(emptyMap()),
         companyId = companyId,
         fundIds = fundIds.orElse(emptyList()).map { it.trim() }.filter { it.isNotEmpty() },
         reportingStart = reportingStart.map { LocalDate.parse(it) }.orElse(null),

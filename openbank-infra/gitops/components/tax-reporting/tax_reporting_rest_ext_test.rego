@@ -183,9 +183,15 @@ sr_actions := {
 	"tax.statutory-return.assemble",
 	"tax.statutory-return.approve",
 	"tax.statutory-return.submit",
+	"tax.statutory-return.acknowledge",
 }
 
-sr_lifecycle := {"tax.statutory-return.assemble", "tax.statutory-return.approve", "tax.statutory-return.submit"}
+sr_lifecycle := {
+	"tax.statutory-return.assemble",
+	"tax.statutory-return.approve",
+	"tax.statutory-return.submit",
+	"tax.statutory-return.acknowledge",
+}
 
 test_human_operator_may_do_every_statutory_return_action if {
 	every action in sr_actions {

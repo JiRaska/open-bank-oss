@@ -33,7 +33,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-tax-reporting-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6d18c671beffc1bb"
+        openbank.tech/policy-checksum: "5af17c05e6623949"
       labels:
         app.kubernetes.io/name: tax-reporting-service
         app.kubernetes.io/part-of: tax-reporting
@@ -147,6 +147,12 @@ spec:
             # opening date of the company's books on this instance; unset = returns refused (503).
             - name: OPENBANK_STATUTORY_RETURNS_COMPANY_BOOKS_OPENED
               value: "2027-01-01"
+            # openbank.ceu.reporting-start (ADR-0367, #15292): the first CEÚ window end this sandbox
+            # reports (Sunday 2026-11-15, so the first overview is Monday's). The first overview diffs
+            # against an empty register — the initial full load — and covers only what the
+            # projection has observed since the CEÚ consumers were deployed; sandbox only.
+            - name: OPENBANK_CEU_REPORTING_START
+              value: "2026-11-15"
           resources:
             requests:
               cpu: 100m

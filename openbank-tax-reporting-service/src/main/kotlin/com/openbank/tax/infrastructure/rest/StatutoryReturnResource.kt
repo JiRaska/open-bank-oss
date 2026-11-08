@@ -143,12 +143,27 @@ class StatutoryReturnResource(
     suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
         Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
 
-    private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
-        ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
+    @POST
+    @Path("/{id}/acknowledgement")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "tax.statutory-return.acknowledge", resource = "#id")
+    @Operation(
+        summary = "Record the regulator's acknowledgement or rejection (SUBMITTED → ACKNOWLEDGED | REJECTED)",
+    )
+    suspend fun acknowledgement(@PathParam("id") id: String, request: RecordAcknowledgementRequest): Response {
+        val accepted = requireNotNull(request.accepted) { "accepted is required" }
+        val detail = requireNotNull(if (accepted) request.reference else request.reason) {
+            if (accepted) "reference is required when accepted" else "reason is required when rejected"
+        }
+        return Response.ok(service.acknowledge(parseId(id), accepted, detail, actingPrincipal()).toResponse()).build()
+    }
 
     private fun actingPrincipal(): String =
         TaxReportingActor.staffSubject(identity, "assemble, approve or submit a statutory return")
 }
+
+private fun parseId(value: String): UUID = runCatching { UUID.fromString(value) }.getOrNull()
+    ?: throw WebApplicationException("id must be a UUID (got '$value')", Response.Status.BAD_REQUEST)
 
 data class AssembleReturnRequest(
     val catalogueId: String,
@@ -158,6 +173,13 @@ data class AssembleReturnRequest(
 )
 
 data class RecordSubmissionRequest(val reference: String)
+
+/** `accepted` with the regulator's `reference`, or not accepted with its `reason`. */
+data class RecordAcknowledgementRequest(
+    val accepted: Boolean?,
+    val reference: String? = null,
+    val reason: String? = null,
+)
 
 data class ReturnCapabilityResponse(
     val dataSourceAvailable: Boolean,
@@ -186,6 +208,9 @@ data class StatutoryReturnResponse(
     val submittedBy: String?,
     val submittedAt: String?,
     val submissionReference: String?,
+    val acknowledgedBy: String?,
+    val acknowledgedAt: String?,
+    val acknowledgement: String?,
 )
 
 data class ReturnDefinitionResponse(
@@ -236,6 +261,9 @@ private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     submittedBy = submittedBy,
     submittedAt = submittedAt?.toString(),
     submissionReference = submissionReference,
+    acknowledgedBy = acknowledgedBy,
+    acknowledgedAt = acknowledgedAt?.toString(),
+    acknowledgement = acknowledgement,
 )
 
 private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(

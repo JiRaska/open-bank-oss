@@ -6,7 +6,7 @@ info:
   # 1.2.0: additive (#12495) — corporate register routes feeding ČNB PSP 32-04, 50-04 and 40-01.
   # 1.3.0: additive (ADR-0340) — GET /api/v1/statutory-returns/{id}/lines exposes the line-level
   # artefact of a line-based return (CRS/FATCA); the catalogue itself is data, not API surface.
-  version: 1.3.0
+  version: 1.4.0
   description: >
     §38d Vyúčtování daně vybírané srážkou podle zvláštní sazby daně — the platform's system of
     record for the monthly withholding-tax return (ADR-0180). Consumes
@@ -353,6 +353,34 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
 
+  /api/v1/statutory-returns/{id}/acknowledgement:
+    post:
+      tags: [StatutoryReturn]
+      summary: Record the regulator's acknowledgement or rejection (SUBMITTED → ACKNOWLEDGED | REJECTED)
+      operationId: recordStatutoryReturnAcknowledgement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecordAcknowledgementRequest' }
+      responses:
+        '200':
+          description: The return after the transition
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatutoryReturnResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+
   /api/v1/corporate-register:
     get:
       tags: [CorporateRegister]
@@ -554,7 +582,7 @@ components:
         code: { type: string }
         name: { type: string }
         scope: { type: string, enum: [COMPANY, FUND] }
-        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR, WORKING_DAY] }
         deadlineDaysAfterPeriodEnd: { type: integer }
         legalBasis: { type: string }
         datapoints: { type: array, items: { type: string } }
@@ -567,6 +595,13 @@ components:
         jurisdiction: { type: string }
         wireFormatVerified: { type: boolean }
         returns: { type: array, items: { $ref: '#/components/schemas/ReturnDefinitionResponse' } }
+    RecordAcknowledgementRequest:
+      type: object
+      required: [accepted]
+      properties:
+        accepted: { type: boolean, description: true when the regulator acknowledged the delivery }
+        reference: { type: string, description: Acknowledgement reference; required when accepted }
+        reason: { type: string, description: Rejection reason; required when not accepted }
     StatutoryReturnResponse:
       type: object
       required: [id, catalogueId, catalogueVersion, returnCode, entityId, periodicity, period, revision, status, datapoints, contentHash, dueDate, assembledBy, assembledAt]
@@ -576,10 +611,10 @@ components:
         catalogueVersion: { type: integer }
         returnCode: { type: string }
         entityId: { type: string }
-        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR] }
+        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR, WORKING_DAY] }
         period: { type: string }
         revision: { type: integer }
-        status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED] }
+        status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED, ACKNOWLEDGED, REJECTED] }
         datapoints: { type: object, additionalProperties: { type: number } }
         contentHash: { type: string, description: SHA-256 of the canonical content }
         dueDate: { type: string, format: date }
@@ -591,6 +626,11 @@ components:
         submittedBy: { type: [string, 'null'] }
         submittedAt: { type: [string, 'null'], format: date-time }
         submissionReference: { type: [string, 'null'] }
+        acknowledgedBy: { type: [string, 'null'] }
+        acknowledgedAt: { type: [string, 'null'], format: date-time }
+        acknowledgement:
+          type: [string, 'null']
+          description: The regulator's acknowledgement reference (ACKNOWLEDGED) or rejection reason (REJECTED)
     StatutoryReturnLinesResponse:
       type: object
       required: [lines]

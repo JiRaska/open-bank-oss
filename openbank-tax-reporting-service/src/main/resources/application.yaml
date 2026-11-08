@@ -196,12 +196,19 @@ openbank:
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
-    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json
+    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json,statutory-returns/cz/ceu.v1.json
     company-id: company
     deadline-check-every: 1h
     # ADR-0337: the first day of the pension company's books. Unset = every company-books return
     # is refused (503), because a balance summed from an unknown start cannot be shown complete.
     # company-books.opened: 2025-01-01
+  # ADR-0367 / #15292: the CEÚ daily change overview. reporting-start is the first window end
+  # (yyyy-MM-dd) this deployment reports; unset = the feed is not live: no overview is assembled,
+  # none is counted overdue, and openbank_workflow_unconfigured{workflow="ceu-daily-overview"}
+  # reads 1. Its value comes from the gitops env (OPENBANK_CEU_REPORTING_START).
+  ceu:
+    tick-every: 15m
+    # reporting-start: 2026-11-09
   build:
     time: "${BUILD_TIME:unknown}"
   git:

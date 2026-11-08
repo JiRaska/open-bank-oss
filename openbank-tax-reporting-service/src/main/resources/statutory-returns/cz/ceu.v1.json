@@ -1,0 +1,22 @@
+{
+  "_comment": "ADR-0367 pilot, issue #15292; spec openbank-libs/governance/returns/ceu-daily.yaml. CEÚ daily change overview (ČNB report CEUSIFE10, methodology CEU20211201) under zákon č. 300/2016 Sb. and vyhláška č. 30/2017 Sb. as amended by 163/2021 Sb. One return per WORKING_DAY window: the window ends the day before a CERTIS working day and is due on that working day (ČNB: by 12:00; the date-level deadline here is the day, the 12:00 cut-off is the scheduler's job). THE CEUSIFE10 DATA-FILE XSD IS PUBLISHED ONLY INSIDE SDAT AND WAS NOT OBTAINED: wireFormatVerified is false and no wire renderer is bound. Line fields and datapoint ids are PLATFORM identifiers, not CEUSIFE10 elements; person data (name, birth number, address) is not carried here and is read from party-service at render time.",
+  "id": "cz-ceu",
+  "version": 1,
+  "jurisdiction": "CZ",
+  "wireFormatVerified": false,
+  "returns": [
+    {
+      "code": "CEUSIFE10", "name": "CEÚ — Denní přehled změn v účtech a bezpečnostních schránkách",
+      "scope": "COMPANY", "periodicity": "WORKING_DAY", "deadlineDaysAfterPeriodEnd": 1,
+      "legalBasis": "zákon č. 300/2016 Sb., o centrální evidenci účtů; vyhláška č. 30/2017 Sb. ve znění vyhlášky č. 163/2021 Sb.",
+      "datapoints": ["changes_total", "changes_new", "changes_changed", "changes_closed", "synthetic_accounts_dropped", "synthetic_relations_dropped", "initial_load", "register_known_at_epoch_ms"],
+      "lineSchema": ["change", "account_id", "account_number", "currency", "opened_on", "closed_on", "persons"],
+      "rules": [
+        {"type": "SUM_EQUALS", "id": "ceu-changes-add-up", "target": "changes_total",
+         "terms": [{"datapoint": "changes_new", "sign": 1}, {"datapoint": "changes_changed", "sign": 1}, {"datapoint": "changes_closed", "sign": 1}]},
+        {"type": "NON_NEGATIVE", "id": "ceu-counts-non-negative",
+         "datapoints": ["changes_total", "changes_new", "changes_changed", "changes_closed", "synthetic_accounts_dropped", "synthetic_relations_dropped", "initial_load"]}
+      ]
+    }
+  ]
+}
