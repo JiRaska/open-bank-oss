@@ -139,7 +139,9 @@ export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: 
             ? t('Identita běžícího obrazu zjištěna', 'Running image identity observed')
             : data.running.source === 'prometheus-runtime-build-info'
               ? t('Běhová verze z build-info změřena', 'Runtime build version measured')
-              : t('Obraz běžícího workloadu změřen', 'Running workload image measured')}: {new Date(data.running.observedAt).toLocaleTimeString(dateLocale)}
+              : data.running.source === 'prometheus-runtime-digest-verified-tag'
+                ? t('Verze z tagu ověřeného digestem běžícího obrazu', 'Version from a tag verified against the running image digest')
+                : t('Obraz běžícího workloadu změřen', 'Running workload image measured')}: {new Date(data.running.observedAt).toLocaleTimeString(dateLocale)}
         </div>
       )}
       {data.running.mixed && (
