@@ -12,6 +12,7 @@ import com.openbank.devops.infrastructure.config.DevOpsConfig
 import com.openbank.libs.security.EgressPolicy
 import com.openbank.libs.security.EgressRequest
 import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.EgressResponse
 import com.openbank.libs.security.SafeHttpClient
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -20,6 +21,7 @@ import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.net.URI
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -109,26 +111,35 @@ class GitHubMetricsAdapter(
     internal suspend fun deliveryPage(path: String): String? =
         if (token.isBlank()) null else get(path, deliveryHttp, observer = true)
 
+    private val profileHttp: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(DELIVERY_CONNECT_TIMEOUT_S),
+            callTimeout = Duration.ofSeconds(DELIVERY_REQUEST_TIMEOUT_S),
+            maxResponseBytes = PROFILE_MAX_BYTES,
+        )
+    }
+
+    internal suspend fun profileResponse(path: String): EgressResponse? {
+        if (token.isBlank()) return null
+        require(path.isEmpty() || path.startsWith("/") && !path.startsWith("//"))
+        return request(repositoryUrl(path), profileHttp, observer = true, authenticated = true)
+    }
+
+    /** Redirect targets get independent admission and egress checks, and never a bearer token. */
+    internal suspend fun profileArchive(url: String): EgressResponse? {
+        if (token.isBlank()) return null
+        val target = URI(url)
+        val api = URI(config.githubApiUrl())
+        val sameOrigin = target.scheme == api.scheme && target.host == api.host && target.port == api.port
+        require(target.scheme == "https" || sameOrigin)
+        require(target.host != null && target.rawUserInfo == null && target.rawFragment == null)
+        return request(url, profileHttp, observer = true, authenticated = false)
+    }
+
     internal suspend fun get(path: String, client: SafeHttpClient = http, observer: Boolean = false): String? {
-        if (!readBudget.reserve(observer)) {
-            log.debug("GitHub read deferred by the shared request budget or backoff")
-            return null
-        }
-        val response = withContext(Dispatchers.IO) {
-            val url = "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
-            val request = EgressRequest(
-                method = "GET",
-                url = url,
-                headers = mapOf(
-                    "Authorization" to "Bearer $token",
-                    "Accept" to "application/vnd.github+json",
-                    "X-GitHub-Api-Version" to "2022-11-28",
-                ),
-                body = null,
-            )
-            client.send(request)
-        }
-        GitHubReadBackoff.until(response, Instant.now(clock))?.let { readBudget.deferUntil(it) }
+        val response = request(repositoryUrl(path), client, observer, authenticated = true) ?: return null
         return if (response.status !in OK_RANGE) {
             log.warnf("GitHub API %s returned HTTP %d", path, response.status)
             null
@@ -137,11 +148,37 @@ class GitHubMetricsAdapter(
         }
     }
 
+    private fun repositoryUrl(path: String): String =
+        "${config.githubApiUrl().trimEnd('/')}/repos/${config.githubOwner()}/${config.githubRepo()}$path"
+
+    private suspend fun request(
+        url: String,
+        client: SafeHttpClient,
+        observer: Boolean,
+        authenticated: Boolean,
+    ): EgressResponse? {
+        if (!readBudget.reserve(observer)) {
+            log.debug("GitHub read deferred by the shared request budget or backoff")
+            return null
+        }
+        val response = withContext(Dispatchers.IO) {
+            val headers = mutableMapOf(
+                "Accept" to "application/vnd.github+json",
+                "X-GitHub-Api-Version" to "2022-11-28",
+            )
+            if (authenticated) headers["Authorization"] = "Bearer $token"
+            client.send(EgressRequest(method = "GET", url = url, headers = headers, body = null))
+        }
+        GitHubReadBackoff.until(response, Instant.now(clock))?.let { readBudget.deferUntil(it) }
+        return response
+    }
+
     private companion object {
         const val DELIVERY_CONNECT_TIMEOUT_S = 2L
         const val DELIVERY_REQUEST_TIMEOUT_S = 3L
         const val CONNECT_TIMEOUT_S = 10L
         const val REQUEST_TIMEOUT_S = 30L
+        const val PROFILE_MAX_BYTES = 2 * 1024 * 1024
         const val RUNS_SAMPLE = 50
         const val ISSUES_PAGE = 100
         val OK_RANGE = 200..299
