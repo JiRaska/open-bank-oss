@@ -17,6 +17,62 @@ import java.util.concurrent.atomic.AtomicInteger
 class CloseParticipationTest {
 
     @Test
+    fun `original constructor descriptors including Kotlin defaults still link`() {
+        val day = LocalDate.of(2026, 11, 8)
+        val integer = Int::class.javaPrimitiveType!!
+        val original = CloseParticipationReport::class.java.getConstructor(
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+        ).newInstance(day, CloseOutcome.RAN, 2, 3, null)
+        assertThat(original.journalsPosted).isEqualTo(2)
+        assertThat(original.exercisedJobs).isEmpty()
+        val defaults = CloseParticipationReport::class.java.getConstructor(
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+            integer,
+            Class.forName("kotlin.jvm.internal.DefaultConstructorMarker"),
+        ).newInstance(day, CloseOutcome.RAN, 0, 0, null, 28, null)
+        assertThat(defaults.itemsProcessed).isZero()
+        assertThat(defaults.sourceRunId).isNull()
+    }
+
+    @Test
+    fun `original copy descriptors retain source evidence including Kotlin default calls`() {
+        val original = CloseParticipationReport(
+            LocalDate.of(2026, 11, 8),
+            CloseOutcome.RAN,
+            2,
+            3,
+            null,
+            setOf("accrual"),
+            "source-receipt",
+        )
+        val integer = Int::class.javaPrimitiveType!!
+        val copied = CloseParticipationReport::class.java.getMethod(
+            "copy",
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+        ).invoke(original, original.businessDate, CloseOutcome.RAN, 2, 3, "retained") as CloseParticipationReport
+        assertThat(copied.exercisedJobs).containsExactly("accrual")
+        assertThat(copied.sourceRunId).isEqualTo("source-receipt")
+        val defaultCopy = CloseParticipationReport::class.java.getDeclaredMethod(
+            "copy\$default", CloseParticipationReport::class.java, LocalDate::class.java,
+            CloseOutcome::class.java, integer, integer, String::class.java, integer, Any::class.java,
+        ).invoke(null, original, null, null, 0, 0, null, 31, null) as CloseParticipationReport
+        assertThat(defaultCopy).isEqualTo(original)
+        assertThat(defaultCopy.sourceRunId).isEqualTo("source-receipt")
+    }
+
+    @Test
     fun `reporting revisits the previous calendar month including leap February`() {
         assertThat(CloseParticipationAssembler.reportingFrom(LocalDate.of(2026, 11, 8), 3))
             .isEqualTo(LocalDate.of(2026, 10, 1))
