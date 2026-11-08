@@ -32,7 +32,7 @@ class GameLevelResource(
 ) {
     @GET
     @Path("/admin/catalog")
-    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_MARKETING")
     @Authorize(action = "engagement.gameCatalog.read")
     suspend fun catalog(): Response = Response.ok(store.catalog()).header("Cache-Control", "no-store").build()
 
@@ -41,8 +41,19 @@ class GameLevelResource(
     @Path("/admin/catalog")
     @RolesAllowed("ROLE_ADMIN")
     @Authorize(action = "engagement.gameCatalog.write")
-    suspend fun update(request: GameCatalogWriteRequest): Response = try {
+    suspend fun update(request: GameCatalogWriteRequest): Response = save(request, false)
+
+    @PUT
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Path("/admin/drafts")
+    @RolesAllowed("ROLE_MARKETING", "ROLE_ADMIN")
+    @Authorize(action = "engagement.gameCatalog.writeDraft")
+    suspend fun updateDraft(request: GameCatalogWriteRequest): Response = save(request, true)
+
+    private suspend fun save(request: GameCatalogWriteRequest, draftOnly: Boolean): Response = try {
         val catalog = request.toDomain()
+        // update rechecks the same revision under its row lock; a concurrent publisher causes 409.
+        if (draftOnly) catalog.requireDraftEditOf(store.catalog())
         val actor = requireNotNull(identity.principal.name).also { require(it.isNotBlank()) }
         Response.ok(store.update(catalog, actor, clock.instant())).build()
     } catch (_: GameCatalogConflict) {
@@ -59,10 +70,31 @@ class GameLevelResource(
     @Path("/levels")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "engagement.game.read", resource = "#partyId")
-    suspend fun levels(@QueryParam("partyId") partyId: UUID?, @QueryParam("beta") beta: Boolean): Response =
-        Response.ok(
-            store.customer(requireNotNull(partyId), beta, clock.instant()),
-        ).header("Cache-Control", "no-store").build()
+    suspend fun levels(
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("beta") beta: Boolean,
+        @QueryParam("contentSchema") contentSchema: Int?,
+    ): Response = Response.ok(
+        store.customer(requireNotNull(partyId), beta, clock.instant()).let { catalog ->
+            if (contentSchema ==
+                1
+            ) {
+                catalog
+            } else {
+                catalog.copy(
+                    levels = catalog.levels.mapNotNull { entry ->
+                        val level = entry.level
+                        when {
+                            level.content == null -> entry
+                            level.id == level.theme && level.id in setOf("embankment", "rooftops", "charles_bridge") ->
+                                entry.copy(level = level.copy(content = null))
+                            else -> null
+                        }
+                    },
+                )
+            }
+        },
+    ).header("Cache-Control", "no-store").build()
 
     @POST
     @Path("/levels/{levelId}/completion")

@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.engagement.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.GameStore
+import com.openbank.engagement.domain.model.game.GameCourse
+import com.openbank.engagement.domain.model.game.GameLevel
+import com.openbank.engagement.domain.model.game.GameLevelState
 import com.openbank.engagement.domain.model.game.GameRequirement
 import com.openbank.engagement.domain.model.game.GameUnlockKind
+import com.openbank.libs.authz.PolicyDecisionPoint
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import java.nio.file.Files
+import java.nio.file.Path
 import java.sql.DriverManager
 import java.util.UUID
 
@@ -24,6 +32,104 @@ import java.util.UUID
 class GameCatalogIT {
     @Inject
     lateinit var games: GameStore
+
+    @Inject
+    lateinit var mapper: ObjectMapper
+
+    @Inject
+    lateinit var policy: Instance<PolicyDecisionPoint>
+
+    @Test
+    fun `production policy decision point is actually wired`() {
+        assertThat(policy.isUnsatisfied).isFalse()
+        assertThat(policy.isAmbiguous).isFalse()
+    }
+
+    @Test
+    @TestSecurity(user = "marketing-editor", roles = ["ROLE_MARKETING"])
+    fun `marketing saves real course through HTTP but cannot publish or change live chapters`(): Unit = runBlocking {
+        val before = games.catalog()
+        val root = if (Files.isDirectory(Path.of("openbank-admin-ui"))) Path.of("") else Path.of("..")
+        val template = mapper.readValue(
+            Files.readString(root.resolve("openbank-admin-ui/public/lion-quest/embankment.json")),
+            GameCourse::class.java,
+        ).copy(id = "marketing_example")
+        val draft = GameLevel(
+            template.id,
+            template.theme,
+            98,
+            "Nové dobrodružství",
+            "New adventure",
+            GameLevelState.BETA,
+            content = template,
+        )
+        try {
+            val edited = before.copy(levels = before.levels + draft)
+            given().contentType("application/json").body(mapper.writeValueAsString(edited))
+                .put("/api/v1/game/admin/drafts").then().statusCode(200)
+            val saved = games.catalog()
+            assertThat(saved.levels.last().content).isEqualTo(template)
+            assertThat(saved.revision).isEqualTo(before.revision + 1)
+            given().contentType("application/json").body(mapper.writeValueAsString(saved))
+                .put("/api/v1/game/admin/catalog").then().statusCode(403)
+            val publish = saved.copy(
+                levels = saved.levels.map {
+                    if (it.id == draft.id) it.copy(state = GameLevelState.LIVE) else it
+                },
+            )
+            given().contentType("application/json").body(mapper.writeValueAsString(publish))
+                .put("/api/v1/game/admin/drafts").then().statusCode(400)
+            assertThat(games.catalog()).isEqualTo(saved)
+        } finally {
+            games.update(before.copy(revision = games.catalog().revision), "game-test-admin", java.time.Instant.now())
+        }
+    }
+
+    @Test
+    fun `capable clients receive authored tracks while legacy clients retain bundled chapters`(): Unit = runBlocking {
+        val before = games.catalog()
+        val root = if (Files.isDirectory(Path.of("openbank-admin-ui"))) Path.of("") else Path.of("..")
+        val template = mapper.readValue(
+            Files.readString(root.resolve("openbank-admin-ui/public/lion-quest/embankment.json")),
+            GameCourse::class.java,
+        )
+        val authored = template.copy(
+            levelEnd = 6000.0,
+            ground = template.ground.dropLast(1) + mapOf("x0" to 4440.0, "x1" to 6000.0),
+        )
+        val newCourse = GameLevel(
+            "new_course",
+            "embankment",
+            97,
+            "Nové kolo",
+            "New course",
+            GameLevelState.BETA,
+            content = authored.copy(id = "new_course"),
+        )
+        try {
+            games.update(
+                before.copy(
+                    levels = before.levels.map {
+                        if (it.id == "embankment") it.copy(content = authored) else it
+                    } + newCourse,
+                ),
+                "game-test-admin",
+                java.time.Instant.now(),
+            )
+            val party = UUID.randomUUID()
+            val capable = given().queryParam("partyId", party).queryParam("beta", true)
+                .queryParam("contentSchema", 1).get("/api/v1/game/levels").then().statusCode(200)
+                .extract().jsonPath()
+            assertThat(capable.getFloat("levels.find { it.level.id == 'new_course' }.level.content.levelEnd"))
+                .isEqualTo(6000f)
+            val legacy = given().queryParam("partyId", party).queryParam("beta", true)
+                .get("/api/v1/game/levels").then().statusCode(200).extract().jsonPath()
+            assertThat(legacy.getList<String>("levels.level.id")).contains("embankment").doesNotContain("new_course")
+            assertThat(legacy.get<Any?>("levels.find { it.level.id == 'embankment' }.level.content")).isNull()
+        } finally {
+            games.update(before.copy(revision = games.catalog().revision), "game-test-admin", java.time.Instant.now())
+        }
+    }
 
     @Test
     fun `null catalogue element returns 400 without changing stored revision`() {

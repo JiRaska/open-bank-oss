@@ -29,12 +29,20 @@ class CustomerGameResource(
     @GET
     @Blocking
     @Authorize(action = "customer.game.read")
-    fun levels(@QueryParam("beta") beta: Boolean, @HeaderParam("X-Acting-For") actingFor: String?): Response {
+    fun levels(
+        @QueryParam("beta") beta: Boolean,
+        @HeaderParam("X-Acting-For") actingFor: String?,
+        @QueryParam("contentSchema") contentSchema: Int? = null,
+    ): Response {
         val party = parties.resolve(actingFor).toString()
         upstream.getToService(
             serviceUrl,
             "/api/v1/game/levels",
-            mapOf("partyId" to party, "beta" to beta.toString()),
+            buildMap {
+                put("partyId", party)
+                put("beta", beta.toString())
+                if (contentSchema == 1) put("contentSchema", "1")
+            },
             party,
         ).use { response ->
             if (response.status !=
@@ -63,6 +71,7 @@ class CustomerGameResource(
                 buildMap<String, Any> {
                     for (key in listOf("id", "theme", "order", "titleCs", "titleEn", "state")) put(key, level.path(key))
                     put("requirement", level.path("requirement"))
+                    if (level.hasNonNull("content")) put("content", level.path("content"))
                     put("unlocked", entry.path("unlocked"))
                     put("completed", entry.path("completed"))
                 }

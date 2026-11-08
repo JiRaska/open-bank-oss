@@ -30,6 +30,7 @@ data class GameLevel(
     val requirement: GameRequirement = GameRequirement(),
     val startsAt: Instant? = null,
     val endsAt: Instant? = null,
+    val content: GameCourse? = null,
 ) {
     init {
         require(id.matches(KEY) && theme.matches(KEY))
@@ -40,6 +41,7 @@ data class GameLevel(
                 titleEn.isNotBlank() &&
                 titleEn.length <= MAX_TITLE,
         )
+        require(content == null || content.id == id && content.theme == theme)
         require(startsAt == null || endsAt == null || startsAt < endsAt)
     }
 
@@ -54,6 +56,14 @@ data class GameLevel(
 }
 
 data class GameCatalog(val revision: Long, val levels: List<GameLevel>) {
+    /** A draft editor cannot publish, hide, delete, reorder or change existing LIVE content. */
+    fun requireDraftEditOf(before: GameCatalog) {
+        if (revision != before.revision) throw GameCatalogConflict()
+        val liveBefore = before.levels.filter { it.state == GameLevelState.LIVE }.sortedBy { it.id }
+        val liveAfter = levels.filter { it.state == GameLevelState.LIVE }.sortedBy { it.id }
+        require(liveBefore == liveAfter) { "Published chapters require an administrator" }
+    }
+
     init {
         require(revision >= 0 && levels.size in 1..MAX_LEVELS)
         require(levels.map { it.id }.distinct().size == levels.size)
