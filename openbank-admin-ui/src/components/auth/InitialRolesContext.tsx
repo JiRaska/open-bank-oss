@@ -19,12 +19,16 @@ import { createContext, useContext } from 'react'
  * suppress the client's initial /api/auth/session fetch, which the mobile-shell e2e
  * tests hold and release to model the permissions-resolve window.
  */
+const InitialOperatorIdContext = createContext<string | null>(null)
 const InitialRolesContext = createContext<string[] | null>(null)
 
-export function InitialRolesProvider({ roles, children }: { roles: string[] | null; children: React.ReactNode }) {
-  return <InitialRolesContext.Provider value={roles}>{children}</InitialRolesContext.Provider>
+export function InitialRolesProvider({ roles, operatorId = null, children }: { roles: string[] | null; operatorId?: string | null; children: React.ReactNode }) {
+  return <InitialOperatorIdContext.Provider value={operatorId}><InitialRolesContext.Provider value={roles}>{children}</InitialRolesContext.Provider></InitialOperatorIdContext.Provider>
 }
 
 export function useInitialRoles(): string[] | null {
   return useContext(InitialRolesContext)
 }
+
+/** Seed browser preferences from the same authenticated identity as the first server paint. */
+export function useInitialOperatorId(): string | null { return useContext(InitialOperatorIdContext) }

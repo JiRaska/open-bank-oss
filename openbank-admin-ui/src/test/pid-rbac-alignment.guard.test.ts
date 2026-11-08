@@ -21,7 +21,7 @@ describe('PID console mirrors pid-service RBAC', () => {
 
   it('uses the same permission at the edge, navigation, and page boundary', () => {
     expect(permissionForPath('/pid')).toBe('pid:view')
-    expect(read('components/layout/Sidebar.tsx')).toMatch(/href: '\/pid'[\s\S]*permission: 'pid:view'/)
+    expect(read('lib/navigation/catalog.ts')).toMatch(/href: '\/pid'[\s\S]*permission: 'pid:view'/)
     expect(read('app/pid/page.tsx')).toContain('<AuthGuard permission="pid:view">')
   })
 })

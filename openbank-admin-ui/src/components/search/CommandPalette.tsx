@@ -9,14 +9,22 @@
 
 'use client'
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import { useSession } from 'next-auth/react'
+import { useInitialRoles } from '@/components/auth/InitialRolesContext'
+import { hasPermission } from '@/lib/auth/roles'
+import { ALL_NAV, currentNavigation, isNavLocked, navigationAreas, searchNavigation } from '@/lib/navigation/catalog'
+import { useDomainOwnership } from '@/components/layout/DomainOwnershipContext'
+import { useNavigationPreferences } from '@/lib/navigation/preferences'
+import { openAssistant } from '@/lib/navigation/assistant'
 import { useRouter } from 'next/navigation'
-import { CreditCard, Search, User, X } from 'lucide-react'
+import { Bot, CreditCard, Search, User, X, FileText } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 type EntityRef = {
-  type: 'party' | 'account'
+  type: 'party' | 'account' | 'page' | 'pin'
+  external?: boolean
   id: string
   label: string
   sublabel?: string
@@ -27,27 +35,47 @@ const RECENTS_KEY = 'ob.palette.recents'
 const DEBOUNCE_MS = 300
 const MAX_RECENTS = 5
 
-function loadRecents(): EntityRef[] {
+function loadRecents(key: string): EntityRef[] {
   try {
-    return JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? '[]') as EntityRef[]
+    const data: unknown = JSON.parse(sessionStorage.getItem(key) ?? '[]')
+    return Array.isArray(data) ? data.filter(isEntityRef).slice(0, MAX_RECENTS) : []
   } catch {
     return []
   }
 }
 
-function pushRecent(ref: EntityRef) {
+function pushRecent(ref: EntityRef, key: string) {
   try {
-    const rest = loadRecents().filter(r => !(r.type === ref.type && r.id === ref.id))
-    sessionStorage.setItem(RECENTS_KEY, JSON.stringify([ref, ...rest].slice(0, MAX_RECENTS)))
+    const rest = loadRecents(key).filter(r => !(r.type === ref.type && r.id === ref.id))
+    sessionStorage.setItem(key, JSON.stringify([ref, ...rest].slice(0, MAX_RECENTS)))
   } catch { /* sessionStorage unavailable — recents are a nicety, never a blocker */ }
 }
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+function isEntityRef(value: unknown): value is EntityRef {
+  if (!value || typeof value !== 'object') return false
+  const ref = value as EntityRef
+  if ((ref.type !== 'party' && ref.type !== 'account') || typeof ref.id !== 'string' ||
+    !/^[a-zA-Z0-9_-]+$/.test(ref.id) || typeof ref.label !== 'string' || ref.label.length > 200) return false
+  return ref.route === `/${ref.type === 'party' ? 'parties' : 'accounts'}/${ref.id}`
+}
+export function CommandPalette(props: { open: boolean; onClose: () => void }) {
+  return props.open ? <OpenCommandPalette onClose={props.onClose} /> : null
+}
+
+function OpenCommandPalette({ onClose }: { onClose: () => void }) {
+  const open = true
   const router = useRouter()
   const { t } = useLanguage()
+  const { data: session } = useSession()
+  const initialRoles = useInitialRoles()
+  const roles = session?.user?.roles ?? initialRoles ?? []
+  const ownership = useDomainOwnership()
+  const preferences = useNavigationPreferences()
+  const [scope, setScope] = useState<'all' | 'pages' | 'records'>('all')
+  const recentsKey = preferences.operatorId ? `${RECENTS_KEY}.${preferences.operatorId}` : ''
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<EntityRef[]>([])
-  const [recents, setRecents] = useState<EntityRef[]>([])
+  const [recents] = useState<EntityRef[]>(() => recentsKey ? loadRecents(recentsKey) : [])
   const [active, setActive] = useState(0)
   const [loading, setLoading] = useState(false)
   const [unavailable, setUnavailable] = useState(false)
@@ -56,21 +84,38 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const listRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
 
-  const shown = query.trim().length >= 2 ? results : recents
+  const areas = navigationAreas(roles, ownership)
+  const toPage = (href: string): EntityRef[] => {
+    const item = ALL_NAV.find(entry => entry.href === href)
+    if (!item || isNavLocked(item, roles) || (item.permission && !hasPermission(roles, item.permission))) return []
+    const area = areas.find(entry => entry.items.includes(item))
+    return [{ type: 'page', id: item.href, label: t(item.nameCs, item.nameEn), route: item.href,
+      external: item.external, sublabel: area ? t(area.nameCs, area.nameEn) : t('Stránka', 'Page') }]
+  }
+  const pages: EntityRef[] = scope === 'records' ? [] : query.trim()
+    ? searchNavigation(query, roles).flatMap(item => toPage(item.href))
+    : preferences.recentPages.flatMap(toPage)
+  const pins: EntityRef[] = scope === 'records' ? [] : preferences.pins.flatMap(pin => {
+    if (!toPage(pin.pathname).length || (query.trim() && !pin.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))) return []
+    return [{ type: 'pin', id: pin.href, label: pin.label, route: pin.href, external: toPage(pin.pathname)[0]?.external, sublabel: t('Připnutý pohled', 'Pinned view') }]
+  })
+  const canShowEntity = (ref: EntityRef) => (ref.type === 'party' && hasPermission(roles, 'parties:view')) ||
+    (ref.type === 'account' && hasPermission(roles, 'accounts:view'))
+  const entities = scope === 'pages' ? [] : (query.trim().length >= 2 ? results : recents).filter(canShowEntity)
+  const shown = [...pages, ...pins, ...entities.filter(ref => ref.type === 'party'), ...entities.filter(ref => ref.type === 'account')]
+  const canAsk = hasPermission(roles, 'agent:view')
+  const askAssistant = (selected?: EntityRef) => {
+    const item = currentNavigation(window.location.pathname)
+    onClose()
+    // Wait until the modal has restored focus before the assistant takes it.
+    requestAnimationFrame(() => openAssistant({ prompt: query.trim(), context: {
+      label: selected?.label ?? (item ? t(item.nameCs, item.nameEn) : t('Aktuální stránka', 'Current page')),
+      route: selected?.route.split('?')[0] ?? window.location.pathname,
+    } }))
+  }
 
   useEffect(() => {
-    if (open) {
-      setQuery('')
-      setResults([])
-      setUnavailable(false)
-      setLoading(false)
-      setRecents(loadRecents())
-      setActive(0)
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open || query.trim().length < 2) return
+    if (!open || query.trim().length < 2 || scope === 'pages') return
     const ctrl = new AbortController()
     const timer = setTimeout(() => {
       fetch(`/api/entities/resolve?q=${encodeURIComponent(query.trim())}`, { signal: ctrl.signal, cache: 'no-store' })
@@ -80,7 +125,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         })
         .then(d => {
           if (ctrl.signal.aborted) return
-          setResults(d.results ?? [])
+          setResults(Array.isArray(d.results) ? d.results.filter(isEntityRef).slice(0, 20) : [])
         })
         .catch(() => {
           if (ctrl.signal.aborted) return
@@ -92,13 +137,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         })
     }, DEBOUNCE_MS)
     return () => { clearTimeout(timer); ctrl.abort() }
-  }, [attempt, open, query])
+  }, [attempt, open, query, scope])
 
-  const choose = useCallback((ref: EntityRef) => {
-    pushRecent(ref)
+  const choose = (ref: EntityRef) => {
+    if (ref.type === 'party' || ref.type === 'account') pushRecent(ref, recentsKey)
+    else preferences.recordPage(ref.route.split('?')[0])
     onClose()
-    router.push(ref.route)
-  }, [onClose, router])
+    if (ref.external) window.location.assign(ref.route)
+    else router.push(ref.route)
+  }
 
   // The keydown listener must never read a STALE `shown`/`active` (#3886).
   //
@@ -134,6 +181,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || (e.target instanceof HTMLElement && e.target !== inputRef.current)) return
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActive(a => Math.max(0, Math.min(a + 1, shownRef.current.length - 1)))
@@ -149,13 +197,15 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   }, [open])
 
   useEffect(() => {
-    const el = listRef.current?.children[active] as HTMLElement | undefined
+    const el = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
     el?.scrollIntoView?.({ block: 'nearest' })
   }, [active])
 
   const groups: Array<{ title: string; icon: typeof User; items: Array<{ ref: EntityRef; index: number }> }> = []
   const parties = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'party')
   const accounts = shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'account')
+  if (pages.length) groups.push({ title: query.trim() ? t('Stránky', 'Pages') : t('Nedávno otevřené stránky', 'Recently opened pages'), icon: FileText, items: shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'page') })
+  if (pins.length) groups.push({ title: t('Připnuté pohledy', 'Pinned views'), icon: FileText, items: shown.map((ref, index) => ({ ref, index })).filter(x => x.ref.type === 'pin') })
   if (parties.length) groups.push({ title: t('Klienti', 'Parties'), icon: User, items: parties })
   if (accounts.length) groups.push({ title: t('Účty', 'Accounts'), icon: CreditCard, items: accounts })
 
@@ -177,7 +227,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         }}
         style={{
           position: 'fixed', zIndex: 101, left: '50%', top: '12vh', transform: 'translateX(-50%)',
-          width: '560px', maxWidth: '92vw', background: 'var(--surface)',
+          width: '680px', maxWidth: '92vw', background: 'var(--surface)',
           border: '1px solid var(--border)', borderRadius: '12px',
           boxShadow: '0 16px 48px rgba(0,0,0,0.35)', overflow: 'hidden',
         }}
@@ -186,7 +236,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           {t('Rychlé hledání', 'Quick search')}
         </Dialog.Title>
         <Dialog.Description style={{ position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
-          {t('Vyhledejte klienta nebo účet a otevřete jeho detail.', 'Search for a party or account and open its detail.')}
+          {t('Vyhledejte stránku, klienta nebo účet. Dotaz můžete předat asistentovi.', 'Find a page, party or account. You can hand your query to the assistant.')}
         </Dialog.Description>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
           <Search size={15} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
@@ -198,12 +248,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               setQuery(nextQuery)
               setResults([])
               setUnavailable(false)
-              setLoading(nextQuery.trim().length >= 2)
+              setLoading(nextQuery.trim().length >= 2 && scope !== 'pages')
               setActive(0)
             }}
-            placeholder={t('Jméno, e-mail, telefon, IČO, IBAN…', 'Name, email, phone, reg. no., IBAN…')}
-            aria-label={t('Hledat klienty a účty', 'Search parties and accounts')}
+            placeholder={t('Najít stránku, klienta nebo se zeptat…', 'Find a page, customer or ask a question…')}
+            aria-label={t('Hledat stránky, klienty a účty', 'Search pages, parties and accounts')}
             aria-controls="command-palette-results"
+            aria-autocomplete="list"
             aria-activedescendant={shown[active] ? `command-palette-option-${shown[active].type}-${shown[active].id}` : undefined}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
@@ -215,6 +266,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           </button>
         </div>
 
+        <div role="group" aria-label={t('Rozsah hledání', 'Search scope')} style={{ display: 'flex', gap: 6, padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+          {(['all', 'pages', 'records'] as const).map(value => <button type="button" key={value} aria-pressed={scope === value}
+            onClick={() => { setScope(value); setActive(0); setLoading(value !== 'pages' && query.trim().length >= 2); setUnavailable(false); inputRef.current?.focus() }}
+            style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', background: scope === value ? 'var(--accent-light)' : 'transparent', color: scope === value ? 'var(--accent-text)' : 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+            {value === 'all' ? t('Vše', 'All') : value === 'pages' ? t('Stránky', 'Pages') : t('Záznamy', 'Records')}
+          </button>)}
+        </div>
         <div
           id="command-palette-results"
           ref={listRef}
@@ -263,12 +321,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               })}
             </div>
           ))}
-          {query.trim().length >= 2 && loading && (
+          {query.trim().length >= 2 && scope !== 'pages' && loading && (
             <div role="status" aria-live="polite" style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-tertiary)' }}>
               {t('Hledám klienty a účty…', 'Searching parties and accounts…')}
             </div>
           )}
-          {query.trim().length >= 2 && !loading && unavailable && (
+          {query.trim().length >= 2 && scope !== 'pages' && !loading && unavailable && (
             <div role="alert" style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-secondary)' }}>
               <div>{t('Vyhledávání je dočasně nedostupné.', 'Search is temporarily unavailable.')}</div>
               <button
@@ -289,13 +347,21 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
               </button>
             </div>
           )}
-          {query.trim().length >= 2 && !loading && !unavailable && shown.length === 0 && (
+          {query.trim().length >= 1 && !loading && !unavailable && shown.length === 0 && (
             <div style={{ padding: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--text-tertiary)' }}>
               {t('Nic nenalezeno', 'No results')}
             </div>
           )}
         </div>
 
+        {canAsk && shown[active] && <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ minWidth: 0, fontSize: 12, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('Kontext', 'Context')}: {shown[active].label}</span>
+          <button type="button" onClick={() => askAssistant(shown[active])} style={{ flexShrink: 0, background: 'transparent', border: 0, color: 'var(--accent-text)', fontSize: 12, cursor: 'pointer' }}>{t('Zeptat se k výsledku', 'Ask about result')}</button>
+        </div>}
+        {canAsk && query.trim() && <button type="button" onClick={() => askAssistant()}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '14px 16px', border: 0, borderTop: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--accent-text)', textAlign: 'left', cursor: 'pointer' }}>
+          <Bot size={16} aria-hidden="true" /><span>{t('Zeptat se asistenta', 'Ask the assistant')} <small>· {t('s kontextem aktuální stránky', 'with current page context')}</small></span>
+        </button>}
         <div style={{ padding: '8px 16px', borderTop: '1px solid var(--border)', display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
           <span>↑↓ {t('výběr', 'select')}</span>
           <span>↵ {t('otevřít', 'open')}</span>
