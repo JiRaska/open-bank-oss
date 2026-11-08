@@ -57,11 +57,14 @@ ghcr-publish.yml|job:publish|id-token
 ghcr-publish.yml|job:publish|packages
 governance-horizon-watch.yml|job:watch|issues
 image-rescan.yml|job:escalate|issues
+# Adds/removes only the needs-kind label (rules.yaml: issues.kinds).
+issue-kind.yml|job:kind|issues
 labels.yml|job:sync|issues
 main-red-watch.yml|job:reconcile|contents
 main-red-watch.yml|job:watch|contents
 main-red-watch.yml|job:watch|issues
 merged-past-red-check-watch.yml|job:watch|issues
+ops-heartbeat.yml|job:watch|issues
 pact-verification-reconcile.yml|job:reconcile|actions
 perf-gate.yml|job:raise-issue|issues
 platform-images.yml|job:build|id-token

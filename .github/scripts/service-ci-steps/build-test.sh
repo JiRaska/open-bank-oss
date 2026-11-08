@@ -4,7 +4,22 @@
 source "$(dirname "${BASH_SOURCE[0]}")/coverage-evidence.sh"
 coverage_paths
 # Never retain a previous invocation's report as evidence for this build.
-rm -f "$coverage_xml"
+coverage_task_plan="$SERVICE/build/kover/report-test-tasks.json"
+rm -f "$coverage_xml" "$coverage_task_plan"
+# Reuse this enforcing invocation to discover the real Test task names. Keep the
+# plan private until the build succeeds; a failed build must not leave a stale plan.
+coverage_plan_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/coverage-tasks.XXXXXX")"
+OPENBANK_COVERAGE_TASK_PLAN="$(cd "$coverage_plan_dir" && pwd)/tasks.json"
+export OPENBANK_COVERAGE_TASK_PLAN
+cat > "$coverage_plan_dir/tasks.init.gradle" <<'GRADLE'
+gradle.beforeProject { module ->
+    if (module.path != ':' + System.getenv('SERVICE')) return
+    gradle.taskGraph.whenReady {
+        def paths = module.tasks.withType(org.gradle.api.tasks.testing.Test).collect { it.path }.sort()
+        new File(System.getenv('OPENBANK_COVERAGE_TASK_PLAN')).text = groovy.json.JsonOutput.toJson(paths)
+    }
+}
+GRADLE
 # Capture image/lifecycle/time plus a transient daemon id from this job's Docker
 # stream. The collector uses the id only to resolve one-to-one duplicate
 # observations and strips it before schema validation/publication; it is never
@@ -23,6 +38,7 @@ docker_events_pid=$!
 cleanup_test_evidence() {
   kill "${docker_events_pid}" 2>/dev/null || true
   wait "${docker_events_pid}" 2>/dev/null || true
+  rm -rf "$coverage_plan_dir"
 }
 trap cleanup_test_evidence EXIT
 # Local task durations for the two observed slow builds; no second build
@@ -45,6 +61,8 @@ fi
 # the first Gradle task; tests and build outputs are never replayed.
 coverage_run build bash .github/scripts/retry-testcontainers-ebusy.sh -- \
   bash .github/scripts/retry-gradle-verification-cache.sh -- \
-  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
+  ./gradlew "${GRADLE_PROFILE_ARGS[@]}" --init-script "$coverage_plan_dir/tasks.init.gradle" --configure-on-demand :"${SERVICE}":build "${deploy_tasks[@]}" --build-cache --console=plain --stacktrace \
   "${deploy_options[@]}" \
-  -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
+  -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated" || exit $?
+mkdir -p "$(dirname "$coverage_task_plan")"
+mv "$OPENBANK_COVERAGE_TASK_PLAN" "$coverage_task_plan"

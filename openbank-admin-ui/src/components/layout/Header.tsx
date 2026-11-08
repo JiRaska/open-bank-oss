@@ -152,7 +152,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
           >
             v{build.version}
             {build.gitSha && build.gitSha !== 'unknown' && (
-              <span style={{ opacity: 0.65, marginLeft: '6px' }}>
+              <span style={{ marginLeft: '6px' }}>
                 {build.gitSha.slice(0, 7)}
               </span>
             )}

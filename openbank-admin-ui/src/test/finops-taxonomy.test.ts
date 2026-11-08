@@ -7,8 +7,16 @@
 // business flow must be a real, domain-classified service, or the roll-up would silently lose it.
 // This fails the build the same way a Zod-validated manifest does.
 
-import { describe, it, expect } from 'vitest'
-import { COST_GROUPS, domainForService, knownServiceIds, canonicalServiceId } from '@/lib/finops/costGroups'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { parse } from 'yaml'
+import { getRegistry } from '@/lib/services/fleet'
+import * as fleet from '@/lib/services/fleet'
+import { k8sNameOf } from '@/lib/services/registry'
+import { COST_GROUPS, domainForService, knownServiceIds, canonicalServiceId, governanceServiceIdForWorkload } from '@/lib/finops/costGroups'
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('finops cost-group taxonomy', () => {
   it('every service in every flow exists in the governance manifest', () => {
@@ -36,6 +44,31 @@ describe('finops cost-group taxonomy', () => {
       expect(g.labelCs.length, g.id).toBeGreaterThan(0)
       expect(g.services.length, g.id).toBeGreaterThan(0)
     }
+  })
+
+  it('joins every registered workload identity to its actual source owner', () => {
+    for (const service of getRegistry()) {
+      const expectedId = service.container.replace(/^openbank-/, '')
+      const declaration = parse(readFileSync(resolve('..', service.container, 'governance.yaml'), 'utf8'))
+      expect(governanceServiceIdForWorkload(k8sNameOf(service)), service.container).toBe(expectedId)
+      expect(domainForService(k8sNameOf(service)), service.container).toBe(declaration.dataDomain)
+    }
+  })
+
+  it('does not assign an ambiguous workload name to an arbitrary business owner', () => {
+    const ledger = getRegistry().find(service => service.id === 'ledger')!
+    const wealth = getRegistry().find(service => service.id === 'wealth')!
+    vi.spyOn(fleet, 'getRegistry').mockReturnValue([ledger, { ...wealth, k8sName: k8sNameOf(ledger) }])
+    expect(governanceServiceIdForWorkload(k8sNameOf(ledger))).toBeUndefined()
+    expect(domainForService(k8sNameOf(ledger))).toBeUndefined()
+  })
+
+  it('resolves the declared scanner workload alias without inventing other suffix aliases', () => {
+    expect(governanceServiceIdForWorkload('security-scanner-service')).toBe('security-scanner')
+    expect(domainForService('security-scanner-service')).toBe(domainForService('security-scanner'))
+    expect(domainForService('openbank-security-scanner-service')).toBe('platform')
+    expect(governanceServiceIdForWorkload('unregistered-service')).toBe('unregistered-service')
+    expect(domainForService('unregistered-service')).toBeUndefined()
   })
 
   it('canonicalServiceId strips a leading openbank- prefix', () => {

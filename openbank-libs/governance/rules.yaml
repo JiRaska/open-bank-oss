@@ -2835,6 +2835,20 @@ issues:
     - governance_followup                 # actionable tail of an ADR (rollout, reg condition, gate flip)
     - bug                                 # defect in shipped behavior
     - enhancement                         # proposed capability (asks "needs ADR?" before build)
+    - tech_debt                           # refactor / cleanup with no observable behavior change
+  # The KIND of an issue: exactly one of these labels per open issue. Native issue types are
+  # org-only and this repo is user-owned, so the kind is a label — and a label has no
+  # cardinality. Measured 2026-11-03: 242 of 397 open issues carried no kind, 27 carried two.
+  # A violation is flagged with `flag_label`, not blocked: GitHub cannot refuse an issue.
+  kinds:
+    labels: [bug, enhancement, governance, sweep, tech-debt]
+    cardinality: exactly_one
+    flag_label: needs-kind
+    # Opened AND closed by a generator; a kind would record no decision. Exempt from
+    # "missing" only — two kinds is still flagged.
+    generator_owned: [deploy-drift, deploy-code-lag, fleet-health, main-red, flaky-test,
+                      vex-triage, credential-inventory, deps-freshness, kev-listed]
+    enforced_by: .github/workflows/issue-kind.yml   # .github/scripts/issue-kind.py
   not_an_issue:
     - architectural decisions             # -> docs/adr (an Issue may TRACK an ADR's rollout, not replace it)
     - changelog entries                   # -> release-please derives these from Conventional Commits

@@ -7,6 +7,9 @@ import './globals.css'
 import { cookies, headers } from 'next/headers'
 import { AppProviders } from '@/components/layout/AppProviders'
 import { auth } from '@/auth'
+import { getRegistry } from '@/lib/services/fleet'
+import type { DomainGroup } from '@/lib/governance/domains'
+import { currentDomainOwnership } from '@/lib/services/domainOwnership'
 import { LANG_COOKIE, parseLanguage } from '@/lib/i18n/language'
 import { THEME_COOKIE_KEY, parseTheme } from '@/lib/theme/theme'
 
@@ -37,10 +40,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // nav re-painted on top of the user (measured 0.12+ workspace CLS, see Sidebar).
   const initialRoles: string[] | null = (await auth())?.user?.roles ?? null
 
+  const registry = initialRoles ? getRegistry() : []
+  const ownership = initialRoles ? (await currentDomainOwnership(registry)).byModule : new Map<string, DomainGroup>()
+  const initialDomainOwnership = Object.fromEntries(registry.map(service =>
+    [service.id, ownership.get(service.container) ?? 'unclassified'],
+  ))
+
   return (
     <html lang={initialLanguage} className={initialTheme === 'dark' ? 'dark' : undefined} suppressHydrationWarning>
       <body>
-        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme} initialRoles={initialRoles}>{children}</AppProviders>
+        <AppProviders initialLanguage={persistedLanguage} initialTheme={initialTheme} initialRoles={initialRoles} initialDomainOwnership={initialDomainOwnership}>{children}</AppProviders>
       </body>
     </html>
   )
