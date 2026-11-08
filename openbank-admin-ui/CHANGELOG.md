@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.6.0...admin-ui-v4.7.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** make test evidence understandable and explorable ([#15236](https://github.com/JiRaska/open-bank-oss/issues/15236)) ([92a8d4a](https://github.com/JiRaska/open-bank-oss/commit/92a8d4aeea99f4dc084023bfeb25921a2932fc19))
+
 ## [4.6.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.5.1...admin-ui-v4.6.0) (2026-11-08)
 
 

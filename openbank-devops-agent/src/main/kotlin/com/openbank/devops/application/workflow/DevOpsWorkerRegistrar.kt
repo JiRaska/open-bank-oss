@@ -21,6 +21,7 @@ class DevOpsWorkerRegistrar(
     private val detectFindings: DetectFindingsActivityImpl,
     private val diagnoseAndPropose: DiagnoseAndProposeActivityImpl,
     private val ciGateProfile: CiGateProfileActivityImpl,
+    private val cpuAdvisory: CpuOptimizationAdvisoryActivityImpl,
 ) {
 
     private val log = Logger.getLogger(DevOpsWorkerRegistrar::class.java)
@@ -35,7 +36,13 @@ class DevOpsWorkerRegistrar(
         val factory = WorkerFactory.newInstance(workflowClient)
         val worker = factory.newWorker(temporalConfig.taskQueue())
         worker.registerWorkflowImplementationTypes(DevOpsAnalysisWorkflowImpl::class.java)
-        worker.registerActivitiesImplementations(collectSignals, detectFindings, diagnoseAndPropose, ciGateProfile)
+        worker.registerActivitiesImplementations(
+            collectSignals,
+            detectFindings,
+            diagnoseAndPropose,
+            ciGateProfile,
+            cpuAdvisory,
+        )
         factory.start()
         log.infof("Temporal devops-agent worker started on task queue '%s'", temporalConfig.taskQueue())
     }
