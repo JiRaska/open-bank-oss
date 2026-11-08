@@ -293,8 +293,9 @@ class AmlCaseCreateIdempotencyFingerprintIT {
 
         assertThat(post(key, body(party, "FRAUD_REVIEW")).statusCode).isEqualTo(403)
         assertThat(caseCount(party)).isZero()
-        val scoped = "idempotency:" + IdempotencyScope("aml-service", "service-account-openbank-sepa-payment").storeKey(key)
-        assertThat(redis.key().exists(scoped).await().indefinitely()).isZero()
+        val scoped = "idempotency:" +
+            IdempotencyScope("aml-service", "service-account-openbank-sepa-payment").storeKey(key)
+        assertThat(redis.key().exists(scoped).await().indefinitely()).isFalse()
     }
 
     @Test
@@ -313,7 +314,7 @@ class AmlCaseCreateIdempotencyFingerprintIT {
         assertThat(post(key, body(party, "FRAUD_REVIEW")).statusCode).isEqualTo(403)
         assertThat(caseCount(party)).isZero()
         val scoped = "idempotency:" + IdempotencyScope("aml-service", "u-compliance").storeKey(key)
-        assertThat(redis.key().exists(scoped).await().indefinitely()).isZero()
+        assertThat(redis.key().exists(scoped).await().indefinitely()).isFalse()
     }
 
     @Test
