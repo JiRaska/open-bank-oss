@@ -181,6 +181,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "the ONNX serving path inside the shipped image (#3354), on a schedule rather than "
         "per-push, so it neither needs nor should store a per-run entry.",
     ),
+    "pension-accounting-e2e.yml::e2e": (
+        "read-only",
+        "Path-scoped packaged accounting proof restores fleet-lint's Gradle home to build "
+        "ledger and pension-fund fast jars; it never introduces another cache writer.",
+    ),
     "pitest.yml::pitest": (
         "read-only",
         "Demoted from setup-java. Consumer; restores fleet-lint's home. The setup-java "

@@ -37,3 +37,8 @@ close evidence remains unchanged. Policies consume the actual typed OPA resource
 
 The JSON report contains assertion names only. This is executable test evidence, not a live
 operating month, chart approval, deployment approval or permission to enable enforcement.
+
+The path-scoped `Pension accounting E2E` GitHub workflow builds the same fast jars and runs this
+scenario on relevant pull requests or manual dispatch. It uploads only the assertion JSON with
+an explicit running/passed/failed status, never the temporary directory containing generated keys.
+This standalone check does not change branch protection or the existing `all-green` dependency set.
