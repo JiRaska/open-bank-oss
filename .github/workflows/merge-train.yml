@@ -180,7 +180,7 @@ jobs:
             *)              SUFFIX="linux_amd64";         OPA_SHA256="23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb" ;;
           esac
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
-            "https://openpolicyagent.org/downloads/v1.21.1/opa_${SUFFIX}"
+            "https://github.com/open-policy-agent/opa/releases/download/v1.21.1/opa_${SUFFIX}"
           echo "${OPA_SHA256}  $HOME/bin/opa" | sha256sum -c - \
             || { echo "::error::OPA v1.21.1 download failed checksum verification"; exit 1; }
           chmod +x "$HOME/bin/opa"
