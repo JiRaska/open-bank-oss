@@ -11,7 +11,7 @@ import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshot
 import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
 import { loadRunningCommits } from '@/lib/evidence/runningCommits'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotResult } from '@/lib/evidence/publishedSnapshot'
-import { testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from '@/lib/evidence/testIntelligenceSnapshot'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from '@/lib/evidence/testIntelligenceSnapshot'
 import { buildEvidenceMeta, etagOf, ifNoneMatchHits, overlayRunningEvidence } from '@/lib/evidence/overlay'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
@@ -552,6 +552,7 @@ function cacheFor(file: string) {
   if (!cache) {
     const publishedReader = createEvidenceSnapshotReader({
       baseUrl,
+      maxBytes: TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES,
       validateSnapshot: validateTestIntelligenceSnapshot,
       collectedAt: testIntelligenceCollectedAt,
     })

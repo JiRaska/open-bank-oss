@@ -55,7 +55,7 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(workflow).toContain('No safe authenticated money-path target')
   })
 
-  it('keeps cross-layer evidence gaps visible from the primary operator view', () => {
+  it('keeps cross-layer gaps reachable and bounds their initial rendering', () => {
     const source = read()
 
     expect(source).toContain("function EvidenceGapQueue")
@@ -63,7 +63,10 @@ describe('Test Intelligence performance coverage scope', () => {
     expect(source).toContain("row.plan?.blocker")
     expect(source).toContain("platform.runtime !== 'passed'")
     expect(source).toContain('<EvidenceGapQueue report={report} selectTab={setTab} />')
-    expect(source).toContain("{gaps.map(gap =>")
+    expect(source).toContain("{gaps.slice(0, visibleLimit).map(gap =>")
+    expect(source).toContain('setVisibleLimit(visibleLimit + 25)')
+    expect(source).toContain('attention={(openComponent, openRuns) =>')
+    expect(source).toContain('<TestAttentionList report={report}')
     expect(source).not.toContain('gaps.slice(0, 12)')
   })
 })
