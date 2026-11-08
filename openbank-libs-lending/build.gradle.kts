@@ -35,6 +35,10 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // The compliance-pack JSON front-end is test-only; do not obtain its engine
+    // implicitly from the domain production API.
+    testImplementation(libs.kotlin.reflect)
+    testImplementation(libs.jackson.module.kotlin)
     // Property tests over random schedules (Amortization small-principal invariants).
     testImplementation("io.kotest:kotest-property:5.9.1")
     // Property tests over the origination graph (ADR-0211 D1): random walks must never throw

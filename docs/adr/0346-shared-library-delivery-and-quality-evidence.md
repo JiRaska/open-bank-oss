@@ -54,6 +54,13 @@ Extract a remote service only when independent ownership or release cadence just
 latency and availability cost. An extraction requires a measured call budget, isolation, a versioned
 protocol and recovery tests. It is not the default way to make a utility library updateable.
 
+Keep JSON engines and Kotlin reflection outside the domain runtime dependency boundary. The
+existing identifier annotations remain part of its API; their wire contracts remain tested.
+Runtime serialization dependencies belong explicitly to `libs-runtime`, while tests that use
+serialization or reflection declare those dependencies in their own test configurations. Verify
+the resolved dependency boundary, not only production imports. Moving a dependency must also
+preserve the resolved versions of consumers that still require it.
+
 ### One dependency model, distinct proof scopes
 
 Use `library_dependency_graph.py` for literal Gradle project edges. CI includes test edges;
@@ -80,7 +87,7 @@ not-applicable are distinct states. A skipped external contract is not a passed 
 |---|---|---|
 | Unit and property | Monetary conservation, valid-state transitions, rounding/calendar boundaries and rejection of invalid inputs | Module tests and property tests exist; extend invariants with each changed capability. |
 | Integration | Actual database/Redis behavior, transactions, serialization and Quarkus/CDI wiring | Runtime container tests and consumer builds exist; mocks do not substitute for these boundaries. |
-| Contract and compatibility | Consumer behavior, wire compatibility and old/new library API linkage | All six code-bearing library modules use Kotlin ABI snapshots in check/build; an old compiled quote consumer executes against the current library. Consumer conformance/Pact remain independent proofs. |
+| Contract and compatibility | Consumer behavior, wire compatibility and old/new library API linkage | Source-bearing runtime libraries discovered by `library_quality_scope.py` use Kotlin ABI snapshots in check/build; an old compiled quote consumer executes against the current library. Consumer conformance/Pact remain independent proofs. |
 | Concurrency and failure | Atomicity, bounded work, cancellation, outages and recovery without false success | XML output isolation and invalid-to-valid parser recovery are tested. Provider outage/cancellation recovery belongs to the affected runtime guard change. Fleet recovery still needs consumer evidence. |
 | Fuzz | Parser robustness and bounded resource use across malformed inputs | ClusterFuzzLite covers domain/ISO parsers. The pacs.008 oracle validates arbitrary input, then requires exact recovery through fresh construction, XSD validation and reading. Deterministic corpus mutations also run in CI. |
 | Mutation | Tests reject meaningful control-flow and arithmetic changes | PIT lanes exist; moved production code must remain in their target sets. Surviving critical mutations require review. |
@@ -103,8 +110,9 @@ Run `bash .github/scripts/libs-change-dependents.sh --selftest` and
 `python3 .github/scripts/service-ci-library-dependents.py --self-test`. The existing
 `libs-change-dependents` governance gate executes these checks.
 
-`libs-quality.yml` checks the ABI snapshots of domain/runtime/lending/ISO/Temporal/testing,
-executes an unchanged old consumer binary and runs XML concurrency, mutation and recovery tests.
+`libs-quality.yml` derives its library build and ABI tasks from `library_quality_scope.py`, excluding
+build-time tools and the resources-only umbrella. It also executes an unchanged old consumer binary
+and runs XML concurrency, mutation and recovery tests.
 The standalone fuzz build runs its corpus tests before packaging the Jazzer targets.
 Update snapshots with `:<module>:updateKotlinAbi` only after reviewing compatibility; changing
 a snapshot is not evidence that an incompatible change became safe.
