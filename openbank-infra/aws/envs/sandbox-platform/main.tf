@@ -875,8 +875,9 @@ resource "helm_release" "cnpg" {
     # put glitchtip-pg on 18.3 while every cluster we pin runs 18.6. Keep this
     # equal to the fleet's pinned PostgreSQL image.
     {
-      name  = "config.data.POSTGRES_IMAGE_NAME"
-      value = "ghcr.io/cloudnative-pg/postgresql:18.6"
+      name = "config.data.POSTGRES_IMAGE_NAME"
+      # Pull-through path, as the fleet's pinned clusters use (and Kyverno would rewrite to).
+      value = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.region}.amazonaws.com/${aws_ecr_pull_through_cache_rule.ghcr.ecr_repository_prefix}/cloudnative-pg/postgresql:18.6"
       type  = "string"
     },
   ]
