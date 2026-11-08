@@ -22,6 +22,8 @@ HANDOFF = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(HANDOFF)
 REPO = "org/repo"
 SHA = "a" * 40
+SELF_BUILT = "openbank-document-renderer"
+LANE = frozenset({SELF_BUILT})
 
 
 def event():
@@ -96,25 +98,37 @@ class ProvenanceTests(unittest.TestCase):
 
 class SelectionTests(unittest.TestCase):
     def test_push_and_followon_are_disjoint_and_cover_original_selection(self):
-        services = ["openbank-ledger-service", HANDOFF.COMPONENT, "openbank-libs", "openbank-account-service"]
-        push = HANDOFF.select_services(services, "push")
-        followon = HANDOFF.select_services(services, "workflow_run")
-        self.assertEqual(followon, [HANDOFF.COMPONENT])
-        self.assertEqual(push, ["openbank-ledger-service", "openbank-libs", "openbank-account-service"])
+        services = ["openbank-ledger-service", SELF_BUILT, "openbank-libs", "openbank-account-service"]
+        push = HANDOFF.select_services(services, "push", LANE)
+        followon = HANDOFF.select_services(services, "workflow_run", LANE)
+        self.assertEqual(push, [SELF_BUILT])
+        self.assertEqual(followon, ["openbank-ledger-service", "openbank-libs", "openbank-account-service"])
         self.assertEqual(set(push) & set(followon), set())
         self.assertEqual(set(push) | set(followon), set(services))
 
-    def test_no_context_added_when_detector_did_not_select_it(self):
-        for selected in ([], ["openbank-ledger-service"]):
-            self.assertEqual(HANDOFF.select_services(selected, "workflow_run"), [])
-            self.assertEqual(HANDOFF.select_services(selected, "push"), selected)
+    def test_no_service_added_that_the_detector_did_not_select(self):
+        for selected in ([], ["openbank-ledger-service"], [SELF_BUILT]):
+            with self.subTest(selected=selected):
+                self.assertTrue(set(HANDOFF.select_services(selected, "workflow_run", LANE)) <= set(selected))
+                self.assertTrue(set(HANDOFF.select_services(selected, "push", LANE)) <= set(selected))
+
+    def test_empty_push_lane_sends_everything_to_the_completed_run(self):
+        services = ["openbank-ledger-service", SELF_BUILT]
+        self.assertEqual(HANDOFF.select_services(services, "push"), [])
+        self.assertEqual(HANDOFF.select_services(services, "workflow_run"), services)
+
+    def test_push_lane_rejects_malformed_names(self):
+        self.assertEqual(HANDOFF.push_lane_set(" openbank-a  openbank-b "), frozenset({"openbank-a", "openbank-b"}))
+        for value in ("context-service", "openbank-X", "openbank-a;rm"):
+            with self.subTest(value=value), self.assertRaises(HANDOFF.HandoffError):
+                HANDOFF.push_lane_set(value)
 
     def test_other_events_untouched_preserving_order_and_duplicates(self):
-        services = [HANDOFF.COMPONENT, "openbank-ledger-service", HANDOFF.COMPONENT]
+        services = [SELF_BUILT, "openbank-ledger-service", SELF_BUILT]
         for name in ("workflow_dispatch", "schedule", "release", "pull_request"):
             with self.subTest(name=name):
-                self.assertEqual(HANDOFF.select_services(services, name), services)
-                self.assertIsNot(HANDOFF.select_services(services, name), services)
+                self.assertEqual(HANDOFF.select_services(services, name, LANE), services)
+                self.assertIsNot(HANDOFF.select_services(services, name, LANE), services)
 
     def test_malformed_selection_or_event_rejected(self):
         for value in (None, {}, "openbank-context-service", [None], [1], ["context-service"], ["openbank-X"], ["openbank-a\n"]):
@@ -125,12 +139,12 @@ class SelectionTests(unittest.TestCase):
                 HANDOFF.select_services([], name)
 
     def test_select_cli_compact_json_and_malformed_input(self):
-        for content, event_name, expected in ((json.dumps([HANDOFF.COMPONENT, "openbank-libs"]), "push", '["openbank-libs"]\n'),
-                                               (json.dumps([HANDOFF.COMPONENT]), "workflow_run", f'["{HANDOFF.COMPONENT}"]\n'),
+        for content, event_name, expected in ((json.dumps([SELF_BUILT, "openbank-libs"]), "push", f'["{SELF_BUILT}"]\n'),
+                                               (json.dumps([SELF_BUILT, "openbank-libs"]), "workflow_run", '["openbank-libs"]\n'),
                                                ("invalid PRIVATE", "push", "")):
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch.object(HANDOFF.sys, "stdin", io.StringIO(content)), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-                status = HANDOFF.main(["select", "--event", event_name])
+                status = HANDOFF.main(["select", "--event", event_name, "--push-lane", SELF_BUILT])
             self.assertEqual(stdout.getvalue(), expected)
             self.assertEqual(status, 0 if expected else 1)
             self.assertNotIn("PRIVATE", stderr.getvalue())
@@ -147,7 +161,7 @@ class WorkflowPartitionTests(unittest.TestCase):
         cls.workflow = (cls.root / ".github/workflows/auto-deploy.yml").read_text()
         changes = cls.workflow.split("  changes:\n", 1)[1]
         cls.admission = re.search(r"^    if: >-\n((?:      .*\n)+)", changes, re.MULTILINE).group(1)
-        marker = 'case "$GITHUB_EVENT_NAME:$CONTEXT_BUILD_HANDOFF_ENABLED"'
+        marker = 'case "$GITHUB_EVENT_NAME:$DEPLOY_AFTER_SERVICES_CI_ENABLED"'
         if changes.count(marker) != 1:
             raise AssertionError("expected one actual workflow handoff partition")
         # Run the workflow's real final selection block, including its flag check and outputs.
@@ -159,6 +173,8 @@ class WorkflowPartitionTests(unittest.TestCase):
                 break
             lines.append(line[10:])
         cls.partition_script = "\n".join(lines)
+        # The workflow's own value, so the test cannot pass against a list the workflow does not use.
+        cls.self_built = re.search(r'^  SELF_BUILT_SERVICES: "([^"]*)"$', cls.workflow, re.MULTILINE).group(1)
 
     def admitted(self, event_name, enabled):
         run = SimpleNamespace(**event()["workflow_run"])
@@ -168,14 +184,15 @@ class WorkflowPartitionTests(unittest.TestCase):
                                  event=SimpleNamespace(workflow_run=run))
         expression = self.admission.replace("&&", " and ").replace("||", " or ")
         return eval("(" + expression + ")", {"__builtins__": {}},
-                    {"github": github, "vars": SimpleNamespace(CONTEXT_BUILD_HANDOFF_ENABLED=enabled)})
+                    {"github": github, "vars": SimpleNamespace(DEPLOY_AFTER_SERVICES_CI_ENABLED=enabled)})
 
     def partition(self, selected, event_name, enabled):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             output = temporary / "output"
             shutil.copyfile(Path(__file__).with_name("context-deploy-handoff.py"), temporary / "context-deploy-handoff.py")
-            environment = dict(os.environ, GITHUB_EVENT_NAME=event_name, CONTEXT_BUILD_HANDOFF_ENABLED=enabled,
+            environment = dict(os.environ, GITHUB_EVENT_NAME=event_name, DEPLOY_AFTER_SERVICES_CI_ENABLED=enabled,
+                               SELF_BUILT_SERVICES=self.self_built,
                                RUNNER_TEMP=directory, GITHUB_OUTPUT=str(output))
             prefix = "set -euo pipefail\nDEPLOYABLE=(" + " ".join(shlex.quote(item) for item in selected) + ")\n"
             result = subprocess.run(["bash", "-c", prefix + self.partition_script], cwd=self.root,
@@ -186,7 +203,7 @@ class WorkflowPartitionTests(unittest.TestCase):
             return json.loads(values["services"])
 
     def test_disabled_flag_preserves_push_and_rejects_followon_job(self):
-        selected = [HANDOFF.COMPONENT, "openbank-ledger-service"]
+        selected = [SELF_BUILT, "openbank-ledger-service"]
         for disabled in ("", "false", "TRUE"):
             with self.subTest(flag=disabled):
                 self.assertTrue(self.admitted("push", disabled))
@@ -194,18 +211,19 @@ class WorkflowPartitionTests(unittest.TestCase):
                 self.assertEqual(self.partition(selected, "push", disabled), selected)
 
     def test_enabled_actual_workflow_partitions_without_adding_services(self):
-        for selected in ([HANDOFF.COMPONENT, "openbank-ledger-service"],
-                         ["openbank-ledger-service"], [HANDOFF.COMPONENT]):
+        for selected in ([SELF_BUILT, "openbank-ledger-service"],
+                         ["openbank-ledger-service"], [SELF_BUILT]):
             with self.subTest(selected=selected):
                 self.assertTrue(self.admitted("workflow_run", "true"))
                 push = self.partition(selected, "push", "true")
                 followon = self.partition(selected, "workflow_run", "true")
                 self.assertFalse(set(push) & set(followon))
                 self.assertEqual(set(push) | set(followon), set(selected))
-                self.assertEqual(followon, [item for item in selected if item == HANDOFF.COMPONENT])
+                self.assertEqual(push, [item for item in selected if item == SELF_BUILT])
+                self.assertEqual(followon, [item for item in selected if item != SELF_BUILT])
 
     def test_manual_and_schedule_selection_unchanged_for_both_flag_states(self):
-        selected = ["openbank-ledger-service", HANDOFF.COMPONENT]
+        selected = ["openbank-ledger-service", SELF_BUILT]
         for name in ("workflow_dispatch", "schedule"):
             for enabled in ("", "true"):
                 with self.subTest(event=name, flag=enabled):
@@ -233,16 +251,18 @@ class WorkflowPartitionTests(unittest.TestCase):
                                "vars": SimpleNamespace(PACT_BROKER_URL=broker)})
                 self.assertEqual(actual, expected)
 
-    def test_handoff_gitops_requires_a_successful_nonempty_explicit_contract_verdict(self):
+    def test_handoff_gitops_deploys_the_proven_subset_like_reconcile(self):
+        # Issue #846: a red gate still emits the services that individually passed. The handoff
+        # lane now carries the whole fleet, so it must deploy that subset rather than none.
         job = self.workflow.split("  gitops-pr:\n", 1)[1]
         condition = re.search(r"^    if: \|\n((?:      .*\n)+)", job, re.MULTILINE).group(1)
         condition = condition.replace("&&", " and ").replace("||", " or ")
         condition = condition.replace("needs.build-push", "build").replace("needs.can-i-deploy", "gate")
-        cases = [("success", "true", f'["{HANDOFF.COMPONENT}"]', True),
-                 ("success", "", f'["{HANDOFF.COMPONENT}"]', False),
-                 ("success", "true", "", False), ("success", "true", "[]", False)]
-        cases += [(status, "true", f'["{HANDOFF.COMPONENT}"]', False)
-                  for status in ("failure", "cancelled", "skipped")]
+        subset = '["openbank-ledger-service"]'
+        cases = [("success", "true", subset, True), ("failure", "true", subset, True),
+                 ("success", "", subset, False), ("failure", "", subset, False),
+                 ("success", "true", "", False), ("failure", "true", "[]", False),
+                 ("cancelled", "true", subset, False)]
         for status, ran, deployable, expected in cases:
             with self.subTest(status=status, ran=ran, deployable=deployable):
                 context = {

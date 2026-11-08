@@ -27,8 +27,10 @@
 name: Auto deploy
 
 on:
-  # Inactive pilot. Completed runs do no work unless an operator
-  # separately enables CONTEXT_BUILD_HANDOFF_ENABLED after reviewing activation.
+  # ADR-0368: with DEPLOY_AFTER_SERVICES_CI_ENABLED=true, every service Services CI builds
+  # deploys from that run's successful completion, when its Pact version already exists;
+  # the push lane keeps only the services Services CI never builds (SELF_BUILT_SERVICES).
+  # Unset or anything but 'true': completed runs do no work and push deploys everything.
   workflow_run:
     workflows: ["Services CI"]
     branches: [main]
@@ -169,7 +171,7 @@ jobs:
     name: Detect changed services
     if: >-
       github.event_name != 'workflow_run' ||
-      (vars.CONTEXT_BUILD_HANDOFF_ENABLED == 'true' &&
+      (vars.DEPLOY_AFTER_SERVICES_CI_ENABLED == 'true' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.status == 'completed' &&
        github.event.workflow_run.conclusion == 'success' &&
@@ -199,7 +201,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate context producer before source checkout
+      - name: Validate Services CI producer before source checkout
         id: source
         run: |
           set -euo pipefail
@@ -223,7 +225,7 @@ jobs:
 
       - id: detect
         env:
-          CONTEXT_BUILD_HANDOFF_ENABLED: ${{ vars.CONTEXT_BUILD_HANDOFF_ENABLED }}
+          DEPLOY_AFTER_SERVICES_CI_ENABLED: ${{ vars.DEPLOY_AFTER_SERVICES_CI_ENABLED }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
           INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
@@ -529,11 +531,13 @@ jobs:
           fi
 
           SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
-          # Disabled pilot preserves push selection.
-          case "$GITHUB_EVENT_NAME:$CONTEXT_BUILD_HANDOFF_ENABLED" in workflow_run:*|push:true)
+          # ADR-0368 partition. Disabled: push keeps its whole selection. Enabled: push keeps only
+          # SELF_BUILT_SERVICES; the completed Services CI run deploys the rest.
+          case "$GITHUB_EVENT_NAME:$DEPLOY_AFTER_SERVICES_CI_ENABLED" in workflow_run:*|push:true)
             HANDOFF_HELPER=.github/scripts/context-deploy-handoff.py
             [ "$GITHUB_EVENT_NAME" != workflow_run ] || HANDOFF_HELPER="$RUNNER_TEMP/context-deploy-handoff.py"
-            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME")"
+            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME" \
+              --push-lane "$SELF_BUILT_SERVICES")"
             ;;
           esac
           if [ "$SERVICES_JSON" = '[]' ]; then
@@ -1360,7 +1364,7 @@ jobs:
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled' &&
       (github.event_name != 'workflow_run' ||
-       (needs.can-i-deploy.result == 'success' && needs.can-i-deploy.outputs.gate_ran == 'true' &&
+       (needs.can-i-deploy.outputs.gate_ran == 'true' &&
         needs.can-i-deploy.outputs.deployable != '' && needs.can-i-deploy.outputs.deployable != '[]')) &&
       ((github.event_name != 'schedule' &&
         (github.event_name != 'workflow_dispatch' || github.event.inputs.reconcile != 'true')) ||

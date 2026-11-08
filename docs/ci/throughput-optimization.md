@@ -57,11 +57,15 @@ Without completion ordering, a first push can reach deployment before CI finishe
 Artifact reuse on that path is opportunistic; a recovery run can reuse a completed
 producer. Do not count a cache lookup as a saved build.
 
-The completed-CI scheduling pilot is disabled by default. Only the repository variable
-`CONTEXT_BUILD_HANDOFF_ENABLED=true` enables it. While enabled, the push lane excludes
-context-service; a successful same-repository Services CI main-push completion selects
-only context-service, and only if the ordinary change detector selected it. Manual and
-scheduled recovery retain their existing selection. Failed CI does not trigger a deployment.
+Deploying after Services CI completes (ADR-0368) is disabled by default. Only the repository
+variable `DEPLOY_AFTER_SERVICES_CI_ENABLED=true` enables it. While it is enabled, the push lane
+keeps only `SELF_BUILT_SERVICES`, the images Services CI never builds. A successful
+same-repository Services CI main-push completion selects every other service, and only those
+the ordinary change detector selected. Its Pact version therefore exists before `can-i-deploy`
+asks, which removes the push lane's `PENDING_BUILD` race. Like reconcile, the lane deploys the
+subset `can-i-deploy` proved even when another service in the same run is blocked (#846).
+Manual and scheduled recovery keep their existing selection. A failed Services CI run triggers
+no deployment; the next reconcile tick re-offers those services.
 Before checking out producer code, the trusted workflow revision validates the event and
 requires the source commit to be an ancestor of main. Checkout, image tags, Pact selection,
 GitOps metadata and SLSA materials use that source explicitly. Workflow provenance retains
@@ -69,9 +73,8 @@ GitHub's workflow revision; `GITHUB_SHA` is never rewritten. Missing Pact eviden
 the handoff instead of selecting a moving main tag. A provenance preflight rejects a source
 without the split-source helper before credentials or image publication.
 
-Activation is separate from merging this change. First verify a successful main context
-artifact with the matching ARM64 recipe, current source support and exact/equivalent Pact
-evidence; then compare the enabled pilot against the measurements below. Setting the
+Activation is separate from merging this change. ADR-0368 lists the before measurement and the
+delivery check to run after enabling it. Setting the
 variable to `false` restores ordinary push selection for new runs. Already running jobs
 retain their evaluated selection and must be considered before changing the flag; the
 variable is not a cancellation mechanism.

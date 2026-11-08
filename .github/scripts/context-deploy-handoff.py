@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Validate the context-service Services CI handoff and partition deploy selection.
+"""Validate the Services CI deploy handoff and partition deploy selection (ADR-0368).
 
 `source` emits only a verified source SHA from GITHUB_EVENT_PATH. Authentication
 of the event is supplied by GitHub; this validates its complete trigger identity.
 The caller must separately verify source ancestry before executing that checkout.
-`select --event EVENT` partitions an existing JSON service selection; it never
-adds a service the ordinary change detector did not select.
+`select --event EVENT --push-lane "SVC ..."` partitions an existing JSON service
+selection; it never adds a service the ordinary change detector did not select.
+
+While the handoff is enabled, a main push deploys only the services Services CI does
+not build (the push lane, e.g. self-built images). Every other service deploys from the
+completed Services CI run for the same commit, so its Pact version already exists when
+can-i-deploy asks: the push lane used to race that publication and fail PENDING_BUILD.
 """
 from __future__ import annotations
 
@@ -17,7 +22,6 @@ from pathlib import Path
 import re
 import sys
 
-COMPONENT = "openbank-context-service"
 WORKFLOW = ".github/workflows/services-ci.yml"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
@@ -56,16 +60,23 @@ def verified_source(payload, repository, event_name):
     return sha
 
 
-def select_services(services, event):
+def push_lane_set(value):
+    names = (value or "").split()
+    if any(SERVICE.fullmatch(item) is None for item in names):
+        raise HandoffError("push lane must be space-separated module names")
+    return frozenset(names)
+
+
+def select_services(services, event, push_lane=frozenset()):
     if not isinstance(event, str) or EVENT.fullmatch(event) is None:
         raise HandoffError("event name is invalid")
     if (not isinstance(services, list) or any(not isinstance(item, str) or SERVICE.fullmatch(item) is None
                                            for item in services)):
         raise HandoffError("service selection must be an array of module names")
     if event == "push":
-        return [item for item in services if item != COMPONENT]
+        return [item for item in services if item in push_lane]
     if event == "workflow_run":
-        return [item for item in services if item == COMPONENT]
+        return [item for item in services if item not in push_lane]
     return list(services)
 
 
@@ -82,6 +93,7 @@ def main(argv=None):
     subparsers.add_parser("source")
     select = subparsers.add_parser("select")
     select.add_argument("--event", required=True)
+    select.add_argument("--push-lane", default="")
     args = parser.parse_args(argv)
     try:
         if args.command == "source":
@@ -93,7 +105,8 @@ def main(argv=None):
             result = verified_source(payload, os.environ.get("GITHUB_REPOSITORY", ""),
                                      os.environ.get("GITHUB_EVENT_NAME", ""))
         else:
-            result = json.dumps(select_services(read_json(sys.stdin), args.event), separators=(",", ":"))
+            result = json.dumps(select_services(read_json(sys.stdin), args.event, push_lane_set(args.push_lane)),
+                                separators=(",", ":"))
         print(result)
         return 0
     except HandoffError as error:
