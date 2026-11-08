@@ -15,6 +15,25 @@
 # — so admin-ui itself had been OutOfSync since 2026-09-10T21:10Z, and communication-db
 # fired PostgresClusterDeclaredNotDeployed. A component that nothing syncs is not a
 # staged rollout, it is a manifest no one applies.
+# Activation and verification
+#
+# This change proposes one replica; it is not evidence of a running workload. Keep the
+# activation PR draft with auto-merge disabled until the final reviewed head has explicit
+# operator approval and the standard deployment-window prerequisites pass.
+#
+# Before approval, retain evidence for the exact pinned image: vulnerability verdict,
+# signature, SBOM and provenance, source freshness, real customer-edge consumer publication,
+# provider verification and the strict deployment contract verdict. Manifest checks alone
+# cannot qualify the workload. Preserve independent deployment holds.
+#
+# After the approved GitOps rollout, verify the actual running image digest and readiness
+# on the management endpoint `:8086/q/health/ready`, then customer-edge app-copy and the
+# authenticated admin editor flow. Do not publish customer content as a health probe.
+# A Healthy Application with zero replicas is not workload health evidence.
+#
+# Rollback through a reviewed GitOps change restoring replicas to zero, retaining the
+# database and published copy. Do not use manual scaling or restarts to bypass this process.
+#
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
