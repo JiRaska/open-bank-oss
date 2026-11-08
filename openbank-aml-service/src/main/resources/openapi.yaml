@@ -189,7 +189,10 @@ components:
       required: true
       description: >-
         Caller-supplied key; `AmlCaseResource.createCase` rejects a blank or absent value.
-        A repeat with the same key replays the stored 201 response.
+        Keys starting with `aml-` and ending with `-FRAUD_REVIEW` are reserved for the
+        domestic-payment service's own authenticated machine identity; other callers receive 403,
+        including callers otherwise permitted to create cases. This check also applies to retries.
+        A permitted repeat with the same key replays the stored 201 response.
       schema:
         type: string
         minLength: 1

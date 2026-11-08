@@ -80,6 +80,7 @@ class AmlCaseResource(
         requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        requireFraudReviewKeyCaller(identity, idempotencyKey)
 
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
@@ -205,5 +206,15 @@ internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
     if (AML_CASE_CREATE_STAFF_ROLES.any(identity::hasRole) && ServiceAccountIdentity.isHumanStaff(identity)) return
     if (!ServiceAccountIdentity.isOneOf(identity, AML_CASE_CREATE_CALLERS)) {
         throw ForbiddenException("caller is not a named AML case-open service")
+    }
+}
+
+/** Only the rail's own verified machine identity may create or replay its fraud-review case. */
+internal fun requireFraudReviewKeyCaller(identity: SecurityIdentity, idempotencyKey: String) {
+    if (
+        idempotencyKey.startsWith("aml-") && idempotencyKey.endsWith("-FRAUD_REVIEW") &&
+        !ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-domestic-payment")
+    ) {
+        throw ForbiddenException("fraud-review case keys are reserved for domestic-payment")
     }
 }
