@@ -27,6 +27,9 @@ spec:
         # Kept in sync by gen-interest-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "1f9f8bac2d8fa03f"
     spec:
+      # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
+      # workload, not to every pod running as `default` in the namespace.
+      serviceAccountName: interest-service
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
@@ -80,11 +83,15 @@ spec:
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
-            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8200 edge.
+            # `verify`. Declared here so gen-network-policies.py derives the interest -> vault:8203 edge.
             # Verification stays at the application default `disabled` (nothing compared, counted) until
             # interest's verify-only role exists; then set INTEREST_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
+            # ESO and the in-namespace jobs. Same interest-internal-tls CA, mounted at /mnt/openbao-tls.
             - name: INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
-              value: https://openbao.vault.svc:8200
+              value: https://openbao.vault.svc:8203
+            - name: OPENBANK_INTEREST_PRODUCT_SHADOW_VERIFICATION_OPENBAO_CA_FILE
+              value: /mnt/openbao-tls/ca.crt
             - name: OIDC_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -177,6 +184,10 @@ spec:
             # ADR-0339 B: party-authority bucket's client cert + CA for the party-service mTLS leg.
             - name: party-tls
               mountPath: /mnt/party-tls
+              readOnly: true
+            # ADR-0352: the private CA behind OpenBao's TLS listener (8203).
+            - name: openbao-tls
+              mountPath: /mnt/openbao-tls
               readOnly: true
             - name: tmp
               mountPath: /tmp
@@ -271,6 +282,10 @@ spec:
           secret:
             secretName: interest-internal-tls
             optional: false
+        - name: openbao-tls
+          secret:
+            secretName: interest-internal-tls
+            optional: false
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -284,6 +299,14 @@ spec:
         - name: kafka-truststore
           secret:
             secretName: kafka-cluster-ca-truststore
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: interest-service
+  namespace: interest
+  labels:
+    app.kubernetes.io/name: interest-service
 ---
 apiVersion: v1
 kind: Service
