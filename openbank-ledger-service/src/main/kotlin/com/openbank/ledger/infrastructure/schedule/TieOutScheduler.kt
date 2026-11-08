@@ -83,6 +83,9 @@ class TieOutScheduler(
     registry: MeterRegistry,
 ) {
     private val log: Logger = Logger.getLogger(TieOutScheduler::class.java)
+
+    @jakarta.inject.Inject
+    var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark? = null
     private val zone: ZoneId = ZoneId.of("Europe/Prague")
 
     // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
@@ -189,6 +192,8 @@ class TieOutScheduler(
      */
     suspend fun runTieOutFor(asOf: LocalDate) {
         log.infof("Sub-ledger tie-out check for %s", asOf)
+        val startedAt = Instant.now(clock)
+        val before = journalWatermark?.countThrough(asOf)
         // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
         // the accumulation is the same, but it reads as one expression and CodeQL can actually
         // follow it (mutable captures across a lambda boundary read to it as never-written).
@@ -199,7 +204,8 @@ class TieOutScheduler(
         if (breaks == 0 && errors == 0) {
             log.infof("Sub-ledger tie-out OK for %s", asOf)
         }
-        recordRun(asOf, checked, breaks, errors)
+        val after = journalWatermark?.countThrough(asOf)
+        recordRun(asOf, checked, breaks, errors, startedAt, before?.takeIf { it == after })
     }
 
     /**
@@ -247,7 +253,14 @@ class TieOutScheduler(
         }
     }
 
-    private suspend fun recordRun(asOf: LocalDate, checked: Int, breaks: Int, errors: Int) {
+    private suspend fun recordRun(
+        asOf: LocalDate,
+        checked: Int,
+        breaks: Int,
+        errors: Int,
+        startedAt: Instant,
+        journalCount: Long?,
+    ) {
         // BREAK outranks ERROR: a confirmed integrity incident beats an incomplete check.
         val status = when {
             breaks > 0 -> TieOutRunStatus.BREAK
@@ -266,6 +279,8 @@ class TieOutScheduler(
                     accountsChecked = checked,
                     breaks = breaks,
                     errors = errors,
+                    startedAt = startedAt,
+                    journalCount = journalCount,
                 ),
             )
         } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {

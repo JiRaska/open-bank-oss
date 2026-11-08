@@ -113,6 +113,8 @@ class AccountingDaySchedulerTest {
         accountsChecked = 4,
         breaks = if (status == TieOutRunStatus.BREAK) 1 else 0,
         errors = if (status == TieOutRunStatus.ERROR) 1 else 0,
+        startedAt = runAt,
+        journalCount = 0,
     )
 
     private fun noDaysInAnyStatus() {

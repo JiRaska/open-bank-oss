@@ -247,12 +247,15 @@ class AccountingDayScheduler(
                 } else {
                     closeParticipation.completeness(day.businessDate).lastWorkReportAt
                 }
-                val completedAfterTieOut = run?.runAt?.let { participantWatermark?.isAfter(it) } == true
-                if (needsPostCutoffRun(run?.runAt, cutoffAt) || completedAfterTieOut) {
+                val completedAfterTieOut = run?.startedAt?.let { participantWatermark?.isAfter(it) } == true
+                val unprovenRun = run != null && (run.startedAt == null || run.journalCount == null)
+                if (needsPostCutoffRun(run?.startedAt, cutoffAt) || completedAfterTieOut || unprovenRun) {
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }
-                val okRun = run?.takeIf { it.status == TieOutRunStatus.OK && !it.runAt.isBefore(cutoffAt) }
+                val okRun = run?.takeIf {
+                    it.status == TieOutRunStatus.OK && it.startedAt?.isBefore(cutoffAt) == false
+                }
                 if (okRun != null && participantsAllowTieOut(day.businessDate)) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
