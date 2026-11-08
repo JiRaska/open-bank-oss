@@ -703,7 +703,7 @@ gates:
     budget_seconds: 60   # self-test builds one small git repo (~3 s); the gate itself is one diff + one fetch
     min_subjects: 50   # 75 sandbox image pins under openbank-infra/gitops on 2026-11-03
     needs_base: optional
-    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py"]
+    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py", ".github/scripts/merge_train_carrier.py"]
     selftest: |
       python3 .github/scripts/check-deploy-pin-monotonic.py --self-test
     selftest_expect: pass
