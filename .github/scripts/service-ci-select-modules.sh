@@ -66,7 +66,7 @@ select_modules() {
     echo "Event $EVENT_NAME -> build all modules (full-fleet)."
     CHANGED="$ALL"
   elif [ "$EVENT_NAME" = "push" ]; then
-    # Scope service and Pact changes; inert release/docs/infra changes build nothing.
+    # Scope service and Pact changes; release markers need fresh build/contract evidence.
     # Unknown build inputs fall back to the full fleet below. Full history makes
     # HEAD~1 available on main (squash-merged pushes are single commits).
     DIFF_BASE=HEAD~1
@@ -81,7 +81,13 @@ select_modules() {
     RELEVANT=""
     while IFS= read -r f; do
       [ -z "$f" ] && continue
-      if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
+      # Auto deploy builds version-only releases; its exact-source Pact gate must
+      # have the matching main-push build, even when application code is unchanged.
+      if [[ "$f" == openbank-*/version.txt ]] && [[ " $ALL " == *" ${f%%/*} "* ]]; then
+        RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"
+      elif ! is_inert_service_path "$f"; then
+        RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"
+      fi
     done <<< "$FILES"
     RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
     if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
@@ -230,18 +236,9 @@ select_modules() {
     # explicitly (#376); this brings services-ci.yml's PR-path trigger in
     # line with it, plus openbank-libs-testing (auto-deploy correctly omits
     # it — it's test-only, never shipped in a runtime image).
-    # Release-bookkeeping paths are inert here for the SAME reason the push path
-    # above already treats them as inert (the `RELEVANT` filter): version.txt,
-    # CHANGELOG.md and the release-please manifest cannot alter any module's
-    # compile inputs or any pact. Without this the PR lane fanned out per-module
-    # on `^<module>/`, so every release-please PR built the service it bumps —
-    # 194 of them in the week of 2026-07-25, each a build of a two-line diff whose
-    # post-merge push is then skipped as inert anyway. It also makes the single
-    # aggregated Release PR (separate-pull-requests: false) build NOTHING rather
-    # than full-fleet, which is what makes the aggregation affordable.
-    # The version bump is not unchecked: check-app-version-override.sh holds the
-    # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
-    # package.json one, both unconditionally in the gate job.
+    # Release PRs keep their existing scope: bookkeeping does not change contracts.
+    # The main-push lane above builds version markers once they land, because auto
+    # deploy requires exact-source build/contract provenance for the released image.
     FILES_CODE=$(grep -vE '^openbank-libs/governance/|^openbank-libs/docs/[^/]+\.md$|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
     FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
     # Match the push selector: an exact raised-floor-only diff stays local.
@@ -452,7 +449,14 @@ self_test() {
   echo d >> "$repo/docs/x.md"
   sg_do commit -q -am d || return 1
   expect push-inert-builds-nothing "" "$(run push)"
-  echo "SUBJECTS=4  # scenarios exercised"
+  # A release-only main push still needs its own published build/contract proof.
+  echo 1.1.0 > "$repo/openbank-a-service/version.txt"
+  sg_do add openbank-a-service/version.txt && sg_do commit -q -m release || return 1
+  expect push-release-builds-released-module-plus-scanner "openbank-a-service openbank-c-service " "$(run push)"
+  echo changelog > "$repo/openbank-b-service/CHANGELOG.md"
+  sg_do add openbank-b-service/CHANGELOG.md && sg_do commit -q -m changelog || return 1
+  expect push-changelog-builds-only-derived-reader "openbank-c-service " "$(run push)"
+  echo "SUBJECTS=6  # scenarios exercised"
   return $rc
 }
 
