@@ -10,7 +10,6 @@ on:
       - "openbank-libs*/**"
       - "openbank-infra/gitops/components/ledger/**"
       - "openbank-infra/gitops/components/ledger-pension-co/**"
-      - "openbank-infra/gitops/components/ledger-pension-fund/**"
       - "openbank-infra/gitops/components/pension-fund/**"
       - "build-logic/**"
       - "gradle/**"
@@ -65,9 +64,14 @@ jobs:
           set -euo pipefail
           tool_dir="$RUNNER_TEMP/pension-accounting-bin"
           mkdir -p "$tool_dir"
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+          if ! curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
             -o "$tool_dir/opa" \
-            https://openpolicyagent.org/downloads/v1.21.1/opa_linux_amd64
+            https://github.com/open-policy-agent/opa/releases/download/v1.21.1/opa_linux_amd64; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+              -o "$tool_dir/opa" \
+              https://openpolicyagent.org/downloads/v1.21.1/opa_linux_amd64
+          fi
+          # Only a download failure selects the fallback; a checksum mismatch fails closed.
           printf '%s  %s\n' \
             '23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb' \
             "$tool_dir/opa" | sha256sum --check --strict
