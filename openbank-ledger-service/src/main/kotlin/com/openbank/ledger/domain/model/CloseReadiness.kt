@@ -28,6 +28,9 @@ data class ClosedParticipantReport(
     val reportedBy: String,
     val reason: String?,
     val exercisedJobs: Set<String> = emptySet(),
+    val sourceRunId: String? = null,
+    val receiptSeq: Long? = null,
+    val reportedAt: Instant? = null,
 )
 
 data class CloseReadinessDay(val businessDate: LocalDate, val blockers: List<String>)

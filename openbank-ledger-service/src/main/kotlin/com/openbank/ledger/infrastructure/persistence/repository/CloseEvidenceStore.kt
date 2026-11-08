@@ -7,8 +7,8 @@ import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.ledger.application.port.out.CloseEvidenceRepository
 import com.openbank.ledger.application.usecase.CloseParticipantsConfig
-import com.openbank.ledger.application.usecase.CloseReadinessConfig
 import com.openbank.ledger.application.usecase.PensionBookIdentity
+import com.openbank.ledger.application.usecase.CloseReadinessConfig
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.ClosedDayParticipation
@@ -128,8 +128,10 @@ class CloseEvidenceStore(
             "AND t.journal_count = (SELECT count(*) FROM journal_entries WHERE entry_date <= :d)), " +
             "(SELECT COALESCE(jsonb_agg(jsonb_build_object('participant', p.participant, " +
             "'outcome', p.outcome, 'reportedBy', p.reported_by, 'reason', p.reason, " +
-            "'exercisedJobs', p.exercised_jobs)), '[]'::jsonb) " +
-            "FROM (SELECT DISTINCT ON (participant) participant, outcome, reported_by, reason, exercised_jobs " +
+            "'exercisedJobs', p.exercised_jobs, 'sourceRunId', p.source_run_id, " +
+            "'receiptSeq', p.seq, 'reportedAt', p.reported_at)), '[]'::jsonb) " +
+            "FROM (SELECT DISTINCT ON (participant) participant, outcome, reported_by, reason, exercised_jobs, " +
+            "source_run_id, seq, reported_at " +
             "FROM ledger_close_participation WHERE business_date = :d ORDER BY participant, seq DESC) p), " +
             "(SELECT count(*) FROM journal_entries WHERE entry_date <= :d), :bookKind, :bookId)"
 

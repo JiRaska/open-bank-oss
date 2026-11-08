@@ -10,6 +10,7 @@ import com.openbank.ledger.application.port.out.CloseParticipationRepository
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
+import com.openbank.ledger.domain.model.checkConflict
 import com.openbank.ledger.domain.model.sealedAt
 import com.openbank.ledger.infrastructure.persistence.entity.CloseParticipationEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -51,18 +52,52 @@ class PanacheCloseParticipationRepository(private val clock: Clock) :
                             record.participant,
                         ).firstResult().flatMap { latestEntity ->
                             val latest = latestEntity?.toDomain()
-                            when (val verdict = guard.check(latest, dayStatus)) {
-                                AppendVerdict.Append -> persist(
-                                    record.sealedAt(clock.instant(), dayStatus, latest).toEntity(),
-                                ).map { it.toDomain() }
-                                AppendVerdict.KeepExisting ->
-                                    Uni.createFrom().item(checkNotNull(latest) { "KeepExisting needs a latest row" })
-                                is AppendVerdict.Reject -> Uni.createFrom().failure(verdict.error)
+                            existingSource(record).flatMap source@{ prior ->
+                                if (prior != null) {
+                                    checkConflict(
+                                        record.copy(
+                                            reportedAt = prior.reportedAt,
+                                            late = prior.late,
+                                        ) == prior,
+                                    ) {
+                                        "Source close receipt identity was reused with another payload"
+                                    }
+                                    return@source Uni.createFrom().item(checkNotNull(latest))
+                                }
+                                when (val verdict = guard.check(latest, dayStatus)) {
+                                    AppendVerdict.Append -> persist(
+                                        record.sealedAt(
+                                            clock.instant().truncatedTo(java.time.temporal.ChronoUnit.MICROS),
+                                            dayStatus,
+                                            latest,
+                                        ).toEntity(),
+                                    ).map { it.toDomain() }
+                                    AppendVerdict.KeepExisting ->
+                                        Uni.createFrom().item(
+                                            checkNotNull(latest) {
+                                                "KeepExisting needs a latest row"
+                                            },
+                                        )
+                                    is AppendVerdict.Reject -> Uni.createFrom().failure(verdict.error)
+                                }
                             }
                         }
                     }
             }
         }.awaitSuspending()
+
+    private fun existingSource(record: CloseParticipationRecord): Uni<CloseParticipationRecord?> =
+        if (record.sourceRunId == null) {
+            Uni.createFrom().nullItem()
+        } else {
+            find(
+                "businessDate = ?1 and participant = ?2 and sourceRunId = ?3",
+                record.businessDate,
+                record.participant,
+                record.sourceRunId,
+            ).firstResult()
+                .map { it?.toDomain() }
+        }
 
     override suspend fun findForDate(businessDate: LocalDate): List<CloseParticipationRecord> = Panache.withSession {
         find("businessDate = ?1 order by seq asc", businessDate).list()
@@ -79,6 +114,7 @@ class PanacheCloseParticipationRepository(private val clock: Clock) :
         it.reportedAt = reportedAt
         it.late = late
         it.exercisedJobs = exercisedJobs.toTypedArray()
+        it.sourceRunId = sourceRunId
     }
 
     private fun CloseParticipationEntity.toDomain() = CloseParticipationRecord(
@@ -92,6 +128,7 @@ class PanacheCloseParticipationRepository(private val clock: Clock) :
         reportedAt = reportedAt,
         late = late,
         exercisedJobs = exercisedJobs.toSet(),
+        sourceRunId = sourceRunId,
     )
 
     private companion object {

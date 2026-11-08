@@ -128,6 +128,7 @@ class CloseParticipationService(
             by = command.callerPrincipal,
             guard = reportGuard(command.outcome),
             exercisedJobs = command.exercisedJobs,
+            sourceRunId = command.sourceRunId,
         )
         if (record.outcome == ParticipationOutcome.WAIVED && command.outcome != ParticipationOutcome.WAIVED) {
             log.infof(
@@ -190,6 +191,7 @@ class CloseParticipationService(
         by: String,
         guard: AppendGuard,
         exercisedJobs: Set<String> = emptySet(),
+        sourceRunId: String? = null,
     ): CloseParticipationRecord {
         require(reason == null || reason.codePointCount(0, reason.length) <= MAX_REASON_CODE_POINTS) {
             "reason must contain at most $MAX_REASON_CODE_POINTS Unicode characters"
@@ -206,6 +208,7 @@ class CloseParticipationService(
             reportedAt = clock.instant(),
             late = false,
             exercisedJobs = exercisedJobs,
+            sourceRunId = sourceRunId,
         )
         val saved = repository.appendGuarded(record, guard)
         // An existing WAIVED row was kept: nothing new was stored, so nothing is counted.

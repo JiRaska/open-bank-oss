@@ -121,6 +121,9 @@ class AccountingDayScheduler(
     @Inject
     lateinit var closeParticipantsConfig: CloseParticipantsConfig
 
+    @Inject
+    var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark? = null
+
     // Nullable, not `lateinit` — a money-path job must never fail because its observability
     // wiring was not initialised (same reasoning as TieOutScheduler).
     private var liveness: WorkflowLivenessRecorder? = null
@@ -240,16 +243,7 @@ class AccountingDayScheduler(
             runStep("tie-out", day.businessDate) {
                 val cutoffAt = day.cutoffAt ?: return@runStep
                 val run = tieOutRunRepository.findLatestFor(day.businessDate)
-                val participantWatermark = if (closeParticipantsConfig.participantsMode() ==
-                    CloseParticipantsConfig.MODE_OFF
-                ) {
-                    null
-                } else {
-                    closeParticipation.completeness(day.businessDate).lastWorkReportAt
-                }
-                val completedAfterTieOut = run?.startedAt?.let { participantWatermark?.isAfter(it) } == true
-                val unprovenRun = run != null && (run.startedAt == null || run.journalCount == null)
-                if (needsPostCutoffRun(run?.startedAt, cutoffAt) || completedAfterTieOut || unprovenRun) {
+                if (needsFreshRun(day.businessDate, cutoffAt, run)) {
                     requestTieOut(day.businessDate, cutoffAt, reRunBudget)
                     return@runStep
                 }
@@ -316,9 +310,25 @@ class AccountingDayScheduler(
      * A post-cutoff verdict of any status (BREAK/ERROR included) stops re-requests: those stay
      * visible through the stuck gauge, never through a re-run loop.
      */
-    private fun needsPostCutoffRun(lastRunAt: Instant?, cutoffAt: Instant): Boolean = when {
-        lastRunAt == null -> cutoffAt.isBefore(accountingClock.instant().minus(Duration.ofHours(stuckCutoffHours)))
-        else -> lastRunAt.isBefore(cutoffAt)
+    private suspend fun needsFreshRun(
+        date: LocalDate,
+        cutoffAt: Instant,
+        run: com.openbank.ledger.domain.model.TieOutRunRecord?,
+    ): Boolean {
+        val lastStarted = run?.startedAt
+        val stale = if (lastStarted == null) {
+            cutoffAt.isBefore(accountingClock.instant().minus(Duration.ofHours(stuckCutoffHours)))
+        } else {
+            lastStarted.isBefore(cutoffAt)
+        }
+        if (stale) return true
+        if (run == null) return false
+        if (run.startedAt == null || run.journalCount == null) return true
+        if (closeParticipantsConfig.participantsMode() != CloseParticipantsConfig.MODE_OFF) {
+            val workAt = closeParticipation.completeness(date).lastWorkReportAt
+            if (workAt?.isAfter(run.startedAt) == true) return true
+        }
+        return journalWatermark?.countThrough(date)?.let { it != run.journalCount } == true
     }
 
     /** Bounded per tick by [maxCatchUpDays]; the day transitions on the next tick that sees the verdict. */

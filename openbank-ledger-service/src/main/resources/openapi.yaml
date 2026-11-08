@@ -1851,6 +1851,10 @@ components:
       type: object
       required: [outcome]
       properties:
+        sourceRunId:
+          type: [string, 'null']
+          pattern: '^[a-f0-9]{64}$'
+          description: Optional stable SHA-256 source receipt identity. Same receipt retries preserve work time; changed payload conflicts.
         exercisedJobs:
           type: array
           uniqueItems: true
