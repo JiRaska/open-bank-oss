@@ -102,8 +102,17 @@ class InterestCloseParticipationSchedulerTest {
         ran(oct1, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
         ran(oct1, InterestCloseJobs.CAPITALIZATION, items = 5, journals = 5)
         scheduler.reportDays(today).await().indefinitely()
-        assertThat(delivered.single { it.businessDate == oct1 })
-            .isEqualTo(CloseParticipationReport(oct1, CloseOutcome.RAN, journalsPosted = 5, itemsProcessed = 12))
+        val successful = delivered.single { it.businessDate == oct1 }
+        assertThat(successful.businessDate).isEqualTo(oct1)
+        assertThat(successful.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(successful.journalsPosted).isEqualTo(5)
+        assertThat(successful.itemsProcessed).isEqualTo(12)
+        assertThat(successful.reason).isNull()
+        assertThat(successful.exercisedJobs).containsExactlyInAnyOrder(
+            InterestCloseJobs.ACCRUAL,
+            InterestCloseJobs.CAPITALIZATION,
+        )
+        assertThat(successful.sourceRunId).matches("[a-f0-9]{64}")
 
         ran(
             oct1,
