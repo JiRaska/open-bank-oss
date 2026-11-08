@@ -329,6 +329,18 @@ gates:
     run: |
       python3 .github/scripts/run-gates.py --self-test
 
+  - id: issue-kind-classifier-self-test
+    name: "issue kind classifier flags zero and several kinds (rules.yaml: issues.kinds, enforced)"
+    group: lint
+    mode: enforced
+    budget_seconds: 30
+    min_subjects: 11   # classifier fixture cases
+    rationale: "issue-kind.yml removes needs-kind wherever the classifier says ok; a classifier that cannot go red would silently clear the backlog's only kind-debt signal. Its fixtures hold missing, ambiguous, exempt and ok cases, and the real rules.yaml kind set must parse."
+    review_after: "2027-05-03"
+    selftest_exempt: "is-a-test-suite — the run is issue-kind.py --selftest"
+    run: |
+      python3 .github/scripts/issue-kind.py --selftest
+
   # Phase 1 must keep the ancestry and consumer-derivation probe executable on every PR.
   # The actual desired/live rollout check remains a Phase 2 precondition: it is expected
   # to fail until every libs-runtime consumer has been rebuilt and deployed.
@@ -676,6 +688,30 @@ gates:
   # so its own self-test is the only place its RED is reachable before it acts on real PRs. Case 1 is
   # the #6231 interleaving and must exit non-zero; case 2 is the ordinary supersede and must still
   # close the older PR, so a fail-everything script does not satisfy it either.
+  # Owner rule: no downgrades, ever. auto-deploy pins every selected service to its own source
+  # sha against whatever main holds, and builds do not finish in commit order — so a deploy PR cut
+  # before a newer deploy merged rewrites newer pins to older ones with no textual conflict and
+  # every job green. Measured 2026-11-03 on #14579: 34 pins moved, all forward against the PR's
+  # merge-base, 22 BACKWARD against live main. supersede-deploy-prs.sh compares open deploy PRs
+  # with each other, never with main's pins; this gate compares the PR's new pins with live main.
+  - id: deploy-pin-monotonic
+    name: "a GitOps image pin only moves forward along main's history unless the PR is labelled deploy-revert"
+    group: gitops
+    mode: enforced
+    rationale: "A deploy PR for an older source sha opened after a newer one merged rewrites main's newer pins to older ones with no conflict and every job green (#14579: 22 of 34 pins backward against live main); nothing before this compared a deploy PR's pins with the pins main holds now."
+    review_after: "2027-05-03"
+    budget_seconds: 60   # self-test builds one small git repo (~3 s); the gate itself is one diff + one fetch
+    min_subjects: 50   # 75 sandbox image pins under openbank-infra/gitops on 2026-11-03
+    needs_base: optional
+    selftest_inputs: [".github/scripts/check-deploy-pin-monotonic.py"]
+    selftest: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --self-test
+    selftest_expect: pass
+    # ${PR_DIFF_BASE:-}: on a push to main there is no base and nothing to block; the checker
+    # counts its subjects and exits 0 there (GITHUB_EVENT_NAME=push), and exits 2 on a PR without one.
+    run: |
+      python3 .github/scripts/check-deploy-pin-monotonic.py --root . --base "${PR_DIFF_BASE:-}"
+
   - id: supersede-deploy-prs-ancestry
     selftest_exempt: "is-a-test-suite — the run: IS supersede-deploy-prs.sh --self-test"
     name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
@@ -709,14 +745,12 @@ gates:
       second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
       against live PRs, so this is where it can go red before it acts.
     review_after: "2027-03-30"
-    budget_seconds: 15
+    budget_seconds: 45
     run: |
       set -e
       python3 .github/scripts/deploy-window.py --self-test
       python3 .github/scripts/test-deploy-producer-isolation.py
-      python3 .github/scripts/test-check-deploy-source-freshness.py \
-        DeploySourceFreshnessTest.test_new_tag_over_the_replaced_digest_fails \
-        DeploySourceFreshnessTest.test_pin_without_a_digest_fails
+      python3 .github/scripts/test-check-deploy-source-freshness.py
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -2090,6 +2124,85 @@ gates:
   # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
   # is required while dependency-submission is not. Their wrapper-download retry keeps
   # a transient transport reset from turning into an unrelated governance failure.
+  # A test file nothing runs is a place where a checker and its proof drift with nothing to notice.
+  # test-check-deploy-source-freshness.py sat that way with 3 failures on main (#14697); measured
+  # 2026-11-03: 21 of 132 test files under .github/scripts were named by no gate, workflow or
+  # unittest-discover pattern (14 once one-hop invocations through a wired script are counted).
+  # check-gate-script-registration.py asks the same question for check-* scripts only, by design.
+  - id: test-script-reachability
+    name: "every test script under .github/scripts is run by a gate, a workflow or a discover pattern"
+    group: lint
+    mode: enforced
+    rationale: "A committed test that no gate or workflow runs reads as coverage and is none: test-check-deploy-source-freshness.py rotted unseen with 3 failures on main (#14697), and 20 more test files were in the same state. The discovery patterns select *_test.py and tests/test_*.py only, so a hyphenated test-*.py beside its checker is silently skipped."
+    review_after: "2027-05-03"
+    budget_seconds: 20
+    min_subjects: 100   # 132 test files under .github/scripts on 2026-11-03
+    selftest_inputs: [".github/scripts/check-test-script-reachability.py"]
+    selftest: |
+      python3 .github/scripts/check-test-script-reachability.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-test-script-reachability.py --root .
+
+  # The orphans the gate above found, wired here so they run on every PR. Two entries so the slow
+  # deploy-side suites (sbom 57 s, record-deployment 31 s, publication race 12 s measured locally)
+  # do not stretch one shard. Each is a real unittest suite; the gate IS the known-positive.
+  - id: deploy-script-tests-previously-unreachable
+    selftest_exempt: "is-a-test-suite — the run: IS three unittest suites that no gate ran before"
+    name: "deploy-side script tests that were run by nothing until 2026-11-03"
+    group: supplychain
+    mode: enforced
+    rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
+    review_after: "2027-05-03"
+    budget_seconds: 240
+    run: |
+      set -e
+      python3 .github/scripts/test-sbom-effective-model-guard.py
+      python3 .github/scripts/test-resolve-record-deployment-manifests.py
+      python3 .github/scripts/test-deploy-publication-race.py
+
+  - id: ci-script-tests-previously-unreachable
+    selftest_exempt: "is-a-test-suite — the run: IS ten test suites that no gate ran before"
+    name: "CI-selection and tooling script tests that were run by nothing until 2026-11-03"
+    group: lint
+    mode: enforced
+    rationale: "Service-CI path selection, provider task discovery, the armed-PR updater, the k6 baseline, the UI required-build check, DR network-policy generation and the Gradle verification-cache retry all had committed tests that nothing executed; test-service-ci-path-selection.py is the only proof the PR module selector still scopes correctly."
+    review_after: "2027-05-03"
+    budget_seconds: 300   # 161.9 s in CI on 2026-11-07 with the two finrep tests added; ~1.85x
+    run: |
+      set -e
+      python3 .github/scripts/test-service-ci-path-selection.py
+      bash .github/scripts/test-service-ci-provider-task-discovery.sh
+      bash .github/scripts/test-service-ci-provider-task-list.sh
+      python3 .github/scripts/test-updater-global-run.py
+      python3 .github/scripts/test-updater-global-slot.py
+      python3 .github/scripts/test-k6-advisory-baseline.py
+      python3 .github/scripts/test-ui-required-build.py
+      python3 .github/scripts/test-dr-network-policy-generation.py
+      python3 .github/scripts/test-historical-admin-ui-pact.py
+      python3 .github/scripts/test-finrep-historical-workflow.py
+      python3 .github/scripts/test-prove-finrep-historical-checkout.py
+      bash .github/scripts/tests/test-retry-gradle-verification-cache.sh
+  # A fixture that commits with no identity works on a Mac (git derives one) and fails on the
+  # runner (#14697); one that does not neutralise signing fails the other way for anyone whose
+  # global config signs. Measured 2026-11-03: 38 git fixtures under .github/scripts, 37 with an
+  # identity in the file or through merge-train.py's Git helper, 28 with signing neutralised.
+  # gatelib.hermetic_git_env() is the shared form for new fixtures; migration is not required.
+  - id: git-fixture-hermetic
+    name: "a git fixture under .github/scripts names its identity and neutralises signing"
+    group: lint
+    mode: enforced
+    rationale: "test-check-deploy-source-freshness.py committed with no git identity: green on every Mac, red the first time the runner ran it (#14697). The scanner proves a fixture names the settings — the decidable half, and the half that was missing."
+    review_after: "2027-05-03"
+    budget_seconds: 15
+    min_subjects: 30   # 38 fixtures on 2026-11-03
+    selftest_inputs: [".github/scripts/check-git-fixture-hermetic.py"]
+    selftest: |
+      python3 .github/scripts/check-git-fixture-hermetic.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-git-fixture-hermetic.py --root .
+
   - id: governance-script-unit-tests
     selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
@@ -3311,7 +3424,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 120   # self-test drives ~25 settle/build/publish ticks over a synthetic origin (~30 s measured)
+    budget_seconds: 300   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07, 300 = ~1.5x
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
@@ -4504,24 +4617,23 @@ gates:
     selftest_inputs: [".github/scripts/check-security-txt.py"]
     run: |
       python3 .github/scripts/check-security-txt.py
-  # End-of-support is DERIVED from SECURITY.md's policy and carried in every release's evidence
-  # bundle (#9881). The derivation has two ways to be quietly wrong — taking the build time instead
-  # of the release date, and inventing the "90 days after supersession" bound for a beta release
-  # that has no successor yet — and nothing else would ever notice either; this runs its table.
+  # End-of-support is DERIVED from SECURITY.md's policy and carried in each release's evidence
+  # bundle (#9881). The derivation must use release time, leave beta's supersession bound open,
+  # and render that same value on the public release page without replacing changelog text.
   - id: release-support-period-derivation
     selftest_exempt: "is-a-test-suite"
-    name: "release end-of-support is derived from the policy, not invented (#9881, enforced)"
+    name: "release support is derived and published from signed evidence (#9881, enforced)"
     group: supplychain
     mode: enforced
-    budget_seconds: 10   # pure date arithmetic over a fixture table
+    budget_seconds: 10   # pure date arithmetic and release-body fixtures
     rationale: >-
-      The end-of-support date in a release's evidence bundle is a public CRA commitment computed
-      by a script no other check reads; a wrong rule would publish wrong dates on every release
-      while every release still verified green.
+      The support date in a release's evidence bundle is a public CRA commitment; the release
+      page must render the signed value without inventing a beta end date or erasing changelog.
     review_after: 2027-03-13
     min_subjects: 6   # 8 derivation cases today (2026-09-13)
     run: |
       python3 .github/scripts/release_support_period.py --self-test
+      python3 .github/scripts/render-release-support.py --self-test
 
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"
@@ -6490,9 +6602,9 @@ gates:
     name: "prod-readiness attestations: format + freshness (#2365, enforced)"
     group: registry
     mode: enforced
-    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test
+    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test && python3 .github/scripts/test_readiness_fuzz_evidence.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-readiness-attestations.py"]
+    selftest_inputs: [".github/scripts/check-readiness-attestations.py", ".github/scripts/readiness_fuzz_evidence.py", ".github/scripts/test_readiness_fuzz_evidence.py"]
     run: |
       # attestations.yaml is the ONLY hand-entered input to the prod-readiness matrix, and
       # nothing read it before this gate. It shipped with `consent-service:` as a service

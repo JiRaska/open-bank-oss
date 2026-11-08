@@ -92,6 +92,7 @@ class StubUpstreamResource : QuarkusTestResourceLifecycleManager {
             "openbank.edge.pension-service-url" to base,
             "openbank.edge.sca-service-url" to base,
             "openbank.edge.delegation-service-url" to base,
+            "openbank.edge.domestic-payment-service-url" to base,
         )
     }
 

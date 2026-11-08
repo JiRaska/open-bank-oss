@@ -284,6 +284,9 @@ def collect_fuzz() -> dict:
         out = {"available": True, "inScope": cov["inScope"], "tested": cov["tested"],
                "coveragePct": cov["coveragePct"], "totalExercised": cov["totalExercised"],
                "excludedCount": len(cov.get("excluded", [])),
+               # operations that answered only 401/403 in every pass: NOT RUN, not passed
+               "totalNotRun": cov.get("totalNotRun"),
+               "authBlockedServices": cov.get("authBlockedServices"),
                "run": cov.get("run", ""), "runDate": cov.get("generatedAt", "")[:10]}
         if skipped_overrides:
             out["note"] = (f"{skipped_overrides} newer override-scoped run(s) skipped — "

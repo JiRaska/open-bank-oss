@@ -6,7 +6,10 @@ package com.openbank.domestic.infrastructure.observability
 
 import com.openbank.domestic.application.port.out.FraudEnforcementMetricsPort
 import com.openbank.domestic.application.workflow.FraudGateAction
+import com.openbank.domestic.application.workflow.FraudHoldBasis
+import com.openbank.domestic.application.workflow.FraudHoldDelivery
 import com.openbank.domestic.application.workflow.FraudRejectCause
+import com.openbank.domestic.application.workflow.FraudReviewDecision
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -36,6 +39,8 @@ class FraudEnforcementMetrics : FraudEnforcementMetricsPort {
 
     private var decisions: Map<Pair<FraudGateAction, Boolean>, Counter> = emptyMap()
     private var rejections: Map<FraudRejectCause, Counter> = emptyMap()
+    private var holds: Map<FraudHoldBasis, Counter> = emptyMap()
+    private var resolutions: Map<Pair<FraudReviewDecision, FraudHoldDelivery>, Counter> = emptyMap()
 
     @PostConstruct
     fun register() {
@@ -59,6 +64,23 @@ class FraudEnforcementMetrics : FraudEnforcementMetricsPort {
                 .description("Payments rejected by the fraud gate, by cause")
                 .register(registry)
         }
+        holds = FraudHoldBasis.entries.associateWith { basis ->
+            Counter.builder(HOLDS_METRIC)
+                .tag("service", SERVICE)
+                .tag("basis", basis.name)
+                .description("Payments held by the enforced fraud gate, by why they were held")
+                .register(registry)
+        }
+        resolutions = FraudReviewDecision.entries
+            .flatMap { d -> FraudHoldDelivery.entries.map { d to it } }
+            .associateWith { (decision, delivery) ->
+                Counter.builder(RESOLUTIONS_METRIC)
+                    .tag("service", SERVICE)
+                    .tag("decision", decision.name)
+                    .tag("delivery", delivery.name)
+                    .description("Analyst decisions on fraud holds; RELEASE and DELIVERED is a false hold")
+                    .register(registry)
+            }
     }
 
     override fun recordDecision(decision: FraudGateAction, enforced: Boolean) {
@@ -69,9 +91,19 @@ class FraudEnforcementMetrics : FraudEnforcementMetricsPort {
         rejections[cause]?.increment()
     }
 
+    override fun recordHold(basis: FraudHoldBasis) {
+        holds[basis]?.increment()
+    }
+
+    override fun recordHoldResolution(decision: FraudReviewDecision, delivery: FraudHoldDelivery) {
+        resolutions[decision to delivery]?.increment()
+    }
+
     companion object {
         const val DECISIONS_METRIC = "openbank.fraud.enforcement.decisions"
         const val REJECTIONS_METRIC = "openbank.fraud.enforcement.rejections"
+        const val HOLDS_METRIC = "openbank.fraud.enforcement.holds"
+        const val RESOLUTIONS_METRIC = "openbank.fraud.enforcement.hold.resolutions"
         const val MODE_SHADOW = "shadow"
         const val MODE_ENFORCED = "enforced"
         const val SERVICE = "domestic"
