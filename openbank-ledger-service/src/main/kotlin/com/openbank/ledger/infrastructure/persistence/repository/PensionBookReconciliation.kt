@@ -39,7 +39,12 @@ class PensionBookReconciliation(
         checkConflict(book.kind != LedgerBookKind.BANK && book.bookId == proposal.bookId) { "Wrong pension book" }
         val required = if (book.kind == LedgerBookKind.PENSION_FUND) FUND_SOURCES else COMPANY_SOURCES
         requireValid(proposal.sourceReferences.keys == required) { "Reconciliation requires sources $required" }
-        requireValid(proposal.sourceReferences.values.all { value: String? -> !value.isNullOrBlank() && value.length <= MAX_REFERENCE }) {
+        requireValid(
+            proposal.sourceReferences.values.all { value: String? ->
+                !value.isNullOrBlank() &&
+                    value.length <= MAX_REFERENCE
+            },
+        ) {
             "Every source requires an opaque evidence reference"
         }
         requireValid(proposal.expectedBalances.isNotEmpty() && proposal.expectedBalances.size <= MAX_ACCOUNTS) {

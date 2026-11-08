@@ -16,8 +16,10 @@ interface PensionAccountingConfig {
     fun companyBookId(): Optional<UUID>
     fun companyUrl(): Optional<URI>
     fun funds(): Map<String, URI>
+
     @WithDefault("5s")
     fun pollInterval(): java.time.Duration
+
     @WithDefault("5m")
     fun closePollInterval(): java.time.Duration
 }

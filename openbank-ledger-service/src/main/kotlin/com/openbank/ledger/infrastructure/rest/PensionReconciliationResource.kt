@@ -43,7 +43,9 @@ class PensionReconciliationResource(
         return mapOf("id" to id)
     }
 
-    private companion object { const val MAX_SUBJECT_LENGTH = 190 }
+    private companion object {
+        const val MAX_SUBJECT_LENGTH = 190
+    }
 
     private fun checkerSubject(): String {
         if (!com.openbank.libs.authz.ServiceAccountIdentity.isHumanStaff(identity)) {
