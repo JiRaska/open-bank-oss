@@ -6,6 +6,8 @@ kind: Deployment
 metadata:
   name: communication-service
   namespace: communication
+  annotations:
+    openbank.io/operations-mode: reviewed-gitops
   labels:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication

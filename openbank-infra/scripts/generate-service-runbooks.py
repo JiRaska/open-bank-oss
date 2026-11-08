@@ -134,6 +134,18 @@ def declared_workload_name(short: str, gitops: Path) -> str | None:
     return gitops_facts.workload_name(short, gitops)
 
 
+def reviewed_gitops_operations(short: str) -> bool:
+    """Honor a workload's declared reviewed-GitOps-only operating mode."""
+    for path in (GITOPS / "components" / short).glob("*.yaml"):
+        for document in yaml.safe_load_all(read(path)):
+            if not isinstance(document, dict) or document.get("kind") not in ("Deployment", "Rollout"):
+                continue
+            annotations = (document.get("metadata") or {}).get("annotations") or {}
+            if annotations.get("openbank.io/operations-mode") == "reviewed-gitops":
+                return True
+    return False
+
+
 def zero_replica_workload(short: str) -> bool:
     """True when GitOps deliberately stages this service with no runnable replicas.
 
@@ -283,6 +295,13 @@ def deployment_status(short: str) -> str:
             f"step, health must be checked on the management endpoint `:{management_port(short)}`;\n"
             "the public HTTP port is not a health-evidence substitute.\n"
             "\n"
+        )
+    if reviewed_gitops_operations(short):
+        return (
+            "## Deployment status — REVIEWED GITOPS OPERATIONS\n\n"
+            "Declared replicas are desired state, not proof of a running workload. Activation and\n"
+            "rollback require a reviewed GitOps change and separate operator approval. Verify the\n"
+            "signed image, contracts, sync and actual management health before claiming availability.\n\n"
         )
     if declared_namespace(short, GITOPS) is not None:
         if workload_live_unverified(short):
@@ -546,6 +565,15 @@ def runtime_sections(short: str, ns: str) -> str:
             "Do not increase replicas, restart, or use log/metrics commands to activate this staged\n"
             "workload. The reviewed activation procedure must first establish the signed image,\n"
             "GitOps sync, and actual cluster health. The declared probes are:\n\n"
+            f"- Readiness: {readiness} · Liveness: {liveness}\n"
+        )
+    if reviewed_gitops_operations(short):
+        return (
+            "## Runtime operations — REVIEWED GITOPS ONLY\n\n"
+            "Use reviewed GitOps changes for activation, replica changes, restart and rollback;\n"
+            "do not use direct scale or restart commands to bypass approval. Retain the database\n"
+            "and published copy during rollback. After the separately approved rollout, verify\n"
+            "the actual image digest and management probes before claiming health.\n\n"
             f"- Readiness: {readiness} · Liveness: {liveness}\n"
         )
     commands = ops_commands(short, ns)

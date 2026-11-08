@@ -8,6 +8,12 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `communication` service. Data domain **engagement**,
 > classification **internal**, datastore **PostgreSQL**.
 
+## Deployment status — REVIEWED GITOPS OPERATIONS
+
+Declared replicas are desired state, not proof of a running workload. Activation and
+rollback require a reviewed GitOps change and separate operator approval. Verify the
+signed image, contracts, sync and actual management health before claiming availability.
+
 ## Service identity
 
 | Field | Value |
@@ -28,18 +34,14 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `communication`.
 
-## Health & probes
+## Runtime operations — REVIEWED GITOPS ONLY
+
+Use reviewed GitOps changes for activation, replica changes, restart and rollback;
+do not use direct scale or restart commands to bypass approval. Retain the database
+and published copy during rollback. After the separately approved rollout, verify
+the actual image digest and management probes before claiming health.
 
 - Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
-- Metrics: scraped by the fleet PodMonitor (namespace `communication`); dashboards in Grafana.
-- Logs: `kubectl logs -n communication deploy/communication-service -f`, or Loki
-  `{namespace="communication"}`.
-
-## Routine operations
-
-- **Restart:** `kubectl rollout restart deploy/communication-service -n communication` (rolling, zero-downtime at >1 replica).
-- **Scale:** `kubectl scale deploy/communication-service -n communication --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
-- **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
 ## Common failure modes
 
