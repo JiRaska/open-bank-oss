@@ -34,13 +34,12 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 /**
- * ADR-0342 participant side: interest reports a day only when every job DUE that day has a recorded
- * run. An accrual that has not run (late, or failed) leaves the day unreported, which is what holds
- * the ledger's close; the moment the accrual records its run, the next tick reports it.
+ * ADR-0342 participant side: interest reports RAN only when every due job has a recorded run.
+ * Missing work reports REFUSED, including when it invalidates an earlier positive report.
  */
 class InterestCloseParticipationSchedulerTest {
 
-    // "today" is 2026-10-03; the lookback covers 2026-09-30 .. 2026-10-02, and 2026-10-01 is a
+    // "today" is 2026-10-03; monthly reporting covers 2026-09-01 .. 2026-10-02, and 2026-10-01 is a
     // capitalization day under the production cron "0 0 2 1 * ?".
     private val clock = Clock.fixed(Instant.parse("2026-10-03T10:00:00Z"), ZoneOffset.UTC)
     private val today = LocalDate.of(2026, 10, 3)
@@ -79,21 +78,52 @@ class InterestCloseParticipationSchedulerTest {
     }
 
     @Test
-    fun `a day whose accrual has not run is not reported, and is reported once it runs late`() {
+    fun `a missing accrual is REFUSED and becomes RAN once its persisted run arrives`() {
         val oct2 = LocalDate.of(2026, 10, 2)
         ran(LocalDate.of(2026, 9, 30), InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
 
         scheduler.reportDays(today).await().indefinitely()
-        assertThat(delivered.map { it.businessDate }).containsExactly(LocalDate.of(2026, 9, 30))
+        assertThat(delivered.single { it.businessDate == oct2 }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(delivered.map { it.businessDate }).contains(LocalDate.of(2026, 9, 1))
+        assertThat(delivered.filter { it.outcome == CloseOutcome.RAN }.map { it.businessDate })
+            .containsExactly(LocalDate.of(2026, 9, 30))
 
         // Late accrual for Oct 2 (a manual POST /accrue/all, or the scheduler finally succeeding).
         ran(oct2, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
         scheduler.reportDays(today).await().indefinitely()
 
-        assertThat(delivered.map { it.businessDate })
+        assertThat(delivered.filter { it.outcome == CloseOutcome.RAN }.map { it.businessDate })
             .describedAs("Sep 30 is not re-sent unchanged; Oct 1 still lacks its capitalization")
             .containsExactly(LocalDate.of(2026, 9, 30), oct2)
         assertThat(delivered.last().outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
+    fun `a newly due job without a receipt revokes RAN and unchanged refusal is not resent`() {
+        val day = LocalDate.of(2026, 10, 1)
+        ran(day, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        val sink = CloseParticipationSink { _, report ->
+            delivered += report
+            Uni.createFrom().item(Unit)
+        }
+        schedulerWith(sink, SimpleMeterRegistry(), capitalizationCron = "off")
+            .reportDays(today).await().indefinitely()
+        val earlier = delivered.single { it.businessDate == day }
+        assertThat(earlier.outcome).isEqualTo(CloseOutcome.RAN)
+
+        // Re-enabling capitalization exposes a due job whose source receipt does not exist.
+        scheduler.reportDays(today).await().indefinitely()
+        val refused = delivered.last { it.businessDate == day }
+        assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(refused.reason).isEqualTo("Due interest job has not completed")
+        assertThat(refused.sourceRunId).isNotEqualTo(earlier.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(refused.journalsPosted).isZero()
+        assertThat(refused.exercisedJobs).isEmpty()
+
+        val sent = delivered.count { it.businessDate == day }
+        scheduler.reportDays(today).await().indefinitely()
+        assertThat(delivered.count { it.businessDate == day }).isEqualTo(sent)
+        assertThat(delivered.last { it.businessDate == day }.sourceRunId).isEqualTo(refused.sourceRunId)
     }
 
     @Test
@@ -150,7 +180,12 @@ class InterestCloseParticipationSchedulerTest {
         .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "interest-close-participation")
         .gauge()?.value()
 
-    private fun schedulerWith(sink: CloseParticipationSink, registry: MeterRegistry, at: Clock = clock) =
+    private fun schedulerWith(
+        sink: CloseParticipationSink,
+        registry: MeterRegistry,
+        at: Clock = clock,
+        capitalizationCron: String = "0 0 2 1 * ?",
+    ) =
         InterestCloseParticipationScheduler(
             closeJobRuns = runs,
             sink = sink,
@@ -158,7 +193,7 @@ class InterestCloseParticipationSchedulerTest {
             clock = at,
             domainMetrics = metricsOver(registry),
             accrualCron = "0 0 1 * * ?",
-            capitalizationCron = "0 0 2 1 * ?",
+            capitalizationCron = capitalizationCron,
             lookbackDays = 3,
         ).also { it.onStart(StartupEvent()) }
 

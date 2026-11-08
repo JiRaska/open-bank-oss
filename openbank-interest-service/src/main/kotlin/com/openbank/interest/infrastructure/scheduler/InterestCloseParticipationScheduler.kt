@@ -31,11 +31,12 @@ import java.time.LocalDate
 /**
  * Reports interest-service's day-close participation to ledger-service (ADR-0342).
  *
- * Every tick re-offers the last [lookbackDays] completed days. For each, the jobs that were DUE
+ * Every tick revisits the current and previous calendar months, or a longer [lookbackDays] window.
+ * For each completed day, the jobs that were DUE
  * (accrual every day its cron is on; capitalization on the days its cron fires) are folded from
  * `interest_close_job_run` by [CloseParticipationAssembler]: a due job with no run means the day
- * is not reported at all, so the ledger keeps it in CUTOFF and pages — interest running late holds
- * the close instead of the close passing without it. Re-offering is cheap: the reporter does not
+ * is reported REFUSED, so missing work holds the close and revokes an earlier positive report.
+ * Re-offering is cheap: the reporter does not
  * re-send a report it already delivered unchanged.
  *
  * Returns the `Uni` for Quarkus to subscribe, the shape of the other interest schedulers — a plain
@@ -72,8 +73,8 @@ class InterestCloseParticipationScheduler(
     fun reportRecentDays(): Uni<Void> = reportDays(accountingClock.today())
         // Liveness means "reports reach the ledger", not "the tick ran": a ledger that is
         // unreachable, 403 or 404 for good would otherwise leave this gauge fresh forever while no
-        // day is ever delivered. A tick that attempted nothing (every day still waiting on a job)
-        // is healthy - it has nothing to deliver - and so is one where every attempt was accepted.
+        // day is ever delivered. Delivery liveness includes accepted refusals: unfinished work is
+        // visible in the participation outcome rather than hidden by a missing report.
         .onItem().invoke { result ->
             if (result.allDelivered) {
                 liveness?.recordSuccess()
@@ -95,16 +96,21 @@ class InterestCloseParticipationScheduler(
         val allDelivered: Boolean get() = delivered == attempted
     }
 
-    /** Report every completed day in `[today - lookbackDays, today - 1]`. Visible for the IT. */
+    /** Revisit every completed day in the monthly evidence and configured recovery windows. */
     fun reportDays(today: LocalDate): Uni<TickResult> {
-        val from = today.minusDays(lookbackDays)
+        val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         return closeJobRuns.findBetween(from, to).flatMap { runs ->
             val reports = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }
-                .mapNotNull { day ->
-                    CloseParticipationAssembler.assemble(day, dueJobs(day), runs, skipReason = SKIP_REASON).also {
-                        if (it == null) log.infof("interest day-close for %s not reported: a due job has not run", day)
-                    }
+                .map { day ->
+                    val due = dueJobs(day)
+                    val forDay = runs.filter { it.businessDate == day }
+                    CloseParticipationAssembler.assemble(day, due, forDay, skipReason = SKIP_REASON)
+                        ?: CloseParticipationAssembler.incomplete(
+                            day,
+                            "Due interest job has not completed",
+                            due.toList() + forDay.map { it.toString() },
+                        )
                 }
                 .toList()
             Multi.createFrom().iterable(reports)
