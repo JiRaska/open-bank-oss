@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: campaign-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-b6494671@sha256:e28e84ac33e3a6a899d66adba2c2492ecc2bb5f44e4929a73a1e4912a46298ff
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-9e2a55ce@sha256:fea6648516e55d134689dc86fe88e6949c5d7efbc47ba879fc73adbbf3874172
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
