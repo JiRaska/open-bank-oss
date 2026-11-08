@@ -35,7 +35,7 @@ describe('test explanation source', () => {
     expect(await readTestExplanationSource()).toEqual(workspaceReport())
     mocks.payload = '{}'
     expect(await readTestExplanationSource()).toBeNull()
-    mocks.payload = 'x'.repeat(9 * 1024 * 1024)
+    mocks.payload = 'x'.repeat(17 * 1024 * 1024)
     mocks.close.mockClear()
     expect(await readTestExplanationSource()).toBeNull()
     expect(mocks.close).toHaveBeenCalledOnce()

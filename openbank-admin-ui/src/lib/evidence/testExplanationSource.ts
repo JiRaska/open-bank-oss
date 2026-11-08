@@ -3,7 +3,7 @@ import 'server-only'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { createEvidenceSnapshotReader } from './publishedSnapshot'
-import { testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from './testIntelligenceSnapshot'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from './testIntelligenceSnapshot'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 
 const readers = new Map<string, ReturnType<typeof createEvidenceSnapshotReader<TestIntelligenceReport>>>()
@@ -14,7 +14,7 @@ export async function readTestExplanationSource(): Promise<TestIntelligenceRepor
   const key = baseUrl ?? '<disabled>'
   let reader = readers.get(key)
   if (!reader) {
-    reader = createEvidenceSnapshotReader({ baseUrl, validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt })
+    reader = createEvidenceSnapshotReader({ baseUrl, maxBytes: TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt })
     if (readers.size >= 8) readers.delete(readers.keys().next().value!)
     readers.set(key, reader)
   }
@@ -26,7 +26,7 @@ export async function readTestExplanationSource(): Promise<TestIntelligenceRepor
     const file = process.env.OPENBANK_TEST_INTELLIGENCE ?? path.resolve(process.cwd(), 'test-intelligence.json')
     const handle = await fs.open(file, 'r')
     try {
-      const maximum = 8 * 1024 * 1024
+      const maximum = TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES
       const buffer = Buffer.alloc(maximum + 1)
       let offset = 0
       while (offset < buffer.length) {
