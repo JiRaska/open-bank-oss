@@ -83,6 +83,9 @@ spec:
                   - docs-truth-agent
                   - authz-policy-auditor
                   - flaky-test-hunter
+                  # admin-ui's Infrastructure page TCP-probes temporal-frontend:7233 for liveness;
+                  # without this the probe is DROPPED and Temporal renders UNKNOWN while healthy.
+                  - admin-ui
                   # ns `platform` hosts case-coordinator-agent (ADR-0244 phase 4, TEMPORAL_ENABLED
                   # =true, namespace openbank-casecoord). It was never added, so the pod
                   # CrashLoopBackOff'd on exactly the failure this comment predicts:
