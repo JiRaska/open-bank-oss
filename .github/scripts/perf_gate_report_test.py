@@ -179,6 +179,29 @@ class BoundedPerfReportTest(unittest.TestCase):
         with self.assertRaises(CONSUMER.StageError):
             self.bundle(bytes(corrupt))
 
+    def test_missing_envelope_still_stages_bounded_diagnostics_only(self):
+        (self.reports / SPEC["envelope"]).unlink()
+        boot = self.reports / (SERVICE + "-boot.log")
+        with boot.open("wb") as stream:
+            stream.seek(PRODUCER.MAX_LOG_BYTES * 2)
+            stream.write(b"boot failed here\n")
+        with self.assertRaises((ValueError, OSError)):
+            self.stage()
+        self.assertFalse(self.output.exists())
+        PRODUCER.stage_diagnostics(SERVICE, self.reports, self.output)
+        self.assertEqual({path.name for path in self.output.iterdir()}, {boot.name})
+        bounded = (self.output / boot.name).read_bytes()
+        self.assertLessEqual(len(bounded), PRODUCER.MAX_LOG_BYTES)
+        self.assertTrue(bounded.endswith(b"boot failed here\n"))
+
+    def test_diagnostics_only_refuses_empty_and_symlinked_logs(self):
+        with self.assertRaises(ValueError):
+            PRODUCER.stage_diagnostics(SERVICE, self.reports, self.output)
+        (self.reports / (SERVICE + "-k6.log")).symlink_to(self.reports / "absent")
+        with self.assertRaises(ValueError):
+            PRODUCER.stage_diagnostics(SERVICE, self.reports, self.output)
+        self.assertFalse(self.output.exists())
+
     def test_actual_workflow_upload_is_gated_on_successful_explicit_staging(self):
         workflow = yaml.safe_load((HERE.parent / "workflows/perf-gate.yml").read_text())
         steps = workflow["jobs"]["perf"]["steps"]
@@ -188,6 +211,12 @@ class BoundedPerfReportTest(unittest.TestCase):
         self.assertEqual(upload["if"], "always() && steps.stage-perf-reports.outcome == 'success'")
         self.assertEqual(upload["with"]["path"], "perf-upload/")
         self.assertEqual(upload["with"]["if-no-files-found"], "error")
+        diag = next(step for step in steps if step.get("id") == "stage-perf-diagnostics")
+        diag_upload = next(step for step in steps if step.get("name") == "Upload perf diagnostics")
+        self.assertEqual(diag["if"], "always() && steps.stage-perf-reports.outcome != 'success'")
+        self.assertIn("--diagnostics-only", diag["run"])
+        self.assertEqual(diag_upload["if"], "always() && steps.stage-perf-diagnostics.outcome == 'success'")
+        self.assertTrue(diag_upload["with"]["name"].startswith("perf-diagnostics-"))
 
 
 if __name__ == "__main__":

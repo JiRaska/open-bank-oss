@@ -47,12 +47,47 @@ def diagnostic_tail(path):
         return header + stream.read(keep)
 
 
-def stage(service, reports, destination):
+def _checked(service, reports, destination):
     if not re.fullmatch(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*", service):
         raise ValueError("invalid perf service")
     reports, destination = Path(reports), Path(destination)
     if reports.is_symlink() or not reports.is_dir() or destination.exists() or destination.is_symlink():
         raise ValueError("perf report input must exist and output must be fresh")
+    return reports, destination
+
+
+def _diagnostics(service, reports):
+    payloads = {}
+    for suffix in ("-boot.log", "-k6.log"):
+        path = reports / (service + suffix)
+        if path.exists() or path.is_symlink():
+            payloads[path.name] = diagnostic_tail(path)
+    return payloads
+
+
+def _publish(payloads, destination):
+    with tempfile.TemporaryDirectory(prefix="perf-report-", dir=destination.parent) as temporary:
+        ready = Path(temporary) / "ready"
+        ready.mkdir()
+        for name, raw in payloads.items():
+            (ready / name).write_bytes(raw)
+        ready.rename(destination)
+
+
+def stage_diagnostics(service, reports, destination):
+    """Bounded boot/k6 tails only, for when the report contract cannot be staged.
+
+    Never carries run.json or summary.json, so it cannot be mistaken for a report.
+    """
+    reports, destination = _checked(service, reports, destination)
+    payloads = _diagnostics(service, reports)
+    if not payloads:
+        raise ValueError("no perf diagnostics to stage")
+    _publish(payloads, destination)
+
+
+def stage(service, reports, destination):
+    reports, destination = _checked(service, reports, destination)
     collector = load("perf_report_envelope", "collect-test-run-evidence.py")
     consumer = load("perf_report_validation", "stage-admin-ui-performance.py")
     run_name, summary_name = service + "-run.json", service + "-summary.json"
@@ -68,16 +103,8 @@ def stage(service, reports, destination):
         consumer._validate_summary(consumer._json(payloads[summary_name]), observations[0])
     elif observations[0].get("state") != "not-run":
         raise ValueError("measured perf evidence requires its summary")
-    for suffix in ("-boot.log", "-k6.log"):
-        path = reports / (service + suffix)
-        if path.exists() or path.is_symlink():
-            payloads[path.name] = diagnostic_tail(path)
-    with tempfile.TemporaryDirectory(prefix="perf-report-", dir=destination.parent) as temporary:
-        ready = Path(temporary) / "ready"
-        ready.mkdir()
-        for name, raw in payloads.items():
-            (ready / name).write_bytes(raw)
-        ready.rename(destination)
+    payloads.update(_diagnostics(service, reports))
+    _publish(payloads, destination)
 
 
 def main():
@@ -85,8 +112,10 @@ def main():
     parser.add_argument("--service", required=True)
     parser.add_argument("--reports", default="perf-reports")
     parser.add_argument("--out", default="perf-upload")
+    parser.add_argument("--diagnostics-only", action="store_true",
+                        help="stage bounded boot/k6 tails only (report contract unavailable)")
     args = parser.parse_args()
-    stage(args.service, args.reports, args.out)
+    (stage_diagnostics if args.diagnostics_only else stage)(args.service, args.reports, args.out)
 
 
 if __name__ == "__main__":

@@ -372,6 +372,27 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
+      # If the report contract could not be staged (e.g. the envelope step
+      # failed and run.json is absent), still ship the bounded boot/k6 tails the
+      # boot-failure message points at. Separate artifact name, so the Admin UI
+      # collector, which reads perf-reports-*, never treats it as a report.
+      - name: Stage bounded perf diagnostics
+        id: stage-perf-diagnostics
+        if: always() && steps.stage-perf-reports.outcome != 'success'
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/stage-perf-gate-report.py --diagnostics-only \
+            --service "${{ matrix.service }}" --out perf-diagnostics
+
+      - name: Upload perf diagnostics
+        if: always() && steps.stage-perf-diagnostics.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-diagnostics-${{ matrix.service }}
+          path: perf-diagnostics/
+          retention-days: 30
+          if-no-files-found: error
+
       # The Admin UI deploy collector intentionally reads only immutable, provenance-complete
       # `test-intelligence-run-*` artifacts. Keep the human-facing report bundle above, but
       # publish this same versioned envelope under the fleet-wide projection contract too.
