@@ -16,6 +16,8 @@ data class CloseParticipationReport(
     val reason: String? = null,
     /** Successful persisted job receipts with observed work; an empty sweep cannot qualify a cycle. */
     val exercisedJobs: Set<String> = emptySet(),
+    /** Stable identity of persisted source receipts; retransmission must not advance ledger work time. */
+    val sourceRunId: String? = null,
 ) {
     init {
         require(journalsPosted >= 0 && itemsProcessed >= 0) { "counts must be non-negative" }
@@ -61,6 +63,7 @@ object CloseParticipationAssembler {
                 businessDate = businessDate,
                 outcome = CloseOutcome.SKIPPED,
                 reason = skipReason ?: "no job was due on $businessDate",
+                sourceRunId = sourceId(listOf(businessDate, skipReason)),
             )
         }
         if (!forDay.keys.containsAll(expectedJobs)) return null
@@ -74,6 +77,7 @@ object CloseParticipationAssembler {
                 reason = refused.joinToString("; ") { run ->
                     "${run.job}: ${run.refused} posting(s) refused — ${run.refusalReason ?: "ledger refused the day"}"
                 },
+                sourceRunId = sourceId(listOf(businessDate) + due.sortedBy { it.job }),
             )
         }
         return CloseParticipationReport(
@@ -82,7 +86,14 @@ object CloseParticipationAssembler {
             journalsPosted = due.sumOf { it.journalsPosted },
             itemsProcessed = due.sumOf { it.itemsProcessed },
             exercisedJobs = due.filter { it.itemsProcessed > 0 || it.journalsPosted > 0 }.map { it.job }.toSet(),
+            sourceRunId = sourceId(listOf(businessDate) + due.sortedBy { it.job }),
         )
+    }
+
+    private fun sourceId(values: List<Any?>): String {
+        val canonical = values.joinToString("") { value -> value.toString().let { "${it.length}:$it" } }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 }
 

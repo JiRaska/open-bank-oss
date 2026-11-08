@@ -102,6 +102,7 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 reason = request.reason,
                 callerPrincipal = ServiceAccountIdentity.verifiedPrincipalName(identity),
                 exercisedJobs = request.exercisedJobs.orEmpty(),
+                sourceRunId = request.sourceRunId,
             ),
         )
         return Response.ok(saved.toResponse()).build()
@@ -162,6 +163,7 @@ data class ReportParticipationRequest(
     val itemsProcessed: Int?,
     val reason: String?,
     val exercisedJobs: Set<String>? = null,
+    val sourceRunId: String? = null,
 )
 
 data class WaiveParticipationRequest(val reason: String?)

@@ -19,6 +19,7 @@ import com.openbank.ledger.domain.model.CloseParticipationRecord
 import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.testing.lock.NoOpClusterLock
@@ -238,6 +239,40 @@ class AccountingDaySchedulerTest {
             tieOutRun(yesterday, TieOutRunStatus.OK, Instant.parse("2026-08-07T06:00:00Z"))
         scheduler.reconcile()
         coVerify(exactly = 1) { useCase.transition(match { it.to == AccountingDayStatus.TIED_OUT }) }
+    }
+
+    @Test
+    fun `a new journal requires fresh proof even when the product report has not changed`(): Unit = runBlocking {
+        participantsMode = CloseParticipantsConfig.MODE_ENFORCE
+        val yesterday = yesterdayEligibleForTieOut()
+        val watermark = mockk<JournalReadWatermark>()
+        scheduler.journalWatermark = watermark
+        coEvery { watermark.countThrough(yesterday) } returns 1L
+        coEvery { participation.completeness(yesterday) } returns CloseCompleteness(
+            yesterday,
+            setOf("interest"),
+            mapOf(
+                "interest" to CloseParticipationRecord(
+                    yesterday, "interest", ParticipationOutcome.RAN, 1, 1, null,
+                    "service-account-openbank-interest", Instant.parse("2026-08-07T03:00:00Z"), false,
+                ),
+            ),
+        )
+        val proof = tieOutRun(yesterday, TieOutRunStatus.OK, Instant.parse("2026-08-07T04:00:00Z"))
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns proof
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 0) { useCase.transition(any()) }
+        coEvery { tieOutRuns.findLatestFor(yesterday) } returns proof.copy(journalCount = 1L)
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 1) { tieOutRunner.runTieOutFor(yesterday) }
+        coVerify(exactly = 1) {
+            useCase.transition(match { it.businessDate == yesterday && it.to == AccountingDayStatus.TIED_OUT })
+        }
     }
 
     @Test

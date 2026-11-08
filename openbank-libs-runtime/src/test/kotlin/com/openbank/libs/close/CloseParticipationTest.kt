@@ -16,6 +16,22 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class CloseParticipationTest {
 
+    @Test
+    fun `source identity is stable across retries and run ordering but changes for new persisted work`() {
+        val a = run("accrual", 10, 0)
+        val b = run("capitalization", 4, 4)
+        val first = CloseParticipationAssembler.assemble(day, setOf(a.job, b.job), listOf(a, b))!!
+        val replay = CloseParticipationAssembler.assemble(day, setOf(b.job, a.job), listOf(b, a))!!
+        val newer = CloseParticipationAssembler.assemble(
+            day,
+            setOf(a.job, b.job),
+            listOf(a.copy(completedAt = at.plusSeconds(1)), b),
+        )!!
+        assertThat(first.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(replay.sourceRunId).isEqualTo(first.sourceRunId)
+        assertThat(newer.sourceRunId).isNotEqualTo(first.sourceRunId)
+    }
+
     private val day = LocalDate.of(2026, 10, 1)
     private val at = Instant.parse("2026-10-02T01:30:00Z")
 
@@ -45,7 +61,7 @@ class CloseParticipationTest {
         )
         assertThat(
             report,
-        ).isEqualTo(
+        ).usingRecursiveComparison().ignoringFields("sourceRunId").isEqualTo(
             CloseParticipationReport(
                 day,
                 CloseOutcome.RAN,

@@ -55,6 +55,9 @@ class CloseParticipationEntity : PanacheEntityBase {
     @Column(name = "exercised_jobs", nullable = false, columnDefinition = "text[]")
     var exercisedJobs: Array<String> = emptyArray()
 
+    @Column(name = "source_run_id")
+    var sourceRunId: String? = null
+
     /** Database-assigned insertion order; never written by the application. */
     @Column(name = "seq", insertable = false, updatable = false)
     var seq: Long = 0
