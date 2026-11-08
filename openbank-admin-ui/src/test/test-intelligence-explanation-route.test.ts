@@ -13,7 +13,7 @@ const json = (value: unknown) => new Response(JSON.stringify(value), { status: 2
 beforeEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
-  mocks.auth.mockResolvedValue({ user: { accessToken: 'test-only-operator-token' } })
+  mocks.auth.mockResolvedValue({ user: { accessToken: 'test-only-operator-token', roles: ['ROLE_OPERATOR'] } })
   mocks.source.mockResolvedValue({ collectedAt: observed, testCases: [testCase] })
   vi.stubGlobal('fetch', vi.fn())
 })
@@ -25,6 +25,17 @@ describe('test explanation BFF', () => {
     expect((await POST(request())).status).toBe(401)
     expect(mocks.source).not.toHaveBeenCalled()
     expect(fetch).not.toHaveBeenCalled()
+  })
+  it('refuses a signed-in role without system:view before reading evidence or calling AI', async () => {
+    mocks.auth.mockResolvedValue({ user: { accessToken: 'test-only-token', roles: ['ROLE_RISK'] } })
+    const { POST } = await import('@/app/api/test-intelligence/explain/route')
+    expect((await POST(request())).status).toBe(403)
+    expect(mocks.source).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it('maps the explain API to system:view so the proxy gates it too', async () => {
+    const { permissionForPath } = await import('@/lib/auth/roles')
+    expect(permissionForPath('/api/test-intelligence/explain')).toBe('system:view')
   })
   it('rejects client-supplied prompts and a changed evidence snapshot before calling AI', async () => {
     const { POST } = await import('@/app/api/test-intelligence/explain/route')
@@ -55,7 +66,7 @@ describe('test explanation BFF', () => {
     expect(outgoing.messages[0].content).toContain('"individualStepsRecorded":false')
     expect((await POST(request())).status).toBe(200)
     expect(fetch).toHaveBeenCalledTimes(2)
-    mocks.auth.mockResolvedValue({ user: { accessToken: 'another-test-only-token' } })
+    mocks.auth.mockResolvedValue({ user: { accessToken: 'another-test-only-token', roles: ['ROLE_OPERATOR'] } })
     vi.mocked(fetch).mockResolvedValue(json({ capabilities: {} }))
     expect((await POST(request())).status).toBe(503)
     expect(fetch).toHaveBeenCalledTimes(3)

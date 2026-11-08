@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { hasPermission } from '@/lib/auth/roles'
 import { readTestExplanationSource } from '@/lib/evidence/testExplanationSource'
 import { explanationPrompt, explanationRequest, testExplanationFacts } from '@/lib/test-explanation'
 
@@ -10,8 +11,14 @@ const cache = new Map<string, { expires: number; value: { explanation: string; m
 const unavailable = () => NextResponse.json({ error: 'explanation_unavailable' }, { status: 503, headers: { 'Cache-Control': 'no-store' } })
 
 export async function POST(request: Request): Promise<Response> {
-  const token = (await auth())?.user?.accessToken
+  const session = await auth()
+  const token = session?.user?.accessToken
   if (!token) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  // Same permission as the /system/tests page. Without it any signed-in role could
+  // trigger an AI explanation (and spend the LLM budget) for evidence it cannot view.
+  if (!hasPermission(session.user.roles ?? [], 'system:view')) {
+    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
   if (Number(request.headers.get('content-length')) > 2048) return NextResponse.json({ error: 'invalid_request' }, { status: 400 })
   let input
   try {
