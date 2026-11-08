@@ -37,6 +37,14 @@ The ledger owns account mappings; product services send accounting purpose and
 source identifiers, never arbitrary GL ids. CZK is the initial supported currency;
 other currencies fail closed until a reviewed chart and FX policy exist.
 
+The shared fast jar registers a Java Flyway callback which selects the chart from
+the runtime book identity. Flyway SQL locations are fixed during Quarkus augmentation;
+changing them only at runtime cannot discover a newly mounted chart. Fund accounts
+come from the packaged fund chart. The company callback reads the existing mounted
+company chart through `openbank.ledger.book.chart-script`, then installs fee mappings.
+It binds identity before changing accounts and refuses changed identities, bank reuse,
+or an unbound database with journal history. An existing book needs a reviewed cutover.
+
 ### Source facts and proposed mappings
 
 Debit and credit below describe a positive amount; a correction reverses the
@@ -67,6 +75,8 @@ the same key; a partial two-book delivery stays pending. A correction creates ne
 intents containing the difference, linked to the superseded NAV; it never edits a
 posted journal. A zero delta has an explicit NO_POSTING receipt, distinct from a
 posted journal. No source fact is marked delivered while accounting is disabled.
+The immutable business intent and both receipts outlive the transport outbox;
+ordinary SENT retention cannot erase completion evidence or change its source identity.
 
 ### Independent close
 
@@ -80,6 +90,9 @@ zero balances; additional machine producers may be declared as their adapters sh
 and attributable; a waiver retains actor and reason and cannot qualify a month for
 enforcement. A reconciliation that predates completed work or a later journal is
 not valid close evidence. Bank tie-out jobs remain disabled on pension instances.
+Each destination is polled independently; failure remains observable after healthy
+destinations refresh. Recovery reads the oldest 31 pending own days, including days
+older than a fixed wall-clock lookback, without exposing journals or balances.
 
 A fund uses a conservative daily NAV requirement until a reviewed due-calendar adapter
 exists. Historical NAVs without accounting intents and pending calculated corrections

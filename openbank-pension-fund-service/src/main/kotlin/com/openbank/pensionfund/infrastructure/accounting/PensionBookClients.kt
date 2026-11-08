@@ -3,6 +3,7 @@
 
 package com.openbank.pensionfund.infrastructure.accounting
 
+import com.openbank.pensionfund.infrastructure.client.PensionBookClient
 import io.quarkus.rest.client.reactive.QuarkusRestClientBuilder
 import io.quarkus.runtime.LaunchMode
 import io.quarkus.tls.TlsConfigurationRegistry

@@ -51,10 +51,11 @@ paths:
   /api/v1/ledger/pension-accounting/closing-days:
     get:
       summary: Read bounded accounting-day states without access to journals or balances
+      description: Without dates, returns the oldest 31 OPEN or CUTOFF days through today for recovery. Supply both dates to inspect a bounded range.
       security: [{bearerAuth: []}]
       parameters:
-        - {name: from, in: query, required: true, schema: {type: string, format: date}}
-        - {name: to, in: query, required: true, schema: {type: string, format: date}}
+        - {name: from, in: query, required: false, schema: {type: string, format: date}}
+        - {name: to, in: query, required: false, schema: {type: string, format: date}}
       responses:
         '200':
           description: At most 32 date states in a range spanning at most 31 days

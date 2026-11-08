@@ -193,6 +193,11 @@ Fund and company receipts are independent; a partial delivery, disabled delivery
 NAV without an intent cannot report complete. An immutable fund-to-company binding prevents
 configuration changes from transferring an old receipt to another book. Pending calculated NAVs
 and corrections remain visible blockers. Stable source receipt hashes survive polling and restarts.
+Business intents live separately from the disposable transport outbox; the ordinary SENT purge
+retains intents, receipts, completion and source identity. Destination polling is independent and
+refreshes recent closed days as well as the oldest pending days, so a new refusal can invalidate
+monthly proof without a new journal. Cancellation still stops the job and destination failures
+remain failures after healthy books refresh.
 
 The client verifies book/source/population in the acknowledgement and refuses redirects. Production
 accounting requires the named mTLS configuration and its own OIDC client token. A fee is an expense

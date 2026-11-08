@@ -28,6 +28,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(
     PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
     initArgs = [ResourceArg(name = "db", value = "pension_company_accounting_it")],
 )
 @TestProfile(PensionCompanyAccountingIT.CompanyProfile::class)
@@ -110,7 +111,7 @@ class PensionCompanyAccountingIT {
                 listOf("PS1310", "PS6110"),
             ),
         ).post(RECONCILIATIONS).then().statusCode(200).extract().path("id")
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
     }
 
     @Test
@@ -124,7 +125,7 @@ class PensionCompanyAccountingIT {
         ],
     )
     fun `company checker records its own control rather than a bank tieout`() {
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
         assertThat(PensionAccountingFixtures.scalar("SELECT control_kind FROM ledger_tieout_runs"))
             .isEqualTo("PENSION_COMPANY")
         assertThat(
@@ -133,7 +134,7 @@ class PensionCompanyAccountingIT {
                     "AND book_id = '${PensionAccountingFixtures.COMPANY}'",
             ),
         ).isEqualTo("1")
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
     }
 
     private fun fee(nav: UUID, amount: String = "10.00", original: UUID? = null) = PensionAccountingFixtures.fee(

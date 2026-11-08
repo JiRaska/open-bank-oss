@@ -19,6 +19,17 @@ data class PensionFeeReceipt(val postingDate: LocalDate, val outcome: String, va
 /** Reserve immutable source identity before remote retries can cause any financial mutation. */
 @ApplicationScoped
 class PensionFeeReceipts(private val book: PensionBookIdentity) {
+    /** Bounded, oldest-first recovery also covers books stalled beyond a wall-clock lookback. */
+    suspend fun pendingDays(through: LocalDate): List<Pair<LocalDate, String>> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Array<Any>>(
+                "SELECT business_date, status FROM ledger_accounting_day " +
+                    "WHERE status IN ('OPEN', 'CUTOFF') AND business_date <= :through " +
+                    "ORDER BY business_date LIMIT :batch",
+            ).setParameter("through", through).setParameter("batch", PENDING_BATCH_SIZE).resultList
+        }
+    }.awaitSuspending().map { LocalDate.parse(it[0].toString()) to it[1].toString() }
+
     suspend fun requireOriginal(navId: UUID, fundId: UUID, synthetic: Boolean) {
         val count = Panache.withSession {
             Panache.getSession().flatMap { session ->
@@ -87,6 +98,7 @@ class PensionFeeReceipts(private val book: PensionBookIdentity) {
 
     private companion object {
         const val JOURNAL_ID = 3
+        const val PENDING_BATCH_SIZE = 31
     }
 
     suspend fun complete(navId: UUID, journalId: UUID?) {

@@ -1,6 +1,14 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 -- Additive, no historical backfill. Rollback disables delivery; retain source facts and receipts.
+-- Business evidence survives the transport outbox's ordinary SENT retention.
+CREATE TABLE pension_fund_fee_intents (
+    nav_id UUID PRIMARY KEY REFERENCES fund_navs(id),
+    fund_id UUID NOT NULL REFERENCES funds(id),
+    payload TEXT NOT NULL,
+    synthetic BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
 CREATE TABLE pension_fund_accounting_outbox (
     id BIGINT PRIMARY KEY,
     event_id UUID NOT NULL UNIQUE,

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.pensionfund.domain.model.ManagementFeeAccrual
+import com.openbank.pensionfund.infrastructure.client.PensionBookClient
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every

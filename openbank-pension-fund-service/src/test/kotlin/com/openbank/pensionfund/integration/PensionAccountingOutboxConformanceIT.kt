@@ -24,6 +24,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(
     PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
     initArgs = [ResourceArg(name = "db", value = "pension_accounting_outbox_conformance_it")],
 )
 @TestProfile(PensionAccountingOutboxConformanceIT.NoDelivery::class)
@@ -60,7 +61,7 @@ class PensionAccountingOutboxConformanceIT : OutboxRepositoryV2ConformanceIT() {
                         "'TEST-CUSTODY', 'CZK', 3, false, 0.01, 1, 'ACTIVE', :at, :at, NULL) " +
                         "ON CONFLICT (id) DO NOTHING",
                 ).setParameter("id", message.aggregateId)
-                    .setParameter("isin", message.aggregateId.toString().replace("-", "").take(12))
+                    .setParameter("isin", message.aggregateId.toString().replace("-", "").takeLast(12))
                     .setParameter("at", message.createdAt).executeUpdate().flatMap { session.persist(entity) }
             }
         }.awaitSuspending()

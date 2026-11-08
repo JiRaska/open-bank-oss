@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+from decimal import Decimal
 import http.server
 import json
 import os
@@ -69,17 +70,25 @@ class Fixture:
         self.create_tls()
         self.context = ssl.create_default_context(cafile=str(self.dir / "ca.crt"))
         self.context.minimum_version = ssl.TLSVersion.TLSv1_3
+        self.context.set_alpn_protocols(["http/1.1"])
         self.context.load_cert_chain(str(self.dir / "client.crt"), str(self.dir / "client.key"))
         self.start_issuer()
 
     def create_tls(self):
+        ca_config = self.dir / "ca.cnf"
+        ca_config.write_text("[req]\ndistinguished_name=dn\nx509_extensions=v3_ca\nprompt=no\n"
+                             "[dn]\nCN=local-accounting-e2e\n[v3_ca]\nbasicConstraints=critical,CA:TRUE,pathlen:0\n"
+                             "keyUsage=critical,keyCertSign,cRLSign\nsubjectKeyIdentifier=hash\n"
+                             "authorityKeyIdentifier=keyid:always,issuer\n")
         run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
-             "-subj", "/CN=local-accounting-e2e", "-keyout", self.dir / "ca.key", "-out", self.dir / "ca.crt"])
+             "-config", ca_config, "-keyout", self.dir / "ca.key", "-out", self.dir / "ca.crt"])
         for name, usage in [("server", "serverAuth"), ("client", "clientAuth")]:
             run(["openssl", "req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", f"/CN=local-{name}",
                  "-keyout", self.dir / f"{name}.key", "-out", self.dir / f"{name}.csr"])
             extension = self.dir / f"{name}.ext"
-            extension.write_text(f"extendedKeyUsage={usage}\nsubjectAltName=IP:127.0.0.1,DNS:localhost\n")
+            extension.write_text("basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+                                 "subjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid,issuer\n"
+                                 f"extendedKeyUsage={usage}\nsubjectAltName=IP:127.0.0.1,DNS:localhost\n")
             run(["openssl", "x509", "-req", "-in", self.dir / f"{name}.csr", "-CA", self.dir / "ca.crt",
                  "-CAkey", self.dir / "ca.key", "-CAcreateserial", "-days", "1", "-extfile", extension,
                  "-out", self.dir / f"{name}.crt"])
@@ -219,6 +228,12 @@ class Fixture:
                 value = {"error": "non-JSON error"}
             return error.code, value
 
+    def ready(self, base, path, token):
+        status, value = self.raw_http(base + path, token=token)
+        if status != 200:
+            raise AssertionError(f"startup status {status}: {value}")
+        return True
+
     def call(self, base, path, method="GET", body=None, *, token=None, status=200):
         actual, value = self.raw_http(base + path, method, body, token or self.maker)
         if actual != status:
@@ -227,14 +242,15 @@ class Fixture:
 
     def until(self, predicate, description, seconds=90):
         deadline = time.monotonic() + seconds
+        last_failure = "predicate remained false"
         while time.monotonic() < deadline:
             try:
                 if predicate():
                     return
-            except (OSError, urllib.error.URLError, AssertionError):
-                pass
+            except (OSError, urllib.error.URLError, AssertionError) as error:
+                last_failure = str(error)
             time.sleep(0.3)
-        raise AssertionError(description + " timed out")
+        raise AssertionError(description + " timed out: " + last_failure)
 
     def check(self, name, condition):
         if not condition:
@@ -270,7 +286,7 @@ class Fixture:
         admin_props = {"openbank.pension-fund.accounting.delivery-enabled": "false",
                        "quarkus.rest-client.product-catalog.url": self.issuer.rsplit("/", 1)[0]}
         admin_proc, admin = self.application("fund-admin-initial", "openbank-pension-fund-service", "fund_admin", admin_opa, admin_props)
-        self.until(lambda: self.raw_http(admin + "/api/v2/funds", token=self.maker)[0] == 200, "Fund service starts")
+        self.until(lambda: self.ready(admin, "/api/v2/funds", self.maker), "Fund service starts")
         fund = self.call(admin, "/api/v2/funds", "POST", {
             "name": "Fixture segregated fund", "isin": "CZ0008474053", "lei": "315700ABCDEF12345678",
             "depositaryReference": "fixture-depositary", "custodyAccountReference": "fixture-custody",
@@ -286,8 +302,8 @@ class Fixture:
         _, fund_book = self.application("fund-book", "openbank-ledger-service", "fund_book", fund_opa, common | {
             "openbank.ledger.book.kind": "PENSION_FUND", "openbank.ledger.book.id": fund,
             "openbank.ledger.book.close.required-jobs.pension-fund": "nav,management-fees",
-            "quarkus.flyway.locations": "db/migration,db/pension-fund"})
-        self.until(lambda: self.raw_http(fund_book + "/api/v1/ledger/pension-accounting/identity", token=source)[0] == 200,
+        })
+        self.until(lambda: self.ready(fund_book, "/api/v1/ledger/pension-accounting/identity", source),
                    "Fund ledger starts")
         # Reserve the company listener now; its process deliberately starts AFTER the fund leg commits.
         company_https = port()
@@ -299,13 +315,15 @@ class Fixture:
                             "openbank.pension-fund.accounting.poll-interval": "1s",
                             "openbank.pension-fund.accounting.close-poll-interval": "1s"})
         _, admin = self.application("fund-admin-active", "openbank-pension-fund-service", "fund_admin", admin_opa, admin_props)
-        self.until(lambda: self.raw_http(admin + "/api/v2/funds", token=self.maker)[0] == 200, "Fund service restarts")
+        self.until(lambda: self.ready(admin, "/api/v2/funds", self.maker), "Fund service restarts")
         today = dt.datetime.now(ZoneInfo("Europe/Prague")).date().isoformat()
         day_path = "/api/v1/ledger/accounting-days/" + today
         self.call(fund_book, day_path, "POST", status=201)
 
         def journal(description, debit, credit, amount):
             ids = {code: self.sql("fund_book", f"SELECT id FROM gl_accounts WHERE code='{code}'") for code in [debit, credit]}
+            for account in ids.values():
+                uuid.UUID(account)  # An absent chart must fail at the fixture boundary.
             lines = [{"glAccountId": ids[code], "side": side, "amount": amount, "currencyCode": "CZK",
                       "baseAmount": amount, "baseCurrencyCode": "CZK"} for code, side in [(debit, "DEBIT"), (credit, "CREDIT")]]
             return self.call(fund_book, "/api/v1/journals", "POST", {
@@ -318,7 +336,7 @@ class Fixture:
         self.call(admin, f"/api/v2/contracts/{contract}/orders", "POST", {"fundId": fund, "type": "SUBSCRIBE", "amount": 36500}, status=202)
         nav = self.call(admin, f"/api/v2/funds/{fund}/navs", "POST", {
             "valuationDate": today, "positions": [], "cash": 36500, "otherLiabilities": 0}, status=201)["id"]
-        self.call(admin, f"/api/v2/navs/{nav}/publish", "POST", token=checker)
+        self.call(admin, f"/api/v2/navs/{nav}/approve", "POST", token=checker)
         self.until(lambda: self.sql("fund_admin", "SELECT count(*) FROM pension_fund_fee_receipts WHERE book_kind='PENSION_FUND'") == "1",
                    "Fund accounting leg commits before unavailable company")
         self.check("partial two-book delivery remains pending", self.sql("fund_admin", "SELECT status FROM pension_fund_accounting_outbox") != "SENT")
@@ -333,14 +351,33 @@ class Fixture:
         _, actual_company_url = self.application("company-book", "openbank-ledger-service", "company_book", company_opa, common | {
             "quarkus.http.ssl-port": str(company_https), "openbank.ledger.book.kind": "PENSION_COMPANY",
             "openbank.ledger.book.id": COMPANY, "openbank.ledger.book.close.required-jobs.pension-fund": "management-fees",
-            "quarkus.flyway.locations": f"db/migration,filesystem:{company_dir},db/pension-company"})
-        self.until(lambda: self.raw_http(company_book + "/api/v1/ledger/pension-accounting/identity", token=source)[0] == 200,
+            "openbank.ledger.book.chart-script": str(company_dir / "afterMigrate__pension_co_chart_of_accounts.sql")})
+        self.until(lambda: self.ready(company_book, "/api/v1/ledger/pension-accounting/identity", source),
                    "Company ledger starts")
         self.call(company_book, day_path, "POST", status=201)
         self.until(lambda: self.sql("fund_admin", "SELECT status FROM pension_fund_accounting_outbox") == "SENT", "Both receipts recover")
         journal("Fixture register subscription recognition", "PF2210", "PF3010", 36500)
-        self.check("one financial fee journal per book after retry", self.sql("fund_book", "SELECT count(*) FROM ledger_pension_fee_receipts WHERE outcome='POSTED'") == "1" and
-                   self.sql("company_book", "SELECT count(*) FROM ledger_pension_fee_receipts WHERE outcome='POSTED'") == "1")
+        def fees_once():
+            for database, debit, credit in [("fund_book", "PF5110", "PF2110"),
+                                            ("company_book", "PS1310", "PS6110")]:
+                count = self.sql(database, f"SELECT count(*) FROM journal_entries WHERE transaction_id='{nav}'")
+                if count != "1":
+                    return False
+                for code, expected in [(debit, Decimal("0.80")), (credit, Decimal("-0.80"))]:
+                    amount = self.sql(database, "SELECT coalesce(sum(CASE WHEN l.side='D' THEN l.base_amount "
+                                      "ELSE -l.base_amount END), 0) FROM journal_lines l JOIN journal_entries e "
+                                      "ON e.id=l.journal_id JOIN gl_accounts g ON g.id=l.gl_account_id "
+                                      f"WHERE e.transaction_id='{nav}' AND g.code='{code}'")
+                    if Decimal(amount) != expected:
+                        return False
+                cash_legs = self.sql(database, "SELECT count(*) FROM journal_lines l JOIN journal_entries e "
+                                     "ON e.id=l.journal_id JOIN gl_accounts g ON g.id=l.gl_account_id "
+                                     f"WHERE e.transaction_id='{nav}' AND g.code NOT IN ('{debit}', '{credit}')")
+                if cash_legs != "0":
+                    return False
+            return True
+
+        self.check("exactly one balanced noncash fee journal per book after recovery", fees_once())
         self.check("company fee is a receivable, not a cash receipt", self.sql("company_book", "SELECT count(*) FROM journal_lines l JOIN gl_accounts g ON g.id=l.gl_account_id WHERE g.code='PS1110'") == "0")
         for base in [fund_book, company_book]:
             self.until(lambda base=base: self.call(base, day_path + "/participants")["complete"], "Own source completion")
@@ -370,6 +407,7 @@ class Fixture:
         journal_body = {"bookId": fund, "fundId": fund, "navId": nav, "valuationDate": today, "amount": 0.80, "currency": "CZK"}
         replay = self.call(fund_book, "/api/v1/ledger/pension-accounting/management-fees", "POST", journal_body, token=source)
         self.check("closed-day retry returns original posting", replay["outcome"] == "POSTED")
+        self.check("closed-day replay adds no journal or duplicate fee amount", fees_once())
         self.call(company_book, "/api/v1/ledger/pension-accounting/management-fees", "POST", journal_body, token=source, status=409)
         self.check("wrong-book routing is refused", True)
         for base in [fund_book, company_book]:

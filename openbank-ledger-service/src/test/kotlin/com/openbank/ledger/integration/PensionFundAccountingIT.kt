@@ -33,6 +33,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(
     PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
     initArgs = [ResourceArg(name = "db", value = "pension_fund_accounting_it")],
 )
 @TestProfile(PensionFundAccountingIT.FundProfile::class)
@@ -51,7 +52,7 @@ class PensionFundAccountingIT {
             "PENSION_FUND",
             PensionAccountingFixtures.FUND,
             listOf("pension-fund", "pension-cash", "pension-settlement", "pension-custody"),
-        ) + ("quarkus.flyway.locations" to "db/migration,db/pension-fund")
+        )
     }
 
     @Inject
@@ -166,7 +167,7 @@ class PensionFundAccountingIT {
                 listOf("PF5110", "PF2110"),
             ),
         ).post(RECONCILIATIONS).then().statusCode(200).extract().path("id")
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
         assertThat(PensionAccountingFixtures.scalar("SELECT count(*) FROM ledger_tieout_runs")).isEqualTo("0")
     }
 
@@ -181,7 +182,7 @@ class PensionFundAccountingIT {
         ],
     )
     fun `independent checker records a fund control with immutable read proof once`() {
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(200)
         assertThat(PensionAccountingFixtures.scalar("SELECT control_kind FROM ledger_tieout_runs"))
             .isEqualTo("PENSION_FUND")
         assertThat(
@@ -189,7 +190,22 @@ class PensionFundAccountingIT {
                 "SELECT count(*) FROM ledger_tieout_runs WHERE started_at IS NOT NULL AND journal_count = 0",
             ),
         ).isEqualTo("1")
-        given().post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+        given().contentType("application/json").post("$RECONCILIATIONS/$proposal/approve").then().statusCode(409)
+    }
+
+    @Test
+    @Order(3)
+    @TestSecurity(user = "own-book-operator", roles = ["ROLE_OPERATOR"])
+    fun `pending lookup recovers a cutoff older than seven days without exposing balances`() {
+        val old = clock.today().minusDays(40)
+        val path = "/api/v1/ledger/accounting-days/$old"
+        given().post(path).then().statusCode(201)
+        given().post("$path/transitions/CUTOFF").then().statusCode(200)
+        given().get("/api/v1/ledger/pension-accounting/closing-days").then().statusCode(200)
+            .body("size()", equalTo(1)).body("[0].businessDate", equalTo(old.toString()))
+            .body("[0].status", equalTo("CUTOFF"))
+        given().queryParam("from", old.toString())
+            .get("/api/v1/ledger/pension-accounting/closing-days").then().statusCode(400)
     }
 
     private fun fee(nav: UUID, amount: String = "10.00", original: UUID? = null): ValidatableResponse =
@@ -217,10 +233,12 @@ internal object PensionAccountingFixtures {
 
     fun profile(kind: String, bookId: String, participants: List<String>): Map<String, String> = buildMap {
         put("quarkus.scheduler.enabled", "false")
+        put("quarkus.oidc-client.enabled", "false")
         put("authz.enforce", "false")
         put("openbank.ledger.day-lock.mode", "off")
         put("openbank.ledger.book.kind", kind)
         put("openbank.ledger.book.id", bookId)
+        if (kind == "PENSION_COMPANY") put("openbank.ledger.book.chart-script", companyChart())
         put("openbank.ledger.book.close.participants-mode", "shadow")
         put("openbank.synthetic.trusted-principals", "service-account-openbank-pension-fund")
         participants.forEach {
@@ -234,6 +252,23 @@ internal object PensionAccountingFixtures {
                 },
             )
         }
+    }
+
+    private fun companyChart(): String {
+        val root = generateSequence(java.nio.file.Path.of("").toAbsolutePath()) { it.parent }
+            .first {
+                java.nio.file.Files.exists(
+                    it.resolve("openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"),
+                )
+            }
+        val source = java.nio.file.Files.readString(
+            root.resolve("openbank-infra/gitops/components/ledger-pension-co/chart-of-accounts.yaml"),
+        ).substringAfter("  afterMigrate__pension_co_chart_of_accounts.sql: |\n")
+            .lineSequence().joinToString("\n") { it.removePrefix("    ") }
+        return java.nio.file.Files.createTempFile("pension-company-chart-", ".sql").also {
+            java.nio.file.Files.writeString(it, source)
+            it.toFile().deleteOnExit()
+        }.toString()
     }
 
     fun resetChart(prefix: String, debit: String, credit: String, debitType: String, creditType: String) {

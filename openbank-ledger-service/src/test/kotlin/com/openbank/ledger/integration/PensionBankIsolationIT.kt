@@ -23,6 +23,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(
     PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
     initArgs = [ResourceArg(name = "db", value = "pension_bank_isolation_it")],
 )
 class PensionBankIsolationIT {

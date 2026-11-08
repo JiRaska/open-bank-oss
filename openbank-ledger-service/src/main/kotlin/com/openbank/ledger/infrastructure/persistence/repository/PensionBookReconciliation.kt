@@ -114,15 +114,18 @@ class PensionBookReconciliation(
                                         net.compareTo(expected.getValue(code)) == 0
                                     },
                             ) { "Source balances do not reconcile to the entire book" }
-                            session.createNativeMutationQuery(
-                                "INSERT INTO ledger_tieout_runs " +
-                                    "(id, as_of, run_at, started_at, journal_count, status, accounts_checked, " +
-                                    "breaks, errors, control_kind) " +
-                                    "SELECT :id, :d, clock_timestamp(), :startedAt, count(*), 'OK', :n, 0, 0, :kind " +
-                                    "FROM journal_entries WHERE entry_date <= :d",
-                            ).setParameter("id", id).setParameter("d", date).setParameter("n", rows.size)
-                                .setParameter("startedAt", startedAt)
-                                .setParameter("kind", book.kind.name).executeUpdate()
+                            JournalReadWatermark.readInTransaction(session, date).flatMap { population ->
+                                session.createNativeMutationQuery(
+                                    "INSERT INTO ledger_tieout_runs " +
+                                        "(id, as_of, run_at, started_at, journal_count, journal_fingerprint, " +
+                                        "status, accounts_checked, breaks, errors, control_kind) " +
+                                        "VALUES (:id, :d, clock_timestamp(), :startedAt, :count, :fingerprint, " +
+                                        "'OK', :n, 0, 0, :kind)",
+                                ).setParameter("id", id).setParameter("d", date).setParameter("n", rows.size)
+                                    .setParameter("startedAt", startedAt).setParameter("count", population.count)
+                                    .setParameter("fingerprint", population.fingerprint)
+                                    .setParameter("kind", book.kind.name).executeUpdate()
+                            }
                         }.flatMap {
                             session.createNativeMutationQuery(
                                 "UPDATE ledger_pension_reconciliations SET approved_by = :actor, approved_at = now() " +

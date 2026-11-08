@@ -6,13 +6,19 @@ package com.openbank.pensionfund.integration
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.pensionfund.FixedFundTerms
+import com.openbank.pensionfund.infrastructure.accounting.PensionAccountingOutbox
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
+import io.smallrye.mutiny.coroutines.uni
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.hamcrest.Matchers.equalTo
@@ -23,6 +29,8 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.math.BigDecimal
 import java.sql.DriverManager
+import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
@@ -31,11 +39,15 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(
     PostgresTestResource::class,
+    restrictToAnnotatedClass = true,
     initArgs = [ResourceArg(name = "db", value = "pension_fee_intent_it")],
 )
 @TestProfile(PensionFeeIntentIT.DisabledDelivery::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class PensionFeeIntentIT {
+    @Inject
+    lateinit var accountingOutbox: PensionAccountingOutbox
+
     class DisabledDelivery : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "false",
@@ -103,6 +115,8 @@ class PensionFeeIntentIT {
                 .isEqualTo("0")
             assertThat(scalar("SELECT count(*) FROM pension_fund_accounting_outbox WHERE event_id = '$rollbackNav'"))
                 .isEqualTo("0")
+            assertThat(scalar("SELECT count(*) FROM pension_fund_fee_intents WHERE nav_id = '$rollbackNav'"))
+                .isEqualTo("0")
         } finally {
             sql(
                 "DROP TRIGGER reject_test_fee_intent ON pension_fund_accounting_outbox; " +
@@ -138,6 +152,20 @@ class PensionFeeIntentIT {
                 "WHERE nav_id = '$nav' AND book_kind = 'PENSION_COMPANY'",
         )
         evidence("PENSION_COMPANY").body("complete", equalTo(true))
+        val companyRun = evidence("PENSION_COMPANY").extract().path<String>("sourceRunId")
+        sql(
+            "UPDATE pension_fund_accounting_outbox SET status = 'SENT', sent_at = now() - interval '8 days' WHERE event_id = '$nav'",
+        )
+        val purged = VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                accountingOutbox.purgeSent(Duration.ofDays(7), 100, Instant.now())
+            }
+        }
+        assertThat(purged).isEqualTo(1)
+        assertThat(scalar("SELECT count(*) FROM pension_fund_accounting_outbox WHERE event_id = '$nav'"))
+            .isEqualTo("0")
+        evidence().body("complete", equalTo(true)).body("sourceRunId", equalTo(runId))
+        evidence("PENSION_COMPANY").body("complete", equalTo(true)).body("sourceRunId", equalTo(companyRun))
     }
 
     @Test
@@ -156,11 +184,9 @@ class PensionFeeIntentIT {
         )
         evidence().body("complete", equalTo(false)).body("blockers", hasItem("HISTORICAL_NAV_HAS_NO_ACCOUNTING_INTENT"))
         sql(
-            "INSERT INTO pension_fund_accounting_outbox (id, event_id, aggregate_id, event_type, payload, " +
-                "status, synthetic, created_at, updated_at) " +
-                "SELECT nextval('pension_fund_accounting_outbox_seq'), '$historical', aggregate_id, event_type, " +
-                "payload, 'PENDING', false, created_at, updated_at " +
-                "FROM pension_fund_accounting_outbox WHERE event_id = '$nav'",
+            "INSERT INTO pension_fund_fee_intents (nav_id, fund_id, payload, synthetic, created_at) " +
+                "SELECT '$historical', fund_id, payload, false, created_at " +
+                "FROM pension_fund_fee_intents WHERE nav_id = '$nav'",
         )
         evidence().body("complete", equalTo(false)).body("blockers", hasItem("ACCOUNTING_DELIVERY_INCOMPLETE"))
         receipt(historical, "PENSION_FUND", fund, yesterday)

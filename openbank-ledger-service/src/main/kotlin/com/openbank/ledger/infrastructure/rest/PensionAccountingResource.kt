@@ -83,6 +83,10 @@ class PensionAccountingResource(
         @jakarta.ws.rs.QueryParam("from") from: LocalDate?,
         @jakarta.ws.rs.QueryParam("to") to: LocalDate?,
     ): List<Map<String, String>> {
+        if (from == null && to == null) {
+            return receipts.pendingDays(clock.today())
+                .map { (date, status) -> mapOf("businessDate" to date.toString(), "status" to status) }
+        }
         requireNotNull(from) { "from is required" }
         requireNotNull(to) { "to is required" }
         requireValid(!to.isBefore(from) && java.time.temporal.ChronoUnit.DAYS.between(from, to) <= MAX_DAYS) {

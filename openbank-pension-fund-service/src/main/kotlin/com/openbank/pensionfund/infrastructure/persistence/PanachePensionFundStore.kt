@@ -118,17 +118,24 @@ class PanachePensionFundStore(
         changes: StoreChanges,
     ): Uni<Void> = changes.managementFees.fold(Uni.createFrom().voidItem()) { acc, fee ->
         acc.flatMap {
-            session.persist(
-                PensionAccountingOutbox.pending().also {
-                    it.eventId = fee.navId
-                    it.aggregateId = fee.fundId
-                    it.eventType = "PensionManagementFeeAccrued.v1"
-                    it.synthetic = changes.synthetic
-                    it.payload = json.writeValueAsString(fee)
-                    it.createdAt = checkNotNull(changes.navs.first { nav -> nav.id == fee.navId }.publishedAt)
-                    it.updatedAt = it.createdAt
-                },
-            )
+            val intent = PensionAccountingOutbox.pending().also {
+                it.eventId = fee.navId
+                it.aggregateId = fee.fundId
+                it.eventType = "PensionManagementFeeAccrued.v1"
+                it.synthetic = changes.synthetic
+                it.payload = json.writeValueAsString(fee)
+                it.createdAt = checkNotNull(changes.navs.first { nav -> nav.id == fee.navId }.publishedAt)
+                it.updatedAt = it.createdAt
+            }
+            // Flush the NAV first so its durable intent FK is checked in this same transaction.
+            session.flush().flatMap {
+                session.createNativeMutationQuery(
+                    "INSERT INTO pension_fund_fee_intents (nav_id, fund_id, payload, synthetic, created_at) " +
+                        "VALUES (:nav, :fund, :payload, :synthetic, :at)",
+                ).setParameter("nav", fee.navId).setParameter("fund", fee.fundId)
+                    .setParameter("payload", intent.payload).setParameter("synthetic", intent.synthetic)
+                    .setParameter("at", intent.createdAt).executeUpdate()
+            }.flatMap { session.persist(intent) }
         }
     }
 

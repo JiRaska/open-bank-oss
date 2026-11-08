@@ -17,6 +17,7 @@ interface LedgerBookConfig {
     @WithDefault("BANK")
     fun kind(): LedgerBookKind
     fun id(): Optional<UUID>
+    fun chartScript(): Optional<String>
 }
 
 /** Configuration changes cannot reassign a database once its first pension receipt binds it. */

@@ -7,19 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.pensionfund.domain.model.ManagementFeeAccrual
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.PUT
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.QueryParam
-import jakarta.ws.rs.core.MediaType
-import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import java.math.BigDecimal
 import java.net.URI
 import java.time.LocalDate
@@ -34,28 +22,6 @@ data class FeePosting(
     val currency: String,
     val correctsNavId: UUID?,
 )
-
-@Path("/")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
-interface PensionBookClient : AutoCloseable {
-    @POST
-    @Path("/api/v1/ledger/pension-accounting/management-fees")
-    suspend fun post(@HeaderParam("x-openbank-synthetic") synthetic: String?, request: FeePosting): FeeDeliveryReceipt
-
-    @GET
-    @Path("/api/v1/ledger/pension-accounting/identity")
-    suspend fun identity(): PensionBookDescriptor
-
-    @GET
-    @Path("/api/v1/ledger/pension-accounting/closing-days")
-    suspend fun days(@QueryParam("from") from: LocalDate, @QueryParam("to") to: LocalDate): List<PensionClosingDay>
-
-    @PUT
-    @Path("/api/v1/ledger/accounting-days/{date}/participants/pension-fund")
-    suspend fun report(@PathParam("date") date: LocalDate, report: PensionCloseReport)
-}
 
 data class PensionBookDescriptor(val kind: String, val bookId: UUID?)
 data class PensionClosingDay(val businessDate: LocalDate, val status: String)

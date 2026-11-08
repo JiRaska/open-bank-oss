@@ -18,6 +18,14 @@ uses mutual TLS and verifies the generated CA. The only external-source doubles 
 OIDC issuer and a pinned catalog revision. Custody receipt and unit recognition are explicit,
 attributable fixture postings through the ledger API; fee publication infers no cash settlement.
 
+The shared ledger package chooses its chart through the registered runtime Flyway callback.
+The company chart has one source: the existing infra ConfigMap. The runner extracts that exact
+SQL into a temporary file and passes `openbank.ledger.book.chart-script`; it does not duplicate
+the chart. A deployment must point that property at its reviewed mounted chart, alongside an
+explicit book kind/id and own close declarations. Runtime Flyway location overrides alone do
+not discover files in a package augmented with different locations. Existing journal history
+without a bound identity requires a reviewed cutover and is refused at startup.
+
 The scenario withholds the company ledger until the fund leg has committed, proves the source
 remains pending, starts the company and recovers without duplicate fee journals. It then proves
 that source completion cannot replace each book's full-chart maker/checker reconciliation,

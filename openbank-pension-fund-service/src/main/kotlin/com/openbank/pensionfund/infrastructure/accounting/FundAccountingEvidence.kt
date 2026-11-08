@@ -40,9 +40,9 @@ class FundAccountingEvidence {
         val rows = Panache.withSession {
             Panache.getSession().flatMap { session ->
                 session.createNativeQuery<Array<Any?>>(
-                    "SELECT n.id, n.status, n.valuation_date, o.synthetic, " +
+                    "SELECT n.id, n.status, n.valuation_date, i.synthetic, " +
                         "r.outcome, r.posting_date, r.journal_id, r.received_at FROM fund_navs n " +
-                        "LEFT JOIN pension_fund_accounting_outbox o ON o.event_id = n.id " +
+                        "LEFT JOIN pension_fund_fee_intents i ON i.nav_id = n.id " +
                         "LEFT JOIN pension_fund_fee_destinations d ON d.fund_id = n.fund_id " +
                         "LEFT JOIN pension_fund_fee_receipts r ON r.nav_id = n.id AND r.book_kind = :kind " +
                         "AND r.book_id = CASE WHEN :kind = 'PENSION_FUND' THEN n.fund_id " +

@@ -3,8 +3,10 @@
 # MECHANISM. ledger-service seeds its chart of accounts with Flyway migrations baked into the
 # image (classpath:db/migration, V1/V5/V14/…/V30 INSERT INTO gl_accounts). That image is shared
 # with the bank, so a pension account added there would land in the BANK's ledger-db too. This
-# instance instead sets QUARKUS_FLYWAY_LOCATIONS=db/migration,filesystem:/flyway/pension-co and
-# mounts this ConfigMap at /flyway/pension-co. The file is a Flyway SQL CALLBACK
+# instance mounts this ConfigMap at /flyway/pension-co. With ADR-0365's shared runtime callback,
+# set an explicit PENSION_COMPANY book kind/id and openbank.ledger.book.chart-script to this file.
+# Runtime QUARKUS_FLYWAY_LOCATIONS alone cannot discover an unrecorded file in a packaged Quarkus
+# application: locations are fixed at augmentation. This file remains an idempotent SQL callback
 # (afterMigrate__*.sql), not a versioned migration:
 #   - it runs after every migrate (every boot), so it re-asserts the chart idempotently;
 #   - it writes no flyway_schema_history row and owns no version number, so a future shared
