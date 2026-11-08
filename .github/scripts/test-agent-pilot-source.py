@@ -24,7 +24,7 @@ REMOTE = 'https://github.com/JiRaska/open-bank-oss.git'
 
 
 class PilotSourceTest(unittest.TestCase):
-    def run_checkout(self, *, missing_source=False, unavailable=False):
+    def run_checkout(self, *, missing_source=False, unavailable=False, symlink_source=False):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             repo = root/'upstream'; repo.mkdir()
@@ -34,6 +34,10 @@ class PilotSourceTest(unittest.TestCase):
                 files[PREFIX+'ExampleTest.kt'] = 'class ExampleTest {}\n'
             for name, content in files.items():
                 path = repo/name; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(content)
+            if symlink_source:
+                outside = root/'outside'; outside.write_text('outside the allowed source tree')
+                (repo/PREFIX/'Escape.kt').symlink_to(outside)
+                files[PREFIX+'Escape.kt'] = None
             def git(*args):
                 return subprocess.run(['git', '-C', str(repo), *args], check=True,
                                       capture_output=True, text=True, timeout=10)
@@ -73,6 +77,10 @@ class PilotSourceTest(unittest.TestCase):
 
     def test_missing_test_tree_fails_startup(self):
         result, _, _ = self.run_checkout(missing_source=True)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_symlink_cannot_make_the_application_scan_outside_the_snapshot(self):
+        result, _, _ = self.run_checkout(symlink_source=True)
         self.assertNotEqual(result.returncode, 0)
 
     def test_snapshot_is_read_only_and_the_fetcher_has_no_secret_inputs(self):

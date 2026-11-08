@@ -51,6 +51,7 @@ spec:
                 --filter=blob:none https://github.com/JiRaska/open-bank-oss.git /source/repo
               git -C /source/repo sparse-checkout set --no-cone '/openbank-flaky-test-hunter/src/test/kotlin/**'
               git -C /source/repo -c core.hooksPath=/dev/null checkout --detach HEAD
+              test -z "$(find /source/repo -path /source/repo/.git -prune -o -type l -print -quit)"
               test -d /source/repo/openbank-flaky-test-hunter/src/test/kotlin
               test -n "$(find /source/repo/openbank-flaky-test-hunter/src/test/kotlin -name '*.kt' -print -quit)"
               git -C /source/repo rev-parse HEAD
