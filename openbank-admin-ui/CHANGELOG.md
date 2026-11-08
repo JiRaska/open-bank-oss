@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.5.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.3...admin-ui-v4.5.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** unify workspace navigation, saved views and assistant search ([#15114](https://github.com/JiRaska/open-bank-oss/issues/15114)) ([7e6e555](https://github.com/JiRaska/open-bank-oss/commit/7e6e555324882d5cf44287f7a22da0e3bc42ae1b))
+
 ## [4.4.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.2...admin-ui-v4.4.3) (2026-11-07)
 
 
