@@ -30,9 +30,9 @@ interface FlakyTestHunterConfig {
     fun modelId(): String
 
     // Filesystem path to a monorepo checkout for TestScanAdapter (the webhook / operator scan
-    // path). The DEPLOYED pod mounts no checkout, so there the scan reads an empty tree; the
-    // production input is the Admin UI snapshot posted to /evidence/analyze. Keep the default
-    // for local and webhook use on a developer machine.
+    // path). The deployed pilot mounts only this module's test sources read-only; fleet
+    // execution evidence still enters through Admin UI snapshots at /evidence/analyze.
+    // The default supports local checkouts with broader source trees and JUnit reports.
     @WithDefault(".")
     fun repoRoot(): String
 
