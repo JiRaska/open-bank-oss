@@ -2171,6 +2171,7 @@ gates:
     budget_seconds: 300   # 161.9 s in CI on 2026-11-07 with the two finrep tests added; ~1.85x
     run: |
       set -e
+      python3 .github/scripts/test-communication-image-only.py
       python3 .github/scripts/test-service-ci-path-selection.py
       bash .github/scripts/test-service-ci-provider-task-discovery.sh
       bash .github/scripts/test-service-ci-provider-task-list.sh

@@ -81,6 +81,10 @@ SETUP_JAVA = "actions/setup-java"
 # OS+architecture on Linux-X64, which today is fleet-lint. Everything else restores.
 # ---------------------------------------------------------------------------
 DECLARED: dict[str, tuple[str, str]] = {
+    "communication-image-only.yml::build-push": (
+        "read-only",
+        "Manual communication evidence build restores existing dependencies without adding a cache writer.",
+    ),
     "fleet-lint.yml::fleet-lint": (
         "conditional",
         "THE designated Linux-X64 writer. Runs `testClasses detekt ktlintCheck` fleet-wide "
