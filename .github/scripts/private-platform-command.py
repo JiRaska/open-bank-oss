@@ -15,7 +15,7 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", required=True,
-                        choices=("init", "preview", "plan", "evidence-guard", "apply"))
+                        choices=("initialization", "preview", "plan", "evidence-guard", "apply"))
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command

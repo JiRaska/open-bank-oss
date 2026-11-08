@@ -126,7 +126,7 @@ jobs:
 
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
-        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage init -- tofu init -input=false
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage initialization -- tofu init -input=false
 
       - name: tofu plan (read-only, no lock)
         working-directory: ${{ env.ENV_DIR }}
@@ -287,7 +287,7 @@ jobs:
 
       - name: tofu init
         working-directory: ${{ env.ENV_DIR }}
-        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage init -- tofu init -input=false
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/private-platform-command.py" --stage initialization -- tofu init -input=false
 
       # Re-plan to a file and apply THAT file in the same job: the executed change
       # is exactly this plan, computed against current locked state. If state moved
