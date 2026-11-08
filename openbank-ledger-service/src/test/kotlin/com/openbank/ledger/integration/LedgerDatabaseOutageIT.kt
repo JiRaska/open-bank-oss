@@ -57,6 +57,9 @@ class LedgerDatabaseOutageIT {
         val admin = URI.create(proxyAdminUrl)
         val proxy = ToxiproxyClient(admin.host, admin.port).getProxy("ledger-postgres")
         DriverManager.getConnection(directJdbcUrl, databaseUser, databasePassword).use { observer ->
+            // Establish the healthy write path before injecting the fault. First-use HTTP/client
+            // initialization must not consume the bound intended for rejecting an unavailable DB.
+            assertThat(post(Posting().payload()).statusCode).isEqualTo(201)
             try {
                 proxy.disable()
                 assertThat(proxy.isEnabled).isFalse()
