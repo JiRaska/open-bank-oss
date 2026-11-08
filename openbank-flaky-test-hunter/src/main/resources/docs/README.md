@@ -47,7 +47,7 @@ Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent
 
 ## Input and dispositions
 
-The deployed agent's input is the Admin UI Test Intelligence snapshot, posted after every collection to `POST /api/v1/flaky-test-hunter/evidence/analyze`. The static source scan reads a repository checkout under `openbank.flaky-test-hunter.repo-root`, and the deployed pod mounts none. The weekly scheduled sweep was therefore removed on 2026-10-17, because it scanned an empty tree. The scan remains reachable through `POST /check/trigger` and the CI-failure webhook. The replay-only `RunTrigger.SCHEDULED` value was removed after the 168-hour Temporal history retention window.
+Fleet execution evidence comes from Admin UI Test Intelligence snapshots at `POST /api/v1/flaky-test-hunter/evidence/analyze`. The operator-triggered source pilot reads only this module's tests from a read-only sparse snapshot of public main, taken at pod startup with its exact revision logged. It never builds or executes that source. No JUnit execution reports are mounted; the scanner keeps a missing execution count unknown. A deployment refreshes the snapshot. Source scans remain reachable through the operator trigger and CI-failure webhook; no periodic fleet sweep is enabled.
 
 A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with the finding and diagnosis. An open issue with the same title is reused, so a re-run does not flood the tracker. The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. Ticket and diagnosis text from an issue is treated as untrusted input.
 
