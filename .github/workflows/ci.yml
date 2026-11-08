@@ -813,7 +813,7 @@ jobs:
           echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
 
-      # ADR-0366: tier 1 of fetch-artifact.py. Entries are keyed by sha256 and re-verified
+      # #15216: tier 1 of fetch-artifact.py. Entries are keyed by sha256 and re-verified
       # against ci/artifacts.lock on read, so a stale or poisoned entry is rejected, never run.
       - name: Restore CI artifact cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

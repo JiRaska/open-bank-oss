@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for fetch-artifact.py (ADR-0366): tier order, per-tier sha256 rejection, exit codes.
+"""Tests for fetch-artifact.py (#15216): tier order, per-tier sha256 rejection, exit codes.
 
 Network-free: the mirror and upstream tiers are served by a local http.server on 127.0.0.1
 that speaks just enough of the OCI distribution API (manifest + blob, with an anonymous

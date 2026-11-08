@@ -1318,7 +1318,7 @@ gates:
     review_after: "2027-02-28"
     min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
     # `install-promtool.sh` installs promtool at the version and sha256 pinned in
-    # ci/artifacts.lock (ADR-0366; the lock is a selftest input, so a bump re-falsifies) and run.sh IS the
+    # ci/artifacts.lock (#15216; the lock is a selftest input, so a bump re-falsifies) and run.sh IS the
     # harness under test. The PrometheusRule manifests are NOT inputs to the falsification:
     # measured 2026-09-02, corrupting the LogQL in prometheus-rules-accounting-day.yaml leaves
     # the self-test verdict unchanged -- see the reason assertion below for why that used to be
@@ -5900,10 +5900,10 @@ gates:
     run: |
       python3 .github/scripts/check-helm-values-keys.py
 
-  # ADR-0366: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
+  # #15216: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
   # fetches; fetch-artifact.py accepts bytes from any tier only when they match its sha256.
   - id: ci-artifact-lock-integrity
-    name: "ci/artifacts.lock is well-formed: unique names, sha256 digests, no latest (ADR-0366, enforced)"
+    name: "ci/artifacts.lock is well-formed: unique names, sha256 digests, no latest (#15216, enforced)"
     group: lint
     mode: enforced
     rationale: "The resolver trusts whatever digest the lock states, so a missing or malformed sha256, a duplicated name or a latest tag would let unverified bytes run in CI while every fetch reports verified."
@@ -5921,15 +5921,15 @@ gates:
     run: |
       python3 -I .github/scripts/check-artifact-lock.py
 
-  # ADR-0366 D6: downloads of lock-eligible upstreams must go through fetch-artifact.py.
+  # #15216: downloads of lock-eligible upstreams must go through fetch-artifact.py.
   # Advisory until rollout step 3 migrates the existing call sites; they print as known debt.
   - id: ci-artifact-fetch-via-resolver
-    name: "CI downloads of GitHub Releases / *.github.io / OPA go through fetch-artifact.py (ADR-0366, advisory)"
+    name: "CI downloads of GitHub Releases / *.github.io / OPA go through fetch-artifact.py (#15216, advisory)"
     group: lint
     mode: advisory
     rationale: "A direct curl or helm pull trusts whatever bytes arrive and turns an upstream outage into a red required check; on 2026-11-08 GitHub Releases 504s reddened Gitleaks and helm-values-key-effect with no change at fault."
     review_after: "2027-02-08"
-    verified: "2026-11-08 — 11 direct downloads remain after PR 1 migrated gitleaks (secret-scan.yml), promtool and the helm-values charts: cosign x5, opa x3, oasdiff x2, gitleaks in public-readiness.yml; all ADR-0366 rollout step 3 debt"
+    verified: "2026-11-08 — 11 direct downloads remain after PR 1 migrated gitleaks (secret-scan.yml), promtool and the helm-values charts: cosign x5, opa x3, oasdiff x2, gitleaks in public-readiness.yml; all #15216 rollout step 3 debt"
     budget_seconds: 30
     min_subjects: 300   # 735 files under .github/ on 2026-11-08
     selftest_inputs: [".github/scripts/check-artifact-fetch-via-resolver.py"]

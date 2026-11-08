@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the pinned, checksum-verified promtool used by the alert-rule unit-test gate.
 #
-# Version and sha256 live in ci/artifacts.lock (entry `promtool`, ADR-0366); the archive is fetched
+# Version and sha256 live in ci/artifacts.lock (entry `promtool`, #15216); the archive is fetched
 # through the resolver, which verifies it against the lock from every tier (cache, mirror,
 # upstream). An unavailable artifact exits 75 with `UNVERIFIED (artifact unavailable)`, which this
 # script passes through unchanged so the gate log says "could not fetch", never "rules broken".

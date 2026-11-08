@@ -71,7 +71,7 @@ NOT touch `ignored_top_level_keys`/`_render`, which never hit the network (they 
 `helm template` against an already-pulled local chart directory): a chart that
 genuinely has a mismatched values key still fails, retries or not.
 
-CHART SOURCE (ADR-0366). Charts are no longer pulled with `helm pull`: each one is fetched through
+CHART SOURCE (#15216). Charts are no longer pulled with `helm pull`: each one is fetched through
 `fetch-artifact.py` from the entry `helm-chart/<chart>` in `ci/artifacts.lock`, sha256-verified,
 from the Actions cache, the mirror or upstream in that order. A chart whose (name, version) is not
 in the lock is a hard FAIL — bump the lock with the targetRevision. A chart no tier could deliver
@@ -309,7 +309,7 @@ def check_fleet() -> int:
                 if pull_error is not None:
                     # COULD-NOT-CHECK is a third state (2026-08-21: gitlab.com 502; 2026-11-08:
                     # GitHub Releases 504). It must not read as a finding, and it must not stop the
-                    # scan — every reachable chart is still examined. But since ADR-0366 it is no
+                    # scan — every reachable chart is still examined. But since #15216 it is no
                     # longer a pass either: a required check that could not look must not go green,
                     # so the run ends UNVERIFIED (exit 75) after the scan, worded so that grepping
                     # for `IGNORED by` or `helm template failed` never matches it.
@@ -388,7 +388,7 @@ def _self_test_unreachable_is_not_a_finding() -> str | None:
 
     History: on 2026-08-21 gitlab.com answered 502 for one chart and the gate (a) failed as
     though the repo were broken and (b) returned immediately, so the other 19 sources were never
-    examined. The #5094-era fix made it a warning and a pass. ADR-0366 keeps (b) — every
+    examined. The #5094-era fix made it a warning and a pass. #15216 keeps (b) — every
     reachable source is still checked — and replaces the pass with UNVERIFIED, exit 75: a
     required check that could not look must not go green, and must not read like a finding.
     A hard resolver error (not in the lock, digest mismatch) is a plain FAIL, exit 1.

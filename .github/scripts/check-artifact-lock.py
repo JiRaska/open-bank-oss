@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integrity of `ci/artifacts.lock`, the trust anchor of the CI artifact resolver (ADR-0366).
+"""Integrity of `ci/artifacts.lock`, the trust anchor of the CI artifact resolver (#15216).
 
 Gate `ci-artifact-lock-integrity` (enforced). The resolver accepts bytes from any tier only when
 their sha256 equals the lock's, so a malformed lock is a supply-chain hole rather than a style

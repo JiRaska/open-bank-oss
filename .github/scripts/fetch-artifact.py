@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch a CI artifact pinned in `ci/artifacts.lock` (ADR-0366).
+"""Fetch a CI artifact pinned in `ci/artifacts.lock` (#15216).
 
     python3 -I .github/scripts/fetch-artifact.py <name> [--platform P] --out PATH
     python3 -I .github/scripts/fetch-artifact.py <name> --show version

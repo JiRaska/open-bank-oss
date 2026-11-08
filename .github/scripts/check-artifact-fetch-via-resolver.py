@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Flag CI downloads that bypass the artifact resolver (ADR-0366, gate `ci-artifact-fetch-via-resolver`).
+"""Flag CI downloads that bypass the artifact resolver (#15216, gate `ci-artifact-fetch-via-resolver`).
 
 Every external tool and chart CI fetches is meant to come through `fetch-artifact.py`, which
 verifies it against `ci/artifacts.lock` and can fall back to a cache and a mirror when upstream is
@@ -8,7 +8,7 @@ property: it trusts whatever bytes arrive, and it turns an upstream outage into 
 check. Lock-eligible upstreams today: GitHub Releases downloads, `*.github.io` (Helm repositories
 whose archives are themselves Release assets) and the OPA download site.
 
-ADVISORY until the existing call sites are migrated (ADR-0366 rollout step 3). Today's offenders
+ADVISORY until the existing call sites are migrated (#15216 rollout step 3). Today's offenders
 are KNOWN DEBT: they print as `::warning` and the gate exits 0. `--enforce` makes any finding fail;
 the gate flips to that once the sweep closes.
 
@@ -120,7 +120,7 @@ def main(argv: list[str]) -> int:
     hits, files = scan(root)
     enforce = "--enforce" in argv
     for hit in hits:
-        prefix = "FAIL" if enforce else "::warning::known debt (ADR-0366 step 3):"
+        prefix = "FAIL" if enforce else "::warning::known debt (#15216 step 3):"
         print(f"{prefix} download bypasses fetch-artifact.py: {hit}")
     print(f"{len(hits)} direct download(s) of lock-eligible upstreams under .github/ "
           f"({'enforced' if enforce else 'ADVISORY: known debt, not a failure'}); {files} file(s) scanned")
