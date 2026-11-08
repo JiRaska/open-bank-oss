@@ -76,9 +76,9 @@ spec:
                   tls_disable     = 1
                   address         = "[::]:8200"
                   cluster_address = "[::]:8201"
-                  # Temporary, runbook 0027 "Root-token rotation": allows generate-root with
-                  # the recovery key (still required to finish). Reverted by a follow-up PR.
-                  disable_unauthed_generate_root_endpoints = false
+                  # Default since OpenBao 2.5.3, stated explicitly: generate-root stays closed.
+                  # Runbook 0027 "Root-token rotation" opens it temporarily when needed.
+                  disable_unauthed_generate_root_endpoints = true
                 }
 
                 # ADR-0352: a SECOND listener, TLS, for clients whose transport refuses http
