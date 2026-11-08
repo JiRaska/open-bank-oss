@@ -355,13 +355,43 @@ jobs:
             --performance-summary "perf-reports/${{ matrix.service }}-summary.json" \
             --out "perf-reports/${{ matrix.service }}-run.json"
 
-      - name: Upload perf reports
+      # Preserve the summary/envelope and issue renderer's diagnostic filenames,
+      # but keep boot/k6 log tails bounded before constructing the report artifact.
+      - name: Stage bounded perf reports
+        id: stage-perf-reports
         if: always()
+        run: |
+          python3 .github/scripts/stage-perf-gate-report.py --service "${{ matrix.service }}"
+
+      - name: Upload perf reports
+        if: always() && steps.stage-perf-reports.outcome == 'success'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perf-reports-${{ matrix.service }}
-          path: perf-reports/
+          path: perf-upload/
           retention-days: 30
+          if-no-files-found: error
+
+      # If the report contract could not be staged (e.g. the envelope step
+      # failed and run.json is absent), still ship the bounded boot/k6 tails the
+      # boot-failure message points at. Separate artifact name, so the Admin UI
+      # collector, which reads perf-reports-*, never treats it as a report.
+      - name: Stage bounded perf diagnostics
+        id: stage-perf-diagnostics
+        if: always() && steps.stage-perf-reports.outcome != 'success'
+        continue-on-error: true
+        run: |
+          python3 .github/scripts/stage-perf-gate-report.py --diagnostics-only \
+            --service "${{ matrix.service }}" --out perf-diagnostics
+
+      - name: Upload perf diagnostics
+        if: always() && steps.stage-perf-diagnostics.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: perf-diagnostics-${{ matrix.service }}
+          path: perf-diagnostics/
+          retention-days: 30
+          if-no-files-found: error
 
       # The Admin UI deploy collector intentionally reads only immutable, provenance-complete
       # `test-intelligence-run-*` artifacts. Keep the human-facing report bundle above, but

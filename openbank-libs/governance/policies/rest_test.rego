@@ -2147,3 +2147,17 @@ test_game_catalog_write_requires_a_verified_human_admin if {
 		not rest.allow with input as {"principal": principal, "action": "engagement.gameCatalog.write"}
 	}
 }
+
+test_game_marketing_draft_edit_does_not_grant_publish if {
+	principal := {"id": "marketing-human", "type": "HUMAN", "roles": ["ROLE_MARKETING"], "service_account": false}
+	rest.allow with input as {"principal": principal, "action": "engagement.gameCatalog.writeDraft"}
+	rest.allow with input as {"principal": principal, "action": "engagement.gameCatalog.read"}
+	not rest.allow with input as {"principal": principal, "action": "engagement.gameCatalog.write"}
+	every denied in {
+		{"id": "service-account-marketing", "type": "HUMAN", "roles": ["ROLE_MARKETING"], "service_account": true},
+		{"id": "customer", "type": "HUMAN", "roles": ["ROLE_CUSTOMER"], "service_account": false},
+		{"id": "agent", "type": "AI_AGENT", "roles": ["ROLE_MARKETING"], "service_account": false},
+	} {
+		not rest.allow with input as {"principal": denied, "action": "engagement.gameCatalog.writeDraft"}
+	}
+}
