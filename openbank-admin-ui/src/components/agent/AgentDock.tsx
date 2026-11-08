@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { isPublicSurface } from '@/lib/auth/publicSurface'
+import { ASSISTANT_REQUEST, type AssistantRequest, type AssistantContext } from '@/lib/navigation/assistant'
 import { Bot, Send, X, Loader2, Wrench, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react'
 
 interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
@@ -50,6 +51,9 @@ export function AgentDock() {
   const [busy, setBusy] = useState(false)
   const [models, setModels] = useState<ModelInfo[]>([])
   const [model, setModel] = useState<string>('')
+  const [context, setContext] = useState<AssistantContext | null>(null)
+  const generation = useRef(0)
+  const requestRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -64,11 +68,34 @@ export function AgentDock() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages, busy])
 
+  useEffect(() => {
+    if (publicSurface) return
+    const receive = (event: Event) => {
+      const request = (event as CustomEvent<AssistantRequest>).detail
+      if (!request || typeof request.prompt !== 'string' || !request.context?.route?.startsWith('/')) return
+      generation.current += 1
+      requestRef.current?.abort()
+      setBusy(false)
+      setOpen(true)
+      setInput(request.prompt)
+      setContext(request.context)
+      setMessages([])
+    }
+    window.addEventListener(ASSISTANT_REQUEST, receive)
+    return () => window.removeEventListener(ASSISTANT_REQUEST, receive)
+  }, [publicSurface])
+  useEffect(() => {
+    if (open) document.getElementById('agent-dock-input')?.focus()
+  }, [open, context])
+
   if (publicSurface) return null
 
   async function send() {
     const text = input.trim()
     if (!text || busy) return
+    const requestedGeneration = ++generation.current
+    const controller = new AbortController()
+    requestRef.current = controller
     const next: Msg[] = [...messages, { role: 'user', content: text }]
     setMessages(next)
     setInput('')
@@ -76,24 +103,27 @@ export function AgentDock() {
     try {
       const res = await fetch('/api/agent/chat', {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: next.map(m => ({ role: m.role, content: m.content })),
           model: model || undefined,
-          context: `admin page ${pathname}`,
+          context: `admin page ${context?.route ?? pathname}`,
         }),
       })
       const data = await res.json()
+      if (requestedGeneration !== generation.current) return
       setMessages(m => [...m, {
         role: 'assistant',
-        content: data.error ? `⚠ ${data.error}` : (data.reply || '(no reply)'),
+        content: !res.ok || data.error ? t('Asistent je dočasně nedostupný. Zkuste zprávu odeslat znovu.', 'The assistant is temporarily unavailable. Try sending the message again.') : (data.reply || t('Asistent nevrátil odpověď.', 'The assistant returned no reply.')),
         toolCalls: data.toolCalls,
         isProposal: data.isProposal === true,
       }])
-    } catch (e) {
-      setMessages(m => [...m, { role: 'assistant', content: `⚠ ${e instanceof Error ? e.message : 'error'}` }])
+    } catch {
+      if (requestedGeneration !== generation.current) return
+      setMessages(m => [...m, { role: 'assistant', content: t('Asistent je dočasně nedostupný. Zkuste zprávu odeslat znovu.', 'The assistant is temporarily unavailable. Try sending the message again.') }])
     } finally {
-      setBusy(false)
+      if (requestedGeneration === generation.current) setBusy(false)
     }
   }
 
@@ -149,6 +179,10 @@ export function AgentDock() {
             )}
           </div>
 
+          <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text-secondary)' }}>
+            {t('Kontext', 'Context')}: {context?.label ?? pathname}
+            {context && <button type="button" onClick={() => { generation.current += 1; requestRef.current?.abort(); setBusy(false); setContext(null); setMessages([]) }} style={{ marginLeft: 8, border: 0, background: 'transparent', color: 'var(--accent-text)', cursor: 'pointer' }}>{t('Použít aktuální stránku', 'Use current page')}</button>}
+          </div>
           {/* Messages */}
           <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 && (
