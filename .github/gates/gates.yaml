@@ -1317,17 +1317,16 @@ gates:
       loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
     review_after: "2027-02-28"
     min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
-    env:
-      PROMETHEUS_VERSION: "3.14.0"
-      PROMETHEUS_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
-    # `install-promtool.sh` pins promtool (PROMETHEUS_VERSION lives in this gate's env: below,
-    # so a version bump is a gates.yaml change and re-falsifies universally) and run.sh IS the
+    # `install-promtool.sh` installs promtool at the version and sha256 pinned in
+    # ci/artifacts.lock (ADR-0366; the lock is a selftest input, so a bump re-falsifies) and run.sh IS the
     # harness under test. The PrometheusRule manifests are NOT inputs to the falsification:
     # measured 2026-09-02, corrupting the LogQL in prometheus-rules-accounting-day.yaml leaves
     # the self-test verdict unchanged -- see the reason assertion below for why that used to be
     # true for the wrong reason, and no longer is.
     selftest_inputs:
       - ".github/scripts/install-promtool.sh"
+      - ".github/scripts/fetch-artifact.py"
+      - "ci/artifacts.lock"
       - "openbank-infra/tests/promtool/run.sh"
     selftest: |
       bash .github/scripts/install-promtool.sh
@@ -5895,11 +5894,49 @@ gates:
     review_after: "2027-02-13"
     selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-helm-values-keys.py"]
+    selftest_inputs: [".github/scripts/check-helm-values-keys.py", ".github/scripts/fetch-artifact.py", "ci/artifacts.lock"]
     min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
     budget_seconds: 180
     run: |
       python3 .github/scripts/check-helm-values-keys.py
+
+  # ADR-0366: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
+  # fetches; fetch-artifact.py accepts bytes from any tier only when they match its sha256.
+  - id: ci-artifact-lock-integrity
+    name: "ci/artifacts.lock is well-formed: unique names, sha256 digests, no latest (ADR-0366, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "The resolver trusts whatever digest the lock states, so a missing or malformed sha256, a duplicated name or a latest tag would let unverified bytes run in CI while every fetch reports verified."
+    review_after: "2027-05-08"
+    budget_seconds: 30
+    min_subjects: 20   # 23 artifacts on 2026-11-08: gitleaks, promtool, 21 Helm charts
+    selftest_inputs:
+      - ".github/scripts/check-artifact-lock.py"
+      - ".github/scripts/fetch-artifact.py"
+      - ".github/scripts/fetch_artifact_test.py"
+    selftest: |
+      python3 -I .github/scripts/check-artifact-lock.py --self-test
+      python3 -I .github/scripts/fetch_artifact_test.py
+    selftest_expect: pass
+    run: |
+      python3 -I .github/scripts/check-artifact-lock.py
+
+  # ADR-0366 D6: downloads of lock-eligible upstreams must go through fetch-artifact.py.
+  # Advisory until rollout step 3 migrates the existing call sites; they print as known debt.
+  - id: ci-artifact-fetch-via-resolver
+    name: "CI downloads of GitHub Releases / *.github.io / OPA go through fetch-artifact.py (ADR-0366, advisory)"
+    group: lint
+    mode: advisory
+    rationale: "A direct curl or helm pull trusts whatever bytes arrive and turns an upstream outage into a red required check; on 2026-11-08 GitHub Releases 504s reddened Gitleaks and helm-values-key-effect with no change at fault."
+    review_after: "2027-02-08"
+    verified: "2026-11-08 — 11 direct downloads remain after PR 1 migrated gitleaks (secret-scan.yml), promtool and the helm-values charts: cosign x5, opa x3, oasdiff x2, gitleaks in public-readiness.yml; all ADR-0366 rollout step 3 debt"
+    budget_seconds: 30
+    min_subjects: 300   # 735 files under .github/ on 2026-11-08
+    selftest_inputs: [".github/scripts/check-artifact-fetch-via-resolver.py"]
+    selftest: python3 -I .github/scripts/check-artifact-fetch-via-resolver.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 -I .github/scripts/check-artifact-fetch-via-resolver.py
 
   # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
   # threat model. stdlib-only gate, ratchets coverage (a new money-path
