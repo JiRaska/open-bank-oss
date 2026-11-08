@@ -24,8 +24,19 @@ export async function readTestExplanationSource(): Promise<TestIntelligenceRepor
   if (published.snapshot) return published.snapshot
   try {
     const file = process.env.OPENBANK_TEST_INTELLIGENCE ?? path.resolve(process.cwd(), 'test-intelligence.json')
-    if ((await fs.stat(file)).size > 8 * 1024 * 1024) return null
-    const report: unknown = JSON.parse(await fs.readFile(file, 'utf8'))
-    return validateTestIntelligenceSnapshot(report, Date.now()) ? report : null
+    const handle = await fs.open(file, 'r')
+    try {
+      const maximum = 8 * 1024 * 1024
+      const buffer = Buffer.alloc(maximum + 1)
+      let offset = 0
+      while (offset < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset)
+        if (!bytesRead) break
+        offset += bytesRead
+      }
+      if (offset > maximum) return null
+      const report: unknown = JSON.parse(buffer.subarray(0, offset).toString('utf8'))
+      return validateTestIntelligenceSnapshot(report, Date.now()) ? report : null
+    } finally { await handle.close() }
   } catch { return null }
 }

@@ -115,6 +115,15 @@ describe('matrix-first educational workspace', () => {
     expect(screen.getAllByRole('row')[1]).toHaveTextContent('Failed')
     expect(screen.getByRole('button', { name: 'Login canary' })).toBeVisible()
   })
+  it('does not hide a failed required control behind a passing performance scenario', () => {
+    const report = workspaceReport({
+      requiredControls: [{ id: 'account:performance', component: workspaceComponent.component, kind: 'performance', state: 'failed', reason: 'The required scope failed', source: null, observedAt: null }],
+      performance: [{ id: 'partial-check', component: workspaceComponent.component, state: 'passed', observedAt: workspaceObservedAt, source: 'fixture', thresholds: 1 }],
+    })
+    render(<TestAttentionList report={report} onOpen={vi.fn()} onOpenRuns={vi.fn()} />)
+    expect(screen.getAllByRole('row')).toHaveLength(2)
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent('Failed')
+  })
   it('translates navigation and educational states into Czech', async () => {
     locale.language = 'cs'
     mount()

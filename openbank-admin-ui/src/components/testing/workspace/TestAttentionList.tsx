@@ -17,8 +17,8 @@ export function TestAttentionList({ report, onOpen, onOpenRuns }: {
     const items = new Map<string, { id: string; component: string; kind: string; state: EvidenceState; reason: string }>()
     const priority: Record<EvidenceState, number> = { failed: 0, blocked: 1, unknown: 2, 'not-run': 3, stale: 4, skipped: 5, passed: 6 }
     for (const control of report.requiredControls ?? []) {
-      if (control.kind === 'synthetic' && report.syntheticJourneys.some(item => control.id === `synthetic:${item.id}`)) continue
-      if (control.kind === 'performance' && report.performance.some(item => item.component === control.component)) continue
+      if (control.kind === 'synthetic' && report.syntheticJourneys.some(item => control.id === `synthetic:${item.id}` && (item.state !== 'passed' || item.status === 'planned') && priority[item.status === 'planned' ? 'blocked' : item.state] <= priority[control.state])) continue
+      if (control.kind === 'performance' && report.performance.some(item => item.component === control.component && (item.state !== 'passed' || item.plan?.blocker) && priority[item.state === 'passed' ? 'blocked' : item.state] <= priority[control.state])) continue
       if (control.state !== 'passed') items.set(`${control.component}:${control.kind}`, { id: control.id, component: control.component ?? '', kind: control.kind, state: control.state, reason: control.blocker ?? control.reason ?? '' })
     }
     for (const component of report.components) for (const item of component.evidence) {
