@@ -44,6 +44,9 @@ test('delegation approval evidence is read-only, responsive and accessible in bo
     if (dark) {
       await page.getByRole('button', { name: 'Switch to the dark theme' }).click()
       await expect(page.locator('html')).toHaveClass(/dark/)
+      // The root class can change before inherited token colors resolve on pending rows.
+      // Scan the settled dark palette; the AA assertion below remains unchanged.
+      await expect(main.getByText('Waiting for a different person')).toHaveCSS('color', 'rgb(148, 163, 184)')
     }
     const scan = await new AxeBuilder({ page })
       .include('#main-content')
