@@ -71,7 +71,7 @@ spec:
         instrumentation.opentelemetry.io/inject-java: "openbank"
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-product-catalog-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "506daeb487b943fc"
+        openbank.tech/policy-checksum: "ed268eb81147cf85"
     spec:
       # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
       # workload, not to every pod running as `default` in the namespace.
