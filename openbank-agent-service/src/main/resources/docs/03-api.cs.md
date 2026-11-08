@@ -187,3 +187,11 @@ katalogu (ADR-0352 §4). Textové JSON argumenty jsou omezeny na 256 KiB, `ratio
 Výsledek nástroje má `isError = true` právě tehdy, když by `obp` pro stejný vstup skončil nenulovým
 kódem — neplatné IR (`{ok:false, problems}`, tytéž bajty, které obp vypíše na stderr), neznámé
 `ruleId` nebo cizí instrukce — takže agent, který čte jen `isError`, nikdy nepovažuje selhání za úspěch.
+
+## Vysvětlení bez přístupu k nástrojům
+
+`GET /agent/models` deklaruje `capabilities.toolFreeChat: true`. Klient, který potřebuje pouze vysvětlení důkazů, nejprve ověří tuto schopnost a potom odešle `POST /agent/chat` s `allowTools: false`. Pro stávající klienty zůstává výchozí hodnota `true`.
+
+Omezený běh modelu nenabízí žádné nástroje a na stávající hranici volání odmítne i nevyžádaný požadavek modelu na nástroj. Zachovává směrování modelů, autorizaci, chartu, limity, audit i nouzové zastavení. Odpověď potvrzuje `toolsRestricted: true`; klient před přijetím vysvětlení ověří také prázdné `toolCalls`. Odmítnutý požadavek modelu tak může vést k nedostupnému vysvětlení, nikdy ke spuštění nástroje.
+
+Vysvětlení omezených metadat testu je interpretace. Nenahrazuje zaznamenaný výsledek ani schválení vydání. Starší server schopnost neoznamuje; přísný klient ponechá důkazy dostupné a označí vysvětlení za nedostupné.

@@ -79,8 +79,8 @@ test('Test Coverage is backed by a dated CI evidence snapshot, not a static scor
   })
 
   await page.goto('/system/tests')
-  await expect(page.getByText(/sesbíráno|collected/)).toBeVisible()
-  await expect(page.getByText(/absence se nikdy nevykresluje jako nula|absence is never rendered as zero/)).toBeVisible()
+  await expect(page.getByText(/Report sesbírán|Report collected/)).toBeVisible()
+  await expect(page.getByText(/Chybí ověření|Unverified/, { exact: true }).first()).toBeVisible()
   const matrix = page.getByRole('region', { name: /Matice důkazů komponent|Component evidence matrix/ })
   await expect(matrix.getByText('ledger-service')).toBeVisible()
   await expect(matrix.getByText('account-service')).toBeVisible()

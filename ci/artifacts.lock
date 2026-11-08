@@ -1,0 +1,287 @@
+{
+  "schema": 1,
+  "artifacts": [
+    {
+      "name": "gitleaks",
+      "kind": "binary-archive",
+      "version": "8.21.2",
+      "platforms": {
+        "linux-amd64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz",
+          "sha256": "5bc41815076e6ed6ef8fbecc9d9b75bcae31f39029ceb55da08086315316e3ba"
+        },
+        "linux-arm64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_arm64.tar.gz",
+          "sha256": "654c935542c89f565aabe7bf7c6c500830f116c114f0aeb509d2460c1ac2e6da"
+        },
+        "darwin-arm64": {
+          "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_darwin_arm64.tar.gz",
+          "sha256": "cad3de5dc9a4d5447d967a70a4d49499c557f04db028274cc324f9ff983f6502"
+        }
+      }
+    },
+    {
+      "name": "promtool",
+      "kind": "binary-archive",
+      "version": "3.14.0",
+      "platforms": {
+        "linux-amd64": {
+          "url": "https://github.com/prometheus/prometheus/releases/download/v3.14.0/prometheus-3.14.0.linux-amd64.tar.gz",
+          "sha256": "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/alloy",
+      "kind": "helm-chart",
+      "version": "1.13.0",
+      "repo": "https://grafana.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/grafana/helm-charts/releases/download/alloy-1.13.0/alloy-1.13.0.tgz",
+          "sha256": "bfdda6cb770c3526444897b9cb5a4fb33711c608d364d9e7857ec699a2fff4fb"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/argo-rollouts",
+      "kind": "helm-chart",
+      "version": "2.43.5",
+      "repo": "https://argoproj.github.io/argo-helm",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/argoproj/argo-helm/releases/download/argo-rollouts-2.43.5/argo-rollouts-2.43.5.tgz",
+          "sha256": "4ba91d08d872887ff50ae86a21312d530cd5a5094663df49f4f394bf43f6a62b"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/prometheus-blackbox-exporter",
+      "kind": "helm-chart",
+      "version": "11.19.1",
+      "repo": "https://prometheus-community.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/prometheus-community/helm-charts/releases/download/prometheus-blackbox-exporter-11.19.1/prometheus-blackbox-exporter-11.19.1.tgz",
+          "sha256": "3c1ef041d3ef27e4929dab50b9c9ca0cd68b47acaf5fd15b4abf70f96fdca0a9"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/gateway-crds-helm",
+      "kind": "helm-chart",
+      "version": "v1.9.2",
+      "repo": "docker.io/envoyproxy",
+      "platforms": {
+        "any": {
+          "url": "oci://docker.io/envoyproxy/gateway-crds-helm",
+          "sha256": "8e22afc647f10b0c792ac2ee0180a66c65d9d11d3f2ac36eba8cb3c70197820f"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/gateway-helm",
+      "kind": "helm-chart",
+      "version": "v1.9.2",
+      "repo": "docker.io/envoyproxy",
+      "platforms": {
+        "any": {
+          "url": "oci://docker.io/envoyproxy/gateway-helm",
+          "sha256": "1079cad009e0885f6e10e5f712257d8e5fdaf911d2ceb3fa1b78632c8f29bbf9"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/external-secrets",
+      "kind": "helm-chart",
+      "version": "2.11.0",
+      "repo": "https://charts.external-secrets.io",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/external-secrets/external-secrets/releases/download/helm-chart-2.11.0/external-secrets-2.11.0.tgz",
+          "sha256": "8199b42fe80b871c6a86233a80bb14f599fd6e1e6462c1216d836577f845e161"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/falco",
+      "kind": "helm-chart",
+      "version": "9.2.1",
+      "repo": "https://falcosecurity.github.io/charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/falcosecurity/charts/releases/download/falco-9.2.1/falco-9.2.1.tgz",
+          "sha256": "726c1fe08c3fd3e2789d4072b34f9eee94ecccad734fee471cc7546124570c6c"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/glitchtip",
+      "kind": "helm-chart",
+      "version": "9.0.1",
+      "repo": "https://gitlab.com/api/v4/projects/16325141/packages/helm/stable",
+      "platforms": {
+        "any": {
+          "url": "https://gitlab.com/api/v4/projects/16325141/packages/helm/stable/charts/glitchtip-9.0.1.tgz",
+          "sha256": "394866157d242078d6e8f9f8f82da067fc1bb8601b75d76d3cc43f1a22ef82d9"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/holmes",
+      "kind": "helm-chart",
+      "version": "0.42.0",
+      "repo": "https://robusta-charts.storage.googleapis.com",
+      "platforms": {
+        "any": {
+          "url": "https://robusta-charts.storage.googleapis.com/holmes-0.42.0.tgz",
+          "sha256": "c631e5a308d04de8fda1e144a85ef0e6ca8cd5fbd0d20d68facf6497d017f2b0"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/ingress-nginx",
+      "kind": "helm-chart",
+      "version": "4.15.1",
+      "repo": "https://kubernetes.github.io/ingress-nginx",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/kubernetes/ingress-nginx/releases/download/helm-chart-4.15.1/ingress-nginx-4.15.1.tgz",
+          "sha256": "3eff0bd18151d6e6b1c441463410571443dda1ac78292cb189346628de784f0c"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/kube-prometheus-stack",
+      "kind": "helm-chart",
+      "version": "91.9.0",
+      "repo": "https://prometheus-community.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/prometheus-community/helm-charts/releases/download/kube-prometheus-stack-91.9.0/kube-prometheus-stack-91.9.0.tgz",
+          "sha256": "75ee7cf15ee9492faf1babc0682237caf6ba706700370cd34b1ea261cee737fe"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/kyverno",
+      "kind": "helm-chart",
+      "version": "3.9.1",
+      "repo": "https://kyverno.github.io/kyverno/",
+      "platforms": {
+        "any": {
+          "url": "https://kyverno.github.io/kyverno/kyverno-3.9.1.tgz",
+          "sha256": "7b7fe51a431b5b133b0ce7eb9dcb222b6a37fb967c163223cf480054ad14d752"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/loki",
+      "kind": "helm-chart",
+      "version": "18.13.7",
+      "repo": "https://grafana-community.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/grafana-community/helm-charts/releases/download/loki-18.13.7/loki-18.13.7.tgz",
+          "sha256": "3cf98e0b8c4359be5095a6036c877a207be0d2cd10088cce83619d0f1663502b"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/metrics-server",
+      "kind": "helm-chart",
+      "version": "3.14.0",
+      "repo": "https://kubernetes-sigs.github.io/metrics-server/",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/kubernetes-sigs/metrics-server/releases/download/metrics-server-helm-chart-3.14.0/metrics-server-3.14.0.tgz",
+          "sha256": "c2ca1185c01e6e7f53dd1b7d131f0c9b3fa50e003ed068b784563a1b5a3422a1"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/openbao",
+      "kind": "helm-chart",
+      "version": "0.30.2",
+      "repo": "https://openbao.github.io/openbao-helm",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/openbao/openbao-helm/releases/download/openbao-0.30.2/openbao-0.30.2.tgz",
+          "sha256": "53a55a9e53e28656b8d4b1264a549116267391eb2652735a855cd94fec461c9f"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/opentelemetry-operator",
+      "kind": "helm-chart",
+      "version": "0.124.1",
+      "repo": "https://open-telemetry.github.io/opentelemetry-helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/open-telemetry/opentelemetry-helm-charts/releases/download/opentelemetry-operator-0.124.1/opentelemetry-operator-0.124.1.tgz",
+          "sha256": "f11e788f51bb27be957d9d7aa8102818f0a3d95dd9e833ec022bdd99c037c7c9"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/opentelemetry-collector",
+      "kind": "helm-chart",
+      "version": "0.175.0",
+      "repo": "https://open-telemetry.github.io/opentelemetry-helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/open-telemetry/opentelemetry-helm-charts/releases/download/opentelemetry-collector-0.175.0/opentelemetry-collector-0.175.0.tgz",
+          "sha256": "6b2ecf067ed5c77fb0ae879b6290731f467a0c5bea65aa5616b80c7171ee4836"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/pyroscope",
+      "kind": "helm-chart",
+      "version": "1.21.0",
+      "repo": "https://grafana.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/grafana/helm-charts/releases/download/pyroscope-1.21.0/pyroscope-1.21.0.tgz",
+          "sha256": "141441e540a8a1ee70da0ba1343d93322f636c0384710d8094cb8943ee657956"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/strimzi-kafka-operator",
+      "kind": "helm-chart",
+      "version": "1.2.0",
+      "repo": "https://strimzi.io/charts/",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/strimzi/strimzi-kafka-operator/releases/download/1.2.0/strimzi-kafka-operator-helm-3-chart-1.2.0.tgz",
+          "sha256": "0f8a50b2f19bd99482f9fd6e17cf42902f72f9e594a136813ac3f0b7af422efd"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/tempo",
+      "kind": "helm-chart",
+      "version": "3.1.0",
+      "repo": "https://grafana-community.github.io/helm-charts",
+      "platforms": {
+        "any": {
+          "url": "https://github.com/grafana-community/helm-charts/releases/download/tempo-3.1.0/tempo-3.1.0.tgz",
+          "sha256": "cbc39dcd0f63ec244d4fea1c346dbecdd099ca8b0a9272240400ad0a91f8cc09"
+        }
+      }
+    },
+    {
+      "name": "helm-chart/vpa",
+      "kind": "helm-chart",
+      "version": "4.6.0",
+      "repo": "https://charts.fairwinds.com/stable",
+      "platforms": {
+        "any": {
+          "url": "https://charts.fairwinds.com/stable/vpa-4.6.0.tgz",
+          "sha256": "b365de628768dddfe024d66e80b48a36901edea560acef964b17e49b449bb0a5"
+        }
+      }
+    }
+  ]
+}

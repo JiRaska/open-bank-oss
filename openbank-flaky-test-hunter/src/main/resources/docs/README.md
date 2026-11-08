@@ -14,9 +14,15 @@ The response contains only `workflowId` and the observed execution `status`. The
 
 An admitted request and a successful workflow execution are separate observations. Execution completion also does not establish approval or application of a proposed change. Clients should timestamp the last observed status and explicitly expose a paused or failed refresh.
 
+## Temporal proposal context
+
+Proposal activities keep coroutine continuations on the safe duplicated Vert.x context supplied by Quarkus. An IO-dispatched GitHub call may suspend; its continuation must return to that same context before opening another Hibernate Reactive session or transaction. `Dispatchers.Unconfined` cannot guarantee this return. The activity-context integration test exercises the production bridge and verifies the committed database disposition after an IO suspension.
+
 ## GitHub proposal egress
 
 The proposal adapter uses `SafeHttpClient` for its configurable GitHub API URL. `openbank.egress.allowed-hosts` defaults to `api.github.com`; explicitly allow the hostname when using a different GitHub API. DNS answers are checked before a connection to a pinned public address; TLS still verifies the original hostname, and redirects are refused. An unlisted host produces no outbound request.
+
+Every request identifies the application with `User-Agent: openbank-flaky-test-hunter`. GitHub requires this header for reads as well as writes; a valid credential alone does not prevent a missing-header rejection.
 
 ## PR-path policy gate (ADR-0031 phase 3)
 
@@ -35,19 +41,20 @@ Config (`flaky-test-hunter.policy-gate`):
 | `opa-url` | `http://localhost:8181` | OPA sidecar base URL |
 | `timeout` | `PT0.5S` | per-call connect + request timeout; exceeding it fails closed (`pdp_unreachable`) |
 
-The mechanism is implemented while the governance rollout remains in phase 2. GitOps explicitly
-sets `FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=false`: the gate denies branch, commit and PR creation
-with `policy_gate_disabled`; it never permits a policy bypass. Temporal finding workflows remain
-enabled. Controlled writer activation is separate rollout work. Phase 3 requires the first real
-agent PR's human merge verified in both the merge-record row and audit, plus deployment attestation
-for agent-service and flaky-test-hunter cross-checked against their deployed-version records.
-Implementation and local tests do not supply those runtime proofs.
+Writer activation and the governance roadmap are separate observations. GitOps declares a bounded
+pilot with `FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true` and a read-only own-test snapshot; verify the
+effective switch and source revision on the running deployment. Setting the switch to false denies
+branch, commit and PR creation with `policy_gate_disabled`; it never permits a policy bypass.
+The authoritative roadmap is `openbank-libs/governance/ai-rollout.yaml`. Advancing it requires a
+completed runtime workflow, a real agent PR's human merge verified in both the merge-record row and
+audit, and deployment attestation for both AI services cross-checked against deployed-version records.
+Enabling the switch or passing local tests alone does not supply those runtime proofs.
 
 Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent.github.pr_open` for every attempted PR path, including denials, and `flaky-test-hunter.github.ticket_opened` when no fix enters the PR path. The event carries `policy_decision` (ALLOW only when the gate allowed **and** the PR was actually opened), `policy_blocked`, `policy_denial_reason`, the evaluated `tool`/`resource`/`pr_branch`, `pr_url` for an opened PR, and `proposal_url` for the selected PR or ticket. A refusal is as auditable as an opened PR; a blocked mechanical fix (`policy_blocked: true`) is distinguishable from a finding that had no fix at all.
 
 ## Input and dispositions
 
-The deployed agent's input is the Admin UI Test Intelligence snapshot, posted after every collection to `POST /api/v1/flaky-test-hunter/evidence/analyze`. The static source scan reads a repository checkout under `openbank.flaky-test-hunter.repo-root`, and the deployed pod mounts none. The weekly scheduled sweep was therefore removed on 2026-10-17, because it scanned an empty tree. The scan remains reachable through `POST /check/trigger` and the CI-failure webhook. The replay-only `RunTrigger.SCHEDULED` value was removed after the 168-hour Temporal history retention window.
+Fleet execution evidence comes from Admin UI Test Intelligence snapshots at `POST /api/v1/flaky-test-hunter/evidence/analyze`. The operator-triggered source pilot reads only this module's tests from a read-only sparse snapshot of public main, taken at pod startup with its exact revision logged. It never builds or executes that source. No JUnit execution reports are mounted; the scanner keeps a missing execution count unknown. A deployment refreshes the snapshot. Source scans remain reachable through the operator trigger and CI-failure webhook; no periodic fleet sweep is enabled.
 
 A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with the finding and diagnosis. An open issue with the same title is reused, so a re-run does not flood the tracker. The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. Ticket and diagnosis text from an issue is treated as untrusted input.
 

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { EvidenceState, TestIntelligenceReport } from '../types/test-intelligence'
 
+// Per-test run attribution and bounded history exceed the small shared dataset default.
+export const TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES = 16 * 1024 * 1024
+
 const COMPONENT = /^openbank-[a-z0-9-]{2,60}$/
 const STATES = new Set<EvidenceState>(['passed', 'failed', 'skipped', 'not-run', 'stale', 'blocked', 'unknown'])
 const KINDS = new Set(['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic', 'visual'])

@@ -29,6 +29,7 @@ spec:
         # Generated with the bundle: subPath mounts require a pod rollout on policy changes.
         openbank.tech/policy-checksum: "e75161a1c84019d7"
     spec:
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -36,11 +37,40 @@ spec:
         fsGroup: 101
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # Reuse the attested fleet CI image for a credential-free, sparse public checkout.
+        # Test sources are data: this container never builds or executes repository code.
+        - name: bounded-test-sources
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-ci-runner@sha256:9f227805610d42bb0f3ace66248c7aba271c78fe6f0e8c5e26fc5d9ca53a32f9
+          command: [/bin/bash, -ec]
+          args:
+            - |
+              export GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+              rm -rf /source/repo
+              timeout 120s git -c credential.helper= clone --no-checkout --depth 1 --single-branch --branch main \
+                --filter=blob:none https://github.com/JiRaska/open-bank-oss.git /source/repo
+              git -C /source/repo sparse-checkout set --no-cone '/openbank-flaky-test-hunter/src/test/kotlin/**'
+              git -C /source/repo -c core.hooksPath=/dev/null checkout --detach HEAD
+              test -z "$(find /source/repo -path /source/repo/.git -prune -o -type l -print -quit)"
+              test -d /source/repo/openbank-flaky-test-hunter/src/test/kotlin
+              test -n "$(find /source/repo/openbank-flaky-test-hunter/src/test/kotlin -name '*.kt' -print -quit)"
+              git -C /source/repo rev-parse HEAD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 256Mi}
+          volumeMounts:
+            - name: test-sources
+              mountPath: /source
       containers:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-b6494671@sha256:a5d1cabb05e11b11a56f5ce281d70487071bc555b41a2492a8b019883e0f6f11
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-2e500af2@sha256:f1105a7a9a6cf6fc2f5d46d21b945563de8b65f29375e5a7f13a45a879912ad1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -64,19 +94,18 @@ spec:
               value: temporal-frontend.temporal.svc:7233
             - name: TEMPORAL_ENABLED
               value: "true"
-            # No sweep cron, on purpose (2026-10-17). This pod mounts no repository checkout and
-            # no test-results artifacts, so the weekly sweep it used to run scanned an empty tree
-            # and had never produced a finding. "When does this agent run" is now answered by the
-            # Admin UI: every Test Intelligence snapshot it collects is posted to
-            # /api/v1/flaky-test-hunter/evidence/analyze, which is this agent's only real input.
+            # Fleet evidence still comes from Admin UI snapshots. The operator-triggered source
+            # pilot scans only this module's read-only test snapshot; no fleet sweep cron is armed.
+            - name: FLAKY_TEST_HUNTER_REPO_ROOT
+              value: /source/repo
             - name: GITHUB_API_URL
               value: https://api.github.com
             - name: GITHUB_REPO
               value: JiRaska/open-bank-oss
-            # Phase-2 mechanism delivery: stop PR writes. False returns DENY rather than
-            # bypassing policy; controlled activation and runtime evidence are separate rollout work.
+            # Bounded development pilot: every attempted PR still needs the packaged charter
+            # and the OPA sidecar to ALLOW. A false value stops the writer for rollback.
             - name: FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED
-              value: "false"
+              value: "true"
             # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
             # and no pull request is opened. It is deliberately separate from every other agent's
             # credential, so revoking this one stops only this bounded development capability.
@@ -101,6 +130,10 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
+          volumeMounts:
+            - name: test-sources
+              mountPath: /source
+              readOnly: true
           readinessProbe:
             httpGet:
               path: /q/health/ready
@@ -174,6 +207,9 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: test-sources
+          emptyDir:
+            sizeLimit: 256Mi
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
