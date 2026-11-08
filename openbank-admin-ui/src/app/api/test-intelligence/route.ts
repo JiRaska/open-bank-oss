@@ -11,7 +11,9 @@ import { createSnapshotCache, type SnapshotCache } from '@/lib/evidence/snapshot
 import { createCommitEvidenceReader } from '@/lib/evidence/commitEvidence'
 import { loadRunningCommits } from '@/lib/evidence/runningCommits'
 import { createEvidenceSnapshotReader, type EvidenceSnapshotResult } from '@/lib/evidence/publishedSnapshot'
-import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from '@/lib/evidence/testIntelligenceSnapshot'
+import { testIntelligenceSnapshotBaseUrl } from '@/lib/evidence/testIntelligenceSnapshot'
+import { testIntelligenceReader } from '@/lib/evidence/testIntelligenceReader'
+import { parseTestReadRequest, selectTestReadView } from '@/lib/test-intelligence-delivery'
 import { buildEvidenceMeta, etagOf, ifNoneMatchHits, overlayRunningEvidence } from '@/lib/evidence/overlay'
 import { loadAiGovernanceSnapshot } from '@/lib/governance/aiGovernanceSnapshot'
 import { RUM_SERVICE_NAME as ADMIN_RUM_SERVICE_NAME } from '@/lib/telemetry/rum-service-name'
@@ -550,12 +552,7 @@ function cacheFor(file: string) {
   const key = `${file}\0${baseUrl ?? '<disabled>'}`
   let cache = caches.get(key)
   if (!cache) {
-    const publishedReader = createEvidenceSnapshotReader({
-      baseUrl,
-      maxBytes: TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES,
-      validateSnapshot: validateTestIntelligenceSnapshot,
-      collectedAt: testIntelligenceCollectedAt,
-    })
+    const publishedReader = testIntelligenceReader(baseUrl)
     cache = createSnapshotCache({ load: () => assembleReport(file, publishedReader), ttlMs: CACHE_TTL_MS })
     caches.set(key, cache)
   }
@@ -563,8 +560,12 @@ function cacheFor(file: string) {
 }
 
 export async function GET(req: Request): Promise<Response> {
+  const requested = parseTestReadRequest(new URL(req.url).searchParams)
+  if (!requested) return NextResponse.json({ error: 'invalid_query' }, { status: 400, headers: { 'Cache-Control': 'private, no-store' } })
   const { value, producedAt } = await cacheFor(reportFile()).get()
-  const payload = JSON.stringify({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt, value.dataset) })
+  const selected = selectTestReadView({ ...value.report, evidence: buildEvidenceMeta(value.report, value.runningKnown, producedAt, value.dataset) }, requested)
+  if (!selected.ok) return NextResponse.json({ error: selected.error }, { status: selected.status, headers: { 'Cache-Control': 'private, no-store' } })
+  const payload = JSON.stringify(selected.value)
   const etag = etagOf(payload)
   // `no-cache` = always revalidate; an unchanged poll is a bodyless 304.
   const headers = { 'Cache-Control': 'private, no-cache', ETag: etag }

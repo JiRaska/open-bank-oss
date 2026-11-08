@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestIntelligenceWorkspace } from '@/components/testing/workspace/TestIntelligenceWorkspace'
 import { TestAttentionList } from '@/components/testing/workspace/TestAttentionList'
 import { workspaceCase, workspaceComponent, workspaceObservedAt, workspaceReport } from '../../e2e/fixtures/test-intelligence-workspace'
+import { selectTestReadView, type TestMatrixReport } from '@/lib/test-intelligence-delivery'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
 
 const locale = vi.hoisted(() => ({ language: 'en' }))
@@ -18,7 +19,12 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 function mount(report: TestIntelligenceReport = workspaceReport()) {
-  return render(<TestIntelligenceWorkspace report={report} freshness={null} attention={(onOpen, onOpenRuns) => <TestAttentionList report={report} onOpen={onOpen} onOpenRuns={onOpenRuns} />} learning={<p>Existing architecture</p>} renderRuns={openTest => <button type="button" onClick={() => openTest(workspaceCase)}>Open retained test</button>} />)
+  const originalFetch = fetch
+  vi.stubGlobal('fetch', vi.fn((url: string | URL | Request, options?: RequestInit) => String(url).startsWith('/api/test-intelligence?')
+    ? Promise.resolve(response(report)) : originalFetch(url, options)))
+  const overview = selectTestReadView(report, { view: 'overview' })
+  if (!overview.ok) throw new Error('Invalid fixture')
+  return render(<TestIntelligenceWorkspace onRefresh={vi.fn()} report={overview.value as TestMatrixReport} freshness={null} attention={(onOpen, onOpenRuns) => <TestAttentionList report={report} onOpen={onOpen} onOpenRuns={onOpenRuns} />} learning={<p>Existing architecture</p>} renderRuns={openTest => <button type="button" onClick={() => openTest(workspaceCase)}>Open retained test</button>} />)
 }
 async function openDetail() {
   fireEvent.click(await screen.findByRole('button', { name: 'Accounts · Logic · Passed' }))
@@ -27,6 +33,26 @@ async function openDetail() {
 }
 
 describe('matrix-first educational workspace', () => {
+  it('requests no testcase archive for the matrix and pages component results on demand', async () => {
+    mount(workspaceReport({ testCases: Array.from({ length: 31 }, (_, index) => ({ ...workspaceCase, fingerprint: `case-${index}`, name: `retained test ${index}` })) }))
+    await screen.findByRole('button', { name: 'Accounts · Logic · Passed' })
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith('/api/test-intelligence?'))).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Accounts · Logic · Passed' }))
+    await screen.findByRole('button', { name: 'retained test 0' })
+    expect(screen.queryByRole('button', { name: 'retained test 25' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await screen.findByRole('button', { name: 'retained test 25' })
+    expect(screen.getByText('Showing 26–31 of 31')).toBeVisible()
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('view=component') && String(url).includes('offset=25'))).toBe(true)
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('view=full'))).toBe(false)
+  })
+  it('does not mount the detailed learning report until the architecture is opened', async () => {
+    mount()
+    fireEvent.click(screen.getByRole('button', { name: 'How testing works' }))
+    expect(screen.queryByText('Existing architecture')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByText('Assurance architecture and detailed platform capabilities'))
+    expect(await screen.findByText('Existing architecture')).toBeVisible()
+  })
   it('takes two clicks to an exact test, retains a shareable URL and requests AI only explicitly', async () => {
     mount()
     expect(screen.getByRole('region', { name: 'Component evidence matrix' })).toBeVisible()
@@ -98,8 +124,9 @@ describe('matrix-first educational workspace', () => {
     vi.mocked(fetch).mockRejectedValue(new Error('offline catalog'))
     window.history.replaceState(null, '', '/system/tests?component=openbank-account-service&kind=unit&test=not-retained')
     mount()
-    expect(await screen.findByText(/linked test is not in the retained report slice/)).toBeVisible()
-    expect(screen.getByRole('button', { name: 'rejects duplicate requests' })).toBeVisible()
+    expect(await screen.findByText(/detail is not in the retained report slice/i)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to matrix' }))
+    expect(await screen.findByRole('region', { name: 'Component evidence matrix' })).toBeVisible()
   })
   it('keeps failures visible above an unknown required control and deduplicates planned obligations', () => {
     const report = workspaceReport({

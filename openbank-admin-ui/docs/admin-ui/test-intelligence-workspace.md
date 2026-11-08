@@ -17,3 +17,22 @@ The BFF negotiates `capabilities.toolFreeChat` with the existing agent service b
 Deploy the additive agent capability before the UI to enable explanations. During a staggered deployment the UI remains usable and explains AI unavailability. Neither an explanation nor a missing explanation changes any test verdict, release gate or approval.
 
 The published Test Intelligence snapshot and its local explanation fallback share a 16 MiB hard read limit, allowing the retained roster and bounded run provenance to travel together. Other evidence datasets retain their existing smaller default. Digest validation, source selection and unavailable-source handling are unchanged.
+
+## Bounded read delivery
+
+The published archive remains immutable and unchanged. The authenticated BFF defaults
+to its legacy full response for existing consumers. The workspace requests an overview
+without testcase histories, then a maximum of 25 lightweight test rows for an opened
+component and one complete testcase for an opened detail. Search runs before pagination.
+The [read-view contract](test-intelligence.openapi.yaml) documents the optional parameters.
+
+Details bind to the overview's `collectedAt`; a changed collection returns 409 and asks
+for a refresh rather than mixing evidence. Superseded searches are aborted and delayed
+responses cannot overwrite another selection. An unavailable refresh preserves the last
+good evidence with a notice. The complete archive loads only when a specialist view or
+expanded architecture is opened. AI and the report share one validated published reader.
+
+Rollback is the previous UI image: no published format, immutable source, verdict or
+history is removed. New clients also accept a legacy full response from old servers and
+apply the same projection locally during an overlapping rollout. The existing 16 MiB
+integrity-checked archive limit remains unchanged.

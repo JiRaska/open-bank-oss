@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from '@playwright/test'
+import { parseTestReadRequest, selectTestReadView } from '../src/lib/test-intelligence-delivery'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 import { workspaceReport, workspaceObservedAt } from './fixtures/test-intelligence-workspace'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
-  await page.route('**/api/test-intelligence', route => route.fulfill({ json: workspaceReport() }))
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => {
+    const request = parseTestReadRequest(new URL(route.request().url()).searchParams)
+    if (!request) return route.fulfill({ status: 400, json: { error: 'invalid_query' } })
+    const selected = selectTestReadView(workspaceReport(), request)
+    return selected.ok ? route.fulfill({ json: selected.value }) : route.fulfill({ status: selected.status, json: { error: selected.error } })
+  })
   await page.route('**/api/catalog/services', route => route.fulfill({ json: { services: [] } }))
 })
 
 test('puts a grouped matrix first and opens an attributable test in two clicks', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1366, height: 768 })
+  const reads: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/test-intelligence') reads.push(request.url()) })
   let explanations = 0
   await page.route('**/api/test-intelligence/explain', route => {
     explanations++
@@ -26,6 +34,7 @@ test('puts a grouped matrix first and opens an attributable test in two clicks',
   expect(bounds!.y).toBeLessThan(600)
   await expect(page.getByText('Run summaries and cross-layer maps')).not.toBeVisible()
   expect(explanations).toBe(0)
+  expect(reads.every(url => new URL(url).searchParams.get('view') === 'overview')).toBe(true)
   await matrix.getByRole('button', { name: 'account · Logic · Passed', exact: true }).click()
   await page.getByRole('button', { name: 'rejects duplicate requests', exact: true }).click()
   const detail = page.getByRole('region', { name: 'Understand this test' })
@@ -33,6 +42,9 @@ test('puts a grouped matrix first and opens an attributable test in two clicks',
   await expect(detail.getByRole('link', { name: /Open this test’s exact run/ })).toHaveAttribute('href', /\/runs\/101$/)
   await expect(detail.getByRole('link', { name: 'Test definition at the tested commit' })).toHaveAttribute('href', /\/blob\/a{40}\//)
   await expect(page).toHaveURL(/test=case-1/)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'component')).toBe(true)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'case')).toBe(true)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'full')).toBe(false)
   expect(explanations).toBe(0)
   await detail.getByRole('button', { name: 'Explain this result with AI' }).click()
   await page.screenshot({ path: testInfo.outputPath('test-detail.png') })

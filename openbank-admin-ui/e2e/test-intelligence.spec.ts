@@ -5,7 +5,7 @@ import { signInAsOperator } from './helpers/auth'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
-  await page.route('**/api/test-intelligence', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
     schemaVersion: 1, collectedAt: '2026-08-22T12:00:00.000Z',
     components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [{ kind: 'integration', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'JUnit:test', environment: 'ci', counts: { discovered: 12, executed: 12, passed: 12, failed: 0, skipped: 0, errors: 0 } }, { kind: 'contract', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'Pact:consumer', environment: 'ci' }, { kind: 'contract', state: 'failed', observedAt: '2026-08-22T11:01:00.000Z', source: 'Pact:provider', environment: 'ci' }, { kind: 'trace', state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'trace-contract:ledger-posting', environment: 'ci', detail: '1 executed marker(s); JUnit suite passed', run: { id: '4242', attempt: 1, commit: '1234567890abcdef', branch: 'main', workflow: 'Services CI', url: 'https://example.test/run/4242', observedAt: '2026-08-22T11:00:00.000Z' } }, { kind: 'e2e', state: 'failed', observedAt: '2026-08-22T11:00:00.000Z', source: 'test-intelligence-run:v1', environment: 'ci', counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 }, diagnostics: [{ kind: 'playwright-report', name: 'playwright-report-4242-a1', url: 'https://example.test/run/4242#artifacts', retentionDays: 7, access: 'github-run-authenticated', mayContainSensitiveData: true }] }], coverage: { state: 'passed', observedAt: '2026-08-22T11:00:00.000Z', source: 'kover.xml', lines: { covered: 80, missed: 20, percentage: 80 }, branches: { covered: 6, missed: 4, percentage: 60 } }, testInfrastructure: { declared: ['postgres'], observed: [{ resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'started', observedAt: '2026-08-22T10:59:00.000Z' }, { resource: 'postgres', image: 'postgres:16.3-alpine', lifecycle: 'stopped', observedAt: '2026-08-22T11:01:00.000Z' }] } }],
     contracts: [], mutations: [], requiredControls: [{ id: 'openbank-ledger-service:mutation', component: 'openbank-ledger-service', kind: 'mutation', state: 'not-run', observedAt: null, reason: 'Mutation score must meet the fleet threshold (70%).', blocker: 'No retained immutable mutation evidence.' }],
@@ -125,8 +125,8 @@ test('renders the animated evidence system and consolidates test dimensions', as
 })
 
 test('never paints an unavailable evidence bundle healthy', async ({ page }) => {
-  await page.unroute('**/api/test-intelligence')
-  await page.route('**/api/test-intelligence', route => route.fulfill({
+  await page.unroute(/\/api\/test-intelligence(?:\?.*)?$/)
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({
@@ -158,7 +158,7 @@ test('never paints an unavailable evidence bundle healthy', async ({ page }) => 
 
 test('recovers from HTTP 503 after an operator refreshes the report', async ({ page }) => {
   let requests = 0
-  await page.route('**/api/test-intelligence', route => {
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => {
     requests += 1
     return requests === 1
       ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' })

@@ -22,7 +22,7 @@ afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, '', '
 
 async function openRunSummaries() {
   fireEvent.click(await screen.findByRole('button', { name: 'Runs and history' }))
-  fireEvent.click(screen.getByText('Run summaries and cross-layer maps'))
+  fireEvent.click(await screen.findByText('Run summaries and cross-layer maps'))
 }
 
 const healthyComponent: ComponentTestPosture = {
@@ -289,7 +289,7 @@ describe('Test Intelligence flow attention', () => {
       source: null, observedAt: null,
     }]
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence'
+      String(input).startsWith('/api/test-intelligence?')
         ? report
         : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
@@ -360,7 +360,7 @@ describe('Test Intelligence flow attention', () => {
       state: 'skipped', reason: 'The mutation sidecar was empty.', source: null, observedAt: null,
     }]
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+      String(input).startsWith('/api/test-intelligence?') ? report : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
 
     render(<TestIntelligencePage />)
@@ -397,12 +397,12 @@ describe('Test Intelligence flow attention', () => {
       }] as unknown as TestIntelligenceReport['syntheticJourneys'],
     })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+      String(input).startsWith('/api/test-intelligence?') ? report : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
 
     render(<TestIntelligencePage />)
     fireEvent.click(await screen.findByRole('button', { name: 'Runs and history' }))
-    fireEvent.change(screen.getByLabelText('Detailed evidence view'), { target: { value: 'synthetic' } })
+    fireEvent.change(await screen.findByLabelText('Detailed evidence view'), { target: { value: 'synthetic' } })
 
     const chromium = within(await screen.findByLabelText('chromium browser evidence'))
     expect(chromium.getByLabelText('Rollout-attested evidence')).toHaveTextContent(/requested\s*abc1234.*observed\s*abc1234def56/)

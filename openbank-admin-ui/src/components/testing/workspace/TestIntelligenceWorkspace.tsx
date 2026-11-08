@@ -5,11 +5,13 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { StatusBadge } from '@/components/ui'
 import { DOMAIN_GROUPS, domainLabel, isDomainId } from '@/lib/governance/domains'
-import type { ComponentTestPosture, EvidenceKind, TestCaseHistory, TestIntelligenceReport } from '@/lib/types/test-intelligence'
-import { readTestSelection, testCell, testScopeCounts, testSelectionUrl, TEST_KINDS, trustworthyTestRunUrl, type TestSelection } from '@/lib/test-intelligence-workspace'
+import type { EvidenceKind, TestCaseHistory } from '@/lib/types/test-intelligence'
+import { readTestSelection, testSelectionUrl, TEST_KINDS, trustworthyTestRunUrl, type TestSelection } from '@/lib/test-intelligence-workspace'
 import { testIntelligenceCollectionUnavailable } from '@/components/testing/TestIntelligenceFlow'
 import { TestCaseDetail } from './TestCaseDetail'
 import { KIND_HELP, kindLabel, stateLabel, stateTone } from './labels'
+import { useTestEvidenceView } from './useTestEvidenceView'
+import type { TestMatrixReport, MatrixComponent, TestCaseListItem } from '@/lib/test-intelligence-delivery'
 import styles from './TestWorkspace.module.css'
 
 const PAGE_SIZE = 25
@@ -17,19 +19,21 @@ const DEFAULT_KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e']
 const initial: TestSelection = { section: 'components', component: '', kind: '', test: '' }
 
 type WorkspaceProps = {
-  report: TestIntelligenceReport
+  report: TestMatrixReport
+  onRefresh: () => void
   renderRuns: (openTest: (item: TestCaseHistory) => void) => ReactNode
   learning: ReactNode
   attention: (openComponent: (component: string, kind: EvidenceKind | '') => void, openRuns: () => void) => ReactNode
   freshness: ReactNode
 }
 
-export function TestIntelligenceWorkspace({ report, renderRuns, learning, attention, freshness }: WorkspaceProps) {
+export function TestIntelligenceWorkspace({ report, renderRuns, learning, attention, freshness, onRefresh }: WorkspaceProps) {
   const { t, language } = useLanguage()
   const [selection, setSelection] = useState<TestSelection>(initial)
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(0)
   const [expandedKinds, setExpandedKinds] = useState(false)
+  const [learningOpen, setLearningOpen] = useState(false)
   const [catalog, setCatalog] = useState<Record<string, { domain: string; label: string }>>({})
   useEffect(() => {
     const read = () => { setSelection(readTestSelection(window.location.search)); setQuery(''); setPage(0) }
@@ -58,20 +62,24 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
     setSelection(next)
     setPage(0)
   }
-  function openTest(item: TestCaseHistory) { navigate({ section: 'components', component: item.component, kind: item.kind, test: item.fingerprint }) }
+  function openTest(item: Pick<TestCaseHistory, 'component' | 'kind' | 'fingerprint'>) { navigate({ section: 'components', component: item.component, kind: item.kind, test: item.fingerprint }) }
   const unavailable = testIntelligenceCollectionUnavailable(report)
   const components = useMemo(() => report.components.filter(item => `${item.component} ${catalog[item.component]?.label ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [report.components, query, catalog])
   const groups = DOMAIN_GROUPS.map(domain => ({ domain, rows: components.filter(item => (catalog[item.component]?.domain ?? (isDomainId(item.domain) ? item.domain : 'unclassified')) === domain) })).filter(group => group.rows.length)
   const component = report.components.find(item => item.component === selection.component)
-  const selectedTest = report.testCases.find(item => item.fingerprint === selection.test && (!selection.component || item.component === selection.component) && (!selection.kind || item.kind === selection.kind))
-  const tests = report.testCases.filter(item => item.component === selection.component && (!selection.kind || item.kind === selection.kind))
-    .filter(item => `${item.name} ${item.classname}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()))
+  const detail = useTestEvidenceView(selection.section === 'components' && component ? selection.test
+    ? { view: 'case', component: selection.component, kind: selection.kind, fingerprint: selection.test, collectedAt: report.collectedAt }
+    : { view: 'component', component: selection.component, kind: selection.kind, query, offset: page * PAGE_SIZE, limit: PAGE_SIZE, collectedAt: report.collectedAt }
+    : null, report.evidence?.servedFrom ?? '')
+  const componentResult = detail.value && 'view' in detail.value && detail.value.view === 'component' ? detail.value : null
+  const selectedTest = detail.value && 'view' in detail.value && detail.value.view === 'case' ? detail.value.testCase : null
+  const tests: TestCaseListItem[] = componentResult?.tests ?? []
   const kinds = expandedKinds ? TEST_KINDS : DEFAULT_KINDS
-  const pages = Math.max(1, Math.ceil((component ? tests.length : components.length) / PAGE_SIZE))
-  const safePage = Math.min(page, pages - 1)
-  const selectedKinds = component?.evidence.filter(item => !selection.kind || item.kind === selection.kind) ?? []
-  const { failed: scopeFailed, stale: scopeStale, missing: scopeMissing } = testScopeCounts(report)
-  function displayName(item: ComponentTestPosture) { return catalog[item.component]?.label ?? item.component.replace(/^openbank-/, '').replace(/-service$/, '').replaceAll('-', ' ') }
+  const pages = Math.max(1, Math.ceil((component ? componentResult?.total ?? 0 : components.length) / PAGE_SIZE))
+  const safePage = componentResult ? Math.floor(componentResult.offset / PAGE_SIZE) : Math.min(page, pages - 1)
+  const selectedKinds = componentResult?.component.evidence.filter(item => !selection.kind || item.kind === selection.kind) ?? []
+  const { failed: scopeFailed, stale: scopeStale, missing: scopeMissing } = report.scope
+  function displayName(item: MatrixComponent) { return catalog[item.component]?.label ?? item.component.replace(/^openbank-/, '').replace(/-service$/, '').replaceAll('-', ' ') }
   const when = (value: string | null) => value && Number.isFinite(Date.parse(value)) ? new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value)) : t('Neuvedeno', 'Not recorded')
 
   function pagination(total: number) {
@@ -113,7 +121,7 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
               if (!rows.length) return null
               return <GroupRows key={group.domain} title={domainLabel(group.domain, language)} colSpan={kinds.length + 2}>{rows.map(item => <tr key={item.component}>
                 <td><button type="button" className={styles.link} onClick={() => { setQuery(''); navigate({ component: item.component, kind: '', test: '' }) }}>{displayName(item)}</button><div className={styles.secondary}>{item.component}{item.moneyPath ? ` · ${t('peněžní tok', 'money path')}` : ''}</div></td>
-                {kinds.map(kind => { const cell = testCell(report, item, kind); return <td key={kind} data-component={item.component} data-evidence-kind={kind}><button type="button" className={styles.cellButton} aria-label={`${displayName(item)} · ${kindLabel(kind, language)} · ${stateLabel(cell.state, language)}`} onClick={() => { setQuery(''); navigate({ component: item.component, kind, test: '' }) }}><StatusBadge status={cell.state} tone={stateTone(cell.state)} label={stateLabel(cell.state, language)} withDot /></button></td> })}
+                {kinds.map(kind => { const cell = item.cells[kind]; return <td key={kind} data-component={item.component} data-evidence-kind={kind}><button type="button" className={styles.cellButton} aria-label={`${displayName(item)} · ${kindLabel(kind, language)} · ${stateLabel(cell.state, language)}`} onClick={() => { setQuery(''); navigate({ component: item.component, kind, test: '' }) }}><StatusBadge status={cell.state} tone={stateTone(cell.state)} label={stateLabel(cell.state, language)} withDot /></button></td> })}
                 <td><span className={styles.secondary}>{item.running?.match === true ? t('Přiřazeno k běžící sestavě', 'Attributed to running build') : item.running?.match === false ? t('Jiná sestava', 'Different build') : t('Shoda sestavy neověřena', 'Build match unverified')}</span>{item.running?.latestEvidenceAt ? <div className={styles.secondary}>{when(item.running.latestEvidenceAt)}</div> : null}</td>
               </tr>)}</GroupRows>
             })}</tbody>
@@ -124,16 +132,21 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
       </>}
       {selection.component && !component ? <div className={styles.empty}><p>{t('Komponenta z odkazu v tomto reportu není. Dostupné výsledky zůstávají nezměněné.', 'The linked component is not present in this report. Available results are unchanged.')}</p><button type="button" className="btn btn-secondary" onClick={() => navigate({ component: '', kind: '', test: '' })}>{t('Zpět do matice', 'Back to matrix')}</button></div> : null}
       {component && <>
+        {detail.loading ? <p role="status">{t('Načítám výsledky…', 'Loading results…')}</p> : null}
+        {detail.error ? <div role="status"><p>{detail.error === 'evidence_changed'
+          ? t('Report se mezitím změnil. Obnovte přehled pro aktuální podklady.', 'The report has changed. Refresh the overview for current evidence.')
+          : detail.error === 'test_not_found' ? t('Detail není v uchovaném výřezu reportu. To neznamená, že test neproběhl.', 'The detail is not in the retained report slice. This does not mean the test did not run.')
+          : t('Výsledky se nepodařilo načíst. Chybějící data nejsou úspěšný výsledek.', 'Results could not be loaded. Missing data is not a passing result.')}</p><button type="button" className="btn btn-secondary btn-sm" onClick={() => { if (detail.error === 'evidence_changed') onRefresh(); else detail.retry() }}>{t('Obnovit', 'Refresh')}</button></div> : null}
         {selectedTest ? <TestCaseDetail key={`${selectedTest.fingerprint}-${selectedTest.lastObservedAt}-${report.collectedAt}-${language}`} testCase={selectedTest} collectedAt={report.collectedAt} onBack={() => navigate({ test: '' })} /> : <section className={styles.section} aria-label={t('Testy vybrané komponenty', 'Selected component tests')}>
           <div><button type="button" className="btn btn-secondary btn-sm" onClick={() => { setQuery(''); navigate({ component: '', kind: '', test: '' }) }}>{t('Zpět do matice', 'Back to matrix')}</button></div>
           <h2 className={styles.heading}>{displayName(component)}{selection.kind ? ` · ${kindLabel(selection.kind, language)}` : ''}</h2>
-          {selection.test ? <p role="status" className={styles.quiet}>{t('Konkrétní test z odkazu není v uchovaném výřezu reportu. Nejde o důkaz, že se neprovedl.', 'The linked test is not in the retained report slice. This does not prove that it did not run.')}</p> : null}
+          {selection.test && !detail.loading && !detail.error ? <p role="status" className={styles.quiet}>{t('Konkrétní test z odkazu není v uchovaném výřezu reportu. Nejde o důkaz, že se neprovedl.', 'The linked test is not in the retained report slice. This does not prove that it did not run.')}</p> : null}
           {selection.kind ? <p className={styles.quiet}>{KIND_HELP[selection.kind][language === 'cs' ? 0 : 1]}</p> : null}
           <div className={styles.toolbar}><label className={styles.field}>{t('Najít test', 'Find a test')}<input className={styles.input} value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label><label className={styles.field}>{t('Typ důkazu', 'Evidence type')}<select className={styles.input} value={selection.kind} onChange={event => { setQuery(''); navigate({ kind: event.target.value as EvidenceKind | '', test: '' }) }}><option value="">{t('Všechny typy', 'All types')}</option>{TEST_KINDS.map(kind => <option key={kind} value={kind}>{kindLabel(kind, language)}</option>)}</select></label></div>
-          <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t('Test a jeho záměr', 'Test and declared intent')}</th><th>{t('Poslední výsledek', 'Last outcome')}</th><th>{t('Kdy', 'Observed')}</th></tr></thead><tbody>{tests.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE).map(item => <tr key={item.fingerprint}><td><button type="button" className={styles.link} onClick={() => openTest(item)}>{item.name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')}</button></td><td>{stateLabel(item.lastState, language)}{item.state === 'flaky' ? <div className={styles.secondary}>{t('Pozorována nestabilita', 'Instability observed')}</div> : null}</td><td>{when(item.lastObservedAt)}</td></tr>)}</tbody></table>{tests.length === 0 ? <div className={styles.empty}>{t('V tomto výřezu nemáme jednotlivé testy. Souhrnné důkazy níže zůstávají dostupné; chybějící detail není nulový počet provedených testů.', 'Individual tests are not retained in this slice. Aggregate evidence remains available below; missing detail is not zero executed tests.')}</div> : null}</div>
-          {pagination(tests.length)}
+          <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t('Test a jeho záměr', 'Test and declared intent')}</th><th>{t('Poslední výsledek', 'Last outcome')}</th><th>{t('Kdy', 'Observed')}</th></tr></thead><tbody>{tests.map(item => <tr key={item.fingerprint}><td><button type="button" className={styles.link} onClick={() => openTest(item)}>{item.name.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ')}</button></td><td>{stateLabel(item.lastState, language)}{item.state === 'flaky' ? <div className={styles.secondary}>{t('Pozorována nestabilita', 'Instability observed')}</div> : null}</td><td>{when(item.lastObservedAt)}</td></tr>)}</tbody></table>{!detail.loading && !detail.error && tests.length === 0 ? <div className={styles.empty}>{t('V tomto výřezu nemáme jednotlivé testy. Souhrnné důkazy níže zůstávají dostupné; chybějící detail není nulový počet provedených testů.', 'Individual tests are not retained in this slice. Aggregate evidence remains available below; missing detail is not zero executed tests.')}</div> : null}</div>
+          {componentResult ? pagination(componentResult.total) : null}
           <h3 className={styles.heading}>{t('Souhrnné důkazy komponenty', 'Component-level evidence')}</h3>
-          <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t('Typ', 'Type')}</th><th>{t('Výsledek', 'Outcome')}</th><th>{t('Zdroj a rozsah', 'Source and scope')}</th><th>{t('Kdy', 'Observed')}</th></tr></thead><tbody>{selectedKinds.map((item, index) => <tr key={`${item.kind}-${index}`}><td>{kindLabel(item.kind, language)}</td><td>{stateLabel(item.state, language)}</td><td>{item.source}{item.counts ? <div className={styles.secondary}>{t(`${item.counts.executed} provedeno · ${item.counts.failed} selhalo · ${item.counts.skipped} přeskočeno`, `${item.counts.executed} executed · ${item.counts.failed} failed · ${item.counts.skipped} skipped`)}</div> : null}{trustworthyTestRunUrl(item.run?.url) ? <div><a href={trustworthyTestRunUrl(item.run?.url)!} target="_blank" rel="noreferrer">{t('Otevřít zdrojový běh', 'Open source run')}</a></div> : null}</td><td>{when(item.observedAt)}</td></tr>)}</tbody></table>{selectedKinds.length === 0 ? <div className={styles.empty}>{t('Pro tento typ nemáme doložený výsledek.', 'No recorded result for this type.')}</div> : null}</div>
+          <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>{t('Typ', 'Type')}</th><th>{t('Výsledek', 'Outcome')}</th><th>{t('Zdroj a rozsah', 'Source and scope')}</th><th>{t('Kdy', 'Observed')}</th></tr></thead><tbody>{selectedKinds.map((item, index) => <tr key={`${item.kind}-${index}`}><td>{kindLabel(item.kind, language)}</td><td>{stateLabel(item.state, language)}</td><td>{item.source}{item.counts ? <div className={styles.secondary}>{t(`${item.counts.executed} provedeno · ${item.counts.failed} selhalo · ${item.counts.skipped} přeskočeno`, `${item.counts.executed} executed · ${item.counts.failed} failed · ${item.counts.skipped} skipped`)}</div> : null}{trustworthyTestRunUrl(item.run?.url) ? <div><a href={trustworthyTestRunUrl(item.run?.url)!} target="_blank" rel="noreferrer">{t('Otevřít zdrojový běh', 'Open source run')}</a></div> : null}</td><td>{when(item.observedAt)}</td></tr>)}</tbody></table>{componentResult && selectedKinds.length === 0 ? <div className={styles.empty}>{t('Pro tento typ nemáme doložený výsledek.', 'No recorded result for this type.')}</div> : null}</div>
         </section>}
       </>}
     </>}
@@ -144,7 +157,7 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
       <p className={styles.quiet}>{t('Test ověřuje konkrétní očekávání za konkrétních podmínek. Zelený test nepotvrzuje všechny vlastnosti systému. Pokrytí kódu měří spuštěné řádky, nikoli pravděpodobnost správnosti.', 'A test checks a specific expectation under specific conditions. A passing test does not establish every property of the system. Code coverage measures executed lines, not the probability of correctness.')}</p>
       <div className={styles.learnGrid}>{TEST_KINDS.map(kind => <article key={kind}><h3 className={styles.heading}>{kindLabel(kind, language)}</h3><p className={styles.quiet}>{KIND_HELP[kind][language === 'cs' ? 0 : 1]}</p></article>)}</div>
       <p className={styles.quiet}>{t('AI vysvětluje dostupné podklady, rozlišuje fakta od hypotéz a navrhuje další ověření. Nemění původní výsledek ani schválení nasazení.', 'AI explains available sources, separates facts from hypotheses and suggests further verification. It does not change the original outcome or deployment approval.')}</p>
-      <details className={styles.details}><summary>{t('Architektura ověřování a podrobné schopnosti platformy', 'Assurance architecture and detailed platform capabilities')}</summary>{learning}</details>
+      <details className={styles.details} onToggle={event => setLearningOpen(event.currentTarget.open)}><summary>{t('Architektura ověřování a podrobné schopnosti platformy', 'Assurance architecture and detailed platform capabilities')}</summary>{learningOpen ? learning : null}</details>
     </section>}
     {report.warnings.length > 0 && <details className={styles.details}><summary>{t(`Úplnost dat a omezení reportu (${report.warnings.length})`, `Data completeness and report limitations (${report.warnings.length})`)}</summary><ul>{report.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul></details>}
   </div>
