@@ -28,6 +28,24 @@ This directory is bundled into the Admin UI image as a snapshot. Runnable servic
 
 For a concrete service, the running `/q/openbank/docs` and `/api/v1/info` report the build that is actually deployed. The Admin UI bundle index reports the Admin UI image commit that supplied this library snapshot. The module source and build files are authoritative for current packages and dependencies.
 
+## Lending APRC contract
+
+`Aprc.solve` in `openbank-libs-lending` accepts nonempty lists of advances and payments.
+Amounts must be positive and their times must be nonnegative year fractions on a common
+time origin. Payments include charges as well as instalments; callers supply the applicable dates
+and net amount advanced.
+
+The result is an annual rate as a fraction, searched in `(0, 100]` and returned with six decimal
+places using `HALF_UP` rounding. The nullable result is deliberate: no admissible positive rate,
+multiple candidates, uncertain arithmetic or exhausted bounded search work can leave the
+calculation unresolved. A zero rate is outside this contract; consumers must retain absence
+rather than display an unresolved result as zero percent or choose a candidate arbitrarily.
+
+The general search shares a bounded work budget across discovery and refinement. General
+exponential valuation remains approximate: the result does not provide a certified exact-root
+rounding or root-count guarantee near ill-conditioned roots. The public input and nullable
+return types are unchanged; callers must handle unresolved calculations explicitly.
+
 ## Related documents
 
 - [ADR 0013 — shared outbox in libs](../../docs/adr/0013-shared-outbox-in-openbank-libs.md)
