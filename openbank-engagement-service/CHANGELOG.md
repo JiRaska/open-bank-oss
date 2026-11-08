@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.1...engagement-service-v0.16.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** add visual Lion Quest course authoring for marketing ([#15227](https://github.com/JiRaska/open-bank-oss/issues/15227)) ([1274803](https://github.com/JiRaska/open-bank-oss/commit/127480353627a49e08d9108cdbc5259305ed32a5))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.0...engagement-service-v0.15.1) (2026-11-08)
 
 
