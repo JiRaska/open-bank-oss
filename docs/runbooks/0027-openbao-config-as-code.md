@@ -41,8 +41,7 @@ VAULT_TOKEN="$(bao print token)" tofu init
 VAULT_TOKEN="$(bao print token)" tofu apply
 ```
 
-Do not revoke the root token unless its replacement is already stored where the break-glass
-procedure expects it.
+Do not revoke the root token: it is the fallback when the SSO break-glass role is unusable.
 
 ## Every later change
 
@@ -170,14 +169,19 @@ VAULT_TOKEN="$(bao print token)" tofu apply
 It is bound to one Keycloak subject and requires `acr=mfa` on both sides.
 
 **Root-token rotation.** OpenBao 2.5.3+ disables the unauthenticated generate-root endpoints
-by default, so generating a root token from the recovery key takes three steps:
+by default, so generating a root token from the recovery key takes these steps (the in-cluster port-forward
+tunnels through the API server, so the key never crosses the pod network in cleartext):
 
 1. A gitops PR sets `disable_unauthed_generate_root_endpoints = false` on the 8200 listener;
    restart `openbao-0` after it syncs.
 2. Generate a root token with the recovery key from the break-glass secret
-   (`bao operator generate-root -init`, then `-nonce=…` with the key, then `-decode`), and store
-   it where the break-glass procedure expects it.
-3. A second PR sets the option back to `true`; restart again.
+   (`bao operator generate-root -init`, then `-nonce=<nonce> -` with the key on STDIN, never as
+   an argument or environment variable, then `-decode`). Store the token in the break-glass
+   secret; do not revoke it.
+3. Before closing the window: `bao login -method=oidc role=openbao-breakglass` and a policy read
+   must succeed, so the SSO path is proven while a fallback still exists.
+4. A second PR sets the option back to `true`; restart again, then check that
+   `GET /v1/sys/generate-root/attempt` is refused (an unknown option would be ignored silently).
 
 A script must never revoke the root token. Revoke only the short-lived tokens it minted itself.
 
