@@ -127,7 +127,15 @@ class CeuDailyOverviewScheduler(
             liveness.recordSuccess()
             outcome
         } catch (e: ReturnValidationException) {
-            log.errorf("[ceu] %s %s failed validation, nothing stored: %s", CODE, period.label, e.findings)
+            // Rule ids and a count only: finding messages name account numbers, which do not
+            // belong in logs. The full findings are reproduced by re-assembling through the API.
+            log.errorf(
+                "[ceu] %s %s failed validation, nothing stored: %d finding(s), rules %s",
+                CODE,
+                period.label,
+                e.findings.size,
+                e.findings.map { it.ruleId }.distinct(),
+            )
             publishUnfiled(unfiledFlag(null, now))
             CeuTickOutcome.FAILED
         } catch (e: ReturnDataUnavailableException) {
