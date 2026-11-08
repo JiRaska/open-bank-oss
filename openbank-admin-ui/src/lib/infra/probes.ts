@@ -72,7 +72,9 @@ export const CLUSTER_INFRA: InfraDef[] = [
   // the real Service DNS, verified against the live cluster. Temporal underpins
   // payment/settlement/statement workflow orchestration; KEDA drives the
   // scale-to-zero the rest of the fleet relies on (ADR-0057).
-  { id: 'temporal',        probe: { kind: 'tcp',  host: 'temporal-frontend.temporal.svc',                    port: 7233 } },
+  // Readiness from kube-state-metrics, not a TCP dial: 7233 is unauthenticated gRPC, so
+  // admin-ui must not be granted network reach to it just to show a liveness badge.
+  { id: 'temporal',        probe: { kind: 'prometheus-deployment', namespace: 'temporal', deployment: 'temporal-frontend' } },
   { id: 'keda',            probe: { kind: 'tcp',  host: 'keda-operator.keda.svc',                             port: 9666 } },
   { id: 'argocd',          probe: { kind: 'tcp',  host: 'argocd-server.argocd.svc',                           port: 80 } },
   { id: 'kyverno',         probe: { kind: 'tcp',  host: 'kyverno-svc-metrics.kyverno.svc',                    port: 8000 } },
