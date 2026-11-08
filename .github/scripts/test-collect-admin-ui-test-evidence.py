@@ -767,5 +767,52 @@ class CollectionTests(unittest.TestCase):
                          seed=None, performance_stage=invalid)
 
 
+class RateLimitRetryTest(unittest.TestCase):
+    """A rate-limited GET waits and retries; a permission 403 stays a real answer."""
+
+    @staticmethod
+    def http_error(code: int, headers: dict) -> "COLLECTOR.HTTPError":
+        from email.message import Message
+        msg = Message()
+        for key, value in headers.items():
+            msg[key] = value
+        return COLLECTOR.HTTPError("https://api.github.com/x", code, "limited", msg, io.BytesIO(b""))
+
+    class Opener:
+        def __init__(self, errors):
+            self.errors, self.calls = list(errors), 0
+
+        def open(self, request, timeout):
+            self.calls += 1
+            if self.errors:
+                raise self.errors.pop(0)
+            return "ok"
+
+    def test_secondary_limit_honours_retry_after_then_succeeds(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "75"})])
+        sleeps = []
+        result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+        self.assertEqual(("ok", 2, [75.0]), (result, opener.calls, sleeps))
+
+    def test_primary_limit_waits_until_reset(self):
+        error = self.http_error(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1100"})
+        self.assertEqual(101.0, COLLECTOR.rate_limit_wait(error, 1, now=1000.0))
+
+    def test_permission_403_is_not_retried(self):
+        # Negative case: without rate-limit headers a 403 is final, so it must raise on call 1.
+        opener = self.Opener([self.http_error(403, {}), self.http_error(403, {})])
+        with self.assertRaises(COLLECTOR.HTTPError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, lambda _: None)
+        self.assertEqual(1, opener.calls)
+
+    def test_exhaustion_raises_after_bounded_attempts(self):
+        opener = self.Opener([self.http_error(429, {}) for _ in range(9)])
+        sleeps = []
+        with self.assertRaises(COLLECTOR.HTTPError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
+        self.assertEqual(COLLECTOR.RATE_LIMIT_ATTEMPTS, opener.calls)
+        self.assertTrue(all(w <= COLLECTOR.RATE_LIMIT_MAX_WAIT_SECONDS for w in sleeps))
+
+
 if __name__ == "__main__":
     unittest.main()

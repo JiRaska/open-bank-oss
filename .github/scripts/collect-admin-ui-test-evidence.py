@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -80,6 +81,47 @@ def require_github_api_url(url: str) -> None:
         raise CollectionError("refusing a GitHub API request outside api.github.com")
 
 
+RATE_LIMIT_ATTEMPTS = 4
+RATE_LIMIT_MAX_WAIT_SECONDS = 300
+
+
+def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> float | None:
+    """Seconds to wait before retrying a rate-limited GET, or None when the error is a real answer.
+
+    Only 403/429 that GitHub marks as a limit qualify: Retry-After (secondary limits), or an
+    exhausted primary window (x-ratelimit-remaining: 0). A permission 403 carries neither and
+    stays final. Admin UI evidence failed 7/7 sampled runs (2026-11-01..08) on a bare HTTP 403
+    because this collector had no retry at all.
+    """
+    if exc.code not in (403, 429):
+        return None
+    headers = exc.headers or {}
+    retry_after = headers.get("Retry-After")
+    if retry_after is not None and str(retry_after).strip().isdigit():
+        wait = float(retry_after)
+    elif headers.get("x-ratelimit-remaining") == "0" and str(headers.get("x-ratelimit-reset", "")).isdigit():
+        wait = float(headers["x-ratelimit-reset"]) - (time.time() if now is None else now) + 1
+    elif exc.code == 429:
+        wait = 60.0 * (2 ** (attempt - 1))
+    else:
+        return None
+    return min(max(wait, 1.0), RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=time.sleep):
+    for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
+        try:
+            return opener.open(request, timeout=timeout)  # noqa: S310 - origin is fixed by callers
+        except HTTPError as exc:
+            wait = rate_limit_wait(exc, attempt)
+            if wait is None or attempt == RATE_LIMIT_ATTEMPTS:
+                raise
+            print(f"::warning::GitHub API rate limited (HTTP {exc.code}); retry {attempt}/"
+                  f"{RATE_LIMIT_ATTEMPTS - 1} in {wait:.0f}s", file=sys.stderr)
+            sleep(wait)
+    raise AssertionError("unreachable")
+
+
 def api_json(url: str, token: str) -> dict:
     require_github_api_url(url)
     request = Request(url, headers={
@@ -89,7 +131,7 @@ def api_json(url: str, token: str) -> dict:
     })
     try:
         opener = build_opener(StripAuthorizationOnCrossHostRedirect)
-        with opener.open(request, timeout=30) as response:  # noqa: S310 - origin is fixed above
+        with open_with_rate_limit_retry(opener, request, 30) as response:  # noqa: S310 - origin is fixed above
             value = json.load(response)
     except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
         status = f"HTTP {exc.code}" if isinstance(exc, HTTPError) else type(exc).__name__
@@ -611,7 +653,7 @@ def api_bytes(url: str, token: str) -> bytes:
     })
     try:
         opener = build_opener(StripAuthorizationOnCrossHostRedirect)
-        with opener.open(request, timeout=60) as response:  # noqa: S310 - origin is fixed above
+        with open_with_rate_limit_retry(opener, request, 60) as response:  # noqa: S310 - origin is fixed above
             value = response.read(MAX_ARCHIVE_BYTES + 1)
             if len(value) > MAX_ARCHIVE_BYTES:
                 raise CollectionError("compressed artifact archive exceeds size limit")

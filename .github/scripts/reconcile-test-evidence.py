@@ -34,9 +34,12 @@ from pathlib import Path
 
 TAG = re.compile(r"\b(openbank-[a-z0-9-]+):sandbox-([0-9a-f]{8})(?:-run\d+)?\b")
 ARTIFACT_RETENTION_DAYS = 30
-GH_API_ATTEMPTS = 3
-GH_API_TOTAL_TIMEOUT_SECONDS = 300
-GH_RETRY_MAX_WAIT_SECONDS = 60
+# A SECONDARY limit outlived two 60 s waits on run 42517789051, so the waits now come from
+# gh-retry's secondary branch (60 s, 120 s, 240 s + jitter) and the budget makes room for them;
+# the job's 30-minute timeout stays the outer bound.
+GH_API_ATTEMPTS = 4
+GH_API_TOTAL_TIMEOUT_SECONDS = 900
+GH_RETRY_MAX_WAIT_SECONDS = 300
 GH_API_DIAGNOSTIC_LIMIT = 400
 
 

@@ -95,6 +95,12 @@ _gh_retry_classify() {
   fi
 }
 
+# _gh_retry_is_secondary <stderr-file> -> 0 when the failure is a SECONDARY (abuse) limit.
+# Test evidence reconcile run 42517789051: two 60 s waits keyed on core.reset, then a final 403.
+_gh_retry_is_secondary() {
+  grep -qiE 'secondary rate|abuse detection|was submitted too quickly' "$1"
+}
+
 # _gh_retry_reset_wait -> seconds until the core rate limit resets (0 if unknown)
 _gh_retry_reset_wait() {
   local reset now
@@ -126,6 +132,22 @@ _gh_retry_dead_letter() {
     gh issue comment "$existing" --body "$body" >/dev/null || true
   else
     gh issue create --title "$title" --body "$body" --label ci-dead-letter >/dev/null || true
+  fi
+}
+
+# _gh_retry_wait_for <class> <stderr-file> <attempt> -> uncapped seconds to sleep.
+# SECONDARY limits are not tied to the hourly core window: waiting for core.reset waits the wrong
+# clock (up to an hour, or the 60 s fallback that proved too short), and probing /rate_limit spends
+# one more request against the very limit that just fired. GitHub's guidance with no visible
+# Retry-After (gh hides response headers): at least 60 s, growing exponentially.
+_gh_retry_wait_for() {
+  local class="$1" err="$2" attempt="$3"
+  if [[ "$class" == "rate_limit" ]] && _gh_retry_is_secondary "$err"; then
+    echo $(( 60 * (2 ** (attempt - 1)) + RANDOM % 15 ))
+  elif [[ "$class" == "rate_limit" ]]; then
+    _gh_retry_reset_wait
+  else
+    echo $(( (2 ** (attempt - 1)) * 5 + RANDOM % 5 ))   # exp backoff + jitter
   fi
 }
 
@@ -175,11 +197,7 @@ gh_retry() {
       rm -f "$err"
       return "$rc"
     fi
-    if [[ "$class" == "rate_limit" ]]; then
-      wait=$(_gh_retry_reset_wait)
-    else
-      wait=$(( (2 ** (attempt - 1)) * 5 + RANDOM % 5 ))   # exp backoff + jitter
-    fi
+    wait=$(_gh_retry_wait_for "$class" "$err" "$attempt")
     (( wait > GH_RETRY_MAX_WAIT_SECONDS )) && wait=$GH_RETRY_MAX_WAIT_SECONDS
     echo "::warning::gh_retry: attempt $attempt/$max failed ($class); retrying in ${wait}s: $*" >&2
     sleep "$wait"
@@ -223,6 +241,27 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" && "${1:-}" == "--self-test" ]]; then
   rm -f "$tmp/state"; STUB_FAILURES=1 STUB_ERROR="HTTP 403: API rate limit exceeded"
   out=$(gh_retry 3 -- stub) && [[ "$out" == stub-ok ]] \
     && echo "self-test ok: rate-limit class retried" || { echo "SELF-TEST FAIL: rate_limit"; fails=1; }
+
+  subjects=$(( subjects + 1 ))
+  rm -f "$tmp/state"; STUB_FAILURES=1
+  STUB_ERROR="You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)"
+  printf '#!/bin/sh\necho call >> "%s"\necho 0\n' "$tmp/probe" > "$tmp/fake-gh"; chmod +x "$tmp/fake-gh"
+  printf '%s\n' "$STUB_ERROR" > "$tmp/sec.err"
+  printf '%s\n' "HTTP 403: API rate limit exceeded for installation" > "$tmp/pri.err"
+  # A non-zero cap so the probe path is REACHABLE; the secondary branch must still not take it.
+  w1=$(GH_RETRY_MAX_WAIT_SECONDS=900 GH_RETRY_GH_BIN="$tmp/fake-gh" _gh_retry_wait_for rate_limit "$tmp/sec.err" 1)
+  w2=$(GH_RETRY_MAX_WAIT_SECONDS=900 GH_RETRY_GH_BIN="$tmp/fake-gh" _gh_retry_wait_for rate_limit "$tmp/sec.err" 2)
+  if (( w1 >= 60 && w2 >= 120 )) && [[ ! -s "$tmp/probe" ]]; then
+    echo "self-test ok: secondary limit waits >=60 s, doubles, and never probes /rate_limit"
+  else
+    echo "SELF-TEST FAIL: secondary wait w1=$w1 w2=$w2"; fails=1
+  fi
+  # NEGATIVE: the PRIMARY limit must still take the reset probe, proving the probe counter can fire.
+  GH_RETRY_MAX_WAIT_SECONDS=900 GH_RETRY_GH_BIN="$tmp/fake-gh" _gh_retry_wait_for rate_limit "$tmp/pri.err" 1 >/dev/null
+  [[ -s "$tmp/probe" ]] && echo "self-test ok: primary limit still probes core.reset (negative case)" \
+    || { echo "SELF-TEST FAIL: probe counter never fires, secondary assertion is vacuous"; fails=1; }
+  out=$(gh_retry 3 -- stub) && [[ "$out" == stub-ok ]] \
+    && echo "self-test ok: secondary limit retried to success" || { echo "SELF-TEST FAIL: secondary retry"; fails=1; }
 
   subjects=$(( subjects + 1 ))
   rm -f "$tmp/state"; STUB_FAILURES=5 STUB_ERROR="HTTP 404 Not Found"
