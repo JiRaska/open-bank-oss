@@ -76,6 +76,9 @@ spec:
                   tls_disable     = 1
                   address         = "[::]:8200"
                   cluster_address = "[::]:8201"
+                  # Temporary, runbook 0027 "Root-token rotation": allows generate-root with
+                  # the recovery key (still required to finish). Reverted by a follow-up PR.
+                  disable_unauthed_generate_root_endpoints = false
                 }
 
                 # ADR-0352: a SECOND listener, TLS, for clients whose transport refuses http
