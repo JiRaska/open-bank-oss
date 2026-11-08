@@ -56,3 +56,5 @@ the OPA suite verifies human authoring and publication boundaries independently.
 The admin scene is an artwork-based placement preview. Course playthrough and
 physical reachability require the native game. Keep a new course in BETA until it
 has been played in an editor-capable app, then publish through the administrator.
+
+Nullable request-array elements and null component values are rejected at the wire boundary before constructing the non-null game model. Both publication and draft endpoints return 400 and retain the original catalogue revision for these malformed requests.

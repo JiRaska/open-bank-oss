@@ -132,6 +132,38 @@ class GameCatalogIT {
     }
 
     @Test
+    fun `null course elements and null component values return 400 without changing the catalogue`(): Unit =
+        runBlocking {
+            val before = games.catalog()
+            val root = if (Files.isDirectory(Path.of("openbank-admin-ui"))) Path.of("") else Path.of("..")
+            val raw = Files.readString(root.resolve("openbank-admin-ui/public/lion-quest/embankment.json"))
+            val fields = listOf(
+                "ground", "platforms", "coins", "vampires", "bats", "piggies", "shields", "slopes", "thieves",
+                "dropZones", "rooftopObjects", "pigeons", "bridgePlatforms", "bridgeTraps",
+            )
+            for (field in fields) {
+                val content = mapper.readTree(raw) as com.fasterxml.jackson.databind.node.ObjectNode
+                content.putArray(field).addNull()
+                val document = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(before)
+                val level = document.path("levels").first { it.path("id").asText() == "embankment" }
+                    as com.fasterxml.jackson.databind.node.ObjectNode
+                level.set<com.fasterxml.jackson.databind.JsonNode>("content", content)
+                for (path in listOf("/api/v1/game/admin/catalog", "/api/v1/game/admin/drafts")) {
+                    given().contentType("application/json").body(document.toString()).put(path).then().statusCode(400)
+                }
+            }
+            val content = mapper.readTree(raw) as com.fasterxml.jackson.databind.node.ObjectNode
+            content.putArray("coins").add(mapper.readTree("""{"x":null,"y":38}"""))
+            val document = mapper.valueToTree<com.fasterxml.jackson.databind.node.ObjectNode>(before)
+            val level = document.path("levels").first { it.path("id").asText() == "embankment" }
+                as com.fasterxml.jackson.databind.node.ObjectNode
+            level.set<com.fasterxml.jackson.databind.JsonNode>("content", content)
+            given().contentType("application/json").body(document.toString())
+                .put("/api/v1/game/admin/catalog").then().statusCode(400)
+            assertThat(games.catalog()).isEqualTo(before)
+        }
+
+    @Test
     fun `null catalogue element returns 400 without changing stored revision`() {
         val before = given().get(
             "/api/v1/game/admin/catalog",

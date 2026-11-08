@@ -47,4 +47,27 @@ class GameCourseTest {
             )
         }
     }
+
+    @Test
+    fun `numeric JSON roundtrip is not a live edit but moving a published coin is forbidden`() {
+        val course = template("embankment")
+        val live = com.openbank.engagement.domain.model.game.GameLevel(
+            course.id,
+            course.theme,
+            0,
+            "Náplavka",
+            "Embankment",
+            com.openbank.engagement.domain.model.game.GameLevelState.LIVE,
+            content = course,
+        )
+        val before = com.openbank.engagement.domain.model.game.GameCatalog(3, listOf(live))
+        val coin = course.coins.first()
+        val x = (coin["x"] as Number).toInt()
+        val roundtripped = course.copy(coins = listOf(coin + ("x" to x)) + course.coins.drop(1))
+        before.copy(levels = listOf(live.copy(content = roundtripped))).requireDraftEditOf(before)
+        val moved = course.copy(coins = listOf(coin + ("x" to x + 1)) + course.coins.drop(1))
+        assertThrows<IllegalArgumentException> {
+            before.copy(levels = listOf(live.copy(content = moved))).requireDraftEditOf(before)
+        }
+    }
 }

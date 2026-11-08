@@ -132,6 +132,27 @@ data class GameCourse(
     }
 }
 
+/** JSON integral/floating spellings must not make an unchanged LIVE course look edited. */
+internal fun GameCourse.comparisonValue(): GameCourse = copy(
+    ground = ground.comparisonValues(),
+    platforms = platforms.comparisonValues(),
+    coins = coins.comparisonValues(),
+    vampires = vampires.comparisonValues(),
+    bats = bats.comparisonValues(),
+    shields = shields.comparisonValues(),
+    slopes = slopes.comparisonValues(),
+    thieves = thieves.comparisonValues(),
+    dropZones = dropZones.comparisonValues(),
+    rooftopObjects = rooftopObjects.comparisonValues(),
+    pigeons = pigeons.comparisonValues(),
+    bridgePlatforms = bridgePlatforms.comparisonValues(),
+    bridgeTraps = bridgeTraps.comparisonValues(),
+)
+
+private fun List<Map<String, Any>>.comparisonValues(): List<Map<String, Any>> = map { item ->
+    item.mapValues { (_, value) -> if (value is Number) value.toDouble() else value }
+}
+
 private fun Map<String, Any>.number(key: String): Double = requireNotNull(this[key] as? Number) {
     "Missing numeric $key"
 }.toDouble()

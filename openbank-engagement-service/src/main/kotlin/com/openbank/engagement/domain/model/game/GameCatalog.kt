@@ -60,7 +60,9 @@ data class GameCatalog(val revision: Long, val levels: List<GameLevel>) {
     fun requireDraftEditOf(before: GameCatalog) {
         if (revision != before.revision) throw GameCatalogConflict()
         val liveBefore = before.levels.filter { it.state == GameLevelState.LIVE }.sortedBy { it.id }
+            .map { it.copy(content = it.content?.comparisonValue()) }
         val liveAfter = levels.filter { it.state == GameLevelState.LIVE }.sortedBy { it.id }
+            .map { it.copy(content = it.content?.comparisonValue()) }
         require(liveBefore == liveAfter) { "Published chapters require an administrator" }
     }
 

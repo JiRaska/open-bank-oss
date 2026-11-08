@@ -5,20 +5,20 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { Course, Item } from '@/lib/game/editor'
 import styles from './page.module.css'
 const groups = [
-  ['coins', 'Mince', 'Coins'],
-  ['vampires', 'Pozemní nepřátelé a bossové', 'Ground enemies and bosses'],
-  ['bats', 'Létající nepřátelé', 'Flying enemies'],
-  ['piggies', 'Vkladomaty', 'Deposit kiosks'],
-  ['shields', 'Ochranné štíty', 'Shields'],
-  ['platforms', 'Plošiny', 'Platforms'],
-  ['ground', 'Pevná země', 'Solid ground'],
-  ['slopes', 'Šikmé střechy', 'Roof slopes'],
-  ['thieves', 'Zloději', 'Thieves'],
-  ['dropZones', 'Padající překážky', 'Falling obstacles'],
-  ['rooftopObjects', 'Střešní objekty', 'Rooftop objects'],
-  ['pigeons', 'Holubi', 'Pigeons'],
-  ['bridgePlatforms', 'Mostní plošiny', 'Bridge platforms'],
-  ['bridgeTraps', 'Pasti u soch', 'Statue traps'],
+  { id: 'coins', label: { cs: 'Mince', en: 'Coins' } },
+  { id: 'vampires', label: { cs: 'Pozemní nepřátelé a bossové', en: 'Ground enemies and bosses' } },
+  { id: 'bats', label: { cs: 'Létající nepřátelé', en: 'Flying enemies' } },
+  { id: 'piggies', label: { cs: 'Vkladomaty', en: 'Deposit kiosks' } },
+  { id: 'shields', label: { cs: 'Ochranné štíty', en: 'Shields' } },
+  { id: 'platforms', label: { cs: 'Plošiny', en: 'Platforms' } },
+  { id: 'ground', label: { cs: 'Pevná země', en: 'Solid ground' } },
+  { id: 'slopes', label: { cs: 'Šikmé střechy', en: 'Roof slopes' } },
+  { id: 'thieves', label: { cs: 'Zloději', en: 'Thieves' } },
+  { id: 'dropZones', label: { cs: 'Padající překážky', en: 'Falling obstacles' } },
+  { id: 'rooftopObjects', label: { cs: 'Střešní objekty', en: 'Rooftop objects' } },
+  { id: 'pigeons', label: { cs: 'Holubi', en: 'Pigeons' } },
+  { id: 'bridgePlatforms', label: { cs: 'Mostní plošiny', en: 'Bridge platforms' } },
+  { id: 'bridgeTraps', label: { cs: 'Pasti u soch', en: 'Statue traps' } },
 ] as const
 export function CourseContents({
   course,
@@ -31,7 +31,7 @@ export function CourseContents({
   const [group, setGroup] = useState('coins')
   const [limit, setLimit] = useState(25)
   const entries = (course[group as keyof Course] ?? []) as (Item | number)[]
-  const caption = (g: (typeof groups)[number]) => (language === 'cs' ? g[1] : g[2])
+  const caption = (g: (typeof groups)[number]) => (language === 'cs' ? g.label.cs : g.label.en)
   return (
     <section className={styles.panel} aria-labelledby="course-contents-title">
       <h2 id="course-contents-title">{t('Obsah tohoto kola', 'Contents of this chapter')}</h2>
@@ -45,14 +45,14 @@ export function CourseContents({
         {groups.map((g) => (
           <button
             className={styles.small}
-            key={g[0]}
-            aria-pressed={group === g[0]}
+            key={g.id}
+            aria-pressed={group === g.id}
             onClick={() => {
-              setGroup(g[0])
+              setGroup(g.id)
               setLimit(25)
             }}
           >
-            {caption(g)} · {((course[g[0]] ?? []) as unknown[]).length}
+            {caption(g)} · {((course[g.id] ?? []) as unknown[]).length}
           </button>
         ))}
       </div>
