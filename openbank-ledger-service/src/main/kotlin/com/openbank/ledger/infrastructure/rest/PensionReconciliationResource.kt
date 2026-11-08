@@ -34,9 +34,16 @@ class PensionReconciliationResource(
     ): Map<String, UUID> {
         val actor = checkerSubject()
         requireNotNull(request) { "a request body is required" }
-        require(request.sourceReferences.values.none { it == null } && request.expectedBalances.values.none { it == null }) {
-            "Source references and expected balances must not contain null values"
-        }
+        require(
+            request.sourceReferences.values.none {
+                it == null
+            },
+        ) { "Source references must not contain null values" }
+        require(
+            request.expectedBalances.values.none {
+                it == null
+            },
+        ) { "Expected balances must not contain null values" }
         return mapOf(
             "id" to reconciliations.propose(request, actor, requireNotNull(key) { "Idempotency-Key is required" }),
         )
