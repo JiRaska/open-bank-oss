@@ -334,9 +334,9 @@ change_requirements:
     require:
       - "the cited test (or the tests declaring the row's verifies id) ran in the latest scheduled main run and every result is passed"
       - "a component with no envelope is unknown, never a verdict; an unreadable corpus is UNRESOLVED, not a failure"
+      - "a finding fails only if absent from .github/gates/baselines/threat-model-test-evidence.txt and in a threat-model row the PR adds or edits; the baseline only shrinks against the PR base (enforced)"
     gate: threat-model-test-evidence
-    enforced: advisory
-    target_enforce_date: "2027-01-31"   # ADR-0144: enforce after one full month of advisory output is triaged
+    enforced: enforce
     ci_producer: ".github/scripts/check-threat-model-test-evidence.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]

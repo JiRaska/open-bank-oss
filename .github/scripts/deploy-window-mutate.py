@@ -53,7 +53,7 @@ def require_train_policy(repo: str) -> None:
         raise ValueError(f"merge train does not own merging: {reason}")
 
 
-def selected_pr(pr, repo: str, number: int, head: str, base: str) -> tuple[str, str]:
+def selected_pr(pr, repo: str, number: int, head: str) -> tuple[str, str]:
     if not isinstance(pr, dict) or pr.get("number") != number:
         raise ValueError("selected deployment response is missing or malformed")
     if pr.get("state") != "open" or pr.get("draft") is not False:
@@ -67,7 +67,9 @@ def selected_pr(pr, repo: str, number: int, head: str, base: str) -> tuple[str, 
     source, target = pr.get("head"), pr.get("base")
     if not isinstance(source, dict) or not isinstance(target, dict):
         raise ValueError("selected deploy PR head/base are unreadable")
-    if source.get("sha") != head or target.get("sha") != base or target.get("ref") != "main":
+    # REST base.sha is the PR creation base, not the live main checked separately.
+    if (source.get("sha") != head or target.get("ref") != "main"
+            or not SHA_RE.fullmatch(str(target.get("sha", "")))):
         raise ValueError("selected deploy PR head or base changed; retry selection")
     if any(not isinstance(ref.get("repo"), dict) or ref["repo"].get("full_name") != repo
            for ref in (source, target)):
@@ -139,14 +141,14 @@ def main(args: argparse.Namespace) -> None:
         raise ValueError("main changed after selection; retry next flush")
     require_train_policy(repo)
     node_id, branch = selected_pr(gh("api", f"repos/{repo}/pulls/{args.number}"), repo,
-                                  args.number, args.selected_head, args.selected_main)
+                                  args.number, args.selected_head)
     verify_source(repo, args.number, branch, args.selected_main)
     require_train_policy(repo)
     should_arm = reselect(args.number, args.selected_head, args.selected_main)
     if live_main(repo) != args.selected_main:
         raise ValueError("main changed before arming; retry next flush")
     latest = selected_pr(gh("api", f"repos/{repo}/pulls/{args.number}"), repo,
-                         args.number, args.selected_head, args.selected_main)
+                         args.number, args.selected_head)
     if latest != (node_id, branch):
         raise ValueError("selected deploy PR identity changed before arming")
     if not should_arm:

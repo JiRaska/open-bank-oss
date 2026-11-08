@@ -76,8 +76,6 @@ IMAGE_REF = re.compile(r"image:[^\n]*?(openbank-[a-z0-9-]+)")
 # has a different answer from a bounded context nobody has modelled yet, and flattening the two
 # would make this list read as 23 identical omissions.
 DEPLOYED_BASELINE: dict[str, str] = {
-    "openbank-admin-ui":
-        "#9167 — bounded context, not yet modelled",
     "openbank-aml-service":
         "#9167 — bounded context, not yet modelled",
     "openbank-analytics-sink":
