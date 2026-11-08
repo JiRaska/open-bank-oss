@@ -112,6 +112,30 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     expect(recents[0].id).toBe('a-9')
   })
 
+  it('keeps arrows and Enter working when focus has moved off the input onto the dialog', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('textbox'), 'nov')
+    await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy(), { timeout: 2000 })
+    // A mouse click on a non-input area leaves focus on the dialog container (tabIndex=-1);
+    // the keydown then targets that element, not the input and not window.
+    const dialog = screen.getByRole('dialog')
+    fireEvent.keyDown(dialog, { key: 'ArrowDown' })
+    fireEvent.keyDown(dialog, { key: 'Enter' })
+    expect(push).toHaveBeenCalledWith('/accounts/a-9')
+  })
+
+  it('ignores keys typed into another editable control', async () => {
+    const user = userEvent.setup()
+    renderPalette()
+    await user.type(screen.getByRole('textbox'), 'nov')
+    await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy(), { timeout: 2000 })
+    const other = document.createElement('textarea')
+    screen.getByRole('dialog').appendChild(other)
+    fireEvent.keyDown(other, { key: 'Enter' })
+    expect(push).not.toHaveBeenCalled()
+  })
+
   // #3886 regression, deterministic. The flake (`push` never called, 2.6% of CI runs) was the
   // rare, load-dependent form of this: a keydown reaching the palette while `shown` is still
   // empty. ArrowDown used to compute `Math.min(a + 1, shown.length - 1)` = -1, deselecting every
