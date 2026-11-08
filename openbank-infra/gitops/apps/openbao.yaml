@@ -78,6 +78,17 @@ spec:
                   cluster_address = "[::]:8201"
                 }
 
+                # ADR-0352: a SECOND listener, TLS, for clients whose transport refuses http
+                # (libs-runtime OpenBaoTransport — Product-IR signing). 8200 above is untouched
+                # so ESO and the rotation jobs keep working. Cert: components/openbao/openbao-tls.yaml
+                # (ClusterIssuer openbank-ca), mounted from Secret openbao-tls.
+                listener "tcp" {
+                  address         = "[::]:8203"
+                  tls_cert_file   = "/openbao/tls/tls.crt"
+                  tls_key_file    = "/openbao/tls/tls.key"
+                  tls_min_version = "tls12"
+                }
+
                 storage "raft" {
                   path = "/openbao/data"
                 }
@@ -106,6 +117,26 @@ spec:
                 }
 
                 service_registration "kubernetes" {}
+          # ADR-0352: the TLS listener's cert (Secret from components/openbao/openbao-tls.yaml).
+          volumes:
+            - name: openbao-tls
+              secret:
+                secretName: openbao-tls
+          volumeMounts:
+            - name: openbao-tls
+              mountPath: /openbao/tls
+              readOnly: true
+          # 8203, not 8202: the chart already declares containerPort 8202 as `http-rep`.
+          extraPorts:
+            - name: https-tls
+              containerPort: 8203
+              protocol: TCP
+          service:
+            extraPorts:
+              - name: https-tls
+                port: 8203
+                targetPort: 8203
+                protocol: TCP
           dataStorage:
             enabled: true
             size: 5Gi
