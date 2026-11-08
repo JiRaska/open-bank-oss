@@ -42,6 +42,13 @@ Those are inputs a gate needs before it can say anything, so failing open is not
 them. ADR-0030 (supply chain) requires pinned, verifiable inputs. It does not say where CI
 obtains them, or what happens when the source is down.
 
+The estate already solved the same problem once, for container images.
+`openbank-infra/aws/envs/sandbox-platform/ecr-public-mirror.tf` mirrors images that Docker
+Hub's rate limit kept failing (kafka for CI, and alloy, grafana, falco and falcoctl for the
+cluster) into ECR Public. Those images are pushed by `scripts/mirror-ci-base-images.sh` and
+pulled anonymously. This ADR extends that working pattern from images to tools and charts. It
+uses the same provider (`aws.us_east_1`) and the same registry alias, and it adds no new vendor.
+
 ## Decision
 
 We will make external CI artifacts a declared, pinned, mirrored dependency with exactly one way
@@ -115,8 +122,8 @@ Rollout runs in four steps:
   debugs a policy gate during an upstream outage.
 
 **Negative**
-- New infrastructure (an ECR Public repository namespace, an IAM role, a workflow) and a sweep
-  of 20 call sites.
+- More ECR Public repositories on the existing alias, an IAM write role, a workflow, and a
+  sweep of 20 call sites.
 - ECR Public runs only in `us-east-1`. That is acceptable because the artifacts are public
   open-source tools, not customer data, so ADR-0175 residency does not apply.
 - An outage of GitHub Actions as a whole is not addressed. Only self-hosted runners plus a
