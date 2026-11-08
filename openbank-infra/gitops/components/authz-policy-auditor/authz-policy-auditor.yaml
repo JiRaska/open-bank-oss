@@ -37,7 +37,7 @@ spec:
         - name: authz-policy-auditor
           # Pending first CI build (ADR-0167 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-authz-policy-auditor:sandbox-cf3e605f@sha256:8f6eb501d2b4fba5006c6ae4f7a6fa85428fdf383483ccb8edcfb0bee211c92f
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-authz-policy-auditor:sandbox-b6494671@sha256:66bf88ff89591941c81e32b16673c581d64f3b5e4faaae21ed1d1a5a6221ce89
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

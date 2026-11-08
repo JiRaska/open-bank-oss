@@ -49,7 +49,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sanctions-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a322040991b0a683"
+        openbank.tech/policy-checksum: "de45d8cf03d76140"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-9e765663
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-703506cf@sha256:a8bdb7d417c5628392af47b39bd0a1e19d9bed1aaca42a896cd7ad8164e61258
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

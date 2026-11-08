@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.1...domestic-payment-v1.4.0) (2026-11-07)
+
+
+### Features
+
+* **domestic-payment:** release fraud holds from the analyst's AML case decision ([#15060](https://github.com/JiRaska/open-bank-oss/issues/15060)) ([4e7636d](https://github.com/JiRaska/open-bank-oss/commit/4e7636dbc48dcb1aa3df75f9d13df5b85223356e))
+
 ## [1.3.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.0...domestic-payment-v1.3.1) (2026-11-06)
 
 

@@ -94,6 +94,7 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/lending/compliance-packs": { disposition: "sidebar-navigation-smoke", path: "/lending/compliance-packs" },
   "/lending": { disposition: "sidebar-navigation-smoke", path: "/lending" },
   "/lending/risk": { disposition: "sidebar-navigation-smoke", path: "/lending/risk" },
+  "/loyalty/game": { disposition: "sidebar-navigation-smoke", path: "/loyalty/game" },
   "/loyalty": { disposition: "sidebar-navigation-smoke", path: "/loyalty" },
   "/merchants": { disposition: "sidebar-navigation-smoke", path: "/merchants" },
   "/notifications": { disposition: "sidebar-navigation-smoke", path: "/notifications" },

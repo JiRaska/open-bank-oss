@@ -215,9 +215,13 @@ spec:
         # (controller/metrics/prommetrics.go: namespaceNameLabels), NOT `rollout` — the
         # original `{{ $labels.rollout }}` here rendered EMPTY, so the page never said which
         # rollout aborted. Use $labels.name.
+        # The controller's phase label values are Progressing, Paused, Completed, Error, Abort and
+        # Timeout (read live with `label/phase/values?match[]=rollout_phase`, 2026-11-07). This rule
+        # matched "Aborted" and the next one "Degraded"; neither value exists, so both stayed silent
+        # while kyc, ledger and lending sat aborted for ~20 h on 2026-11-06/07.
         - alert: RolloutAnalysisAborted
           expr: |
-            label_replace(rollout_phase{phase="Aborted"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
+            label_replace(rollout_phase{phase="Abort"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
           for: 1m
           labels:
             severity: warning
@@ -233,7 +237,7 @@ spec:
         # abort = code/regression issue).
         - alert: RolloutProgressDeadlineExceeded
           expr: |
-            label_replace(rollout_phase{phase="Degraded"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
+            label_replace(rollout_phase{phase="Timeout"}, "namespace", "$1", "exported_namespace", "(.+)") == 1
           for: 2m
           labels:
             severity: warning
