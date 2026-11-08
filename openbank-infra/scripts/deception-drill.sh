@@ -96,17 +96,22 @@ if [[ "$SCOPE" == full ]]; then
 fi
 
 # --- poll ---------------------------------------------------------------------------------
+# A metric read that errors must not look like a signal that has not arrived yet. The file is
+# kept for its error CODE only: AWS error messages name the caller's ARN, and the verdict is public.
+METRIC_ERR=$(mktemp)
+trap 'rm -f "$METRIC_ERR"' EXIT
+metric_error_code() { grep -oE '\([A-Za-z]+\) when calling' "$METRIC_ERR" | head -1 | sed -E 's/^\(([A-Za-z]+)\).*/\1/'; }
 matched() {  # EventBridge rule matched events since the drill started
   aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/Events \
     --metric-name MatchedEvents --dimensions Name=RuleName,Value="$KEY_RULE" \
     --start-time "$(iso $(( FIRED_key / 60 * 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
-    --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>/dev/null
+    --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>>"$METRIC_ERR"
 }
 delivered() {  # notifications the alert topic delivered to its subscribers since the drill
   aws cloudwatch get-metric-statistics --region "$REGION" --namespace AWS/SNS \
     --metric-name NumberOfNotificationsDelivered --dimensions Name=TopicName,Value="$TOPIC" \
     --start-time "$(iso $(( FIRED_delivery / 60 * 60 )))" --end-time "$(iso $(( $(now) + 300 )))" \
-    --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>/dev/null
+    --period 60 --statistics Sum --query 'sum(Datapoints[].Sum)' --output text 2>>"$METRIC_ERR"
 }
 # Windows start at the MINUTE the drill fired, never earlier: a 60 s lead once reached into the
 # previous one-minute bucket and counted a notification sent before the drill (a subscription
@@ -128,6 +133,8 @@ deadline=$(( $(now) + TIMEOUT ))
 while (( $(now) < deadline )); do
   [[ -z "${SEEN_key:-}" ]] && ge1 "$(matched || true)" && SEEN_key=$(now)
   [[ -z "${SEEN_delivery:-}" ]] && ge1 "$(delivered || true)" && SEEN_delivery=$(now)
+  # Waiting cannot cure a denial, so stop now and report it rather than a 10 minute "no signal".
+  grep -q 'AccessDenied' "$METRIC_ERR" && break
   [[ "$SCOPE" == full && -z "${SEEN_sa:-}" && "$(alarm)" == "ALARM" ]] && SEEN_sa=$(now)
   [[ -z "${SEEN_decoy:-}" ]] && loki_hit && SEEN_decoy=$(now)
   [[ -n "${SEEN_key:-}" && -n "${SEEN_delivery:-}" && ( "$SCOPE" == aws || -n "${SEEN_sa:-}" ) && ( -z "$LOKI" || -n "${SEEN_decoy:-}" ) ]] && break
@@ -171,6 +178,12 @@ if [[ -n "${SEEN_key:-}" ]]; then
   else
     out '%-10s %-10s %s\n' count PASS "matched=${COUNT}"
   fi
+fi
+if [[ -s "$METRIC_ERR" && ( -z "${SEEN_key:-}" || -z "${SEEN_delivery:-}" ) ]]; then
+  # A FAIL above then means "could not look", not "the alert did not arrive".
+  code=$(metric_error_code)
+  out '%-10s %-10s %s\n' metrics FAIL "read error ${code:-unknown}: signal state unknown, check the metrics by hand"
+  rc=1
 fi
 echo "Seconds measure signal-in-AWS/Loki. delivery = the SNS topic handed the key alert to its subscribers (email)."
 exit $rc

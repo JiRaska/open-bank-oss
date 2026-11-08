@@ -4,7 +4,7 @@ Runs development-operations analysis and records reviewable findings.
 
 ## Interface
 
-This module has no committed OpenAPI contract. Its endpoints and scheduled workflows are internal; consult the source and the service runbook for their current behavior.
+The internal REST contract is published in `openapi.yaml`. Authenticated readers can inspect the current delivery overview and persisted shadow history; sampling and measurement semantics are documented in `08-delivery-shadow.en.md`. Mutating finding and analysis operations remain admin-only.
 
 ## GitHub API egress
 

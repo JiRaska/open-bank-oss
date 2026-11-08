@@ -25,3 +25,20 @@ is `openbank-admin-ui/e2e/settings-access-preview.spec.ts`.
 When adding a role or permission, add both translations and descriptions to the
 display dictionary. Type checking and catalog-coverage tests reject missing copy.
 Descriptions explain the UI rule only; they must not promise unconditional access.
+
+## Large-catalog layout
+
+The matrix defaults to compact rows: localized names and technical identifiers
+remain visible, while the display-only **Show descriptions** switch reveals the
+existing bilingual descriptions. Search still includes hidden descriptions.
+
+The single-role dropdown is a shortcut; **Choose roles to compare** supports any
+subset of the catalog, with select-all and clear-selection actions. The optional
+**Only grants listed for selected roles** filter keeps permissions listed for at
+least one selected role. A role selection changes displayed columns only. Empty
+selection and empty search results have separate messages.
+
+The scrolling region pins column headers and the permission column; striped rows,
+row hover and column separators preserve context. Narrow viewports scroll inside
+the matrix rather than widening the page. Display preferences stay in component
+state and never update role assignments or policy.

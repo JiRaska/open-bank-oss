@@ -14,9 +14,10 @@
 // DERIVED counts injected so the reality column is real.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
+import { createHash } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, fallback) => {
@@ -37,6 +38,11 @@ const INPUTS = [
   '.github/workflows/Dockerfile.deploy',
 ]
 
+// GitOps image pins change on ordinary deploys without changing any displayed fact.
+// Bind freshness to the facts used by this dossier, not every input byte.
+const inputFingerprint = (facts) =>
+  `sha256:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`
+
 const read = (p) => { try { return readFileSync(p, 'utf8') } catch { return null } }
 
 // ── derived: namespace set (ArgoCD app destinations) ──────────────────────────────────────────
@@ -49,7 +55,7 @@ function declaredNamespaces() {
       for (const m of txt.matchAll(/namespace:\s*([a-z][a-z0-9-]+)/g)) set.add(m[1])
     }
   }
-  // exclude managed-platform namespaces we don't present as OpenBank domains
+  // Exclude managed control namespaces from this declared application inventory.
   for (const n of ['argocd', 'kube-system', 'kube-public', 'kube-node-lease']) set.delete(n)
   return [...set].sort()
 }
@@ -103,9 +109,10 @@ const L = (cs, en) => ({ cs, en })
 
 // ── curated: per-namespace role + group (declared facts) ──────────────────────────────────────
 const GROUPS = [
-  { id: 'domain', label: 'Byznys domény', labelEn: 'Business domains', color: '#326CE5', icon: 'bank',
-    blurb: L('Každá doména banky běží ve vlastním zapečeném namespace — jako oddělené patro budovy.',
-      'Every banking domain runs in its own sealed namespace — like a separate floor of the building.') },
+  // The historical wire ID remains stable; this is a physical workload group, not a business-domain ID.
+  { id: 'domain', label: 'Aplikační namespacy', labelEn: 'Application namespaces', color: '#326CE5', icon: 'bank',
+    blurb: L('Namespacy seskupují služby a jejich instance pro jednotlivé právní entity. Obchodní domény eviduje katalog služeb nezávisle.',
+      'Namespaces group services and their legal-entity instances. Business ownership is classified independently in the service catalog.') },
   { id: 'identity', label: 'Identita & tajemství', labelEn: 'Identity & secrets', color: '#8b5cf6', icon: 'lock',
     blurb: L('Kdo se přihlásí a kde leží klíče: Keycloak, OpenBao, secrety, certifikáty.',
       'Who signs in and where the keys live: Keycloak, OpenBao, secrets, certificates.') },
@@ -117,7 +124,7 @@ const GROUPS = [
       'The operating brain and factory: AI agent, runners, autoscaling, admission policy, scanners.') },
 ]
 const NS_MAP = {
-  // domain
+  // Application workload namespaces; membership does not assign business ownership.
   accounts: ['domain', L('Účty zákazníků', 'Customer accounts')], balances: ['domain', L('Zůstatky (projekce ledgeru)', 'Balances (ledger projection)')],
   ledger: ['domain', L('Hlavní kniha (double-entry GL)', 'General ledger (double-entry GL)')], payments: ['domain', L('Platby (SEPA/domácí/SCT Inst)', 'Payments (SEPA/domestic/SCT Inst)')],
   fx: ['domain', L('Směnárna / FX kurzy', 'Exchange / FX rates')], interest: ['domain', L('Úroky a kapitalizace', 'Interest and capitalisation')],
@@ -171,7 +178,6 @@ const counts = {
 }
 const img = imageFacts()
 const pod = podSecurity()
-const npCoverage = `${counts.networkPolicies} / ${ns.length}`
 
 const securityLayers = [
   { id: 'edge', label: L('Edge', 'Edge'), icon: 'globe', status: 'partial',
@@ -179,12 +185,12 @@ const securityLayers = [
     summary: L('CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.',
       'CloudFront + WAF + TLS at the perimeter, before traffic ever reaches the cluster.'),
     controls: ['CloudFront/WAF', 'TLS (ACM/cert-manager)', 'ingress-nginx'], adr: ['0027'], detailRoute: '/docs/cloud-architecture' },
-  { id: 'network', label: L('Síť (segmentace)', 'Network (segmentation)'), icon: 'network', status: 'planned',
+  { id: 'network', label: L('Síť (segmentace)', 'Network (segmentation)'), icon: 'network', status: counts.networkPolicies > 0 ? 'partial' : 'planned',
     analogy: L('Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.',
       'Locked doors between floors — without a pass you cannot move between departments.'),
-    summary: L(`Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen ${counts.networkPolicies} NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.`,
-      `The zero-trust ideal is deny-by-default between namespaces. Reality: only ${counts.networkPolicies} NetworkPolicies declared → traffic between namespaces is largely open.`),
-    controls: [`NetworkPolicy (${npCoverage})`, 'per-namespace deny-by-default (target)'], adr: ['0081'] },
+    summary: L(`Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno ${counts.networkPolicies} NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.`,
+      `The zero-trust goal is deny-by-default between namespaces. GitOps declares ${counts.networkPolicies} NetworkPolicies; this count cannot establish per-namespace coverage or effective traffic isolation.`),
+    controls: [`NetworkPolicy manifests (${counts.networkPolicies})`, 'per-namespace deny-by-default (target)'], adr: ['0081'] },
   { id: 'identity', label: L('Identita & autorizace', 'Identity & authorization'), icon: 'lock', status: 'live',
     analogy: L('Občanka a oprávnění — každý ukáže, kdo je a co smí.', 'ID card and permissions — everyone shows who they are and what they may do.'),
     summary: L('Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.',
@@ -241,12 +247,12 @@ const imageAnatomy = {
 }
 
 const planVsReality = [
-  { item: L('Namespace segmentace', 'Namespace segmentation'), plan: L('Doménová izolace, 1 ns / doména', 'Domain isolation, 1 ns / domain'), reality: L(`${counts.namespaces} namespaců`, `${counts.namespaces} namespaces`), status: 'live' },
-  { item: L('NetworkPolicy (east-west)', 'NetworkPolicy (east-west)'), plan: L('deny-by-default v každém ns', 'deny-by-default in every ns'), reality: L(`${npCoverage} ns má NetworkPolicy → většina provozu otevřená`, `${npCoverage} ns have a NetworkPolicy → most traffic open`), status: 'planned' },
+  { item: L('Namespace segmentace', 'Namespace segmentation'), plan: L('Technické oddělení služeb a právních entit', 'Technical separation of workloads and legal entities'), reality: L(`${counts.namespaces} namespaců`, `${counts.namespaces} namespaces`), status: 'live' },
+  { item: L('NetworkPolicy (east-west)', 'NetworkPolicy (east-west)'), plan: L('deny-by-default v každém ns', 'deny-by-default in every ns'), reality: L(`${counts.networkPolicies} NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny`, `${counts.networkPolicies} NetworkPolicies declared in GitOps; namespace coverage and runtime effectiveness unverified`), status: counts.networkPolicies > 0 ? 'partial' : 'planned' },
   { item: L('Podpis image', 'Image signing'), plan: L('Enforce — blokovat nepodepsané', 'Enforce — block unsigned'), reality: L('Cosign podpis zapojen, kyverno zatím Audit', 'Cosign signing wired, kyverno still Audit'), status: 'partial' },
   { item: L('Tajemství', 'Secrets'), plan: L('OpenBao + ESO, nic v gitu', 'OpenBao + ESO, nothing in git'), reality: L(`${counts.externalSecrets} ExternalSecret`, `${counts.externalSecrets} ExternalSecrets`), status: 'live' },
   { item: L('Pod hardening', 'Pod hardening'), plan: L('non-root + seccomp + read-only FS + drop caps', 'non-root + seccomp + read-only FS + drop caps'), reality: L(`non-root ${pod.runAsNonRoot ? '✓' : '✗'}, seccomp ${pod.seccomp ? '✓' : '✗'}, read-only/caps jen místy`, `non-root ${pod.runAsNonRoot ? '✓' : '✗'}, seccomp ${pod.seccomp ? '✓' : '✗'}, read-only/caps only in places`), status: 'partial' },
-  { item: L('Admission policy', 'Admission policy'), plan: L('sada kyverno policies', 'a set of kyverno policies'), reality: L(`${counts.clusterPolicies} ClusterPolicy (image-verify)`, `${counts.clusterPolicies} ClusterPolicy (image-verify)`), status: 'partial' },
+  { item: L('Admission policy', 'Admission policy'), plan: L('sada kyverno policies', 'a set of kyverno policies'), reality: L(`${counts.clusterPolicies} ClusterPolicy deklarovaných v GitOpsu; runtime stav neověřen`, `${counts.clusterPolicies} ClusterPolicies declared in GitOps; runtime state unverified`), status: counts.clusterPolicies > 0 ? 'partial' : 'planned' },
 ]
 
 const out = {
@@ -254,6 +260,7 @@ const out = {
   source: 'derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081',
   // Commit time of the newest input, not the clock — see scripts/lib/source-date.mjs (#2621).
   generatedAt: sourceDate(REPO, INPUTS),
+  inputFingerprint: inputFingerprint({ ns, counts, img, pod }),
   counts,
   groups: GROUPS,
   namespaces: ns,
@@ -262,5 +269,26 @@ const out = {
   planVsReality,
 }
 
-writeFileSync(OUT, JSON.stringify(out, null, 2))
-console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+const stable = preserveDerivedTimestamp(OUT, out, 'generatedAt')
+const rendered = JSON.stringify(stable, null, 2)
+if (process.argv.includes('--check')) {
+  const committed = read(OUT)
+  let expected = rendered
+  if (committed && !process.env.SOURCE_DATE_EPOCH) {
+    try {
+      const existing = JSON.parse(committed)
+      if (existing.inputFingerprint === out.inputFingerprint) {
+        expected = JSON.stringify({ ...out, generatedAt: existing.generatedAt }, null, 2)
+      }
+    } catch { /* Malformed JSON fails the exact comparison. */ }
+  }
+  if (committed !== expected) {
+    console.error('[generate-cluster-topology] committed snapshot is missing or stale; regenerate from GitOps and Dockerfile inputs')
+    process.exitCode = 1
+  } else {
+    console.log('[generate-cluster-topology] committed snapshot matches its declared inputs')
+  }
+} else {
+  writeFileSync(OUT, rendered)
+  console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+}

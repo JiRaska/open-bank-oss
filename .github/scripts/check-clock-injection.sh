@@ -73,6 +73,19 @@ if [ "${1:-}" = "--self-test" ]; then
   reset; put "$K/domain/Money.kt" 'class Money {\n  // never call Instant.now() here — inject a Clock (ADR-0100)\n  fun at() = Instant.now(clock)\n}\n'
   expect "the call named in a comment is not a hit" 0 "OK: no direct wall-clock"
 
+  # Exact path segments: moving the filter into find must retain the original scope.
+  reset; put "$K/domainology/Money.kt" 'class Money { fun at() = Instant.now() }\n'
+  expect "a similar layer name is out of scope" 0 "SUBJECTS=0"
+
+  reset; put "$K/nested space/domain/Money.kt" 'class Money { fun at() = Instant.now() }\n'
+  expect "a nested layer under a path containing spaces is checked" 1 "SUBJECTS=1"
+
+  reset; put "$K/domain/application/Money.kt" 'class Money { fun at() = Instant.now() }\n'
+  expect "a file under both layers retains both checks" 1 "SUBJECTS=2"
+
+  reset; put "$K/domain/"$'line\nbreak.kt' 'class Money { fun at() = Instant.now() }\n'
+  expect "NUL-delimited traversal preserves a newline in a filename" 1 "SUBJECTS=1"
+
   # DERIVATION: an empty money_path_services must fail, not silently scan nothing. This is the
   # defect the derivation replaced — a short list read as a clean fleet.
   printf 'money_path_services: []\n' > "$td/openbank-libs/governance/rules.yaml"
@@ -83,7 +96,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'money_path_services:\n  - openbank-fixture-service\n' > "$td/openbank-libs/governance/rules.yaml"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: clock-injection gate is falsifiable (7 cases, scope derived from rules.yaml)"
+  echo "self-test ok: clock-injection gate is falsifiable (11 cases, scope derived from rules.yaml)"
   exit 0
 fi
 
@@ -130,17 +143,12 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
   for layer in "${TARGET_LAYERS[@]}"; do
     search_dir="${svc}/src/main/kotlin"
     # The layer directory can sit at any depth under the kotlin source root
-    # (e.g. com/openbank/ledger/domain/), so we use find + grep per file.
+    # (e.g. com/openbank/ledger/domain/); find filters the exact path segment.
     if [ ! -d "$search_dir" ]; then
       continue
     fi
 
     while IFS= read -r -d '' file; do
-      # Check whether the file lives under a domain/ or application/ path segment
-      if ! echo "$file" | grep -qE "/${layer}/"; then
-        continue
-      fi
-
       matches=$(grep -n "$PATTERN" "$file" | grep -v '[[:space:]]*//' | grep -v '[[:space:]]\*' || true)
       SCANNED=$((SCANNED + 1))
       if [ -n "$matches" ]; then
@@ -149,7 +157,7 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
         echo "---"
         VIOLATIONS=$((VIOLATIONS + 1))
       fi
-    done < <(find "$search_dir" -type f -name "*.kt" -print0)
+    done < <(find "$search_dir" -type f -name "*.kt" -path "*/${layer}/*" -print0)
   done
 done
 

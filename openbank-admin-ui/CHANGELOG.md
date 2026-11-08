@@ -1,5 +1,34 @@
 # Changelog
 
+## [4.4.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.2...admin-ui-v4.4.3) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose game management in loyalty navigation ([#15094](https://github.com/JiRaska/open-bank-oss/issues/15094)) ([af41e33](https://github.com/JiRaska/open-bank-oss/commit/af41e33c43e34e59ccbda5c0256cf901cfde1cdf))
+
+## [4.4.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.1...admin-ui-v4.4.2) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui:** preserve header commit badge contrast ([#15085](https://github.com/JiRaska/open-bank-oss/issues/15085)) ([4c59828](https://github.com/JiRaska/open-bank-oss/commit/4c598286b7315947e775f8df8e43c37b61a14926))
+* **admin-ui:** refresh cluster-topology snapshot when GitOps inputs change ([#14599](https://github.com/JiRaska/open-bank-oss/issues/14599)) ([abbbf30](https://github.com/JiRaska/open-bank-oss/commit/abbbf309cd3a810a27abd54803e9b417ab58b0aa))
+
+## [4.4.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.4.0...admin-ui-v4.4.1) (2026-11-07)
+
+
+### Bug Fixes
+
+* **admin-ui,mcp-service:** align remaining domain consumers ([#15040](https://github.com/JiRaska/open-bank-oss/issues/15040)) ([7e5b6d5](https://github.com/JiRaska/open-bank-oss/commit/7e5b6d552d94dd952dc1e5e0a549439e87896a18))
+
+## [4.4.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.3.0...admin-ui-v4.4.0) (2026-11-07)
+
+
+### Features
+
+* **admin-ui:** make access matrix compact and compare selected roles ([#15032](https://github.com/JiRaska/open-bank-oss/issues/15032)) ([173c387](https://github.com/JiRaska/open-bank-oss/commit/173c3877b246b8a6710cb4536aeb87a466cea7d5))
+
 ## [4.3.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.2.0...admin-ui-v4.3.0) (2026-11-06)
 
 
