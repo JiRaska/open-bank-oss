@@ -4,6 +4,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { createHash } from 'node:crypto'
+import { workspaceCase } from '../../e2e/fixtures/test-intelligence-workspace'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES } from '@/lib/evidence/testIntelligenceSnapshot'
+vi.mock('server-only', () => ({}))
 
 const dirs: string[] = []
 afterEach(() => {
@@ -90,7 +93,7 @@ describe('GET /api/test-intelligence', () => {
     expect(body.warnings[0]).toMatch(/not bundled/i)
   })
 
-  it('serves a validated independently published snapshot and its provenance', async () => {
+  it('serves a full retained testcase roster with provenance beyond the shared 2 MiB default', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-published-'))
     dirs.push(dir)
     const file = path.join(dir, 'report.json')
@@ -100,10 +103,16 @@ describe('GET /api/test-intelligence', () => {
     const collectedAt = new Date().toISOString()
     const snapshot = {
       ...local, collectedAt,
+      testCases: Array.from({ length: 2000 }, (_, index) => ({
+        ...workspaceCase, component: 'openbank-ledger-service', fingerprint: `capacity-${index}`, observations: 10,
+        recentRuns: Array.from({ length: 10 }, (_, runIndex) => ({ state: 'passed', durationMs: 12, run: { ...workspaceCase.lastRun!, id: String(101 - runIndex), url: `https://github.com/JiRaska/open-bank-oss/actions/runs/${101 - runIndex}`, observedAt: new Date(Date.parse(workspaceCase.lastObservedAt) - runIndex * 60_000).toISOString() } })),
+      })),
       components: [{ component: 'openbank-ledger-service', released: true, moneyPath: true, evidence: [], coverage: { state: 'not-run', observedAt: null, source: null, lines: { covered: 0, missed: 0, percentage: null }, branches: { covered: 0, missed: 0, percentage: null } }, testInfrastructure: { declared: [], observed: [] } }],
       totals: { ...local.totals, components: 1, moneyPathComponents: 1, missingEvidence: 1 },
     }
     const bytes = JSON.stringify(snapshot)
+    expect(Buffer.byteLength(bytes)).toBeGreaterThan(2 * 1024 * 1024)
+    expect(Buffer.byteLength(bytes)).toBeLessThan(TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES)
     const sha256 = createHash('sha256').update(bytes).digest('hex')
     const sourceSha = 'a'.repeat(40)
     const base = 'https://snapshot.example/admin-ui/test-intelligence'
@@ -117,6 +126,9 @@ describe('GET /api/test-intelligence', () => {
     const body = await (await GET(new Request('http://admin.test/api/test-intelligence'))).json()
 
     expect(body.components.map((item: { component: string }) => item.component)).toEqual(['openbank-ledger-service'])
+    expect(body.testCases).toHaveLength(2000)
+    const { readTestExplanationSource } = await import('@/lib/evidence/testExplanationSource')
+    expect((await readTestExplanationSource())?.testCases).toHaveLength(2000)
     expect(body.evidence).toMatchObject({
       source: 'published-snapshot',
       dataset: { status: 'ready', sourceSha, runId: 123, runAttempt: 1, snapshot: snapshotKey, sha256, collectedAt },

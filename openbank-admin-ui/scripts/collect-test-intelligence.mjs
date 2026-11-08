@@ -353,11 +353,17 @@ function testCaseHistory(currentEnvelopes) {
     const retryRun = latestRetryFlaky
       ? safeRun(latestRetryFlaky.run, `retry-flaky:${latest.component}:${fingerprint}`)
       : undefined
+    const lastRun = safeRun(latest.run, `test:${latest.component}:${fingerprint}`)
     return {
       fingerprint, component: latest.component, kind: latest.kind, classname: latest.classname, name: latest.name,
       // This is a verified path to the test definition, when a JVM report can provide one. It
       // is intentionally not a claimed production dependency or a test-selection recommendation.
       testDefinitionPath: latest.testDefinitionPath ?? null,
+      ...(lastRun ? { lastRun } : {}),
+      recentRuns: rows.slice(-10).reverse().flatMap(row => {
+        const run = safeRun(row.run, `test:${row.component}:${fingerprint}`)
+        return run ? [{ state: row.state, durationMs: row.durationMs, run }] : []
+      }),
       owner: ownership.owners.get(latest.component) ?? ownership.fallback,
       // Preserve the established same-commit transition signal, then let the newest run group
       // decide terminal precedence independently of testcase array order.
@@ -1184,6 +1190,11 @@ async function main() {
   const layerCoverage = layerApplicability(components)
   const syntheticCoverage = journeyCoverage(synthetic)
   const clientExperience = await clientExperiences()
+  for (const component of components) {
+    const declaration = readText(path.join(repo, component.component, 'governance.yaml'))
+    const domain = declaration ? parseYaml(declaration)?.dataDomain : null
+    if (typeof domain === 'string') component.domain = domain
+  }
   const testCases = testCaseHistory(currentEnvelopes)
   const impact = testImpact(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
