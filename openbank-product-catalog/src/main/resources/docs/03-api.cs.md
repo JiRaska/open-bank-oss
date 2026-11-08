@@ -162,4 +162,11 @@ kopie nebo neplatný podpis selže uzavřeně (žádné vyhodnocení, žádné �
 revizi); katalog je publikační autorita, nikdy závislost na účtovací
 cestě. Verze kontraktu API je 2.9.0; změna je aditivní.
 
+V režimu `openbao` se katalog přihlašuje přes Kubernetes auth roli `product-catalog-ir-signing`
+jako vlastní ServiceAccount `product-catalog` a k OpenBao se připojuje jen přes TLS
+(`https://openbao.vault.svc:8203`). `openbank.catalog.ir-signing.openbao.ca-file` určuje PEM CA,
+které pro toto spojení důvěřuje (nasazení ukazuje na privátní CA z `internal-tls`); bez nastavení
+platí výchozí trust store JVM. Transit klíč, politiku a roli zakládá runbook 0027, sekce
+"Product IR signing".
+
 Těla požadavků katalogu se dekódují přísně: tělo s opakovaným klíčem JSON objektu je odmítnuto s `400`, poslední hodnota se tiše neprosadí. Limity 1 MiB a hloubky vnoření u těla IR lintu zůstávají beze změny.
