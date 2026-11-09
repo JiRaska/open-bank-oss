@@ -10,8 +10,9 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 afterEach(cleanup)
 
 function expectSemanticTone(element: HTMLElement, color: string, background: string) {
-  expect(element).toHaveStyle({ color })
-  // Inspect the authored token: computed shorthand serialization varies across DOM versions.
+  // Inspect the authored tokens. jsdom >= 31 resolves var() in computed style, and an
+  // undefined custom property (no theme stylesheet in tests) computes to the initial colour.
+  expect(element.style.getPropertyValue('color')).toBe(color)
   expect(element.style.getPropertyValue('background')).toBe(background)
 }
 
