@@ -16,6 +16,121 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class CloseParticipationTest {
 
+    @Test
+    fun `original constructor descriptors including Kotlin defaults still link`() {
+        val day = LocalDate.of(2026, 11, 8)
+        val integer = Int::class.javaPrimitiveType!!
+        val original = CloseParticipationReport::class.java.getConstructor(
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+        ).newInstance(day, CloseOutcome.RAN, 2, 3, null)
+        assertThat(original.journalsPosted).isEqualTo(2)
+        assertThat(original.exercisedJobs).isEmpty()
+        val defaults = CloseParticipationReport::class.java.getConstructor(
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+            integer,
+            Class.forName("kotlin.jvm.internal.DefaultConstructorMarker"),
+        ).newInstance(day, CloseOutcome.RAN, 0, 0, null, 28, null)
+        assertThat(defaults.itemsProcessed).isZero()
+        assertThat(defaults.sourceRunId).isNull()
+    }
+
+    @Test
+    fun `original copy descriptors retain source evidence including Kotlin default calls`() {
+        val original = CloseParticipationReport(
+            LocalDate.of(2026, 11, 8),
+            CloseOutcome.RAN,
+            2,
+            3,
+            null,
+            setOf("accrual"),
+            "source-receipt",
+        )
+        val integer = Int::class.javaPrimitiveType!!
+        val copied = CloseParticipationReport::class.java.getMethod(
+            "copy",
+            LocalDate::class.java,
+            CloseOutcome::class.java,
+            integer,
+            integer,
+            String::class.java,
+        ).invoke(original, original.businessDate, CloseOutcome.RAN, 2, 3, "retained") as CloseParticipationReport
+        assertThat(copied.exercisedJobs).containsExactly("accrual")
+        assertThat(copied.sourceRunId).isEqualTo("source-receipt")
+        val defaultCopy = CloseParticipationReport::class.java.getDeclaredMethod(
+            "copy\$default", CloseParticipationReport::class.java, LocalDate::class.java,
+            CloseOutcome::class.java, integer, integer, String::class.java, integer, Any::class.java,
+        ).invoke(null, original, null, null, 0, 0, null, 31, null) as CloseParticipationReport
+        assertThat(defaultCopy).isEqualTo(original)
+        assertThat(defaultCopy.sourceRunId).isEqualTo("source-receipt")
+    }
+
+    @Test
+    fun `reporting revisits the previous calendar month including leap February`() {
+        assertThat(CloseParticipationAssembler.reportingFrom(LocalDate.of(2026, 11, 8), 3))
+            .isEqualTo(LocalDate.of(2026, 10, 1))
+        assertThat(CloseParticipationAssembler.reportingFrom(LocalDate.of(2024, 3, 31), 3))
+            .isEqualTo(LocalDate.of(2024, 2, 1))
+    }
+
+    @Test
+    fun `reporting preserves a longer configured recovery window and rejects nonpositive windows`() {
+        val today = LocalDate.of(2026, 11, 8)
+        assertThat(CloseParticipationAssembler.reportingFrom(today, 75)).isEqualTo(today.minusDays(75))
+        for (lookback in listOf(0L, -1L)) {
+            assertThatThrownBy { CloseParticipationAssembler.reportingFrom(today, lookback) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("lookbackDays must be positive")
+        }
+    }
+
+    @Test
+    fun `incomplete source identity is stable across retries and ordering and separate from successful work`() {
+        val facts = listOf("accrual:pending", "capitalization:pending")
+        val first = CloseParticipationAssembler.incomplete(day, "due work remains", facts)
+        val retry = CloseParticipationAssembler.incomplete(day, "due work remains", facts)
+        val reordered = CloseParticipationAssembler.incomplete(day, "due work remains", facts.reversed())
+        val changed = CloseParticipationAssembler.incomplete(day, "due work remains", facts + "new-intent")
+        val completed = CloseParticipationAssembler.assemble(day, setOf("accrual"), listOf(run("accrual", 1, 0)))!!
+
+        assertThat(first.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(first.reason).isEqualTo("due work remains")
+        assertThat(first.journalsPosted).isZero()
+        assertThat(first.itemsProcessed).isZero()
+        assertThat(first.exercisedJobs).isEmpty()
+        assertThat(first.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(retry).isEqualTo(first)
+        assertThat(reordered).isEqualTo(first)
+        assertThat(changed.sourceRunId).isNotEqualTo(first.sourceRunId)
+        assertThat(completed.sourceRunId).isNotEqualTo(first.sourceRunId)
+    }
+
+    @Test
+    fun `source identity is stable across retries and run ordering but changes for new persisted work`() {
+        val a = run("accrual", 10, 0)
+        val b = run("capitalization", 4, 4)
+        val first = CloseParticipationAssembler.assemble(day, setOf(a.job, b.job), listOf(a, b))!!
+        val replay = CloseParticipationAssembler.assemble(day, setOf(b.job, a.job), listOf(b, a))!!
+        val newer = CloseParticipationAssembler.assemble(
+            day,
+            setOf(a.job, b.job),
+            listOf(a.copy(completedAt = at.plusSeconds(1)), b),
+        )!!
+        assertThat(first.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(replay.sourceRunId).isEqualTo(first.sourceRunId)
+        assertThat(newer.sourceRunId).isNotEqualTo(first.sourceRunId)
+        val implicitSkip = CloseParticipationAssembler.assemble(day, emptySet(), emptyList())!!
+        val literalSkip = CloseParticipationAssembler.assemble(day, emptySet(), emptyList(), skipReason = "null")!!
+        assertThat(implicitSkip.sourceRunId).isNotEqualTo(literalSkip.sourceRunId)
+    }
+
     private val day = LocalDate.of(2026, 10, 1)
     private val at = Instant.parse("2026-10-02T01:30:00Z")
 
@@ -45,7 +160,26 @@ class CloseParticipationTest {
         )
         assertThat(
             report,
-        ).isEqualTo(CloseParticipationReport(day, CloseOutcome.RAN, journalsPosted = 4, itemsProcessed = 14))
+        ).usingRecursiveComparison().ignoringFields("sourceRunId").isEqualTo(
+            CloseParticipationReport(
+                day,
+                CloseOutcome.RAN,
+                journalsPosted = 4,
+                itemsProcessed = 14,
+                exercisedJobs = setOf("accrual", "capitalization"),
+            ),
+        )
+    }
+
+    @Test
+    fun `an empty successful sweep cannot attest an exercised monthly job`() {
+        val report = CloseParticipationAssembler.assemble(
+            day,
+            setOf("capitalization"),
+            listOf(run("capitalization", 0, 0)),
+        )!!
+        assertThat(report.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(report.exercisedJobs).isEmpty()
     }
 
     @Test

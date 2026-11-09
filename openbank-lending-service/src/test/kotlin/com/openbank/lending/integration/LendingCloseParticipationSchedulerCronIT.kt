@@ -74,6 +74,32 @@ class LendingCloseParticipationSchedulerCronIT {
     lateinit var clock: Clock
 
     @Test
+    fun `an incomplete legacy journal row retains its required job with scheduling off`() {
+        val day = java.time.LocalDate.of(2001, 1, 3)
+        VertxContextSupport.subscribeAndAwait { closeJobRuns.addJournals(day, LendingCloseJobs.ACCRUAL, 1) }
+        val completed = VertxContextSupport.subscribeAndAwait { closeJobRuns.findBetween(day, day) }
+        assertThat(completed).isEmpty()
+        val retained = VertxContextSupport.subscribeAndAwait { closeJobRuns.requiredJobs(day, day, emptyMap()) }
+        assertThat(retained[day]).containsExactly(LendingCloseJobs.ACCRUAL)
+    }
+
+    @Test
+    fun `observed obligations survive a later read without scheduling and create no completed run`() {
+        val day = java.time.LocalDate.of(2001, 1, 2)
+        io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, mapOf(day to setOf("provisioning")))
+        }
+        val retained = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, emptyMap())
+        }
+        assertThat(retained[day]).containsExactly("provisioning")
+        val completed = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.findBetween(day, day)
+        }
+        assertThat(completed).isEmpty()
+    }
+
+    @Test
     fun `the cron reports a completed day, and a refused accrual as REFUSED`() {
         val bank = AccountingClock.bank(clock)
         val yesterday = bank.today().minusDays(1)
@@ -109,7 +135,11 @@ class LendingCloseParticipationSchedulerCronIT {
         fun seen(day: java.time.LocalDate) = RecordingSink.delivered
             .filter { it.first == LendingCloseJobs.PARTICIPANT && it.second.businessDate == day }
             .map { it.second }
-        while (System.nanoTime() < deadline && (seen(yesterday).isEmpty() || seen(dayBefore).isEmpty())) {
+        fun complete() = seen(yesterday).any { it.outcome == CloseOutcome.RAN } &&
+            seen(dayBefore).any {
+                it.outcome == CloseOutcome.REFUSED && it.reason?.contains("ACCOUNTING_DAY_CLOSED") == true
+            }
+        while (System.nanoTime() < deadline && !complete()) {
             Thread.sleep(POLL_MILLIS)
         }
         assertThat(seen(yesterday)).anySatisfy {

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.1...tax-reporting-service-v0.47.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **pension:** migrate retained fund clients to pension-fund v2 ([#15300](https://github.com/JiRaska/open-bank-oss/issues/15300)) ([db1dfdc](https://github.com/JiRaska/open-bank-oss/commit/db1dfdc1ba8cb1c5c5a08845eb3702c6f59c198d))
+
 ## [0.47.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.0...tax-reporting-service-v0.47.1) (2026-11-06)
 
 

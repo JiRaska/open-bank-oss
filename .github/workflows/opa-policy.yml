@@ -116,6 +116,7 @@ jobs:
           # Self-hosted runner lacks sudo — install to $HOME/bin (always writable).
           # Detect OS + arch: the runner may be macOS (darwin) or Linux.
           mkdir -p "$HOME/bin"
+          OPA_VERSION="1.21.1"
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')   # darwin | linux
           ARCH=$(uname -m)                               # x86_64 | arm64 | aarch64
           # Verify the download against the per-platform sha256 published alongside the
@@ -129,8 +130,12 @@ jobs:
             linux_arm64)    SUFFIX="linux_arm64_static";  OPA_SHA256="9a1f3625529c6f01240fe68286dde06aa0b23c5253da700ac48f4d943ff8a4de" ;;
             *)              SUFFIX="linux_amd64";         OPA_SHA256="23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb" ;;
           esac
-          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
-            "https://openpolicyagent.org/downloads/v1.21.1/opa_${SUFFIX}"
+          if ! curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
+            "https://github.com/open-policy-agent/opa/releases/download/v${OPA_VERSION}/opa_${SUFFIX}"; then
+            curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
+              "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_${SUFFIX}"
+          fi
+          # Only a download failure selects the fallback; a checksum mismatch fails closed.
           # sha256sum on Linux; macOS (self-hosted) ships shasum instead.
           SHATOOL="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SHATOOL="shasum -a 256"
           echo "${OPA_SHA256}  $HOME/bin/opa" | ${SHATOOL} -c - \

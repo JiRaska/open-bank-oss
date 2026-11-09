@@ -71,6 +71,8 @@ import {
   Gift,
   Gamepad2,
   Undo2,
+  TrainFront,
+  Rocket,
 } from 'lucide-react'
 import { hasPermission, type Permission } from '@/lib/auth/roles'
 import { DOMAIN_GROUPS, domainLabel } from '@/lib/governance/domains'
@@ -226,6 +228,8 @@ export const platformNav: NavItem[] = [
   { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'SDLC / CI·CD', nameEn: 'SDLC / CI·CD', href: '/devops/sdlc', icon: Workflow, permission: 'system:view', badge: 'GUIDE' },
+  { nameCs: 'CI · Vláčky změn', nameEn: 'CI · Change trains', href: '/devops/sdlc/ci', icon: TrainFront, permission: 'system:view' },
+  { nameCs: 'CD · Nasazování', nameEn: 'CD · Deployment', href: '/devops/sdlc/cd', icon: Rocket, permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
   { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
   { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },

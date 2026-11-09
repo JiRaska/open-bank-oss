@@ -317,7 +317,7 @@ spec:
                   value: "ghcr.io/cloudnative-pg/postgresql:18.6"
                 # Valkey fallback (accounts-service namespace valkey statefulset)
                 - name: VALKEY_IMAGE
-                  value: "valkey/valkey:8.1.10-alpine"
+                  value: "valkey/valkey:9.1.3-alpine"
               args:
                 - |
                   set -eu

@@ -20,6 +20,9 @@
 #      is a syntax error. The parse error's caret points at unrelated EARLIER text on the
 #      line — in the original sighting, `Hibernate Reactive / Panache`, which parses fine on
 #      its own — so reading the error message leads away from the cause. Quote the label.
+#      mermaid 12.3 accepts a bare `@` inside a bracketed label; what it still rejects is the
+#      metadata shorthand itself with an invalid body (`a@{ shape: nope }`), which is the
+#      self-test's known-positive now (#15330 bumped the renderer and made the old one vacuous).
 #   2. A literal `;` in a sequenceDiagram message or Note. `;` is a statement separator
 #      there. Write `#59;`, which renders as `;`.
 #
@@ -205,7 +208,7 @@ if [ "${1:-}" = "--self-test" ]; then
 
   # Named, because a gate that goes red without saying WHICH file is the #2165 failure.
   write_doc bad-label.md 'graph TB
-  a[Outbox<br/>Dispatcher<br/>@Scheduled every 5s]
+  a@{ shape: nope }
   b[Sink]
   a --> b'
   write_doc bad-sequence.md 'sequenceDiagram

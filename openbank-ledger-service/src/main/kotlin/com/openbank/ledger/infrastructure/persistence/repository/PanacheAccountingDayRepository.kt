@@ -25,6 +25,7 @@ import java.util.UUID
 class PanacheAccountingDayRepository(
     private val clock: Clock,
     private val outboxRepository: LedgerOutboxRepositoryImpl,
+    private val closeEvidence: CloseEvidenceStore,
 ) : AccountingDayRepository,
     PanacheRepositoryBase<AccountingDayEntity, UUID> {
 
@@ -91,7 +92,9 @@ class PanacheAccountingDayRepository(
                     "Accounting day ${record.businessDate} changed concurrently (expected version " +
                         "$expectedVersion) — retry against the current state"
                 }
-                outboxRepository.persistInTransaction(outbox).replaceWith(record)
+                closeEvidence.capture(record, requiredParticipants != null).flatMap {
+                    outboxRepository.persistInTransaction(outbox).replaceWith(record)
+                }
             }
         }
     }.awaitSuspending()
@@ -103,7 +106,7 @@ class PanacheAccountingDayRepository(
      * tied out, as `late`). Latest = highest `seq`, never a timestamp.
      */
     private fun requireParticipantsComplete(record: AccountingDayRecord, required: Set<String>?): Uni<Unit> {
-        if (required == null) return Uni.createFrom().item(Unit)
+        if (record.status != AccountingDayStatus.TIED_OUT) return Uni.createFrom().item(Unit)
         return Panache.getSession().flatMap { session ->
             CloseParticipationLocks.lockDay(session, record.businessDate).flatMap {
                 session.createNativeQuery<Array<Any>>(LATEST_OUTCOMES_SQL)
@@ -112,7 +115,7 @@ class PanacheAccountingDayRepository(
             }
         }.map { rows ->
             val latest = rows.associate { it[0].toString() to it[1].toString() }
-            val pending = required.filterTo(linkedSetOf()) { latest[it] == null || latest[it] == REFUSED }
+            val pending = required.orEmpty().filterTo(linkedSetOf()) { latest[it] == null || latest[it] == REFUSED }
             if (pending.isNotEmpty()) throw CloseParticipantsPendingException(pending)
         }
     }

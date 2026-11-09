@@ -195,3 +195,16 @@ date, and both balances are compared by value date too.
   - a line entered more than 7 days before `openingDate` and valued after it;
   - a movement the correspondent booked on a day other than the value date the bank recorded.
     That line is also unmatched.
+
+## Daily close source evidence
+
+Completion compares persisted accrual receipts, durable deal journals and committed lifecycle
+transitions. Pending/dead journal events, open posting intents, unapplied acknowledgements and
+unfinished accrual passes emit REFUSED, including after a prior RAN or a scheduler disable.
+Only a day with no due/historical job or unresolved financial work may be SKIPPED; actual completed
+journals remain visible when accrual is off. Refresh includes the previous calendar month and
+unchanged source receipts keep their identity. Later work invalidates the frozen close proof.
+Keep deployment holds until the full live month and the bounded scan's production cost are reviewed.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.
