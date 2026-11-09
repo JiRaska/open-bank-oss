@@ -78,6 +78,20 @@ class InterestCloseParticipationSchedulerCronIT {
     lateinit var scheduler: InterestCloseParticipationScheduler
 
     @Test
+    fun `observed obligations survive a later read without scheduling and create no completed run`() {
+        val day = java.time.LocalDate.of(2001, 1, 2)
+        VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, mapOf(day to setOf("capitalization")))
+        }
+        val retained = VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, emptyMap())
+        }
+        assertThat(retained[day]).containsExactly("capitalization")
+        val completed = VertxContextSupport.subscribeAndAwait { closeJobRuns.findBetween(day, day) }
+        assertThat(completed).isEmpty()
+    }
+
+    @Test
     fun `the cron itself reports a completed day to the sink`() {
         val yesterday = AccountingClock.bank(clock).today().minusDays(1)
         // Record a run for EVERY job due yesterday, not just accrual: on the 1st of a month the
