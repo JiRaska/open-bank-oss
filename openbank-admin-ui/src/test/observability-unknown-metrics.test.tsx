@@ -29,7 +29,7 @@ describe('Business observability unknown metric states', () => {
     for (const label of ['Service Availability', 'Service Error Rate', 'p99 Latency', 'Edge Error Rate', 'Failed Payments']) {
       const card = screen.getByText(label).closest('.stat-card')
       expect(card).toHaveAttribute('data-metric-state', 'unknown')
-      expect(card?.querySelector('[data-metric-icon]')).toHaveStyle({ color: 'var(--text-muted)' })
+      expect((card?.querySelector('[data-metric-icon]') as HTMLElement).style.getPropertyValue('color')).toBe('var(--text-muted)')
       expect(card).toHaveTextContent('N/A')
     }
   })
