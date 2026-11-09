@@ -38,7 +38,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: psd2-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-45b874d6@sha256:c0cdeb8a79a7e98c6cb0c02ad4873da2a413f59b125a44cf715de157e1e12a98
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-psd2-service:sandbox-5152b68c@sha256:bdd68c27b7861d54fbf4732eb2357bd4f4bdd8f977dea13cb0d32b962310275f
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8107}

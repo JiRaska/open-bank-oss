@@ -60,7 +60,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sanctions-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-5fd56412@sha256:2720b3ace34769b58fb86036e26555076036ed70d1b1cac8d8247a2575d9af96
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sanctions-service:sandbox-5152b68c@sha256:813cba0bf48cf24280b7e506ff2a35d8eaa7473947e5bf6910635145dfffff09
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
