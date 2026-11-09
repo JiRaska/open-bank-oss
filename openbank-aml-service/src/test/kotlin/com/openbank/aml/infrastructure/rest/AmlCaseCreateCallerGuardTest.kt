@@ -95,6 +95,47 @@ class AmlCaseCreateCallerGuardTest {
     }
 
     @Test
+    fun `only the domestic payment machine may create a reserved fraud review key`() {
+        val key = "aml-00000000-0000-0000-0000-000000000001-FRAUD_REVIEW"
+        val domestic = identity("service-account-openbank-domestic-payment", "ROLE_API")
+        assertThatCode { requireFraudReviewKeyCaller(domestic, key) }.doesNotThrowAnyException()
+        listOf(
+            identity("service-account-openbank-sepa-payment", "ROLE_API"),
+            identity("service-account-openbank-fx", "ROLE_API"),
+            jwtIdentity("openbank-admin-ui", "u-staff", "ROLE_COMPLIANCE"),
+        ).forEach { caller ->
+            assertThatCode { requireNamedMachineCaller(caller) }.doesNotThrowAnyException()
+            assertThatThrownBy { requireFraudReviewKeyCaller(caller, key) }
+                .isInstanceOf(ForbiddenException::class.java)
+        }
+    }
+
+    @Test
+    fun `a domestic service username on another client cannot own the reserved namespace`() {
+        // Exercise the namespace guard itself: a raw principal-name comparison would admit this.
+        val spoofed = jwtIdentity(
+            "openbank-admin-ui",
+            "service-account-openbank-domestic-payment",
+            "ROLE_COMPLIANCE",
+        )
+        assertThatThrownBy { requireFraudReviewKeyCaller(spoofed, "aml-payment-FRAUD_REVIEW") }
+            .isInstanceOf(ForbiddenException::class.java)
+    }
+
+    @Test
+    fun `ordinary keys preserve the existing named machine and staff admission`() {
+        val callers = AML_CASE_CREATE_CALLERS.map { identity(it, "ROLE_API") } +
+            jwtIdentity("openbank-admin-ui", "u-staff", "ROLE_COMPLIANCE")
+        callers.forEach { caller ->
+            assertThatCode {
+                requireNamedMachineCaller(caller)
+                requireFraudReviewKeyCaller(caller, "aml-payment-SCREENING_UNAVAILABLE")
+                requireFraudReviewKeyCaller(caller, "ordinary-FRAUD_REVIEW")
+            }.doesNotThrowAnyException()
+        }
+    }
+
+    @Test
     fun `createCase admits ROLE_API and carries the amlCase create action`() {
         val m = AmlCaseResource::class.java.declaredMethods.single { it.name == "createCase" }
         assertThat(m.getAnnotation(RolesAllowed::class.java).value).contains("ROLE_API")
