@@ -15,10 +15,10 @@ summary: "Every regulatory return is a declared spec in the repo, computed only 
 ## Context
 
 ADR-0097 decided that FINREP/COREP are derived from the attested close by a stateless
-`openbank-finrep-service`. ADR-0180 and ADR-0336 decided that a statutory filing is a system of
-record in `openbank-tax-reporting-service` with one lifecycle (assemble, validate, four-eyes
-attest, record submission, deadline gauge), and ADR-0340 adds CRS/FATCA as a further return
-family there. Each of those decides **where one family of returns lives**. None of them decides
+`openbank-finrep-service`. ADR-0180 decided that a statutory filing is a system of record in
+`openbank-tax-reporting-service`; ADR-0336 (proposed) puts it on one lifecycle (assemble,
+validate, four-eyes attest, record submission, deadline gauge), and ADR-0340 (proposed) would add
+CRS/FATCA as a further return family there. Each of those decides **where one family of returns lives**. None of them decides
 what a return *is* to the rest of the platform, and that gap is visible on `origin/main`:
 
 - The regulatory catalogue is a hand-kept array (`REPORT_CATALOG`) inside
