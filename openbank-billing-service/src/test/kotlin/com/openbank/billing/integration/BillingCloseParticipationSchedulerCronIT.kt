@@ -87,7 +87,14 @@ class BillingCloseParticipationSchedulerCronIT {
             .filter { it.first == BillingCloseJobs.PARTICIPANT && it.second.businessDate == day }
             .map { it.second }
         val deadline = System.nanoTime() + WAIT_NANOS
-        while (System.nanoTime() < deadline && (seen(cycleDay).isEmpty() || seen(otherDay).isEmpty())) {
+        // A tick before the source fixture commits correctly emits REFUSED. Wait for the actual
+        // completed verdict, rather than accepting the existence of that earlier refusal.
+        while (System.nanoTime() < deadline &&
+            (
+                seen(cycleDay).none { it.outcome == CloseOutcome.RAN } ||
+                    seen(otherDay).none { it.outcome == CloseOutcome.SKIPPED }
+                )
+        ) {
             Thread.sleep(POLL_MILLIS)
         }
         assertThat(seen(cycleDay)).anySatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.RAN) }

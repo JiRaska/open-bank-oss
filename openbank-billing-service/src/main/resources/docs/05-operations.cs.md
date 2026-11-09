@@ -108,3 +108,13 @@ scope `catalog:read`), ne jako sdílený klient `openbank-services`. product-cat
 ROLE_API ho záměrně odmítá. Pokud klient v Keycloaku nemá scope `catalog:read`, čtení bude po
 zapnutí vynucování autorizace v product-catalog odmítnuto. Výběr klienta hlídá
 `M2mOidcClientIdentityWiringTest`.
+
+## Zdrojové důkazy denní uzávěrky
+
+Uložený běh vlastní své datum i po vypnutí dnešního scheduleru. Čekající či neúspěšné poplatky
+zadržují dokončení v měsíci svého cyklu; vypnutí průchodu neruší finanční práci. Den bez cyklu
+může být SKIPPED jen bez nehotových poplatků a se známým vlastníkem cyklu, případně bez finanční
+práce. Zaúčtované poplatky bez dokončeného zdrojového cyklu zůstávají REFUSED. Potvrzení se čte
+z trvalého stavu vyměřených poplatků, proto běžný úklid SENT outboxu důkaz nemaže. Obnovovací okno
+zahrnuje předchozí kalendářní měsíc a identita stejných podkladů se opakováním nemění. Hold zůstává
+do posouzení celého živého měsíce a provozní ceny širšího čtení.

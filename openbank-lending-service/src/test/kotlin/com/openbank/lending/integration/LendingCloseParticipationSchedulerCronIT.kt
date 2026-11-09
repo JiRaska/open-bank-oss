@@ -109,7 +109,11 @@ class LendingCloseParticipationSchedulerCronIT {
         fun seen(day: java.time.LocalDate) = RecordingSink.delivered
             .filter { it.first == LendingCloseJobs.PARTICIPANT && it.second.businessDate == day }
             .map { it.second }
-        while (System.nanoTime() < deadline && (seen(yesterday).isEmpty() || seen(dayBefore).isEmpty())) {
+        fun complete() = seen(yesterday).any { it.outcome == CloseOutcome.RAN } &&
+            seen(dayBefore).any {
+                it.outcome == CloseOutcome.REFUSED && it.reason?.contains("ACCOUNTING_DAY_CLOSED") == true
+            }
+        while (System.nanoTime() < deadline && !complete()) {
             Thread.sleep(POLL_MILLIS)
         }
         assertThat(seen(yesterday)).anySatisfy {

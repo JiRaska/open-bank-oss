@@ -34,16 +34,20 @@ import java.time.LocalDate
  * Reports billing-service's day-close participation to ledger-service (ADR-0342), on the pattern of
  * interest-service's `InterestCloseParticipationScheduler`.
  *
- * Every tick re-offers the last [lookbackDays] completed accounting days. The cycle is DUE on a day
+ * Every tick revisits the current and previous calendar months, or a longer [lookbackDays] window.
+ * The cycle is DUE on a day
  * when the sweep is enabled and its cron fires on that day (by default 03:00 on the 1st); every
- * other day is SKIPPED with that reason. A due day is reported only when BOTH hold:
+ * other gap-free day is SKIPPED with that reason. A due day is RAN only when BOTH hold:
  *
  *  1. the sweep recorded its `billing_close_job_run` row for the day — otherwise billing has not
- *     finished and nothing is reported, so the ledger holds the day;
+ *     finished and the day is REFUSED, revoking an earlier positive report;
  *  2. no fee of that cycle is still `PENDING` in the outbox — the journals are booked by the outbox
  *     after the sweep, and reporting before they land would claim journals that do not exist yet.
  *
- * Then the day is RAN with the booked journals, or REFUSED when accounts failed to assess, the sweep
+ * Pending or failed fees refuse every reported day of their monthly cycle, regardless of current
+ * scheduler flags. A recorded historical run remains its cycle's owner even after the sweep stops.
+ * A finished day is RAN with the booked journals, or
+ * REFUSED when accounts failed to assess, the sweep
  * aborted, or fees ended `FAILED` (the ledger refused the day with `ACCOUNTING_DAY_CLOSED`, or the
  * outbox exhausted its retries).
  *
@@ -101,9 +105,9 @@ class BillingCloseParticipationScheduler(
         val allDelivered: Boolean get() = delivered == attempted
     }
 
-    /** Report every completed day in `[today - lookbackDays, today - 1]`. Visible for tests. */
+    /** Revisit every completed day in the monthly evidence and configured recovery windows. */
     fun reportDays(today: LocalDate): Uni<TickResult> {
-        val from = today.minusDays(lookbackDays)
+        val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
         return evidence.findBetween(from, to).flatMap { runs ->
@@ -120,24 +124,43 @@ class BillingCloseParticipationScheduler(
     }
 
     private fun assemble(day: LocalDate, runs: List<CloseJobRun>): Uni<CloseParticipationReport?> {
-        if (!isDue(day)) {
-            return Uni.createFrom().item(
-                CloseParticipationAssembler.assemble(day, emptySet(), runs, skipReason = skipReason()),
-            )
-        }
+        val cycle = BillingCycleScheduler.cycleIdFor(day)
         val run = runs.firstOrNull { it.businessDate == day && it.job == BillingCloseJobs.CYCLE }
-        if (run == null) {
-            log.infof("billing day-close for %s not reported: the cycle has not run", day)
-            return Uni.createFrom().nullItem()
-        }
-        return evidence.postingsFor(BillingCycleScheduler.cycleIdFor(day)).map { postings ->
+        return evidence.postingsFor(cycle).map { postings ->
+            // Disabling or moving a sweep cannot cancel fees already queued for its monthly cycle.
+            // Their original run day may already be closed, so unresolved fees hold other days too.
             if (postings.pending > 0) {
                 log.infof(
-                    "billing day-close for %s not reported: %d fee posting(s) still pending",
+                    "billing day-close for %s refused: %d fee posting(s) still pending",
                     day,
                     postings.pending,
                 )
-                return@map null
+                return@map CloseParticipationAssembler.incomplete(
+                    day,
+                    PENDING_FEES,
+                    listOfNotNull(run?.toString(), postings.toString()),
+                )
+            }
+            if (run == null && postings.failed > 0) {
+                return@map CloseParticipationAssembler.incomplete(day, FAILED_FEES, listOf(postings.toString()))
+            }
+            if (run == null) {
+                val cycleRecorded = runs.any {
+                    it.job == BillingCloseJobs.CYCLE && BillingCycleScheduler.cycleIdFor(it.businessDate) == cycle
+                }
+                if (!isDue(day) && (cycleRecorded || postings.posted == 0)) {
+                    return@map CloseParticipationAssembler.assemble(
+                        day,
+                        emptySet(),
+                        runs,
+                        skipReason = "${skipReason()}; ${postings.posted} completed fee posting(s) for cycle $cycle",
+                    )
+                }
+                return@map CloseParticipationAssembler.incomplete(
+                    day,
+                    if (isDue(day)) INCOMPLETE_CYCLE else UNOWNED_FEES,
+                    listOf(BillingCloseJobs.CYCLE, postings.toString()),
+                )
             }
             val refused = run.refused + postings.failed
             val reason = listOfNotNull(
@@ -164,6 +187,10 @@ class BillingCloseParticipationScheduler(
         val OFF_VALUES = setOf("off", "disabled")
         const val SKIP_NOT_DUE = "no billing cycle is scheduled on this day"
         const val SKIP_DISABLED = "billing cycle sweep is switched off"
+        const val INCOMPLETE_CYCLE = "BILLING_CYCLE_INCOMPLETE"
+        const val PENDING_FEES = "BILLING_FEES_PENDING"
+        const val FAILED_FEES = "BILLING_FEES_FAILED"
+        const val UNOWNED_FEES = "BILLING_FEES_WITHOUT_COMPLETED_CYCLE"
         val PARSER = CronParser(CronDefinitionBuilder.instanceDefinitionFor(CronType.QUARTZ))
     }
 }

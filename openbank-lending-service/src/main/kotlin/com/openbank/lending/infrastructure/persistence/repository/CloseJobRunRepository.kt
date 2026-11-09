@@ -18,7 +18,7 @@ import java.time.ZoneOffset
 
 /**
  * Postgres day-close evidence for lending: [CloseJobRunPort] over `lending_close_job_run` (V28), and
- * [AllowancePostingsPort] over the `lending.allowance.posting` rows of `lending_outbox`.
+ * [AllowancePostingsPort] over durable allowance delivery receipts and unresolved outbox rows.
  *
  * Same shape as interest-service's run table, except that a second run on the same day ADDS its items
  * and journals (lending's jobs run on an interval, so a restart can run a job twice in one day) and a
@@ -78,6 +78,7 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
             pending = (row[0] as Number).toInt(),
             posted = (row[1] as Number).toInt(),
             dead = (row[2] as Number).toInt(),
+            covered = row[COL_ALLOWANCE_COVERED] == true,
         )
     }
 
@@ -121,6 +122,7 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
         const val COL_REFUSED = 4
         const val COL_REASON = 5
         const val COL_COMPLETED = 6
+        const val COL_ALLOWANCE_COVERED = 3
 
         const val START_SQL =
             "INSERT INTO lending_close_job_run (business_date, job, running, started_at) " +
@@ -164,13 +166,21 @@ class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : LendingClos
                 "WHERE business_date BETWEEN ?1 AND ?2 AND running ORDER BY business_date, job"
 
         // FAILED is a retryable outbox state (the dispatcher re-claims it), so it is still pending;
-        // only DEAD means the journal will never be booked.
+        // only DEAD means the journal will never be booked. SENT delivery receipts survive retention;
+        // earlier unverified dates remain uncovered rather than inferring purged delivery history.
+        const val ALLOWANCE_SCOPE =
+            "FROM lending_outbox WHERE event_type = 'lending.allowance.posting' " +
+                "AND CAST(payload AS jsonb) ->> 'accountingDate' = ?1 "
+
+        // Repeated native parameters expand into separate wire slots. Describe every slot as
+        // TEXT before converting to DATE, matching the String bound above for JSON date keys.
         const val ALLOWANCE_SQL =
             "SELECT " +
-                "count(*) FILTER (WHERE status IN ('PENDING', 'DISPATCHING', 'FAILED')), " +
-                "count(*) FILTER (WHERE status = 'SENT'), " +
-                "count(*) FILTER (WHERE status = 'DEAD') " +
-                "FROM lending_outbox WHERE event_type = 'lending.allowance.posting' " +
-                "AND CAST(payload AS jsonb) ->> 'accountingDate' = ?1"
+                "(SELECT count(*) " + ALLOWANCE_SCOPE + "AND status IN ('PENDING', 'DISPATCHING', 'FAILED')), " +
+                "(SELECT count(*) FROM lending_allowance_delivery_receipts " +
+                "WHERE accounting_date = CAST(CAST(?1 AS text) AS date)), " +
+                "(SELECT count(*) " + ALLOWANCE_SCOPE + "AND status = 'DEAD'), " +
+                "COALESCE((SELECT CAST(CAST(?1 AS text) AS date) >= starts_on " +
+                "FROM lending_allowance_receipt_coverage WHERE singleton), false)"
     }
 }

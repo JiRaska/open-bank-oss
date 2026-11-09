@@ -111,17 +111,19 @@ class TreasuryCloseParticipationSchedulerCronIT {
             assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED)
             assertThat(it.reason).contains("ACCOUNTING_DAY_CLOSED")
         }
-        assertThat(seen(pendingDay)).describedAs("held while its journal event is in the outbox").isEmpty()
-        assertThat(seen(inFlightDay)).describedAs("held while its pass is in flight").isEmpty()
+        assertThat(seen(pendingDay)).describedAs("held while its journal event is in the outbox")
+            .isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
+        assertThat(seen(inFlightDay)).describedAs("held while its pass is in flight")
+            .isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
 
         jdbc { c ->
             c.createStatement().use {
                 it.executeUpdate("UPDATE treasury_outbox SET status = 'SENT' WHERE event_id = '$event'")
             }
         }
-        awaitReport(pendingDay)
+        awaitReport(pendingDay, CloseOutcome.RAN)
         assertThat(seen(pendingDay)).anySatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.RAN) }
-        assertThat(seen(inFlightDay)).isEmpty()
+        assertThat(seen(inFlightDay)).isNotEmpty().allSatisfy { assertThat(it.outcome).isEqualTo(CloseOutcome.REFUSED) }
     }
 
     @Inject
@@ -167,9 +169,9 @@ class TreasuryCloseParticipationSchedulerCronIT {
         .filter { it.first == TreasuryCloseJobs.PARTICIPANT && it.second.businessDate == day }
         .map { it.second }
 
-    private fun awaitReport(day: LocalDate) {
+    private fun awaitReport(day: LocalDate, outcome: CloseOutcome? = null) {
         val deadline = System.nanoTime() + WAIT_NANOS
-        while (seen(day).isEmpty()) {
+        while (seen(day).none { outcome == null || it.outcome == outcome }) {
             check(System.nanoTime() < deadline) { "no report for $day within the wait" }
             Thread.sleep(POLL_MILLIS)
         }

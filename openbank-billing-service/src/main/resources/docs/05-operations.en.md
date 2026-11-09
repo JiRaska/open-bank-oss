@@ -113,3 +113,14 @@ The published-revision read (`ProductCatalogRestClient`, `GET /api/v2/legacy-pro
 shared client on ROLE_API alone. If the Keycloak client lacks the `catalog:read` scope, the read is
 denied once product-catalog enforces authorization. `M2mOidcClientIdentityWiringTest` pins the
 client selection.
+
+## Daily close source evidence
+
+A persisted cycle run owns its date even when the current scheduler is switched off. Pending or
+failed fees hold completion throughout their cycle month; switching the sweep off does not cancel
+financial work. A non-cycle date is SKIPPED only with no unresolved fee work and a known cycle
+owner, or no financial evidence. Posted fees without a completed source cycle remain REFUSED.
+Completion reads durable assessed-fee posting states, so ordinary SENT outbox retention cannot
+erase its acknowledgement. The bounded recovery window includes the previous calendar month;
+source identities are stable across retries. Retain the deployment hold and observe a complete
+live month before reviewing enforcement, including the cost of the wider source scan.

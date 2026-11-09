@@ -1021,3 +1021,16 @@ Ordinary successful runs cannot clear this uncertainty. Existing controlled ledg
 or waiver is required for disposition. Rollback retains additive V28 evidence and pending intents.
 
 - **2026-11-04** — **Product-catalog read moves to this service's own M2M identity.** `ProductCatalogLoanClient` (published loan revision read) now authenticates with the named OIDC client `m2m` (`openbank-lending`, ROLE_API plus the narrow `catalog:read` scope) instead of the shared `openbank-services` principal. product-catalog admits it by name on `catalog.read` only (`service-named-catalog-read`); `catalog.list` and all writes stay closed. **STRIDE-S/E:** narrows the shared principal's reach and attributes catalog reads to this service. The edge, its payload and the credential source (this service's existing client secret) are unchanged. **Residual:** if the live client lacks `catalog:read`, the read is denied once product-catalog enforces authorization (it is advisory today). **Rollback:** revert.
+
+The close producer refreshes completed days in the configured recovery window and the current /
+immediately preceding calendar month. Incomplete source work emits an attributable, retry-stable
+REFUSED receipt, revoking an earlier RAN even before any new journal exists. Recent closed days
+remain observable; later receipts invalidate monthly readiness and never rewrite at-close facts.
+The wider bounded scan requires production-volume timing before activation.
+
+Allowance delivery acknowledgements are retained independently of the disposable SENT outbox.
+V30 records them atomically with SENT, archives only surviving acknowledgements and retains an
+explicit coverage boundary. An existing database's earlier unverified dates remain REFUSED;
+purged delivery history is never inferred from current loan balances or a successful sweep.
+The migration briefly excludes writers/retention while establishing this boundary; schedule it
+under the retained deployment hold. Rollback retains receipts, coverage and financial history.

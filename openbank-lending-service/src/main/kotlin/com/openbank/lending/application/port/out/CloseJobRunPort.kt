@@ -52,7 +52,7 @@ data class InFlightRun(val businessDate: LocalDate, val job: String, val started
  * @property posted rows the outbox delivered to the ledger (SENT)
  * @property dead rows the outbox gave up on (DEAD): the journal was never booked
  */
-data class AllowancePostings(val pending: Int, val posted: Int, val dead: Int)
+data class AllowancePostings(val pending: Int, val posted: Int, val dead: Int, val covered: Boolean = true)
 
 /** Read side of [AllowancePostings]. */
 fun interface AllowancePostingsPort {

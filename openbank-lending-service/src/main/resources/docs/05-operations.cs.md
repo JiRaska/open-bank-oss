@@ -168,3 +168,14 @@ Výmaz nevyřešeného záměru sleduje životní cyklus splátky a zachová pou
 `unreconciled` dotčených pracovních/požadovaných dnů, kterou úspěšný běh nesmaže. Dispozici řeší
 existující řízené dorovnání či waiver v ledgeru. Nevzniká zákaznický tombstone ani nová retenční lhůta.
 Rollback zachová tabulky V28 i čekající důkazy; návrat kódu nedokazuje, že vzdálený zápis nenastal.
+
+## Zdrojové důkazy denní uzávěrky
+
+Dokončené akruály, provisioning i rozpracované průchody zůstávají podkladem i po vypnutí scheduleru.
+Chybějící, běžící či nedoručená práce opravných položek hlásí stabilní REFUSED a odvolá dřívější
+kladný výsledek. V30 ukládá skutečné potvrzení doručení atomicky se SENT, odděleně od dočasného
+outboxu. Datumový index podporuje ohraničenou měsíční kontrolu. U existující databáze začíná pokrytí
+následující pražský kalendářní den; dříve smazaná doručení jsou neznámá a nemohou knihu kvalifikovat.
+Nová databáze pokrývá skutečnosti zapsané od svého vzniku. Historie vyžaduje schválený přechod.
+Rollback zachovává potvrzení, pokrytí i účetní historii. Hold trvá do vyhodnocení celého živého
+měsíce a ceny čtení při skutečném objemu dat.
