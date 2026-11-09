@@ -39,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: consent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-consent-service:sandbox-2e500af2@sha256:cefb7462dbb847cdd656e74ece50ec00912957d6cef3b9f23e103c2b63dad882
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-consent-service:sandbox-6107f91a@sha256:294f6a9171c1a89b91bf67be2d2b260dda64ed00f4cdd05cfeccfad12eeae712
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
