@@ -505,9 +505,11 @@ class DayCloseParticipantsIT {
             assertReasonHistory(date, 0, null)
         }
         given().contentType("application/json")
-            .body(mapOf("outcome" to "RAN", "exercisedJobs" to listOf("accrual")))
+            .body(
+                mapOf("outcome" to "RAN", "exercisedJobs" to listOf("accrual"), "reason" to "completed accrual"),
+            )
             .put(path).then().statusCode(200)
-        assertReasonHistory(date, 1, null)
+        assertReasonHistory(date, 1, "completed accrual")
     }
 
     @Test
