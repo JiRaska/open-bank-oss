@@ -3232,6 +3232,28 @@ gates:
   # known-positive plus the known-negatives; this gate keeps the workflow invoking the script
   # and refuses an inline `listWorkflowRuns`, so the decision cannot quietly move back to where
   # nothing can falsify it.
+  # The merge train can run on schedule and merge NOTHING for hours (2026-11-09, three times, each
+  # noticed by a human). The watch keeps one issue naming the systemic cause; this gate holds its
+  # decision logic to a falsified self-test and its wiring (workflow_run on the train, --write, label).
+  - id: merge-train-stall-watch-declaration
+    name: "merge-train throughput stall watch is falsified and wired to the train (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # <1s measured; offline, three files read
+    review_after: "2027-05-09"
+    rationale: >-
+      Existing controls prove train runs happen and flag PRs told of a refusal, but nothing alerts
+      on "armed PRs, runs happening, no merge". The watch's decisions (threshold, systemic grouping,
+      could-not-look, idempotent issue) are unreachable except on a real stall, so the self-test is
+      the only executor of the failure path. Re-examine if the train itself publishes a throughput SLO.
+    min_subjects: 1
+    selftest: |
+      python3 .github/scripts/merge-train-stall-watch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/merge-train-stall-watch.py", ".github/workflows/merge-train-stall-watch.yml", ".github/labels.yml", ".github/workflows/merge-train.yml"]
+    run: |
+      python3 .github/scripts/merge-train-stall-watch.py --check-declaration
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
