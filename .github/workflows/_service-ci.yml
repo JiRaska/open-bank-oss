@@ -154,6 +154,10 @@ jobs:
           helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
           cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
           cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
+          # Pinned Gradle distribution installer (ADR-0366 lock): staged from the trusted SHA
+          # so a historical provider ref still gets the retrying, sha256-checked fetch.
+          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py \
+            ci/artifacts.lock "$helper_dir/"
           chmod 600 "$helper_dir/"*.sh
           bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"
           echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
@@ -231,6 +235,15 @@ jobs:
           # per-service home caches on PR branches would churn the Actions cache quota.
           cache-read-only: true
           gradle-home-cache-strict-match: false
+
+      # Every ./gradlew call downloads the wrapper distribution itself on a cold home: one
+      # attempt, 10 s timeout, no mirror. Install it ONCE here (lock-pinned, retried) so no
+      # later step fetches from upstream again. Rationale: ensure-gradle-distribution.py.
+      - name: Install pinned Gradle distribution (once, retried)
+        run: >-
+          python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py"
+          --lock "$SERVICE_CI_HELPERS/artifacts.lock"
+          --fetcher "$SERVICE_CI_HELPERS/fetch-artifact.py"
 
       # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
       # never has a broker URL to forward, so the @PactBroker-gated provider-verification
@@ -555,6 +568,10 @@ jobs:
           helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
           cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
           cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
+          # Pinned Gradle distribution installer (ADR-0366 lock): staged from the trusted SHA
+          # so a historical provider ref still gets the retrying, sha256-checked fetch.
+          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py \
+            ci/artifacts.lock "$helper_dir/"
           chmod 600 "$helper_dir/"*.sh
           echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
 
@@ -673,6 +690,15 @@ jobs:
           # in-cluster remote build cache (GRADLE_REMOTE_CACHE_URL, arc-runners.tf) instead.
           cache-disabled: true
           gradle-home-cache-strict-match: false
+
+      # Every ./gradlew call downloads the wrapper distribution itself on a cold home: one
+      # attempt, 10 s timeout, no mirror. Install it ONCE here (lock-pinned, retried) so no
+      # later step fetches from upstream again. Rationale: ensure-gradle-distribution.py.
+      - name: Install pinned Gradle distribution (once, retried)
+        run: >-
+          python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py"
+          --lock "$SERVICE_CI_HELPERS/artifacts.lock"
+          --fetcher "$SERVICE_CI_HELPERS/fetch-artifact.py"
 
       # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
       #
