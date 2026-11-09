@@ -145,7 +145,7 @@ obligations:
     transport: dávkové soubory CSV pro GSFT
     personal_data: yes
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: null }
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
     note: Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
   - id: gsft-test-delivery
     area: deposit-insurance
@@ -161,7 +161,7 @@ obligations:
     transport: dávkové soubory pro GSFT
     personal_data: yes
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: null }
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
   - id: gsft-contribution-base
     area: deposit-insurance
     name: { cs: Podklady pro příspěvek do Fondu pojištění vkladů, en: Deposit insurance contribution base }
@@ -176,7 +176,7 @@ obligations:
     transport: neověřeno
     personal_data: no
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: null }
+    coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
   - id: resolution-fund-contribution
     area: deposit-insurance
     name: { cs: Podklady pro příspěvek do Fondu pro řešení krize, en: Resolution fund contribution data }

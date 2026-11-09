@@ -104,7 +104,7 @@ Celkem povinností: **70**.
 - **Lhůta:** Při pojistné události (oznámení ČNB nebo rozhodnutí soudu); náhrady se vyplácejí do 7 pracovních dnů, data musí být připravena trvale. *(ověřeno)*
 - **Druh / kanál:** event · dávkové soubory CSV pro GSFT
 - **Osobní údaje:** True
-- **Pokrytí:** `missing` — chybí
+- **Pokrytí:** `missing` — chybí; sleduje #15356
 - **Poznámka:** Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
 
 ### Testovací předání údajů GSFT
@@ -117,7 +117,7 @@ Celkem povinností: **70**.
 - **Lhůta:** Na žádost GSFT a při zátěžových testech. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · dávkové soubory pro GSFT
 - **Osobní údaje:** True
-- **Pokrytí:** `missing` — chybí
+- **Pokrytí:** `missing` — chybí; sleduje #15356
 
 ### Podklady pro příspěvek do Fondu pojištění vkladů
 
@@ -129,7 +129,7 @@ Celkem povinností: **70**.
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · neověřeno
 - **Osobní údaje:** False
-- **Pokrytí:** `missing` — chybí
+- **Pokrytí:** `missing` — chybí; sleduje #15356
 
 ### Podklady pro příspěvek do Fondu pro řešení krize
 
