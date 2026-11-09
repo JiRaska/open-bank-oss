@@ -14,7 +14,37 @@ data class CloseParticipationReport(
     val journalsPosted: Int = 0,
     val itemsProcessed: Int = 0,
     val reason: String? = null,
+    /** Successful persisted job receipts with observed work; an empty sweep cannot qualify a cycle. */
+    val exercisedJobs: Set<String> = emptySet(),
+    /** Stable identity of persisted source receipts; retransmission must not advance ledger work time. */
+    val sourceRunId: String? = null,
 ) {
+    /** Keep already compiled callers of the original constructor/default bridge linkable. */
+    constructor(
+        businessDate: LocalDate,
+        outcome: CloseOutcome,
+        journalsPosted: Int = 0,
+        itemsProcessed: Int = 0,
+        reason: String? = null,
+    ) : this(businessDate, outcome, journalsPosted, itemsProcessed, reason, emptySet(), null)
+
+    /** The original copy/default bridge must preserve the new immutable source evidence too. */
+    fun copy(
+        businessDate: LocalDate = this.businessDate,
+        outcome: CloseOutcome = this.outcome,
+        journalsPosted: Int = this.journalsPosted,
+        itemsProcessed: Int = this.itemsProcessed,
+        reason: String? = this.reason,
+    ): CloseParticipationReport = CloseParticipationReport(
+        businessDate,
+        outcome,
+        journalsPosted,
+        itemsProcessed,
+        reason,
+        exercisedJobs,
+        sourceRunId,
+    )
+
     init {
         require(journalsPosted >= 0 && itemsProcessed >= 0) { "counts must be non-negative" }
         require(outcome == CloseOutcome.RAN || !reason.isNullOrBlank()) { "$outcome requires a reason" }
@@ -40,6 +70,24 @@ data class CloseJobRun(
 /** Folds a participant's job runs for one day into the report it sends (ADR-0342 D1/D4). */
 object CloseParticipationAssembler {
 
+    /** Revisit the entire period eligible for monthly readiness, preserving a longer recovery window. */
+    fun reportingFrom(today: LocalDate, lookbackDays: Long): LocalDate {
+        require(lookbackDays > 0) { "lookbackDays must be positive" }
+        return minOf(today.minusDays(lookbackDays), today.withDayOfMonth(1).minusMonths(1))
+    }
+
+    /** An unfinished source must revoke an earlier positive report, even before another journal exists. */
+    fun incomplete(
+        businessDate: LocalDate,
+        reason: String,
+        sourceIdentity: Collection<String>,
+    ): CloseParticipationReport = CloseParticipationReport(
+        businessDate = businessDate,
+        outcome = CloseOutcome.REFUSED,
+        reason = reason,
+        sourceRunId = sourceId(listOf(businessDate, "incomplete", reason) + sourceIdentity.sorted()),
+    )
+
     /**
      * @param expectedJobs the jobs that were due on [businessDate]. A due job with no run means the
      *   participant has NOT finished the day, and the answer is `null` — nothing is reported, so the
@@ -59,6 +107,7 @@ object CloseParticipationAssembler {
                 businessDate = businessDate,
                 outcome = CloseOutcome.SKIPPED,
                 reason = skipReason ?: "no job was due on $businessDate",
+                sourceRunId = sourceId(listOf(businessDate, skipReason)),
             )
         }
         if (!forDay.keys.containsAll(expectedJobs)) return null
@@ -72,6 +121,7 @@ object CloseParticipationAssembler {
                 reason = refused.joinToString("; ") { run ->
                     "${run.job}: ${run.refused} posting(s) refused — ${run.refusalReason ?: "ledger refused the day"}"
                 },
+                sourceRunId = sourceId(listOf(businessDate) + due.sortedBy { it.job }),
             )
         }
         return CloseParticipationReport(
@@ -79,7 +129,15 @@ object CloseParticipationAssembler {
             outcome = CloseOutcome.RAN,
             journalsPosted = due.sumOf { it.journalsPosted },
             itemsProcessed = due.sumOf { it.itemsProcessed },
+            exercisedJobs = due.filter { it.itemsProcessed > 0 || it.journalsPosted > 0 }.map { it.job }.toSet(),
+            sourceRunId = sourceId(listOf(businessDate) + due.sortedBy { it.job }),
         )
+    }
+
+    private fun sourceId(values: List<Any?>): String {
+        val canonical = values.joinToString("") { value -> value?.toString()?.let { "${it.length}:$it" } ?: "-1:" }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
     }
 }
 

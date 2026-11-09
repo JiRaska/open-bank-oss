@@ -46,4 +46,17 @@ describe('statutory returns read-only view', () => {
     expect(screen.queryByText('API nehlásí žádný překročený termín.')).not.toBeInTheDocument()
     expect(screen.queryByText('API zatím nevrátilo žádnou sestavenou revizi.')).not.toBeInTheDocument()
   })
+
+  it('keeps the returns visible when only deadline monitoring is unavailable, and never reads it as "none missed"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/capability')) return response({ dataSourceAvailable: true, wireFormatAvailable: false, note: 'Bound' })
+      if (url.endsWith('/breaches')) return response({ error: 'Statutory return reporting start is not configured' }, 503)
+      return response([])
+    }))
+    render(<LanguageProvider initialLanguage="cs"><StatutoryReturnsPage /></LanguageProvider>)
+
+    expect(await screen.findByText(/Kontrolu termínů nelze vyhodnotit/)).toBeInTheDocument()
+    expect(screen.getByText('API zatím nevrátilo žádnou sestavenou revizi.')).toBeInTheDocument()
+    expect(screen.queryByText('API nehlásí žádný překročený termín.')).not.toBeInTheDocument()
+  })
 })

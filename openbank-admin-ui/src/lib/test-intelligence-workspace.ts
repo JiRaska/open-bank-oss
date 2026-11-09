@@ -3,7 +3,7 @@ import type { ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenc
 import { aggregateEvidenceState } from './test-intelligence-state'
 
 export const TEST_KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'trace', 'mutation', 'simulation', 'performance', 'synthetic', 'visual']
-export type TestWorkspaceSection = 'components' | 'attention' | 'runs' | 'learn'
+export type TestWorkspaceSection = 'components' | 'attention' | 'runs' | 'learn' | 'expert'
 export interface TestSelection { section: TestWorkspaceSection; component: string; kind: EvidenceKind | ''; test: string }
 
 export function readTestSelection(search: string): TestSelection {
@@ -11,7 +11,7 @@ export function readTestSelection(search: string): TestSelection {
   const section = params.get('section')
   const kind = params.get('kind')
   return {
-    section: section === 'attention' || section === 'runs' || section === 'learn' ? section : 'components',
+    section: section === 'attention' || section === 'runs' || section === 'learn' || section === 'expert' ? section : 'components',
     component: (params.get('component') ?? '').slice(0, 100),
     kind: TEST_KINDS.includes(kind as EvidenceKind) ? kind as EvidenceKind : '',
     test: (params.get('test') ?? '').slice(0, 160),
