@@ -3,7 +3,10 @@
 
 package com.openbank.ledger.application.usecase
 
-/** Each required product job must have a successful persisted receipt in the observed month. */
+/**
+ * Required jobs resolved by BookCloseReadiness for this book. Property mappings live on
+ * BankCloseReadiness and PensionCloseDeclarations, so a pension book cannot inherit bank jobs.
+ */
 interface CloseReadinessConfig {
     fun requiredJobs(): Map<String, Set<String>>
 }
