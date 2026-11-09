@@ -41,7 +41,11 @@ Internal clients that retain an injected JDK `HttpClient` (the LLM gateway, cont
 
 ## Day-close participation (ADR-0342)
 
-`com.openbank.libs.close` (in `openbank-libs-runtime`) is the participant side of the ledger's day-close contract: `CloseParticipationAssembler` folds a service's persisted job runs into one report per accounting day, and `CloseParticipationReporter` delivers it without ever failing the calling job. A job run that was refused or partially failed folds to `REFUSED`, which the ledger treats as NOT complete: the day stays in `CUTOFF` until the participant reports `RAN` or an operator waives it. Business dates must come from `AccountingClock`, never from the UTC `Clock` bean.
+`com.openbank.libs.close` (in `openbank-libs-runtime`) is the participant side of the ledger's day-close contract: `CloseParticipationAssembler` folds a service's persisted job runs into one report per accounting day, and `CloseParticipationReporter` delivers it without ever failing the calling job. A job run that was refused or partially failed folds to `REFUSED`, which the ledger treats as NOT complete. In enforce mode the day stays in `CUTOFF` until a successful report or an attributable, justified waiver; shadow records the gap without holding close. A waiver never qualifies monthly readiness. Business dates must come from `AccountingClock`, never from the UTC `Clock` bean.
+
+`exercisedJobs` identifies successful persisted jobs with observed work; an empty sweep does not exercise a monthly cycle. `sourceRunId` hashes stable source receipts, so retrying unchanged evidence does not advance the ledger's work watermark. Use `incomplete` to revoke an earlier positive report when due work is missing, even if no new journal exists. `reportingFrom` includes the preceding calendar month and preserves a longer recovery window. Never invent historical receipts to fill a proof.
+
+The original five-argument report constructor and `copy`, including Kotlin default bridges, remain available to compiled consumers. Copying through the legacy entry point preserves the new source evidence. Generate ABI declarations with `updateKotlinAbi`, then run `checkKotlinAbi` in a separate Gradle invocation. Keep shadow and deployment holds until a complete representative live month and rollout review; SDK delivery alone does not authorize enforcement.
 
 ## Blob store opt-in and warm-up entity skipping (2026-10-17)
 

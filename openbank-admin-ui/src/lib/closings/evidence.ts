@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
+import { svcUrl } from '@/lib/services/bff'
+
+/** One bounded calendar month, selected by the ledger when omitted. */
+export function fetchCloseReadiness(signal: AbortSignal, month?: string): Promise<Response> {
+  return fetch(svcUrl('ledger-service', '/api/v1/ledger/close-readiness', month ? { month } : undefined), {
+    cache: 'no-store', signal,
+  })
+}
+
 export interface CurrencyReconciliation {
   currency: string
   ledgerControlBalance: number | string
