@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v2.0.0...pension-fund-service-v2.0.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **pension:** migrate retained fund clients to pension-fund v2 ([#15300](https://github.com/JiRaska/open-bank-oss/issues/15300)) ([db1dfdc](https://github.com/JiRaska/open-bank-oss/commit/db1dfdc1ba8cb1c5c5a08845eb3702c6f59c198d))
+
 ## [2.0.0](https://github.com/JiRaska/open-bank-oss/compare/pension-fund-service-v1.0.2...pension-fund-service-v2.0.0) (2026-11-06)
 
 

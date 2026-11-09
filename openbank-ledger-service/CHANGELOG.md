@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.41.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.40.0...ledger-service-v1.41.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** prove daily close completeness before enforcement ([#14179](https://github.com/JiRaska/open-bank-oss/issues/14179)) ([6107f91](https://github.com/JiRaska/open-bank-oss/commit/6107f91a8055fdf46f82b5b5eff701079fe1fdf5))
+
 ## [1.40.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.39.1...ledger-service-v1.40.0) (2026-10-29)
 
 
