@@ -27,8 +27,10 @@
 name: Auto deploy
 
 on:
-  # Inactive pilot. Completed runs do no work unless an operator
-  # separately enables CONTEXT_BUILD_HANDOFF_ENABLED after reviewing activation.
+  # ADR-0368: with DEPLOY_AFTER_SERVICES_CI_ENABLED=true, every service Services CI builds
+  # deploys from that run's successful completion, when its Pact version already exists;
+  # the push lane keeps only the services Services CI never builds (SELF_BUILT_SERVICES).
+  # Unset or anything but 'true': completed runs do no work and push deploys everything.
   workflow_run:
     workflows: ["Services CI"]
     branches: [main]
@@ -169,7 +171,7 @@ jobs:
     name: Detect changed services
     if: >-
       github.event_name != 'workflow_run' ||
-      (vars.CONTEXT_BUILD_HANDOFF_ENABLED == 'true' &&
+      (vars.DEPLOY_AFTER_SERVICES_CI_ENABLED == 'true' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.status == 'completed' &&
        github.event.workflow_run.conclusion == 'success' &&
@@ -199,7 +201,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate context producer before source checkout
+      - name: Validate Services CI producer before source checkout
         id: source
         run: |
           set -euo pipefail
@@ -223,7 +225,7 @@ jobs:
 
       - id: detect
         env:
-          CONTEXT_BUILD_HANDOFF_ENABLED: ${{ vars.CONTEXT_BUILD_HANDOFF_ENABLED }}
+          DEPLOY_AFTER_SERVICES_CI_ENABLED: ${{ vars.DEPLOY_AFTER_SERVICES_CI_ENABLED }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
           INPUT_RECONCILE_SERVICES: ${{ github.event.inputs.reconcile_services }}
@@ -232,69 +234,8 @@ jobs:
           INPUT_SERVICES: ${{ github.event.inputs.services }}
         run: |
           set -euo pipefail
-          # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
-          # with a build.gradle.kts dynamically), this list is static and can drift:
-          # a service added to the fleet gets full CI for free but silently gets ZERO
-          # auto-deploy coverage until someone adds it here (openbank-libs excluded on
-          # purpose: it has no Dockerfile, only its consumers need rebuilding).
-          # billing-service shipped a CodeQL log-injection fix (#597/#601) that merged
-          # and released cleanly but never deployed — "Detect changed services" always
-          # printed "No deployable services changed" because the service was simply
-          # never a candidate, regardless of what changed. Re-added here.
-          # anacredit-service had the same gap PLUS no Dockerfile ever committed — the
-          # running sandbox pod traces back to an image built from a Dockerfile that only
-          # ever existed on someone's laptop. Neither build-push-service.sh nor this
-          # workflow's own Docker-push step read a per-service Dockerfile for the build
-          # itself (both generate their own from a canonical template); the per-service
-          # Dockerfile is only grepped for its EXPOSE line to set the container port
-          # (falls back to 8080 if absent). Added openbank-anacredit-service/Dockerfile
-          # (EXPOSE 8137, matching the gitops manifest) alongside this entry so the port
-          # extraction is correct, not just defaulted.
-          # The 6 ADR-0163/ADR-0164-0168 control/governance agents (control-liveness-
-          # sentinel, governance-auditor, release-steward, docs-truth-agent,
-          # authz-policy-auditor, flaky-test-hunter) shipped with the exact same gap:
-          # merged, released, gitops manifest present — but never in ALL_SERVICES, so
-          # every one of their Deployments sat perpetually blocked at the placeholder
-          # `sandbox-pending` tag (Kyverno's SBOM-attestation/cosign-signature policies
-          # reject a tag that was never pushed) with zero auto-deploy coverage, and none
-          # had a per-service Dockerfile either. Added both here.
-          # document-service had the exact same gap: real Dockerfile (EXPOSE 8143), real
-          # gitops manifest, ADR-0162 onboarding-agreement + ADR-0169 SCA-document-binding
-          # PRs (#1137, #1142) merged and released — but never in ALL_SERVICES, so every
-          # push since it shipped silently deployed nothing. Added here.
-            # clearing-simulator: the same gap again, and live. Released (0.4.4), real
-            # Dockerfile (EXPOSE 8139), real gitops manifest — but never in ALL_SERVICES,
-            # so its manifest still pinned the image built on 2026-06-22 and every push
-            # since deployed nothing. It also went unattested for the whole of that window
-            # (its .att dates from the 2026-07-16 hand-fix, its .sig from June), because
-            # the SBOM-attestation policy graduated to Enforce while nothing rebuilt it —
-            # one reschedule in that window and it would have died like keycloak did.
-            # Audit at the time: 50 released components, 47 here; the only legitimate
-            # absentee is admin-ui (own admin-ui-deploy.yml). finrep-service is the third
-            # and needs a Dockerfile first — see #1205, which also tracks a guard so this
-            # list stops drifting out of sync with release-please by hand.
-            # vop-service is the fourth, and it shipped straight into the gap: #1195 merged
-            # it with a version.txt, a release-please entry and a Rollout, but no entry here,
-            # so its auto-deploy run had nothing to build. Its manifest still pinned the
-            # literal `sandbox-placeholder` tag, the ECR repo was never created, and Kyverno
-            # therefore denied every pod (NAME_UNKNOWN on the SBOM-attestation and
-            # cosign-signature policies) — the Rollout sat Degraded with zero pods from the
-            # moment it landed. Added here with a Dockerfile carrying EXPOSE 8149.
-                      # finrep-service: the last of the six. Released 0.5.0 since June with a gitops
-            # manifest pinned to the ADR-0097 `sandbox-init` placeholder and no ECR repo at
-            # all, so it sat at 0/1 ErrImagePull and no push could ever fix it. Repo created
-            # 2026-07-16; first real image (sandbox-cef5fdcd) built, signed, attested and
-            # running. Added here so it stays built. With this, ALL_SERVICES and
-            # release-please's package list finally agree — and check-deploy-coverage.sh
-            # keeps them agreeing (#1205).
-            # analytics-sink: never listed here since the service was created, so NO push has ever
-            # built it. Its deployed image was built 2026-07-26 (#2654) and nine commits touched
-            # its src/main afterwards, none of which reached the cluster — including the
-            # aggregate_type normalisation of #4576. Nothing was red: the run reports
-            # "No deployable services changed" and succeeds. check-deploy-coverage.sh could not
-            # see it either, because its subject set was release-please's released components and
-            # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
-            # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
+          # Static on purpose and drift-prone: check-deploy-coverage.sh keeps it equal to the fleet.
+          # Every past gap (and why) lives in docs/ci/auto-deploy-service-list-history.md.
             ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-card-processing-service openbank-document-renderer openbank-pension-service openbank-tax-reporting-service openbank-pension-fund-service'
 
           reconcile_candidates() {
@@ -529,11 +470,14 @@ jobs:
           fi
 
           SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
-          # Disabled pilot preserves push selection.
-          case "$GITHUB_EVENT_NAME:$CONTEXT_BUILD_HANDOFF_ENABLED" in workflow_run:*|push:true)
+          # ADR-0368 partition (see context-deploy-handoff.py).
+          case "$GITHUB_EVENT_NAME:$DEPLOY_AFTER_SERVICES_CI_ENABLED" in workflow_run:*|push:true)
             HANDOFF_HELPER=.github/scripts/context-deploy-handoff.py
             [ "$GITHUB_EVENT_NAME" != workflow_run ] || HANDOFF_HELPER="$RUNNER_TEMP/context-deploy-handoff.py"
-            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME")"
+            CI_SELECT="$(mktemp -d)"
+            EVENT_NAME=push SELECT_OUT="$CI_SELECT" GITHUB_OUTPUT=/dev/null bash .github/scripts/service-ci-select-modules.sh >&2
+            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME" \
+              --push-lane "$SELF_BUILT_SERVICES" --ci-built "$(cat "$CI_SELECT/changed.txt")")"
             ;;
           esac
           if [ "$SERVICES_JSON" = '[]' ]; then
@@ -1368,7 +1312,7 @@ jobs:
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled' &&
       (github.event_name != 'workflow_run' ||
-       (needs.can-i-deploy.result == 'success' && needs.can-i-deploy.outputs.gate_ran == 'true' &&
+       (needs.can-i-deploy.outputs.gate_ran == 'true' &&
         needs.can-i-deploy.outputs.deployable != '' && needs.can-i-deploy.outputs.deployable != '[]')) &&
       ((github.event_name != 'schedule' &&
         (github.event_name != 'workflow_dispatch' || github.event.inputs.reconcile != 'true')) ||
