@@ -86,7 +86,10 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid head sha"; exit 1; }
-          [[ "$HEAD_BRANCH" =~ ^dependabot/gradle/[A-Za-z0-9._/-]+$ ]] || { echo "::error::unexpected branch name"; exit 1; }
+          if [[ ! "$HEAD_BRANCH" =~ ^dependabot/gradle/[A-Za-z0-9._/-]+$ || "$HEAD_BRANCH" == *..* ||
+                "$HEAD_BRANCH" == *//* || "$HEAD_BRANCH" == */ ]]; then
+            echo "::error::unexpected branch name"; exit 1
+          fi
           pr="$(gh api "repos/${GH_REPO}/pulls?state=open&head=${GH_REPO%%/*}:${HEAD_BRANCH}" --jq '
             [.[] | select(.user.login == "dependabot[bot]" and .head.sha == env.HEAD_SHA)] |
             if length == 1 then .[0].number else empty end')"
