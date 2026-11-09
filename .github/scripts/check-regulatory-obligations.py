@@ -229,6 +229,7 @@ def run(root: Path, write: bool) -> int:
     if errs:
         return 1
     print(f"regulatory-obligations: {len(reg['obligations'])} obligations, catalogue fully claimed, doc current")
+    print(f"SUBJECTS={len(reg['obligations'])}")
     return 0
 
 

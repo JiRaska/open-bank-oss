@@ -3823,6 +3823,28 @@ gates:
     selftest_inputs: [".github/scripts/gen-card-capability-matrix.py"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
 
+  # The regulatory obligations register (ADR-0367) starts from the LAW and maps each duty onto the
+  # admin-ui report catalogue. The inventory it replaces was built from the code, so a duty with no
+  # code (CEÚ, GSFT) was invisible to it. This gate keeps the two views joined: every catalogue
+  # report must belong to an obligation, every claimed report must exist, every obligation must cite
+  # its legal text, and the documentation page must equal what the register renders. It also
+  # rejects duplicate YAML keys — an unquoted comma in a flow map silently truncated six names
+  # under PyYAML before this check existed.
+  - id: regulatory-obligations-register
+    name: "regulatory obligations register: sourced, catalogue fully claimed, doc derived (ADR-0367, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.3s locally
+    # 70 obligations today. The floor stops a renamed key turning the coverage check into a
+    # green no-op over an empty register.
+    min_subjects: 50
+    review_after: "2027-11-09"
+    rationale: "A regulatory duty nobody has mapped is a filing nobody makes. The register is the only place the platform states what it owes which authority; a catalogue report with no stated legal duty, or a documentation page that disagrees with the register, misleads the person deciding what to file."
+    selftest: python3 .github/scripts/check-regulatory-obligations.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-regulatory-obligations.py"]
+    run: python3 .github/scripts/check-regulatory-obligations.py
+
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
