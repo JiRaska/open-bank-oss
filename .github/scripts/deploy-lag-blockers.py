@@ -16,18 +16,20 @@ WHY THIS EXISTS
 WHAT IT ADDS to each report entry
   holds              deploy_holds entries for the service: [{issue, reason}]
   money_path         service is in rules.yaml money_path_services
-  blocked_consumers  consumers the auto-deploy can-i-deploy step refused because THIS
-                     service has to deploy first (parsed from that run's log)
+  blocked_consumers  consumers the auto-deploy can-i-deploy step blocked because THIS
+                     service has to deploy first (parsed from that run's log; the line does
+                     not carry the block class, so it may be REGRESSION or a transient wait)
   blocker            "hold" | "unexplained"
   escalate           money-path and older than --money-path-days with no hold recorded:
                      nothing in governance explains the lag, so it is a pipeline defect.
 
-  A provider named by a REGRESSION block that is not in the lag report is appended as its
-  own entry (kind "regression_block"): a consumer refused forever by a provider pin is a
-  deployment blocker even when the provider's own source has not moved.
+  The log is UNTRUSTED data: only warning-annotation lines are parsed, and only names in
+  the --services allowlist (the repo's own service set) are accepted. Entries are only
+  enriched, never added, so the issue lifecycle stays driven by the lag report alone.
 
 Usage: deploy-lag-blockers.py --report lag.json --rules rules.yaml
                               [--deploy-log can-i-deploy.log] [--money-path-days 3]
+                              [--services openbank-a,openbank-b]
 Prints the enriched report as JSON on stdout. Exit 2 on unreadable input — a watch that
 cannot read its input must not report a clean bill.
 """
@@ -42,7 +44,8 @@ import sys
 import yaml
 
 BLOCKED_RE = re.compile(
-    r"\[(openbank-[a-z0-9-]+)\] is blocked on (openbank-[a-z0-9-]+), which is NOT part of this run"
+    r"(?:^|\s)(?:##\[warning\]|::warning::)\[(openbank-[a-z0-9-]+)\] is blocked on (openbank-[a-z0-9-]+), which is NOT part of this run",
+    re.MULTILINE,
 )
 
 
@@ -54,25 +57,22 @@ def holds_for(rules: dict, service: str) -> list[dict]:
     return [{"issue": str(i.get("issue", "")), "reason": str(i.get("reason", ""))} for i in items]
 
 
-def blocked_map(log_text: str) -> dict[str, list[str]]:
+def blocked_map(log_text: str, known: set[str] | None) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for consumer, provider in BLOCKED_RE.findall(log_text):
+        if known is not None and (consumer not in known or provider not in known):
+            continue
         lst = out.setdefault(provider, [])
         if consumer not in lst:
             lst.append(consumer)
     return out
 
 
-def enrich(report: dict, rules: dict, log_text: str, money_path_days: float) -> dict:
+def enrich(report: dict, rules: dict, log_text: str, money_path_days: float,
+           known: set[str] | None = None) -> dict:
     money = set(rules.get("money_path_services") or [])
-    blocked = blocked_map(log_text)
+    blocked = blocked_map(log_text, known)
     entries = list(report.get("entries") or [])
-    seen = {e["service"] for e in entries}
-    for provider in sorted(blocked):
-        if provider not in seen:
-            entries.append({"service": provider, "kind": "regression_block",
-                            "oldest_src_age_hours": 0, "deployed_tag": "?",
-                            "pinned_commit": "?", "oldest_src_commit": "?"})
     for e in entries:
         svc = e["service"]
         e["holds"] = holds_for(rules, svc)
@@ -93,6 +93,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--rules", required=True)
     ap.add_argument("--deploy-log")
     ap.add_argument("--money-path-days", type=float, default=3.0)
+    ap.add_argument("--services", help="comma-separated allowlist of known service names")
     a = ap.parse_args(argv)
     try:
         with open(a.report, encoding="utf-8") as f:
@@ -109,7 +110,8 @@ def main(argv: list[str]) -> int:
     if not isinstance(report, dict) or not isinstance(rules, dict) or "entries" not in report:
         print("deploy-lag-blockers: malformed report or rules", file=sys.stderr)
         return 2
-    json.dump(enrich(report, rules, log_text, a.money_path_days), sys.stdout, indent=2)
+    json.dump(enrich(report, rules, log_text, a.money_path_days,
+                     set(filter(None, a.services.split(","))) if a.services else None), sys.stdout, indent=2)
     print()
     return 0
 

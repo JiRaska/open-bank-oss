@@ -28,12 +28,20 @@ RULES = {
         "openbank-aml-service": {"issue": "#3", "reason": "single-entry form"},
     }},
 }
+# Lines shaped as `gh run view --log` prints them (job, step, timestamp, annotation).
+P = "can-i-deploy\tUNKNOWN STEP\t2026-11-09T16:07:53.5662163Z "
 LOG = (
-    "##[warning][openbank-billing-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
-    "##[warning][openbank-treasury-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
-    "##[warning][openbank-treasury-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
-    "##[warning][openbank-card-service] is blocked on openbank-fx-service, which is NOT part of this run\n"
+    P + "##[warning][openbank-billing-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
+    + P + "##[warning][openbank-treasury-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
+    + P + "##[warning][openbank-treasury-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
+    # untrusted: a name outside the allowlist must be dropped
+    + P + "##[warning][openbank-evil-service] is blocked on openbank-ledger-service, which is NOT part of this run\n"
+    # not an annotation (plain text, e.g. a script listing) must not match
+    + P + "[openbank-card-service] is blocked on openbank-aml-service, which is NOT part of this run\n"
 )
+KNOWN = {"openbank-ledger-service", "openbank-billing-service", "openbank-treasury-service",
+         "openbank-account-service", "openbank-account-service-x", "openbank-aml-service",
+         "openbank-card-service"}
 
 
 def entry(svc, hours):
@@ -54,7 +62,7 @@ report = {"threshold_hours": 6, "entries": [
     entry("openbank-ledger-service", 570), entry("openbank-account-service", 80),
     entry("openbank-account-service-x", 80), entry("openbank-aml-service", 10)]}
 # account-service-x is a near-name: it must NOT inherit account-service's money-path flag.
-out = {e["service"]: e for e in mod.enrich(report, RULES, LOG, 3)["entries"]}
+out = {e["service"]: e for e in mod.enrich(report, RULES, LOG, 3, KNOWN)["entries"]}
 
 led = out["openbank-ledger-service"]
 check("held money-path service names both holds", [h["issue"] for h in led["holds"]] == ["#1", "#2"])
@@ -65,9 +73,10 @@ acc = out["openbank-account-service"]
 check("unheld money-path lag past N days escalates", acc["escalate"] and acc["blocker"] == "unexplained")
 check("near-name service is not money-path", not out["openbank-account-service-x"]["money_path"])
 check("single-entry hold form is read", out["openbank-aml-service"]["holds"][0]["issue"] == "#3")
-check("provider blocking a consumer but absent from lag report is appended",
-      out.get("openbank-fx-service", {}).get("kind") == "regression_block"
-      and out["openbank-fx-service"]["blocked_consumers"] == ["openbank-card-service"])
+check("unknown service name in log is rejected",
+      "openbank-evil-service" not in led["blocked_consumers"])
+check("non-annotation line is not parsed", out["openbank-aml-service"]["blocked_consumers"] == [])
+check("entries are never added from the log", len(out) == 4)
 
 young = {e["service"]: e for e in mod.enrich(
     {"entries": [entry("openbank-account-service", 71)]}, RULES, "", 3)["entries"]}
