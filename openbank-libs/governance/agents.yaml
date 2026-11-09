@@ -515,6 +515,8 @@ agents:
       dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
   # Regulatory obligations watcher (ADR-0367 decision 6).
   #
+  # stale-ref-ok: the register file lands with the sibling PR #15358, merged before this charter is enabled.
+  #
   # WHY IT EXISTS: openbank-libs/governance/regulatory-obligations.yaml cites, for every duty, the
   # legal text and the authority's specification. Those sources change — a decree is amended, ČNB
   # republishes a reporting calendar, GSFT changes its file format — and the register says nothing
