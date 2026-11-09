@@ -150,6 +150,7 @@ def check(base_path: Path, candidate_path: Path) -> int:
         print(f"::error::{problem}")
     if problems:
         return 1
+    print(f"SUBJECTS={len(checksums(candidate))}  # pinned artifacts compared")
     print(f"verification metadata is additive: {added} artifact(s) added, no pin or configuration changed")
     return 0
 
