@@ -18,6 +18,7 @@ import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.quarkus.scheduler.Scheduler
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -34,6 +35,7 @@ import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -73,6 +75,9 @@ class DayCloseParticipantsIT {
     }
 
     @Inject
+    lateinit var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
+
+    @Inject
     lateinit var tieOutRuns: TieOutRunRepository
 
     @Inject
@@ -86,6 +91,25 @@ class DayCloseParticipantsIT {
 
     @Inject
     lateinit var participantsConfig: CloseParticipantsConfig
+
+    @Inject
+    lateinit var scheduler: Scheduler
+
+    @AfterEach
+    fun resumeScheduler() = scheduler.resume()
+
+    private fun recordFreshTieOut(date: LocalDate) {
+        onEventLoop {
+            val at = Instant.now()
+            tieOutRuns.save(
+                TieOutRunRecord(
+                    UUID.randomUUID(), date, at, TieOutRunStatus.OK, 4, 0, 0,
+                    startedAt = at, journalCount = journalWatermark.countThrough(date),
+                    journalFingerprint = journalWatermark.populationThrough(date).fingerprint,
+                ),
+            )
+        }
+    }
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -106,7 +130,7 @@ class DayCloseParticipantsIT {
     }
 
     /** A CUTOFF day with an OK tie-out recorded after its cutoff — everything but participants. */
-    private fun seedTiedOutEligibleDay(date: LocalDate) {
+    private fun seedTiedOutEligibleDay(date: LocalDate, withheld: String = "interest") {
         val cutoffAt = Instant.now().minus(Duration.ofHours(2))
         onEventLoop {
             tieOutRuns.save(
@@ -118,6 +142,9 @@ class DayCloseParticipantsIT {
                     accountsChecked = 4,
                     breaks = 0,
                     errors = 0,
+                    startedAt = cutoffAt.plus(Duration.ofMinutes(30)),
+                    journalCount = journalWatermark.countThrough(date),
+                    journalFingerprint = journalWatermark.populationThrough(date).fingerprint,
                 ),
             )
             val opened = AccountingDayRecord.open(date, cutoffAt.minus(Duration.ofDays(1)), SEED_ACTOR)
@@ -127,7 +154,8 @@ class DayCloseParticipantsIT {
                 OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
             )
         }
-        othersReport(date)
+        othersReport(date, withheld)
+        recordFreshTieOut(date)
     }
 
     /**
@@ -136,8 +164,8 @@ class DayCloseParticipantsIT {
      * Read from the live config, so a participant declared later (#13167: lending, billing, ...) is
      * covered without editing this test, and a missing one cannot make a scenario vacuous.
      */
-    private fun othersReport(date: LocalDate) = participantsConfig.participants()
-        .filterKeys { it != "interest" }
+    private fun othersReport(date: LocalDate, withheld: String = "interest") = participantsConfig.participants()
+        .filterKeys { it != withheld }
         .forEach { (name, declared) ->
             onEventLoop {
                 participation.report(
@@ -167,7 +195,7 @@ class DayCloseParticipantsIT {
                     callerPrincipal = INTEREST_PRINCIPAL,
                 ),
             )
-        }
+        }.also { recordFreshTieOut(date) }
 
     private fun statusOf(date: LocalDate) = onEventLoop { accountingDays.findByDate(date) }?.status
 
@@ -188,6 +216,34 @@ class DayCloseParticipantsIT {
         // Interest runs late and reports; the next tick closes the day.
         interestReports(LATE_DAY, ParticipationOutcome.RAN, journals = 2)
         assertThat(await { statusOf(LATE_DAY) == AccountingDayStatus.TIED_OUT }).isTrue()
+    }
+
+    @Test
+    fun `missing fees block the real cron even after interest completed`() {
+        val control = LocalDate.of(2019, 8, 9)
+        val held = LocalDate.of(2019, 8, 10)
+        seedTiedOutEligibleDay(control)
+        interestReports(control, ParticipationOutcome.RAN, journals = 1)
+        seedTiedOutEligibleDay(held, withheld = "billing")
+
+        assertThat(await { statusOf(control) == AccountingDayStatus.TIED_OUT }).isTrue()
+        assertThat(statusOf(held)).isEqualTo(AccountingDayStatus.CUTOFF)
+        assertThat(onEventLoop { participation.completeness(held) }.missing).containsExactly("billing")
+        onEventLoop {
+            participation.report(
+                ReportParticipationCommand(
+                    held,
+                    "billing",
+                    ParticipationOutcome.RAN,
+                    2,
+                    2,
+                    null,
+                    participantsConfig.participants().getValue("billing").principal(),
+                ),
+            )
+        }
+        recordFreshTieOut(held)
+        assertThat(await { statusOf(held) == AccountingDayStatus.TIED_OUT }).isTrue()
     }
 
     @Test
@@ -273,18 +329,95 @@ class DayCloseParticipantsIT {
         }.isInstanceOf(CloseParticipantForbiddenException::class.java)
     }
 
-    /** Future cutoff instant keeps any cron verdict ineligible while the manual HTTP path is tested. */
+    /** Pause automatic transitions so the manual HTTP path is observed without a cron race. */
     private fun seedManualDay(date: LocalDate) {
+        scheduler.pause()
+        seedTiedOutEligibleDay(date)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `persisted source receipt retries preserve reconciliation and stale work cannot undo a waiver`() {
+        val date = LocalDate.of(2019, 9, 18)
+        seedManualDay(date)
+        val command = ReportParticipationCommand(
+            date,
+            "interest",
+            ParticipationOutcome.RAN,
+            1,
+            1,
+            null,
+            INTEREST_PRINCIPAL,
+            sourceRunId = "a".repeat(64),
+        )
+        val first = onEventLoop { participation.report(command) }
+        recordFreshTieOut(date)
+        val replay = onEventLoop { participation.report(command) }
+        assertThat(replay.reportedAt).isEqualTo(first.reportedAt)
+        assertThat(onEventLoop { participation.completeness(date) }.lastWorkReportAt).isEqualTo(first.reportedAt)
         onEventLoop {
-            val now = Instant.now()
-            val opened = AccountingDayRecord.open(date, now.minusSeconds(60), SEED_ACTOR)
-            val cut = opened.transitionTo(AccountingDayStatus.CUTOFF, SEED_ACTOR, now.plus(Duration.ofHours(1)))
-            accountingDays.saveOpened(
-                cut,
-                OutboxMessage(aggregateId = cut.id, eventType = "AccountingDayTransitioned", payload = "{}"),
+            participation.report(
+                command.copy(
+                    outcome = ParticipationOutcome.REFUSED,
+                    journalsPosted = 0,
+                    reason = "later run refused",
+                    sourceRunId = "b".repeat(64),
+                ),
             )
         }
-        othersReport(date)
+        onEventLoop { participation.waive(WaiveParticipationCommand(date, "interest", "reviewed exception", "owner")) }
+        assertThat(onEventLoop { participation.report(command) }.outcome).isEqualTo(ParticipationOutcome.WAIVED)
+        assertThatThrownBy { onEventLoop { participation.report(command.copy(itemsProcessed = 2)) } }
+            .isInstanceOf(com.openbank.ledger.domain.model.LedgerConflictException::class.java)
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `a new persisted source run with the same counts still needs a new reconciliation`() {
+        val date = LocalDate.of(2019, 9, 19)
+        seedManualDay(date)
+        val command = ReportParticipationCommand(
+            date,
+            "interest",
+            ParticipationOutcome.RAN,
+            1,
+            1,
+            null,
+            INTEREST_PRINCIPAL,
+            sourceRunId = "a".repeat(64),
+        )
+        onEventLoop { participation.report(command) }
+        recordFreshTieOut(date)
+        onEventLoop { participation.report(command.copy(sourceRunId = "b".repeat(64))) }
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        recordFreshTieOut(date)
+        given().contentType(
+            "application/json",
+        ).post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
+    }
+
+    @Test
+    @TestSecurity(user = "manual-close-operator", roles = ["ROLE_OPERATOR"])
+    fun `manual HTTP tie-out cannot use reconciliation older than completed fee work`() {
+        val date = LocalDate.of(2019, 9, 10)
+        seedManualDay(date)
+        // Unlike interestReports, this deliberately does not record a newer tie-out fixture.
+        onEventLoop {
+            participation.report(
+                ReportParticipationCommand(date, "interest", ParticipationOutcome.RAN, 1, 1, null, INTEREST_PRINCIPAL),
+            )
+        }
+        given().contentType("application/json")
+            .post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(409)
+        assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+        recordFreshTieOut(date)
+        given().contentType("application/json")
+            .post("/api/v1/ledger/accounting-days/$date/transitions/TIED_OUT").then().statusCode(200)
     }
 
     @Test
@@ -349,6 +482,34 @@ class DayCloseParticipantsIT {
             .put("/api/v1/ledger/accounting-days/$date/participants/interest/waiver").then().statusCode(403)
         assertThat(onEventLoop { participation.completeness(date) }.reported).doesNotContainKey("interest")
         assertThat(statusOf(date)).isEqualTo(AccountingDayStatus.CUTOFF)
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-interest", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-interest"),
+            Claim(key = "sub", value = "interest-machine-sub"),
+            Claim(key = "preferred_username", value = "service-account-openbank-interest"),
+            Claim(key = "client_id", value = "openbank-interest"),
+        ],
+    )
+    fun `report rejects null job names without appending`() {
+        val date = LocalDate.of(2019, 7, 12)
+        seedManualDay(date)
+        val path = "/api/v1/ledger/accounting-days/$date/participants/interest"
+        for (jobs in listOf(listOf(null), listOf("accrual", null))) {
+            given().contentType("application/json")
+                .body(mapOf("outcome" to "RAN", "exercisedJobs" to jobs))
+                .put(path).then().statusCode(400)
+            assertReasonHistory(date, 0, null)
+        }
+        given().contentType("application/json")
+            .body(
+                mapOf("outcome" to "RAN", "exercisedJobs" to listOf("accrual"), "reason" to "completed accrual"),
+            )
+            .put(path).then().statusCode(200)
+        assertReasonHistory(date, 1, "completed accrual")
     }
 
     @Test

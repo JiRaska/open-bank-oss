@@ -252,6 +252,11 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
+# The SDLC guide derives a bounded configuration snapshot inside the image build.
+COPY .github/workflows/merge-train.yml .github/workflows/auto-deploy.yml /.github/workflows/
+COPY openbank-infra/gitops/components/ledger/ledger-service.yaml /openbank-infra/gitops/components/ledger/ledger-service.yaml
+COPY openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml /openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml
+COPY openbank-infra/gitops/apps/ledger.yaml /openbank-infra/gitops/apps/ledger.yaml
 # platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, staged
 # at their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki/Postgres version.
 COPY --from=platform-versions-collector /pv-src/ /

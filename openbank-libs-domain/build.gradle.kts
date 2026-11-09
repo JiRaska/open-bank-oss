@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.jandex)
@@ -23,10 +25,11 @@ repositories {
 
 dependencies {
     api(libs.kotlin.stdlib)
-    api(libs.kotlin.reflect)
     api(libs.kotlinx.coroutines.core)
-    api(libs.jackson.module.kotlin)
-    api(libs.jackson.datatype.jsr310)
+    // The identifier API still carries Jackson annotations. Serialization engines
+    // belong to libs-runtime; pure finance/lending/ISO consumers do not need them.
+    // Annotations use an independent minor-only version, already integrity-pinned.
+    api("com.fasterxml.jackson.core:jackson-annotations:2.22")
 
     // UUIDv7 generation for time-ordered identifiers (ADR-0106).
     // Internal detail of domain.identifiers.Ids — services mint ids via EntityId.random() factories.
@@ -52,6 +55,10 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // Verify the existing wire contracts without exporting their engines to main.
+    testImplementation(libs.kotlin.reflect)
+    testImplementation(libs.jackson.module.kotlin)
+    testImplementation(libs.jackson.datatype.jsr310)
     // FlagdProviderTest and OpaSidecarPolicyDecisionPointTest drive real HttpClient calls over
     // a mock server; no framework needed — they are pure JVM.
     // Property-based tests on Money arithmetic invariants (ADR-0011 L1, issue #469). Same
@@ -101,6 +108,33 @@ tasks.processResources {
             ),
         )
     }
+}
+
+val domainRuntimeArtifacts = configurations.runtimeClasspath.flatMap { it.incoming.artifacts.resolvedArtifacts }
+
+val verifyDomainRuntimeDependencies by tasks.registering {
+    group = "verification"
+    description = "Keep serialization engines and Kotlin reflection outside the domain runtime boundary."
+    doLast {
+        val artifacts = domainRuntimeArtifacts.get()
+        val dependencies = artifacts.map { artifact ->
+            val identity = artifact.id.componentIdentifier
+            check(identity is ModuleComponentIdentifier) { "Domain runtime dependency has no external module identity" }
+            identity
+        }
+        val forbidden = dependencies.filter { dependency ->
+            (dependency.group.startsWith("com.fasterxml.jackson.") && dependency.module != "jackson-annotations") ||
+                (dependency.group == "org.jetbrains.kotlin" && dependency.module == "kotlin-reflect")
+        }
+        check(forbidden.isEmpty()) {
+            "Domain runtime dependencies exceed the annotation-only serialization boundary: $forbidden"
+        }
+        logger.lifecycle("Domain runtime dependency boundary verified across {} artifacts", artifacts.size)
+    }
+}
+
+tasks.named("check") {
+    dependsOn(verifyDomainRuntimeDependencies)
 }
 
 tasks.test {

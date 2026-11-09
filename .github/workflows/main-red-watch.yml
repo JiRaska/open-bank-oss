@@ -88,6 +88,9 @@ on:
       # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
       # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
       - "Platform images"
+      # ADR-0366: red means a ci/artifacts.lock entry is not in the ECR Public mirror, so CI
+      # has no fallback for it during the next upstream outage.
+      - "CI artifact mirror"
       - "Keycloak workload identity"
       - "Agent charter registry"
       - "AI governance snapshot"
