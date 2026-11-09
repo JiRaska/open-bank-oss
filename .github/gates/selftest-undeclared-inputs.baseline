@@ -142,6 +142,7 @@ pdp-flag-rollout-complete openbank-*/
 pdp-flag-rollout-complete openbank-libs/
 probe-scrape-port-has-a-listener openbank-*/
 probe-scrape-port-has-a-listener openbank-infra/
+promql-alert-unit-tests openbank-infra/gitops/components/
 readiness-collectors-agree docs/
 readiness-collectors-agree openbank-*/
 readiness-collectors-agree openbank-admin-ui/
