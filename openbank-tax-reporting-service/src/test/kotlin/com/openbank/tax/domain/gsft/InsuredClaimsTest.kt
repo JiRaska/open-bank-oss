@@ -31,6 +31,7 @@ class InsuredClaimsTest {
         synthetic: Boolean = false,
     ) = DepositAccount(
         UUID.randomUUID(),
+        "CZ6508000000192000145399",
         currency,
         BigDecimal(principal),
         BigDecimal(interest),

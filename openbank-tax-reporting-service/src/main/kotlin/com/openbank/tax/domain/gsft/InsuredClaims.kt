@@ -63,6 +63,7 @@ data class Holding(val partyId: UUID, val share: BigDecimal?)
 
 data class DepositAccount(
     val accountId: UUID,
+    val iban: String,
     val currency: String,
     val principal: BigDecimal,
     val accruedInterest: BigDecimal,
