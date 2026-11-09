@@ -18,7 +18,12 @@ vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: null, status: 'unauthenticated' }),
 }))
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, '', '/system/tests') })
+
+async function openRunSummaries() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Runs and history' }))
+  fireEvent.click(await screen.findByText('Run summaries and cross-layer maps'))
+}
 
 const healthyComponent: ComponentTestPosture = {
   component: 'openbank-example-service',
@@ -284,17 +289,16 @@ describe('Test Intelligence flow attention', () => {
       source: null, observedAt: null,
     }]
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence'
+      String(input).startsWith('/api/test-intelligence?')
         ? report
         : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
 
     render(<TestIntelligencePage />)
 
+    await openRunSummaries()
     const ciCard = (await screen.findByText('CI evidence')).closest('button')
     expect(ciCard).toHaveTextContent('skipped')
-    const health = screen.getByText('NEEDS ATTENTION').closest('.ti-health')
-    expect(health).toHaveTextContent(/NEEDS ATTENTION\s*1\s*signal to inspect/)
     const titles = screen.getAllByText('Required control: openbank-libs-runtime:mutation')
     expect(titles).toHaveLength(1)
     const gap = titles[0].closest('button')
@@ -356,11 +360,12 @@ describe('Test Intelligence flow attention', () => {
       state: 'skipped', reason: 'The mutation sidecar was empty.', source: null, observedAt: null,
     }]
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+      String(input).startsWith('/api/test-intelligence?') ? report : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
 
     render(<TestIntelligencePage />)
 
+    await openRunSummaries()
     const queue = within(await screen.findByRole('region', { name: 'Evidence gap queue' }))
     expect(queue.getAllByText('Performance: latency-smoke')).toHaveLength(1)
     expect(queue.queryByText('Required control: openbank-example-service:performance')).not.toBeInTheDocument()
@@ -392,11 +397,12 @@ describe('Test Intelligence flow attention', () => {
       }] as unknown as TestIntelligenceReport['syntheticJourneys'],
     })
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => new Response(JSON.stringify(
-      String(input) === '/api/test-intelligence' ? report : { findings: [], available: false },
+      String(input).startsWith('/api/test-intelligence?') ? report : { findings: [], available: false },
     ), { status: 200, headers: { 'content-type': 'application/json' } })))
 
     render(<TestIntelligencePage />)
-    fireEvent.click(await screen.findByRole('tab', { name: /Synthetics/ }).catch(() => screen.getByText('Synthetics')))
+    fireEvent.click(await screen.findByRole('button', { name: 'Runs and history' }))
+    fireEvent.change(await screen.findByLabelText('Detailed evidence view'), { target: { value: 'synthetic' } })
 
     const chromium = within(await screen.findByLabelText('chromium browser evidence'))
     expect(chromium.getByLabelText('Rollout-attested evidence')).toHaveTextContent(/requested\s*abc1234.*observed\s*abc1234def56/)

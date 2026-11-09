@@ -77,6 +77,22 @@ spec:
 
 
 class RunbookGeneratorTest(unittest.TestCase):
+    def test_reviewed_operations_survive_positive_replicas(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            component = root / "openbank-infra/gitops/components/reviewed"
+            component.mkdir(parents=True)
+            manifest = component / "service.yaml"
+            manifest.write_text("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reviewed\n  annotations:\n    openbank.io/operations-mode: reviewed-gitops\nspec:\n  replicas: 1\n")
+            generator = load_module(root)
+            text = generator.deployment_status("reviewed") + generator.runtime_sections("reviewed", "reviewed")
+            self.assertIn("REVIEWED GITOPS ONLY", text)
+            self.assertIn("not proof", text)
+            self.assertNotIn("kubectl scale", text)
+            self.assertNotIn("kubectl rollout restart", text)
+            manifest.write_text("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: reviewed\nspec:\n  replicas: 1\n")
+            self.assertFalse(generator.reviewed_gitops_operations("reviewed"))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

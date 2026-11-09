@@ -57,6 +57,9 @@ jobs:
       - name: Classifier selftest
         run: .github/scripts/check-fleet-attestations.sh --selftest
 
+      - name: Bounded development pilot source controls
+        run: python3 .github/scripts/test-agent-pilot-source.py
+
   verify:
     name: Verify fleet attestations
     runs-on: ubuntu-latest
@@ -98,12 +101,15 @@ jobs:
       # image with an attestation type it has never carried — and fails loudly if that stops
       # reading as UNATTESTED. Read-only; verifies nothing about the fleet itself.
       - name: Vocabulary control (cosign still says "not attested" the way we parse)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: .github/scripts/check-fleet-attestations.sh --vocabulary-control
 
       - name: Verify every declared openbank-* image is attested
         id: gate
         env:
           FLEET_ATTEST_JSON: ${{ runner.temp }}/fleet-attest.json
+          GH_TOKEN: ${{ github.token }}
         # `set -o pipefail` is load-bearing, not boilerplate. A `run:` block with no
         # `shell:` key runs under GitHub's default `bash -e {0}` — which does NOT set
         # pipefail (only an explicit `shell: bash` gets `-e -o pipefail`). Without it the

@@ -55,6 +55,7 @@ class IrSigningModeTest {
         transitMount = "transit",
         role = "product-catalog-ir-signing",
         saTokenPath = "/nonexistent",
+        caFile = Optional.empty(),
     )
 
     private companion object {

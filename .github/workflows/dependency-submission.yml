@@ -106,6 +106,12 @@ jobs:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
+      # The dependency-graph plugin version, pinned HERE instead of inherited from setup-gradle's
+      # default. setup-gradle's init script reads this variable, and dependency_snapshot.py requires
+      # every shard's detector to report exactly it. A setup-gradle bump therefore cannot change the
+      # plugin silently: before this pin, 6.4.0 -> 6.4.1 moved the plugin 1.5.0 -> 1.5.1 and every
+      # main snapshot failed its identity check until the script was edited (#15161).
+      DEPENDENCY_GRAPH_PLUGIN_VERSION: "1.5.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

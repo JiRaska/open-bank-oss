@@ -186,21 +186,9 @@ jobs:
         SERVICE_CI_JOB_STATUS: ${{ job.status }}
         SERVICE_CI_REPORT_OUTCOME: ${{ steps.coverage_report.outcome }}
     - name: Collect consumer pacts for hand-off to the contract job
-      run: 'set -euo pipefail
-
-        mkdir -p pact-handoff
-
-        shopt -s nullglob
-
-        files=(pacts/${{ inputs.service }}-*.json)
-
-        for f in "${files[@]}"; do cp "$f" pact-handoff/; done
-
-        echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
-
-        echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
-
-        '
+      env:
+        SERVICE: ${{ inputs.service }}
+      run: bash -e "$SERVICE_CI_HELPERS/consumer-pact-handoff.sh" collect
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: consumer-pacts-${{ inputs.service }}
