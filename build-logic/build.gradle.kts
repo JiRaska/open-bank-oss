@@ -122,6 +122,11 @@ dependencies {
 }
 tasks.test {
     useJUnitPlatform()
+    // TestKit's UnexpectedBuildFailure carries the nested fixture build output in its
+    // exception message. SHORT logging hides that cause on gate shards without reports.
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
     systemProperty("fixture.junit.classpath", configurations.testRuntimeClasspath.get().files
         .filter { it.name.startsWith("junit-") || it.name.startsWith("opentest4j-") || it.name.startsWith("apiguardian-") }
         .joinToString(File.pathSeparator))
