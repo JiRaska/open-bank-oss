@@ -3420,7 +3420,9 @@ def stacked_squash_mismatch(gh, git, main: str, members: list[tuple[int, str]], 
     (git's own merge base, as GitHub's), required equal to tree(steps[i]); `main` is the first `before`, each
     later one the previous verified step. Any fetch or merge-tree failure is a mismatch (fail closed)."""
     before = main
-    for (n, head), step in zip(members, steps):
+    if len(members) != len(steps):
+        return "member count does not match the stacked chain"
+    for (n, head), step in zip(members, steps, strict=True):
         ref = f"refs/merge-train/stack-member-{n}"
         if (git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:{ref}", check=False).returncode != 0
                 or git("rev-parse", ref, check=False).stdout.strip() != head):
