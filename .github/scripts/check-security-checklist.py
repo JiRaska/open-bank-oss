@@ -1392,13 +1392,11 @@ def self_test() -> int:
     # (j-mb) a branch cut BEFORE main changed the declaration did not change it: judged from the
     #        merge-base, not from main's tip (#15210 held every strict PR behind it). And a branch that
     #        itself edits the declaration still counts, behind main or not.
-    import os as _os
-    import tempfile as _tf
-    cwd = _os.getcwd()
+    cwd = os.getcwd()
     with _tf.TemporaryDirectory() as repo:
         def g(*a: str) -> str:
             return subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True, text=True,
-                                  env={**_os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                  env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
                                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}).stdout.strip()
         rules = Path(repo, RULES)
         rules.parent.mkdir(parents=True)
@@ -1419,7 +1417,7 @@ def self_test() -> int:
         g("commit", "-q", "--no-gpg-sign", "-am", "pr narrows")
         pr2_head = g("rev-parse", "HEAD")
         g("checkout", "-q", "main")
-        _os.chdir(repo)
+        os.chdir(repo)
         try:
             if declarations_from_text(narrowed_text) == declarations_from_text(decl_rules):
                 print("self-test FAIL (j-mb0): fixture did not change the declaration"); bad += 1
@@ -1428,7 +1426,7 @@ def self_test() -> int:
             if not declaration_changed(main_tip, pr2_head):
                 print("self-test FAIL (j-mb2): a behind branch that edits the declaration was not caught"); bad += 1
         finally:
-            _os.chdir(cwd)
+            os.chdir(cwd)
     # (j) narrowing the declaration → fails, even in the same PR as a harmless refactor, and even
     #     when no money-path file moved at all (a rules.yaml-only PR).
     narrowed = decl_rules.replace('      - \"src/main/kotlin/**/security/**\"\n', "").replace(
