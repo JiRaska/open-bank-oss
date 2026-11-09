@@ -89,4 +89,4 @@
 @media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .laneChoices { grid-template-columns: 1fr; } .laneChoices button { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); } .laneChoices strong { margin: 0; } .routeDescription { min-height: 0; } .stations { gap: 0; } .stations button { padding: var(--space-1); font-size: 11px; overflow-wrap: anywhere; } .journeyDetail { min-height: 0; padding-left: var(--space-3); } .sectionTop h2 { font-size: var(--text-xl); } .guideNav a { flex: 1 1 auto; } }
 @media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .trainBounce, .passenger { animation: none !important; } }
 
-@media (max-width: 520px) { .sceneSvg { height: 260px; aspect-ratio: auto; } }
+@media (max-width: 520px) { .scene { overflow-x: auto; } .sceneSvg { width: 720px; max-width: none; } }

@@ -19,7 +19,7 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   await expect(scene).toHaveAccessibleDescription(/nastoupili|have boarded/)
   // A captured frame must include decoded passengers, not just the faster backdrop.
   await page.evaluate(async () => {
-    await Promise.all(['/brand/sdlc/train-passengers.png', '/brand/sdlc/train-atlas-v2.webp', '/brand/sdlc/prague-station-v2.webp', '/brand/sdlc/openbank-mark.svg'].map(async src => {
+    await Promise.all(['/brand/sdlc/train-passengers.png', '/brand/sdlc/train-atlas-v3.webp', '/brand/sdlc/heritage-coach.webp', '/brand/sdlc/prague-station-v2.webp', '/brand/sdlc/openbank-mark.svg'].map(async src => {
       const image = new Image()
       image.src = src
       await image.decode()

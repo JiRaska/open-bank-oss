@@ -59,3 +59,36 @@ Environment prompt:
 [Brandmark.jsx](https://github.com/JiRaska/openbank-app/blob/d81735d112c7ae005246de45e6d5d056e9ab1a0a/design-system/components/brand/Brandmark.jsx).
 It is exported as a static lockup with the source's supported accent recolouring to cyan.
 The mark is composed independently of the generated train artwork, never inferred by ImageGen.
+
+## Heritage steam train
+
+The current scene uses `train-atlas-v3.webp` (1536 × 1024; locomotive in the upper row)
+and `heritage-coach.webp` (1448 × 1086). These are original built-in ImageGen assets,
+encoded as WebP with their geometry and alpha preserved. The earlier electric atlas is
+retained as the material reference. The Prague environment and canonical vector mark
+are unchanged. Passenger sprites remain separate so boarding, waving, worry and celebration
+still follow the selected journey state. Tall open windows make faces and paws visible.
+
+Locomotive prompt:
+
+> Modular transparent train atlas, 1536 × 1024, two equal rows. Historic Central European
+> steam express facing right in strict side elevation, short coal tender, large drive wheels,
+> detailed connecting rods, boiler and chimney, fine restrained steam. Premium cinematic 3D,
+> midnight navy painted metal, warm brass, restrained cyan pinstripe, amber cabin light.
+> Preserve the established material and lighting style. No passengers, logos, lettering,
+> track or environment; actual transparent alpha. Matching heritage coach in the lower row.
+
+Coach prompt:
+
+> One very short historic Central European observation coach in strict side elevation,
+> width-to-height ratio about 1.4:1, on a transparent canvas. Midnight navy body, warm brass,
+> cyan pinstripe, visible steel wheels, luxurious realistic materials matching the locomotive.
+> One single very large open window with a dark warm-lit empty cabin, no glass reflections,
+> no bars across the opening. No people, logos, text, track or background.
+
+Window refinement prompt:
+
+> Preserve the 1448 × 1086 canvas, silhouette, materials, wheels and alpha. Enlarge only
+> the central opening: x=240..1200, top y=270, bottom y=720. Lower the brass sill and cyan
+> line to y=745, leaving a narrow lower panel. The opening must fit a mascot's head and
+> waving paw. Keep the cabin empty; no logos, text or other changes.
