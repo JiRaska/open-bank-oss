@@ -99,10 +99,10 @@ Celkem povinností: **70**.
 *Depositor data for payout (single customer view)* · `gsft-depositor-data`
 
 - **Adresát:** Garanční systém finančního trhu
-- **Právní základ:** zákon č. 21/1992 Sb. § 41a a násl.; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb.
+- **Právní základ:** zákon č. 21/1992 Sb. § 41c odst. 10 a § 41d odst. 4; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2011-71) · [specifikace úřadu](https://www.gsft.cz/)
-- **Lhůta:** Při pojistné události (oznámení ČNB nebo rozhodnutí soudu); náhrady se vyplácejí do 7 pracovních dnů, data musí být připravena trvale. *(ověřeno)*
-- **Druh / kanál:** event · dávkové soubory CSV pro GSFT
+- **Lhůta:** Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale. *(ověřeno)*
+- **Druh / kanál:** event · CSV (CP-1250), komprimováno a šifrováno AES-256, na nosiči podle vyhlášky 431/2016 Sb.
 - **Osobní údaje:** True
 - **Pokrytí:** `missing` — chybí; sleduje #15356
 - **Poznámka:** Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
@@ -112,9 +112,9 @@ Celkem povinností: **70**.
 *GSFT test deliveries* · `gsft-test-delivery`
 
 - **Adresát:** Garanční systém finančního trhu
-- **Právní základ:** zákon č. 21/1992 Sb.; směrnice 2014/49/EU čl. 4 odst. 10 (zátěžové testy)
+- **Právní základ:** zákon č. 21/1992 Sb. § 41n
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21) · [specifikace úřadu](https://www.gsft.cz/)
-- **Lhůta:** Na žádost GSFT a při zátěžových testech. *(NEOVĚŘENO)*
+- **Lhůta:** GSFT ověřuje systém vyplácení nejméně jednou ročně; údaje na žádost ve lhůtě nejméně 3 pracovních dnů; zátěžový test nejméně jednou za 3 roky. Testovací dávky nesou atribut TEST. *(ověřeno)*
 - **Druh / kanál:** event · dávkové soubory pro GSFT
 - **Osobní údaje:** True
 - **Pokrytí:** `missing` — chybí; sleduje #15356
@@ -124,9 +124,9 @@ Celkem povinností: **70**.
 *Deposit insurance contribution base* · `gsft-contribution-base`
 
 - **Adresát:** Garanční systém finančního trhu
-- **Právní základ:** zákon č. 21/1992 Sb.; směrnice 2014/49/EU čl. 13; EBA GL o rizikově vážených příspěvcích
+- **Právní základ:** zákon č. 21/1992 Sb. § 41c odst. 3, § 41ca–41cc
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21) · [specifikace úřadu](https://www.gsft.cz/)
-- **Lhůta:** Ročně. *(NEOVĚŘENO)*
+- **Lhůta:** Ročně: ČNB stanoví příspěvek do 31. 5. z evidence banky, banka platí do 30. 6.; zda banka podává samostatný podklad, neověřeno. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · neověřeno
 - **Osobní údaje:** False
 - **Pokrytí:** `missing` — chybí; sleduje #15356
@@ -347,7 +347,7 @@ Celkem povinností: **70**.
 *Monetary and financial statistics (balance sheet, deposits)* · `cnb-bank-statistics`
 
 - **Adresát:** Česká národní banka
-- **Právní základ:** zákon č. 6/1993 Sb. § 41; vyhláška ČNB o předkládání výkazů; nařízení ECB 2021/379
+- **Právní základ:** zákon č. 6/1993 Sb. § 41; vyhláška č. 346/2013 Sb. o předkládání výkazů bankami (lhůty v přílohách a metadatech SDAT); nařízení ECB 2021/379
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1993-6) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/)
 - **Lhůta:** Měsíčně a čtvrtletně podle výkazu (kalendář ČNB). *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
@@ -434,9 +434,9 @@ Celkem povinností: **70**.
 *Payment fraud statistics* · `psd2-fraud-statistics`
 
 - **Adresát:** Česká národní banka
-- **Právní základ:** zákon č. 370/2017 Sb.; PSD2 čl. 96 odst. 6; EBA GL/2018/05
-- **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2017-370)
-- **Lhůta:** Pololetně. *(EU text, neověřeno znovu)*
+- **Právní základ:** zákon č. 370/2017 Sb. § 222; vyhláška č. 401/2021 Sb.; výkaz PSSIVYP22
+- **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2017-370) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/pss/)
+- **Lhůta:** Pololetně, výkaz PSSIVYP22 (platební statistika včetně podvodů); lhůta podle metadat SDAT neověřena. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** False
 - **Pokrytí:** `missing` — chybí
@@ -510,9 +510,9 @@ Celkem povinností: **70**.
 
 - **Adresát:** Česká národní banka
 - **Právní základ:** DORA čl. 28 odst. 3; prováděcí nařízení (EU) 2024/2956
-- **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj)
-- **Lhůta:** Ročně; termín sběru ČNB neověřen. *(NEOVĚŘENO)*
-- **Druh / kanál:** register · xBRL-CSV přes ČNB
+- **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/dora/)
+- **Lhůta:** Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU. *(ověřeno)*
+- **Druh / kanál:** register · SDAT
 - **Osobní údaje:** False
 - **Pokrytí:** `missing` — chybí
 
@@ -575,8 +575,8 @@ Celkem povinností: **70**.
 - **Adresát:** Finanční analytický úřad
 - **Právní základ:** zákon č. 253/2008 Sb. § 18
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2008-253) · [specifikace úřadu](https://www.fau.gov.cz/)
-- **Lhůta:** Bez zbytečného odkladu, nejpozději do 5 kalendářních dnů. *(NEOVĚŘENO)*
-- **Druh / kanál:** event · MoneyWeb / datová schránka
+- **Lhůta:** Bez zbytečného odkladu, a hrozí-li nebezpečí z prodlení, ihned po zjištění (§ 18 odst. 1). *(ověřeno)*
+- **Druh / kanál:** event · písemně nebo elektronicky se zajištěním důvěrnosti (§ 18 odst. 4, § 19); konkrétní kanál neověřen
 - **Osobní údaje:** True
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `aml-far`; služby `openbank-aml-service`; sleduje ADR-0367
 - **Poznámka:** Zákaz informování klienta (§ 38).
@@ -636,9 +636,9 @@ Celkem povinností: **70**.
 *CRS / DAC2 reporting* · `fs-crs`
 
 - **Adresát:** Finanční správa ČR
-- **Právní základ:** zákon č. 164/2013 Sb.; směrnice 2011/16/EU ve znění DAC2 a DAC8
+- **Právní základ:** zákon č. 164/2013 Sb. § 13k, § 13l, § 13t; směrnice 2011/16/EU ve znění DAC2 a DAC8
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2013-164) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
-- **Lhůta:** Ročně, do 30. 6. následujícího roku. *(NEOVĚŘENO)*
+- **Lhůta:** Oznámení do 30. 6. roku následujícího po vykazovaném roce, pouze elektronicky; předběžné ohlášení do 31. 5. *(ověřeno)*
 - **Druh / kanál:** granular-feed · EPO / MOJE daně (XML)
 - **Osobní údaje:** True
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-tax-reporting-service`, `openbank-party-service`; sleduje ADR-0340
@@ -663,7 +663,7 @@ Celkem povinností: **70**.
 - **Adresát:** Finanční správa ČR
 - **Právní základ:** zákon č. 586/1992 Sb. § 36 a § 38d
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-586) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
-- **Lhůta:** Odvod do konce měsíce následujícího po měsíci srážky; roční vyúčtování. *(NEOVĚŘENO)*
+- **Lhůta:** Odvod do konce měsíce následujícího po měsíci srážky (ověřeno, § 38d odst. 3); lhůta ročního vyúčtování (§ 38d odst. 9) neověřena. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · EPO / MOJE daně
 - **Osobní údaje:** False
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-tax-reporting-service`, `openbank-interest-service`

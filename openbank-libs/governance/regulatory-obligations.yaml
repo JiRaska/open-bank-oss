@@ -135,14 +135,14 @@ obligations:
     area: deposit-insurance
     name: { cs: Údaje o oprávněných osobách a pojištěných pohledávkách, en: Depositor data for payout (single customer view) }
     authority: gsft
-    legal_basis: zákon č. 21/1992 Sb. § 41a a násl.; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb.
+    legal_basis: "zákon č. 21/1992 Sb. § 41c odst. 10 a § 41d odst. 4; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb."
     sources:
       law: https://www.zakonyprolidi.cz/cs/2011-71
       spec: https://www.gsft.cz/
-    cadence: Při pojistné události (oznámení ČNB nebo rozhodnutí soudu); náhrady se vyplácejí do 7 pracovních dnů, data musí být připravena trvale.
+    cadence: "Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale."
     cadence_confidence: verified
     kind: event
-    transport: dávkové soubory CSV pro GSFT
+    transport: "CSV (CP-1250), komprimováno a šifrováno AES-256, na nosiči podle vyhlášky 431/2016 Sb."
     personal_data: yes
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
@@ -151,12 +151,12 @@ obligations:
     area: deposit-insurance
     name: { cs: Testovací předání údajů GSFT, en: GSFT test deliveries }
     authority: gsft
-    legal_basis: zákon č. 21/1992 Sb.; směrnice 2014/49/EU čl. 4 odst. 10 (zátěžové testy)
+    legal_basis: "zákon č. 21/1992 Sb. § 41n"
     sources:
       law: https://www.zakonyprolidi.cz/cs/1992-21
       spec: https://www.gsft.cz/
-    cadence: Na žádost GSFT a při zátěžových testech.
-    cadence_confidence: unverified
+    cadence: "GSFT ověřuje systém vyplácení nejméně jednou ročně; údaje na žádost ve lhůtě nejméně 3 pracovních dnů; zátěžový test nejméně jednou za 3 roky. Testovací dávky nesou atribut TEST."
+    cadence_confidence: verified
     kind: event
     transport: dávkové soubory pro GSFT
     personal_data: yes
@@ -166,11 +166,11 @@ obligations:
     area: deposit-insurance
     name: { cs: Podklady pro příspěvek do Fondu pojištění vkladů, en: Deposit insurance contribution base }
     authority: gsft
-    legal_basis: zákon č. 21/1992 Sb.; směrnice 2014/49/EU čl. 13; EBA GL o rizikově vážených příspěvcích
+    legal_basis: "zákon č. 21/1992 Sb. § 41c odst. 3, § 41ca–41cc"
     sources:
       law: https://www.zakonyprolidi.cz/cs/1992-21
       spec: https://www.gsft.cz/
-    cadence: Ročně.
+    cadence: "Ročně: ČNB stanoví příspěvek do 31. 5. z evidence banky, banka platí do 30. 6.; zda banka podává samostatný podklad, neověřeno."
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: neověřeno
@@ -441,7 +441,7 @@ obligations:
     area: statistics
     name: { cs: "Měnová a finanční statistika bank (rozvahová statistika, vklady)", en: "Monetary and financial statistics (balance sheet, deposits)" }
     authority: cnb
-    legal_basis: zákon č. 6/1993 Sb. § 41; vyhláška ČNB o předkládání výkazů; nařízení ECB 2021/379
+    legal_basis: "zákon č. 6/1993 Sb. § 41; vyhláška č. 346/2013 Sb. o předkládání výkazů bankami (lhůty v přílohách a metadatech SDAT); nařízení ECB 2021/379"
     sources:
       law: https://www.zakonyprolidi.cz/cs/1993-6
       spec: https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/
@@ -549,11 +549,11 @@ obligations:
     area: payments
     name: { cs: Statistika podvodů v platebním styku, en: Payment fraud statistics }
     authority: cnb
-    legal_basis: zákon č. 370/2017 Sb.; PSD2 čl. 96 odst. 6; EBA GL/2018/05
+    legal_basis: "zákon č. 370/2017 Sb. § 222; vyhláška č. 401/2021 Sb.; výkaz PSSIVYP22"
     sources:
       law: https://www.zakonyprolidi.cz/cs/2017-370
-      spec: null
-    cadence: Pololetně.
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/pss/
+    cadence: "Pololetně, výkaz PSSIVYP22 (platební statistika včetně podvodů); lhůta podle metadat SDAT neověřena."
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
@@ -645,11 +645,11 @@ obligations:
     legal_basis: DORA čl. 28 odst. 3; prováděcí nařízení (EU) 2024/2956
     sources:
       law: https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj
-      spec: null
-    cadence: Ročně; termín sběru ČNB neověřen.
-    cadence_confidence: unverified
+      spec: https://www.cnb.cz/cs/statistika/metodicke-informace/dora/
+    cadence: "Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU."
+    cadence_confidence: verified
     kind: register
-    transport: xBRL-CSV přes ČNB
+    transport: SDAT
     personal_data: no
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
@@ -723,10 +723,10 @@ obligations:
     sources:
       law: https://www.zakonyprolidi.cz/cs/2008-253
       spec: https://www.fau.gov.cz/
-    cadence: Bez zbytečného odkladu, nejpozději do 5 kalendářních dnů.
-    cadence_confidence: unverified
+    cadence: "Bez zbytečného odkladu, a hrozí-li nebezpečí z prodlení, ihned po zjištění (§ 18 odst. 1)."
+    cadence_confidence: verified
     kind: event
-    transport: MoneyWeb / datová schránka
+    transport: "písemně nebo elektronicky se zajištěním důvěrnosti (§ 18 odst. 4, § 19); konkrétní kanál neověřen"
     personal_data: yes
     applicability: always
     coverage: { status: bff-only, reports: [aml-far], services: [openbank-aml-service], tracking: ADR-0367 }
@@ -797,12 +797,12 @@ obligations:
     area: tax
     name: { cs: Automatická výměna informací o finančních účtech (CRS/DAC2), en: CRS / DAC2 reporting }
     authority: fs
-    legal_basis: zákon č. 164/2013 Sb.; směrnice 2011/16/EU ve znění DAC2 a DAC8
+    legal_basis: "zákon č. 164/2013 Sb. § 13k, § 13l, § 13t; směrnice 2011/16/EU ve znění DAC2 a DAC8"
     sources:
       law: https://www.zakonyprolidi.cz/cs/2013-164
       spec: https://www.financnisprava.gov.cz/
-    cadence: Ročně, do 30. 6. následujícího roku.
-    cadence_confidence: unverified
+    cadence: "Oznámení do 30. 6. roku následujícího po vykazovaném roce, pouze elektronicky; předběžné ohlášení do 31. 5."
+    cadence_confidence: verified
     kind: granular-feed
     transport: EPO / MOJE daně (XML)
     personal_data: yes
@@ -832,7 +832,7 @@ obligations:
     sources:
       law: https://www.zakonyprolidi.cz/cs/1992-586
       spec: https://www.financnisprava.gov.cz/
-    cadence: Odvod do konce měsíce následujícího po měsíci srážky; roční vyúčtování.
+    cadence: "Odvod do konce měsíce následujícího po měsíci srážky (ověřeno, § 38d odst. 3); lhůta ročního vyúčtování (§ 38d odst. 9) neověřena."
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: EPO / MOJE daně
