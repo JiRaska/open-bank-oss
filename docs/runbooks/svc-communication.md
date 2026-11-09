@@ -8,14 +8,11 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `communication` service. Data domain **engagement**,
 > classification **internal**, datastore **PostgreSQL**.
 
-## Deployment status — WORKLOAD STAGED, ACTIVATION PENDING
+## Deployment status — REVIEWED GITOPS OPERATIONS
 
-**GitOps deliberately declares zero replicas for this workload.** This is not a live
-service and does not authorize a replica increase, restart, log inspection, traffic claim,
-or metrics/health assertion. Activation remains the separately reviewed step after the
-pinned image, GitOps sync, and live cluster-health evidence are available. After that
-step, health must be checked on the management endpoint `:8086`;
-the public HTTP port is not a health-evidence substitute.
+Declared replicas are desired state, not proof of a running workload. Activation and
+rollback require a reviewed GitOps change and separate operator approval. Verify the
+signed image, contracts, sync and actual management health before claiming availability.
 
 ## Service identity
 
@@ -37,11 +34,12 @@ the public HTTP port is not a health-evidence substitute.
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `communication`.
 
-## Runtime operations — DEFERRED
+## Runtime operations — REVIEWED GITOPS ONLY
 
-Do not increase replicas, restart, or use log/metrics commands to activate this staged
-workload. The reviewed activation procedure must first establish the signed image,
-GitOps sync, and actual cluster health. The declared probes are:
+Use reviewed GitOps changes for activation, replica changes, restart and rollback;
+do not use direct scale or restart commands to bypass approval. Retain the database
+and published copy during rollback. After the separately approved rollout, verify
+the actual image digest and management probes before claiming health.
 
 - Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
 

@@ -425,7 +425,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
   ['system:view', [
-    '/api/platform-versions', '/api/finops',
+    '/api/platform-versions', '/api/finops', '/api/test-intelligence',
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/system',
   ]],

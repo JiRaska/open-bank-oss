@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.11.0...devops-agent-v0.12.0) (2026-11-08)
+
+
+### Features
+
+* **devops-agent:** retain idempotent CPU measurement advisories ([#15257](https://github.com/JiRaska/open-bank-oss/issues/15257)) ([9d795c2](https://github.com/JiRaska/open-bank-oss/commit/9d795c2ba8ac64ad1183cb58a191204e5d591b6d))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.10.0...devops-agent-v0.11.0) (2026-11-08)
 
 
