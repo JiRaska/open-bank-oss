@@ -111,6 +111,25 @@ class CeuRegisterTest {
     }
 
     @Test
+    fun `an untainted reinstatement of a synthetic grant stays out of the register`() {
+        val grant = UUID.randomUUID()
+        val later = Instant.parse("2026-11-03T08:00:00Z")
+        val latest = Instant.parse("2026-11-04T08:00:00Z")
+        val synthStart = tie(grant, disposer, CeuRole.DISPOSER, synthetic = true)
+        val facts = listOf(
+            opened(),
+            tie(acc, holder, CeuRole.HOLDER),
+            synthStart,
+            RegisterFact.RelationEnded(UUID.randomUUID(), grant, acc, tue, later, false),
+            synthStart.copy(eventId = UUID.randomUUID(), effectiveOn = wed, recordedAt = latest, synthetic = false),
+        )
+
+        val snapshot = RegisterSnapshot.fold(facts, wed, latest)
+
+        assertThat(snapshot.accounts.getValue(acc).persons.map { it.partyId }).containsExactly(holder)
+    }
+
+    @Test
     fun `a late fact for an already reported day surfaces in the next overview`() {
         val reportedAt = Instant.parse("2026-11-03T09:00:00Z")
         val lateAt = Instant.parse("2026-11-03T15:00:00Z")
