@@ -834,6 +834,16 @@ jobs:
           key: ci-artifacts-${{ matrix.slug }}-${{ hashFiles('ci/artifacts.lock') }}
           restore-keys: ci-artifacts-${{ matrix.slug }}-
 
+      # Self-tests run under strace (OB_SELFTEST_TRACE), and the kernel refuses setuid elevation
+      # to a process with an unprivileged tracer, so `sudo` inside a traced self-test fails.
+      # promql-alert-unit-tests' self-test installs promtool with sudo; provision it here,
+      # untraced, so the self-test finds it present (its version check still runs traced).
+      - name: Provision promtool before traced self-tests
+        if: contains(matrix.groups, 'gitops')
+        env:
+          OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
+        run: bash .github/scripts/install-promtool.sh
+
       - name: Run gates
         env:
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts

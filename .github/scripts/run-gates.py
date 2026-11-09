@@ -453,6 +453,10 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
         scratch.close()
         shutil.copyfile(index, scratch.name)
         env["GIT_INDEX_FILE"] = scratch.name
+    if trace_file:
+        # A traced tree must not start a nested tracer: ptrace cannot attach twice, so an inner
+        # run-gates in `require` mode would fail every gate as untraceable.
+        env.pop(sit.TRACE_ENV, None)
     # Popen + os.wait4 rather than subprocess.run, for ONE reason: wait4 hands back the
     # rusage of the reaped child, which includes every descendant it waited for. That is the
     # gate's CPU time, measured per gate even though gates run concurrently in threads
@@ -671,6 +675,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     t0 = time.monotonic()
     buf = []
     undeclared_fail = False
+    traced_cost = (0.0, 0.0)  # (wall, cpu) of a TRACED self-test, excluded from the budget
 
     selftest = gate.get("selftest")
     needed, why = selftest_is_needed(gate, changed)
@@ -700,9 +705,24 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             rc, out, cpu = _run(selftest, root, gate.get("env"), timeout, index, trace_file)
             r.cpu_seconds += cpu
             r.selftest_seconds = time.monotonic() - st0
+            if trace_file:
+                # strace is now the reaped process, so its own CPU and the ptrace stops land in
+                # this figure. Kept out of the budget comparison below: the budget measures the
+                # gate's work, not the tracer's (a traced run must not redden main on budget).
+                traced_cost = (r.selftest_seconds, cpu)
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
             if trace_file and (rc == 0) == want_pass:
-                undeclared_fail = _judge_trace(gate, root, trace_file, r, buf)
+                found = _judge_trace(gate, root, trace_file, r, buf)
+                # Fail only on a pull request. A traced self-test runs on a PR exactly when the
+                # gate or its declared inputs changed — the moment a new undeclared read is
+                # introduced. On main the same read can appear because the CORPUS grew (a new
+                # file a scanning self-test walks), which no PR author touched in the gate;
+                # failing there would recreate the red-main failure this control prevents.
+                if found and is_pr:
+                    undeclared_fail = True
+                elif found:
+                    buf.append("::warning::undeclared self-test input(s) observed off a pull "
+                               "request — reported, not failed; declare or baseline them.\n")
         finally:
             if trace_file:
                 try:
@@ -802,9 +822,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         # timing worth profiling).
         buf.append("\n[run-gates] this gate is NOT EVALUATED on this run: it could not read its "
                    "subject. Not a pass and not a finding — re-run the job.\n")
-    elif budget is not None and content_rc != 124 and r.seconds > budget:
+    elif budget is not None and content_rc != 124 and r.seconds - traced_cost[0] > budget:
         on_ci = os.environ.get("CI") == "true"
-        if r.cpu_seconds > budget:
+        if r.cpu_seconds - traced_cost[1] > budget:
             buf.append(
                 f"\n[run-gates] this gate took {r.seconds:.1f}s wall and {r.cpu_seconds:.1f}s CPU "
                 f"against a budget of {budget}s. CPU over budget is work, not runner load — "

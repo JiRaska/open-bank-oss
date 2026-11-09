@@ -16,7 +16,7 @@
 #
 # MECHANISM — observe, do not infer
 #   When OB_SELFTEST_TRACE is set, run-gates.py runs each self-test under
-#   `strace -f --seccomp-bpf -y -e trace=open,openat,openat2`. `-y` makes strace print the
+#   `strace -f -y -e trace=open,openat,openat2`. `-y` makes strace print the
 #   ABSOLUTE path behind every returned file descriptor, so a successful open is recorded as
 #   the file actually opened — relative paths, chdir and symlinks are already resolved by the
 #   kernel, and nothing here has to model a shell, Python's import system or Node's resolver.
@@ -37,7 +37,13 @@
 #
 #   What this does NOT see, stated so a green is not over-read: a stat() or existence probe of
 #   a repo file (only opens are traced), a read through a network service, and anything a
-#   self-test does not reach on the path it actually ran.
+#   self-test does not reach on the path it actually ran; content read out of git objects
+#   (`git show HEAD:<path>`, `git cat-file`: those opens are under .git/), and reads made by a
+#   long-lived daemon outside the traced process tree (a Gradle or Docker daemon).
+#
+#   A finding FAILS only on a pull request (where a traced self-test runs because the gate or
+#   its inputs changed). On main it is a warning: there the corpus a scanning self-test walks
+#   can grow without anyone touching the gate, and that must not turn main red.
 #
 # RATCHET
 #   .github/gates/selftest-undeclared-inputs.baseline holds today's undeclared reads, one
@@ -115,8 +121,31 @@ def strace_usable():
 
 
 def _unescape(s: str) -> str:
-    # strace escapes non-printables as \xNN and `\`/`"` with a backslash; repo paths are ASCII.
-    return re.sub(r"\\x([0-9a-fA-F]{2})", lambda m: chr(int(m.group(1), 16)), s).replace("\\\\", "\\")
+    # strace C-escapes the decoded path: \xNN / octal for non-printable bytes (a UTF-8 name
+    # arrives as several \xNN), and a backslash before `\`, `"`, `<`, `>`. Rebuild the BYTES,
+    # then decode as UTF-8, so a non-ASCII name compares equal to `git ls-files`.
+    out = bytearray()
+    i = 0
+    simple = {"n": b"\n", "t": b"\t", "r": b"\r", "v": b"\v", "f": b"\f"}
+    while i < len(s):
+        c = s[i]
+        if c == "\\" and i + 1 < len(s):
+            n = s[i + 1]
+            if n == "x" and re.match(r"[0-9a-fA-F]{2}", s[i + 2:i + 4]):
+                out.append(int(s[i + 2:i + 4], 16))
+                i += 4
+                continue
+            m = re.match(r"[0-7]{1,3}", s[i + 1:i + 4])
+            if m:
+                out.append(int(m.group(0), 8))
+                i += 1 + len(m.group(0))
+                continue
+            out += simple.get(n, n.encode())
+            i += 2
+            continue
+        out += c.encode()
+        i += 1
+    return out.decode("utf-8", "replace")
 
 
 def opened_paths(trace_text: str) -> set:
@@ -190,7 +219,7 @@ def baseline_covers(path: str, entries) -> bool:
         es = e.rstrip("/").split("/")
         if len(segs) < len(es) or (not prefix and len(segs) != len(es)):
             continue
-        if all(fnmatch.fnmatchcase(s, p) for s, p in zip(segs, es)):
+        if all(fnmatch.fnmatchcase(s, p) for s, p in zip(segs[:len(es)], es, strict=True)):
             return True
     return False
 
@@ -289,18 +318,32 @@ def baseline_from(json_files) -> int:
 
 
 def self_test() -> int:
+    bad = []
+    # Canned strace line shapes (-f interleaving, failures, escapes), independent of strace.
+    canned = "\n".join([
+        '101 openat(AT_FDCWD, "a", O_RDONLY) = 3</r/a>',
+        '101 openat(AT_FDCWD, "b", O_RDONLY <unfinished ...>',
+        '102 openat(AT_FDCWD, "c", O_RDONLY) = -1 ENOENT (No such file or directory)',
+        '101 <... openat resumed>) = 4</r/b c>',
+        '103 openat2(AT_FDCWD, "d", {flags=O_RDONLY}, 24) = 5</r/\\xc5\\xbe.txt>',
+        '104 open("e", O_RDONLY) = 6</r/x\\>y>',
+    ])
+    want = {"/r/a", "/r/b c", "/r/ž.txt", "/r/x>y"}
+    if opened_paths(canned) != want:
+        bad.append(f"canned trace parse: want {sorted(want)}, got {sorted(opened_paths(canned))}")
     ok, why = strace_usable()
     if not ok:
         print(f"FAIL: cannot falsify the tracer here — {why}")
         return 1
-    bad = []
     with tempfile.TemporaryDirectory() as d:
         root = pathlib.Path(d) / "repo"
         (root / "gate").mkdir(parents=True)
         (root / "ui/node_modules/lib").mkdir(parents=True)
         (root / "lib/__pycache__").mkdir(parents=True)
         files = {
-            "gate/check.sh": "cat secret.txt ui/node_modules/lib/index.js lib/__pycache__/h.cpython-312.pyc\n",
+            "gate/check.sh": "cat secret.txt ui/node_modules/lib/index.js lib/__pycache__/h.cpython-312.pyc "
+                             "'odd name \u017e.txt'\n",
+            "odd name \u017e.txt": "space and non-ASCII\n",
             "secret.txt": "undeclared\n",
             "ui/package-lock.json": "{}\n",
             "ui/package.json": "{}\n",
@@ -327,16 +370,18 @@ def self_test() -> int:
             bad.append(f"traced fixture exited {p.returncode}")
         gate = {"id": "fixture", "selftest": "x", "selftest_inputs": ["gate/check.sh"]}
         new, _, _ = analyse(trace, str(root), gate)
-        want = ["lib/h.py", "secret.txt", "ui/package-lock.json"]
+        want = ["lib/h.py", "odd name \u017e.txt", "secret.txt", "ui/package-lock.json"]
         if new != want:
             bad.append(f"undeclared reads: want {want}, got {new}")
         # Full declaration -> clean. Directory prefix covers below it.
-        g2 = dict(gate, selftest_inputs=["gate/check.sh", "secret.txt", "ui/", "lib/h.py"])
+        g2 = dict(gate, selftest_inputs=["gate/check.sh", "secret.txt", "ui/", "lib/h.py",
+                                         "odd name \u017e.txt"])
         if analyse(trace, str(root), g2)[0]:
             bad.append("a complete declaration still produced findings")
         # Baseline: an entry suppresses, an unread one is stale, a prefix entry covers.
         new, based, stale = analyse(trace, str(root), gate, ["secret.txt", "ui/", "never/read"])
-        if new != ["lib/h.py"] or based != ["secret.txt", "ui/package-lock.json"] or stale != ["never/read"]:
+        if (new != ["lib/h.py", "odd name ž.txt"]
+                or based != ["secret.txt", "ui/package-lock.json"] or stale != ["never/read"]):
             bad.append(f"baseline handling wrong: new={new} based={based} stale={stale}")
         # Lookalike prefix must NOT cover (run-gates' own `ab` vs `abc/` rule).
         if covered("secrets.txt", ["secret"]) or not covered("ui/a/b", ["ui"]):
