@@ -11,15 +11,22 @@ test.beforeEach(async ({ context, baseURL }) => {
 
 test('CI passengers board, ride and arrive; the shorter lane has its own explanation', async ({ page }, testInfo) => {
   await page.goto('/devops/sdlc/ci')
-  const train = page.getByRole('region', { name: /Každý lvíček|Every lion/ })
+  const train = page.getByRole('region', { name: /Více kolejí|Several tracks/ })
   await expect(train).toBeVisible()
   const scene = train.getByRole('img', { name: /Lví vláček|Lion change train/ })
-  await expect(scene).toHaveAccessibleDescription(/čekají na nástupišti|wait on the platform/)
+  await train.getByRole('button', { name: /^Pozastavit$|^Pause$/ }).click()
+  await expect(scene).toHaveAccessibleDescription(/tří souběžných kolejí|three concurrent tracks/)
+  await expect(scene.locator('[data-lane]')).toHaveCount(3)
+  await expect(scene).toHaveAccessibleDescription(/čeká na ověření|awaits verification/)
   for (let i = 0; i < 2; i++) await train.getByRole('button', { name: /Další stanice|Next station/ }).click()
+  await expect(scene).toHaveAccessibleDescription(/nastoupili|have boarded/)
+  await train.getByRole('button', { name: /Rychlá kolej|Fast lane/ }).click()
+  await expect(scene.locator('[data-lane="fast"]')).toHaveAttribute('data-step', '1')
+  await train.getByRole('button', { name: /Dávkový vlak|Batch train/ }).click()
   await expect(scene).toHaveAccessibleDescription(/nastoupili|have boarded/)
   // A captured frame must include decoded passengers, not just the faster backdrop.
   await page.evaluate(async () => {
-    await Promise.all(['/brand/sdlc/train-passengers.png', '/brand/sdlc/train-atlas-v3.webp', '/brand/sdlc/heritage-coach.webp', '/brand/sdlc/prague-station-v2.webp', '/brand/sdlc/openbank-mark.svg'].map(async src => {
+    await Promise.all(['/brand/sdlc/train-passengers.png', '/brand/sdlc/train-atlas-v3.webp', '/brand/sdlc/heritage-coach.webp', '/brand/sdlc/masaryk-station-parallel.webp', '/brand/sdlc/openbank-mark.svg'].map(async src => {
       const image = new Image()
       image.src = src
       await image.decode()
