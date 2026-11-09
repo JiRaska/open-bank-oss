@@ -22,12 +22,13 @@ type WorkspaceProps = {
   report: TestMatrixReport
   onRefresh: () => void
   renderRuns: (openTest: (item: TestCaseHistory) => void) => ReactNode
+  renderExpert: (openComponent: (component: string, kind: EvidenceKind | '') => void, openTest: (item: TestCaseHistory) => void, catalog: Record<string, { domain: string; label: string }>) => ReactNode
   learning: ReactNode
   attention: (openComponent: (component: string, kind: EvidenceKind | '') => void, openRuns: () => void) => ReactNode
   freshness: ReactNode
 }
 
-export function TestIntelligenceWorkspace({ report, renderRuns, learning, attention, freshness, onRefresh }: WorkspaceProps) {
+export function TestIntelligenceWorkspace({ report, renderRuns, renderExpert, learning, attention, freshness, onRefresh }: WorkspaceProps) {
   const { t, language } = useLanguage()
   const [selection, setSelection] = useState<TestSelection>(initial)
   const [query, setQuery] = useState('')
@@ -62,12 +63,12 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
     setSelection(next)
     setPage(0)
   }
-  function openTest(item: Pick<TestCaseHistory, 'component' | 'kind' | 'fingerprint'>) { navigate({ section: 'components', component: item.component, kind: item.kind, test: item.fingerprint }) }
+  function openTest(item: Pick<TestCaseHistory, 'component' | 'kind' | 'fingerprint'>) { navigate({ section: selection.section === 'expert' ? 'expert' : 'components', component: item.component, kind: item.kind, test: item.fingerprint }) }
   const unavailable = testIntelligenceCollectionUnavailable(report)
   const components = useMemo(() => report.components.filter(item => `${item.component} ${catalog[item.component]?.label ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [report.components, query, catalog])
   const groups = DOMAIN_GROUPS.map(domain => ({ domain, rows: components.filter(item => (catalog[item.component]?.domain ?? (isDomainId(item.domain) ? item.domain : 'unclassified')) === domain) })).filter(group => group.rows.length)
   const component = report.components.find(item => item.component === selection.component)
-  const detail = useTestEvidenceView(selection.section === 'components' && component ? selection.test
+  const detail = useTestEvidenceView((selection.section === 'components' || selection.section === 'expert') && component ? selection.test
     ? { view: 'case', component: selection.component, kind: selection.kind, fingerprint: selection.test, collectedAt: report.collectedAt }
     : { view: 'component', component: selection.component, kind: selection.kind, query, offset: page * PAGE_SIZE, limit: PAGE_SIZE, collectedAt: report.collectedAt }
     : null, report.evidence?.servedFrom ?? '')
@@ -96,11 +97,11 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
     </div>
     {freshness}
     <nav className={styles.nav} aria-label={t('Části Test Intelligence', 'Test Intelligence sections')}>
-      {(['components', 'attention', 'runs', 'learn'] as const).map((section, index) => <button type="button" className={`btn btn-sm ${selection.section === section ? 'btn-primary' : 'btn-secondary'}`} key={section} aria-current={selection.section === section ? 'page' : undefined} onClick={() => { setQuery(''); navigate({ section, component: '', kind: '', test: '' }) }}>{[t('Komponenty', 'Components'), t('K řešení', 'Needs attention'), t('Běhy a historie', 'Runs and history'), t('Jak testujeme', 'How testing works')][index]}</button>)}
+      {(['components', 'attention', 'runs', 'learn', 'expert'] as const).map((section, index) => <button type="button" className={`btn btn-sm ${selection.section === section ? 'btn-primary' : 'btn-secondary'}`} key={section} aria-current={selection.section === section ? 'page' : undefined} onClick={() => { setQuery(''); navigate({ section, component: '', kind: '', test: '' }) }}>{[t('Komponenty', 'Components'), t('K řešení', 'Needs attention'), t('Běhy a historie', 'Runs and history'), t('Jak testujeme', 'How testing works'), t('Expert', 'Expert')][index]}</button>)}
     </nav>
     {unavailable ? <p className={styles.quiet} role="status">{t('Úplný report není dostupný. Chybějící data se nepovažují za úspěšný výsledek.', 'The complete report is unavailable. Missing data is not a passing result.')}</p> : null}
-    {selection.section === 'components' && <>
-      {!selection.component && <>
+    {(selection.section === 'components' || selection.section === 'expert') && <>
+      {selection.section === 'components' && !selection.component && <>
         <div className={styles.summary} aria-label={t('Souhrn komponent', 'Component summary')}>
           <span>{t('Komponenty', 'Components')}: <strong>{report.components.length}</strong></span>
           <span>{t('Se selháním', 'With failures')}: <strong>{scopeFailed}</strong></span>
@@ -150,6 +151,7 @@ export function TestIntelligenceWorkspace({ report, renderRuns, learning, attent
         </section>}
       </>}
     </>}
+    {selection.section === 'expert' && !selection.component && renderExpert((component, kind) => { setQuery(''); navigate({ section: 'expert', component, kind, test: '' }) }, openTest, catalog)}
     {selection.section === 'attention' && attention((component, kind) => { setQuery(''); navigate({ section: 'components', component, kind, test: '' }) }, () => navigate({ section: 'runs', component: '', kind: '', test: '' }))}
     {selection.section === 'runs' && renderRuns(openTest)}
     {selection.section === 'learn' && <section className={styles.section}>

@@ -36,3 +36,20 @@ Rollback is the previous UI image: no published format, immutable source, verdic
 history is removed. New clients also accept a legacy full response from old servers and
 apply the same projection locally during an overlapping rollout. The existing 16 MiB
 integrity-checked archive limit remains unchanged.
+
+### Expert matrix
+
+The explicit **Expert** section restores the full cross-component matrix with all evidence
+kinds, Kover line coverage and running-build applicability. It fetches the complete archive
+only when opened; the ordinary overview and individual testcase readers remain bounded.
+The matrix renders 25 components per page with sticky headings and component identifiers.
+Search, domain, money-path, verification-status, sorting, visible columns, page and open
+inspector are preserved in the URL for sharing and browser back/forward navigation.
+
+Opening a cell shows retained observations, their exact source runs and diagnostic reports,
+required controls and up to five retained testcases beside the matrix. A testcase opens the
+existing educational detail and explicit AI explanation. Its own run may differ from the
+component observation's run: both links retain their actual attribution. Returning restores
+the expert selection. Missing detail never means zero executed tests; counts from separate
+observations are not added together. Passing evidence, freshness and build attribution remain
+separate facts. Priority sorting is a deterministic review order, not a readiness score.
