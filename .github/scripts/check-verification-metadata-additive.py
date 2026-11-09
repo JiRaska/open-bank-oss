@@ -30,6 +30,14 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 NS = "{https://schema.gradle.org/dependency-verification}"
+XSI = "{http://www.w3.org/2001/XMLSchema-instance}"
+
+
+# The only shapes Gradle writes under <components>. Anything else is refused rather than
+# ignored: a validator that skips what it does not recognise is a parser differential,
+# because Gradle may read the very element this script stepped over.
+COMPONENT_TAGS = {"component", "artifact", "sha1", "sha256", "sha512", "md5", "also-trust", "pgp"}
+DIGEST_TAGS = {"sha1", "sha256", "sha512", "md5", "pgp"}
 
 
 def load(path: Path) -> ET.Element:
@@ -41,6 +49,22 @@ def load(path: Path) -> ET.Element:
     root = ET.fromstring(text)
     if root.tag != NS + "verification-metadata":
         raise ValueError(f"{path}: root is {root.tag!r}, not verification-metadata")
+    for element in root.iter():
+        if not isinstance(element.tag, str) or not element.tag.startswith(NS):
+            raise ValueError(f"{path}: element outside the verification namespace: {element.tag!r}")
+        for attribute in element.attrib:
+            # Gradle writes xsi:schemaLocation on the root; nowhere else carries a namespace.
+            if attribute.startswith("{") and not (element is root and attribute.startswith(XSI)):
+                raise ValueError(f"{path}: namespaced attribute {attribute!r}")
+    children = [child.tag.removeprefix(NS) for child in root]
+    if children.count("configuration") != 1 or children.count("components") > 1 or (
+            set(children) - {"configuration", "components"}):
+        raise ValueError(f"{path}: root must hold one <configuration> and at most one <components>, got {children}")
+    components = root.find(NS + "components")
+    if components is not None:
+        for element in components.iter():
+            if element is not components and element.tag.removeprefix(NS) not in COMPONENT_TAGS:
+                raise ValueError(f"{path}: unexpected <{element.tag.removeprefix(NS)}> under <components>")
     return root
 
 
@@ -56,15 +80,26 @@ def checksums(root: ET.Element) -> dict[tuple[str, str, str, str], frozenset[tup
     components = root.find(NS + "components")
     if components is None:
         return pins
-    for component in components.findall(NS + "component"):
+    for component in components:
+        if component.tag != NS + "component":
+            raise ValueError(f"<{component.tag.removeprefix(NS)}> directly under <components>")
         coordinate = (component.get("group", ""), component.get("name", ""), component.get("version", ""))
-        for artifact in component.findall(NS + "artifact"):
+        for artifact in component:
+            if artifact.tag != NS + "artifact":
+                raise ValueError(f"<{artifact.tag.removeprefix(NS)}> directly under <component>")
             key = (*coordinate, artifact.get("name", ""))
+            # A repeated key would let a second entry carry a value the comparison never sees.
+            if key in pins:
+                raise ValueError("artifact listed more than once: " + ":".join(key))
             values = set()
             for digest in artifact:
                 tag = digest.tag.removeprefix(NS)
+                if tag not in DIGEST_TAGS:
+                    raise ValueError(f"<{tag}> directly under <artifact>")
                 values.add((tag, digest.get("value", "")))
-                for also in digest.findall(NS + "also-trust"):
+                for also in digest:
+                    if also.tag != NS + "also-trust":
+                        raise ValueError(f"<{also.tag.removeprefix(NS)}> inside a digest")
                     values.add((tag, also.get("value", "")))
             pins[key] = frozenset(values)
     return pins
@@ -85,6 +120,7 @@ def check(base_path: Path, candidate_path: Path) -> int:
     try:
         base, candidate = load(base_path), load(candidate_path)
         problems = refusals(base, candidate)
+        added = len(checksums(candidate).keys() - checksums(base).keys())
     except (OSError, ET.ParseError, ValueError) as error:
         print(f"::error::verification metadata could not be checked: {error}")
         return 2
@@ -92,7 +128,6 @@ def check(base_path: Path, candidate_path: Path) -> int:
         print(f"::error::{problem}")
     if problems:
         return 1
-    added = len(checksums(candidate).keys() - checksums(base).keys())
     print(f"verification metadata is additive: {added} artifact(s) added, no pin or configuration changed")
     return 0
 
@@ -125,6 +160,15 @@ def selftest() -> int:
         ("verify-metadata false", base.replace("<verify-metadata>true", "<verify-metadata>false"), 1),
         ("not metadata", "<project/>", 2),
         ("not xml", "<verification-metadata", 2),
+        ("second configuration", base.replace("<components>", "<configuration><verify-metadata>false"
+                                               "</verify-metadata></configuration>\n<components>"), 2),
+        ("foreign-namespace element", base.replace("<components>", '<components><trusted-artifacts xmlns="urn:x">'
+                                                    '<trust group=".*"/></trusted-artifacts>'), 2),
+        ("unknown element under components", base.replace("<components>", "<components><ignored-key/>"), 2),
+        ("duplicate artifact with a second value", doc(("a", "11"), ("a", "99")), 2),
+        ("unexpected root child", base.replace("</verification-metadata>", "<keyring-format/></verification-metadata>"), 2),
+        ("namespaced attribute below root", base.replace('<component group="g"',
+                                                          '<component xmlns:q="urn:q" q:x="1" group="g"'), 2),
         ("entity declaration", '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "x">]>' + base.split("?>", 1)[1], 2),
     ]
     failed = 0
