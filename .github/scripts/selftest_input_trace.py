@@ -16,12 +16,14 @@
 #
 # MECHANISM — observe, do not infer
 #   When OB_SELFTEST_TRACE is set, run-gates.py runs each self-test under
-#   `strace -f -y -e trace=open,openat,openat2`. `-y` makes strace print the
+#   `strace -f -y --seccomp-bpf -e trace=open,openat,openat2`. `-y` makes strace print the
 #   ABSOLUTE path behind every returned file descriptor, so a successful open is recorded as
 #   the file actually opened — relative paths, chdir and symlinks are already resolved by the
 #   kernel, and nothing here has to model a shell, Python's import system or Node's resolver.
-#   Not --seccomp-bpf, though it would be cheaper: it sets no_new_privs, which makes sudo
-#   inside a self-test fail, and a correct verdict outranks tracer overhead.
+#   --seccomp-bpf stops the tracer only on the traced syscalls (measured: without it the traced
+#   estate cost ~2x more again). No traced process can gain privileges either way (setuid is
+#   refused under ptrace, and seccomp sets no_new_privs), so a self-test needing sudo must have
+#   that step provisioned by the CI shard beforehand (promtool, in ci.yml).
 #
 #   A read becomes a FINDING when, after attribution:
 #     * it is a git-TRACKED file of this checkout (an untracked fixture the self-test wrote,
@@ -41,9 +43,10 @@
 #   (`git show HEAD:<path>`, `git cat-file`: those opens are under .git/), and reads made by a
 #   long-lived daemon outside the traced process tree (a Gradle or Docker daemon).
 #
-#   A finding FAILS only on a pull request (where a traced self-test runs because the gate or
-#   its inputs changed). On main it is a warning: there the corpus a scanning self-test walks
-#   can grow without anyone touching the gate, and that must not turn main red.
+#   Tracing runs on pull requests only, where a self-test runs because the gate or its declared
+#   inputs changed, and a finding there FAILS the gate. Never on main: there the corpus a
+#   scanning self-test walks can grow without anyone touching the gate, which must not turn
+#   main red, and the ~2x tracer cost would buy nothing.
 #
 # RATCHET
 #   .github/gates/selftest-undeclared-inputs.baseline holds today's undeclared reads, one
@@ -93,9 +96,7 @@ _PYC = re.compile(r"^(.*?)(?:^|/)__pycache__/([^/]+?)\.[^/]*\.pyc$")
 
 
 def strace_argv(trace_file: str) -> list:
-    # No --seccomp-bpf: it sets no_new_privs, and sudo inside a self-test then refuses to run
-    # (measured: promql-alert-unit-tests' promtool install went UNFALSIFIED under it).
-    return ["strace", "-f", "-qq", "-y", "-e", "trace=open,openat,openat2",
+    return ["strace", "-f", "-qq", "-y", "--seccomp-bpf", "-e", "trace=open,openat,openat2",
             "-e", "signal=none", "-o", trace_file]
 
 

@@ -604,10 +604,13 @@ def _trace_mode() -> str:
     return os.environ.get(sit.TRACE_ENV, "").strip().lower()
 
 
-def _selftest_trace_file(gate):
+def _selftest_trace_file(gate, is_pr: bool):
     """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
     mode = _trace_mode()
-    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs"):
+    # Pull requests only. A finding fails only there (see execute), and tracing costs ~2x the
+    # self-test time (measured over the estate: 420 s -> 919 s), which main need not pay to
+    # produce warnings: the PR that introduces an undeclared read is where it is caught.
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
         return None, ""
     ok, why = sit.strace_usable()
     if not ok:
@@ -694,7 +697,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
-        trace_file, trace_note = _selftest_trace_file(gate)
+        trace_file, trace_note = _selftest_trace_file(gate, is_pr)
         if trace_note:
             buf.append(trace_note)
             if trace_file is None and _trace_mode() == "require":
@@ -702,7 +705,10 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
                 r.output = "".join(buf)
                 return r
         try:
-            rc, out, cpu = _run(selftest, root, gate.get("env"), timeout, index, trace_file)
+            # A traced self-test gets twice the hard timeout: ptrace roughly doubles a fork-heavy
+            # self-test (merge-train-declaration: 176 s untraced, 351 s traced, against 420 s).
+            rc, out, cpu = _run(selftest, root, gate.get("env"), timeout * 2 if trace_file else timeout,
+                                index, trace_file)
             r.cpu_seconds += cpu
             r.selftest_seconds = time.monotonic() - st0
             if trace_file:
@@ -713,16 +719,11 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
             if trace_file and (rc == 0) == want_pass:
                 found = _judge_trace(gate, root, trace_file, r, buf)
-                # Fail only on a pull request. A traced self-test runs on a PR exactly when the
-                # gate or its declared inputs changed — the moment a new undeclared read is
-                # introduced. On main the same read can appear because the CORPUS grew (a new
-                # file a scanning self-test walks), which no PR author touched in the gate;
-                # failing there would recreate the red-main failure this control prevents.
-                if found and is_pr:
-                    undeclared_fail = True
-                elif found:
-                    buf.append("::warning::undeclared self-test input(s) observed off a pull "
-                               "request — reported, not failed; declare or baseline them.\n")
+                # Tracing happens only on a pull request (_selftest_trace_file), where a self-test
+                # runs because the gate or its declared inputs changed — the moment a new
+                # undeclared read is introduced. Never on main: there a scanning self-test's
+                # corpus grows with no one touching the gate, and that must not turn main red.
+                undeclared_fail = found
         finally:
             if trace_file:
                 try:
