@@ -107,6 +107,30 @@ class LicenseChoiceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("actual retry comparison did not confirm", result.stderr)
 
+    def elk(self, **overrides):
+        return {
+            "change_type": "added", "ecosystem": "npm", "name": "elkjs", "version": "0.12.1",
+            "package_url": "pkg:npm/elkjs@0.12.1", "license": "EPL-2.0 OR GPL-3.0-or-later",
+            "vulnerabilities": [], **overrides,
+        }
+
+    def test_elkjs_epl_choice_is_selected_only_for_the_exact_approved_row(self):
+        self.assertEqual(choice.select_packages([self.elk()]), "pkg:npm/elkjs@0.12.1")
+        # The removed predecessor row adds no obligation and does not block the choice.
+        removed = self.elk(change_type="removed", version="0.9.3", package_url="pkg:npm/elkjs", license="EPL-2.0")
+        self.assertEqual(choice.select_packages([removed, self.elk()]), "pkg:npm/elkjs@0.12.1")
+        for overrides in [{"license": "GPL-3.0-or-later"}, {"license": "EPL-2.0 AND GPL-3.0-or-later"},
+                          {"version": "0.13.0", "package_url": "pkg:npm/elkjs@0.13.0"},
+                          {"ecosystem": "maven"}, {"license": None}]:
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                choice.select_packages([self.elk(**overrides)])
+
+    def test_both_choices_are_emitted_together_and_independently_checked(self):
+        self.assertEqual(choice.select_packages([self.row(), self.elk()]),
+                         choice.PACKAGE + ", pkg:npm/elkjs@0.12.1")
+        with self.assertRaises(ValueError):
+            choice.select_packages([self.row(), self.elk(license="GPL-3.0-or-later")])
+
     def test_workflow_rechecks_full_policy_and_actual_retry_comparison(self):
         workflow = SCRIPT.parents[1] / "workflows" / "dependency-review.yml"
         text = workflow.read_text(encoding="utf-8")
