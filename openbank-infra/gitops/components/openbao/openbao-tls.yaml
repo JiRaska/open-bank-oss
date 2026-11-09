@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0352: server certificate for OpenBao's SECOND listener, 8203 (TLS). The 8200 listener stays
+# plaintext and unchanged so ESO, the rotation CronJobs and document-service keep working; the
+# libs-runtime OpenBaoTransport refuses http by design, so Product-IR signing (catalog `sign`,
+# billing/interest `verify`) can only reach OpenBao over this listener.
+#
+# Same private ClusterIssuer the fleet's east-west listeners use (openbank-ca), so a client
+# already holding an openbank-ca `ca.crt` trusts it with no new trust anchor.
+#
+# Ordering: the openbao StatefulSet mounts this Secret (apps/openbao.yaml). If the pod restarts
+# before cert-manager has issued it, the pod waits in ContainerCreating until the Secret exists —
+# it does not start without the listener cert. Rotation: OpenBao reads the files at start (and on
+# SIGHUP); a renewed cert takes effect at the next pod restart, well inside renewBefore.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: openbao
+    openbank.io/plane: platform
+    openbank.io/adr: "0352"
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: openbao-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: openbao.vault.svc
+  dnsNames:
+    - openbao.vault.svc
+    - openbao.vault.svc.cluster.local
+    - openbao-active.vault.svc
+    - openbao-active.vault.svc.cluster.local
+  usages:
+    - digital signature
+    - server auth
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -422,6 +422,11 @@ DOCISH = (".md", ".txt", ".adoc")
 CODEISH = (".kt", ".java", ".py", ".rego", ".sql", ".ts", ".tsx", ".sh", ".yaml", ".yml",
            ".json", ".gradle", ".kts", ".xml", ".properties", ".tf", ".conf")
 
+# These tokens have exactly the ASCII boundaries used by Corpus._word().
+IDENTIFIER = re.compile(r"[A-Za-z0-9_]+")
+# A lookahead preserves overlapping declarations, including declaration-shaped comments.
+DECLARATION = re.compile(r"(?=\b(?:class|object|interface|fun|val|var)\s+([A-Za-z0-9_]+)\b)")
+
 STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
@@ -603,8 +608,15 @@ class Corpus:
             self._memo[sym] = True
             return True
         needle = sym.rsplit(".", 1)[-1] if POLICYRULE.match(sym) else sym
-        pat = self._word(needle)
-        hit = any(pat.search(b) for b in self.code.values() if needle in b)
+        if IDENTIFIER.fullmatch(needle):
+            # Build once per immutable corpus, never once per citation. Non-identifiers keep
+            # the literal regex path, including dotted config keys and policy spellings.
+            if getattr(self, "_identifiers", None) is None:
+                self._identifiers = {word for b in self.code.values() for word in IDENTIFIER.findall(b)}
+            hit = needle in self._identifiers
+        else:
+            pat = self._word(needle)
+            hit = any(pat.search(b) for b in self.code.values() if needle in b)
         self._memo[sym] = hit
         return hit
 
@@ -622,17 +634,18 @@ class Corpus:
         """
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
-        return None
+        if getattr(self, "_stub_sites", None) is None:
+            self._stub_sites = {}
+            for f, b in self.main.items():
+                lines = b.splitlines()
+                for n, line in enumerate(lines):
+                    names = DECLARATION.findall(line)
+                    if names and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        for name in names:
+                            # Preserve raw source, file order and the FIRST stub site;
+                            # an earlier non-stub declaration must not hide a later stub.
+                            self._stub_sites.setdefault(name, f"{f}:{n + 1}")
+        return self._stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -748,16 +761,18 @@ def money_path(root: pathlib.Path) -> list[str]:
 # `Corpus.resolve` proves a cited test class EXISTS. It cannot tell a green test from one that has
 # been red, skipped or deleted from the CI task for a month. The Test Intelligence run envelopes
 # can: a cited test class must have run, and run green, in the latest evidence for its component.
+VERIFIES_CITATION = re.compile(r"`verifies:([a-z0-9][a-z0-9-]*/[A-Za-z0-9][A-Za-z0-9._-]{0,63})`")
 TEST_CLASS = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)*[A-Z][A-Za-z0-9]*(?:Test|Tests|IT|Spec)$")
 
 
-def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None) -> dict[str, dict]:
+def load_evidence(paths: list[pathlib.Path], trusted_run: dict | None = None,
+                  workflow: str = "services-ci.yml") -> dict[str, dict]:
     """Validate producer envelopes against the independently selected scheduled-main run.
 
     The newest observation per component from that exact run/attempt wins. Other sources,
     malformed envelopes and unknown provenance cannot establish a green result.
     """
-    if not valid_evidence_run(trusted_run):
+    if not valid_evidence_run(trusted_run, workflow):
         return {}  # caller must supply independently selected scheduled-main run metadata
     collector = evidence_collector()
     newest: dict[str, tuple[object, dict]] = {}
@@ -815,7 +830,20 @@ def evidence_findings(root: pathlib.Path, services: list[str], corpus: "Corpus",
         for rid, _threat, mitig, kind in claims(path.read_text(encoding="utf-8")):
             if kind == "prose":
                 continue  # no row id to attribute a verdict to; the register rows are the claims
-            declared = ev["verifies"].get(f"{scope}/{rid}")
+            # An id the mitigation NAMES must have run green: unlike the row-id convention below,
+            # its absence is a finding, because the row says this test proves it.
+            named = sorted(set(VERIFIES_CITATION.findall(mitig)))
+            for vid in named:
+                judged += 1
+                states = ev["verifies"].get(vid)
+                if states is None:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites `verifies:{vid}`, which has no result in the latest {comp} run "
+                                     "(deleted, renamed or not executed)"))
+                elif states != {"passed"}:
+                    findings.append(("UNVERIFIED", svc, rid,
+                                     f"cites `verifies:{vid}`, whose latest result is {', '.join(sorted(states))}"))
+            declared = None if f"{scope}/{rid}" in named else ev["verifies"].get(f"{scope}/{rid}")
             if declared is not None:
                 judged += 1
                 if declared != {"passed"}:
@@ -861,13 +889,13 @@ def evidence_collector():
     return module
 
 
-def valid_evidence_run(run: dict | None) -> bool:
-    """Metadata from the trusted repository's scheduled Services CI API selection."""
+def valid_evidence_run(run: dict | None, workflow: str = "services-ci.yml") -> bool:
+    """Metadata from the trusted repository's scheduled API selection of `workflow`."""
     if not isinstance(run, dict):
         return False
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     return (run.get("event") == "schedule" and run.get("head_branch") == "main"
-            and run.get("path") == ".github/workflows/services-ci.yml"
+            and run.get("path") == f".github/workflows/{workflow}"
             and isinstance(run.get("repository"), dict)
             and run["repository"].get("full_name") == repo
             and isinstance(run.get("head_repository"), dict)
@@ -881,33 +909,49 @@ def valid_evidence_run(run: dict | None) -> bool:
             and run.get("status") == "completed")
 
 
-def fetch_latest_evidence(dest: pathlib.Path) -> tuple[list[pathlib.Path], dict | None]:
+def fetch_latest_evidence(dest: pathlib.Path, workflow: str = "services-ci.yml",
+                          artifact_prefix: str = "test-intelligence-run-") -> tuple[list[pathlib.Path], dict | None]:
     """Select the latest scheduled run regardless of result; never fall back to old green."""
     repo = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
     try:
         result = subprocess.run(
-            ["gh", "api", f"repos/{repo}/actions/workflows/services-ci.yml/runs?branch=main&event=schedule&per_page=1"],
+            ["gh", "api", f"repos/{repo}/actions/workflows/{workflow}/runs?branch=main&event=schedule&per_page=1"],
             capture_output=True, text=True, timeout=60, check=True)
         run = json.loads(result.stdout)["workflow_runs"][0]
-        if not valid_evidence_run(run):
+        if not valid_evidence_run(run, workflow):
             print("UNRESOLVED: newest scheduled run is pending or its provenance is invalid")
             return [], None
         print(f"Evidence source: run {run['id']} attempt {run['run_attempt']}, "
               f"commit {run['head_sha']}, conclusion {run.get('conclusion')}")
         listing = subprocess.run(
             ["gh", "api", f"repos/{repo}/actions/runs/{run['id']}/artifacts", "--paginate", "--jq",
-             '.artifacts[] | select(.expired == false and (.name | startswith("test-intelligence-run-"))) | .name'],
+             '.artifacts[] | select(.expired == false and (.name | startswith("' + artifact_prefix + '"))) | .name'],
             capture_output=True, text=True, timeout=120, check=True)
         from concurrent.futures import ThreadPoolExecutor
 
-        def pull(name: str) -> None:
-            if not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name):
-                raise ValueError("invalid artifact name")
-            subprocess.run(["gh", "run", "download", str(run["id"]), "-R", repo, "-n", name,
-                            "-D", str(dest / name)], capture_output=True, text=True, timeout=120, check=True)
+        names = listing.stdout.split()
+        if len(set(names)) != len(names) or any(
+                not re.fullmatch(r"test-intelligence-run-[A-Za-z0-9_-]+", name) for name in names):
+            raise ValueError("invalid or duplicate artifact name")
+
+        def pull(batch: list[str]) -> None:
+            # Each gh invocation lists the run's artifacts again. Partition the exact names
+            # among at most eight downloaders instead of repeating that listing per artifact.
+            # gh extracts multi-name downloads into name directories, single-name ones directly
+            # into -D. Preserve the original tree and the eight-transfer concurrency ceiling.
+            directory = dest / batch[0] if len(batch) == 1 else dest
+            command = ["gh", "run", "download", str(run["id"]), "-R", repo, "-D", str(directory)]
+            for name in batch:
+                command.extend(["-n", name])
+            subprocess.run(command, capture_output=True, text=True, timeout=120 * len(batch), check=True)
+            # gh can succeed when only some requested names remain available. An expired or
+            # missing artifact must invalidate the whole fetch, just as a failed individual pull.
+            if any(not (dest / name).is_dir() for name in batch):
+                raise ValueError("incomplete artifact download")
 
         with ThreadPoolExecutor(max_workers=8) as pool:
-            list(pool.map(pull, listing.stdout.split()))
+            workers = min(8, len(names))
+            list(pool.map(pull, [names[i::workers] for i in range(workers)]))
     except (OSError, subprocess.SubprocessError, ValueError, IndexError, KeyError, TypeError, AttributeError):
         return [], None
     return [dest], run
@@ -1162,6 +1206,47 @@ def self_test() -> int:
         case(label, stub_corpus.stub_site(symbol), expected)
         case(label + " on repeated lookup", stub_corpus.stub_site(symbol), expected)
 
+    # Differential checks against the original literal scans. The index must preserve both
+    # ASCII existence boundaries and Unicode declaration boundaries, not just ordinary Kotlin.
+    indexed = _FakeCorpus({"openbank-x/src/main/kotlin/Controls.kt":
+                           "// CommentOnlyControl\nclass RealControl\n"
+                           "val x = éUnicodeEdgeControlé + prefixSuffixControl + _HiddenControl\n"
+                           "val y = ASCII_Control + dotted.control.name + bracket[BracketControl]\n"})
+    for symbol in ["CommentOnlyControl", "RealControl", "UnicodeEdgeControl", "SuffixControl",
+                   "HiddenControl", "ASCII_Control", "dotted.control.name", "BracketControl",
+                   "AbsentControl", "éUnicodeEdgeControlé"]:
+        expected = any(Corpus._word(symbol).search(b) for b in indexed.code.values())
+        case("indexed existence matches literal scan: " + symbol, indexed.resolve(symbol), expected)
+
+    raw_sources = {
+        "first": "class RepeatedControl { }\n" + "\n" * STUB_WINDOW
+                 + "class RepeatedControl { // TODO\n}\n"
+                 + "// class CommentStubControl // FIXME\n"
+                 + "class fun OverlappingControl // not implemented\n"
+                 + "class UnicodeStubControlé // TODO\n"
+                 + "class OtherSuffixControl // TODO\n"
+                 + "class DottedControl.kt // TODO\n",
+        "second": "class RepeatedControl { // TODO\n}\nclass LaterControl // TODO\n",
+    }
+    indexed_stubs = Corpus.__new__(Corpus)
+    indexed_stubs.main, indexed_stubs._stub_memo = raw_sources, {}
+    for symbol in ["RepeatedControl", "CommentStubControl", "OverlappingControl",
+                   "UnicodeStubControl", "SuffixControl", "DottedControl.kt", "LaterControl",
+                   "MissingControl"]:
+        declaration = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(symbol) + r"\b")
+        expected_site = None
+        if CAMEL.match(symbol) or LOWERCAMEL.match(symbol):
+            for source, blob in raw_sources.items():
+                lines = blob.splitlines()
+                for n, line in enumerate(lines):
+                    if declaration.search(line) and STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
+                        expected_site = f"{source}:{n + 1}"
+                        break
+                if expected_site is not None:
+                    break
+        case("indexed stub matches literal scan: " + symbol,
+             indexed_stubs.stub_site(symbol), expected_site)
+
     # (4) DISCRIMINATION. The widening must not simply fail everything: the CORRECTED form of each
     #     red case has to come back clean, or the gate is a blanket and not a check.
     good = _FakeCorpus({"openbank-x/src/test/kotlin/C.kt": "class ClearingSecurityContractTest {",
@@ -1263,6 +1348,52 @@ def self_test() -> int:
                     "repository": {"full_name": "JiRaska/open-bank-oss"},
                     "head_repository": {"full_name": "JiRaska/open-bank-oss"},
                     "html_url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "status": "completed"}
+        # Exact-name batching must preserve completeness, failure and provenance semantics.
+        for count, fault in [(0, ""), (1, ""), (7, ""), (9, ""), (86, ""),
+                             (9, "missing"), (9, "download"), (9, "listing"),
+                             (9, "invalid"), (9, "duplicate"), (9, "pending")]:
+            names = [f"test-intelligence-run-{i}" for i in range(count)]
+            downloaded = []
+            selected = {**_trusted, "status": "in_progress"} if fault == "pending" else _trusted
+            with tempfile.TemporaryDirectory() as scratch:
+                destination = pathlib.Path(scratch)
+
+                def fake_gh(command, *, selected=selected, fault=fault, names=names,
+                            downloaded=downloaded, **kwargs):
+                    if command[1] == "api":
+                        if "workflows/" in command[2]:
+                            body = json.dumps({"workflow_runs": [selected]})
+                        else:
+                            if fault == "listing":
+                                raise subprocess.CalledProcessError(1, command)
+                            listed = names + (["../escape"] if fault == "invalid" else [])
+                            if fault == "duplicate":
+                                listed += names[:1]
+                            body = "\n".join(listed)
+                        return subprocess.CompletedProcess(command, 0, stdout=body)
+                    batch = [command[i + 1] for i, value in enumerate(command) if value == "-n"]
+                    downloaded.append(batch)
+                    if fault == "download":
+                        raise subprocess.CalledProcessError(1, command)
+                    target = pathlib.Path(command[command.index("-D") + 1])
+                    for name in batch:
+                        if fault == "missing" and name == names[0]:
+                            continue  # gh may exit zero on a partial name match
+                        (target / name if len(batch) > 1 else target).mkdir(parents=True, exist_ok=True)
+                    return subprocess.CompletedProcess(command, 0, stdout="")
+
+                with patch("subprocess.run", side_effect=fake_gh):
+                    fetched, metadata = fetch_latest_evidence(destination)
+                label = f"fetch batching: {count} artifacts {fault or 'complete'}"
+                if fault:
+                    case(label + " stays unresolved", (fetched, metadata), ([], None))
+                    if fault in {"listing", "invalid", "duplicate", "pending"}:
+                        case(label + " never downloads", downloaded, [])
+                else:
+                    case(label + " retains trusted run", (fetched, metadata), ([destination], _trusted))
+                    case(label + " fetches every exact name once",
+                         sorted(n for batch in downloaded for n in batch), sorted(names))
+                    case(label + " bounds listing repetitions", len(downloaded), min(8, count))
         def _env(seen, cases):
             return {"schemaVersion": 1, "component": "openbank-x", "run": {
                 "id": "1", "attempt": 1, "commit": "a" * 40, "branch": "main", "workflow": "Services CI",
@@ -1289,6 +1420,22 @@ def self_test() -> int:
         _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
         case("evidence: a declared verifies id is judged by its own tests",
              sorted({r for _k, _s, r, _d2 in _f}), ["T2", "T3", "T4"])
+        (_root / "docs" / "threat-models" / "openbank-x.md").write_text(
+            "| ID | Threat | Mitigation |\n|----|--------|------------|\n"
+            "| V1 | Replay | `verifies:x/E2E-green` asserts it |\n"
+            "| V2 | Bypass | `verifies:x/E2E-skipped` asserts it |\n"
+            "| V3 | Drift | `verifies:x/E2E-deleted` asserts it |\n", encoding="utf-8")
+        (_root / "ev" / "named.json").write_text(json.dumps(_env("2026-10-19T03:00:00Z", [
+            {"classname": "a.spec.ts", "state": "passed", "verifies": ["x/E2E-green"]},
+            {"classname": "a.spec.ts", "state": "skipped", "verifies": ["x/E2E-skipped"]}])))
+        _f, _n = evidence_findings(_root, ["openbank-x"], _corpus, load_evidence([_root / "ev"], _trusted))
+        case("evidence: a NAMED verifies id that is skipped or absent is UNVERIFIED; green is not",
+             sorted(r for _k, _s, r, _d2 in _f), ["V2", "V3"])
+        _other = dict(_trusted, path=".github/workflows/other.yml")
+        case("evidence: a run from another workflow cannot witness the selected source",
+             load_evidence([_root / "ev"], _other), {})
+        case("evidence: the named source accepts its own workflow",
+             sorted(load_evidence([_root / "ev"], _other, "other.yml")), ["openbank-x"])
 
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")

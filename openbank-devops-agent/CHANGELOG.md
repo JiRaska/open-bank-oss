@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.11.0...devops-agent-v0.12.0) (2026-11-08)
+
+
+### Features
+
+* **devops-agent:** retain idempotent CPU measurement advisories ([#15257](https://github.com/JiRaska/open-bank-oss/issues/15257)) ([9d795c2](https://github.com/JiRaska/open-bank-oss/commit/9d795c2ba8ac64ad1183cb58a191204e5d591b6d))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.10.0...devops-agent-v0.11.0) (2026-11-08)
+
+
+### Features
+
+* **devops-agent:** collect verified CI gate profiles in daily reports ([#15203](https://github.com/JiRaska/open-bank-oss/issues/15203)) ([2e500af](https://github.com/JiRaska/open-bank-oss/commit/2e500af2efc3229f6ed6845f55ae5a4310d9710e))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.9.0...devops-agent-v0.10.0) (2026-11-07)
+
+
+### Features
+
+* **devops-agent:** retain delivery shadow observations ([#15072](https://github.com/JiRaska/open-bank-oss/issues/15072)) ([e181fd7](https://github.com/JiRaska/open-bank-oss/commit/e181fd7567f4ff1d1e589d374dbfea22045c2b02))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/devops-agent-v0.8.4...devops-agent-v0.9.0) (2026-11-07)
 
 

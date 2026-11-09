@@ -43,9 +43,15 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      prs:
-        description: "Merged PR numbers to backfill and verify, comma separated (maximum 100)"
+      operation:
+        description: "Record evidence, read capabilities, or verify existing evidence without writing"
+        type: choice
+        options: [record, capabilities, verify-existing]
+        default: record
         required: true
+      prs:
+        description: "Merged PR numbers for record/verify-existing, comma separated (maximum 100); empty for capabilities"
+        required: false
         type: string
 
 permissions:
@@ -73,6 +79,25 @@ env:
   # runner), never interpolated into the script.
 
 jobs:
+  observe:
+    name: Read existing merge evidence
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
+      github.run_attempt == 1 &&
+      (inputs.operation == 'capabilities' || inputs.operation == 'verify-existing')
+    uses: ./.github/workflows/_read-agent-merge.yml
+    with:
+      operation: ${{ inputs.operation }}
+      prs: ${{ inputs.prs || '' }}
+    # Native secret inputs are masked before the worker's first runner headers.
+    # Caller workflow env is not propagated to a reusable workflow.
+    secrets:
+      agent_service_url: ${{ vars.AGENT_SERVICE_URL }}
+      recorder_issuer: ${{ vars.AGENT_MERGE_RECORDER_ISSUER }}
+      recorder_client_id: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_ID }}
+      recorder_client_secret: ${{ secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET }}
+
   record:
     name: record-agent-merge
     env:
@@ -83,10 +108,11 @@ jobs:
     # record, and the agent-authorship decision itself lives in the script (testable
     # Python, thin YAML — repo convention).
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      ((github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
        github.actor == github.repository_owner && github.triggering_actor == github.repository_owner &&
-       github.run_attempt == 1)
+       github.run_attempt == 1)) &&
+      (github.event_name != 'workflow_dispatch' || (inputs.operation || 'record') == 'record')
     # In-cluster ARC runner — the same lane as schema-registry-apply.yml (Apicurio),
     # _service-ci.yml's Pact Broker publish and audit-anchor-attestation.yml: only it
     # resolves the agent-service cluster-DNS name. ubuntu-latest would fail every POST
@@ -170,7 +196,7 @@ jobs:
     needs: record
     # The merge already happened (pull_request closed) — a red run + tracking issue is
     # the visible failure mode; it never blocks anything downstream.
-    if: ${{ failure() }}
+    if: ${{ failure() && (inputs.operation || 'record') == 'record' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

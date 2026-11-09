@@ -115,6 +115,8 @@ spec:
               secretName: rum-gateway-tls
         # OTLP-HTTP is exposed (mobile SDKs export OTLP/HTTP); gRPC is disabled.
         ports:
+          metrics:
+            enabled: true
           otlp:
             enabled: false
           otlp-http:
@@ -126,6 +128,8 @@ spec:
           jaeger-thrift: { enabled: false }
           jaeger-grpc: { enabled: false }
           zipkin: { enabled: false }
+        serviceMonitor:
+          enabled: true
         config:
           extensions:
             # Required by the chart (drives the liveness/readiness probes); a

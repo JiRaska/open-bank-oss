@@ -436,6 +436,30 @@ journeys:
       cluster network, and is tracked as the second phase of this journey, not a reason to
       leave the authenticated half unevidenced until then.
 
+  - id: admin-money-path-screens
+    title: "Every money-path admin screen, read-only, as a signed-in operator"
+    capability: >-
+      Least-privilege operators sign in through the deployed sandbox SSO and open each money-path
+      admin screen against real backends. A screen they may not see must refuse them. The lane
+      cannot write: a non-GET request to the app's own origin is aborted and fails the test.
+    status: active
+    covers:
+      - openbank-admin-ui
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-deployed-auth-gate.yml
+    workflow_name: Admin UI deployed auth-gate
+    browser_variants: [chromium]
+    schedule: "47 4 * * *"
+    environment: sandbox
+    falsification: >-
+      Make an admin-ui API route answer 5xx, break a screen so that it no longer renders a heading,
+      or grant the e2e operator a role it should not hold: the matching case must fail and retain
+      its immutable evidence envelope.
+    runtime_note: >-
+      Smoke depth: a screen renders and its same-origin API calls do not answer 5xx. It does not
+      assert the displayed values, and /treasury is only proven to refuse both operators.
+
   - id: fx-rates-customer-read
     title: "FX rate sheet, pair quote and ČNB reference through the public edge"
     capability: >-

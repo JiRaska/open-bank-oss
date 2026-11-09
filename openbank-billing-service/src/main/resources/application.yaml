@@ -233,7 +233,7 @@ openbank:
         mode: "${BILLING_PRODUCT_SHADOW_VERIFICATION_MODE:disabled}"
         key-id: "${BILLING_PRODUCT_SHADOW_VERIFICATION_KEY_ID:product-ir-publish}"
         openbao:
-          address: "${BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}"
+          address: "${BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS:https://openbao.vault.svc:8203}"
 
 "%dev":
   quarkus:

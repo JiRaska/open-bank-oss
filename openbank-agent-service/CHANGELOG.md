@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.1...agent-service-v1.33.0) (2026-11-08)
+
+
+### Features
+
+* **agent:** support governed chat explanations without tools ([#15232](https://github.com/JiRaska/open-bank-oss/issues/15232)) ([f28b1fa](https://github.com/JiRaska/open-bank-oss/commit/f28b1faff4b7012ec995c1f3932e554d168e2029))
+
 ## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.0...agent-service-v1.32.1) (2026-11-06)
 
 

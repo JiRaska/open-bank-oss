@@ -34,7 +34,7 @@ test('filters the live infrastructure map and keeps a DOWN state semantically ex
   await expect(page.getByRole('button', { name: 'ArgoCD' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'PostgreSQL' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'All' }).click()
+  await page.locator('main').getByRole('button', { name: 'All', exact: true }).click()
   await page.getByRole('button', { name: 'PostgreSQL' }).click()
 
   const details = page.getByRole('region', { name: 'Infrastructure component details' })

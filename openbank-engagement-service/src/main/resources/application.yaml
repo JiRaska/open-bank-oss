@@ -44,6 +44,9 @@ quarkus:
     level: INFO
 
 openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
   engagement:
     marketing-grantee: party-service:marketing-comms
     impression-budget-per-window: 1

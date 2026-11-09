@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator } from './helpers/auth'
 import { PERMISSIONS, ROLES } from '../src/lib/auth/roles'
 
@@ -9,6 +10,7 @@ test('settings exposes an incomplete read-only projection of every UI grant', as
   test.setTimeout(90_000)
   await signInAsOperator(context, baseURL!)
   await page.goto('/settings')
+  await waitForSettledShell(page)
   const preview = page.getByRole('region', { name: /UI access rule matrix|Matice přístupových pravidel UI/ })
   await expect(preview).toBeVisible()
   await expect(preview.getByRole('columnheader')).toHaveCount(Object.values(ROLES).length + 1)
@@ -38,8 +40,10 @@ for (const language of ['cs', 'en'] as const) {
   test(`access preview explains roles and permissions in ${language}`, async ({ page, context, baseURL }) => {
     await signInAsOperator(context, baseURL!)
     await page.goto('/settings')
+    await waitForSettledShell(page)
     const languageButton = page.getByRole('button', { name: language === 'cs' ? /EN: Switch to Czech/ : /CS: Přepnout na angličtinu/ })
     if (await languageButton.count()) await languageButton.click()
+    await expect(page.locator('html')).toHaveAttribute('lang', language)
     const preview = page.getByRole('region', { name: /UI access rule matrix|Matice přístupových pravidel UI/ })
     await page.getByLabel(/Find permission|Hledat oprávnění/).fill('Approve payment')
     await page.getByRole('combobox', { name: /^(Role)$/ }).selectOption('ROLE_ADMIN')
@@ -54,6 +58,7 @@ for (const language of ['cs', 'en'] as const) {
 test('matrix compares a custom role selection and keeps labels pinned while scrolling', async ({ page, context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
   await page.goto('/settings')
+  await waitForSettledShell(page)
   const matrix = page.getByRole('region', { name: /UI access rule matrix|Matice přístupových pravidel UI/ })
   await expect(matrix).toBeVisible()
   await page.getByText(/Choose roles to compare|Vybrat role k porovnání/).click()

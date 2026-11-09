@@ -23,6 +23,9 @@ labels:
   - name: merge-train
     color: "0e8a16"
     description: "Merge-train carrier PR (ADR-0343): verifies a batch as one tree; auto-closed, never merge."
+  - name: merge-train-stuck
+    color: "b60205"
+    description: "Tracking issue the merge train keeps: armed PRs it cannot serve until someone acts (ADR-0343)."
   # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
   - name: vex-triage
     color: "b60205"

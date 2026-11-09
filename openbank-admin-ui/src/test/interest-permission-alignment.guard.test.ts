@@ -21,7 +21,7 @@ describe('Interest console mirrors InterestResource accrual-read roles', () => {
 
   it('uses the same permission at the edge, navigation, and page boundary', () => {
     expect(permissionForPath('/interest')).toBe('interest:view')
-    expect(read('components/layout/Sidebar.tsx')).toMatch(/href: '\/interest'[\s\S]*permission: 'interest:view'/)
+    expect(read('lib/navigation/catalog.ts')).toMatch(/href: '\/interest'[\s\S]*permission: 'interest:view'/)
     expect(read('app/interest/page.tsx')).toContain('<AuthGuard permission="interest:view">')
   })
 })

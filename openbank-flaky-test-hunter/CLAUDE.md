@@ -9,15 +9,14 @@ Charter: ADR-0168, `openbank-libs/governance/agents.yaml` id `flaky-test-hunter`
   privacy-bounded projection of each component's evidence to
   `POST /api/v1/flaky-test-hunter/evidence/analyze`. `FlakyTestHunterService.analyze` turns it
   into findings (current and historical failures, missing evidence kinds, drift). That is the
-  single source of truth for the deployed agent.
-- **The static source scan (`TestScanAdapter`) has no input in the deployed pod.** It reads
+  source of truth for fleet execution evidence.
+- **The static source scan (`TestScanAdapter`) has a bounded deployed input.** It reads
   `*/src/test/kotlin` and `*/build/test-results` under `openbank.flaky-test-hunter.repo-root`
-  (default `.`), and the gitops manifest mounts no checkout and no artifacts. The weekly
-  `@Scheduled` sweep that drove it was removed on 2026-10-17: it had scanned an empty tree every
-  Sunday since the day it shipped, and an empty findings table reads as "nothing to act on".
-  The scan stays reachable through `POST /check/trigger` (operator) and the CI-failure webhook
-  for a checkout on a developer machine. Do not add the cron back without giving the pod a
-  checkout and the test-results artifacts first.
+  (default `.`). GitOps supplies only this module's test sources as a read-only sparse public-main
+  snapshot taken at pod startup, with its exact revision logged. It supplies no execution reports;
+  missing reports remain unknown, never zero executed tests. The operator and CI-failure webhook
+  can scan this snapshot; local checkouts can supply a wider source tree and JUnit reports.
+  No periodic fleet sweep is enabled. A source snapshot is not live fleet execution evidence.
 - `RunTrigger` has no scheduled value. The deprecated `SCHEDULED` was deleted on 2026-11-01,
   once the 168 h Temporal retention after the sweep removal had passed.
 

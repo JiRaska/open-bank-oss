@@ -38,7 +38,10 @@ concurrency:
 jobs:
   refresh-metadata:
     name: Refresh verification metadata
-    if: github.actor == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+    # Both the triggering actor AND the PR author must be Dependabot: a human pushing to a
+    # dependabot/* branch changes github.actor, and a same-repo PR authored by anyone else
+    # is excluded by the author check.
+    if: github.actor == 'dependabot[bot]' && github.event.pull_request.user.login == 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -52,8 +55,10 @@ jobs:
       # so stale metadata is a warning, not a merge blocker) rather than create the deadlock.
       - name: Detect refresh token
         id: tok
+        env:
+          METADATA_REFRESH_PAT: ${{ secrets.METADATA_REFRESH_PAT }}
         run: |
-          if [ -n "${{ secrets.METADATA_REFRESH_PAT }}" ]; then
+          if [ -n "${METADATA_REFRESH_PAT}" ]; then
             echo "have=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::METADATA_REFRESH_PAT not set — skipping metadata refresh (lenient verification means stale metadata only warns; a GITHUB_TOKEN push would deadlock auto-merge)."
@@ -65,7 +70,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.ref }}
-          token: ${{ secrets.METADATA_REFRESH_PAT }}
+          # The PR head's Gradle build runs next; do not leave the PAT in .git/config where
+          # build logic resolved from the bumped dependency graph could read it. The push
+          # step below supplies it for that one command only.
+          persist-credentials: false
 
       # No `cache: gradle`. That input produced `setup-java-Linux-x64-gradle`, a single 1181 MB
       # entry — 12% of the repo's 10 GB Actions-cache ceiling — for a job that runs only on a
@@ -101,6 +109,7 @@ jobs:
         if: steps.tok.outputs.have == 'true'
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          METADATA_REFRESH_PAT: ${{ secrets.METADATA_REFRESH_PAT }}
         run: |
           set -euo pipefail
           if git diff --quiet gradle/verification-metadata.xml; then
@@ -111,4 +120,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add gradle/verification-metadata.xml
           git commit -m "chore(deps): refresh dependency-verification metadata for this bump"
-          git push origin "HEAD:${HEAD_REF}"
+          AUTH_B64="$(printf 'x-access-token:%s' "${METADATA_REFRESH_PAT}" | base64 -w0)"
+          echo "::add-mask::${AUTH_B64}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_B64}" \
+            push origin "HEAD:refs/heads/${HEAD_REF}"

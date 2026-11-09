@@ -49,6 +49,11 @@ spec:
       failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 0.05"
       count: 5
       failureLimit: 1
+      # A query that cannot reach Prometheus is an Error, retried every 10s, and errors do not
+      # count toward `count`. The default limit (4) aborted kyc, ledger and lending on a
+      # Prometheus restart on 2026-11-06. 60 rides out ~10 min of monitoring outage; a real
+      # failureCondition still aborts on the first failed measurement.
+      consecutiveErrorLimit: 60
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc:9090
@@ -79,6 +84,11 @@ spec:
       failureCondition: "len(result) > 0 && !isNaN(result[0]) && result[0] >= 1.0"
       count: 5
       failureLimit: 1
+      # A query that cannot reach Prometheus is an Error, retried every 10s, and errors do not
+      # count toward `count`. The default limit (4) aborted kyc, ledger and lending on a
+      # Prometheus restart on 2026-11-06. 60 rides out ~10 min of monitoring outage; a real
+      # failureCondition still aborts on the first failed measurement.
+      consecutiveErrorLimit: 60
       provider:
         prometheus:
           address: http://kube-prometheus-stack-prometheus.observability.svc:9090

@@ -567,3 +567,10 @@ Rationale + what does *not* cover it: `rules.yaml: dependencies.pr_time_cve_gate
   `Dependency verification failed for configuration ...` on a cold `GRADLE_USER_HOME` (new runner,
   isolated cache, CodeQL's tracing build).
 
+
+- **`update-branch` refused on a conflict-free PR: look for a workflow file changed on BOTH sides.**
+  Merging such a file creates a blob equal to neither parent, and the train's App may not write it.
+  Separated 13 of 13 requests on 2026-11-05; workflow edits in different files on each side were all
+  served, so "the PR touches `.github/workflows`" is not the test. `git merge-tree` cannot see this,
+  because the merge is clean. The train now logs GitHub's answer, names the files in its comment, and
+  keeps a `merge-train-stuck` issue for notices older than 4 h.
