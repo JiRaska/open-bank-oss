@@ -141,7 +141,7 @@ class PaymentSessionStoreCrossReplicaTest {
 
     private companion object {
         // Same Valkey line the edge runs in the cluster (redis.yaml).
-        const val VALKEY_IMAGE = "docker.io/valkey/valkey:8.1.10-alpine"
+        const val VALKEY_IMAGE = "docker.io/valkey/valkey:9.1.3-alpine"
         const val REDIS_PORT = 6379
     }
 }
