@@ -9,7 +9,7 @@
 #   absence nobody notices.
 #
 # DERIVED SURFACES — edit this file, never them
-#   - docs/compliance/regulatory-obligations.md   (.github/scripts/gen-regulatory-obligations-doc.py)
+#   - docs/compliance/regulatory-obligations.md   (.github/scripts/check-regulatory-obligations.py --write)
 #   - openbank-admin-ui/regulatory-obligations.json (openbank-admin-ui/scripts/generate-regulatory-obligations.mjs)
 #   Enforced by gate `regulatory-obligations-register` (check-regulatory-obligations.py).
 #
