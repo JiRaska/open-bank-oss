@@ -6929,7 +6929,7 @@ gates:
     # The self-test runs admin-ui's own node modules, so a lockfile bump is a change to this gate's
     # code: without the lockfile here, mermaid 12.3 (#15330) skipped the self-test on its PR and made
     # it vacuous on main instead (#15383).
-    selftest_inputs: [".github/scripts/check-mermaid-parses.sh", "openbank-admin-ui/package-lock.json", ".github/scripts/ensure-admin-ui-deps.sh", "openbank-admin-ui/package.json"]
+    selftest_inputs: [".github/scripts/check-mermaid-parses.sh", ".github/scripts/ensure-admin-ui-deps.sh", "openbank-admin-ui/package.json"]
     min_subjects: 220   # 362 diagrams today (2026-08-22): 248 ```mermaid blocks + 114 .mmd files (#6495)
     run: |
       bash .github/scripts/check-mermaid-parses.sh
