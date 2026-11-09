@@ -11,8 +11,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 /*
- * Insured claims per depositor for the deposit-insurance payout (issue #15356; register rows
- * `gsft-depositor-data`, `gsft-test-delivery` in openbank-libs/governance/regulatory-obligations.yaml).
+ * Insured claims per depositor for the deposit-insurance payout (issue #15356; obligation
+ * rows `gsft-depositor-data` and `gsft-test-delivery` of the regulatory obligations register).
  *
  * WHY THIS IS A PURE FUNCTION OF ONE DAY
  *   The bank must hand GSFT the depositor data within 3 working days of the relevant day
