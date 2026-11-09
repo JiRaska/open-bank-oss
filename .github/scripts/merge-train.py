@@ -2903,6 +2903,18 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             stacked_steps = git("rev-list", "--reverse", "--first-parent", f"{chain[0]}..{sha}").stdout.split()
             if len(stacked_steps) != len(chain[1]):
                 problem = problem or "stacked chain does not match its members"
+            elif not problem:
+                # BEFORE any merge: the squash GitHub will make of each member (merge-tree of the member head
+                # over the tree before it) must be exactly the verified stacked step, or nothing merges.
+                why = stacked_squash_mismatch(gh, git, live_main, chain[1], stacked_steps)
+                if why:
+                    log(f"::warning::carrier #{carrier}: stacked, {why} — closed with no verdict, nothing merged, "
+                        f"nobody blamed")
+                    summary["inconclusive"].append(carrier)
+                    gh.close_carrier(carrier)
+                    Pusher(git, branch, gh.remote).delete()
+                    acted = True
+                    continue
         acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
@@ -2915,6 +2927,13 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     break
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
+                    break
+                if stacked_steps and not shadow and stacked_squash_mismatch(
+                        gh, git, expected, [(n, head)], [stacked_steps[i]]):
+                    # Re-predicted over the exact main this merge lands on: still the verified tree, or stop.
+                    log(f"::error::carrier #{carrier}: #{n}'s squash over main {expected[:12]} is not the verified "
+                        f"stacked tree — not merged, stopping")
+                    summary.setdefault("stack_tree_mismatch", []).append(n)
                     break
                 gh.post_status(head, "success", f"verified on train over main {chain[0][:12]}", source_number=n)
                 if shadow:
@@ -2931,8 +2950,12 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     # A fetch failure raises: fail closed, nothing further merges.
                     git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/stack-main")
                     if git.tree(merged) != git.tree(stacked_steps[i]):
+                        # Second line of defence only (the pre-check above should make this unreachable):
+                        # main moved to an unverified tree, so stop and raise an alert on main itself.
                         log(f"::error::carrier #{carrier}: main {merged[:12]} after #{n} is not the verified "
                             f"stacked tree — stopping")
+                        gh.post_status(merged, "failure", f"ALERT: tree after #{n} differs from stacked carrier "
+                                       f"#{carrier}'s verified tree", context=STACK_CONTEXT)
                         summary.setdefault("stack_tree_mismatch", []).append(n)
                         break
         elif not [c for c in failing if c not in main_red]:
@@ -3389,6 +3412,25 @@ def restack_chain(git, base: str, head: str, tip: str) -> tuple[str, str]:
     if git.special_entries(own) - git.special_entries(head):
         raise Reject("stacked tree contains a symlink/gitlink the holder does not", member_fault=False)
     return own, git.tree(own)
+
+
+def stacked_squash_mismatch(gh, git, main: str, members: list[tuple[int, str]], steps: list[str]) -> str | None:
+    """Why the squash merges GitHub will make would NOT reproduce the verified stacked trees, or None.
+    Execution-free: member i's squash over the tree before it is `git merge-tree --write-tree <before> <head>`
+    (git's own merge base, as GitHub's), required equal to tree(steps[i]); `main` is the first `before`, each
+    later one the previous verified step. Any fetch or merge-tree failure is a mismatch (fail closed)."""
+    before = main
+    for (n, head), step in zip(members, steps):
+        ref = f"refs/merge-train/stack-member-{n}"
+        if (git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:{ref}", check=False).returncode != 0
+                or git("rev-parse", ref, check=False).stdout.strip() != head):
+            return f"#{n}'s head could not be read at {head[:12]}"
+        r = git("merge-tree", "--write-tree", before, head, check=False)
+        tree = r.stdout.split()[0] if r.returncode == 0 and r.stdout.split() else ""
+        if not tree or tree != git.tree(step):
+            return f"#{n}'s squash over {before[:12]} is not the verified stacked tree"
+        before = step
+    return None
 
 
 def stack_verdict(gh, git, p: dict, live_main: str) -> tuple[str, str]:
@@ -4987,9 +5029,9 @@ def retry_planner_self_test(check) -> None:
 # post-merge tree check): spawns=15,550 at 594 cases before trimming two no-op ticks; ceiling 15,800.
 # Strict carrier serving order, workflow members and the refused push: spawns=15,928 at 605 cases; ceiling 16,200.
 # Speculative stacking (2026-11-09): the S1-S10 cases drive ~20 more settle/build/publish ticks. Measured on
-# the same machine, same day: origin/main 16,105 spawns at 653 cases, this change 17,093 at 670 (+988);
-# ceiling 17,500 (~2.4 % headroom), under the 18,534 that first overran the shard budget.
-SELF_TEST_SPAWN_CEILING = 17500
+# the same machine, same day: origin/main 16,105 spawns at 653 cases, this change 17,286 at 671 (+1,181);
+# ceiling 17,800 (~3 % headroom), under the 18,534 that first overran the shard budget.
+SELF_TEST_SPAWN_CEILING = 17800
 
 
 
@@ -7329,6 +7371,32 @@ def self_test() -> int:
             check("stacking (S6c): a holder disarmed while its stacked carrier waits voids the carrier, nobody blamed",
                   st == "published" and not open_carriers() and s["inconclusive"] and not blamed(1) and gh.merged == [],
                   f"st={st} {s}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S6d) the member's squash would NOT reproduce the verified stacked step (here the carrier's step
+            # carries an extra file, re-recorded as if publish had pushed it): checked BEFORE any merge, so the
+            # member never merges and nobody is blamed. Must-FAIL without the pre-merge check.
+            h, s, st = stacked_setup()
+            c = open_carriers()[0]
+            tip = c["head"]["sha"]
+            msg = gh.g("log", "-1", "--format=%B", tip).stdout.rstrip("\n")
+            gh.g("checkout", "-q", "-f", "--detach", tip)
+            pathlib.Path(origin, "docs", "unverified-extra.md").write_text("x\n")
+            gh.g("add", "docs/unverified-extra.md")
+            gh.g("commit", "-q", "--amend", "-m", msg)
+            forged = gh.g("rev-parse", "HEAD").stdout.strip()
+            gh.g("checkout", "-q", "-f", "main")
+            gh.g("update-ref", f"refs/heads/{c['head']['ref']}", forged)
+            c["head"]["sha"] = forged
+            gh.post_status(forged, "success", f"tree={Git(origin).tree(forged)}", context=RECORD_CONTEXT)
+            gh.post_status(forged, "success", f"stacked over {h} of #35", context=STACK_CONTEXT)
+            gh.head_checks.clear()
+            settle_now()                                     # the holder merges
+            s = settle_now()
+            check("stacking (S6d): a member whose squash differs from the verified stacked step is never merged",
+                  st == "published" and gh.merged == [35] and not open_carriers() and s["inconclusive"]
+                  and not blamed(1), f"st={st} {s} merged={gh.merged}")
             gh.head_checks.clear()
             reset()
 
