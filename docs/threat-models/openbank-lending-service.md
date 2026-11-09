@@ -1034,3 +1034,5 @@ explicit coverage boundary. An existing database's earlier unverified dates rema
 purged delivery history is never inferred from current loan balances or a successful sweep.
 The migration briefly excludes writers/retention while establishing this boundary; schedule it
 under the retained deployment hold. Rollback retains receipts, coverage and financial history.
+
+- **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.

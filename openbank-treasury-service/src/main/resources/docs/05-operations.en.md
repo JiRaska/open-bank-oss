@@ -205,3 +205,6 @@ Only a day with no due/historical job or unresolved financial work may be SKIPPE
 journals remain visible when accrual is off. Refresh includes the previous calendar month and
 unchanged source receipts keep their identity. Later work invalidates the frozen close proof.
 Keep deployment holds until the full live month and the bounded scan's production cost are reviewed.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.

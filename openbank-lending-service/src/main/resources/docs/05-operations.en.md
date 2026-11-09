@@ -185,3 +185,6 @@ earlier purged delivery history is unknown and cannot qualify. Fresh databases b
 coverage of their subsequently written facts. A reviewed cutover is required for legacy history.
 Rollback retains receipts, coverage and financial history. Keep the deployment hold and require
 a full live month plus production-volume scan timing before activation.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.

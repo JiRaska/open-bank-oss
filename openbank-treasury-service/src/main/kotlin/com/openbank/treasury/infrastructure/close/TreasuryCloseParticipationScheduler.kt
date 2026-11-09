@@ -115,17 +115,21 @@ class TreasuryCloseParticipationScheduler(
         val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return evidence.findBetween(from, to).flatMap { runs ->
-            evidence.inFlightBetween(from, to).flatMap { inFlight ->
-                Multi.createFrom().iterable(days)
-                    .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, inFlight) }
-                    .collect().asList()
-                    .flatMap { assembled ->
-                        Multi.createFrom().iterable(assembled.filterNotNull())
-                            .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                            .collect().asList()
-                    }
-                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+        return evidence.requiredJobs(from, to, days.associateWith { dueJobs() }).flatMap { required ->
+            evidence.findBetween(from, to).flatMap { runs ->
+                evidence.inFlightBetween(from, to).flatMap { inFlight ->
+                    Multi.createFrom().iterable(days)
+                        .onItem().transformToUniAndConcatenate { day ->
+                            assemble(day, runs, inFlight, required[day].orEmpty())
+                        }
+                        .collect().asList()
+                        .flatMap { assembled ->
+                            Multi.createFrom().iterable(assembled.filterNotNull())
+                                .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                                .collect().asList()
+                        }
+                        .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+                }
             }
         }
     }
@@ -134,11 +138,12 @@ class TreasuryCloseParticipationScheduler(
         day: LocalDate,
         runs: List<CloseJobRun>,
         inFlight: List<InFlightRun>,
+        required: Set<String>,
     ): Uni<CloseParticipationReport?> = evidence.postingsFor(day).flatMap { postings ->
         // The outbox hold and the DEAD check apply WHATEVER is due (#13882 review): settlements,
         // maturities and reversals post journals with the accrual switched off too.
         lifecycleGap(day, postings)?.let { return@flatMap Uni.createFrom().item(it) }
-        val due = dueJobs() + runs.filter { it.businessDate == day }.map { it.job } +
+        val due = required + runs.filter { it.businessDate == day }.map { it.job } +
             inFlight.filter { it.businessDate == day }.map { it.job }
         if (due.isEmpty()) return@flatMap Uni.createFrom().item(withoutDueJob(day, postings))
         val now = clock.instant()

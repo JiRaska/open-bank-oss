@@ -118,3 +118,6 @@ práce. Zaúčtované poplatky bez dokončeného zdrojového cyklu zůstávají 
 z trvalého stavu vyměřených poplatků, proto běžný úklid SENT outboxu důkaz nemaže. Obnovovací okno
 zahrnuje předchozí kalendářní měsíc a identita stejných podkladů se opakováním nemění. Hold zůstává
 do posouzení celého živého měsíce a provozní ceny širšího čtení.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.

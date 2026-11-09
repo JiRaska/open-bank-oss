@@ -179,3 +179,6 @@ následující pražský kalendářní den; dříve smazaná doručení jsou nez
 Nová databáze pokrývá skutečnosti zapsané od svého vzniku. Historie vyžaduje schválený přechod.
 Rollback zachovává potvrzení, pokrytí i účetní historii. Hold trvá do vyhodnocení celého živého
 měsíce a ceny čtení při skutečném objemu dat.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.

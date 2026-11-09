@@ -57,6 +57,14 @@ class TreasuryCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `an observed missing job stays required in a new reporter with scheduling off`() {
+        assertThat(report()!!.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(report(accrualEnabled = false)!!.outcome).isEqualTo(CloseOutcome.REFUSED)
+        ran()
+        assertThat(report(accrualEnabled = false)!!.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
     fun `a completed accrual reports the day RAN with the day's journals`() {
         ran()
         evidence.postings[DAY] = DayJournalPostings(journals = 5, pending = 0, dead = 0)

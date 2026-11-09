@@ -110,20 +110,27 @@ class BillingCloseParticipationScheduler(
         val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return evidence.findBetween(from, to).flatMap { runs ->
-            Multi.createFrom().iterable(days)
-                .onItem().transformToUniAndConcatenate { day -> assemble(day, runs) }
-                .collect().asList()
-                .flatMap { assembled ->
-                    Multi.createFrom().iterable(assembled.filterNotNull())
-                        .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                        .collect().asList()
-                }
-                .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+        val scheduled = days.associateWith { if (isDue(it)) setOf(BillingCloseJobs.CYCLE) else emptySet() }
+        return evidence.requiredJobs(from, to, scheduled).flatMap { required ->
+            evidence.findBetween(from, to).flatMap { runs ->
+                Multi.createFrom().iterable(days)
+                    .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, required[day].orEmpty()) }
+                    .collect().asList()
+                    .flatMap { assembled ->
+                        Multi.createFrom().iterable(assembled.filterNotNull())
+                            .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                            .collect().asList()
+                    }
+                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+            }
         }
     }
 
-    private fun assemble(day: LocalDate, runs: List<CloseJobRun>): Uni<CloseParticipationReport?> {
+    private fun assemble(
+        day: LocalDate,
+        runs: List<CloseJobRun>,
+        required: Set<String>,
+    ): Uni<CloseParticipationReport?> {
         val cycle = BillingCycleScheduler.cycleIdFor(day)
         val run = runs.firstOrNull { it.businessDate == day && it.job == BillingCloseJobs.CYCLE }
         return evidence.postingsFor(cycle).map { postings ->
@@ -148,7 +155,7 @@ class BillingCloseParticipationScheduler(
                 val cycleRecorded = runs.any {
                     it.job == BillingCloseJobs.CYCLE && BillingCycleScheduler.cycleIdFor(it.businessDate) == cycle
                 }
-                if (!isDue(day) && (cycleRecorded || postings.posted == 0)) {
+                if (required.isEmpty() && (cycleRecorded || postings.posted == 0)) {
                     return@map CloseParticipationAssembler.assemble(
                         day,
                         emptySet(),
@@ -158,7 +165,7 @@ class BillingCloseParticipationScheduler(
                 }
                 return@map CloseParticipationAssembler.incomplete(
                     day,
-                    if (isDue(day)) INCOMPLETE_CYCLE else UNOWNED_FEES,
+                    if (required.isNotEmpty()) INCOMPLETE_CYCLE else UNOWNED_FEES,
                     listOf(BillingCloseJobs.CYCLE, postings.toString()),
                 )
             }

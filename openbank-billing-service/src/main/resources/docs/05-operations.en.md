@@ -124,3 +124,6 @@ Completion reads durable assessed-fee posting states, so ordinary SENT outbox re
 erase its acknowledgement. The bounded recovery window includes the previous calendar month;
 source identities are stable across retries. Retain the deployment hold and observe a complete
 live month before reviewing enforcement, including the cost of the wider source scan.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.

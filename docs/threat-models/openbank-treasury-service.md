@@ -246,3 +246,5 @@ immediately preceding calendar month. Incomplete source work emits an attributab
 REFUSED receipt, revoking an earlier RAN even before any new journal exists. Recent closed days
 remain observable; later receipts invalidate monthly readiness and never rewrite at-close facts.
 The wider bounded scan requires production-volume timing before activation.
+
+- **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.

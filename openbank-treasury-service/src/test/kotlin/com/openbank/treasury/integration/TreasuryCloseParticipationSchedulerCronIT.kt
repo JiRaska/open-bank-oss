@@ -72,6 +72,22 @@ class TreasuryCloseParticipationSchedulerCronIT {
     lateinit var clock: Clock
 
     @Test
+    fun `observed obligations survive a later read without scheduling and create no completed run`() {
+        val day = java.time.LocalDate.of(2001, 1, 2)
+        io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.requiredJobs(day, day, mapOf(day to setOf("accrual")))
+        }
+        val retained = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.requiredJobs(day, day, emptyMap())
+        }
+        assertThat(retained[day]).containsExactly("accrual")
+        val completed = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            evidence.findBetween(day, day)
+        }
+        assertThat(completed).isEmpty()
+    }
+
+    @Test
     fun `the cron holds pending and in-flight days, reports refusals, and RAN once the event left`() {
         val today = AccountingClock.bank(clock).today()
         val pendingDay = today.minusDays(1)

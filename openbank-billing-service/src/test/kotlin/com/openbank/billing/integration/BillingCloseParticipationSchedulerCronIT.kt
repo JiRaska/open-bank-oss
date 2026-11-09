@@ -74,6 +74,22 @@ class BillingCloseParticipationSchedulerCronIT {
     lateinit var clock: Clock
 
     @Test
+    fun `observed obligations survive a later read without scheduling and create no completed run`() {
+        val day = java.time.LocalDate.of(2001, 1, 2)
+        io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, mapOf(day to setOf("cycle")))
+        }
+        val retained = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.requiredJobs(day, day, emptyMap())
+        }
+        assertThat(retained[day]).containsExactly("cycle")
+        val completed = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+            closeJobRuns.findBetween(day, day)
+        }
+        assertThat(completed).isEmpty()
+    }
+
+    @Test
     fun `the cron reports the cycle day RAN and the other days SKIPPED`() {
         val today = AccountingClock.bank(clock).today()
         // The most recent 1st strictly before today (the reporter only covers completed days).

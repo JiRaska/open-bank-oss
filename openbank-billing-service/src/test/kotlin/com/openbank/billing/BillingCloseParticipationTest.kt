@@ -45,6 +45,16 @@ class BillingCloseParticipationTest {
 
     private class Runs : CloseJobRunPort {
         val rows = linkedMapOf<Pair<LocalDate, String>, CloseJobRun>()
+        private val obligations = linkedMapOf<LocalDate, Set<String>>()
+        override fun requiredJobs(
+            from: LocalDate,
+            to: LocalDate,
+            scheduled: Map<LocalDate, Set<String>>,
+        ): Uni<Map<LocalDate, Set<String>>> {
+            scheduled.forEach { (day, jobs) -> obligations[day] = obligations[day].orEmpty() + jobs }
+            return Uni.createFrom().item(obligations.filterKeys { it in from..to })
+        }
+
         override fun record(run: CloseJobRun): Uni<Unit> {
             rows[run.businessDate to run.job] = run
             return Uni.createFrom().item(Unit)
@@ -97,6 +107,18 @@ class BillingCloseParticipationTest {
     }
 
     private fun reportFor(day: LocalDate) = delivered.single { it.businessDate == day }
+
+    @Test
+    fun `an observed missing job stays required in a new reporter with scheduling off`() {
+        reporter().reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        runs.record(CloseJobRun(cycleDay, BillingCloseJobs.CYCLE, 1, 0, 0, null, clock.instant()))
+            .await().indefinitely()
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.RAN)
+    }
 
     @Test
     fun `the cycle is due only on the day its cron fires, and never when the sweep is off`() {

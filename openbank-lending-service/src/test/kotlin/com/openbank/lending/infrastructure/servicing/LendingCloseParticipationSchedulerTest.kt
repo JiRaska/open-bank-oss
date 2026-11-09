@@ -96,6 +96,19 @@ class LendingCloseParticipationSchedulerTest {
     private fun reportFor(day: LocalDate) = delivered.single { it.businessDate == day }
 
     @Test
+    fun `an observed missing job stays required in a new reporter with scheduling off`() {
+        val day = today.minusDays(1)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 0)
+        scheduler().reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        scheduler(provisioningEvery = "off").reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 1, journals = 0)
+        scheduler(provisioningEvery = "off").reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
     fun `both interval jobs are due every day they are on`() {
         assertThat(scheduler().dueJobs())
             .containsExactlyInAnyOrder(LendingCloseJobs.ACCRUAL, LendingCloseJobs.PROVISIONING)

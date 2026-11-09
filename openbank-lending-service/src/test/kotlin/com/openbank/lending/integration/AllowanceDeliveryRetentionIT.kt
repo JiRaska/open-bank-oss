@@ -144,7 +144,10 @@ class AllowanceDeliveryRetentionIT {
     @Order(4)
     fun `actual V30 upgrades a populated V29 database without fabricating purged deliveries`() {
         sql(
-            "DROP TRIGGER record_lending_allowance_delivery ON lending_outbox; " +
+            // Reconstruct the actual V29 fixture, including removal of later additive observations.
+            "DROP TABLE lending_close_required_job; " +
+                "DELETE FROM flyway_schema_history WHERE version = '31'; " +
+                "DROP TRIGGER record_lending_allowance_delivery ON lending_outbox; " +
                 "DROP FUNCTION record_lending_allowance_delivery(); " +
                 "DROP INDEX idx_lending_allowance_outbox_date_status; " +
                 "DROP TABLE lending_allowance_delivery_receipts; " +
@@ -163,7 +166,7 @@ class AllowanceDeliveryRetentionIT {
 
         val migrated = Flyway.configure().dataSource(dataSource)
             .locations("filesystem:${Path.of("src/main/resources/db/migration").toAbsolutePath()}")
-            .validateOnMigrate(false).cleanDisabled(true).load().migrate()
+            .target("30").validateOnMigrate(false).cleanDisabled(true).load().migrate()
 
         assertThat(migrated.migrationsExecuted).isEqualTo(1)
         assertThat(scalar("SELECT starts_on FROM lending_allowance_receipt_coverage"))
