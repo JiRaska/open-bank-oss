@@ -19,7 +19,6 @@ import com.openbank.ledger.domain.model.requireValid
 import com.openbank.libs.security.sanitizeForLog
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
-import io.smallrye.config.ConfigMapping
 import io.smallrye.config.WithDefault
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
@@ -41,7 +40,6 @@ import java.time.LocalDate
  * The map key is the participant name a product service reports under; [Participant.principal] is
  * the ONE verified service-account allowed to report for it.
  */
-@ConfigMapping(prefix = "openbank.ledger.close")
 interface CloseParticipantsConfig {
 
     /**
@@ -129,6 +127,8 @@ class CloseParticipationService(
             reason = command.reason,
             by = command.callerPrincipal,
             guard = reportGuard(command.outcome),
+            exercisedJobs = command.exercisedJobs,
+            sourceRunId = command.sourceRunId,
         )
         if (record.outcome == ParticipationOutcome.WAIVED && command.outcome != ParticipationOutcome.WAIVED) {
             log.infof(
@@ -190,6 +190,8 @@ class CloseParticipationService(
         reason: String?,
         by: String,
         guard: AppendGuard,
+        exercisedJobs: Set<String> = emptySet(),
+        sourceRunId: String? = null,
     ): CloseParticipationRecord {
         require(reason == null || reason.codePointCount(0, reason.length) <= MAX_REASON_CODE_POINTS) {
             "reason must contain at most $MAX_REASON_CODE_POINTS Unicode characters"
@@ -205,6 +207,8 @@ class CloseParticipationService(
             // Placeholders: the repository seals the real instant and `late` under its lock.
             reportedAt = clock.instant(),
             late = false,
+            exercisedJobs = exercisedJobs,
+            sourceRunId = sourceRunId,
         )
         val saved = repository.appendGuarded(record, guard)
         // An existing WAIVED row was kept: nothing new was stored, so nothing is counted.

@@ -395,8 +395,59 @@ class AgentChatServiceTest {
 
         assertThat(result.reply).isEqualTo("The recorded test passed.")
         assertThat(result.toolCalls).isEmpty()
-        coVerify(exactly = 1) { gateway.complete(any(), match { it.tools.isEmpty() }, any(), any()) }
+        coVerify(exactly = 1) {
+            gateway.complete(any(), match { it.tools.isEmpty() && it.maxTokens == 2048 }, any(), any())
+        }
         coVerify(exactly = 1) { runAuditor.runCompleted(match { it.identity.agentId == "ui-assistant" }) }
+    }
+
+    @Test
+    fun `ordinary chat retains its existing bounded output budget`(): Unit = runBlocking {
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "Recorded result.", stopReason = StopReason.END, modelId = "mock-echo")
+
+        toolFreeService().chat(listOf(ChatMessage(ChatRole.USER, "Explain a unit test.")), null, null)
+
+        coVerify(exactly = 1) { gateway.complete(any(), match { it.maxTokens == 512 }, any(), any()) }
+    }
+
+    @Test
+    fun `a truncated tool-free response is unavailable and never exposes the partial text`(): Unit = runBlocking {
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "A sentence cut off mid", stopReason = StopReason.MAX_TOKENS, modelId = "mock-echo")
+
+        val result = toolFreeService().chat(
+            listOf(ChatMessage(ChatRole.USER, "Explain a unit test.")),
+            null,
+            null,
+            allowTools = false,
+        )
+
+        assertThat(result.unavailable).isTrue()
+        assertThat(result.reply).doesNotContain("A sentence cut off mid")
+        assertThat(result.toolCalls).isEmpty()
+        verify(exactly = 0) { registry.call(any(), any(), any()) }
+        coVerify(exactly = 1) {
+            runAuditor.runCompleted(match { it.result == AuditResult.FAILURE && it.detail == "model_output_truncated" })
+        }
+    }
+
+    @Test
+    fun `an empty tool-free response is an audited unavailable outcome`(): Unit = runBlocking {
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "", stopReason = StopReason.END, modelId = "mock-echo")
+
+        val result = toolFreeService().chat(
+            listOf(ChatMessage(ChatRole.USER, "Explain a unit test.")),
+            null,
+            null,
+            allowTools = false,
+        )
+
+        assertThat(result.unavailable).isTrue()
+        coVerify(exactly = 1) {
+            runAuditor.runCompleted(match { it.result == AuditResult.FAILURE && it.detail == "model_output_empty" })
+        }
     }
 
     @Test

@@ -384,3 +384,6 @@ reports/
 # jqwik stores its property-tries database in the working directory by default;
 # it is a local cache (like Gradle build state), never a deliverable.
 .jqwik-database
+
+# SDLC guide evidence derived from workflow and GitOps declarations at build time.
+openbank-admin-ui/sdlc-evidence.json

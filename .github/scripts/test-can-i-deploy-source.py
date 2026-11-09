@@ -194,7 +194,11 @@ svc=openbank-context-service
             ("schedule", "", "failure", "true", subset, True),
             ("workflow_dispatch", "true", "failure", "true", subset, True),
             ("workflow_dispatch", "true", "success", "true", built, True),
-            ("workflow_run", "", "failure", "true", subset, False),
+            # ADR-0368: a completed Services CI run deploys the verified subset even when
+            # can-i-deploy held back another service (the partial-success rule of #846).
+            ("workflow_run", "", "failure", "true", subset, True),
+            ("workflow_run", "", "failure", "true", "[]", False),
+            ("workflow_run", "", "failure", "", subset, False),
             ("workflow_run", "", "success", "true", subset, True),
             ("push", "", "success", "", "", True),
             ("workflow_dispatch", "false", "success", "", "", True),

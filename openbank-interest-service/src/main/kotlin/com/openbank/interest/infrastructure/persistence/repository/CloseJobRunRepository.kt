@@ -17,6 +17,32 @@ import java.time.ZoneOffset
 @ApplicationScoped
 class CloseJobRunRepository(private val sf: Mutiny.SessionFactory) : CloseJobRunPort {
 
+    override fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>> = sf.withTransaction { session ->
+        val observed = scheduled.flatMap { (day, jobs) -> jobs.sorted().map { day to it } }
+        observed.fold(Uni.createFrom().item(0)) { previous, (day, job) ->
+            previous.flatMap {
+                session.createNativeMutationQuery(
+                    "INSERT INTO interest_close_required_job (business_date, job) VALUES (:day, :job) " +
+                        "ON CONFLICT (business_date, job) DO NOTHING",
+                ).setParameter("day", day).setParameter("job", job).executeUpdate()
+            }
+        }.flatMap {
+            session.createNativeQuery<Array<Any?>>(
+                "SELECT business_date, job FROM interest_close_required_job " +
+                    "WHERE business_date BETWEEN :from AND :to " +
+                    "UNION SELECT business_date, job FROM interest_close_job_run " +
+                    "WHERE business_date BETWEEN :from AND :to ORDER BY business_date, job",
+            ).setParameter("from", from).setParameter("to", to).resultList
+        }
+    }.map { rows ->
+        rows.groupBy({ LocalDate.parse(it[0].toString()) }, { it[1] as String })
+            .mapValues { (_, jobs) -> jobs.toSet() }
+    }
+
     override fun record(run: CloseJobRun): Uni<Unit> = sf.withTransaction { s ->
         s.createNativeQuery<Int>(UPSERT_SQL)
             .setParameter(P_DATE, run.businessDate)
