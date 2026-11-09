@@ -9,6 +9,7 @@ import com.openbank.agent.application.AgentChatService
 import com.openbank.agent.application.ModelGateway
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
+import com.openbank.libs.domain.error.Unavailable
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -96,6 +97,9 @@ class ChatEndpoint {
             pageContext = request.context,
             allowTools = request.allowTools,
         )
+        if (!request.allowTools && outcome.unavailable) {
+            throw Unavailable("The explanation could not be completed. Please try again later.")
+        }
         ChatResponse(
             reply = outcome.reply,
             model = outcome.model,

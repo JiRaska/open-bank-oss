@@ -46,6 +46,9 @@ class PanacheTieOutRunRepository :
         it.accountsChecked = accountsChecked
         it.breaks = breaks
         it.errors = errors
+        it.startedAt = startedAt
+        it.journalCount = journalCount
+        it.journalFingerprint = journalFingerprint
     }
 
     private fun TieOutRunEntity.toDomain() = TieOutRunRecord(
@@ -56,5 +59,8 @@ class PanacheTieOutRunRepository :
         accountsChecked = accountsChecked,
         breaks = breaks,
         errors = errors,
+        startedAt = startedAt,
+        journalCount = journalCount,
+        journalFingerprint = journalFingerprint,
     )
 }

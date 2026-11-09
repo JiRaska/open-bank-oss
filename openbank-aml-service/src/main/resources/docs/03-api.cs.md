@@ -44,6 +44,11 @@ Pravidla:
 - Klíč je cachován v Redis. Replay se stejným klíčem vrátí cachovanou odpověď s hlavičkou `X-Idempotency-Replayed: true`.
 - Klíč je rovněž perzistován jako unikátní sloupec `idempotency_key` na řádku případu — opakovaný create znovu použije existující případ místo vytvoření duplikátu. (Onboarding konzument používá jako klíč `"<partyId>:CUSTOMER_ONBOARDING"`.)
 
+Klíče začínající `aml-` a končící `-FRAUD_REVIEW` jsou vyhrazené vlastní ověřené
+strojové identitě služby domestic-payment. Ostatní volající dostanou 403, i když jinak
+smějí zakládat AML případy nebo opakovat uloženou odpověď. Kontrola identity proběhne
+před rezervací či přehráním odpovědi v Redis; běžné klíče případů se chovají stejně jako dosud.
+
 ## Endpointy
 
 ### Založení AML případu
