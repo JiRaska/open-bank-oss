@@ -48,7 +48,14 @@ class CeuRegisterService(private val repository: CeuRegisterRepository) {
     ): CeuObservation {
         val start = repository.startOf(relationId) ?: return CeuObservation.UNPLACEABLE
         return record(
-            RegisterFact.RelationEnded(eventId, relationId, start.accountId, effectiveOn, recordedAt, synthetic),
+            RegisterFact.RelationEnded(
+                eventId,
+                relationId,
+                start.accountId,
+                effectiveOn,
+                recordedAt,
+                synthetic || start.synthetic,
+            ),
         )
     }
 
@@ -62,7 +69,13 @@ class CeuRegisterService(private val repository: CeuRegisterRepository) {
     ): CeuObservation {
         val start = repository.startOf(relationId) ?: return CeuObservation.UNPLACEABLE
         return record(
-            start.copy(eventId = eventId, effectiveOn = effectiveOn, recordedAt = recordedAt, synthetic = synthetic),
+            // A taint is never washed out: a reinstatement of a synthetic grant stays synthetic.
+            start.copy(
+                eventId = eventId,
+                effectiveOn = effectiveOn,
+                recordedAt = recordedAt,
+                synthetic = synthetic || start.synthetic,
+            ),
         )
     }
 }

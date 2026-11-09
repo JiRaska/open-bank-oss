@@ -154,6 +154,12 @@ data class RegisterSnapshot(
             val closedOn = mutableMapOf<UUID, LocalDate>()
             val relations = linkedMapOf<UUID, RegisterFact.RelationStarted>()
             var droppedRelations = 0
+            // A relation any of whose starts was tainted stays out, so a later untainted
+            // reinstatement cannot bring a synthetic grant back into the register.
+            val taintedRelations = visible.filterIsInstance<RegisterFact.RelationStarted>()
+                .filter { it.synthetic }
+                .map { it.relationId }
+                .toSet()
 
             visible.forEach { fact ->
                 if (fact.accountId in syntheticAccounts) return@forEach
@@ -161,7 +167,7 @@ data class RegisterSnapshot(
                     is RegisterFact.AccountOpened -> if (!fact.synthetic) opened.putIfAbsent(fact.accountId, fact)
                     is RegisterFact.AccountClosed -> closedOn[fact.accountId] = fact.effectiveOn
                     is RegisterFact.RelationStarted ->
-                        if (fact.synthetic || fact.partyId in syntheticParties) {
+                        if (fact.relationId in taintedRelations || fact.partyId in syntheticParties) {
                             droppedRelations++
                         } else {
                             relations[fact.relationId] = fact
