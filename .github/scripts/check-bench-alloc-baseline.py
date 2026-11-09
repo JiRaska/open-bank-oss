@@ -80,6 +80,8 @@ ABS_TOLERANCE_BYTES = 16.0
 # has a baseline entry is a finding, so it can only shrink by being noticed. Re-measure with
 # `-f 5` before adding to it; a sharp before/after difference is NOT bimodality.
 UNSTABLE: dict[str, str] = {
+    "com.openbank.libs.benchmarks.OutboxDispatchBench.concurrentReadyBatch":
+        "2026-11-09: five unchanged-source forks (SerialGC, 512 MiB, 3+3x1s) measured 11088 / 11088 / 11064 / 12664 / 12688 B/op; two allocation plateaus on the ready path. Runs and is reported, not compared.",
     "com.openbank.libs.benchmarks.MoneyBench.allocate":
         "2026-09-30: 1592 / 1680 / 1680 / 1680 B/op over four -f 1 runs, then 1680 / 1560 / 1680 with "
         "a 5-iteration warmup (7.7 % spread, no code change) — C2 escape analysis on the BigInteger "
@@ -210,6 +212,7 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
     findings: list[str] = []
     notices: list[str] = []
     base = set(baseline)
+    unstable_required = declared & set(UNSTABLE)
     for name in sorted(set(UNSTABLE) - declared):
         findings.append(f"{name}: UNSTABLE entry names no @Benchmark in {SOURCES} — remove it")
     for name in sorted(set(UNSTABLE) & base):
@@ -221,6 +224,8 @@ def compare(declared: set[str], baseline: dict[str, float], results: dict[str, f
         findings.append(f"{name}: stale baseline entry — no such @Benchmark in {SOURCES}")
     if results is None:
         return findings, notices
+    for name in sorted(unstable_required - set(results)):
+        findings.append(f"{name}: missing from the results — UNSTABLE benchmarks must still run and be reported")
     ran = set(results) - set(UNSTABLE)
     for name in sorted(set(UNSTABLE) & set(results)):
         notices.append(f"{name}: {results[name]:.1f} B/op reported, NOT compared (UNSTABLE: {UNSTABLE[name]})")
@@ -405,6 +410,8 @@ def _self_test() -> int:
     try:
         UNSTABLE[u] = "fixture: bimodal"
         unstable_cases = [
+            ("an UNSTABLE benchmark that did not run is red", ["alpha", "unstable"], {a: 1000.0},
+             {a: 1000.0}, 1, f"{u}: missing from the results"),
             ("an UNSTABLE benchmark 50 % over is not a finding", ["alpha", "unstable"], {a: 1000.0},
              {a: 1000.0, u: 3000.0}, 0, f"::notice::{u}: 3000.0 B/op reported, NOT compared"),
             ("an UNSTABLE entry naming no @Benchmark is red", ["alpha"], {a: 1000.0}, None, 1,
