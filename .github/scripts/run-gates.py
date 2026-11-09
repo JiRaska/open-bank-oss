@@ -68,6 +68,9 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import selftest_input_trace as sit  # noqa: E402  (sibling module; see its header)
+
 try:
     import yaml
 except ImportError:
@@ -391,6 +394,9 @@ class Result:
         # Wall time over budget while CPU was not: the runner was loaded, or the gate waited
         # on I/O. Reported (annotation + JSON), never a failure.
         self.wall_over_budget = False
+        # Repo files the traced self-test read without declaring them in `selftest_inputs`
+        # (selftest_input_trace.py), baselined ones included. None = not traced this run.
+        self.selftest_undeclared_reads = None
 
     @property
     def id(self):
@@ -429,7 +435,8 @@ def _read_streams(*files) -> str:
     return "".join(parts)
 
 
-def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: pathlib.Path = None):
+def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: pathlib.Path = None,
+         trace_file: str = None):
     env = dict(os.environ)
     for k, v in (extra_env or {}).items():
         env[k] = str(v)
@@ -455,7 +462,8 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
     err_f = tempfile.TemporaryFile()
     try:
         proc = subprocess.Popen(
-            ["bash", "-euo", "pipefail", "-c", cmd],
+            (sit.strace_argv(trace_file) if trace_file else [])
+            + ["bash", "-euo", "pipefail", "-c", cmd],
             cwd=cwd, env=env, stdout=out_f, stderr=err_f, stdin=subprocess.DEVNULL,
             start_new_session=True,  # own process group, so a timeout kills the whole tree
         )
@@ -525,6 +533,9 @@ UNIVERSAL_SELFTEST_INPUTS = (
     ".github/gates/gates.yaml",
     ".github/scripts/run-gates.py",
     ".github/scripts/gatelib.py",
+    # Decides whether a traced self-test passes (undeclared-input findings + its baseline).
+    ".github/scripts/selftest_input_trace.py",
+    ".github/gates/selftest-undeclared-inputs.baseline",
 )
 
 
@@ -585,6 +596,51 @@ def selftest_is_needed(gate, changed):
     return False, "no declared input changed on this pull request"
 
 
+def _trace_mode() -> str:
+    return os.environ.get(sit.TRACE_ENV, "").strip().lower()
+
+
+def _selftest_trace_file(gate):
+    """(trace_file or None, note). Tracing is opt-in via OB_SELFTEST_TRACE (CI sets `require`)."""
+    mode = _trace_mode()
+    if mode not in ("1", "true", "require") or not gate.get("selftest_inputs"):
+        return None, ""
+    ok, why = sit.strace_usable()
+    if not ok:
+        return None, (f"[run-gates] {sit.TRACE_ENV}={mode} but the self-test cannot be traced: "
+                      f"{why}. Undeclared self-test inputs are NOT being checked on this run.\n")
+    f = tempfile.NamedTemporaryFile(prefix="selftest-trace-", delete=False,
+                                    dir=os.environ.get("RUNNER_TEMP") or None)
+    f.close()
+    return f.name, ""
+
+
+_BASELINE_CACHE = {}
+
+
+def _judge_trace(gate, root: pathlib.Path, trace_file: str, r, buf) -> bool:
+    """True when the self-test read a repo file it neither declares nor has baselined."""
+    key = str(root)
+    if key not in _BASELINE_CACHE:
+        _BASELINE_CACHE[key] = sit.load_baseline(root)
+    entries = _BASELINE_CACHE[key].get(gate["id"], [])
+    new, based, stale = sit.analyse(trace_file, str(root), gate, entries)
+    r.selftest_undeclared_reads = sorted(new + based)
+    if stale:
+        buf.append("\n[run-gates] notice: baselined undeclared self-test input(s) not read on this "
+                   f"run (drop from {sit.BASELINE} if that holds on main): {', '.join(stale)}\n")
+    if not new:
+        return False
+    buf.append(
+        "\n[run-gates] this gate's self-test READ repo file(s) its `selftest_inputs` does not "
+        "declare:\n" + "".join(f"    {p}\n" for p in new)
+        + "A pull request changing one of them would SKIP this self-test, and the breakage would "
+        "surface on main instead (2026-11-09: mermaid-parses and admin-ui's package-lock.json). "
+        "Add them to `selftest_inputs` in gates.yaml (a directory prefix ending in `/` is fine).\n"
+    )
+    return True
+
+
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
@@ -614,6 +670,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
 
     t0 = time.monotonic()
     buf = []
+    undeclared_fail = False
 
     selftest = gate.get("selftest")
     needed, why = selftest_is_needed(gate, changed)
@@ -632,10 +689,26 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
         st0 = time.monotonic()
-        rc, out, cpu = _run(selftest, root, gate.get("env"), timeout, index)
-        r.cpu_seconds += cpu
-        r.selftest_seconds = time.monotonic() - st0
-        buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
+        trace_file, trace_note = _selftest_trace_file(gate)
+        if trace_note:
+            buf.append(trace_note)
+            if trace_file is None and _trace_mode() == "require":
+                r.status, r.failure_kind = "failed", "setup"
+                r.output = "".join(buf)
+                return r
+        try:
+            rc, out, cpu = _run(selftest, root, gate.get("env"), timeout, index, trace_file)
+            r.cpu_seconds += cpu
+            r.selftest_seconds = time.monotonic() - st0
+            buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
+            if trace_file and (rc == 0) == want_pass:
+                undeclared_fail = _judge_trace(gate, root, trace_file, r, buf)
+        finally:
+            if trace_file:
+                try:
+                    os.unlink(trace_file)
+                except OSError:
+                    pass
         if (rc == 0) != want_pass:
             r.status, r.failure_kind = "unfalsified", "unfalsified"
             buf.append(
@@ -696,6 +769,8 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             )
 
     r.seconds = time.monotonic() - t0
+    if undeclared_fail and rc == 0:
+        rc = 1
 
     # Budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s required
     # check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap, the total
@@ -880,6 +955,9 @@ def json_records(results) -> list[dict]:
             "cpu_seconds": round(r.cpu_seconds, 3),
             "wall_over_budget": r.wall_over_budget,
             "min_subjects": g.get("min_subjects"),
+            # Additive. Repo files the traced self-test read but did not declare (baselined
+            # ones included); null when this run did not trace it.
+            "selftest_undeclared_reads": r.selftest_undeclared_reads,
         })
     return out
 

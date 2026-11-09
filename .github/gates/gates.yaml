@@ -7245,6 +7245,24 @@ gates:
     run: |
       python3 .github/scripts/check-gate-selftest-declaration.py --enforce
 
+  # run-gates.py skips a self-test on a PR unless a declared `selftest_inputs` path changed, so an
+  # UNDECLARED input is a PR that skips the self-test it breaks: #15330 bumped admin-ui's lockfile,
+  # mermaid-parses' self-test runs those node modules, and main sat UNFALSIFIED for 85 min (#15386
+  # fixed that one by hand). Every traced self-test now fails on an undeclared read (the shards set
+  # OB_SELFTEST_TRACE=require); this gate keeps the ratchet baseline and that wiring honest.
+  - id: selftest-inputs-traced
+    name: "self-test reads are declared in selftest_inputs — traced, baseline ratchet (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A self-test that reads an undeclared repo file is skipped on the PR that changes that file and fails on main instead; tracing the reads makes the declaration checkable rather than remembered."
+    review_after: "2027-05-09"
+    budget_seconds: 30
+    min_subjects: 200   # 280 gates declare selftest_inputs on 2026-11-09
+    selftest: python3 .github/scripts/selftest_input_trace.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/selftest_input_trace.py --check
+
   # A rethrow only helps if the connector PARKS the record. SmallRye's default failure-strategy is
   # `fail`, which STOPS the channel — and before #5745 only 4 of the fleet's 44 incoming channels
   # configured a DLQ, so most of the #5698 sweep traded silent data loss for a wedged consumer while

@@ -1,0 +1,4 @@
+# Ratchet baseline for selftest_input_trace.py: repo files a gate's self-test READS (observed
+# under strace) without declaring them in its `selftest_inputs`. One `<gate-id> <path>` per
+# line; a path ending in `/` covers everything below it. NEW reads fail the gate's self-test;
+# remove a line by declaring the input (the `selftest-inputs-traced` gate then insists on it).
