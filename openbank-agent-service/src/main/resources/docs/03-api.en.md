@@ -196,3 +196,5 @@ foreign instruction — so an agent that reads only `isError` never takes a fail
 The restricted turn offers an empty tool set and rejects any unsolicited model tool call at the existing invocation boundary. It retains model routing, authorization, charter checks, rate limits, auditing and the kill switch. The response acknowledges `toolsRestricted: true`; clients must also require an empty `toolCalls` list before accepting an explanation. A rejected model tool request can therefore make the explanation unavailable without executing the tool.
 
 This supports read-only explanations of bounded retained test metadata. An explanation remains an interpretation, never a replacement for a recorded verdict or a release approval. Older servers do not advertise the capability, so a strict client must keep the evidence visible and mark explanation unavailable.
+
+Tool-free operator chat reserves up to 2,048 output tokens, including model reasoning. A reply stopped by the output limit or an empty completion is audited as unavailable and returns HTTP 503; partial explanations are never returned as a successful response. Ordinary chat retains its existing 512-token limit.

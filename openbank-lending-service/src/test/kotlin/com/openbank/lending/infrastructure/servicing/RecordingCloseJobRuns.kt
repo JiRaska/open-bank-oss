@@ -28,6 +28,16 @@ class RecordingCloseJobRuns : CloseJobRunPort {
     /** Every (day, job) ever marked started, in order — what a pass worked as of. */
     val started = mutableListOf<Pair<LocalDate, String>>()
 
+    private val obligations = linkedMapOf<LocalDate, Set<String>>()
+    override fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>> {
+        scheduled.forEach { (day, jobs) -> obligations[day] = obligations[day].orEmpty() + jobs }
+        return Uni.createFrom().item(obligations.filterKeys { it in from..to })
+    }
+
     override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> {
         inFlight[businessDate to job] = at
         started += businessDate to job
