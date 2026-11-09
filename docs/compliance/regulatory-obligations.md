@@ -342,9 +342,9 @@ Celkem povinností: **70**.
 
 ## Statistické výkaznictví
 
-### Měnová a finanční statistika bank (rozvahová statistika
+### Měnová a finanční statistika bank (rozvahová statistika, vklady)
 
-*Monetary and financial statistics (balance sheet* · `cnb-bank-statistics`
+*Monetary and financial statistics (balance sheet, deposits)* · `cnb-bank-statistics`
 
 - **Adresát:** Česká národní banka
 - **Právní základ:** zákon č. 6/1993 Sb. § 41; vyhláška ČNB o předkládání výkazů; nařízení ECB 2021/379
@@ -621,7 +621,7 @@ Celkem povinností: **70**.
 
 *Beneficial owner register discrepancy report* · `beneficial-owner-discrepancy`
 
-- **Adresát:** Soudy
+- **Adresát:** Soudy, exekutoři a orgány činné v trestním řízení
 - **Právní základ:** zákon č. 37/2021 Sb.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2021-37)
 - **Lhůta:** Při zjištění. *(NEOVĚŘENO)*
@@ -707,7 +707,7 @@ Celkem povinností: **70**.
 - **Použitelnost:** banka poskytuje služby kryptoaktiv podle MiCA
 - **Pokrytí:** `conditional` — jen za podmínky
 
-### Vlastní daňová přiznání banky (DPPO
+### Vlastní daňová přiznání banky (DPPO, DPH, mzdy)
 
 *Own corporate tax filings* · `fs-corporate-taxes`
 
@@ -734,11 +734,11 @@ Celkem povinností: **70**.
 - **Osobní údaje:** True
 - **Pokrytí:** `missing` — chybí
 
-### Součinnost exekutorům
+### Součinnost exekutorům, soudům a orgánům činným v trestním řízení
 
-*Court* · `court-executor-requests`
+*Court, bailiff and law-enforcement requests* · `court-executor-requests`
 
-- **Adresát:** Soudy
+- **Adresát:** Soudy, exekutoři a orgány činné v trestním řízení
 - **Právní základ:** zákon č. 120/2001 Sb. § 33; trestní řád § 8; zákon č. 21/1992 Sb. § 38
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2001-120)
 - **Lhůta:** Při žádosti; lhůty neověřeny. *(NEOVĚŘENO)*
@@ -750,7 +750,7 @@ Celkem povinností: **70**.
 
 *Social security and health insurer requests* · `social-body-requests`
 
-- **Adresát:** ČSSZ
+- **Adresát:** ČSSZ, zdravotní pojišťovny, úřady práce
 - **Právní základ:** zákony č. 582/1991 Sb., 592/1992 Sb., 111/2006 Sb.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1991-582)
 - **Lhůta:** Při žádosti. *(NEOVĚŘENO)*
@@ -758,9 +758,9 @@ Celkem povinností: **70**.
 - **Osobní údaje:** True
 - **Pokrytí:** `missing` — chybí
 
-### Oznámení ČNB (vedoucí osoby
+### Oznámení ČNB (vedoucí osoby, kvalifikované účasti, outsourcing)
 
-*Notifications to CNB (management* · `cnb-notifications`
+*Notifications to CNB (management, holdings, outsourcing)* · `cnb-notifications`
 
 - **Adresát:** Česká národní banka
 - **Právní základ:** zákon č. 21/1992 Sb.; EBA GL o outsourcingu

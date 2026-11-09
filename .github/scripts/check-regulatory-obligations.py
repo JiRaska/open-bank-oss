@@ -31,6 +31,29 @@ REGISTER = Path("openbank-libs/governance/regulatory-obligations.yaml")
 CATALOG = Path("openbank-admin-ui/src/app/regulatory/page.tsx")
 DOC = Path("docs/compliance/regulatory-obligations.md")
 
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """PyYAML keeps the LAST of a repeated key and says nothing. In this register that happens
+    whenever an unquoted flow value contains a comma (`{ cs: A, B, en: C }`), so a name is
+    silently truncated. Fail instead."""
+
+
+def _construct_unique(loader, node, deep=False):
+    keys = set()
+    for k, _ in node.value:
+        key = loader.construct_object(k, deep=deep)
+        if key in keys:
+            raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r} (unquoted comma?)", k.start_mark)
+        keys.add(key)
+    return loader.construct_mapping(node, deep=deep)
+
+
+_UniqueKeyLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique)
+
+
+def load_register(text: str) -> dict:
+    return yaml.load(text, Loader=_UniqueKeyLoader)  # noqa: S506 — SafeLoader subclass
+
 STATUS_LABEL = {
     "filed-return": "výkaz v katalogu, počítá backend",
     "bff-only": "výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367)",
@@ -189,7 +212,11 @@ def render(reg: dict) -> str:
 
 
 def run(root: Path, write: bool) -> int:
-    reg = yaml.safe_load((root / REGISTER).read_text(encoding="utf-8"))
+    try:
+        reg = load_register((root / REGISTER).read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        print(f"::error::{REGISTER}: {exc}")
+        return 1
     errs = validate(root, reg)
     doc = render(reg)
     if write:
@@ -243,7 +270,17 @@ def self_test() -> int:
     def bad_status(r): r["obligations"][0]["coverage"]["status"] = "done"
     def unknown_report(r): r["obligations"][0]["coverage"]["reports"] = ["nope"]
     def missing_with_report(r): r["obligations"][0]["coverage"]["status"] = "missing"
+    def dup_key_rejected() -> bool:
+        try:
+            load_register("x: { cs: A (p, q), en: B (p, q) }\n")
+        except yaml.YAMLError:
+            print("self-test PASS: unquoted comma in a flow map (duplicate key) is rejected")
+            return True
+        print("self-test FAIL: duplicate key accepted")
+        return False
+
     results = [
+        dup_key_rejected(),
         case(lambda r: None, catalog, True, "clean register passes"),
         case(no_law, catalog, False, "obligation without legal source is rejected"),
         case(bad_status, catalog, False, "unknown status is rejected"),

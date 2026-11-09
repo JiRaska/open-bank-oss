@@ -47,8 +47,8 @@ authorities:
   uoou: { cs: Úřad pro ochranu osobních údajů, en: Office for Personal Data Protection, url: https://uoou.gov.cz/ }
   nukib: { cs: Národní úřad pro kybernetickou a informační bezpečnost, en: National Cyber and Information Security Agency, url: https://nukib.gov.cz/ }
   csu: { cs: Český statistický úřad, en: Czech Statistical Office, url: https://csu.gov.cz/ }
-  courts: { cs: Soudy, exekutoři a orgány činné v trestním řízení, en: Courts, bailiffs and law enforcement, url: null }
-  social: { cs: ČSSZ, zdravotní pojišťovny, úřady práce, en: Social security, health insurers, labour offices, url: null }
+  courts: { cs: "Soudy, exekutoři a orgány činné v trestním řízení", en: "Courts, bailiffs and law enforcement", url: null }
+  social: { cs: "ČSSZ, zdravotní pojišťovny, úřady práce", en: "Social security, health insurers, labour offices", url: null }
   trade-repository: { cs: Registr obchodních údajů, en: Trade repository, url: null }
   public: { cs: Veřejnost a klienti, en: Public and clients, url: null }
 
@@ -439,7 +439,7 @@ obligations:
   # ── Statistical ────────────────────────────────────────────────────────────────────────────
   - id: cnb-bank-statistics
     area: statistics
-    name: { cs: Měnová a finanční statistika bank (rozvahová statistika, vklady), en: Monetary and financial statistics (balance sheet, deposits) }
+    name: { cs: "Měnová a finanční statistika bank (rozvahová statistika, vklady)", en: "Monetary and financial statistics (balance sheet, deposits)" }
     authority: cnb
     legal_basis: zákon č. 6/1993 Sb. § 41; vyhláška ČNB o předkládání výkazů; nařízení ECB 2021/379
     sources:
@@ -887,7 +887,7 @@ obligations:
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: fs-corporate-taxes
     area: tax
-    name: { cs: Vlastní daňová přiznání banky (DPPO, DPH, mzdy), en: Own corporate tax filings }
+    name: { cs: "Vlastní daňová přiznání banky (DPPO, DPH, mzdy)", en: Own corporate tax filings }
     authority: fs
     legal_basis: zákony č. 586/1992 Sb., 235/2004 Sb., 280/2009 Sb.
     sources:
@@ -920,7 +920,7 @@ obligations:
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: court-executor-requests
     area: requests
-    name: { cs: Součinnost exekutorům, soudům a orgánům činným v trestním řízení, en: Court, bailiff and law-enforcement requests }
+    name: { cs: "Součinnost exekutorům, soudům a orgánům činným v trestním řízení", en: "Court, bailiff and law-enforcement requests" }
     authority: courts
     legal_basis: zákon č. 120/2001 Sb. § 33; trestní řád § 8; zákon č. 21/1992 Sb. § 38
     sources:
@@ -950,7 +950,7 @@ obligations:
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-notifications
     area: requests
-    name: { cs: Oznámení ČNB (vedoucí osoby, kvalifikované účasti, outsourcing), en: Notifications to CNB (management, holdings, outsourcing) }
+    name: { cs: "Oznámení ČNB (vedoucí osoby, kvalifikované účasti, outsourcing)", en: "Notifications to CNB (management, holdings, outsourcing)" }
     authority: cnb
     legal_basis: zákon č. 21/1992 Sb.; EBA GL o outsourcingu
     sources:

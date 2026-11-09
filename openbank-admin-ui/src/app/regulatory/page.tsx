@@ -598,6 +598,10 @@ export default function RegulatoryPage() {
         <Link href="/regulatory/statutory-returns" className="btn btn-secondary">
           {t('Statutární výkazy a termíny', 'Statutory returns and deadlines')}
         </Link>
+        {' '}
+        <Link href="/regulatory/obligations" className="btn btn-secondary">
+          {t('Regulatorní povinnosti a jejich zdroje', 'Regulatory obligations and their sources')}
+        </Link>
       </p>
 
       {/* Summary */}
@@ -687,7 +691,7 @@ export default function RegulatoryPage() {
           const cfg = DATA_SOURCE_CONFIG[source]
           const isSelected = selected === report.id
           return (
-            <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
+            <div key={report.id} id={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.border}` }}>
               <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
                 <button type="button" aria-expanded={isSelected} aria-controls={`regulatory-report-${report.id}`}
                   aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
