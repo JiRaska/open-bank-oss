@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { createHash } from 'node:crypto'
-import { workspaceCase } from '../../e2e/fixtures/test-intelligence-workspace'
+import { workspaceCase, workspaceReport } from '../../e2e/fixtures/test-intelligence-workspace'
 import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES } from '@/lib/evidence/testIntelligenceSnapshot'
 vi.mock('server-only', () => ({}))
 
@@ -21,6 +21,30 @@ afterEach(() => {
 })
 
 describe('GET /api/test-intelligence', () => {
+  it('serves bounded views with snapshot binding while retaining the full default contract', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-views-'))
+    dirs.push(dir)
+    const file = path.join(dir, 'report.json')
+    const report = workspaceReport({ collectedAt: new Date().toISOString() })
+    writeFileSync(file, JSON.stringify(report))
+    process.env.OPENBANK_TEST_INTELLIGENCE = file
+    const { GET } = await import('@/app/api/test-intelligence/route')
+    const get = (query: string) => GET(new Request(`http://admin.test/api/test-intelligence${query}`))
+    const overview = await (await get('?view=overview')).json()
+    expect(overview.view).toBe('overview')
+    expect(overview).not.toHaveProperty('testCases')
+    expect(overview.components[0].cells.unit.state).toBe('passed')
+    const list = await (await get(`?view=component&component=${workspaceCase.component}&collectedAt=${encodeURIComponent(report.collectedAt)}`)).json()
+    expect(list.tests).toHaveLength(1)
+    expect(list.tests[0]).not.toHaveProperty('recentRuns')
+    expect(list.tests[0]).not.toHaveProperty('lastRun')
+    const detail = await (await get(`?view=case&component=${workspaceCase.component}&fingerprint=${workspaceCase.fingerprint}`)).json()
+    expect(detail.testCase).toEqual(workspaceCase)
+    expect((await get(`?view=case&component=${workspaceCase.component}&fingerprint=${workspaceCase.fingerprint}&collectedAt=2000-01-01T00:00:00Z`)).status).toBe(409)
+    expect((await get('?view=component&component=../invalid')).status).toBe(400)
+    expect((await (await get('')).json()).testCases).toEqual([workspaceCase])
+  })
+
   it('projects retained browser verdicts into required controls without Prometheus', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'test-intelligence-browser-control-'))
     dirs.push(dir)
@@ -129,6 +153,15 @@ describe('GET /api/test-intelligence', () => {
     expect(body.testCases).toHaveLength(2000)
     const { readTestExplanationSource } = await import('@/lib/evidence/testExplanationSource')
     expect((await readTestExplanationSource())?.testCases).toHaveLength(2000)
+    // Overview and AI reuse the already validated immutable source, not another download.
+    const overviewResponse = await GET(new Request('http://admin.test/api/test-intelligence?view=overview'))
+    const overview = await overviewResponse.json()
+    expect(overview).not.toHaveProperty('testCases')
+    expect(Buffer.byteLength(JSON.stringify(overview))).toBeLessThan(64 * 1024)
+    const unchanged = await GET(new Request('http://admin.test/api/test-intelligence?view=overview', { headers: { 'if-none-match': overviewResponse.headers.get('etag')! } }))
+    expect(unchanged.status).toBe(304)
+    expect(await unchanged.text()).toBe('')
+    expect(fetch).toHaveBeenCalledTimes(2)
     expect(body.evidence).toMatchObject({
       source: 'published-snapshot',
       dataset: { status: 'ready', sourceSha, runId: 123, runAttempt: 1, snapshot: snapshotKey, sha256, collectedAt },

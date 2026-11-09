@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 import { expect, test } from '@playwright/test'
+import { parseTestReadRequest, selectTestReadView } from '../src/lib/test-intelligence-delivery'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 import { workspaceReport, workspaceObservedAt } from './fixtures/test-intelligence-workspace'
 
 test.beforeEach(async ({ context, baseURL, page }) => {
   await signInAsOperator(context, baseURL!)
-  await page.route('**/api/test-intelligence', route => route.fulfill({ json: workspaceReport() }))
+  await page.route(/\/api\/test-intelligence(?:\?.*)?$/, route => {
+    const request = parseTestReadRequest(new URL(route.request().url()).searchParams)
+    if (!request) return route.fulfill({ status: 400, json: { error: 'invalid_query' } })
+    const selected = selectTestReadView(workspaceReport(), request)
+    return selected.ok ? route.fulfill({ json: selected.value }) : route.fulfill({ status: selected.status, json: { error: selected.error } })
+  })
   await page.route('**/api/catalog/services', route => route.fulfill({ json: { services: [] } }))
 })
 
 test('puts a grouped matrix first and opens an attributable test in two clicks', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1366, height: 768 })
+  const reads: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/test-intelligence') reads.push(request.url()) })
   let explanations = 0
   await page.route('**/api/test-intelligence/explain', route => {
     explanations++
@@ -26,6 +34,7 @@ test('puts a grouped matrix first and opens an attributable test in two clicks',
   expect(bounds!.y).toBeLessThan(600)
   await expect(page.getByText('Run summaries and cross-layer maps')).not.toBeVisible()
   expect(explanations).toBe(0)
+  expect(reads.every(url => new URL(url).searchParams.get('view') === 'overview')).toBe(true)
   await matrix.getByRole('button', { name: 'account · Logic · Passed', exact: true }).click()
   await page.getByRole('button', { name: 'rejects duplicate requests', exact: true }).click()
   const detail = page.getByRole('region', { name: 'Understand this test' })
@@ -33,6 +42,9 @@ test('puts a grouped matrix first and opens an attributable test in two clicks',
   await expect(detail.getByRole('link', { name: /Open this test’s exact run/ })).toHaveAttribute('href', /\/runs\/101$/)
   await expect(detail.getByRole('link', { name: 'Test definition at the tested commit' })).toHaveAttribute('href', /\/blob\/a{40}\//)
   await expect(page).toHaveURL(/test=case-1/)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'component')).toBe(true)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'case')).toBe(true)
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'full')).toBe(false)
   expect(explanations).toBe(0)
   await detail.getByRole('button', { name: 'Explain this result with AI' }).click()
   await page.screenshot({ path: testInfo.outputPath('test-detail.png') })
@@ -65,5 +77,37 @@ test('keeps navigation and the matrix usable on a phone without page overflow', 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   await page.getByRole('button', { name: 'Needs attention', exact: true }).click()
   await expect(page.getByRole('button', { name: 'openbank-account-service', exact: true })).toBeVisible()
+  expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])
+})
+
+test('expert matrix retains precise evidence, deep links and filters across testcase drilldown', async ({ page }, testInfo) => {
+  const reads: string[] = []
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/test-intelligence') reads.push(request.url()) })
+  await page.goto('/system/tests')
+  await expect(page.getByRole('region', { name: 'Component evidence matrix' })).toBeVisible()
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'full')).toBe(false)
+  await page.getByRole('button', { name: 'Expert', exact: true }).click()
+  const matrix = page.getByRole('region', { name: 'Expert component evidence matrix', exact: true })
+  await expect(matrix).toBeVisible()
+  expect(reads.some(url => new URL(url).searchParams.get('view') === 'full')).toBe(true)
+  await matrix.getByRole('textbox', { name: 'Find a component' }).fill('account')
+  await matrix.getByRole('button', { name: 'openbank-account-service · Logic · Passed', exact: true }).click()
+  await expect(matrix.getByRole('link', { name: /Exact evidence run/ })).toHaveAttribute('href', /\/runs\/202$/)
+  await page.screenshot({ path: testInfo.outputPath('expert-desktop.png') })
+  expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])
+  await matrix.getByRole('button', { name: 'rejects duplicate requests', exact: true }).click()
+  const detail = page.getByRole('region', { name: 'Understand this test' })
+  await expect(detail).toBeVisible()
+  await expect(detail.getByRole('link', { name: /Open this test’s exact run/ })).toHaveAttribute('href', /\/runs\/101$/)
+  await expect(page).toHaveURL(/section=expert/)
+  await expect(page).toHaveURL(/expertQuery=account/)
+  await page.goBack()
+  await expect(matrix.getByRole('textbox', { name: 'Find a component' })).toHaveValue('account')
+  await expect(matrix.getByRole('link', { name: /Exact evidence run/ })).toBeVisible()
+  await page.reload()
+  await expect(matrix.getByRole('link', { name: /Exact evidence run/ })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('expert-mobile.png') })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
   expect((await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations).toEqual([])
 })

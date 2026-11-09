@@ -927,9 +927,17 @@ jobs:
       # action the `trivy` job in security.yml already relies on for this exact
       # hosted-runner scenario.
       - name: Install Trivy
+        id: install-trivy
+        continue-on-error: true
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
+
+      - name: Retry checksum-verified Trivy release installation
+        if: steps.install-trivy.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/install-trivy-release-fallback.sh
 
       - name: Prune Docker build cache before scan
         run: |
