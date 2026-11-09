@@ -108,10 +108,7 @@ NON_MODULE_IMAGES = {
 # real OPA decisions (403 for any action lacking a rule). That needs would-deny evidence from an
 # advisory window first. Stale in BOTH directions, like NON_MODULE_IMAGES: an entry whose service
 # now wires a bean (or no longer has a sidecar) is an error, so this cannot become a permanent list.
-PDP_BEAN_PENDING = {
-    "tax-reporting-service": "AUTHZ_ENFORCE=true in gitops; enabling the producer turns the 503 "
-                             "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
-}
+PDP_BEAN_PENDING: dict[str, str] = {}
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
 # `@Authorize` as an annotation use-site: the identifier must not be part of a longer word
