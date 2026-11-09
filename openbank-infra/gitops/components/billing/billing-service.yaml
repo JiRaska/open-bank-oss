@@ -36,7 +36,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-billing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b2dc71d3d3fafd3d"
+        openbank.tech/policy-checksum: "2630951de7b1b995"
     spec:
       # ADR-0352: a dedicated ServiceAccount so OpenBao's kubernetes-auth role binds to THIS
       # workload, not to every pod running as `default` in the namespace.
@@ -64,10 +64,12 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             # ADR-0352 phase 3: the product-IR shadow verifies revision signatures with OpenBao Transit
             # `verify`. Declared here so gen-network-policies.py derives the billing -> vault:8203 edge.
-            # Verification stays at the application default `disabled` (nothing compared, counted) until
-            # billing's verify-only role exists; then set BILLING_PRODUCT_SHADOW_VERIFICATION_MODE=openbao.
+            # MODE=openbao verifies through billing's verify-only role (runbook 0027); the application
+            # default `disabled` compares nothing and counts verification_disabled.
             # OpenBao's TLS listener (8203, private CA openbank-ca); 8200 stays plaintext for
             # ESO and the in-namespace jobs. The CA comes from billing-openbao-client-tls.
+            - name: BILLING_PRODUCT_SHADOW_VERIFICATION_MODE
+              value: openbao
             - name: BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_ADDRESS
               value: https://openbao.vault.svc:8203
             - name: OPENBANK_BILLING_PRODUCT_SHADOW_VERIFICATION_OPENBAO_CA_FILE

@@ -23,7 +23,7 @@ info:
     NBA ranking — content returns in catalogue order until ADR-0201's model graduates from shadow
     (D5). The customer app reaches these endpoints only through customer-edge, whose narrowly
     scoped M2M policy injects the authoritative party id.
-  version: 1.8.0
+  version: 1.9.0
 tags:
   - name: Surfaces
   - name: Eligibility
@@ -58,6 +58,25 @@ paths:
         '401': {description: Authentication required}
         '403': {description: Admin role required}
         '409': {description: Revision changed; reload before saving}
+  /api/v1/game/admin/drafts:
+    put:
+      operationId: updateGameDraftCatalog
+      summary: Marketing edits only OFF and BETA chapters; every LIVE chapter must remain identical
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/GameCatalog'}
+      responses:
+        '200':
+          description: Draft catalogue saved with audited actor and incremented revision
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/GameCatalog'}
+        '400': {description: Invalid catalogue or attempted change to published content}
+        '401': {description: Authentication required}
+        '403': {description: Human marketing or admin role required}
+        '409': {description: Revision changed; reload before saving}
   /api/v1/game/admin/audit:
     get:
       operationId: gameAdminAudit
@@ -85,6 +104,11 @@ paths:
       operationId: customerGameCatalog
       summary: Evaluate visible chapters against stored completions and awards; edge injects party
       parameters:
+        - in: query
+          name: contentSchema
+          required: false
+          description: Set to 1 only if the app can validate and play remotely authored course content. Legacy clients receive bundled chapters only.
+          schema: {type: integer, minimum: 0, maximum: 1, default: 0}
         - {name: partyId, in: query, required: true, schema: {type: string, format: uuid}}
         - {name: beta, in: query, schema: {type: boolean, default: false}, description: Presentation hint for testing builds; grants no banking entitlement}
       responses:
@@ -214,6 +238,162 @@ components:
         count: {type: integer, minimum: 1, maximum: 1000, default: 1}
         hintCs: {type: string, maxLength: 160}
         hintEn: {type: string, maxLength: 160}
+    GameCourse:
+      type: object
+      description: Version 1 playable course. Unknown engine themes require an app release. The mobile engine validates before play and retains its last known configuration offline.
+      required: [id, theme, ground, platforms, coins, vampires, bats, piggies, shields, vaultX, levelEnd]
+      properties:
+        schema: {type: integer, enum: [1], default: 1}
+        id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        theme: {type: string, enum: [embankment, rooftops, charles_bridge]}
+        vaultX: {type: number, minimum: 0, maximum: 50000}
+        levelEnd: {type: number, minimum: 1000, maximum: 50000}
+        pickpocketBoss: {type: boolean, default: false}
+        paperworkBossX: {type: number, nullable: true, minimum: 0, maximum: 50000}
+        piggies: {type: array, maxItems: 200, items: {type: number, minimum: 0, maximum: 50000}}
+        ground:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        platforms:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        coins:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        vampires:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bats:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        shields:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        slopes:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        thieves:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        dropZones:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        rooftopObjects:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        pigeons:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bridgePlatforms:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bridgeTraps:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
     GameLevel:
       type: object
       required: [id, theme, order, titleCs, titleEn, state]
@@ -227,6 +407,7 @@ components:
         startsAt: {type: string, format: date-time, nullable: true}
         endsAt: {type: string, format: date-time, nullable: true}
         requirement: {$ref: '#/components/schemas/GameRequirement'}
+        content: {$ref: '#/components/schemas/GameCourse'}
     GameCatalog:
       type: object
       required: [revision, levels]

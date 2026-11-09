@@ -109,8 +109,6 @@ NON_MODULE_IMAGES = {
 # advisory window first. Stale in BOTH directions, like NON_MODULE_IMAGES: an entry whose service
 # now wires a bean (or no longer has a sidecar) is an error, so this cannot become a permanent list.
 PDP_BEAN_PENDING = {
-    "engagement-service": "AUTHZ_ENFORCE defaults true; enabling the producer turns the 503 "
-                          "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
     "tax-reporting-service": "AUTHZ_ENFORCE=true in gitops; enabling the producer turns the 503 "
                              "fail-closed into real OPA decisions — needs would-deny evidence first (#9105)",
 }
