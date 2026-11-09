@@ -805,6 +805,33 @@ postings dated after the evaluated day do not. Legacy runs without a read waterm
 The count query runs over journal history and must be measured at production volume before
 activation; the implementation does not claim a production latency or a completed live month.
 
+
+### ADR-0365 — purpose-bound pension books
+
+The pension fee endpoint rejects the bank, mismatched fund/book ids, unverified client identity,
+changed source payloads, missing correction bases and untrusted synthetic classification. The
+first receipt binds the database to its book; later configuration cannot reassign it. Idempotent
+POSTED and NO_POSTING receipts remain distinct and retained after a software rollback.
+
+Pension reconciliation compares the entire enabled own chart (including zero balances), rejects
+foreign/disabled accounts with activity, and stores a read start plus committed journal watermark.
+Independent verified interactive issuer subjects propose and approve once. The purpose-specific
+OPA grants do not give the NAV producer generic journal posting, reversal or balance access.
+Participation grants require the actual typed OPA resource: type `ledger` and the caller's own
+participant id. Bare strings, another resource type and another participant fail closed. The bank
+and pension policy fixtures use the same resource shape emitted by the runtime PDP adapter.
+The registered runtime Flyway callback checks and binds database identity before any chart SQL.
+Changing kind/id, reusing a pension database as the bank, or assigning an unbound database with
+journal history fails startup. The company chart is the reviewed mounted source, selected by an
+explicit script path; runtime Flyway location overrides alone are not discovery evidence.
+At-close snapshots retain book identity; a bank verdict or another book's snapshot cannot qualify
+this book. Exceptions remain attributable waivers and never qualify a month for promotion.
+
+Residual: external source references are professional attestations. The implementation does not
+prove their contents, approve a statutory chart or supply missing custody/payment adapters. Source
+receipt hashes prevent transport replay from claiming newer work; they do not grant source actors
+permission to invent a completed business job. Keep production rollout staged and observe a full
+representative calendar month before considering enforcement.
 The journal population check also retains an order-independent SHA-256 multiset fingerprint of
 committed journal ids. Archive removal plus the same number of new postings cannot reuse a count
 as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting the whole set.

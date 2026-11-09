@@ -32,6 +32,9 @@ quarkus:
     connect-retries: 10
     connect-retries-interval: 2S
     locations: db/migration
+    # Locations are fixed at augmentation. The callback selects an explicitly identified pension
+    # book at runtime and leaves BANK untouched, including in the shared fast-jar deployment.
+    callbacks: com.openbank.ledger.infrastructure.persistence.PensionChartCallback
 
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
