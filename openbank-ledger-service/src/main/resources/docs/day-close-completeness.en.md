@@ -24,7 +24,14 @@ job evidence. Keep shadow and all existing holds until the full monthly proof an
 are complete. Legacy reports remain accepted and fail monthly qualification safely. Do not infer
 historical evidence, reset a counter to qualify, or replay financial jobs just to fill a report.
 
-Pension-company books and participant-owned fund assets have separate owners and boundaries.
-Neither pension module currently supplies the GL posting mappings needed for accounting-close
-participation. NAV publication and scheduler success cannot attest it. Their own mapped sources,
-tie-out authority and complete close must be delivered before their controls can be activated.
+Pension-company books and participant-owned fund assets use separately bound book identities.
+ADR-0365 proposes noncash management fee accruals: fund expense/payable and company
+receivable/income. NAV publication retains durable delivery intents and independent receipts for
+both books. Pending delivery refuses completion, including after a day has closed. Neither NAV
+publication nor successful delivery replaces the full-chart source reconciliation: a different
+verified accountant must approve the independently supplied balances before own-book close.
+The engineering mapping still requires professional accounting approval and a live complete month;
+other recognition categories require reviewed source evidence and are not inferred from NAV.
+Repeated fee requests use navId as Idempotency-Key. Reconciliation proposals retain a scoped
+request key and reject changed retries; approval retries use the proposal id and do not create
+another control. Existing books require a reviewed opening/cutover before enabling delivery.

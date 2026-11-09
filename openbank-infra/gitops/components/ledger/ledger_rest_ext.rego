@@ -38,7 +38,6 @@
 # issue #266) hit the identical gap for ROLE_VIEWER and named it explicitly; ledger adds
 # ROLE_AUDITOR to the same fix since its read roles include auditor too.
 
-
 # ── #3734 (2026-08-05): service-account exclusion + edge write prohibition ──────────────
 # The two operator rules above were role-only, and rules.yaml's role_action_matrix grants
 # ledger.create/reverse/trigger/replay to ROLE_OPERATOR. Both realm M2M clients carry that
@@ -110,17 +109,17 @@ allowed_reasons contains "service-ledger-read" if {
 # Staff only — a service-account holding ROLE_OPERATOR or ROLE_VIEWER is NOT staff here; the
 # machine callers are named by identity, one rule each.
 allowed_reasons contains "ledger-close-inspect-read" if {
-    input.principal.type == "HUMAN"
-    not startswith(object.get(input.principal, "id", ""), "service-account-")
-    some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
-    role in input.principal.roles
-    input.action == "ledger.close.inspect"
+	input.principal.type == "HUMAN"
+	not startswith(object.get(input.principal, "id", ""), "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_VIEWER", "ROLE_AUDITOR"}
+	role in input.principal.roles
+	input.action == "ledger.close.inspect"
 }
 
 allowed_reasons contains "service-ledger-close-inspect" if {
-    input.principal.type == "HUMAN"
-    machine_named("service-account-openbank-services")
-    input.action == "ledger.close.inspect"
+	input.principal.type == "HUMAN"
+	machine_named("service-account-openbank-services")
+	input.action == "ledger.close.inspect"
 }
 
 # Operators and admins may perform routine ledger writes. Close DRAFT creation has a
@@ -137,27 +136,27 @@ allowed_reasons contains "operator-ledger-write" if {
 # service-ledger-post exception for ledger.create: a service-account maker makes the later
 # four-eyes comparison technically distinct but evidentially meaningless.
 allowed_reasons contains "operator-ledger-close-draft" if {
-    input.principal.type == "HUMAN"
-    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    role in input.principal.roles
-    not principal_is_machine
-    input.action == "ledger.close.draft"
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not principal_is_machine
+	input.action == "ledger.close.draft"
 }
 
 # #12906: journal-approval queue reads and checker decisions are human-only. The
 # explicit machine veto is required for reads because base operator-read-any would
 # otherwise admit a client_credentials principal carrying ROLE_OPERATOR.
 allowed_reasons contains "operator-journal-approval" if {
-    input.principal.type == "HUMAN"
-    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    role in input.principal.roles
-    not principal_is_machine
-    input.action in {"ledger.approval.read", "ledger.approval.decide"}
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not principal_is_machine
+	input.action in {"ledger.approval.read", "ledger.approval.decide"}
 }
 
 prohibited if {
-    principal_is_machine
-    input.action in {"ledger.approval.read", "ledger.approval.decide"}
+	principal_is_machine
+	input.action in {"ledger.approval.read", "ledger.approval.decide"}
 }
 
 # Year-close attestation (ledger.approve) is deliberately its OWN rule, not folded into
@@ -229,8 +228,8 @@ allowed_reasons contains "service-lending-ledger-post" if {
 # ── ledger.close.participate: day-close participation reports (ADR-0342 D2, #13167) ─────────
 # PUT /api/v1/ledger/accounting-days/{date}/participants/{participant} authorizes as its OWN
 # action, never ledger.create, so reporting a day does not need (or grant) a journal-create grant.
-# Each machine account may report for exactly ONE participant: the resource is the participant
-# name from the path, and the use case additionally checks the verified caller against
+# Each machine account may report for exactly ONE participant: the typed ledger resource's id
+# is the participant name from the path, and the use case additionally checks the verified caller against
 # openbank.ledger.close.participants.<name>.principal. A new participant adds one map entry here
 # and its test; nothing else reaches this action (no staff role, no shared client).
 close_participant_accounts := {
@@ -249,7 +248,8 @@ allowed_reasons contains "service-close-participation" if {
 	input.action == "ledger.close.participate"
 	some account, participant in close_participant_accounts
 	machine_named(account)
-	input.resource == participant
+	input.resource.type == "ledger"
+	input.resource.id == participant
 }
 
 allowed_reasons contains "service-clearing-ledger-post" if {
@@ -336,5 +336,5 @@ allowed_reasons contains "service-ledger-reverse" if {
 
 prohibited if {
 	machine_named("service-account-openbank-edge")
-    input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
+	input.action in {"ledger.create", "ledger.reverse", "ledger.trigger", "ledger.replay", "ledger.approve", "ledger.close.draft"}
 }
