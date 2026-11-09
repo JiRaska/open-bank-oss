@@ -513,6 +513,75 @@ agents:
         Art. 13 — transparency: every filed issue cites the bulletin it came from and the capability
         it was mapped to, so a reader can check the mapping rather than trust it.
       dora: ICT third-party change awareness — a scheme mandate is a supplier-imposed change
+  # Regulatory obligations watcher (ADR-0367 decision 6).
+  #
+  # WHY IT EXISTS: openbank-libs/governance/regulatory-obligations.yaml cites, for every duty, the
+  # legal text and the authority's specification. Those sources change — a decree is amended, ČNB
+  # republishes a reporting calendar, GSFT changes its file format — and the register says nothing
+  # when they do. Most of its deadlines are still marked `unverified`, too, so the useful daily
+  # work is mostly confirmation: fetch the cited source, compare it with the row, and propose the
+  # correction with the quote that justifies it.
+  #
+  # WHY IT IS PROPOSAL-ONLY: a regulatory duty is an interpretation of law. The agent proposes an
+  # issue citing the source; a human decides and changes the register in a reviewed PR. Write and
+  # execute tiers are denied EXPLICITLY.
+  #
+  # `enabled: false` ON PURPOSE: it needs an allow-listed outbound fetch of the cited public
+  # sources (zakonyprolidi.cz, e-sbirka.cz, eur-lex.europa.eu, cnb.cz, gsft.cz, fau.gov.cz,
+  # financnisprava.gov.cz) and a prompt in prompts/registry.yaml. Enable both in the same PR.
+  - id: regulatory-obligations-watcher
+    plane: control
+    model: deepseek-ai/DeepSeek-V3.2
+    charter: ADR-0367
+    description: >
+      Re-reads the legal texts and authority specifications cited by the regulatory obligations
+      register, flags amendments, changed deadlines or formats and still-unverified rows, and files
+      one governance issue per finding citing the source. Read-only: it never edits the register,
+      a report, or a filing.
+    enabled: false
+    enforcement: block
+    schedule:
+      weekly: Monday 06:30 UTC
+    data_scope:
+      read:
+        - read.governance
+      pii: none
+    tools:
+      allow:
+        - tier: read
+          resources:
+            - read.governance
+        - tier: write_proposal
+          resources:
+            - draft.ticket
+      deny:
+        - tier: write
+          resources:
+            - '*'
+        - tier: execute
+          resources:
+            - '*'
+    requires_human:
+      - any_legal_interpretation
+      - any_register_change
+    limits:
+      tokens_per_run: 60000
+      runs_per_day: 1
+      kill_switch: true
+    audit:
+      capture:
+        - model_id
+        - prompt_hash
+        - tool_calls
+        - policy_decision
+        - obligation_id
+        - source_url
+        - source_quote
+    compliance:
+      eu_ai_act: >
+        Art. 13 — transparency: every issue cites the obligation id, the source URL and the quoted
+        passage, so a reader checks the finding against the law instead of trusting it.
+      dora: not applicable — no ICT system or third-party arrangement is changed
   # Card dispute evidence drafter (ADR-0283 phase 4, issue #8869).
   #
   # WHY IT EXISTS: a chargeback is won or lost on what was filed before the network's respond-by
