@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.8.0...admin-ui-v4.9.0) (2026-11-09)
+
+
+### Features
+
+* **admin-ui:** add lion train CI and CD guides ([#15351](https://github.com/JiRaska/open-bank-oss/issues/15351)) ([1ebe1f7](https://github.com/JiRaska/open-bank-oss/commit/1ebe1f79801527fdd1d1e32f22aa7b7dadccad3b))
+
 ## [4.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.7.1...admin-ui-v4.8.0) (2026-11-09)
 
 
