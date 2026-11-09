@@ -24,7 +24,7 @@ import org.testcontainers.utility.DockerImageName
 class RedisTestResource : QuarkusTestResourceLifecycleManager {
 
     private companion object {
-        const val VALKEY_IMAGE = "valkey/valkey:8-alpine"
+        const val VALKEY_IMAGE = "valkey/valkey:9.1.3-alpine"
     }
 
     private var redis: GenericContainer<*>? = null
