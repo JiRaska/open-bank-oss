@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.0...aml-service-v0.14.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **aml:** reserve domestic fraud review case keys ([#15302](https://github.com/JiRaska/open-bank-oss/issues/15302)) ([dcd532d](https://github.com/JiRaska/open-bank-oss/commit/dcd532d5eb71f79b7d957036cb54518ad8337e8e))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.13.8...aml-service-v0.14.0) (2026-11-07)
 
 
