@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.3...product-catalog-v1.6.0) (2026-11-08)
+
+
+### Features
+
+* **infra:** provision OpenBao TLS listener and Transit key for product-IR signing ([#15117](https://github.com/JiRaska/open-bank-oss/issues/15117)) ([35f7501](https://github.com/JiRaska/open-bank-oss/commit/35f7501ca1e47759e8a2df550dafeec1bdec5632))
+
 ## [1.5.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v1.5.2...product-catalog-v1.5.3) (2026-11-03)
 
 

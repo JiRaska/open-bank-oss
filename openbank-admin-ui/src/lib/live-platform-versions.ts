@@ -70,7 +70,11 @@ export const IMAGE_PATTERNS: Record<string, RegExp> = {
   'cert-manager': /jetstack\/cert-manager-(?:controller|webhook|cainjector|startupapicheck):v?(\d+\.\d+\.\d+)/,
   karpenter: /karpenter\/controller:v?(\d+\.\d+\.\d+)/,
   loki: /(?:^|\/)grafana\/loki:(\d+\.\d+\.\d+)/,
-  keycloak: /keycloak\/keycloak:(\d+\.\d+\.\d+)/,
+  // openbank-keycloak is our pre-optimized build: build-push-keycloak.sh / platform-images.yml
+  // derive its tag from the Dockerfile's digest-pinned upstream KEYCLOAK_VERSION, so the
+  // leading semver IS the upstream release. Only ever promoted through a digest-verified
+  // spec (see runtimeVerifiedImage), never from a desired tag alone.
+  keycloak: /(?:keycloak\/keycloak|(?:^|\/)openbank-keycloak):(\d+\.\d+\.\d+)/,
   grafana: /(?:^|\/)grafana\/grafana:(\d+\.\d+\.\d+)/,
 }
 
@@ -108,7 +112,7 @@ const IMAGE_REPOSITORIES: Record<string, RegExp> = {
   'cert-manager': /(?:^|\/)jetstack\/cert-manager-(?:controller|webhook|cainjector|startupapicheck)(?=[:@])/,
   karpenter: /(?:^|\/)karpenter\/controller(?=[:@])/,
   loki: /(?:^|\/)grafana\/loki(?=[:@])/,
-  keycloak: /(?:^|\/)keycloak\/keycloak(?=[:@])/,
+  keycloak: /(?:^|\/)(?:keycloak\/keycloak|openbank-keycloak)(?=[:@])/,
   grafana: /(?:^|\/)grafana\/grafana(?=[:@])/,
 }
 
@@ -124,11 +128,28 @@ export function parseImageVersion(component: string, image: string): string | nu
 }
 
 /** Aggregate running-container image rows into distinct running versions per component. */
-export interface LiveImageVersion extends LiveVersion { observedAt: string; source?: 'prometheus-runtime-build-info' }
+export interface LiveImageVersion extends LiveVersion { observedAt: string; source?: 'prometheus-runtime-build-info' | 'prometheus-runtime-digest-verified-tag' }
 
-export function aggregateImages(rows: { image: string; container?: string; namespace?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
-  const out: Record<string, Map<string, { count: number; observedAt: string }>> = {}
-  for (const { image, container, namespace, count, observedAt } of rows) {
+const DIGEST = /@sha256:([a-f\d]{64})$/i
+
+/**
+ * kube-state-metrics' `image` label is often only the runtime image ID (`sha256:…`), which
+ * names no release. The spec (`image_spec`) carries a tag, but a tag alone is a DESIRED
+ * value (#13592). The two are joined only when the runtime-resolved manifest digest
+ * (`image_id`) equals the digest pinned in the spec: then the container is running
+ * exactly the artifact that tag was pinned to, and the tag describes it.
+ */
+export function runtimeVerifiedImage(metric: { image?: string; image_id?: string; image_spec?: string }): string | null {
+  const spec = metric.image_spec ?? ''
+  const pinned = DIGEST.exec(spec)?.[1]
+  const running = DIGEST.exec(metric.image_id ?? '')?.[1]
+  if (!pinned || !running || pinned.toLowerCase() !== running.toLowerCase()) return null
+  return spec
+}
+
+export function aggregateImages(rows: { image: string; verified?: boolean; container?: string; namespace?: string; count: number; observedAt: string }[]): Record<string, LiveImageVersion[]> {
+  const out: Record<string, Map<string, { count: number; observedAt: string; verified: boolean }>> = {}
+  for (const { image, verified = false, container, namespace, count, observedAt } of rows) {
     for (const component of Object.keys(IMAGE_PATTERNS)) {
       // Role and workload identity are part of the image evidence: Kafka exporters can carry
       // broker-like image tags, and the analytics card must not absorb other ClickHouse instances.
@@ -143,12 +164,18 @@ export function aggregateImages(rows: { image: string; container?: string; names
         m.set(v, {
           count: (previous?.count ?? 0) + count,
           observedAt: previous && previous.observedAt > observedAt ? previous.observedAt : observedAt,
+          // Digest-verified only if EVERY sample of this version was; one plain tag downgrades it.
+          verified: (previous?.verified ?? true) && verified,
         })
       }
     }
   }
   return Object.fromEntries(
-    Object.entries(out).map(([k, m]) => [k, [...m].map(([version, sample]) => ({ version, ...sample })).sort((a, b) => b.count - a.count)]),
+    Object.entries(out).map(([k, m]) => [k, [...m].map(([version, { verified, ...sample }]) => ({
+      version,
+      ...sample,
+      ...(verified ? { source: 'prometheus-runtime-digest-verified-tag' as const } : {}),
+    })).sort((a, b) => b.count - a.count)]),
   )
 }
 
@@ -234,12 +261,15 @@ export async function fetchLiveSnapshot(fetchImpl: FetchLike = fetch, now: () =>
   const imageRows = rows(images)
   const freshImageRows = (imageRows ?? [])
     .filter(r => r.metric.image && Number.isFinite(r.value))
-    .map(r => ({ image: r.metric.image, container: r.metric.container, namespace: r.metric.namespace, sampledAtMs: r.value * 1000 }))
+    .map(r => {
+      const verified = /^sha256:/i.test(r.metric.image) ? runtimeVerifiedImage(r.metric) : null
+      return { image: verified ?? r.metric.image, verified: verified !== null, container: r.metric.container, namespace: r.metric.namespace, sampledAtMs: r.value * 1000 }
+    })
     .filter(r => {
       const ageMs = fetchedAt.getTime() - r.sampledAtMs
       return ageMs >= -30_000 && ageMs <= IMAGE_SAMPLE_MAX_AGE_MS
     })
-    .map(r => ({ image: r.image, container: r.container, namespace: r.namespace, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
+    .map(r => ({ image: r.image, verified: r.verified, container: r.container, namespace: r.namespace, count: 1, observedAt: new Date(r.sampledAtMs).toISOString() }))
   const components = aggregateImages(freshImageRows)
   // The controller reports its own runtime build version. kube-state-metrics may expose
   // only a platform digest, which cannot safely be mapped back to a desired image tag.

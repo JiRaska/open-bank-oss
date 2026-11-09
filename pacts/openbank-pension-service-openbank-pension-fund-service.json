@@ -12,7 +12,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c2/holdings"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c2/holdings"
       },
       "response": {
         "body": {
@@ -93,7 +93,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/strategies"
+        "path": "/api/v2/strategies"
       },
       "response": {
         "body": [
@@ -207,7 +207,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/transactions"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c1/transactions"
       },
       "response": {
         "body": [
@@ -349,7 +349,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
       },
       "response": {
         "body": {
@@ -550,7 +550,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/orders"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c1/orders"
       },
       "response": {
         "body": {
@@ -634,7 +634,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
       },
       "response": {
         "body": {
@@ -687,7 +687,7 @@
       ],
       "request": {
         "method": "GET",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c1/holdings"
       },
       "response": {
         "status": 401
@@ -733,7 +733,7 @@
           }
         },
         "method": "POST",
-        "path": "/api/v1/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
+        "path": "/api/v2/contracts/7a1e0000-0000-4000-8000-0000000000c3/orders"
       },
       "response": {
         "status": 401

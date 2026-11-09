@@ -829,6 +829,9 @@ its own installation from an untrusted branch.
 
 ### Amendment (2026-10-29) — an approval survives an update that brought in only main (#13400)
 
+**Superseded by the exact-head amendment below.** The following records the former behavior;
+it does not authorize approval inheritance.
+
 Measured 2026-10-29: #13613 was approved on `cac63b1b`, the strict lane update-branched it to
 `71899487`, and it waited on "needs owner approval" again. Every update the train makes is a merge
 of `main` into the PR, so with about ten `codex/` PRs queued the owner re-approved after every
@@ -860,3 +863,22 @@ standard library only, so the privileged `python3 -I -S` job is unchanged.
 
 The CI result on H' is unaffected by this: every required and extra gate must still be green on
 H' itself. The owner reviews the PR's delta once; CI proves the combination with current `main`.
+
+### Amendment (2026-11-08) — every changed head requires fresh owner approval
+
+Owner authorization binds the repository, PR and full current head SHA, as declared by
+`merge_train.owner_approval.bind` and `stale_on_push: true`. This supersedes approval inheritance
+in the 2026-10-29 amendment, including for conflict-free updates that bring in only `main`.
+Tree equivalence proves what changed; it is not owner authorization for the new head.
+
+After any head change, admission and the final source-intent read require a fresh canonical
+App-created owner approval on that exact head. Prior-head approval cannot grant admission or
+override a current-head decision. The existing bounded main-update topology remains useful only
+to preserve later active revocations: a later revoke on that proven chain still withdraws intent,
+while a fresh current-head approval may supersede an older revoke. As before, each head contributes
+its latest authenticated decision; superseded revocations are not historical vetoes. Decisions are read live; producer
+authenticity, required and extra checks, lane routing and the exact-head merge API pin are unchanged.
+
+After a strict-lane update, review the combined head and its fresh CI before recording a new
+owner decision. A closed PR cannot receive a retroactive approval, and this change does not
+alter historical merge execution or recorder evidence.

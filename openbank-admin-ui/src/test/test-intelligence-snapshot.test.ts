@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
+import { createEvidenceSnapshotReader } from '@/lib/evidence/publishedSnapshot'
 import {
+  TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES,
   testIntelligenceCollectedAt,
   testIntelligenceSnapshotBaseUrl,
   validateTestIntelligenceSnapshot,
@@ -30,6 +33,21 @@ describe('published Test Intelligence snapshot boundary', () => {
   afterEach(() => {
     delete process.env.OPENBANK_EVIDENCE_STORE_URL
     delete process.env.OPENBANK_TEST_INTELLIGENCE_SNAPSHOT_URL
+  })
+
+  it('retains a hard per-dataset ceiling for reports with run provenance', async () => {
+    const snapshot = report()
+    const payload = JSON.stringify(snapshot)
+    const sha256 = createHash('sha256').update(payload).digest('hex')
+    const start = Date.parse(snapshot.collectedAt)
+    const fetchImpl = vi.fn(async (url: RequestInfo | URL) => String(url).endsWith('/current.json')
+      ? Response.json({ schemaVersion: 1, sha256, snapshot: `snapshots/1-1-${sha256}.json`, sourceSha: 'a'.repeat(40), runId: 1, runAttempt: 1, collectedAt: snapshot.collectedAt, expiresAt: new Date(start + 60_000).toISOString(), complete: true })
+      : new Response(payload, { headers: { 'Content-Length': String(TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES + 1) } }))
+    const reader = createEvidenceSnapshotReader({ baseUrl: 'https://evidence.example/admin-ui/test-intelligence', fetchImpl, now: () => start + 1000,
+      maxBytes: TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt })
+    const result = await reader.read()
+    expect(result.status).toBe('unavailable')
+    expect(result.error).toContain('snapshot exceeds size limit')
   })
 
   it('accepts a valid roster-driven snapshot and exposes its collection timestamp', () => {

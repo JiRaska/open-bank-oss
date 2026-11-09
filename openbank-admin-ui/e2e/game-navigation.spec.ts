@@ -28,7 +28,7 @@ for (const language of ['cs', 'en']) {
       await page.screenshot({ path: testInfo.outputPath('loyalty-game-entry.png') })
       await entry.click()
       await expect(page).toHaveURL(/\/loyalty\/game$/)
-      await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toHaveText(language === 'cs' ? 'Lví stezka — správa kol' : 'Lion Quest — chapters')
+      await expect(page.getByRole('main').getByRole('heading', { level: 1 })).toHaveText(language === 'cs' ? 'Lví stezka' : 'Lion Quest')
       await expect(sidebar.getByRole('link', { name })).toHaveAttribute('aria-current', 'page')
       await sidebar.getByRole('link', { name: language === 'cs' ? 'Lípa (věrnost)' : 'Lípa (Loyalty)', exact: true }).click()
       await sidebar.getByRole('link', { name }).click()

@@ -1089,9 +1089,9 @@ agents:
       test functions using runBlocking/GlobalScope.launch/GlobalScope.async without an explicit
       ': Unit' return type, which JUnit5 silently drops; Pact provider tests gated on
       pactbroker.url; two colliding @Provider classes; declared-vs-executed @Test counts) is
-      reachable only through the CI-failure webhook and the operator trigger where a repository
-      checkout exists -- the deployed pod mounts none, which is why the weekly sweep it carried
-      until 2026-10-17 had scanned an empty tree since the day it shipped and was removed.
+      reachable through the CI-failure webhook and the operator trigger where a repository
+      checkout exists. The deployed source pilot mounts only this module's test sources as a
+      read-only sparse snapshot of public main taken at pod startup; no fleet sweep cron is enabled.
       Every finding without a bounded mechanical repair opens a tracking issue (label
       flaky-test) through the GitHub adapter for the HITL queue -- guessing wrong on a fix here
       (suspend fun vs ': Unit', which @Provider class should own an interaction) risks silently
@@ -1106,9 +1106,9 @@ agents:
                                                       # only where a checkout is mounted
     data_scope:
       read:
-        - read.governance             # the Admin UI's bounded Test Intelligence snapshot; on a
-                                       # developer checkout also src/test/kotlin trees and
-                                       # build/test-results/test/*.xml JUnit reports
+        - read.governance             # bounded Test Intelligence evidence; the deployed source
+                                       # pilot reads only its own test snapshot. A developer
+                                       # checkout can also supply JUnit execution reports.
       pii: none                       # test source text and JUnit report metadata only; no customer data
     tools:
       allow:

@@ -80,7 +80,8 @@ class OpenTelemetryContextPropagator : ContextPropagator {
     private object MapGetter : TextMapGetter<Map<String, String>> {
         override fun keys(carrier: Map<String, String>): Iterable<String> = carrier.keys
 
-        override fun get(carrier: Map<String, String>?, key: String): String? = carrier?.get(key)
+        override fun get(carrier: Map<String, String>?, key: String): String? =
+            if (key == "tracestate") TracestateInput.canonicalize(carrier?.get(key)) else carrier?.get(key)
     }
 
     companion object {
@@ -97,6 +98,93 @@ class OpenTelemetryContextPropagator : ContextPropagator {
             listOf(OpenTelemetryContextPropagator())
         } catch (_: ClassNotFoundException) {
             emptyList()
+        }
+    }
+}
+
+/**
+ * Validate only when the delegate requests tracestate, after its traceparent check. Literal comma
+ * scanning avoids feeding unbounded whitespace to the affected OTel delimiter regex (#14757).
+ * The limits below are W3C member/key/value grammar limits, not a combined-header size cap.
+ */
+private object TracestateInput {
+    private const val MAX_MEMBERS = 32
+    private const val MAX_KEY = 256
+    private const val MAX_VALUE = 256
+    private const val MAX_TENANT_ID = 241
+    private const val MAX_SYSTEM_ID = 14
+
+    fun canonicalize(raw: String?): String? = if (raw.isNullOrEmpty()) raw else canonicalizePresent(raw)
+
+    private fun canonicalizePresent(raw: String): String? {
+        val keys = HashSet<String>()
+        var cursor = 0
+        var members = 0
+        var needsNormalization = false
+        while (true) {
+            val comma = raw.indexOf(',', cursor)
+            val end = if (comma < 0) raw.length else comma
+            if (++members > MAX_MEMBERS) return null
+            var last = end
+            val first = skipLeadingOws(raw, cursor, last)
+            while (last > first && isOws(raw[last - 1])) last--
+            if (first == last) {
+                needsNormalization = true
+            } else {
+                if (!validMember(raw, first, last, keys)) return null
+                if (first != cursor || last != end) needsNormalization = true
+            }
+            if (comma < 0) break
+            cursor = comma + 1
+        }
+        return if (needsNormalization) normalized(raw) else raw
+    }
+
+    private fun validMember(raw: String, first: Int, last: Int, keys: MutableSet<String>): Boolean {
+        if (last - first > MAX_KEY + 1 + MAX_VALUE) return false
+        val equals = raw.indexOf('=', first)
+        if (equals <= first || equals >= last) return false
+        val key = raw.substring(first, equals)
+        if (!validKey(key) || !keys.add(key)) return false
+        if (last - equals - 1 !in 1..MAX_VALUE) return false
+        return (equals + 1 until last).all { raw[it] in ' '..'~' && raw[it] != '=' }
+    }
+
+    private fun validKey(key: String): Boolean {
+        if (key.length !in 1..MAX_KEY) return false
+        val at = key.indexOf('@')
+        if (at < 0) return key[0] in 'a'..'z' && key.all(::isKeyChar)
+        if (at !in 1..MAX_TENANT_ID || key.length - at - 1 !in 1..MAX_SYSTEM_ID) return false
+        if (key[0] !in 'a'..'z' && key[0] !in '0'..'9') return false
+        if (key[at + 1] !in 'a'..'z') return false
+        return key.indices.all { it == at || isKeyChar(key[it]) }
+    }
+
+    private fun isKeyChar(char: Char): Boolean =
+        char in 'a'..'z' || char in '0'..'9' || char == '_' || char == '-' || char == '*' || char == '/'
+
+    private fun isOws(char: Char): Boolean = char == ' ' || char == '\t'
+
+    private fun skipLeadingOws(raw: String, start: Int, end: Int): Int {
+        var first = start
+        while (first < end && isOws(raw[first])) first++
+        return first
+    }
+
+    private fun normalized(raw: String): String {
+        val result = StringBuilder()
+        var cursor = 0
+        while (true) {
+            val comma = raw.indexOf(',', cursor)
+            var last = if (comma < 0) raw.length else comma
+            val first = skipLeadingOws(raw, cursor, last)
+            while (last > first && isOws(raw[last - 1])) last--
+            if (first < last) {
+                if (result.isNotEmpty()) result.append(',')
+                result.append(raw, first, last)
+            }
+            if (comma < 0) return result.toString()
+            cursor = comma + 1
         }
     }
 }
