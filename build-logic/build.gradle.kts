@@ -112,3 +112,23 @@ configurations.all {
         force("io.netty:netty-transport-native-kqueue:4.2.19.Final")
     }
 }
+
+// Exercise cache keys with real Gradle tasks and an isolated local cache.
+dependencies {
+    testImplementation(gradleTestKit())
+    testImplementation(platform("org.junit:junit-bom:${versionsMap["junit"]}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+tasks.test {
+    useJUnitPlatform()
+    // TestKit's UnexpectedBuildFailure carries the nested fixture build output in its
+    // exception message. SHORT logging hides that cause on gate shards without reports.
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+    systemProperty("fixture.junit.classpath", configurations.testRuntimeClasspath.get().files
+        .filter { it.name.startsWith("junit-") || it.name.startsWith("opentest4j-") || it.name.startsWith("apiguardian-") }
+        .joinToString(File.pathSeparator))
+    systemProperty("fixture.testkit.dir", layout.buildDirectory.dir("testkit").get().asFile.absolutePath)
+}
