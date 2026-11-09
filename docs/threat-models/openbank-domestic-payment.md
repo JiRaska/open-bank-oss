@@ -845,3 +845,24 @@ cutover, revert caller URLs and policies before removing the listener.
 
 
 - **2026-11-04** — **The TLS listener no longer accepts a client certificate as a login (#12511).** `client-auth: required` also registers Quarkus's mTLS authentication mechanism, so any certificate the private CA signed became an authenticated `SecurityIdentity` with no bearer. `%prod` now restricts `/api/*` to `auth-mechanism: bearer` with `policy: authenticated` (GET `/api/v1/info` and `/api/v1/config` stay public metadata), so the certificate is transport authentication only and the OIDC bearer is the only identity a route or OPA sees, identically on both listeners. **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every caller already sends its own bearer. Proven by `DomesticPaymentListenerAuthParityIT` (production listener shape, real HTTP) and gated by `mtls-bearer-only`. **Rollback:** revert the commit (re-opens the path).
+
+
+### Reserved fraud-review case identity (#15066)
+
+The AML create boundary reserves `aml-*-FRAUD_REVIEW` keys for the domestic-payment
+service's own authenticated service account. It checks the existing verified client identity
+before looking up or reserving an idempotent response; a staff role or another otherwise
+permitted payment/FX machine identity does not grant this namespace. The guard uses the
+same unmodified key that reaches Redis and the durable case store. It changes neither the
+rail's case key nor the fraud hold/decision workflow.
+
+The boundary is implemented in
+`openbank-aml-service/src/main/kotlin/com/openbank/aml/infrastructure/rest/AmlCaseResource.kt`.
+Regression scenarios in
+`openbank-aml-service/src/test/kotlin/com/openbank/aml/it/AmlCaseCreateIdempotencyFingerprintIT.kt`
+exercise real HTTP, PostgreSQL and Redis: refused creation without a row or idempotency marker,
+refused stored replay, and the domestic-payment caller's create/retry path. Ordinary-key
+fingerprint and retry scenarios remain in the same suite. Execution results belong to the
+exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
+This prevents new squatting through this boundary; it does not attest historical case ownership,
+perform remediation or enable fraud enforcement. Hold timeout remains fail closed.

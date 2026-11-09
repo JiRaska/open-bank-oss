@@ -120,7 +120,8 @@ class PanacheJournalRepository(
 
     override suspend fun save(entry: JournalEntry, idempotencyKey: String?, outbox: List<OutboxMessage>): JournalEntry =
         Panache.withTransaction {
-            persist(entry.toEntity())
+            Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }
+                .flatMap { persist(entry.toEntity()) }
                 .flatMap { persistLines(entry) }
                 .flatMap {
                     if (idempotencyKey != null) {
@@ -153,13 +154,15 @@ class PanacheJournalRepository(
         // here serialises them and the loser matches 0 rows after the winner commits — so it
         // fails BEFORE persisting a second compensation entry and its AccountBookedChanged
         // deltas (double-credit downstream). Backstop: uq_journal_entries_reversal_of (V12).
-        update(
-            "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
-            JournalStatus.REVERSED.name,
-            originalId,
-            originalEntryDate,
-            JournalStatus.POSTED.name,
-        ).flatMap { updated ->
+        Panache.getSession().flatMap { JournalReadWatermark.lockWriter(it) }.flatMap {
+            update(
+                "status = ?1, version = version + 1 where id = ?2 and entryDate = ?3 and status = ?4",
+                JournalStatus.REVERSED.name,
+                originalId,
+                originalEntryDate,
+                JournalStatus.POSTED.name,
+            )
+        }.flatMap { updated ->
             if (updated == 0) {
                 Uni.createFrom().failure(
                     JournalReversalConflictException(

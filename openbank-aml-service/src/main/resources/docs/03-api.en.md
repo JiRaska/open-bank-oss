@@ -44,6 +44,11 @@ Rules:
 - The key is cached in Redis. A replay with the same key returns the cached response with header `X-Idempotency-Replayed: true`.
 - The key is also persisted as a unique `idempotency_key` column on the case row — a redelivered create reuses the existing case rather than creating a duplicate. (The onboarding consumer uses `"<partyId>:CUSTOMER_ONBOARDING"` as its key.)
 
+Keys starting with `aml-` and ending with `-FRAUD_REVIEW` belong to the domestic-payment
+service's own authenticated machine identity. Other callers receive 403 even when they
+may otherwise create AML cases or replay a cached response. The identity check happens
+before any Redis reservation or replay; ordinary case keys keep their existing behavior.
+
 ## Endpoints
 
 ### Create AML case

@@ -736,7 +736,12 @@ fire from *outside* it, so they stay here:
   `sequenceDiagram` message or `Note` is a statement separator — write `#59;`. Both render as a red
   "Mermaid render failed" box in the Service Docs page, which nothing in CI loads: 40 of 248 blocks
   across 21 services were broken that way, found only when someone opened one. Now enforced by the
-  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
+  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid. **Mermaid 12.3
+  accepts a bare `@` inside a bracketed label**, so the trap is version-bound. Keep quoting labels,
+  but never use the bare-`@` form as a negative fixture: bumping the renderer made two such fixtures
+  vacuous at once and turned `main` red on `mermaid-parses` UNFALSIFIED (#15330). Hold self-tests to
+  forms the installed parser still rejects (`a@{ shape: nope }`, a literal `;`), and when you bump
+  mermaid, run every mermaid self-test, not only the one that failed.
 
 ### Multi-agent / parallel work
 - **A review fix pushed to a PR branch AFTER auto-merge fires is silently lost — the squash already
