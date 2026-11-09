@@ -100,24 +100,27 @@ class InterestCloseParticipationScheduler(
     fun reportDays(today: LocalDate): Uni<TickResult> {
         val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
-        return closeJobRuns.findBetween(from, to).flatMap { runs ->
-            val reports = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }
-                .map { day ->
-                    val forDay = runs.filter { it.businessDate == day }
-                    // Turning a cron off cannot erase an already owned, unfinished job.
-                    val due = dueJobs(day) + forDay.map { it.job }
-                    CloseParticipationAssembler.assemble(day, due, forDay, skipReason = SKIP_REASON)
-                        ?: CloseParticipationAssembler.incomplete(
-                            day,
-                            "Due interest job has not completed",
-                            due.toList() + forDay.map { it.toString() },
-                        )
-                }
-                .toList()
-            Multi.createFrom().iterable(reports)
-                .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                .collect().asList()
-                .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+        val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
+        return closeJobRuns.requiredJobs(from, to, days.associateWith { dueJobs(it) }).flatMap { required ->
+            closeJobRuns.findBetween(from, to).flatMap { runs ->
+                val reports = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }
+                    .map { day ->
+                        val forDay = runs.filter { it.businessDate == day }
+                        // Turning a cron off cannot erase an already owned, unfinished job.
+                        val due = required[day].orEmpty() + forDay.map { it.job }
+                        CloseParticipationAssembler.assemble(day, due, forDay, skipReason = SKIP_REASON)
+                            ?: CloseParticipationAssembler.incomplete(
+                                day,
+                                "Due interest job has not completed",
+                                due.toList() + forDay.map { it.toString() },
+                            )
+                    }
+                    .toList()
+                Multi.createFrom().iterable(reports)
+                    .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                    .collect().asList()
+                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+            }
         }
     }
 

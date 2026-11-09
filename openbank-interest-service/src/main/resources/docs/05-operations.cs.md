@@ -191,3 +191,6 @@ Nové hlášení zneplatní původní měsíční důkaz; zpětně neopraví ne�
 a shadow pozorování zůstávají do vyhodnocení celého živého měsíce a provozní ceny tohoto čtení.
 
 Uložené vlastnictví úlohy přežívá změnu cronu: nastavení kapitalizace na `off` nepřevede existující odmítnutý běh na SKIPPED. Odmítnutí dál zadržuje uzávěrku; úspěšné opakování zachová důkaz provedené práce i při vypnutém cronu.
+
+
+Pozorované povinnosti úloh se ukládají odděleně od dokladů skutečných běhů. Vypnutí nebo přesun scheduleru po odmítnutí chybějící práce povinnost neodstraní, ani po restartu. Vyřeší ji skutečně dokončený běh nebo doložená výjimka v ledgeru. Pozorování nevyrábí dokončené běhy ani zpětně neodvozuje nikdy nepozorované plány. Rollback zachová tabulku povinností i běhů.

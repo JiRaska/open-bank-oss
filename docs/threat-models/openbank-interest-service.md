@@ -399,3 +399,5 @@ money-path service, not adjacent.
   verifies its tie-out and freezes close evidence; this producer cannot authorize enforcement.
   Rollback retains job receipts and ledger evidence and reverts the producer transport while the
   deployment hold and shadow posture remain; never manufacture historical receipts for eligibility.
+
+- **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.

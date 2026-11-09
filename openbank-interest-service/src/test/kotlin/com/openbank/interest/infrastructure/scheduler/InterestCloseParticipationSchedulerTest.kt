@@ -137,6 +137,35 @@ class InterestCloseParticipationSchedulerTest {
     }
 
     @Test
+    fun `a missing capitalization stays refused after restart with its cron off`() {
+        val day = LocalDate.of(2026, 10, 1)
+        ran(day, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)
+        scheduler.reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+
+        schedulerWith(
+            { _, report ->
+                delivered += report
+                Uni.createFrom().item(Unit)
+            },
+            SimpleMeterRegistry(),
+            capitalizationCron = "off",
+        ).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+
+        ran(day, InterestCloseJobs.CAPITALIZATION, items = 1, journals = 1)
+        schedulerWith(
+            { _, report ->
+                delivered += report
+                Uni.createFrom().item(Unit)
+            },
+            SimpleMeterRegistry(),
+            capitalizationCron = "off",
+        ).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
     fun `a newly due job without a receipt revokes RAN and unchanged refusal is not resent`() {
         val day = LocalDate.of(2026, 10, 1)
         ran(day, InterestCloseJobs.ACCRUAL, items = 7, journals = 0)

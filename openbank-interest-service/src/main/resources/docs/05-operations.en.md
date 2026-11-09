@@ -191,3 +191,6 @@ monthly proof; it cannot repair an already incomplete close. Keep the deployment
 shadow observation until the full live month and source-scan performance have been reviewed.
 
 Persisted job ownership survives a cron change: setting capitalization to `off` cannot turn an existing refused run into SKIPPED. Its refusal continues to hold close; a completed retry retains its exercised-job evidence even while the cron remains off.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.
