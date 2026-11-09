@@ -5,7 +5,7 @@
 """Exercise the real CycloneDX POM preflight with a local parent-POM fixture.
 
 This is intentionally an opt-in integration check: it invokes the repository's
-Gradle wrapper and includes the real build-logic composite build.
+Gradle wrapper and includes an isolated source copy of the real build-logic build.
 """
 
 from __future__ import annotations
@@ -120,19 +120,27 @@ def make_fixture(repo: Path, fixture: Path) -> tuple[Path, Path]:
     (fixture / "gradle/libs.versions.toml").parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(repo / "openbank-libs/gradle/libs.versions.toml",
                     fixture / "gradle/libs.versions.toml")
-    (fixture / "settings.gradle.kts").write_text(f'''pluginManagement {{
-    includeBuild("{(repo / "build-logic").as_posix()}")
-    repositories {{
+    # Gates run concurrently. Rebuilding the checkout's included build with
+    # --rerun-tasks would share Kotlin/class outputs with its provenance tests.
+    # Copy source inputs, never live outputs or project-local incremental state.
+    shutil.copytree(repo / "build-logic", fixture / "build-logic",
+                    ignore=shutil.ignore_patterns("build", ".gradle", ".kotlin"))
+    catalog = fixture / "openbank-libs/gradle/libs.versions.toml"
+    catalog.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(repo / "openbank-libs/gradle/libs.versions.toml", catalog)
+    (fixture / "settings.gradle.kts").write_text('''pluginManagement {
+    includeBuild("build-logic")
+    repositories {
         maven("https://maven-central.storage-download.googleapis.com/maven2/")
         gradlePluginPortal()
         mavenCentral()
-    }}
-}}
-gradle.beforeProject {{
-    buildscript.configurations.configureEach {{
+    }
+}
+gradle.beforeProject {
+    buildscript.configurations.configureEach {
         resolutionStrategy.force("org.freemarker:freemarker:2.3.35")
-    }}
-}}
+    }
+}
 rootProject.name = "sbom-effective-model-fixture"
 include(":probe")
 ''')
