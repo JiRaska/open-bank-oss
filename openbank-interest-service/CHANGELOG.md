@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.28.0...interest-service-v0.29.0) (2026-11-09)
+
+
+### Features
+
+* **interest:** deliver exercised close job evidence ([#14180](https://github.com/JiRaska/open-bank-oss/issues/14180)) ([9a84ff2](https://github.com/JiRaska/open-bank-oss/commit/9a84ff2915aa0bc9e1d21f27b952651b2a7ab542))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.27.0...interest-service-v0.28.0) (2026-11-08)
 
 

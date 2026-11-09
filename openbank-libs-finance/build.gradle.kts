@@ -35,6 +35,9 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // Kotest needs reflection; tests must own it instead of obtaining it from
+    // the domain production API or falling back to Kotest's older transitive pin.
+    testImplementation(libs.kotlin.reflect)
     testImplementation("io.kotest:kotest-property:5.9.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }

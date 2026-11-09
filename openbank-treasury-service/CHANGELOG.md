@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.4...treasury-service-v0.21.0) (2026-11-09)
+
+
+### Features
+
+* **lending:** deliver lending, billing and treasury close evidence ([#14181](https://github.com/JiRaska/open-bank-oss/issues/14181)) ([458d4dd](https://github.com/JiRaska/open-bank-oss/commit/458d4dd972dfe37baf3f4da4fed608a8924fa3a1))
+
 ## [0.20.4](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.20.3...treasury-service-v0.20.4) (2026-11-06)
 
 

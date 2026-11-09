@@ -49,6 +49,8 @@ data class ParticipationReportRequest(
     val journalsPosted: Int,
     val itemsProcessed: Int,
     val reason: String?,
+    val exercisedJobs: Set<String> = emptySet(),
+    val sourceRunId: String? = null,
 )
 
 /** Binds the libs-runtime [CloseParticipationSink] to [LedgerCloseParticipationClient]. */
@@ -63,6 +65,8 @@ class LedgerCloseParticipationSink(@RestClient private val client: LedgerClosePa
             journalsPosted = report.journalsPosted,
             itemsProcessed = report.itemsProcessed,
             reason = report.reason,
+            exercisedJobs = report.exercisedJobs,
+            sourceRunId = report.sourceRunId,
         ),
     ).replaceWith(Unit)
 }
