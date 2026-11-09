@@ -212,7 +212,8 @@ internal fun requireNamedMachineCaller(identity: SecurityIdentity) {
 /** Only the rail's own verified machine identity may create or replay its fraud-review case. */
 internal fun requireFraudReviewKeyCaller(identity: SecurityIdentity, idempotencyKey: String) {
     if (
-        idempotencyKey.startsWith("aml-") && idempotencyKey.endsWith("-FRAUD_REVIEW") &&
+        idempotencyKey.startsWith("aml-") &&
+        idempotencyKey.endsWith("-FRAUD_REVIEW") &&
         !ServiceAccountIdentity.isPrincipal(identity, "service-account-openbank-domestic-payment")
     ) {
         throw ForbiddenException("fraud-review case keys are reserved for domestic-payment")
