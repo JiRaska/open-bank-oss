@@ -22,12 +22,16 @@ import {
 } from '@/components/testing/TestIntelligenceFlow'
 import workspaceStyles from '@/components/testing/workspace/TestWorkspace.module.css'
 import { TestIntelligenceWorkspace } from '@/components/testing/workspace/TestIntelligenceWorkspace'
+import dynamic from 'next/dynamic'
 import { FullTestReportPanel } from '@/components/testing/workspace/FullTestReportPanel'
+
 import { decodeTestReadReply, type TestMatrixReport } from '@/lib/test-intelligence-delivery'
 import { TestAttentionList } from '@/components/testing/workspace/TestAttentionList'
 import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
 import { PageHeader, StatusBadge as SharedStatusBadge, TONE_TEXT_CLASS, type Tone } from '@/components/ui'
+
+const LazyExpertEvidenceMatrix = dynamic(() => import('@/components/testing/workspace/ExpertEvidenceMatrix').then(module => module.ExpertEvidenceMatrix))
 
 type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients' | 'ai-assurance'
 
@@ -756,6 +760,7 @@ export default function TestIntelligencePage() {
       freshness={<EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
       attention={(openComponent, openRuns) => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <><TestAttentionList report={full} onOpen={openComponent} onOpenRuns={openRuns} /><LazyTestAgentPanel /></>}</FullTestReportPanel>}
       learning={<FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <TestIntelligenceFlow report={full} />}</FullTestReportPanel>}
+      renderExpert={(onOpen, onOpenTest, catalog) => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <LazyExpertEvidenceMatrix report={full} catalog={catalog} onOpen={onOpen} onOpenTest={onOpenTest} />}</FullTestReportPanel>}
       renderRuns={openTest => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <div style={{ display: 'grid', gap: 16 }}>
         <label style={{ display: 'grid', gap: 6, maxWidth: 360 }}>{t('Podrobný pohled na důkazy', 'Detailed evidence view')}<select className="form-select" value={tab} onChange={event => setTab(event.target.value as Tab)}>{tabs.map(tabDef => <option key={tabDef.id} value={tabDef.id}>{tabDef.label}</option>)}</select></label>
         {tab === 'posture' && <Posture report={full} />}{tab === 'tests' && <TestCases report={full} onOpenTest={openTest} />}{tab === 'history' && <History report={full} />}{tab === 'execution' && <Execution report={full} />}{tab === 'runtime' && <RuntimeInfrastructure report={full} />}{tab === 'coverage' && <Coverage report={full} />}
