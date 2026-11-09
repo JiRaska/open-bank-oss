@@ -81,16 +81,6 @@ jobs:
         echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
 
         '
-    - name: Stage trusted Gradle distribution installer
-      run: 'set -euo pipefail
-
-        dist_dir="$(mktemp -d "${RUNNER_TEMP}/gradle-dist-installer.XXXXXX")"
-
-        cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py ci/artifacts.lock "$dist_dir/"
-
-        echo "GRADLE_DIST_INSTALLER=$dist_dir" >> "$GITHUB_ENV"
-
-        '
     - name: Stage trusted build retry helpers
       if: inputs.ref != ''
       run: "set -euo pipefail\nfor helper in retry-testcontainers-ebusy.sh retry-gradle-verification-cache.sh heal-gradle-verification-failure.sh;\
@@ -135,9 +125,6 @@ jobs:
         cache-disabled: false
         cache-read-only: true
         gradle-home-cache-strict-match: false
-    - name: Install pinned Gradle distribution (once, retried)
-      run: python3 -I "$GRADLE_DIST_INSTALLER/ensure-gradle-distribution.py" --lock "$GRADLE_DIST_INSTALLER/artifacts.lock"
-        --fetcher "$GRADLE_DIST_INSTALLER/fetch-artifact.py"
     - name: Prepare optional context test ordering
       if: inputs.service == 'openbank-context-service' && inputs.ref == ''
       timeout-minutes: 1
