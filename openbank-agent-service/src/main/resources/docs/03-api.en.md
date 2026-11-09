@@ -188,3 +188,11 @@ are capped at 256 KiB, the proposal `rationale` at 4 KiB.
 A tool result is `isError = true` exactly when `obp` would exit non-zero for the same input — an
 invalid IR (`{ok:false, problems}`, the same bytes obp prints on stderr), an unknown `ruleId`, or a
 foreign instruction — so an agent that reads only `isError` never takes a failed check for success.
+
+## Tool-free explanatory turns
+
+`GET /agent/models` advertises `capabilities.toolFreeChat: true`. A client that requires an explanation without tool access must negotiate that capability before sending its evidence, then include `allowTools: false` in `POST /agent/chat`. The default remains `true` for existing clients.
+
+The restricted turn offers an empty tool set and rejects any unsolicited model tool call at the existing invocation boundary. It retains model routing, authorization, charter checks, rate limits, auditing and the kill switch. The response acknowledges `toolsRestricted: true`; clients must also require an empty `toolCalls` list before accepting an explanation. A rejected model tool request can therefore make the explanation unavailable without executing the tool.
+
+This supports read-only explanations of bounded retained test metadata. An explanation remains an interpretation, never a replacement for a recorded verdict or a release approval. Older servers do not advertise the capability, so a strict client must keep the evidence visible and mark explanation unavailable.

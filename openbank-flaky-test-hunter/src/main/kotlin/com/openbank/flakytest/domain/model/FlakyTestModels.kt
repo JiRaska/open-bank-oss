@@ -115,10 +115,10 @@ data class FlakyTestReport(
 )
 
 /**
- * The weekly sweep was removed because the deployed pod carries no repository checkout or test
- * results. Its replay-only SCHEDULED value was removed after the 168-hour Temporal history
- * retention window. The scan remains reachable through a webhook or operator trigger; production
- * input is the Admin UI Test Intelligence snapshot posted to `POST /evidence/analyze`.
+ * No periodic fleet sweep is enabled. Source scans use a webhook or operator trigger; the
+ * deployed pilot has only a read-only own-test snapshot, while a local checkout can include
+ * execution reports. Fleet execution evidence enters through Admin UI Test Intelligence
+ * snapshots at `POST /evidence/analyze`. No scheduled trigger is part of this contract.
  */
 enum class RunTrigger {
     CI_TEST_SUITE_FAILURE_WEBHOOK,

@@ -146,7 +146,8 @@ export const PERMISSIONS = {
   // auditor is included deliberately — the programme's obligation and its cap are exactly what an
   // audit asks about.
   "loyalty:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR, ROLES.VIEWER],
-  "game:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "game:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.MARKETING],
+  "game:edit":             [ROLES.ADMIN, ROLES.MARKETING],
   "game:manage":           [ROLES.ADMIN],
   "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
   "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
@@ -424,7 +425,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission | readonly Permission[]
   ['approvals:view', ['/approvals']],
   ['settlements:view', ['/settlements']],
   ['system:view', [
-    '/api/platform-versions', '/api/finops',
+    '/api/platform-versions', '/api/finops', '/api/test-intelligence',
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/system',
   ]],

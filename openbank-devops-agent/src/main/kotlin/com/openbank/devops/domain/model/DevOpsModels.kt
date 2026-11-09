@@ -71,6 +71,7 @@ data class DevOpsRunReport(
     val doraMetricsAtRisk: Int,
     val tokensUsed: Int,
     val trigger: RunTrigger,
+    val ciGateProfile: CiGateProfileEvidence? = null,
 )
 
 enum class RunTrigger { SCHEDULED, ALERT_WEBHOOK, OPERATOR_MANUAL }

@@ -467,7 +467,7 @@ def preserve_fixture_outputs(*names):
 class ThinCalleeTest(unittest.TestCase):
     # Preserve PR12587 profiling/provider/HAL bodies together with current main
     # context-only deployment options and coverage discovery. Unrelated helpers stay fixed.
-    BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '65fed32ffa372784ddf440955c0b65a6323159b5fc37695646357c9f86f692aa', {'SERVICE': '${{ inputs.service }}', 'DEPLOY_ARTIFACT_PILOT': "${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' }}"}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', 'd34b7783f113651bdbf88431aceec68318d0a8d5a5df0b478f1eb709f4a805a9', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '6bdbc08d0209bd0dd7c545679063a38479c14b3e835ceab2f744ab1ea9d3844f', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', '0e74a3f67a9bc2cb9cd3823873aba2afcc051093cfc66355ae75ede4d0b7c9ec', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '3c0cc41a6127180ce4a2e4d305c8108adbbbea707ea59032117f7a76517dac25', {})}
+    BODIES: ClassVar[dict] = {'build-test.sh': ('build', 'Build + test (:${{ inputs.service }})', '65fed32ffa372784ddf440955c0b65a6323159b5fc37695646357c9f86f692aa', {'SERVICE': '${{ inputs.service }}', 'DEPLOY_ARTIFACT_PILOT': "${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' }}"}), 'checkout-provider-ref.sh': ('contract', 'Check out a requested provider version only after proving it is on main', '9359271c9fbb762b315b2cc0b0da49b326d93fab2901a15e4b1ca21b294495fd', {}), 'prepare-provider-overlay.sh': ('contract', 'Check out P and overlay the provider test tree from F (equivalence-proven)', '0f445699cbeda8ff0dbad68672a9a71bc53219d33bbf96b23a43f4c9371708f0', {}), 'prewarm-images.sh': ('contract', 'Pre-warm Testcontainers image cache via ECR', '36f9392b6a9fd8ab7df2d878ba0b936420502a88fccfa77085755f22103b0bfc', {'ECR_LOGIN_OUTCOME': '${{ steps.ecr_login.outcome }}'}), 'configure-maven-mirror.sh': ('contract', 'Configure CodeArtifact Maven mirror', '8a6a6c1a11a5623f49afbd15dff4af80c338c295e695c27f7959a71aeedb15bf', {}), 'warm-gradle-cache.sh': ('contract', 'Warm Gradle dependency cache (self-heal corrupted entries)', 'd34b7783f113651bdbf88431aceec68318d0a8d5a5df0b478f1eb709f4a805a9', {'SERVICE': '${{ inputs.service }}'}), 'publish-consumer-pacts.sh': ('contract', 'Publish consumer pacts to broker', '4648d16cb03ba701b58aeabd5bbcf69ca9d0bcd807d751c56fd92a64e7728c2a', {'SERVICE': '${{ inputs.service }}'}), 'discover-provider-task.sh': ('contract', 'Discover provider Pact task', '0e74a3f67a9bc2cb9cd3823873aba2afcc051093cfc66355ae75ede4d0b7c9ec', {'REQUIRE_PROVIDER_PACT_TEST': '${{ inputs.require_provider_pact_test }}'}), 'preflight-pact-broker.sh': ('contract', 'Preflight Pact Broker selector/HAL response', '3c0cc41a6127180ce4a2e4d305c8108adbbbea707ea59032117f7a76517dac25', {})}
 
     BODIES['render-coverage-report.sh'] = ('build', 'Generate Kover XML report', '4b082884e67f8c0dc025e49383f8edb2f7147f944f3d00798b99b3657635bdbd', {'SERVICE': '${{ inputs.service }}'})
     BODIES['remote-build-cache.sh'] = ('build', 'Remote build cache', '43cb4b6590ef527c4abce2ec83f6e83d4ef6ee83e627f01341af44f32911b9db', {'W': '${{ secrets.GRADLE_CACHE_WRITE_PASSWORD }}', 'R': '${{ vars.GRADLE_CACHE_READ_PASSWORD }}', 'U': '${{ vars.GRADLE_CACHE_URL }}', 'H': '${{ inputs.ref }}'})
@@ -479,7 +479,9 @@ class ThinCalleeTest(unittest.TestCase):
     BODIES['check-test-intelligence-compat.sh'] = ('build', 'Check Test Intelligence compatibility evidence', '2ca2fa47888f38f3ee6f0092d0264cff200a3f2ef9a606f499d02ca3fd272e9c', {'SERVICE': '${{ inputs.service }}', 'EXPECTED_BRANCH': '${{ github.head_ref || github.ref_name }}'})
     BODIES['configure-gradle-cache-retention.sh'] = ('contract', 'Configure Gradle cache retention', 'e1723e664fca37880d92c9fa5d00abfc6b4c13aefe8fca1aa759c99eba58b49e', {})
     BODIES['probe-reposilite-mirror.sh'] = ('contract', 'Probe Reposilite in-cluster Maven mirror', '11a1849437afe770229d0aee273f835e1d7035efcbfdcd8d2c4561f78f7c9383', {})
-    BODIES['stage-handed-off-pacts.sh'] = ('contract', 'Stage handed-off consumer pacts into pacts/', 'f813e8ef5a6ea7026a2dfdfd12524f5883e2c3024e4ef9f01c4ef415867bcde1', {})
+    BODIES['stage-handed-off-pacts.sh'] = ('contract', 'Stage handed-off consumer pacts into pacts/', '09b69efe1750bb05cb4d8d2d647840a2c76c4f257dc74aaa3783e08da0aaf196', {'SERVICE': '${{ inputs.service }}'})
+
+    BODIES['consumer-pact-handoff.sh'] = ('build', 'Collect consumer pacts for hand-off to the contract job', '7d716b91874e1793c69f537e0a7a58593033a79d48b05d310b2b6d5da691babe', {'SERVICE': '${{ inputs.service }}'})
 
     def test_exact_bodies_and_explicit_environment(self):
         import hashlib
@@ -504,6 +506,8 @@ class ThinCalleeTest(unittest.TestCase):
                 subprocess.run(['bash', '-n', str(path)], check=True)
                 step = next(s for s in workflow['jobs'][job]['steps'] if s.get('name') == name)
                 expected = f'bash -e "$SERVICE_CI_HELPERS/{filename}"'
+                if filename == 'consumer-pact-handoff.sh':
+                    expected += ' collect'
                 if filename == 'render-coverage-report.sh':
                     expected = 'timeout --kill-after=10s 600s ' + expected
                     self.assertTrue(step['continue-on-error'])
@@ -688,38 +692,31 @@ class ThinCalleeTest(unittest.TestCase):
             self.assertFalse(poison.exists())
 
     def test_consumer_publication_zero_and_exact_selected_files(self):
-        import os
-        import subprocess
-        script = graph.ROOT / '.github/scripts/service-ci-steps/publish-consumer-pacts.sh'
+        from consumer_pact_handoff_test import ConsumerPactSourceTest, SERVICE
         for nonempty in [False, True]:
-            with (self.subTest(nonempty=nonempty), tempfile.TemporaryDirectory() as tmp,
-                  preserve_fixture_outputs('/tmp/pact-publish.json')):
-                root = Path(tmp)
-                (root / 'pacts').mkdir()
-                fixture = {'consumer': {'name': 'fixture-consumer'}, 'provider': {'name': 'fixture-provider'}}
-                (root / 'pacts/openbank-foreign-contract.json').write_text(json.dumps(fixture))
-                if nonempty:
-                    (root / 'pacts/openbank-fixture-contract.json').write_text(json.dumps(fixture))
-                runner = root / 'runner'
-                runner.mkdir()
-                capture = root / 'request'
-                (runner / 'pact-broker-post.sh').write_text(
-                    'cp "$2" "$CAPTURE"\nprintf \'{"notices":[]}\\n\' > "$3"\necho 200\n')
-                env = dict(os.environ, SERVICE='openbank-fixture', BRANCH='fixture', GITHUB_SHA='a' * 40,
-                           GITHUB_SERVER_URL='https://example.invalid', GITHUB_REPOSITORY='fixture/repo',
-                           GITHUB_RUN_ID='42', RUNNER_TEMP=str(runner), CAPTURE=str(capture),
-                           PACT_BROKER_URL='https://broker.invalid', PACT_BROKER_PASSWORD='secret-canary')
-                result = subprocess.run(['bash', '-e', str(script)], cwd=root, env=env,
-                                        capture_output=True, text=True, check=False)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertNotIn('secret-canary', result.stdout + result.stderr)
-                self.assertEqual(capture.exists(), nonempty)
-                if nonempty:
-                    body = json.loads(capture.read_text())
-                    self.assertEqual(body['pacticipantName'], 'openbank-fixture')
-                    self.assertEqual(body['pacticipantVersionNumber'], 'a' * 40)
-                    self.assertEqual(body['branch'], 'fixture')
-                    self.assertEqual(len(body['contracts']), 1)
+            with self.subTest(nonempty=nonempty):
+                fixture = ConsumerPactSourceTest()
+                fixture.setUp()
+                try:
+                    fixture.env.update(PACT_BROKER_PASSWORD='secret-canary', BRANCH='fixture')
+                    (fixture.root / 'pacts/openbank-foreign-contract.json').write_text('{}')
+                    if not nonempty:
+                        fixture.pact.unlink()
+                        (fixture.root / 'pact-handoff' / fixture.pact.name).unlink()
+                        fixture.run_helper('consumer-pact-handoff.sh', 'collect')
+                    fixture.run_helper('stage-handed-off-pacts.sh')
+                    result = fixture.run_helper('publish-consumer-pacts.sh')
+                    self.assertNotIn('secret-canary', result.stdout + result.stderr)
+                    capture = fixture.root / 'published.json'
+                    self.assertEqual(capture.exists(), nonempty)
+                    if nonempty:
+                        body = json.loads(capture.read_text())
+                        self.assertEqual(body['pacticipantName'], SERVICE)
+                        self.assertEqual(body['pacticipantVersionNumber'], fixture.source)
+                        self.assertEqual(body['branch'], 'fixture')
+                        self.assertEqual(len(body['contracts']), 1)
+                finally:
+                    fixture.doCleanups()
 
     def test_provider_discovery_success_absence_and_failure(self):
         import os

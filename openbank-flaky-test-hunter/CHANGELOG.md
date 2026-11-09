@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.4...flaky-test-hunter-v0.15.5) (2026-11-08)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** preserve asynchronous proposal delivery ([#15251](https://github.com/JiRaska/open-bank-oss/issues/15251)) ([a58917f](https://github.com/JiRaska/open-bank-oss/commit/a58917f6cc70433d7fc50fb6aec1e95f91628bbc))
+
 ## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.15.3...flaky-test-hunter-v0.15.4) (2026-11-01)
 
 

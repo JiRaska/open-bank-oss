@@ -71,9 +71,47 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
+// Build-time tech-stack snapshot read by com.openbank.libs.util.BuildInfo and served at
+// /api/v1/info (admin-ui System Health + Tech Inventory). It MUST be stamped in this module,
+// next to BuildInfo: every service has libs-domain on its classpath, while the umbrella
+// openbank-libs JAR it used to live in is absent from services that depend on domain/runtime
+// directly — they reported Quarkus, Gradle and libs as `unknown`. Values come from the version
+// catalog so a bump in one place flows straight to the endpoint. No git commit or wall clock is
+// stamped: either would change this JAR on every build and invalidate every service's test
+// classpath; the running service's commit comes from openbank-service-build.properties.
+val kotlinFromCatalog = versionCatalogs.named("libs").findVersion("kotlin").get().requiredVersion
+val quarkusFromCatalog = libs.versions.quarkus.asProvider().get()
+val gradleVersionStamp: String = gradle.gradleVersion
+
+tasks.processResources {
+    inputs.property("kotlinVersion", kotlinFromCatalog)
+    inputs.property("quarkusVersion", quarkusFromCatalog)
+    inputs.property("gradleVersion", gradleVersionStamp)
+    inputs.property("libsVersion", project.version.toString())
+    filesMatching("openbank-build-info.properties") {
+        filter(
+            org.apache.tools.ant.filters.ReplaceTokens::class,
+            "tokens" to mapOf(
+                "kotlinVersion" to kotlinFromCatalog,
+                "quarkusVersion" to quarkusFromCatalog,
+                "quarkusLts" to "true",
+                "quarkusSupportUntil" to "2027-09-30",
+                "gradleVersion" to gradleVersionStamp,
+                "libsVersion" to project.version.toString(),
+            ),
+        )
+    }
+}
+
 tasks.test {
     useJUnitPlatform()
     jvmArgs("-Dnet.bytebuddy.experimental=true")
+    // BuildInfoTest asserts the stamped values against the catalog, so a resource that is not
+    // stamped (or not on the classpath) fails the build instead of shipping `unknown`.
+    systemProperty("expected.kotlin.version", kotlinFromCatalog)
+    systemProperty("expected.quarkus.version", quarkusFromCatalog)
+    systemProperty("expected.gradle.version", gradleVersionStamp)
+    systemProperty("expected.libs.version", project.version.toString())
 }
 
 kover {

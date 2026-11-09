@@ -12,6 +12,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 
 /**
@@ -38,5 +39,21 @@ class ChatNullMessageElementIT {
             .body("""{"messages":[null]}""")
             .`when`().post("/agent/chat")
             .then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `tool-free chat is negotiated and acknowledged on the real HTTP surface`() {
+        given().`when`().get("/agent/models").then()
+            .statusCode(200)
+            .body("capabilities.toolFreeChat", equalTo(true))
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"messages":[{"role":"user","content":"Explain what a unit test checks."}],"allowTools":false}""")
+            .`when`().post("/agent/chat")
+            .then().statusCode(200)
+            .body("toolsRestricted", equalTo(true))
+            .body("toolCalls.size()", equalTo(0))
     }
 }

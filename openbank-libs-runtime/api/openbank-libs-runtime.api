@@ -1856,6 +1856,7 @@ public final class com/openbank/libs/security/OpenBaoTransport$Companion {
 	public static synthetic fun boundedBody$default (Lcom/openbank/libs/security/OpenBaoTransport$Companion;IILjava/lang/Object;)Ljava/net/http/HttpResponse$BodyHandler;
 	public final fun defaultHttpClient (Ljavax/net/ssl/SSLContext;)Ljava/net/http/HttpClient;
 	public static synthetic fun defaultHttpClient$default (Lcom/openbank/libs/security/OpenBaoTransport$Companion;Ljavax/net/ssl/SSLContext;ILjava/lang/Object;)Ljava/net/http/HttpClient;
+	public final fun pemTrustSslContext (Ljava/nio/file/Path;)Ljavax/net/ssl/SSLContext;
 }
 
 public final class com/openbank/libs/security/ResponseTooLargeException : java/io/IOException {

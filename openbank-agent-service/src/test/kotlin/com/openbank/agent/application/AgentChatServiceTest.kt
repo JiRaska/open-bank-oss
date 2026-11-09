@@ -22,6 +22,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -364,5 +365,53 @@ class AgentChatServiceTest {
                 )
             }
         }
+    }
+    private fun toolFreeService(): AgentChatService = AgentChatService().apply {
+        gateway = this@AgentChatServiceTest.gateway
+        registry = this@AgentChatServiceTest.registry
+        policyGate = mockk(relaxed = true)
+        rateLimiter = mockk<CharterRateLimiter>().also {
+            every { it.checkRunsPerDay(any()) } returns null
+            every { it.checkTokensPerRun(any(), any()) } returns null
+        }
+        charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
+        runAuditor = this@AgentChatServiceTest.runAuditor
+        injectionGuard = passThroughGuard
+        contentSafety = passThroughContentSafety
+        killSwitch = noHaltKillSwitch
+    }
+
+    @Test
+    fun `an explanation turn offers no tools and retains the governed run audit`(): Unit = runBlocking {
+        coEvery { gateway.complete(any(), any(), any(), any()) } returns
+            ModelResponse(content = "The recorded test passed.", stopReason = StopReason.END, modelId = "mock-echo")
+
+        val result = toolFreeService().chat(
+            listOf(ChatMessage(ChatRole.USER, "Explain the recorded unit test outcome.")),
+            null,
+            "test evidence explanation",
+            allowTools = false,
+        )
+
+        assertThat(result.reply).isEqualTo("The recorded test passed.")
+        assertThat(result.toolCalls).isEmpty()
+        coVerify(exactly = 1) { gateway.complete(any(), match { it.tools.isEmpty() }, any(), any()) }
+        coVerify(exactly = 1) { runAuditor.runCompleted(match { it.identity.agentId == "ui-assistant" }) }
+    }
+
+    @Test
+    fun `an unsolicited tool invocation in an explanation cannot execute`(): Unit = runBlocking {
+        coEvery { gateway.complete(any(), any(), any(), any()) } returnsMany toolUseThenEnd()
+
+        val result = toolFreeService().chat(
+            listOf(ChatMessage(ChatRole.USER, "Explain the recorded unit test outcome.")),
+            null,
+            "test evidence explanation",
+            allowTools = false,
+        )
+
+        assertThat(result.toolCalls).allSatisfy { assertThat(it.allowed).isFalse() }
+        verify(exactly = 0) { registry.call(any(), any(), any()) }
+        coVerify { gateway.complete(any(), match { it.tools.isEmpty() }, any(), any()) }
     }
 }

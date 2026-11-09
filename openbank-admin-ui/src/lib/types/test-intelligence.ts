@@ -132,6 +132,8 @@ export interface EvidenceSource {
 
 export interface ComponentTestPosture {
   component: string
+  /** Canonical governance domain; absent in older retained reports. */
+  domain?: string
   /** Added by the route at request time; absent in the on-disk/CI file. */
   running?: RunningCommitObservation
   /** Present only on a posture served by the commit-addressed evidence store (#13201). */
@@ -472,6 +474,10 @@ export interface TestCaseHistory {
   wastedDurationMs: number
   sameCommitTransitions: number
   lastObservedAt: string
+  /** Exact testcase execution, distinct from a component-level aggregate. */
+  lastRun?: TestRunProvenance & { observedAt: string }
+  /** Bounded immutable observations; no failure messages, input values or stack traces. */
+  recentRuns?: Array<{ state: 'passed' | 'failed' | 'skipped'; durationMs: number; run: TestRunProvenance & { observedAt: string } }>
   /** Direct evidence that a passed Playwright testcase needed retry attempts. */
   retryFlaky?: true
   /** Latest typed retry observation; failure text and stack output are never retained. */

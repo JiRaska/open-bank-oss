@@ -6,14 +6,14 @@ Embankment, Old Town rooftops, Charles Bridge. The initial catalogue publishes
 Embankment as LIVE and the other two worlds as BETA.
 
 The bank owns availability (OFF/BETA/LIVE), unique order, Czech/English titles,
-optional UTC season bounds and unlock requirements. The mobile app owns painted
-worlds, geometry, heroes and controls. Unknown themes are hidden by the client;
+optional UTC season bounds and unlock requirements. The optional course content owns geometry and component placement for supported
+worlds. The mobile app owns painted worlds, heroes, mechanics and controls. Unknown themes are hidden by the client;
 adding art or mechanics still requires a mobile release. Stable chapter ids
 identify stored completions and should be retained when changing names or order.
 
 ## Authority and writes
 
-- Staff read: `GET /api/v1/game/admin/catalog`, operator/admin/compliance.
+- Staff read: `GET /api/v1/game/admin/catalog`, operator/admin/compliance/marketing.
 - Admin write: `PUT /api/v1/game/admin/catalog`, admin only. Send the revision from
   the read. PostgreSQL serializes updates; stale revisions receive 409. The new
   document and audit record (verified actor and before/after values) commit in one
@@ -79,3 +79,30 @@ cd openbank-admin-ui
 npx vitest run src/test/game-catalog-bff.test.ts src/test/roles.test.ts
 npx playwright test e2e/game-catalog.spec.ts
 ```
+
+## Marketing studio workflow
+
+The studio lists visual chapter cards with chapter numbers, availability and original
+artwork. Open a card to preview the scene and scrub along the course. Create a new
+chapter from one of the three supported world templates, or duplicate a chapter;
+new chapters start OFF. Existing ids remain stable so renaming/reordering does not
+detach completions.
+
+Choose a component in the illustrated library and place it in the scene. The chapter
+contents panel lists every existing collection, including ground, slopes, deposits,
+bridge/rooftop objects and enemies, in bounded pages. Selecting an existing component
+moves the preview to it and opens editable properties. Terrain, course length,
+finish, final boss, publication window and unlock requirement remain explicit controls.
+The preview is a placement aid; it does not claim to simulate native physics.
+
+Human marketing staff can inspect and edit OFF/BETA courses through the draft-only
+endpoint. Every LIVE entry is protected against modification, removal and reordering;
+only the human administrator's publication path can change it. Both paths preserve
+revision conflict handling and the existing transactional audit. Saving a catalogue
+does not create an award or change customer completions.
+
+Save work in testing, play through it in an editor-capable native build, then ask an
+administrator to publish. `contentSchema=1` clients receive the authored track. Older
+clients keep the original three bundled chapters and do not see new authored ids.
+New art or mechanics still require a reviewed mobile release. A mobile refresh that
+fails validation or networking retains the profile-scoped last known configuration.
