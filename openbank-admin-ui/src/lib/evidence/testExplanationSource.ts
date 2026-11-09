@@ -2,22 +2,14 @@
 import 'server-only'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { createEvidenceSnapshotReader } from './publishedSnapshot'
-import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, testIntelligenceCollectedAt, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from './testIntelligenceSnapshot'
+import { testIntelligenceReader } from './testIntelligenceReader'
+import { TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, testIntelligenceSnapshotBaseUrl, validateTestIntelligenceSnapshot } from './testIntelligenceSnapshot'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
-
-const readers = new Map<string, ReturnType<typeof createEvidenceSnapshotReader<TestIntelligenceReport>>>()
 
 /** Same validated source contract as the report route; a configured outage never falls back silently. */
 export async function readTestExplanationSource(): Promise<TestIntelligenceReport | null> {
   const baseUrl = testIntelligenceSnapshotBaseUrl()
-  const key = baseUrl ?? '<disabled>'
-  let reader = readers.get(key)
-  if (!reader) {
-    reader = createEvidenceSnapshotReader({ baseUrl, maxBytes: TEST_INTELLIGENCE_SNAPSHOT_MAX_BYTES, validateSnapshot: validateTestIntelligenceSnapshot, collectedAt: testIntelligenceCollectedAt })
-    if (readers.size >= 8) readers.delete(readers.keys().next().value!)
-    readers.set(key, reader)
-  }
+  const reader = testIntelligenceReader(baseUrl)
   let published
   try { published = await reader.read() } catch { return null }
   if (published.status === 'unavailable') return null

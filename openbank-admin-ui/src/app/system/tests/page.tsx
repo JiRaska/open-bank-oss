@@ -22,6 +22,8 @@ import {
 } from '@/components/testing/TestIntelligenceFlow'
 import workspaceStyles from '@/components/testing/workspace/TestWorkspace.module.css'
 import { TestIntelligenceWorkspace } from '@/components/testing/workspace/TestIntelligenceWorkspace'
+import { FullTestReportPanel } from '@/components/testing/workspace/FullTestReportPanel'
+import { decodeTestReadReply, type TestMatrixReport } from '@/lib/test-intelligence-delivery'
 import { TestAttentionList } from '@/components/testing/workspace/TestAttentionList'
 import { EvidenceFreshness } from '@/components/testing/EvidenceFreshness'
 import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'
@@ -699,7 +701,7 @@ function AiAssurance({ report }: { report: TestIntelligenceReport }) {
 export default function TestIntelligencePage() {
   const { t } = useLanguage()
   const [tab, setTab] = useState<Tab>('tests')
-  const [report, setReport] = useState<TestIntelligenceReport | null>(null)
+  const [report, setReport] = useState<TestMatrixReport | null>(null)
   const [loading, setLoading] = useState(true)
   const testLoading = loading
   const qualityLoading = false
@@ -708,13 +710,11 @@ export default function TestIntelligencePage() {
     if (!silent) setLoading(true)
     try {
       // `no-cache` revalidates with the route's ETag: an unchanged poll is a bodyless 304.
-      const response = await fetch('/api/test-intelligence', { cache: 'no-cache' })
+      const response = await fetch('/api/test-intelligence?view=overview', { cache: 'no-cache' })
       if (!response.ok) throw new Error(`Test intelligence request failed with HTTP ${response.status}`)
-      const result = await response.json() as TestIntelligenceReport
-      if (!Array.isArray(result.components) || !Array.isArray(result.warnings) || !result.totals) {
-        throw new Error('Invalid test intelligence report')
-      }
-      setReport(result)
+      const decoded = decodeTestReadReply(await response.json(), { view: 'overview' })
+      if (!decoded.ok || !('view' in decoded.value) || decoded.value.view !== 'overview') throw new Error('Invalid test evidence')
+      setReport(decoded.value)
     } catch { if (!silent) setReport(null) } finally { if (!silent) setLoading(false) }
   }, [])
   const load = useCallback(() => fetchReport(false), [fetchReport])
@@ -752,15 +752,16 @@ export default function TestIntelligencePage() {
     />
     {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <TestIntelligenceWorkspace
       report={report}
+      onRefresh={load}
       freshness={<EvidenceFreshness evidence={report.evidence} components={report.components.length} />}
-      attention={(openComponent, openRuns) => <><TestAttentionList report={report} onOpen={openComponent} onOpenRuns={openRuns} /><LazyTestAgentPanel /></>}
-      learning={<TestIntelligenceFlow report={report} />}
-      renderRuns={openTest => <div style={{ display: 'grid', gap: 16 }}>
+      attention={(openComponent, openRuns) => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <><TestAttentionList report={full} onOpen={openComponent} onOpenRuns={openRuns} /><LazyTestAgentPanel /></>}</FullTestReportPanel>}
+      learning={<FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <TestIntelligenceFlow report={full} />}</FullTestReportPanel>}
+      renderRuns={openTest => <FullTestReportPanel key={report.collectedAt} collectedAt={report.collectedAt} refreshKey={report.evidence?.servedFrom ?? ''} onRefresh={load}>{full => <div style={{ display: 'grid', gap: 16 }}>
         <label style={{ display: 'grid', gap: 6, maxWidth: 360 }}>{t('Podrobný pohled na důkazy', 'Detailed evidence view')}<select className="form-select" value={tab} onChange={event => setTab(event.target.value as Tab)}>{tabs.map(tabDef => <option key={tabDef.id} value={tabDef.id}>{tabDef.label}</option>)}</select></label>
-        {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} onOpenTest={openTest} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
-        {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}{tab === 'clients' && <ClientExperiences report={report} />}{tab === 'ai-assurance' && <AiAssurance report={report} />}
-        <details><summary>{t('Souhrny běhů a mapy všech vrstev', 'Run summaries and cross-layer maps')}</summary><TestOverviewPanel report={report} selectTab={setTab} /><AssuranceBoard report={report} selectTab={setTab} /><EvidenceGapQueue report={report} selectTab={setTab} /></details>
-      </div>}
+        {tab === 'posture' && <Posture report={full} />}{tab === 'tests' && <TestCases report={full} onOpenTest={openTest} />}{tab === 'history' && <History report={full} />}{tab === 'execution' && <Execution report={full} />}{tab === 'runtime' && <RuntimeInfrastructure report={full} />}{tab === 'coverage' && <Coverage report={full} />}
+        {tab === 'contracts' && <Contracts report={full} />}{tab === 'mutation' && <Mutations report={full} />}{tab === 'performance' && <Performance report={full} />}{tab === 'synthetic' && <Synthetics report={full} />}{tab === 'clients' && <ClientExperiences report={full} />}{tab === 'ai-assurance' && <AiAssurance report={full} />}
+        <details><summary>{t('Souhrny běhů a mapy všech vrstev', 'Run summaries and cross-layer maps')}</summary><TestOverviewPanel report={full} selectTab={setTab} /><AssuranceBoard report={full} selectTab={setTab} /><EvidenceGapQueue report={full} selectTab={setTab} /></details>
+      </div>}</FullTestReportPanel>}
     /> : <div role="status" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný. Můžete jej zkusit obnovit.', 'The report is unavailable. You can try refreshing it.')}</div>}
   </div>
 }
