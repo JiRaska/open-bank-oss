@@ -33,6 +33,12 @@ on:
     # 47 minutes past every 6th hour — off the congested :00/:30 marks, between the
     # auto-deploy 3-hourly reconcile ticks (…, :23) so it observes their output.
     - cron: "47 5,11,17,23 * * *"
+  # Also after every Auto deploy run: its can-i-deploy log is what names a consumer
+  # refused because a provider has to deploy first (REGRESSION), and schedule delivery
+  # here is unreliable. See deploy-lag-blockers.py.
+  workflow_run:
+    workflows: ["Auto deploy"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -50,13 +56,16 @@ jobs:
     permissions:
       contents: read
       issues: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
       - name: Self-test the report script
-        run: bash .github/scripts/test-deploy-code-lag-report.sh
+        run: |
+          bash .github/scripts/test-deploy-code-lag-report.sh
+          python3 .github/scripts/test-deploy-lag-blockers.py
 
       - name: Report deployed code lag
         id: probe
@@ -72,6 +81,22 @@ jobs:
                echo "::error::answer. That is a failure of THIS GATE, not a clean bill."
                exit 1 ;;
           esac
+
+      - name: Name the blocker per lagging service
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          : > /tmp/deploy.log
+          if [ -n "${DEPLOY_RUN_ID:-}" ]; then
+            gh run view "$DEPLOY_RUN_ID" -R "$GITHUB_REPOSITORY" --log > /tmp/deploy.log \
+              || echo "::warning::could not read Auto deploy run $DEPLOY_RUN_ID log; REGRESSION consumers not attributed this run"
+          fi
+          python3 .github/scripts/deploy-lag-blockers.py --report /tmp/code-lag.json \
+            --rules openbank-libs/governance/rules.yaml --deploy-log /tmp/deploy.log \
+            --money-path-days 3 > /tmp/code-lag-enriched.json
+          mv /tmp/code-lag-enriched.json /tmp/code-lag.json
 
       # Runs on an empty report too: the auto-close half is the only thing that closes a
       # tracker whose lag has resolved (same lesson as deploy-drift-watch, measured
@@ -96,18 +121,27 @@ jobs:
               `| oldest undeployed src commit | \`${e.oldest_src_commit}\` — **${e.oldest_src_age_hours}h** on main |`,
               `| threshold | ${report.threshold_hours}h |`,
               '',
-              'A change to this service own source has been on main longer than the',
-              'threshold without reaching sandbox. The auto-deploy reconcile re-drives it',
-              '(possibly behind a transient can-i-deploy block); this issue tracks the fact',
-              'until the deployed pin catches up, then the watch closes it itself.',
+              `| money-path | ${e.money_path ? 'yes' : 'no'} |`,
               '',
-              'If the lag is deliberate (hold, governance), say so in a comment — a silent',
-              'lag is the only unacceptable state.',
+              '### Blocking reason',
+              ...(e.holds.length
+                ? ['Held in `rules.yaml: deploy_holds`. The reconcile will NOT re-drive it; only the owner releasing the hold does:',
+                   ...e.holds.map(h => `- ${h.issue}: ${h.reason}`)]
+                : [e.escalate
+                    ? `**No hold recorded and money-path lag exceeds ${report.money_path_days} days: nothing in governance explains this, treat it as a pipeline defect.**`
+                    : 'No hold recorded; the auto-deploy reconcile should re-drive it.']),
+              ...(e.blocked_consumers.length
+                ? ['', 'Consumers refused by can-i-deploy REGRESSION until this service deploys:',
+                   ...e.blocked_consumers.map(c => '- `' + c + '`')]
+                : []),
+              '',
+              'This issue tracks the fact until the deployed pin catches up, then the watch closes it itself.',
               '',
               `_Automated: \`${context.workflow}\` run ${context.runId}, threshold ${report.threshold_hours}h. Refreshed in place while the lag persists._`,
             ].join('\n')
-            const titleFor = e =>
-              `deploy-code-lag: ${e.service} has src ${e.oldest_src_age_hours}h on main, sandbox runs ${e.deployed_tag}`
+            const titleFor = e => e.kind === 'regression_block'
+              ? `deploy-code-lag: ${e.service} blocks ${e.blocked_consumers.join(', ')} (can-i-deploy REGRESSION)`
+              : `deploy-code-lag: ${e.holds.length ? '[held] ' : (e.escalate ? '[money-path, unexplained] ' : '')}${e.service} has src ${e.oldest_src_age_hours}h on main, sandbox runs ${e.deployed_tag}`
 
             // One open issue per lagging service — refreshed, never stacked; a recently
             // hand-closed issue for a service that still lags is reopened, not duplicated

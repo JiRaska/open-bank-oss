@@ -2357,6 +2357,7 @@ gates:
     budget_seconds: 30
     run: |
       bash .github/scripts/test-deploy-code-lag-report.sh
+      python3 .github/scripts/test-deploy-lag-blockers.py
 
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
