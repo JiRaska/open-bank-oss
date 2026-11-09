@@ -32,6 +32,7 @@ export interface DayCloseParticipant {
 export interface DayCloseCompleteness {
   businessDate: string
   complete: boolean
+  participantsMode: 'off' | 'shadow' | 'enforce' | 'unknown'
   missing: string[]
   refused: string[]
   participants: DayCloseParticipant[]
@@ -64,6 +65,8 @@ export function parseDayCloseCompleteness(raw: unknown): DayCloseCompleteness | 
   return {
     businessDate: body.businessDate,
     complete: body.complete,
+    participantsMode: body.participantsMode === 'off' || body.participantsMode === 'shadow' || body.participantsMode === 'enforce'
+      ? body.participantsMode : 'unknown',
     missing: body.missing.filter((m): m is string => typeof m === 'string'),
     refused: Array.isArray(body.refused) ? body.refused.filter((m): m is string => typeof m === 'string') : [],
     participants,
@@ -173,12 +176,21 @@ export function DayCloseParticipantsPanel() {
         <div className="skeleton" style={{ height: '96px' }} />
       ) : data ? (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', overflowX: 'auto' }}>
+          <p style={{ margin: 0, padding: '12px 16px' }}>
+            {t('Kontrola úplnosti: ', 'Completeness check: ')}
+            {data.participantsMode === 'enforce' ? t('Blokování zapnuto', 'Blocking active')
+              : data.participantsMode === 'shadow' ? t('Pouze sledování', 'Observation only')
+                : data.participantsMode === 'off' ? t('Vypnuta', 'Disabled') : t('Režim není doložen', 'Mode unknown')}
+          </p>
           <p role="status" style={{ margin: 0, padding: '12px 16px', fontSize: '13px', fontWeight: 600,
             color: data.complete ? 'var(--success-text)' : 'var(--danger-text)' }}>
             {data.complete
-              ? t('Všichni účastníci nahlásili výsledek — den může být uzavřen.', 'Every participant has reported — the day can tie out.')
-              : t(`${heldText(data, 'cs')} — den zůstane v CUTOFF, dokud účastník nenahlásí proběhnutí nebo ho operátor výslovně nepromině.`,
-                  `${heldText(data, 'en')} — the day stays in CUTOFF until the participant reports it ran or an operator explicitly waives it.`)}
+              ? t('Účast požadovaných služeb je doložena. Uzavření dále závisí na účetních kontrolách.', 'Required service participation is evidenced. Closing also depends on the accounting controls.')
+              : data.participantsMode === 'enforce'
+                ? t(`${heldText(data, 'cs')} — den zůstane v CUTOFF, dokud účastník nenahlásí proběhnutí nebo ho operátor výslovně nepromině.`,
+                  `${heldText(data, 'en')} — the day stays in CUTOFF until the participant reports it ran or an operator explicitly waives it.`)
+                : t(`${heldText(data, 'cs')} — blokování neúplné uzávěrky není potvrzeno; den může přesto přejít do TIED_OUT.`,
+                    `${heldText(data, 'en')} — blocking an incomplete close is not confirmed; the day may still reach TIED_OUT.`)}
           </p>
           <table className="table" style={{ width: '100%' }}>
             <thead>
@@ -188,6 +200,7 @@ export function DayCloseParticipantsPanel() {
                 <th scope="col" style={{ textAlign: 'right' }}>{t('Zaúčtováno', 'Journals')}</th>
                 <th scope="col" style={{ textAlign: 'right' }}>{t('Položek', 'Items')}</th>
                 <th scope="col">{t('Důvod', 'Reason')}</th>
+                <th scope="col">{t('Nahlásil / schválil výjimku', 'Reported / waived by')}</th>
                 <th scope="col">{t('Nahlášeno', 'Reported')}</th>
               </tr>
             </thead>
@@ -202,6 +215,7 @@ export function DayCloseParticipantsPanel() {
                   <td style={{ textAlign: 'right' }}>{p.journalsPosted}</td>
                   <td style={{ textAlign: 'right' }}>{p.itemsProcessed}</td>
                   <td>{p.reason ?? '—'}</td>
+                  <td>{p.reportedBy ?? '—'}</td>
                   <td>{fmtTs(p.reportedAt)}</td>
                 </tr>
               ))}

@@ -782,3 +782,38 @@ set) apply equally to the new `ledger.approval.decide` action.
   reads and may restore false-real classification. Existing journal flags are not rewritten.
   Dedicated caller provisioning and trusted-principals configuration are separate work (#14060);
   live canary seeding and deployed acceptance remain separate operational decisions.
+
+- **2026-11-08 — At-close participation evidence (#13167).** A monthly readiness read is protected by
+  `ledger.read` and the existing authenticated read roles. A new additive table is written only
+  inside the day-transition transaction, under the same day lock as participant reports and
+  waivers; insert failure rolls back the state change and its outbox event. No update or backfill
+  API exists. The snapshot records the configured participant principals, required jobs, latest
+  reports and qualifying post-cutoff tie-out id. Later reports cannot retroactively repair the
+  historical verdict. Missing evidence, disabled checks, waivers, declaration drift and unexercised
+  monthly jobs fail readiness closed. Report identity checks and human-only reasoned waivers
+  remain mandatory, including in advisory authorization mode. Job names are bounded and only
+  RAN may attest them. Snapshots retain operator attribution and waiver reasons under the same
+  audit-data access/retention obligations as participation history; no such values enter metrics.
+  Rollback retains the additive table and history. This read does not activate enforcement,
+  release deployment holds or attest pension-company/fund accounting mappings.
+The retained verdict records reconciliation start and the committed journal count through its
+business date. Writers take a shared advisory lock; only the short close capture takes it
+exclusively, so normal postings remain concurrent. A run that overlaps a journal commit cannot
+qualify. Monthly readiness compares the retained count to current immutable journal history:
+backdated postings and reversals invalidate qualification without rewriting the original evidence;
+postings dated after the evaluated day do not. Legacy runs without a read watermark stay unknown.
+The count query runs over journal history and must be measured at production volume before
+activation; the implementation does not claim a production latency or a completed live month.
+
+The journal population check also retains an order-independent SHA-256 multiset fingerprint of
+committed journal ids. Archive removal plus the same number of new postings cannot reuse a count
+as proof. Its four exact numeric SHA-256 limb sums avoid materialising/sorting the whole set.
+Capture computes this before excluding writers, under the transition transaction's relation lock,
+then verifies the short count check under the writer barrier. Production-volume CPU and monthly
+read latency still require measurement before rollout; this is a consistency check, not a signature.
+
+A newer declared participant receipt also invalidates monthly readiness, including a refusal or
+zero-journal run after close. Frozen reports are never replaced by later success; missing legacy
+receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
+receipt and preserve the proof. Producers must refresh the current and immediately prior month,
+including closed days, and explicitly revoke completion while source work is pending.
