@@ -90,6 +90,21 @@ gates:
     run: |
       python3 .github/scripts/check-capacity-profile.py --root .
 
+  - id: verification-metadata-additive-check
+    name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
+    group: supplychain
+    mode: enforced
+    rationale: "The privileged workflow_run push trusts this validator with an artifact produced by a build that ran the bump's own plugins. Its self-test must stay red-reachable on every PR, not first run after merge, and main's own file must still parse under its strict rules or every refresh would be refused."
+    review_after: "2027-05-09"
+    budget_seconds: 30
+    # main pins ~7,000 artifacts; a count near zero means the parse or the path broke.
+    min_subjects: 1000
+    selftest: python3 .github/scripts/check-verification-metadata-additive.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-verification-metadata-additive.py"]
+    run: |
+      python3 .github/scripts/check-verification-metadata-additive.py gradle/verification-metadata.xml gradle/verification-metadata.xml
+
   - id: test-intelligence-ecosystem
     name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
     group: kotlin

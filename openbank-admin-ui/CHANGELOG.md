@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.9.0...admin-ui-v4.9.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **admin-ui:** show concurrent CI tracks in a realistic station ([#15409](https://github.com/JiRaska/open-bank-oss/issues/15409)) ([a4847e8](https://github.com/JiRaska/open-bank-oss/commit/a4847e8eba6175e6b11a04404e649b607c2bc2bf))
+
+## [4.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.8.0...admin-ui-v4.9.0) (2026-11-09)
+
+
+### Features
+
+* **admin-ui:** add lion train CI and CD guides ([#15351](https://github.com/JiRaska/open-bank-oss/issues/15351)) ([1ebe1f7](https://github.com/JiRaska/open-bank-oss/commit/1ebe1f79801527fdd1d1e32f22aa7b7dadccad3b))
+
 ## [4.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.7.1...admin-ui-v4.8.0) (2026-11-09)
 
 
