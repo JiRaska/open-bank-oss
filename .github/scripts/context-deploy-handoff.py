@@ -67,7 +67,16 @@ def push_lane_set(value):
     return frozenset(names)
 
 
-def select_services(services, event, push_lane=frozenset()):
+def select_services(services, event, push_lane=frozenset(), ci_built=None):
+    """Partition one detected selection between the push lane and the Services CI lane.
+
+    `ci_built` is the module set Services CI's own selector builds for this SHA. A detected
+    service it does NOT build (a release-only version.txt bump is the common case) gets no
+    exact Pact version from that run, so the workflow_run lane could never verify it: it must
+    stay on the push lane. Without `ci_built` only the static `push_lane` decides.
+    """
+    if ci_built is not None and isinstance(services, list):
+        push_lane = frozenset(push_lane) | frozenset(item for item in services if item not in ci_built)
     if not isinstance(event, str) or EVENT.fullmatch(event) is None:
         raise HandoffError("event name is invalid")
     if (not isinstance(services, list) or any(not isinstance(item, str) or SERVICE.fullmatch(item) is None
@@ -94,6 +103,8 @@ def main(argv=None):
     select = subparsers.add_parser("select")
     select.add_argument("--event", required=True)
     select.add_argument("--push-lane", default="")
+    select.add_argument("--ci-built", default=None,
+                        help="space-separated modules Services CI builds for this SHA")
     args = parser.parse_args(argv)
     try:
         if args.command == "source":
@@ -105,7 +116,8 @@ def main(argv=None):
             result = verified_source(payload, os.environ.get("GITHUB_REPOSITORY", ""),
                                      os.environ.get("GITHUB_EVENT_NAME", ""))
         else:
-            result = json.dumps(select_services(read_json(sys.stdin), args.event, push_lane_set(args.push_lane)),
+            result = json.dumps(select_services(read_json(sys.stdin), args.event, push_lane_set(args.push_lane),
+                                             None if args.ci_built is None else push_lane_set(args.ci_built)),
                                 separators=(",", ":"))
         print(result)
         return 0

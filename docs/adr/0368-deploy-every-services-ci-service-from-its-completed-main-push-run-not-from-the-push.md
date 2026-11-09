@@ -50,11 +50,16 @@ limited to context-service and has no ADR.
 We will deploy every service that Services CI builds from the successful completion of that
 service's main-push Services CI run, not from the push.
 
-- **Partition.** With `DEPLOY_AFTER_SERVICES_CI_ENABLED=true`, the push lane keeps only the
-  services in `SELF_BUILT_SERVICES` (images Services CI never builds). The `workflow_run` lane
-  takes every other service the ordinary change detector selected for that commit. The
-  partition never adds a service. It is the pilot's `context-deploy-handoff.py select`, given
-  the push lane as data instead of a hard-coded single component.
+- **Partition.** With `DEPLOY_AFTER_SERVICES_CI_ENABLED=true`, the `workflow_run` lane takes
+  exactly the detected services that Services CI builds for that commit, as Services CI's own
+  selector (`service-ci-select-modules.sh`, same `HEAD~1..HEAD` diff) reports them. Every other
+  detected service stays on the push lane: `SELF_BUILT_SERVICES` (images Services CI never
+  builds), and any service Services CI does not build at that SHA. The common case is a
+  release-only `version.txt` bump: the detector deploys it, Services CI classifies the path as
+  inert and builds nothing, so no exact Pact version would ever exist and the follow-on gate
+  could only refuse it. A static list alone would have left such a release deployed by neither
+  lane. The partition never adds a service. It is the pilot's `context-deploy-handoff.py
+  select`, given both sets as data instead of a hard-coded single component.
 - **Gate.** `can-i-deploy` is unchanged and still asks about the exact commit. Because the lane
   starts after publication, `PENDING_BUILD` stops being a scheduling artefact.
 - **Partial verdicts.** As on reconcile (#846), the lane deploys the subset that
@@ -94,6 +99,8 @@ service's main-push Services CI run, not from the push.
   For a commit that would have deployed cleanly from the push lane, this is slower.
 - A failed Services CI run (35 of 364 commits measured) now deploys none of its services until
   reconcile, including services unrelated to the failure. Today the push lane would deploy those.
+  The gap is silent: `deploy-signal` reads the partitioned selection, so nothing reports those
+  services as undeployed until the 3-hourly reconcile tick picks them up.
 - A Services CI run that finishes after a newer commit's run produces an older deploy. The
   enforced `deploy-pin-monotonic` gate (ADR-0362) refuses a backwards pin, so it is closed
   instead of applied.

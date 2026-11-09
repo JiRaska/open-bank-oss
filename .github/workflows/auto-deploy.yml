@@ -474,7 +474,10 @@ jobs:
           case "$GITHUB_EVENT_NAME:$DEPLOY_AFTER_SERVICES_CI_ENABLED" in workflow_run:*|push:true)
             HANDOFF_HELPER=.github/scripts/context-deploy-handoff.py
             [ "$GITHUB_EVENT_NAME" != workflow_run ] || HANDOFF_HELPER="$RUNNER_TEMP/context-deploy-handoff.py"
-            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME" --push-lane "$SELF_BUILT_SERVICES")"
+            CI_SELECT="$(mktemp -d)"
+            EVENT_NAME=push SELECT_OUT="$CI_SELECT" GITHUB_OUTPUT=/dev/null bash .github/scripts/service-ci-select-modules.sh >&2
+            SERVICES_JSON="$(printf '%s' "$SERVICES_JSON" | python3 "$HANDOFF_HELPER" select --event "$GITHUB_EVENT_NAME" \
+              --push-lane "$SELF_BUILT_SERVICES" --ci-built "$(cat "$CI_SELECT/changed.txt")")"
             ;;
           esac
           if [ "$SERVICES_JSON" = '[]' ]; then

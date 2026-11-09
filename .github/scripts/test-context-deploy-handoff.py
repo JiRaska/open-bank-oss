@@ -176,8 +176,8 @@ class WorkflowPartitionTests(unittest.TestCase):
         # The workflow's own value, so the test cannot pass against a list the workflow does not use.
         cls.self_built = re.search(r'^  SELF_BUILT_SERVICES: "([^"]*)"$', cls.workflow, re.MULTILINE).group(1)
 
-    def admitted(self, event_name, enabled):
-        run = SimpleNamespace(**event()["workflow_run"])
+    def admitted(self, event_name, enabled, **override):
+        run = SimpleNamespace(**{**event()["workflow_run"], **override})
         run.repository = SimpleNamespace(full_name=REPO)
         run.head_repository = SimpleNamespace(full_name=REPO)
         github = SimpleNamespace(event_name=event_name, repository=REPO,
@@ -186,16 +186,23 @@ class WorkflowPartitionTests(unittest.TestCase):
         return eval("(" + expression + ")", {"__builtins__": {}},
                     {"github": github, "vars": SimpleNamespace(DEPLOY_AFTER_SERVICES_CI_ENABLED=enabled)})
 
-    def partition(self, selected, event_name, enabled):
+    def partition(self, selected, event_name, enabled, ci_built="openbank-ledger-service"):
         with tempfile.TemporaryDirectory() as directory:
             temporary = Path(directory)
             output = temporary / "output"
             shutil.copyfile(Path(__file__).with_name("context-deploy-handoff.py"), temporary / "context-deploy-handoff.py")
+            # The workflow asks Services CI's own selector what it builds for this SHA; stub it
+            # so each case states that set instead of inheriting this checkout's last commit.
+            scripts = temporary / ".github/scripts"
+            scripts.mkdir(parents=True)
+            shutil.copyfile(Path(__file__).with_name("context-deploy-handoff.py"), scripts / "context-deploy-handoff.py")
+            (scripts / "service-ci-select-modules.sh").write_text(
+                f'printf %s {shlex.quote(ci_built)} > "$SELECT_OUT/changed.txt"\n')
             environment = dict(os.environ, GITHUB_EVENT_NAME=event_name, DEPLOY_AFTER_SERVICES_CI_ENABLED=enabled,
                                SELF_BUILT_SERVICES=self.self_built,
                                RUNNER_TEMP=directory, GITHUB_OUTPUT=str(output))
             prefix = "set -euo pipefail\nDEPLOYABLE=(" + " ".join(shlex.quote(item) for item in selected) + ")\n"
-            result = subprocess.run(["bash", "-c", prefix + self.partition_script], cwd=self.root,
+            result = subprocess.run(["bash", "-c", prefix + self.partition_script], cwd=temporary,
                                     env=environment, capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             values = dict(line.split("=", 1) for line in output.read_text().splitlines())
@@ -221,6 +228,23 @@ class WorkflowPartitionTests(unittest.TestCase):
                 self.assertEqual(set(push) | set(followon), set(selected))
                 self.assertEqual(push, [item for item in selected if item == SELF_BUILT])
                 self.assertEqual(followon, [item for item in selected if item != SELF_BUILT])
+
+    def test_service_services_ci_does_not_build_stays_on_the_push_lane(self):
+        # A release-only version.txt bump: the detector deploys it, Services CI builds nothing
+        # for it, so no exact Pact version will exist and the follow-on could never verify it.
+        selected = ["openbank-sanctions-service", "openbank-ledger-service"]
+        push = self.partition(selected, "push", "true", ci_built="openbank-ledger-service")
+        followon = self.partition(selected, "workflow_run", "true", ci_built="openbank-ledger-service")
+        self.assertEqual(push, ["openbank-sanctions-service"])
+        self.assertEqual(followon, ["openbank-ledger-service"])
+        self.assertEqual(self.partition(selected, "push", "true", ci_built=""), selected)
+        self.assertEqual(self.partition(selected, "workflow_run", "true", ci_built=""), [])
+
+    def test_admission_rejects_runs_that_must_not_deploy(self):
+        for field, value in (("conclusion", "failure"), ("conclusion", "cancelled"), ("event", "pull_request"),
+                             ("head_branch", "feature"), ("status", "in_progress"), ("path", ".github/workflows/other.yml")):
+            with self.subTest(**{field: value}):
+                self.assertFalse(self.admitted("workflow_run", "true", **{field: value}))
 
     def test_manual_and_schedule_selection_unchanged_for_both_flag_states(self):
         selected = ["openbank-ledger-service", SELF_BUILT]
