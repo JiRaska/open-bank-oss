@@ -120,6 +120,7 @@ data class InsuredClaimsAssembly(
     val claims: List<InsuredClaim>,
     val droppedSyntheticDepositors: Int,
     val droppedSyntheticAccounts: Int,
+    val droppedOverdrawnAccounts: Int,
     val excludedDepositors: Map<ExclusionReason, Int>,
 )
 
@@ -139,7 +140,10 @@ object InsuredClaims {
         }
 
         val coverLimitCzk = rates.toCzk(COVER_LIMIT_EUR, EUR).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
-        val liveAccounts = accounts.filterNot { it.synthetic }
+        // An overdrawn account holds no deposit: it is not reported (the format carries no sign)
+        // and does not net against the depositor's other balances.
+        val overdrawn = accounts.filter { !it.synthetic && it.principal.add(it.accruedInterest).signum() < 0 }
+        val liveAccounts = accounts.filterNot { it.synthetic || it in overdrawn }
         val eligible = depositors.filter { !it.synthetic && it.exclusion == null }
 
         val claims = eligible.mapNotNull { depositor ->
@@ -159,6 +163,7 @@ object InsuredClaims {
             claims = claims,
             droppedSyntheticDepositors = depositors.count { it.synthetic },
             droppedSyntheticAccounts = accounts.count { it.synthetic },
+            droppedOverdrawnAccounts = overdrawn.size,
             excludedDepositors = depositors.filter { !it.synthetic }.mapNotNull { it.exclusion }
                 .groupingBy { it }.eachCount(),
         )

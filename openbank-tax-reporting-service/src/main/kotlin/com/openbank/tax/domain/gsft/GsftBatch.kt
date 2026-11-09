@@ -4,6 +4,7 @@
 
 package com.openbank.tax.domain.gsft
 
+import com.openbank.tax.domain.model.TaxValidationException
 import com.openbank.tax.domain.model.requireValid
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -99,7 +100,16 @@ data class BatchHeader(
     val branchCountry: String = "",
 )
 
-data class GsftBatch(val files: Map<String, ByteArray>, val totalPaymentCzk: BigDecimal)
+/** A person left out of the batch, with the reason an operator needs to correct the data. */
+data class RejectedPerson(val partyId: UUID, val reason: String)
+
+data class GsftBatch(
+    val files: Map<String, ByteArray>,
+    val totalPaymentCzk: BigDecimal,
+    val rejected: List<RejectedPerson>,
+)
+
+private class PersonRecords(val dic: List<String>, val dia: List<List<String>>, val dil: List<List<String>>)
 
 object GsftBatchRenderer {
 
@@ -125,36 +135,37 @@ object GsftBatchRenderer {
         // (a corrected or supplementary payout) take 2, 3, ... and are not produced here.
         val order = FIRST_PAYOUT
 
-        val claims = assembly.claims.map { claim ->
-            val identity = requireNotNull(who[claim.partyId]) { "no identity for entitled person ${claim.partyId}" }
-            claim to identity
-        }.sortedWith(compareBy({ it.second.idc }, { it.second.type.code }))
-
-        val dic = claims.map { (claim, id) -> dicRecord(claim, id, order) }
+        // One entitled person's data must never stop the whole delivery — the bank has 3 working
+        // days. A person whose records cannot be rendered is left out of THIS batch and listed in
+        // [GsftBatch.rejected] for an operator to correct and send in a follow-up tranche.
+        val rejected = mutableListOf<RejectedPerson>()
+        val dic = mutableListOf<List<String>>()
         val dia = mutableListOf<List<String>>()
         val dil = mutableListOf<List<String>>()
-        for ((claim, id) in claims) {
-            for (accountId in claim.accountIds) {
-                val account = requireNotNull(byAccount[accountId]) { "claim references unknown account $accountId" }
-                val total = account.principal.add(account.accruedInterest)
-                requireValid(total.signum() >= 0) {
-                    "account $accountId has a negative balance; the format carries no sign"
-                }
-                val totalCzk = rates.toCzk(total, account.currency)
-                val key = listOf(id.idc, id.type.code, order, iban(account.iban), account.currency)
-                dia += listOf("T") + key + listOf(amount(total), amount(totalCzk))
-                if (account.holders.size > 1) {
-                    val share = account.shareOf(claim.partyId)
-                    dil += listOf("O") + key + listOf(amount(total.multiply(share)), amount(totalCzk.multiply(share)))
-                }
+        var totalPayment = BigDecimal.ZERO
+        val ordered = assembly.claims.sortedWith(
+            compareBy({ who[it.partyId]?.idc ?: "" }, {
+                who[it.partyId]?.type?.code
+                    ?: ""
+            }),
+        )
+        for (claim in ordered) {
+            val records = try {
+                personRecords(claim, who[claim.partyId], byAccount, rates, order)
+            } catch (e: TaxValidationException) {
+                rejected += RejectedPerson(claim.partyId, e.message ?: "invalid record")
+                continue
             }
+            dic += records.dic
+            dia += records.dia
+            dil += records.dil
+            totalPayment = totalPayment.add(claim.compensationCzk)
         }
         // Sorted by IDC, TYPE, ORDER_P, ACCOUNT (1.2.3, 1.2.4): the record's fields after IDR.
         val byKey = compareBy<List<String>> { it.drop(1).take(SORT_KEY_FIELDS).joinToString("\u0000") }
         dia.sortWith(byKey)
         dil.sortWith(byKey)
 
-        val totalPayment = assembly.claims.fold(BigDecimal.ZERO) { sum, c -> sum.add(c.compensationCzk) }
         val diw = diwRecord(header, dic.size, dia.size, dil.size, totalPayment)
 
         val suffix = "$bankCode$branchCountry.${"%05d".format(batchNumber)}"
@@ -162,7 +173,40 @@ object GsftBatchRenderer {
         if (dic.isNotEmpty()) files["DIC$suffix"] = encode(dic)
         if (dia.isNotEmpty()) files["DIA$suffix"] = encode(dia)
         if (dil.isNotEmpty()) files["DIL$suffix"] = encode(dil)
-        return GsftBatch(files, totalPayment.setScale(2, RoundingMode.HALF_UP))
+        return GsftBatch(files, totalPayment.setScale(2, RoundingMode.HALF_UP), rejected)
+    }
+
+    private fun personRecords(
+        claim: InsuredClaim,
+        id: DepositorIdentity?,
+        byAccount: Map<UUID, DepositAccount>,
+        rates: FxRates,
+        order: String,
+    ): PersonRecords {
+        val identity = id ?: throw TaxValidationException("no identity for entitled person ${claim.partyId}")
+        val dia = mutableListOf<List<String>>()
+        val dil = mutableListOf<List<String>>()
+        for (accountId in claim.accountIds) {
+            val account =
+                byAccount[accountId] ?: throw TaxValidationException("claim references unknown account $accountId")
+            val total = account.principal.add(account.accruedInterest)
+            val totalCzk = rates.toCzk(total, account.currency)
+            val key = listOf(identity.idc, identity.type.code, order, GsftFields.iban(account.iban), account.currency)
+            dia += listOf("T") + key + listOf(GsftFields.amount(total), GsftFields.amount(totalCzk))
+            if (account.holders.size > 1) {
+                val share = account.shareOf(claim.partyId)
+                dil +=
+                    listOf("O") + key +
+                    listOf(GsftFields.amount(total.multiply(share)), GsftFields.amount(totalCzk.multiply(share)))
+            }
+        }
+        val dic = dicRecord(claim, identity, order)
+        (listOf(dic) + dia + dil).flatten().forEach { field ->
+            requireValid(CP1250.newEncoder().canEncode(field)) {
+                "a field contains a character CP-1250 cannot encode: '$field'"
+            }
+        }
+        return PersonRecords(dic, dia, dil)
     }
 
     private fun diwRecord(header: BatchHeader, clients: Int, accounts: Int, shares: Int, totalPayment: BigDecimal) =
@@ -170,70 +214,39 @@ object GsftBatchRenderer {
             "R",
             header.createdAt.format(TIMESTAMP),
             "%05d".format(header.batchNumber),
-            count(clients),
-            count(accounts),
-            count(shares),
-            count(0),
-            count(0),
-            count(0),
-            amount(totalPayment),
+            GsftFields.count(clients),
+            GsftFields.count(accounts),
+            GsftFields.count(shares),
+            GsftFields.count(0),
+            GsftFields.count(0),
+            GsftFields.count(0),
+            GsftFields.amount(totalPayment),
             "1",
             header.mode.code,
         )
 
     private fun dicRecord(claim: InsuredClaim, id: DepositorIdentity, order: String): List<String> = listOf(
         "E",
-        text(id.idc, IDC_MAX, "IDC"),
+        GsftFields.text(id.idc, IDC_MAX, "IDC"),
         id.type.code,
         order,
         if (id.type == EntitledPersonType.NATURAL_PERSON) "1" else "0",
-        text(id.name, TEXT_MAX, "NAME"),
-        text(id.street, TEXT_MAX, "STREET"),
-        text(id.city, TEXT_MAX, "CITY"),
-        text(id.zip, ZIP_MAX, "ZIP"),
-        exactly(id.country, 2, "COUNTRY"),
-        amount(claim.eligibleBalanceCzk.max(BigDecimal.ZERO)),
-        amount(claim.compensationCzk),
-        text(id.note.orEmpty(), TEXT_MAX, "NOTE"),
+        GsftFields.text(id.name, TEXT_MAX, "NAME"),
+        GsftFields.text(id.street, TEXT_MAX, "STREET"),
+        GsftFields.text(id.city, TEXT_MAX, "CITY"),
+        GsftFields.text(id.zip, ZIP_MAX, "ZIP"),
+        GsftFields.exactly(id.country, 2, "COUNTRY"),
+        GsftFields.amount(claim.eligibleBalanceCzk.max(BigDecimal.ZERO)),
+        GsftFields.amount(claim.compensationCzk),
+        GsftFields.text(id.note.orEmpty(), TEXT_MAX, "NOTE"),
         "",
-        text(id.cellPhone.orEmpty(), PHONE_MAX, "CELL_PHONE"),
-        text(id.email.orEmpty(), EMAIL_MAX, "EMAIL"),
-        exactly(id.language, 2, "LANGUAGE"),
+        GsftFields.text(id.cellPhone.orEmpty(), PHONE_MAX, "CELL_PHONE"),
+        GsftFields.text(id.email.orEmpty(), EMAIL_MAX, "EMAIL"),
+        GsftFields.exactly(id.language, 2, "LANGUAGE"),
     )
 
-    /** 15 digits, hundredths, no separator. Rounds half-up to hundredths first. */
-    internal fun amount(value: BigDecimal): String {
-        val hundredths = value.setScale(2, RoundingMode.HALF_UP).multiply(HUNDRED).toBigIntegerExact()
-        requireValid(hundredths.signum() >= 0) { "amount $value is negative; the format carries no sign" }
-        val digits = hundredths.toString()
-        requireValid(digits.length <= AMOUNT_DIGITS) { "amount $value does not fit $AMOUNT_DIGITS digits" }
-        return digits.padStart(AMOUNT_DIGITS, '0')
-    }
-
-    private fun count(n: Int) = "%09d".format(n)
-
-    private fun iban(value: String): String {
-        val compact = value.replace(" ", "")
-        requireValid(compact.length <= IBAN_MAX) { "IBAN '$value' is longer than $IBAN_MAX characters" }
-        return compact
-    }
-
-    private fun text(value: String, max: Int, field: String): String {
-        requireValid(value.length <= max) { "$field is longer than $max characters" }
-        return value
-    }
-
-    private fun exactly(value: String, length: Int, field: String): String {
-        requireValid(value.length == length) { "$field must be exactly $length characters, was '$value'" }
-        return value
-    }
-
-    /** CSV per 1.1.6.1 — quoted only when the text contains a comma or a quote. */
-    internal fun csvField(value: String): String =
-        if (value.contains(',') || value.contains('"')) "\"" + value.replace("\"", "\"\"") + "\"" else value
-
     private fun encode(records: List<List<String>>): ByteArray {
-        val text = records.joinToString(separator = "") { r -> r.joinToString(",") { csvField(it) } + CRLF }
+        val text = records.joinToString(separator = "") { r -> r.joinToString(",") { GsftFields.csvField(it) } + CRLF }
         val encoder = CP1250.newEncoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
@@ -245,4 +258,38 @@ object GsftBatchRenderer {
         }
         return ByteArray(buffer.remaining()).also { buffer.get(it) }
     }
+}
+
+/** Field encodings of the decree annex, 1.1.6.1.2. */
+internal object GsftFields {
+    /** 15 digits, hundredths, no separator. Rounds half-up to hundredths first. */
+    fun amount(value: BigDecimal): String {
+        val hundredths = value.setScale(2, RoundingMode.HALF_UP).multiply(HUNDRED).toBigIntegerExact()
+        requireValid(hundredths.signum() >= 0) { "amount $value is negative; the format carries no sign" }
+        val digits = hundredths.toString()
+        requireValid(digits.length <= AMOUNT_DIGITS) { "amount $value does not fit $AMOUNT_DIGITS digits" }
+        return digits.padStart(AMOUNT_DIGITS, '0')
+    }
+
+    fun count(n: Int) = "%09d".format(n)
+
+    fun iban(value: String): String {
+        val compact = value.replace(" ", "")
+        requireValid(compact.length <= IBAN_MAX) { "IBAN '$value' is longer than $IBAN_MAX characters" }
+        return compact
+    }
+
+    fun text(value: String, max: Int, field: String): String {
+        requireValid(value.length <= max) { "$field is longer than $max characters" }
+        return value
+    }
+
+    fun exactly(value: String, length: Int, field: String): String {
+        requireValid(value.length == length) { "$field must be exactly $length characters, was '$value'" }
+        return value
+    }
+
+    /** CSV per 1.1.6.1 — quoted only when the text contains a comma or a quote. */
+    fun csvField(value: String): String =
+        if (value.contains(',') || value.contains('"')) "\"" + value.replace("\"", "\"\"") + "\"" else value
 }

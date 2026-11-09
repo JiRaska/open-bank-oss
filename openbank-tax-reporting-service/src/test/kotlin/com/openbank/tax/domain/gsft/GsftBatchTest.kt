@@ -113,49 +113,60 @@ class GsftBatchTest {
     }
 
     @Test
-    fun `refuses a claim with no identity`() {
-        val accounts = listOf(account("CZ0100000000000000000001", "1", alice))
-        val assembly = InsuredClaims.assemble(day, listOf(Depositor(alice, null, false)), accounts, rates)
-        assertThatThrownBy { GsftBatchRenderer.render(assembly, accounts, emptyList(), rates, header) }
-            .isInstanceOf(IllegalArgumentException::class.java)
+    fun `a person with no identity is rejected without stopping the batch`() {
+        val accounts =
+            listOf(account("CZ0100000000000000000001", "1", alice), account("CZ0100000000000000000002", "2", bob))
+        val people = listOf(Depositor(alice, null, false), Depositor(bob, null, false))
+        val assembly = InsuredClaims.assemble(day, people, accounts, rates)
+        val batch = GsftBatchRenderer.render(assembly, accounts, listOf(identity(bob, "8501010006")), rates, header)
+        assertThat(batch.rejected.map { it.partyId }).containsExactly(alice)
+        assertThat(lines(batch, "DIC")).hasSize(1)
+        assertThat(lines(batch, "DIW").single()).contains(",000000000000200,")
     }
 
     @Test
-    fun `refuses a character CP-1250 cannot encode`() {
-        assertThatThrownBy {
-            render(listOf(account("CZ0100000000000000000001", "1", alice)), listOf(identity(alice, "8001010009", "名前")))
-        }.isInstanceOf(TaxValidationException::class.java).hasMessageContaining("CP-1250")
+    fun `a character CP-1250 cannot encode rejects that person only`() {
+        val batch = render(
+            listOf(account("CZ0100000000000000000001", "1", alice), account("CZ0100000000000000000002", "2", bob)),
+            listOf(identity(alice, "8001010009", "名前"), identity(bob, "8501010006", "Petr Novák")),
+        )
+        assertThat(batch.rejected.single().reason).contains("CP-1250")
+        assertThat(lines(batch, "DIC")).hasSize(1).allSatisfy { assertThat(it).contains("Petr Novák") }
     }
 
     @Test
-    fun `refuses an over-long name`() {
-        assertThatThrownBy {
+    fun `an over-long name rejects that person only`() {
+        val batch =
             render(
                 listOf(account("CZ0100000000000000000001", "1", alice)),
                 listOf(identity(alice, "8001010009", "x".repeat(241))),
             )
-        }.isInstanceOf(TaxValidationException::class.java).hasMessageContaining("NAME")
+        assertThat(batch.rejected.single().reason).contains("NAME")
+        assertThat(batch.files.keys).containsExactly("DIW6363.00001")
     }
 
     @Test
-    fun `refuses a negative balance because the format has no sign`() {
-        assertThatThrownBy {
-            render(listOf(account("CZ0100000000000000000001", "-5", alice)), listOf(identity(alice, "8001010009")))
-        }.isInstanceOf(TaxValidationException::class.java).hasMessageContaining("negative")
+    fun `an overdrawn account is left out of DIA`() {
+        val batch = render(
+            listOf(account("CZ0100000000000000000001", "-5", alice), account("CZ0100000000000000000002", "7", alice)),
+            listOf(identity(alice, "8001010009")),
+        )
+        assertThat(lines(batch, "DIA")).hasSize(1).allSatisfy { assertThat(it).contains("CZ0100000000000000000002") }
+        assertThat(batch.rejected).isEmpty()
     }
 
     @Test
     fun `formats amounts as 15 digits of hundredths`() {
-        assertThat(GsftBatchRenderer.amount(BigDecimal("0.005"))).isEqualTo("000000000000001")
-        assertThat(GsftBatchRenderer.amount(BigDecimal("2500000"))).isEqualTo("000000250000000")
+        assertThat(GsftFields.amount(BigDecimal("0.005"))).isEqualTo("000000000000001")
+        assertThat(GsftFields.amount(BigDecimal("2500000"))).isEqualTo("000000250000000")
         assertThatThrownBy {
-            GsftBatchRenderer.amount(BigDecimal("1E13"))
+            GsftFields.amount(BigDecimal("1E13"))
         }.isInstanceOf(TaxValidationException::class.java)
     }
 
     @Test
     fun `doubles an embedded quote`() {
-        assertThat(GsftBatchRenderer.csvField("A \"B\"")).isEqualTo("\"A \"\"B\"\"\"")
-        assertThat(GsftBatchRenderer.csvField("plain")).isEqualTo("plain")
+        assertThat(GsftFields.csvField("A \"B\"")).isEqualTo("\"A \"\"B\"\"\"")
+        assertThat(GsftFields.csvField("plain")).isEqualTo("plain")
     }
 }

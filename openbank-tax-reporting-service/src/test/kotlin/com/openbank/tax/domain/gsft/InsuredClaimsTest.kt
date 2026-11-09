@@ -168,9 +168,16 @@ class InsuredClaimsTest {
     }
 
     @Test
-    fun `a negative balance yields no compensation`() {
-        val result = InsuredClaims.assemble(day, listOf(person(alice)), listOf(account("-50", sole(alice))), rates)
-        assertThat(result.claims.single().compensationCzk).isEqualByComparingTo("0")
+    fun `an overdrawn account is not a deposit and does not net against other balances`() {
+        val result = InsuredClaims.assemble(
+            day,
+            listOf(person(alice)),
+            listOf(account("-50", sole(alice)), account("100", sole(alice))),
+            rates,
+        )
+        assertThat(result.claims.single().eligibleBalanceCzk).isEqualByComparingTo("100.00")
+        assertThat(result.claims.single().accountIds).hasSize(1)
+        assertThat(result.droppedOverdrawnAccounts).isEqualTo(1)
     }
 
     @Test
