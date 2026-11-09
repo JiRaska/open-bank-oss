@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.3](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.2...tax-reporting-service-v0.47.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **tax-reporting:** bind the OPA policy decision point so @Authorize routes answer ([#15344](https://github.com/JiRaska/open-bank-oss/issues/15344)) ([c419dd1](https://github.com/JiRaska/open-bank-oss/commit/c419dd1a98dcc72d5509d227379df410bf17d824))
+
 ## [0.47.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.1...tax-reporting-service-v0.47.2) (2026-11-09)
 
 
