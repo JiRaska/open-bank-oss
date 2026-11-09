@@ -152,6 +152,12 @@ authz:
 openbank:
   api:
     version: "1"
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (build-time property).
+  # Without it no PolicyDecisionPoint bean exists, AuthorizeInterceptor fails closed and every
+  # @Authorize endpoint answers 503 "policy decision point not configured".
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
