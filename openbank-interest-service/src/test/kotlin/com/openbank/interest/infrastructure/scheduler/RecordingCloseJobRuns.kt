@@ -13,6 +13,16 @@ import java.time.LocalDate
 class RecordingCloseJobRuns : CloseJobRunPort {
     val runs = linkedMapOf<Pair<LocalDate, String>, CloseJobRun>()
 
+    private val obligations = linkedMapOf<LocalDate, Set<String>>()
+    override fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>> {
+        scheduled.forEach { (day, jobs) -> obligations[day] = obligations[day].orEmpty() + jobs }
+        return Uni.createFrom().item(obligations.filterKeys { it in from..to })
+    }
+
     override fun record(run: CloseJobRun): Uni<Unit> {
         runs[run.businessDate to run.job] = run
         return Uni.createFrom().item(Unit)

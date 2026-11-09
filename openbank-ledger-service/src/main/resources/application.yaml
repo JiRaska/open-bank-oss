@@ -32,6 +32,9 @@ quarkus:
     connect-retries: 10
     connect-retries-interval: 2S
     locations: db/migration
+    # Locations are fixed at augmentation. The callback selects an explicitly identified pension
+    # book at runtime and leaves BANK untouched, including in the shared fast-jar deployment.
+    callbacks: com.openbank.ledger.infrastructure.persistence.PensionChartCallback
 
   oidc:
     auth-server-url: http://localhost:8080/realms/openbank
@@ -175,12 +178,18 @@ openbank:
     #
     # Ships in SHADOW for the same reason as the locks above: it counts
     # openbank_ledger_close_participants_decisions_total{outcome="would_hold"} and moves the day
-    # anyway. Flip to enforce once that counter reads zero across a full month (capitalization
-    # runs on the 1st). The list must match rules.yaml: close_participants
+    # anyway. Review GET /api/v1/ledger/close-readiness over a whole completed month before
+    # enforcement; a counter can reset and cannot supply that evidence. The list must match rules.yaml: close_participants
     # (check-close-participants.py). A second ledger deployment for another legal entity
     # (ADR-0337) sets LEDGER_CLOSE_PARTICIPANTS_MODE=off until it declares its own participants.
     close:
       participants-mode: "${LEDGER_CLOSE_PARTICIPANTS_MODE:shadow}"
+      readiness:
+        required-jobs:
+          interest: [accrual, capitalization]
+          lending: [accrual, provisioning]
+          billing: [billing-cycle]
+          treasury: [accrual]
       participants:
         interest:
           principal: service-account-openbank-interest

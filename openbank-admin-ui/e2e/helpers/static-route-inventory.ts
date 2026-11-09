@@ -47,6 +47,8 @@ export const STATIC_ROUTE_INVENTORY: Record<string, { disposition: StaticRouteDi
   "/delegations": { disposition: "sidebar-navigation-smoke", path: "/delegations" },
   "/devops": { disposition: "sidebar-navigation-smoke", path: "/devops" },
   "/devops/sdlc": { disposition: "sidebar-navigation-smoke", path: "/devops/sdlc" },
+  "/devops/sdlc/ci": { disposition: "sidebar-navigation-smoke", path: "/devops/sdlc/ci" },
+  "/devops/sdlc/cd": { disposition: "sidebar-navigation-smoke", path: "/devops/sdlc/cd" },
   "/disputes": { disposition: "sidebar-navigation-smoke", path: "/disputes" },
   "/docs/adr": { disposition: "static-direct-load-smoke", path: "/docs/adr" },
   "/docs/api": { disposition: "sidebar-navigation-smoke", path: "/docs/api" },

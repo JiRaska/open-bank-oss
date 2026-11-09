@@ -44,10 +44,13 @@ spec:
   # looped pact-broker-db and fraud-db when rewrite-ghcr landed). Setting the ref HERE is
   # the mechanism the policy's own comment asks for — "CNPG must own its image ref
   # end-to-end" — with no mutation and nothing to drift from.
-  # Tag stays 16.14 = what this cluster actually runs. The 18.1 that was declared here
-  # never applied (see the storage note below) and adopting it would be a Postgres MAJOR
-  # upgrade — a separate, deliberate decision, not a side effect of changing a registry.
-  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:16.15
+  # 18.6 = the fleet's Postgres. 16 -> 18 is a MAJOR upgrade, done deliberately (#15128):
+  # CNPG >= 1.26 runs it as an offline in-place pg_upgrade when the major in this tag
+  # changes (the cluster is down for the duration; pact-broker is CI-only tooling). Only
+  # plpgsql is installed, so no extension needs a matching 18 build. Base backups taken
+  # on 16 cannot restore an 18 cluster: force a fresh `kind: Backup` after the upgrade and
+  # check status.firstRecoverabilityPoint moves forward.
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     # 5Gi = the live PVC. It was declared 1Gi in 343aef3f8 while the volume was already

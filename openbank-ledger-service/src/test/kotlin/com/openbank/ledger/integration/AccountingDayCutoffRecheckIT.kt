@@ -74,6 +74,9 @@ class AccountingDayCutoffRecheckIT {
     lateinit var tieOutRuns: TieOutRunRepository
 
     @Inject
+    lateinit var journalWatermark: com.openbank.ledger.infrastructure.persistence.repository.JournalReadWatermark
+
+    @Inject
     lateinit var accountingDays: AccountingDayRepository
 
     @Inject
@@ -129,6 +132,9 @@ class AccountingDayCutoffRecheckIT {
                 accountsChecked = 4,
                 breaks = if (status == TieOutRunStatus.BREAK) 1 else 0,
                 errors = 0,
+                startedAt = runAt,
+                journalCount = journalWatermark.countThrough(asOf),
+                journalFingerprint = journalWatermark.populationThrough(asOf).fingerprint,
             ),
         )
     }

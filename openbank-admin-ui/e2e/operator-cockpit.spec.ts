@@ -69,7 +69,7 @@ test('Customer 360 joins authoritative portfolio and documents to the name-selec
 })
 
 test('Test Coverage is backed by a dated CI evidence snapshot, not a static score', async ({ page }) => {
-  await json(page, '**/api/test-intelligence', {
+  await json(page, '**/api/test-intelligence?*', {
     schemaVersion: 1, collectedAt: '2026-08-22T08:00:00Z', contracts: [], mutations: [], performance: [], syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [], warnings: [],
     totals: { components: 2, componentsWithExecutionEvidence: 1, moneyPathComponents: 1, failingEvidence: 1, missingEvidence: 1, staleEvidence: 0 },
     components: [

@@ -68,7 +68,8 @@ spec:
     # this was pinned, so pinning it changed nothing on the running broker.
     # Bump metadataVersion only after the broker version is rolled and healthy —
     # a KRaft metadata version cannot be downgraded.
-    version: 4.2.0
+    # 4.2.2 (patch, same 4.2-IV1 metadata) needs operator >= 1.3; 1.2.x supports only 4.2.0/4.2.1.
+    version: 4.2.2
     metadataVersion: 4.2-IV1
     # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed

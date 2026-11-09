@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.18.0...billing-service-v0.19.0) (2026-11-09)
+
+
+### Features
+
+* **lending:** deliver lending, billing and treasury close evidence ([#14181](https://github.com/JiRaska/open-bank-oss/issues/14181)) ([458d4dd](https://github.com/JiRaska/open-bank-oss/commit/458d4dd972dfe37baf3f4da4fed608a8924fa3a1))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.17.4...billing-service-v0.18.0) (2026-11-08)
 
 

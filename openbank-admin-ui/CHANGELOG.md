@@ -1,5 +1,38 @@
 # Changelog
 
+## [4.9.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.8.0...admin-ui-v4.9.0) (2026-11-09)
+
+
+### Features
+
+* **admin-ui:** add lion train CI and CD guides ([#15351](https://github.com/JiRaska/open-bank-oss/issues/15351)) ([1ebe1f7](https://github.com/JiRaska/open-bank-oss/commit/1ebe1f79801527fdd1d1e32f22aa7b7dadccad3b))
+
+## [4.8.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.7.1...admin-ui-v4.8.0) (2026-11-09)
+
+
+### Features
+
+* **admin-ui:** add an evidence-linked expert testing matrix ([#15346](https://github.com/JiRaska/open-bank-oss/issues/15346)) ([7bd79ad](https://github.com/JiRaska/open-bank-oss/commit/7bd79ad095d3472db2e2751d9f916c74edb4b0a3))
+* **ledger:** prove daily close completeness before enforcement ([#14179](https://github.com/JiRaska/open-bank-oss/issues/14179)) ([6107f91](https://github.com/JiRaska/open-bank-oss/commit/6107f91a8055fdf46f82b5b5eff701079fe1fdf5))
+
+
+### Bug Fixes
+
+* **admin-ui:** keep statutory returns visible when deadline status is unavailable ([#15343](https://github.com/JiRaska/open-bank-oss/issues/15343)) ([57d8a7c](https://github.com/JiRaska/open-bank-oss/commit/57d8a7c9ed4f5f97c95cfdb4caf580199a775cdc))
+* **admin-ui:** read Temporal liveness from kube-state-metrics ([#15291](https://github.com/JiRaska/open-bank-oss/issues/15291)) ([a2830cd](https://github.com/JiRaska/open-bank-oss/commit/a2830cdc24b778f6d368962f67f38685d254a753))
+
+
+### Performance
+
+* **admin-ui:** load test evidence in bounded views ([#15310](https://github.com/JiRaska/open-bank-oss/issues/15310)) ([5a5030a](https://github.com/JiRaska/open-bank-oss/commit/5a5030ae78517c0a5be67a1f557877cba35a4271))
+
+## [4.7.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.7.0...admin-ui-v4.7.1) (2026-11-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** require system:view for the test explanation API ([#15282](https://github.com/JiRaska/open-bank-oss/issues/15282)) ([6b7d703](https://github.com/JiRaska/open-bank-oss/commit/6b7d7038048d427489459d4c1be4a46a2aaed222))
+
 ## [4.7.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.6.0...admin-ui-v4.7.0) (2026-11-08)
 
 

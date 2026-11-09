@@ -59,8 +59,8 @@ treated as hard requirements: if a chart cannot be pulled, this gate FAILS rathe
 than passing quietly, because "could not check" and "checked and clean" must never
 render the same — that equivalence is the whole defect class above.
 
-NETWORK RETRIES (#5094). `helm pull` hits real upstream repos (kyverno.github.io,
-charts.fairwinds.com, etc.) and a transient reset there is not this gate's business —
+NETWORK RETRIES (#5094). Fetching a chart reaches real upstream chart repositories and a
+transient reset there is not this gate's business —
 three PRs (#5065, #5068, #5086) failed on it and cleared on a bare re-run with zero
 code change. `_pull_chart` now retries the pull a bounded number of times with a short
 backoff before giving up, and the FAIL line it prints in that case says explicitly that
@@ -71,6 +71,14 @@ NOT touch `ignored_top_level_keys`/`_render`, which never hit the network (they 
 `helm template` against an already-pulled local chart directory): a chart that
 genuinely has a mismatched values key still fails, retries or not.
 
+CHART SOURCE (#15216). Charts are no longer pulled with `helm pull`: each one is fetched through
+`fetch-artifact.py` from the entry `helm-chart/<chart>` in `ci/artifacts.lock`, sha256-verified,
+from the Actions cache, the mirror or upstream in that order. A chart whose (name, version) is not
+in the lock is a hard FAIL — bump the lock with the targetRevision. A chart no tier could deliver
+is the THIRD state: `UNVERIFIED (artifact unavailable)`, printed distinctly from a finding, and
+the gate still exits non-zero (75) because a required check that could not look must not pass.
+The scan continues past it, so every reachable chart is still checked in the same run.
+
 Usage:
     check-helm-values-keys.py              # check the fleet
     check-helm-values-keys.py --self-test  # offline detector self-test (no network)
@@ -79,12 +87,13 @@ Usage:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 
@@ -95,12 +104,36 @@ import yaml
 # to mask a genuinely dead or renamed chart repo behind minutes of silent waiting.
 PULL_RETRY_ATTEMPTS = 3
 PULL_RETRY_BACKOFF_SECONDS = 2.0
+# Wall-clock budget for ALL chart fetches in one run. run-gates.py kills a gate at 420 s; when
+# both GitHub routes are down every chart costs ~40 s (a 30 s web timeout plus the API's 504),
+# so 12 GitHub-hosted charts alone would overrun it and the gate would die as a TIMEOUT instead
+# of reporting UNVERIFIED. Past the budget, remaining charts are not fetched and are reported
+# UNVERIFIED immediately; renders of the charts already fetched still run (#15220 measured the
+# working-API case at 88 s, well inside this).
+FETCH_BUDGET_SECONDS = 240.0
+_FETCH_DEADLINE: list[float] = [float("inf")]
+# Set once a chart has exhausted every attempt as UNVERIFIED: the outage is real, so later
+# charts get one resolver call each instead of PULL_RETRY_ATTEMPTS.
+_OUTAGE: list[bool] = [False]
+
+
+def _github_hosted(chart: str, version: str, lock_path: pathlib.Path | None = None) -> bool:
+    """True when the lock's upstream for (chart, version) is a GitHub release asset."""
+    for entry in json.loads((lock_path or LOCK).read_text()).get("artifacts", []):
+        if entry.get("name") == f"helm-chart/{chart}" and str(entry.get("version")) == version:
+            return any("github.com/" in (p.get("url") or "") for p in entry.get("platforms", {}).values())
+    return False
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 APPS_DIR = REPO / "openbank-infra" / "gitops" / "apps"
+LOCK = REPO / "ci" / "artifacts.lock"
+RESOLVER = REPO / ".github" / "scripts" / "fetch-artifact.py"
+UNVERIFIED_MARK = "UNVERIFIED (artifact unavailable)"
+_PREFER_API = False
+EXIT_UNVERIFIED = 75
 
 # Keys measured as ignored by their chart that this PR does not fix, each with the
 # spelling the chart actually wants. They are unrelated to the Rollout alerting gap
@@ -140,136 +173,63 @@ def _render(chart_dir: str, values: dict) -> str | None:
     return proc.stdout if proc.returncode == 0 else None
 
 
-def _pull_ref(chart: str, repo_url: str) -> list[str]:
-    """The `helm pull` reference for an Argo CD Helm source.
-
-    Argo CD reads a scheme-less repoURL (`docker.io/envoyproxy`) as an OCI registry, and
-    `helm pull <chart> --repo <that>` cannot fetch it — the source would be reported
-    unreachable and skipped, i.e. never checked. Pull such a source by its OCI reference.
-    """
-    if repo_url.startswith("oci://"):
-        return ["helm", "pull", f"{repo_url.rstrip('/')}/{chart}"]
-    if "://" not in repo_url:
-        return ["helm", "pull", f"oci://{repo_url.rstrip('/')}/{chart}"]
-    return ["helm", "pull", chart, "--repo", repo_url]
-
-
-_PREFER_API = False
-# One `helm pull` normally takes 1-3 s; a frontend outage made it hang ~60 s per try.
-PULL_ATTEMPT_TIMEOUT_SECONDS = 30
-_GH_RELEASE = re.compile(r"^https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$")
-
-
-def _github_api_get(url: str, accept: str) -> bytes:
-    """GET an api.github.com URL. The token is sent to api.github.com ONLY: an asset
-    download answers 302 to a presigned CDN URL, which is followed by hand WITHOUT the
-    Authorization header (urllib would otherwise re-send it to the redirect target)."""
-    import urllib.error
-    import urllib.request
-
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):  # noqa: ANN002, ANN003
-            return None
-
-    headers = {"Accept": accept, "User-Agent": "openbank-ci-helm-values-gate"}
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    opener = urllib.request.build_opener(_NoRedirect)
-    try:
-        with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as err:
-        if err.code not in (301, 302, 303, 307, 308) or not err.headers.get("Location"):
-            raise
-        target = err.headers["Location"]
-    plain = {"Accept": accept, "User-Agent": headers["User-Agent"]}
-    with urllib.request.urlopen(urllib.request.Request(target, headers=plain), timeout=120) as resp:
-        return resp.read()
-
-
-def _fetch_via_github_api(chart: str, repo_url: str, version: str,
-                          chart_root: pathlib.Path) -> str | None:
-    """Fallback when `helm pull` fails: resolve the chart archive URL from the repo's
-    index.yaml and, if it is a GitHub release asset, download it through the REST API.
-
-    github.com's web frontend can answer 504 for `/releases/download/` while the API and
-    the asset CDN keep working (measured 2026-11-08, #15216). The API route
-    (`/repos/{o}/{r}/releases/assets/{id}`, Accept: application/octet-stream) redirects
-    straight to the asset CDN. Returns None on success, or a reason string.
-    """
-    import io
-    import json
-    import tarfile
-    import urllib.request
-    if repo_url.startswith("oci://") or "://" not in repo_url:
-        return "fallback: OCI source has no index.yaml"
-    try:
-        with urllib.request.urlopen(f"{repo_url.rstrip('/')}/index.yaml", timeout=60) as resp:
-            index = yaml.safe_load(resp.read())
-        entry = next(e for e in (index.get("entries") or {}).get(chart, [])
-                     if str(e.get("version")) == version)
-        archive_url = (entry.get("urls") or [""])[0]
-        match = _GH_RELEASE.match(archive_url)
-        if not match:
-            return f"fallback: archive is not a GitHub release asset ({archive_url})"
-        owner, repo, tag, name = match.groups()
-        release = json.loads(_github_api_get(
-            f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}",
-            "application/vnd.github+json"))
-        asset = next(a for a in release.get("assets", []) if a.get("name") == name)
-        data = _github_api_get(asset["url"], "application/octet-stream")
-        digest = entry.get("digest")
-        if not digest:
-            return f"fallback: repo index carries no digest for {name}; refusing an unverified chart"
-        if hashlib.sha256(data).hexdigest() != digest:
-            return f"fallback: sha256 of {name} does not match the repo index digest"
-        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
-            tar.extractall(chart_root, filter="data")
-        return None
-    except Exception as exc:  # noqa: BLE001 - every failure here is a network/lookup failure
-        return f"fallback failed: {exc}"
+def lock_name(chart: str, version: str, lock_path: pathlib.Path = LOCK) -> str | None:
+    """The lock entry that pins (chart, version), or None when the lock does not cover it."""
+    name = f"helm-chart/{chart}"
+    for entry in json.loads(lock_path.read_text()).get("artifacts", []):
+        if entry.get("name") == name and str(entry.get("version")) == version:
+            return name
+    return None
 
 
 def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Path,
                  attempts: int = PULL_RETRY_ATTEMPTS,
                  backoff_seconds: float = PULL_RETRY_BACKOFF_SECONDS) -> str | None:
-    """`helm pull` with retries. Returns None on success, or the last stderr on failure.
+    """Fetch the chart through the resolver and untar it. None on success, else the error text.
 
-    Only retries the network fetch — a chart that pulls fine and then fails the
-    values-key comparison is a different failure and is never routed through here.
+    An error containing UNVERIFIED_MARK means no tier could deliver the archive (the third
+    state); any other error is a hard failure (not in the lock, sha256 mismatch, bad archive).
+    Only the resolver's "unavailable" outcome is retried — an integrity failure never heals.
     """
-    global _PREFER_API
-    if _PREFER_API and _fetch_via_github_api(chart, repo_url, version, chart_root) is None:
-        return None
-    last_stderr = ""
+    name = lock_name(chart, version)
+    if name is None:
+        return (f"{chart}@{version} (repo {repo_url}) is not pinned in ci/artifacts.lock — add or "
+                f"bump the `helm-chart/{chart}` entry with the targetRevision")
+    archive = chart_root.parent / f".{chart}-{version}.tgz"
+    last = ""
+    if _OUTAGE[0]:
+        attempts = 1
     for attempt in range(1, attempts + 1):
-        try:
-            pull = subprocess.run(
-                [*_pull_ref(chart, repo_url), "--version", version,
-                 "--untar", "--untardir", str(chart_root)],
-                capture_output=True, text=True, timeout=PULL_ATTEMPT_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            last_stderr = f"helm pull timed out after {PULL_ATTEMPT_TIMEOUT_SECONDS}s"
-            break  # a hung upstream will not recover within this run's budget
-        if pull.returncode == 0:
+        env = {**os.environ, "OB_ARTIFACT_RETRIES": "1"}
+        if _PREFER_API:
+            env["OB_GITHUB_PREFER_API"] = "1"
+        proc = subprocess.run(
+            [sys.executable, "-I", str(RESOLVER), name, "--platform", "any", "--out", str(archive)],
+            capture_output=True, text=True, env=env,
+        )
+        if proc.returncode == 0 and "served by the REST API asset route" in (proc.stderr or ""):
+            # Lesson of #15220: once the web route is down and the API route works, use the API
+            # first for the rest of the run, or a 21-chart scan exceeds the 420 s hard timeout.
+            globals()["_PREFER_API"] = True
+        if proc.returncode == 0:
+            try:
+                chart_root.mkdir(parents=True, exist_ok=True)
+                with tarfile.open(archive) as tar:
+                    tar.extractall(chart_root, filter="data")
+            except (tarfile.TarError, OSError) as exc:
+                return f"{chart}@{version}: verified archive did not unpack: {exc}"
+            finally:
+                archive.unlink(missing_ok=True)
             return None
-        last_stderr = pull.stderr.strip()
-        if "504" in last_stderr or "Gateway Time" in last_stderr:
-            break  # gateway outage, not a flake: retrying only spends the hard timeout
+        last = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        if proc.returncode != EXIT_UNVERIFIED:
+            return f"{chart}@{version}: resolver exit {proc.returncode}: {last[-300:]}"
+        if time.monotonic() >= _FETCH_DEADLINE[0]:
+            break  # out of fetch budget: report UNVERIFIED rather than die on the hard timeout
         if attempt < attempts:
             time.sleep(backoff_seconds * attempt)
-    fallback = _fetch_via_github_api(chart, repo_url, version, chart_root)
-    if fallback is None:
-        # The direct route is down and the API route works: go to the API first for the
-        # rest of this run instead of paying the retry budget on every chart (a 22-chart
-        # run otherwise exceeds the gate's hard timeout during a frontend outage).
-        _PREFER_API = True
-        print(f"::notice::helm-values-key-effect fetched {chart}@{version} via the GitHub "
-              "REST API after `helm pull` failed (#15216)")
-        return None
-    return f"{last_stderr}\n{fallback}"
+    _OUTAGE[0] = True
+    return f"{UNVERIFIED_MARK}: {chart}@{version} from {repo_url}: {last[-300:]}"
 
 
 def ignored_top_level_keys(chart_dir: str, values: dict) -> list[str] | None:
@@ -324,33 +284,38 @@ def check_fleet() -> int:
         return 1
 
     cache = pathlib.Path(tempfile.mkdtemp(prefix="helm-values-gate-"))
+    _FETCH_DEADLINE[0] = time.monotonic() + FETCH_BUDGET_SECONDS
+    _OUTAGE[0] = False
     findings: list[str] = []
     stale: list[str] = []
     unreachable: list[str] = []
     checked = 0
 
     try:
-        for name, chart, repo_url, version, values in iter_helm_sources():
+        # Non-GitHub sources first (stable within each group): when a GitHub outage spends the
+        # fetch budget, the charts that do not depend on GitHub have already been checked.
+        sources = sorted(iter_helm_sources(), key=lambda s: _github_hosted(s[1], s[3]))
+        for name, chart, repo_url, version, values in sources:
             chart_root = cache / f"{chart}-{version}"
             if not chart_root.exists():
-                pull_error = _pull_chart(chart, repo_url, version, chart_root)
+                if time.monotonic() >= _FETCH_DEADLINE[0]:
+                    pull_error = (f"{UNVERIFIED_MARK}: {chart}@{version} not attempted — the run's "
+                                  f"{FETCH_BUDGET_SECONDS:.0f} s fetch budget is spent (upstream outage)")
+                else:
+                    pull_error = _pull_chart(chart, repo_url, version, chart_root)
+                if pull_error is not None and UNVERIFIED_MARK not in pull_error:
+                    print(f"FAIL {name}: {pull_error}", file=sys.stderr)
+                    return 1
                 if pull_error is not None:
-                    # COULD-NOT-CHECK is a third state, and collapsing it into FAIL was wrong in
-                    # both directions. Measured 2026-08-21: gitlab.com answered 502 for the
-                    # glitchtip chart, which (a) failed an enforced gate on an unrelated PR as if
-                    # the repo were broken, and (b) `return 1` here ABORTED the scan, so the other
-                    # 19 charts were never examined — a green run and a red run both told you
-                    # nothing about them.
-                    #
-                    # Now: record it, keep going, and let the SUBJECT FLOOR decide. One unreachable
-                    # repo leaves 19 of 20 checked and the gate passes with a loud warning; a real
-                    # outage drops the count under `min_subjects: 15` and run-gates fails the gate
-                    # for examining too little. That is the repo's existing mechanism for "this
-                    # gate did not see enough to mean anything", and it is the honest one here.
+                    # COULD-NOT-CHECK is a third state (2026-08-21: gitlab.com 502; 2026-11-08:
+                    # GitHub Releases 504). It must not read as a finding, and it must not stop the
+                    # scan — every reachable chart is still examined. But since #15216 it is no
+                    # longer a pass either: a required check that could not look must not go green,
+                    # so the run ends UNVERIFIED (exit 75) after the scan, worded so that grepping
+                    # for `IGNORED by` or `helm template failed` never matches it.
                     unreachable.append(
-                        f"{name}: could not reach {repo_url} to pull {chart}@{version} after "
-                        f"{PULL_RETRY_ATTEMPTS} attempts — upstream network failure, NOT a "
-                        f"values-key finding: {pull_error[:200]}"
+                        f"{name}: {chart}@{version} — upstream/mirror/cache all unavailable, NOT a "
+                        f"values-key finding: {pull_error[:300]}"
                     )
                     continue
 
@@ -387,15 +352,21 @@ def check_fleet() -> int:
     for line in findings + stale:
         print(f"FAIL {line}", file=sys.stderr)
     for line in unreachable:
-        # ::warning, not ::error: this is the build telling you it could not look, which must not
-        # read the same as the build telling you something is wrong.
-        print(f"::warning::helm-values-key-effect SKIPPED a source — {line}")
+        # Infrastructure, not a finding: labelled UNVERIFIED so it never reads like `IGNORED by`.
+        print(f"{UNVERIFIED_MARK}: helm-values-key-effect could not check {line}")
 
     if findings or stale:
+        gatelib.subjects(checked, "Helm source(s) with valuesObject")
         return 1
+    if unreachable:
+        print(f"UNVERIFIED helm valuesObject key-effect gate: {checked} Helm source(s) checked, "
+              f"{len(unreachable)} could not be fetched — infrastructure, not a finding; failing "
+              f"because an unchecked chart must not pass.")
+        gatelib.subjects(checked, "Helm source(s) with valuesObject")
+        return EXIT_UNVERIFIED
 
     total_baselined = sum(len(v) for v in KNOWN_IGNORED.values())
-    skipped_note = f", {len(unreachable)} unreachable (see warnings)" if unreachable else ""
+    skipped_note = ""
     print(f"PASS helm valuesObject key-effect gate: {checked} Helm source(s) checked, "
           f"0 silently-ignored keys ({total_baselined} baselined in KNOWN_IGNORED){skipped_note}.")
     # Declare the subject count so run-gates.py can enforce min_subjects. Without it a
@@ -413,16 +384,14 @@ class _FakeCompletedProcess:
 
 
 def _self_test_unreachable_is_not_a_finding() -> str | None:
-    """An unreachable chart repo must NOT fail the gate, and must NOT stop the scan.
+    """An unreachable chart is the THIRD state: not a finding, not a pass, and not a scan-stopper.
 
-    Both halves are the 2026-08-21 defect. gitlab.com answered 502 for one chart, and the
-    gate (a) failed an enforced build on an unrelated PR as though the repo were broken and
-    (b) returned immediately, so the other 19 sources were never examined — a state in
-    which neither pass nor fail said anything about them.
-
-    The replacement contract, asserted here: exit 0, a ::warning naming the source, and
-    every reachable source still checked. Systemic outages are caught by `min_subjects`
-    instead, because `checked` no longer counts what could not be pulled.
+    History: on 2026-08-21 gitlab.com answered 502 for one chart and the gate (a) failed as
+    though the repo were broken and (b) returned immediately, so the other 19 sources were never
+    examined. The #5094-era fix made it a warning and a pass. #15216 keeps (b) — every
+    reachable source is still checked — and replaces the pass with UNVERIFIED, exit 75: a
+    required check that could not look must not go green, and must not read like a finding.
+    A hard resolver error (not in the lock, digest mismatch) is a plain FAIL, exit 1.
     """
     import io
     import unittest.mock as mock
@@ -433,86 +402,127 @@ def _self_test_unreachable_is_not_a_finding() -> str | None:
         ("dead-repo", "chart-b", "https://example.invalid/b", "2.0.0", {"k": 1}),
         ("reachable-c", "chart-c", "https://example.invalid/c", "3.0.0", {"k": 1}),
     ]
-    pulled: list[str] = []
 
-    def _pull(chart, repo_url, version, dest):
-        pulled.append(chart)
-        if chart == "chart-b":
-            return "502 Bad Gateway"
-        pathlib.Path(dest, "inner").mkdir(parents=True, exist_ok=True)
-        pathlib.Path(dest, "inner", "Chart.yaml").write_text("name: x\n")
-        return None
+    def run(failure: str):
+        pulled: list[str] = []
 
-    out, err = io.StringIO(), io.StringIO()
-    with mock.patch(f"{__name__}.iter_helm_sources", return_value=sources), \
-         mock.patch(f"{__name__}._pull_chart", side_effect=_pull), \
-         mock.patch(f"{__name__}.ignored_top_level_keys", return_value=[]), \
-         contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = check_fleet()
+        def _pull(chart, repo_url, version, dest):
+            pulled.append(chart)
+            if chart == "chart-b":
+                return failure
+            pathlib.Path(dest, "inner").mkdir(parents=True, exist_ok=True)
+            pathlib.Path(dest, "inner", "Chart.yaml").write_text("name: x\n")
+            return None
 
-    if rc != 0:
-        return f"an unreachable repo failed the gate (rc={rc}); it is a could-not-check, not a finding"
-    if [c for c in pulled] != ["chart-a", "chart-b", "chart-c"]:
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch(f"{__name__}.iter_helm_sources", return_value=sources), \
+             mock.patch(f"{__name__}._pull_chart", side_effect=_pull), \
+             mock.patch(f"{__name__}.ignored_top_level_keys", return_value=[]), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = check_fleet()
+        return rc, pulled, out.getvalue() + err.getvalue()
+
+    rc, pulled, combined = run(f"{UNVERIFIED_MARK}: chart-b@2.0.0: HTTP 504")
+    if rc != EXIT_UNVERIFIED:
+        return f"an unavailable chart must end UNVERIFIED (rc={EXIT_UNVERIFIED}), got rc={rc}"
+    if pulled != ["chart-a", "chart-b", "chart-c"]:
         return f"the scan stopped at the unreachable repo instead of continuing: pulled={pulled}"
-    combined = out.getvalue() + err.getvalue()
-    if "::warning" not in combined or "dead-repo" not in combined:
-        return "the unreachable source was not reported as a warning naming it"
+    if UNVERIFIED_MARK not in combined or "dead-repo" not in combined:
+        return "the unavailable source was not reported as UNVERIFIED naming it"
+    if "IGNORED by" in combined:
+        return "an unavailable chart was worded like a values-key finding"
     if "SUBJECTS=2" not in combined:
         return f"subject count must exclude the unreachable source, got: {combined[-200:]!r}"
+
+    with mock.patch(f"{__name__}.FETCH_BUDGET_SECONDS", 0.0):
+        rc, pulled, combined = run("unused")
+    if rc != EXIT_UNVERIFIED or pulled or "fetch budget is spent" not in combined:
+        return (f"a spent fetch budget must report every chart UNVERIFIED without fetching it "
+                f"(rc={rc}, pulled={pulled})")
+
+    rc, _, combined = run("chart-b@2.0.0 is not pinned in ci/artifacts.lock")
+    if rc != 1 or UNVERIFIED_MARK in combined:
+        return f"a hard resolver error must FAIL (rc=1) and not read as UNVERIFIED, got rc={rc}"
     return None
 
 
 def _self_test_pull_retry() -> str | None:
-    """Offline check of `_pull_chart`'s retry/backoff and its distinct failure text.
+    """Offline check of `_pull_chart`'s retry/backoff and its distinct failure text (#5094).
 
-    No real `helm pull` runs here — `subprocess.run` is monkeypatched so the whole
-    thing stays network-free like the rest of the self-test. Two cases, both of which
-    the #5094 fix must get right or it regresses into one of the two failure modes it
-    was written to avoid: retrying forever (never surfacing a real dead repo), or
-    swallowing a genuine values-key defect as if it were a network blip.
-
-    Returns None on success, or a description of what went wrong.
+    `subprocess.run` (the resolver call) is monkeypatched, so nothing touches the network.
+    Retries apply ONLY to the resolver's "unavailable" exit (75): it must stop after exactly
+    PULL_RETRY_ATTEMPTS, recover from a transient failure, and never retry an integrity error.
     """
+    import io
     import unittest.mock as mock
 
-    # Case 1: every attempt fails (a genuinely unreachable/renamed repo) — must retry
-    # exactly PULL_RETRY_ATTEMPTS times, not "forever", and must return an error.
-    calls = {"n": 0}
+    def _tgz(path: str) -> None:
+        payload = b"apiVersion: v2\nname: probe\nversion: 1.0.0\n"
+        info = tarfile.TarInfo("probe/Chart.yaml")
+        info.size = len(payload)
+        with tarfile.open(path, "w:gz") as tar:
+            tar.addfile(info, io.BytesIO(payload))
 
-    def _always_fail(*_args, **_kwargs):
-        calls["n"] += 1
-        return _FakeCompletedProcess(1, "dial tcp: connection reset by peer")
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="helm-pull-selftest-"))
+    try:
+        with mock.patch(f"{__name__}.lock_name", return_value="helm-chart/probe"), \
+             mock.patch("time.sleep", return_value=None):
+            # Case 1: unavailable on every attempt.
+            _OUTAGE[0] = False
+            calls = {"n": 0}
 
-    with mock.patch("subprocess.run", side_effect=_always_fail), \
-         mock.patch("time.sleep", return_value=None):  # keep the self-test fast
-        err = _pull_chart("probe", "https://example.invalid/charts", "1.0.0",
-                           pathlib.Path("/tmp/does-not-matter"))
-    if calls["n"] != PULL_RETRY_ATTEMPTS:
-        return (f"_pull_chart made {calls['n']} attempt(s), expected exactly "
-                f"{PULL_RETRY_ATTEMPTS} — it must not retry forever nor give up early")
-    if err is None:
-        return "_pull_chart reported success against a source that failed every attempt"
+            def _always_unavailable(*_a, **_k):
+                calls["n"] += 1
+                return _FakeCompletedProcess(EXIT_UNVERIFIED, "UNVERIFIED (artifact unavailable): x")
 
-    # Case 2: a transient failure that clears within the retry budget — must succeed
-    # and must NOT report the earlier failures as the final outcome.
-    calls2 = {"n": 0}
+            with mock.patch("subprocess.run", side_effect=_always_unavailable):
+                err = _pull_chart("probe", "https://example.invalid/c", "1.0.0", tmp / "one")
+            if calls["n"] != PULL_RETRY_ATTEMPTS:
+                return (f"_pull_chart made {calls['n']} attempt(s), expected exactly "
+                        f"{PULL_RETRY_ATTEMPTS} — it must not retry forever nor give up early")
+            if err is None or UNVERIFIED_MARK not in err:
+                return f"an always-unavailable chart must return an UNVERIFIED error, got {err!r}"
 
-    def _fail_once_then_succeed(*_args, **_kwargs):
-        calls2["n"] += 1
-        if calls2["n"] == 1:
-            return _FakeCompletedProcess(1, "connection reset by peer")
-        return _FakeCompletedProcess(0, "")
+            # Case 1b: once one chart exhausted its attempts, the outage is established and the
+            # next chart gets a single call, so a GitHub outage cannot multiply the run time.
+            calls["n"] = 0
+            with mock.patch("subprocess.run", side_effect=_always_unavailable):
+                _pull_chart("probe", "https://example.invalid/c", "1.0.0", tmp / "one-b")
+            if calls["n"] != 1:
+                return f"after an established outage a chart made {calls['n']} attempts, expected 1"
 
-    with mock.patch("subprocess.run", side_effect=_fail_once_then_succeed), \
-         mock.patch("time.sleep", return_value=None):
-        err2 = _pull_chart("probe", "https://example.invalid/charts", "1.0.0",
-                            pathlib.Path("/tmp/does-not-matter"))
-    if err2 is not None:
-        return (f"_pull_chart did not recover from a transient failure within "
-                f"{PULL_RETRY_ATTEMPTS} attempts: {err2}")
-    if calls2["n"] != 2:
-        return f"_pull_chart made {calls2['n']} attempt(s) on the recovering source, expected 2"
+            # Case 2: transient, then success — must recover and unpack the verified archive.
+            _OUTAGE[0] = False
+            calls2 = {"n": 0}
 
+            def _fail_once_then_succeed(cmd, *_a, **_k):
+                calls2["n"] += 1
+                if calls2["n"] == 1:
+                    return _FakeCompletedProcess(EXIT_UNVERIFIED, "unavailable")
+                _tgz(cmd[cmd.index("--out") + 1])
+                return _FakeCompletedProcess(0, "")
+
+            with mock.patch("subprocess.run", side_effect=_fail_once_then_succeed):
+                err2 = _pull_chart("probe", "https://example.invalid/c", "1.0.0", tmp / "two")
+            if err2 is not None or calls2["n"] != 2:
+                return f"_pull_chart did not recover from one transient failure: {err2!r}, calls={calls2['n']}"
+            if not (tmp / "two" / "probe" / "Chart.yaml").is_file():
+                return "_pull_chart reported success without unpacking the chart"
+
+            # Case 3: integrity failure — never retried, never reported as UNVERIFIED.
+            _OUTAGE[0] = False
+            calls3 = {"n": 0}
+
+            def _mismatch(*_a, **_k):
+                calls3["n"] += 1
+                return _FakeCompletedProcess(65, "INTEGRITY FAILURE")
+
+            with mock.patch("subprocess.run", side_effect=_mismatch):
+                err3 = _pull_chart("probe", "https://example.invalid/c", "1.0.0", tmp / "three")
+            if calls3["n"] != 1 or err3 is None or UNVERIFIED_MARK in err3:
+                return f"a digest mismatch was retried or worded as unavailable: calls={calls3['n']} {err3!r}"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     return None
 
 
@@ -528,19 +538,15 @@ def self_test() -> int:
         print("FAIL self-test: `helm` is not on PATH", file=sys.stderr)
         return 1
 
-    oci_cases = {
-        ("gateway-helm", "docker.io/envoyproxy"):
-            ["helm", "pull", "oci://docker.io/envoyproxy/gateway-helm"],
-        ("gateway-helm", "oci://docker.io/envoyproxy/"):
-            ["helm", "pull", "oci://docker.io/envoyproxy/gateway-helm"],
-        ("loki", "https://grafana.github.io/helm-charts"):
-            ["helm", "pull", "loki", "--repo", "https://grafana.github.io/helm-charts"],
-    }
-    for (chart_name, repo), want in oci_cases.items():
-        got = _pull_ref(chart_name, repo)
-        if got != want:
-            print(f"FAIL self-test (pull ref): {repo!r} -> {got}, want {want}", file=sys.stderr)
-            return 1
+    # Every Helm source the fleet scan reads must be pinned in the lock, or the real run FAILs
+    # on it; and a chart the lock does not hold must not resolve (known negative).
+    uncovered = [f"{c}@{v}" for _, c, _, v, _ in iter_helm_sources() if lock_name(c, v) is None]
+    if uncovered:
+        print(f"FAIL self-test (lock coverage): not in ci/artifacts.lock: {uncovered}", file=sys.stderr)
+        return 1
+    if lock_name("no-such-chart", "0.0.0") is not None:
+        print("FAIL self-test (lock coverage): an unpinned chart resolved", file=sys.stderr)
+        return 1
 
     retry_error = _self_test_pull_retry()
     if retry_error is not None:

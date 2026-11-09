@@ -52,3 +52,12 @@ production activation require their usual independent evidence and review.
 
 The artifact metadata/digest and archive redirect follow the
 [GitHub Actions artifact API](https://docs.github.com/en/rest/actions/artifacts).
+
+
+## CPU measurement advisories
+
+The daily workflow can retain one deterministic measurement request from a trusted, fresh single-artifact profile. Selection is limited to successful enforced gates with positive finite CPU, an actually passed self-test and a satisfied declared subject floor. The largest eligible CPU value wins within that artifact; ties use the gate identifier. Missing, unavailable, stale or malformed evidence produces no advisory. This is not a ranking of the whole pipeline and does not estimate savings.
+
+The request retains the repository, source, run, attempt, artifact digest and selected gate observation in the existing findings store. Its stable identity binds those immutable inputs. Concurrent delivery and activity retries insert once; existing human approvals, rejections and other lifecycle data are never overwritten. A separate Temporal version marker preserves pre-profile and profile-only histories. Activity unavailability leaves the existing detector report intact.
+
+The advisory requires an alternating whole-gate A/B benchmark including setup, tests and cleanup; identical corpus, verdicts, diagnostics and provenance; total process-tree CPU, wall and process/request counts; and independent review. Net regression is not a saving. It does not call an LLM, open a proposal or implementation PR, authorize skipping controls, merge, deploy, add polling, or spend another GitHub request. The existing read budget and storage egress policy remain unchanged. Actual autonomous implementation PRs require a later reviewed capability.

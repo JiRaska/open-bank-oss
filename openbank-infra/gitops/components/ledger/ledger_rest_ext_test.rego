@@ -297,7 +297,11 @@ test_batch1_identity_rules_do_not_cross_admit if {
 
 # --- ledger.close.participate: day-close participation (ADR-0342 D2, #13167) ---
 
-participate(p, participant) := {"principal": p, "action": "ledger.close.participate", "resource": participant}
+participate(p, participant) := {
+	"principal": p,
+	"action": "ledger.close.participate",
+	"resource": {"type": "ledger", "id": participant},
+}
 
 test_each_participant_account_may_report_its_own_participant if {
 	rest.allow.allow with input as participate(interest_m2m, "interest") with data.rules as rules_mock
@@ -306,12 +310,30 @@ test_each_participant_account_may_report_its_own_participant if {
 		with data.rules as rules_mock
 }
 
-# Remove the `input.resource == participant` line and this goes red: an account reports for its
+# Remove the `input.resource.id == participant` line and this goes red: an account reports for its
 # own participant only.
 test_a_participant_account_may_not_report_for_another_participant if {
 	not rest.allow.allow with input as participate(interest_m2m, "lending") with data.rules as rules_mock
 	not rest.allow.allow with input as participate(lending_m2m, "interest") with data.rules as rules_mock
 	not rest.allow.allow with input as participate(lending_m2m, "billing") with data.rules as rules_mock
+}
+
+test_participation_rejects_resource_with_wrong_type if {
+	not rest.allow.allow with input as {
+		"principal": interest_m2m,
+		"action": "ledger.close.participate",
+		"resource": {"type": "account", "id": "interest"},
+	}
+		with data.rules as rules_mock
+}
+
+test_participation_rejects_legacy_string_resource if {
+	not rest.allow.allow with input as {
+		"principal": interest_m2m,
+		"action": "ledger.close.participate",
+		"resource": "interest",
+	}
+		with data.rules as rules_mock
 }
 
 # Nobody else reaches the action: not the shared client, not another ROLE_API account, not staff.
