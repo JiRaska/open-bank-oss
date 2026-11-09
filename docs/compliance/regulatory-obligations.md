@@ -102,7 +102,7 @@ Celkem povinností: **70**.
 - **Právní základ:** zákon č. 21/1992 Sb. § 41c odst. 10 a § 41d odst. 4; vyhláška č. 71/2011 Sb. ve znění vyhlášky č. 431/2016 Sb.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2011-71) · [specifikace úřadu](https://www.gsft.cz/)
 - **Lhůta:** Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale. *(ověřeno)*
-- **Druh / kanál:** event · CSV (CP-1250), komprimováno a šifrováno AES-256, na nosiči podle vyhlášky 431/2016 Sb.
+- **Druh / kanál:** event · Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)
 - **Osobní údaje:** True
 - **Pokrytí:** `missing` — chybí; sleduje #15356
 - **Poznámka:** Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.

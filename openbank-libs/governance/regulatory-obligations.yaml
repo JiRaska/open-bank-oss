@@ -142,7 +142,7 @@ obligations:
     cadence: "Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale."
     cadence_confidence: verified
     kind: event
-    transport: "CSV (CP-1250), komprimováno a šifrováno AES-256, na nosiči podle vyhlášky 431/2016 Sb."
+    transport: "Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)"
     personal_data: yes
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
