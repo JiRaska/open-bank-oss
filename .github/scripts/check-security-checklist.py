@@ -507,9 +507,17 @@ def load_declarations(root: Path, ref: str = "HEAD") -> dict[str, dict[str, list
 
 
 def declaration_changed(base: str, head: str = "HEAD") -> bool:
-    """True when the diff changes the declaration block (or it cannot be compared)."""
+    """True when the diff changes the declaration block (or it cannot be compared).
+
+    Compared from the MERGE-BASE, like changed_files' `base...head`: against `base` itself, a branch cut
+    before a declaration change on main reads as reverting it, so every PR behind such a commit was
+    held for three human ticks it did not owe (#15210 added one glob at 18:28Z on 2026-11-09 and the
+    merge-train admission refused every strict PR behind it). Fails closed: no merge-base, compare
+    against `base` as before."""
+    mb = subprocess.run(["git", "merge-base", base, head], capture_output=True, text=True)
+    since = mb.stdout.strip() if mb.returncode == 0 and mb.stdout.strip() else base
     try:
-        old = subprocess.run(["git", "show", f"{base}:{RULES}"], capture_output=True, text=True,
+        old = subprocess.run(["git", "show", f"{since}:{RULES}"], capture_output=True, text=True,
                              check=True).stdout
     except subprocess.CalledProcessError:
         return False  # no rules.yaml at base: nothing to narrow
@@ -1381,6 +1389,46 @@ def self_test() -> int:
     undeclared_rules = "money_path_services:\n  - " + svc + "\n"
     if dfixture(undeclared_rules, refactor, no_checklist, rules_base=undeclared_rules) == 0:
         print("self-test FAIL (i): undeclared money-path service auto-passed"); bad += 1
+    # (j-mb) a branch cut BEFORE main changed the declaration did not change it: judged from the
+    #        merge-base, not from main's tip (#15210 held every strict PR behind it). And a branch that
+    #        itself edits the declaration still counts, behind main or not.
+    import os as _os
+    import tempfile as _tf
+    cwd = _os.getcwd()
+    with _tf.TemporaryDirectory() as repo:
+        def g(*a: str) -> str:
+            return subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True, text=True,
+                                  env={**_os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                       "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}).stdout.strip()
+        rules = Path(repo, RULES)
+        rules.parent.mkdir(parents=True)
+        g("init", "-q", "-b", "main")
+        rules.write_text(decl_rules)
+        g("add", "-A"); g("commit", "-q", "--no-gpg-sign", "-m", "a")
+        g("checkout", "-q", "-b", "pr")
+        Path(repo, "unrelated.txt").write_text("x\n")
+        g("add", "-A"); g("commit", "-q", "--no-gpg-sign", "-m", "pr")
+        pr_head = g("rev-parse", "HEAD")
+        g("checkout", "-q", "main")
+        rules.write_text(decl_rules.replace('      - "src/main/kotlin/**/security/**"\n',
+                                            '      - "src/main/kotlin/**/security/**"\n      - "src/main/kotlin/**/Extra*.kt"\n'))
+        g("commit", "-q", "--no-gpg-sign", "-am", "main widens")
+        main_tip = g("rev-parse", "HEAD")
+        g("checkout", "-q", "-b", "pr2", pr_head)
+        rules.write_text(narrowed_text := decl_rules.replace('      - "src/main/kotlin/**/security/**"\n', ""))
+        g("commit", "-q", "--no-gpg-sign", "-am", "pr narrows")
+        pr2_head = g("rev-parse", "HEAD")
+        g("checkout", "-q", "main")
+        _os.chdir(repo)
+        try:
+            if declarations_from_text(narrowed_text) == declarations_from_text(decl_rules):
+                print("self-test FAIL (j-mb0): fixture did not change the declaration"); bad += 1
+            if declaration_changed(main_tip, pr_head):
+                print("self-test FAIL (j-mb): a branch behind a declaration change on main read as changing it"); bad += 1
+            if not declaration_changed(main_tip, pr2_head):
+                print("self-test FAIL (j-mb2): a behind branch that edits the declaration was not caught"); bad += 1
+        finally:
+            _os.chdir(cwd)
     # (j) narrowing the declaration → fails, even in the same PR as a harmless refactor, and even
     #     when no money-path file moved at all (a rules.yaml-only PR).
     narrowed = decl_rules.replace('      - \"src/main/kotlin/**/security/**\"\n', "").replace(
