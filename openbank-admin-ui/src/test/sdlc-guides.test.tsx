@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import CiGuidePage from '@/app/devops/sdlc/ci/page'
 import CdGuidePage from '@/app/devops/sdlc/cd/page'
 import { currentNavigation } from '@/lib/navigation/catalog'
@@ -18,7 +18,7 @@ describe('SDLC guides', () => {
     render(<CiGuidePage />)
     const scene = screen.getByRole('img', { name: /Lion change train/ })
     expect(scene).toHaveAccessibleDescription(/awaits verification before boarding/)
-    expect(scene.querySelectorAll('image[href="/brand/sdlc/train-passengers.png"]')).toHaveLength(0)
+    expect(scene.querySelector('[data-lane="batch"]')?.querySelectorAll('image[href="/brand/sdlc/train-passengers.png"]')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: /Next station/ }))
     expect(scene).toHaveAccessibleDescription(/Ticket inspection represents PR checks/)
     expect(scene).toHaveTextContent('CI / REVIEW')
@@ -31,6 +31,23 @@ describe('SDLC guides', () => {
     expect(screen.getByRole('region', { name: /What is happening now/ })).toHaveTextContent(/Deployment comes next/)
     expect(screen.getByRole('button', { name: /Next station/ })).toBeDisabled()
     expect(screen.getAllByRole('link', { name: /how we deploy/i })[0]).toHaveAttribute('href', '/devops/sdlc/cd')
+  })
+  it('keeps each track’s progress when switching details and advances CI lanes independently', () => {
+    vi.useFakeTimers()
+    render(<CiGuidePage />)
+    const scene = screen.getByRole('img', { name: /Lion change train/ })
+    const progress = (lane: string) => scene.querySelector(`[data-lane="${lane}"]`)?.getAttribute('data-step')
+    expect(scene).toHaveAccessibleDescription(/three concurrent tracks/)
+    expect([progress('batch'), progress('fast'), progress('strict')]).toEqual(['0', '1', '2'])
+    act(() => vi.advanceTimersByTime(5000))
+    expect([progress('batch'), progress('fast'), progress('strict')]).toEqual(['0', '2', '2'])
+    act(() => vi.advanceTimersByTime(3000))
+    expect([progress('batch'), progress('fast'), progress('strict')]).toEqual(['1', '2', '2'])
+    fireEvent.click(screen.getByRole('button', { name: /Fast lane.*independent change/i }))
+    expect(scene).toHaveAccessibleDescription(/have boarded/)
+    fireEvent.click(screen.getByRole('button', { name: /Batch train.*shared test ride/i }))
+    expect(scene).toHaveAccessibleDescription(/Ticket inspection/)
+    expect(screen.getByText(/Writes to main still follow governed ordering/)).toBeInTheDocument()
   })
   it('explains the carrier-free fast lane and the strict path separately', () => {
     render(<CiGuidePage />)
