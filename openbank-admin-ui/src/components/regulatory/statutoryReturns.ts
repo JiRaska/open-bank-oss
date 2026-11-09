@@ -51,6 +51,9 @@ export async function loadStatutoryReturns() {
   ])
   if (!capability.ok) return capability
   if (!returns.ok) return returns
-  if (!breaches.ok) return breaches
-  return { ok: true as const, data: { capability: capability.data, returns: returns.data, breaches: breaches.data } }
+  // Deadline monitoring fails closed on its own (503 until a reporting start is configured,
+  // ADR-0336). That must not hide the returns themselves, and it must not read as "no missed
+  // deadline" either: null means UNKNOWN, an empty array means none.
+  const missed = breaches.ok ? breaches.data : null
+  return { ok: true as const, data: { capability: capability.data, returns: returns.data, breaches: missed } }
 }
