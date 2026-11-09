@@ -195,3 +195,5 @@ kódem — neplatné IR (`{ok:false, problems}`, tytéž bajty, které obp vypí
 Omezený běh modelu nenabízí žádné nástroje a na stávající hranici volání odmítne i nevyžádaný požadavek modelu na nástroj. Zachovává směrování modelů, autorizaci, chartu, limity, audit i nouzové zastavení. Odpověď potvrzuje `toolsRestricted: true`; klient před přijetím vysvětlení ověří také prázdné `toolCalls`. Odmítnutý požadavek modelu tak může vést k nedostupnému vysvětlení, nikdy ke spuštění nástroje.
 
 Vysvětlení omezených metadat testu je interpretace. Nenahrazuje zaznamenaný výsledek ani schválení vydání. Starší server schopnost neoznamuje; přísný klient ponechá důkazy dostupné a označí vysvětlení za nedostupné.
+
+Operátorský chat bez nástrojů má prostor nejvýše 2 048 výstupních tokenů včetně uvažování modelu. Odpověď zastavená výstupním limitem nebo prázdná odpověď se audituje jako nedostupná a vrací HTTP 503; neúplné vysvětlení se nevrací jako úspěšná odpověď. Běžný chat zachovává stávající limit 512 tokenů.
