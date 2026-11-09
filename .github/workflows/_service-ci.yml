@@ -154,13 +154,19 @@ jobs:
           helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
           cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
           cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
-          # Pinned Gradle distribution installer (ADR-0366 lock): staged from the trusted SHA
-          # so a historical provider ref still gets the retrying, sha256-checked fetch.
-          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py \
-            ci/artifacts.lock "$helper_dir/"
           chmod 600 "$helper_dir/"*.sh
           bash "$helper_dir/diagnostic-actions.sh" stage "$helper_dir"
           echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
+
+      # Pinned Gradle distribution installer (ADR-0366 lock), staged from the trusted SHA so a
+      # historical provider ref still gets the retrying, sha256-checked fetch. Its own step:
+      # the helper-staging recipe above is a closed, gate-checked contract.
+      - name: Stage trusted Gradle distribution installer
+        run: |
+          set -euo pipefail
+          dist_dir="$(mktemp -d "${RUNNER_TEMP}/gradle-dist-installer.XXXXXX")"
+          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py ci/artifacts.lock "$dist_dir/"
+          echo "GRADLE_DIST_INSTALLER=$dist_dir" >> "$GITHUB_ENV"
 
       - name: Stage trusted build retry helpers
         if: inputs.ref != ''
@@ -241,9 +247,9 @@ jobs:
       # later step fetches from upstream again. Rationale: ensure-gradle-distribution.py.
       - name: Install pinned Gradle distribution (once, retried)
         run: >-
-          python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py"
-          --lock "$SERVICE_CI_HELPERS/artifacts.lock"
-          --fetcher "$SERVICE_CI_HELPERS/fetch-artifact.py"
+          python3 -I "$GRADLE_DIST_INSTALLER/ensure-gradle-distribution.py"
+          --lock "$GRADLE_DIST_INSTALLER/artifacts.lock"
+          --fetcher "$GRADLE_DIST_INSTALLER/fetch-artifact.py"
 
       # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
       # never has a broker URL to forward, so the @PactBroker-gated provider-verification
@@ -568,12 +574,18 @@ jobs:
           helper_dir="$(mktemp -d "${RUNNER_TEMP}/service-ci-helpers.XXXXXX")"
           cp .github/scripts/service-ci-steps/*.sh "$helper_dir/"
           cp .github/scripts/heal-gradle-verification-failure.sh "$helper_dir/"
-          # Pinned Gradle distribution installer (ADR-0366 lock): staged from the trusted SHA
-          # so a historical provider ref still gets the retrying, sha256-checked fetch.
-          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py \
-            ci/artifacts.lock "$helper_dir/"
           chmod 600 "$helper_dir/"*.sh
           echo "SERVICE_CI_HELPERS=$helper_dir" >> "$GITHUB_ENV"
+
+      # Pinned Gradle distribution installer (ADR-0366 lock), staged from the trusted SHA so a
+      # historical provider ref still gets the retrying, sha256-checked fetch. Its own step:
+      # the helper-staging recipe above is a closed, gate-checked contract.
+      - name: Stage trusted Gradle distribution installer
+        run: |
+          set -euo pipefail
+          dist_dir="$(mktemp -d "${RUNNER_TEMP}/gradle-dist-installer.XXXXXX")"
+          cp .github/scripts/ensure-gradle-distribution.py .github/scripts/fetch-artifact.py ci/artifacts.lock "$dist_dir/"
+          echo "GRADLE_DIST_INSTALLER=$dist_dir" >> "$GITHUB_ENV"
 
       - name: Stage trusted Pact Broker retry helper
         run: |
@@ -696,9 +708,9 @@ jobs:
       # later step fetches from upstream again. Rationale: ensure-gradle-distribution.py.
       - name: Install pinned Gradle distribution (once, retried)
         run: >-
-          python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py"
-          --lock "$SERVICE_CI_HELPERS/artifacts.lock"
-          --fetcher "$SERVICE_CI_HELPERS/fetch-artifact.py"
+          python3 -I "$GRADLE_DIST_INSTALLER/ensure-gradle-distribution.py"
+          --lock "$GRADLE_DIST_INSTALLER/artifacts.lock"
+          --fetcher "$GRADLE_DIST_INSTALLER/fetch-artifact.py"
 
       # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
       #
