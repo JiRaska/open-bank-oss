@@ -17,8 +17,11 @@ describe('SDLC guides', () => {
   it('boards lions, changes their emotions and distinguishes merge from deployment', () => {
     render(<CiGuidePage />)
     const scene = screen.getByRole('img', { name: /Lion change train/ })
-    expect(scene).toHaveAccessibleDescription(/wait on the platform/)
+    expect(scene).toHaveAccessibleDescription(/awaits verification before boarding/)
+    expect(scene.querySelectorAll('image[href="/brand/sdlc/train-passengers.png"]')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: /Next station/ }))
+    expect(scene).toHaveAccessibleDescription(/Ticket inspection represents PR checks/)
+    expect(scene).toHaveTextContent('CI / REVIEW')
     fireEvent.click(screen.getByRole('button', { name: /Next station/ }))
     expect(scene).toHaveAccessibleDescription(/have boarded/)
     fireEvent.click(screen.getByRole('button', { name: /Next station/ }))

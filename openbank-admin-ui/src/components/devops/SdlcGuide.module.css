@@ -26,9 +26,9 @@
 .sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; }
 .trainPosition { transition: transform 1.8s cubic-bezier(.2,.8,.2,1); }
 .trainBounce { animation: train-bounce 2.2s ease-in-out infinite; }
-.passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 1.4s ease-in-out infinite; }
+.passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 3.2s ease-in-out infinite; }
 .passenger[data-mood="1"] { animation-name: passenger-worry; animation-duration: 2.8s; }
-.passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: .9s; }
+.passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: 2.2s; }
 .scene[data-playing="false"] .passenger { animation-play-state: paused; }
 .scene[data-moving="false"] .trainBounce { animation-play-state: paused; }
 .stations { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); list-style: none; margin: var(--space-5) 0; padding: 0; }
@@ -82,9 +82,9 @@
 .sources ul { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); list-style: none; padding: 0; }
 .nextChapter { display: flex; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-5) 0; margin-top: var(--space-6); }
 @keyframes train-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
-@keyframes passenger-wave { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(3deg); } }
-@keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2px) rotate(-2deg); } }
-@keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px) rotate(2deg); } }
+@keyframes passenger-wave { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+@keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+@keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 @media (max-width: 800px) { .deliveryPath { grid-template-columns: repeat(2,minmax(0,1fr)); } .trainSection { padding: var(--space-4); } .laneChoices { gap: var(--space-2); } .laneChoices button { padding: var(--space-3); } }
 @media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .laneChoices { grid-template-columns: 1fr; } .laneChoices button { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); } .laneChoices strong { margin: 0; } .routeDescription { min-height: 0; } .stations { gap: 0; } .stations button { padding: var(--space-1); font-size: 11px; overflow-wrap: anywhere; } .journeyDetail { min-height: 0; padding-left: var(--space-3); } .sectionTop h2 { font-size: var(--text-xl); } .guideNav a { flex: 1 1 auto; } }
 @media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .trainBounce, .passenger { animation: none !important; } }

@@ -55,18 +55,17 @@ Environment prompt:
 
 ## Canonical brandmark
 
-`openbank-mark.svg` uses the original vault-medallion and BotB vector geometry from
-[Brandmark.jsx](https://github.com/JiRaska/openbank-app/blob/d81735d112c7ae005246de45e6d5d056e9ab1a0a/design-system/components/brand/Brandmark.jsx).
-It is exported as a static lockup with the source's supported accent recolouring to cyan.
-The mark is composed independently of the generated train artwork, never inferred by ImageGen.
+`openbank-mark.svg` is a byte-for-byte copy of the current two-leaf Lípa mark in
+`openbank-infra/web/landing/assets/lipa-mark.svg`, also used on https://open-bank.tech/.
+Keep the original geometry and colours. The retired vault-medallion/BotB lockup is not
+used in this scene. The mark is composed independently of generated train artwork.
 
 ## Heritage steam train
 
 The current scene uses `train-atlas-v3.webp` (1536 × 1024; locomotive in the upper row)
 and `heritage-coach.webp` (1448 × 1086). These are original built-in ImageGen assets,
 encoded as WebP with their geometry and alpha preserved. The earlier electric atlas is
-retained as the material reference. The Prague environment and canonical vector mark
-are unchanged. Passenger sprites remain separate so boarding, waving, worry and celebration
+retained as the material reference. The Prague environment is unchanged; the brandmark follows the current website identity. Passenger sprites remain separate so boarding, waving, worry and celebration
 still follow the selected journey state. Tall open windows make faces and paws visible.
 
 Locomotive prompt:
@@ -92,3 +91,12 @@ Window refinement prompt:
 > the central opening: x=240..1200, top y=270, bottom y=720. Lower the brass sill and cyan
 > line to y=745, leaving a narrow lower panel. The opening must fit a mascot's head and
 > waving paw. Keep the cabin empty; no logos, text or other changes.
+
+## Cabin composition
+
+`TrainScene.tsx` measures the coach opening in its 300 × 225 display coordinates.
+Cabin contents are clipped to x=59..242, y=522..600 and the original coach frame is
+redrawn above them through an inverse mask. Seats, smaller passenger sprites and subtle
+glazing establish depth behind the brass frame. The idea and PR-check stages use a
+proposal and an inspected ticket in the same opening; passengers appear at boarding.
+The masthead, coaches and tender all use the current two-leaf mark.
