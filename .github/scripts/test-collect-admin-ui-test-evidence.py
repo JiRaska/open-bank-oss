@@ -794,6 +794,21 @@ class RateLimitRetryTest(unittest.TestCase):
         result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30, sleeps.append)
         self.assertEqual(("ok", 2, [75.0]), (result, opener.calls, sleeps))
 
+    def test_shared_budget_fails_before_a_wait_it_cannot_cover(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "300"})])
+        sleeps = []
+        with self.assertRaises(COLLECTOR.CollectionError):
+            COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30,
+                                                 sleeps.append, deadline=1100.0, clock=lambda: 1000.0)
+        self.assertEqual((1, []), (opener.calls, sleeps))
+
+    def test_shared_budget_allows_a_wait_it_can_cover(self):
+        opener = self.Opener([self.http_error(403, {"Retry-After": "60"})])
+        sleeps = []
+        result = COLLECTOR.open_with_rate_limit_retry(opener, COLLECTOR.Request("https://api.github.com/x"), 30,
+                                                      sleeps.append, deadline=1100.0, clock=lambda: 1000.0)
+        self.assertEqual(("ok", [60.0]), (result, sleeps))
+
     def test_primary_limit_waits_until_reset(self):
         error = self.http_error(403, {"x-ratelimit-remaining": "0", "x-ratelimit-reset": "1100"})
         self.assertEqual(101.0, COLLECTOR.rate_limit_wait(error, 1, now=1000.0))

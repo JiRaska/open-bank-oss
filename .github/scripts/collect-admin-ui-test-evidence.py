@@ -83,6 +83,10 @@ def require_github_api_url(url: str) -> None:
 
 RATE_LIMIT_ATTEMPTS = 4
 RATE_LIMIT_MAX_WAIT_SECONDS = 300
+# Shared across every request: collection runs inside a 30-minute job, so the sum of all
+# rate-limit sleeps must leave time to publish. Past it, fail with a diagnostic.
+RATE_LIMIT_BUDGET_SECONDS = 900
+_RATE_LIMIT_DEADLINE = time.monotonic() + RATE_LIMIT_BUDGET_SECONDS
 
 
 def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> float | None:
@@ -108,7 +112,9 @@ def rate_limit_wait(exc: HTTPError, attempt: int, now: float | None = None) -> f
     return min(max(wait, 1.0), RATE_LIMIT_MAX_WAIT_SECONDS)
 
 
-def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=time.sleep):
+def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=time.sleep,
+                               deadline: float | None = None, clock=time.monotonic):
+    deadline = _RATE_LIMIT_DEADLINE if deadline is None else deadline
     for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
         try:
             return opener.open(request, timeout=timeout)  # noqa: S310 - origin is fixed by callers
@@ -116,6 +122,10 @@ def open_with_rate_limit_retry(opener, request: Request, timeout: int, sleep=tim
             wait = rate_limit_wait(exc, attempt)
             if wait is None or attempt == RATE_LIMIT_ATTEMPTS:
                 raise
+            if clock() + wait > deadline:
+                raise CollectionError(
+                    f"GitHub API rate limited (HTTP {exc.code}) and the {RATE_LIMIT_BUDGET_SECONDS}s "
+                    "rate-limit budget cannot cover the next wait; failing before the job timeout") from exc
             print(f"::warning::GitHub API rate limited (HTTP {exc.code}); retry {attempt}/"
                   f"{RATE_LIMIT_ATTEMPTS - 1} in {wait:.0f}s", file=sys.stderr)
             sleep(wait)

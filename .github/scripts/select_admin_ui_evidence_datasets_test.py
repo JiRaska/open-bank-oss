@@ -97,6 +97,31 @@ class SupersededSourceSkipTest(unittest.TestCase):
         # An empty matrix is a workflow error, so the publish job itself must be skipped.
         self.assertIn("needs.authorize-source.outputs.datasets != '[]'", jobs["publish"]["if"])
 
+    def _run_guard(self, event: str, sha: str, main: str) -> str:
+        """Execute the step's real superseded-source guard with `git` stubbed; return datasets."""
+        import os
+        import subprocess
+        import tempfile
+        import yaml
+
+        workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / "workflows" / "admin-ui-evidence.yml").read_text())
+        run = next(step["run"] for step in workflow["jobs"]["authorize-source"]["steps"] if step.get("id") == "source")
+        guard = run[run.index('if [ "$EVENT_NAME" = workflow_run ]'):]
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp, "git")
+            stub.write_text(f"#!/bin/sh\nprintf '%s\\trefs/heads/main\\n' {main}\n")
+            stub.chmod(0o755)
+            out = Path(tmp, "out")
+            script = f"set -euo pipefail\nsha={sha}\ndatasets='[\"pact\"]'\n{guard}"
+            env = {**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}", "EVENT_NAME": event, "GITHUB_OUTPUT": str(out)}
+            subprocess.run(["bash", "-c", script], check=True, env=env, capture_output=True, text=True)
+            return dict(line.split("=", 1) for line in out.read_text().splitlines())["datasets"]
+
+    def test_guard_skips_a_superseded_source_and_keeps_a_current_one(self) -> None:
+        self.assertEqual("[]", self._run_guard("workflow_run", "a" * 40, "b" * 40))
+        self.assertEqual('["pact"]', self._run_guard("workflow_run", "a" * 40, "a" * 40))
+        self.assertEqual('["pact"]', self._run_guard("schedule", "a" * 40, "b" * 40))
+
 
 if __name__ == "__main__":
     unittest.main()

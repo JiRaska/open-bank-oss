@@ -30,6 +30,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 TAG = re.compile(r"\b(openbank-[a-z0-9-]+):sandbox-([0-9a-f]{8})(?:-run\d+)?\b")
@@ -41,6 +42,20 @@ GH_API_ATTEMPTS = 4
 GH_API_TOTAL_TIMEOUT_SECONDS = 900
 GH_RETRY_MAX_WAIT_SECONDS = 300
 GH_API_DIAGNOSTIC_LIMIT = 400
+# One budget for the whole script, under the job's 30-minute timeout, so a run of throttled
+# calls ends in a diagnostic here instead of a silent cancellation by the runner.
+SCRIPT_BUDGET_SECONDS = 1500
+SCRIPT_MIN_CALL_SECONDS = 30
+_DEADLINE = time.monotonic() + SCRIPT_BUDGET_SECONDS
+
+
+def call_timeout(now: float | None = None) -> float:
+    """Seconds the next gh call may use: the per-call cap, cut to what the script has left."""
+    remaining = _DEADLINE - (time.monotonic() if now is None else now)
+    if remaining < SCRIPT_MIN_CALL_SECONDS:
+        raise RuntimeError(f"GitHub API budget of {SCRIPT_BUDGET_SECONDS}s spent; "
+                           "stopping before the job timeout cancels the run without a diagnostic")
+    return min(GH_API_TOTAL_TIMEOUT_SECONDS, remaining)
 
 
 def sh(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -69,7 +84,7 @@ fi
     process = subprocess.Popen(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env=env, start_new_session=True)
     try:
-        stdout, stderr = process.communicate(timeout=GH_API_TOTAL_TIMEOUT_SECONDS)
+        stdout, stderr = process.communicate(timeout=call_timeout())
     except subprocess.TimeoutExpired as error:
         # Kill the process group so a child `gh` cannot outlive its Bash retry wrapper.
         try:
