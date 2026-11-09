@@ -86,7 +86,7 @@ gates:
     min_subjects: 1
     selftest: python3 .github/scripts/check-capacity-profile.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-capacity-profile.py"]
+    selftest_inputs: [".github/scripts/check-capacity-profile.py", "perf/"]
     run: |
       python3 .github/scripts/check-capacity-profile.py --root .
 
@@ -174,7 +174,7 @@ gates:
     budget_seconds: 10
     selftest: python3 .github/scripts/derive-fleet-scanning-test-modules.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/derive-fleet-scanning-test-modules.py"]
+    selftest_inputs: [".github/scripts/derive-fleet-scanning-test-modules.py", ".github/scripts/library_dependency_graph.py", ".github/scripts/runtime_resource_inputs.py"]
     run: |
       python3 .github/scripts/derive-fleet-scanning-test-modules.py 2>&1
 
@@ -513,7 +513,7 @@ gates:
       ADR-0237 sat `planned` while its own adoption gate was enforced).
     review_after: "2027-02-19"
     min_subjects: 100   # 147 enforced gates in the manifest today (2026-08-19)
-    selftest_inputs: [".github/scripts/check-adr-delivery-evidence.py"]
+    selftest_inputs: [".github/scripts/check-adr-delivery-evidence.py", "docs/adr/index.json"]
     selftest: |
       python3 .github/scripts/check-adr-delivery-evidence.py --self-test
     run: |
@@ -869,7 +869,7 @@ gates:
     review_after: "2027-02-19"
     selftest: python3 .github/scripts/check-litellm-config-revision.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-litellm-config-revision.py"]
+    selftest_inputs: [".github/scripts/check-litellm-config-revision.py", "openbank-infra/gitops/components/ai-platform/litellm.yaml"]
     run: |
       # LiteLLM parses --config once at startup, so a ConfigMap edit alone changes nothing while
       # ArgoCD reports Synced and Healthy — the manifest has warned about this in prose since
@@ -1360,7 +1360,7 @@ gates:
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
     mode: enforced
-    selftest_inputs: [".github/scripts/check-podmonitor-namespace-coverage.py"]
+    selftest_inputs: [".github/scripts/check-podmonitor-namespace-coverage.py", "openbank-infra/scripts/gitops_facts.py"]
     selftest: |
       python3 .github/scripts/check-podmonitor-namespace-coverage.py --self-test
     min_subjects: 18   # 38 namespaces running workloads today (2026-08-09)
@@ -1913,7 +1913,7 @@ gates:
       ebs-csi-node, eks-pod-identity-agent, kube-proxy, node-exporter, alloy, falco) and
       reported alloy + falco MISSING on the cluster as deployed before this PR.
     min_subjects: 20   # 26 money-path clusters + temporal-db today (2026-09-30)
-    selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py", ".github/scripts/check-cnpg-update-resilience.py"]
+    selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py", ".github/scripts/check-cnpg-update-resilience.py", "openbank-infra/aws/envs/sandbox-platform/main.tf", "openbank-infra/gitops/components/kyverno/stateful-on-demand-cel.yaml"]
     selftest: python3 .github/scripts/check-stateful-not-on-spot.py --self-test
     selftest_expect: pass
     run: |
@@ -1938,7 +1938,7 @@ gates:
       file (catch-all removed, catch-all raised to 50%, Drifted raised to 5, scheduled Drifted
       budget removed, window widened to 12h, freeze removed, pool renamed) and a missing file.
     min_subjects: 3   # 4 budget entries today (2026-10-24)
-    selftest_inputs: [".github/scripts/check-default-nodepool-budget.py"]
+    selftest_inputs: [".github/scripts/check-default-nodepool-budget.py", "openbank-infra/aws/envs/sandbox-platform/main.tf"]
     selftest: python3 .github/scripts/check-default-nodepool-budget.py --self-test
     selftest_expect: pass
     run: |
@@ -2038,6 +2038,7 @@ gates:
       - ".github/scripts/check-buildx-push-single-manifest.py"
       - ".github/scripts/test-cosign-attest-single-manifest.sh"
       - "openbank-infra/scripts/lib/cosign-attest.sh"
+      - "openbank-infra/scripts/build-push-admin-ui.sh"
     selftest: |
       python3 .github/scripts/check-buildx-push-single-manifest.py --self-test
       bash .github/scripts/test-cosign-attest-single-manifest.sh
@@ -2108,7 +2109,7 @@ gates:
     review_after: "2027-05-03"
     min_subjects: 80   # 97 workflow files observed 2026-11-03
     budget_seconds: 20
-    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py"]
+    selftest_inputs: [".github/scripts/check-remote-build-cache-write-scope.py", ".github/scripts/service-ci-steps/remote-build-cache.sh"]
     selftest: |
       python3 .github/scripts/check-remote-build-cache-write-scope.py --self-test
     run: |
@@ -2235,7 +2236,7 @@ gates:
     name: "release-registration consistency (rule 3, ADR-0029)"
     group: supplychain
     mode: enforced
-    selftest_inputs: ["openbank-infra/scripts/check-release-registration.py"]
+    selftest_inputs: ["openbank-infra/scripts/check-release-registration.py", ".release-please-manifest.json", "release-please-config.json"]
     selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
     selftest_expect: pass
     needs_base: optional
@@ -2276,7 +2277,7 @@ gates:
     verified: "2026-08-09 — heuristic by design (classifies from PR title before the squash commit exists); PR-only, still noisy-not-wrong, no graduation planned"
     when: pull_request
     needs_base: required
-    selftest_inputs: ["openbank-infra/scripts/check-release-scope-mismatch.py"]
+    selftest_inputs: ["openbank-infra/scripts/check-release-scope-mismatch.py", "release-please-config.json"]
     selftest: python3 openbank-infra/scripts/check-release-scope-mismatch.py --self-test
     selftest_expect: pass
     run: |
@@ -2651,7 +2652,7 @@ gates:
     budget_seconds: 30   # parses one YAML and renders JSON; ~2s observed
     selftest: python3 .github/scripts/gen-slo-dashboard.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/gen-slo-dashboard.py", ".github/scripts/slo-dashboard-base.json"]
+    selftest_inputs: [".github/scripts/gen-slo-dashboard.py", ".github/scripts/slo-dashboard-base.json", "openbank-infra/gitops/components/observability/pyrra-slo-money-path.yaml"]
     run: |
       python3 .github/scripts/gen-slo-dashboard.py --check
 
@@ -2682,7 +2683,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-prompt-registry.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-prompt-registry.py"]
+    selftest_inputs: [".github/scripts/check-prompt-registry.py", "openbank-libs/governance/agents.yaml"]
     run: |
       python3 .github/scripts/check-prompt-registry.py
 
@@ -2714,7 +2715,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-evals-registry.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-evals-registry.py"]
+    selftest_inputs: [".github/scripts/check-evals-registry.py", "openbank-libs/governance/agents.yaml"]
     run: |
       python3 .github/scripts/check-evals-registry.py
 
@@ -2763,7 +2764,7 @@ gates:
       python3 .github/scripts/check-governance-lineage.py --enforce
     selftest: python3 .github/scripts/check-governance-lineage.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-governance-lineage.py"]
+    selftest_inputs: [".github/scripts/check-governance-lineage.py", ".github/scripts/check-event-consumer-liveness.py"]
 
   # issue #2412 (third residual). openbank-mcp-service masks PII on every tool result
   # UNCONDITIONALLY — deliberately, since a switch that can turn a declared control off is how
@@ -2779,7 +2780,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-mcp-charter-data-scope.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-mcp-charter-data-scope.py"]
+    selftest_inputs: [".github/scripts/check-mcp-charter-data-scope.py", "openbank-libs/governance/agents.yaml"]
     run: |
       python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
 
@@ -2842,7 +2843,7 @@ gates:
     budget_seconds: 90   # the registry shard is 20s in CI end to end
     selftest: bash .github/scripts/check-adr-registry.sh --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-adr-registry.sh"]
+    selftest_inputs: [".github/scripts/check-adr-registry.sh", "docs/adr/known-repos.txt", "docs/adr/lib-frontmatter.sh", "docs/adr/tags.txt"]
     run: |
       bash .github/scripts/check-adr-registry.sh
 
@@ -2874,7 +2875,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-adr-partial-followup.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-adr-partial-followup.py"]
+    selftest_inputs: [".github/scripts/check-adr-partial-followup.py", "docs/adr/known-repos.txt", "docs/adr/lib-frontmatter.sh"]
     run: |
       python3 .github/scripts/check-adr-partial-followup.py --enforce
 
@@ -3037,7 +3038,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-ai-act-high-risk-inventory.py"]
+    selftest_inputs: [".github/scripts/check-ai-act-high-risk-inventory.py", "openbank-libs/governance/ml-systems.yaml"]
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
@@ -3213,7 +3214,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-main-red-watch.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-main-red-watch.py"]
+    selftest_inputs: [".github/scripts/check-main-red-watch.py", ".github/scripts/gh-transient-patterns.txt"]
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
 
@@ -3388,7 +3389,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-merged-past-red-check.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-merged-past-red-check.py"]
+    selftest_inputs: [".github/scripts/check-merged-past-red-check.py", ".github/workflows/merged-past-red-check-watch.yml"]
     run: |
       python3 .github/scripts/check-merged-past-red-check.py --check-declaration
 
@@ -3408,7 +3409,7 @@ gates:
     selftest: |
       python3 .github/scripts/auto-update-armed-prs.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
+    selftest_inputs: [".github/scripts/auto-update-armed-prs.py", ".github/workflows/auto-update-armed-prs.yml"]
     run: |
       python3 .github/scripts/auto-update-armed-prs.py --check-declaration
 
@@ -3436,7 +3437,7 @@ gates:
     selftest_expect: pass
     # .github/scripts and .github/workflows: the self-test's drift guard reads every check script and
     # every workflow, so a PR adding a carrier- or ruleset-judging check script must re-run it (#13750).
-    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts", ".github/workflows", "openbank-libs/governance/rules.yaml", ".gitattributes", ".github/PULL_REQUEST_TEMPLATE.md"]
     run: |
       python3 .github/scripts/merge-train.py --check-declaration
 
@@ -3541,7 +3542,7 @@ gates:
       a pass. Documented in four places and re-broken anyway — prose is not a control.
     review_after: '2027-02-21'
     min_subjects: 240
-    selftest_inputs: [".github/scripts/check-configproperty-supplied.py"]
+    selftest_inputs: [".github/scripts/check-configproperty-supplied.py", ".github/scripts/configproperty-defined-as-empty-baseline.txt"]
     selftest: |
       python3 .github/scripts/check-configproperty-supplied.py --self-test
     run: |
@@ -3820,7 +3821,7 @@ gates:
     rationale: "The matrix is the artifact a bank reads to choose a network per product; the registry is what the code and the Card Center bind to. A hand-editable copy of derived data drifts silently and the reader cannot tell which one is current."
     selftest: python3 .github/scripts/gen-card-capability-matrix.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/gen-card-capability-matrix.py"]
+    selftest_inputs: [".github/scripts/gen-card-capability-matrix.py", "openbank-libs/governance/card-capabilities.yaml"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
 
   - id: ai-governance-snapshot-drift
@@ -4375,7 +4376,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-new-random-uuid.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-new-random-uuid.py"]
+    selftest_inputs: [".github/scripts/check-new-random-uuid.py", ".github/scripts/check-roles-allowed-realm.py"]
     run: |
       python3 .github/scripts/check-new-random-uuid.py "${PR_DIFF_BASE:-}"
 
@@ -4471,7 +4472,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-accounting-clock.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-accounting-clock.py"]
+    selftest_inputs: [".github/scripts/check-accounting-clock.py", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/check-accounting-clock.py --enforce
 
@@ -4848,6 +4849,7 @@ gates:
       - ".github/scripts/test-verify-release-evidence-manifest.py"
       - ".github/workflows/release-please.yml"
       - ".github/workflows/verify-release-evidence.yml"
+      - ".github/scripts/release_support_period.py"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
       python3 .github/scripts/test-release-evidence-upload.py
@@ -5329,7 +5331,7 @@ gates:
     selftest: |
       python3 .github/scripts/check-aggregate-type-case-fold.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-aggregate-type-case-fold.py"]
+    selftest_inputs: [".github/scripts/check-aggregate-type-case-fold.py", ".github/scripts/aggregate-type-case-fold-baseline.txt"]
     run: |
       python3 .github/scripts/check-aggregate-type-case-fold.py --root .
 
@@ -5914,6 +5916,7 @@ gates:
       - ".github/scripts/check-artifact-lock.py"
       - ".github/scripts/fetch-artifact.py"
       - ".github/scripts/fetch_artifact_test.py"
+      - "ci/artifacts.lock"
     selftest: |
       python3 -I .github/scripts/check-artifact-lock.py --self-test
       python3 -I .github/scripts/fetch_artifact_test.py
@@ -5946,7 +5949,7 @@ gates:
     name: "threat-model coverage (ADR-0030 D2)"
     group: security
     mode: enforced
-    selftest_inputs: ["openbank-infra/scripts/check-threat-models.py"]
+    selftest_inputs: ["openbank-infra/scripts/check-threat-models.py", "openbank-libs/governance/rules.yaml"]
     selftest: python3 openbank-infra/scripts/check-threat-models.py --self-test
     selftest_expect: pass
     run: |
@@ -5964,7 +5967,7 @@ gates:
     needs_base: required
     rationale: "A new auto-synced service previously arrived before its threat model, generated OPA bundle and initial backup declaration; each gap became visible only on a later PR."
     review_after: "2027-04-14"
-    selftest_inputs: [".github/scripts/check-service-application-readiness.py", ".github/scripts/test_service_application_readiness.py"]
+    selftest_inputs: [".github/scripts/check-service-application-readiness.py", ".github/scripts/test_service_application_readiness.py", "openbank-infra/scripts/check-cnpg-backup-declared.py", "openbank-infra/scripts/check-threat-models.py"]
     selftest: python3 .github/scripts/test_service_application_readiness.py
     selftest_expect: pass
     budget_seconds: 120
@@ -6030,7 +6033,7 @@ gates:
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge_train_carrier.py", ".github/scripts/merge-train.py", "openbank-libs/governance/rules.yaml"]
     run: |
       # PR_BODY is github.event.pull_request.body — frozen at the last synchronize event.
       # Editing the body to add the checklist (the documented remediation) only reached this
@@ -6054,7 +6057,7 @@ gates:
     review_after: "2027-03-28"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-security-checklist.py", "openbank-libs/governance/rules.yaml"]
+    selftest_inputs: [".github/scripts/check-security-checklist.py", "openbank-libs/governance/rules.yaml", ".github/PULL_REQUEST_TEMPLATE.md", ".github/scripts/merge-train.py", ".github/scripts/merge_train_carrier.py"]
     run: |
       python3 .github/scripts/check-security-checklist.py --coverage
 
@@ -6109,7 +6112,7 @@ gates:
     review_after: "2027-02-20"
     selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-threat-model-claims.py"]
+    selftest_inputs: [".github/scripts/check-threat-model-claims.py", ".github/scripts/collect-test-run-evidence.py"]
     run: |
       python3 .github/scripts/check-threat-model-claims.py --enforce
 
@@ -6132,7 +6135,7 @@ gates:
     review_after: "2027-03-31"
     selftest: python3 .github/scripts/check-threat-model-test-evidence.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py"]
+    selftest_inputs: [".github/scripts/check-threat-model-test-evidence.py", ".github/scripts/check-threat-model-claims.py", ".github/scripts/collect-test-run-evidence.py"]
     run: |
       python3 .github/scripts/check-threat-model-test-evidence.py --fetch-evidence --pr-base "${PR_DIFF_BASE:-}" --ratchet .github/gates/baselines/threat-model-test-evidence.txt
 
@@ -6236,7 +6239,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-psd2-anonymous-grant-paths.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-psd2-anonymous-grant-paths.py"]
+    selftest_inputs: [".github/scripts/check-psd2-anonymous-grant-paths.py", "openbank-infra/gitops/components/psd2-service/psd2_rest_ext.rego", "openbank-psd2-service/src/main/kotlin/com/openbank/psd2/infrastructure/rest/filter/EidasMtlsFilter.kt"]
     run: |
       python3 .github/scripts/check-psd2-anonymous-grant-paths.py --enforce
 
@@ -6481,7 +6484,7 @@ gates:
     review_after: "2027-03-29"
     budget_seconds: 5
     min_subjects: 1  # exactly one named operator client must be present
-    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py"]
+    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py", "openbank-infra/gitops/components/keycloak/realm-template.json"]
     selftest: python3 openbank-infra/e2e/ops_cli_client.test.py --self-test
     selftest_expect: pass
     run: |
@@ -6786,7 +6789,7 @@ gates:
     when: pull_request
     selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test && python3 .github/scripts/test-agent-pr-review.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-agent-pr-guard.py", ".github/scripts/test-agent-pr-review.py"]
+    selftest_inputs: [".github/scripts/check-agent-pr-guard.py", ".github/scripts/test-agent-pr-review.py", "openbank-libs/governance/rules.yaml"]
     run: |
       python3 .github/scripts/check-agent-pr-guard.py
 
@@ -6901,7 +6904,7 @@ gates:
     # The self-test runs admin-ui's own node modules, so a lockfile bump is a change to this gate's
     # code: without the lockfile here, mermaid 12.3 (#15330) skipped the self-test on its PR and made
     # it vacuous on main instead (#15383).
-    selftest_inputs: [".github/scripts/check-governance-manifest.sh", "openbank-admin-ui/package-lock.json"]
+    selftest_inputs: [".github/scripts/check-governance-manifest.sh", "openbank-admin-ui/package-lock.json", ".github/scripts/ensure-admin-ui-deps.sh", "openbank-admin-ui/package.json", "openbank-admin-ui/scripts/generate-domain-taxonomy.mjs", "openbank-admin-ui/scripts/generate-governance.mjs", "openbank-admin-ui/scripts/governance-schema.mjs", "openbank-admin-ui/scripts/service-inventory.mjs", "openbank-admin-ui/src/lib/governance/domains.ts", "openbank-libs/governance/domain-taxonomy.json"]
     min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
     run: |
       bash .github/scripts/check-governance-manifest.sh
@@ -6926,7 +6929,7 @@ gates:
     # The self-test runs admin-ui's own node modules, so a lockfile bump is a change to this gate's
     # code: without the lockfile here, mermaid 12.3 (#15330) skipped the self-test on its PR and made
     # it vacuous on main instead (#15383).
-    selftest_inputs: [".github/scripts/check-mermaid-parses.sh", "openbank-admin-ui/package-lock.json"]
+    selftest_inputs: [".github/scripts/check-mermaid-parses.sh", "openbank-admin-ui/package-lock.json", ".github/scripts/ensure-admin-ui-deps.sh", "openbank-admin-ui/package.json"]
     min_subjects: 220   # 362 diagrams today (2026-08-22): 248 ```mermaid blocks + 114 .mmd files (#6495)
     run: |
       bash .github/scripts/check-mermaid-parses.sh
@@ -7151,7 +7154,7 @@ gates:
       statements of one fan-out for exactly that reason and no gate could see it.
     review_after: "2027-02-28"
     min_subjects: 40   # 58 released components with a release-please component today (2026-08-30)
-    selftest_inputs: [".github/scripts/check-vex-overlay-coverage.py"]
+    selftest_inputs: [".github/scripts/check-vex-overlay-coverage.py", "openbank-libs/governance/vex-no-overlay/products.txt", "release-please-config.json"]
     selftest: |
       python3 .github/scripts/check-vex-overlay-coverage.py --self-test
     run: |
@@ -7300,7 +7303,7 @@ gates:
     review_after: "2027-02-28"
     selftest: python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-clickhouse-migration-configmap-sync.py"]
+    selftest_inputs: [".github/scripts/check-clickhouse-migration-configmap-sync.py", "openbank-infra/gitops/components/analytics/clickhouse-init-configmap.yaml"]
     min_subjects: 11   # 11 migrations today (2026-08-31)
     run: |
       python3 .github/scripts/check-clickhouse-migration-configmap-sync.py --enforce
@@ -7359,7 +7362,7 @@ gates:
     mode: enforced
     rationale: "ArgoCD reported Synced/Healthy on an app it had applied nothing to for three weeks, and no metric exposes the condition that recorded it; the replacement detector runs in-cluster, so only this gate can notice it being unwired or its comparison being broken."
     review_after: "2027-02-23"
-    selftest_inputs: [".github/scripts/check-argocd-sync-integrity.py"]
+    selftest_inputs: [".github/scripts/check-argocd-sync-integrity.py", "openbank-infra/gitops/components/argocd-sync-verifier/argocd-sync-verifier.yaml"]
     selftest: python3 .github/scripts/check-argocd-sync-integrity.py --self-test
     selftest_expect: pass
     run: |
@@ -7559,7 +7562,7 @@ gates:
     min_subjects: 8   # 2 IR fixtures + 6 golden scenarios at introduction (2026-10-22); 16 on 2026-10-23
     selftest: python3 .github/scripts/check-product-ir-run-limits.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-product-ir-run-limits.py"]
+    selftest_inputs: [".github/scripts/check-product-ir-run-limits.py", "openbank-libs-domain/src/main/resources/product-ir/v1.schema.json"]
     run: |
       python3 .github/scripts/check-product-ir-run-limits.py --root . --enforce
 

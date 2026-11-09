@@ -20,8 +20,8 @@
 #   ABSOLUTE path behind every returned file descriptor, so a successful open is recorded as
 #   the file actually opened — relative paths, chdir and symlinks are already resolved by the
 #   kernel, and nothing here has to model a shell, Python's import system or Node's resolver.
-#   --seccomp-bpf stops the tracer only on the three traced syscalls, so the overhead is a
-#   small fraction of the self-test, not a multiple of it.
+#   Not --seccomp-bpf, though it would be cheaper: it sets no_new_privs, which makes sudo
+#   inside a self-test fail, and a correct verdict outranks tracer overhead.
 #
 #   A read becomes a FINDING when, after attribution:
 #     * it is a git-TRACKED file of this checkout (an untracked fixture the self-test wrote,
@@ -54,6 +54,7 @@
 #   selftest_input_trace.py --baseline-from J...  print baseline lines from run-gates --json files
 
 import argparse
+import fnmatch
 import functools
 import json
 import os
@@ -63,6 +64,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from gatelib import hermetic_git_env  # noqa: E402
 
 TRACE_ENV = "OB_SELFTEST_TRACE"          # "1" = trace when possible, "require" = fail if not
 BASELINE = ".github/gates/selftest-undeclared-inputs.baseline"
@@ -83,7 +87,9 @@ _PYC = re.compile(r"^(.*?)(?:^|/)__pycache__/([^/]+?)\.[^/]*\.pyc$")
 
 
 def strace_argv(trace_file: str) -> list:
-    return ["strace", "-f", "-qq", "-y", "--seccomp-bpf", "-e", "trace=open,openat,openat2",
+    # No --seccomp-bpf: it sets no_new_privs, and sudo inside a self-test then refuses to run
+    # (measured: promql-alert-unit-tests' promtool install went UNFALSIFIED under it).
+    return ["strace", "-f", "-qq", "-y", "-e", "trace=open,openat,openat2",
             "-e", "signal=none", "-o", trace_file]
 
 
@@ -124,7 +130,10 @@ def opened_paths(trace_text: str) -> set:
 
 @functools.lru_cache(maxsize=4)
 def tracked_files(root: str) -> frozenset:
-    p = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, timeout=120)
+    # hermetic_git_env drops GIT_INDEX_FILE/GIT_DIR: run-gates hands each gate a private index,
+    # which must never redirect this listing to a different tree.
+    p = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, timeout=120,
+                       env=hermetic_git_env())
     if p.returncode != 0:
         raise RuntimeError(f"git ls-files failed in {root}: {p.stderr.decode()[:200]}")
     return frozenset(x for x in p.stdout.decode("utf-8", "replace").split("\0") if x)
@@ -170,6 +179,22 @@ def covered(path: str, decls) -> bool:
     return False
 
 
+def baseline_covers(path: str, entries) -> bool:
+    """A baseline entry is a path, or a prefix ending in `/`, whose segments may be fnmatch
+    globs (`openbank-*/`). Globs exist for the corpus-scanning self-tests: a self-test that
+    walks every service reads every new service's files too, and a per-file list would turn
+    each new file into a red self-test on main."""
+    segs = path.split("/")
+    for e in entries:
+        prefix = e.endswith("/")
+        es = e.rstrip("/").split("/")
+        if len(segs) < len(es) or (not prefix and len(segs) != len(es)):
+            continue
+        if all(fnmatch.fnmatchcase(s, p) for s, p in zip(segs, es)):
+            return True
+    return False
+
+
 def load_baseline(root) -> dict:
     """{gate_id: [entry, ...]} — raises ValueError on a malformed line."""
     p = pathlib.Path(root) / BASELINE
@@ -191,9 +216,9 @@ def undeclared(gate: dict, reads, baseline_entries=()):
     """(new_findings, baselined, stale_baseline) for one traced self-test."""
     decls = list(gate.get("selftest_inputs") or [])
     raw = sorted(r for r in reads if r not in UNIVERSAL and not covered(r, decls))
-    new = [r for r in raw if not covered(r, baseline_entries)]
-    based = [r for r in raw if covered(r, baseline_entries)]
-    stale = [b for b in baseline_entries if not any(covered(r, [b]) for r in raw)]
+    new = [r for r in raw if not baseline_covers(r, baseline_entries)]
+    based = [r for r in raw if baseline_covers(r, baseline_entries)]
+    stale = [b for b in baseline_entries if not any(baseline_covers(r, [b]) for r in raw)]
     return new, based, stale
 
 
@@ -228,7 +253,7 @@ def check(root: pathlib.Path) -> int:
             if covered(p, g.get("selftest_inputs") or []) or p in UNIVERSAL:
                 errors.append(f"{BASELINE}: `{gid} {p}` is now covered by a declaration — "
                               f"remove the stale baseline line")
-            elif not p.endswith("/") and not (root / p).exists():
+            elif not any(c in p for c in "*?[") and not (root / p).exists():
                 errors.append(f"{BASELINE}: `{gid} {p}` names a path that does not exist")
     # The control is only as real as the job that switches it on: a shard that stops setting
     # OB_SELFTEST_TRACE=require would turn every trace into a silent no-op.
@@ -288,8 +313,9 @@ def self_test() -> int:
         (root / "ui/node_modules/lib/index.js").write_text("//\n")
         (root / "lib/__pycache__/h.cpython-312.pyc").write_text("pyc\n")
         (root / "scratch.txt").write_text("untracked\n")
-        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-        subprocess.run(["git", "add", *files], cwd=root, check=True)
+        genv = hermetic_git_env()
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True, env=genv)
+        subprocess.run(["git", "add", *files], cwd=root, check=True, env=genv)
         tracked_files.cache_clear()
         trace = str(pathlib.Path(d) / "trace")
         # cd into a subdirectory and read back up: the path must still resolve absolutely.
@@ -315,6 +341,14 @@ def self_test() -> int:
         # Lookalike prefix must NOT cover (run-gates' own `ab` vs `abc/` rule).
         if covered("secrets.txt", ["secret"]) or not covered("ui/a/b", ["ui"]):
             bad.append("prefix coverage disagrees with run-gates' rule")
+        glob_cases = [("openbank-new-service/src/A.kt", ["openbank-*/"], True),
+                      ("docs/x.md", ["openbank-*/"], False),
+                      ("a/b/c.txt", ["a/b"], False),          # exact entry, not a prefix
+                      ("a/b", ["a/b"], True),
+                      ("a/bc/d", ["a/b/"], False)]
+        for path, entries, want in glob_cases:
+            if baseline_covers(path, entries) != want:
+                bad.append(f"baseline_covers({path!r}, {entries}) != {want}")
     # --check must flag a baseline line that a declaration already covers.
     with tempfile.TemporaryDirectory() as d:
         r = pathlib.Path(d)
