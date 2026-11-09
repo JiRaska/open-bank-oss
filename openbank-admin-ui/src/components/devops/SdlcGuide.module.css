@@ -1,24 +1,4 @@
 .page {
-  --sdlc-sky-top: color-mix(in srgb, var(--info-bg) 75%, var(--surface));
-  --sdlc-sky-bottom: var(--surface);
-  --sdlc-sun: color-mix(in srgb, var(--warning) 65%, var(--surface));
-  --sdlc-cloud: color-mix(in srgb, var(--surface) 88%, transparent);
-  --sdlc-skyline: color-mix(in srgb, var(--info) 17%, var(--surface));
-  --sdlc-ground: color-mix(in srgb, var(--success) 10%, var(--surface));
-  --sdlc-platform: var(--border-strong);
-  --sdlc-track: var(--text-secondary);
-  --sdlc-sign: var(--sidebar-bg);
-  --sdlc-sign-text: var(--text-inverse);
-  --sdlc-train-top: color-mix(in srgb, var(--ob-accent) 75%, var(--info));
-  --sdlc-train-bottom: var(--ob-accent-hover);
-  --sdlc-train-ink: var(--text-inverse);
-  --sdlc-roof: var(--sidebar-bg);
-  --sdlc-window: color-mix(in srgb, var(--info-bg) 65%, var(--surface));
-  --sdlc-wheel: var(--sidebar-bg);
-  --sdlc-hub: var(--text-secondary);
-  --sdlc-wheel-spoke: var(--border-strong);
-  --sdlc-train-stripe: var(--info);
-  --sdlc-light-off: var(--text-secondary);
   padding-bottom: var(--space-10);
   color: var(--text-primary);
 }
@@ -42,18 +22,15 @@
 .laneChoices strong { display: block; font-size: var(--text-md); margin-bottom: var(--space-1); }
 .laneChoices span { display: block; color: var(--text-secondary); font-size: var(--text-xs); }
 .routeDescription { min-height: 3.5em; margin: var(--space-4) 0; color: var(--text-secondary); line-height: 1.7; }
-.scene { border-radius: calc(var(--radius) * 1.5); background: var(--sdlc-sky-top); overflow: hidden; }
-.sceneSvg { display: block; width: 100%; height: auto; }
+.scene { border-radius: calc(var(--radius) * 1.5); background: #071425; overflow: hidden; border: 1px solid #243a52; box-shadow: inset 0 0 50px #030a14; }
+.sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; }
 .trainPosition { transition: transform 1.8s cubic-bezier(.2,.8,.2,1); }
-.trainBounce { animation: train-bounce 1.1s ease-in-out infinite; }
-.wheel { transform-box: fill-box; transform-origin: center; animation: train-wheel 1.8s linear infinite; }
-.steam { animation: train-steam 2.5s ease-out infinite; transform-origin: 130px 174px; }
-.clouds { animation: train-clouds 9s ease-in-out infinite alternate; }
+.trainBounce { animation: train-bounce 2.2s ease-in-out infinite; }
 .passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 1.4s ease-in-out infinite; }
 .passenger[data-mood="1"] { animation-name: passenger-worry; animation-duration: 2.8s; }
 .passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: .9s; }
 .scene[data-playing="false"] .passenger { animation-play-state: paused; }
-.scene[data-moving="false"] .trainBounce, .scene[data-moving="false"] .wheel, .scene[data-moving="false"] .steam, .scene[data-playing="false"] .clouds { animation-play-state: paused; }
+.scene[data-moving="false"] .trainBounce { animation-play-state: paused; }
 .stations { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); list-style: none; margin: var(--space-5) 0; padding: 0; }
 .stations button { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); width: 100%; min-height: 68px; padding: var(--space-2); background: transparent; border: 0; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); text-align: center; cursor: pointer; }
 .stations button > span { display: flex; align-items: center; justify-content: center; height: 27px; width: 27px; border-radius: 50%; background: var(--surface-3); color: var(--text-secondary); font-weight: var(--font-semibold); }
@@ -104,13 +81,12 @@
 .sources { padding-top: var(--space-4); border-top: 1px solid var(--border-strong); color: var(--text-secondary); font-size: var(--text-xs); }
 .sources ul { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); list-style: none; padding: 0; }
 .nextChapter { display: flex; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-5) 0; margin-top: var(--space-6); }
-@keyframes train-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-@keyframes train-wheel { to { transform: rotate(360deg); } }
-@keyframes train-steam { 0% { opacity: .7; transform: translate(0,0) scale(.8); } 100% { opacity: 0; transform: translate(-18px,-24px) scale(1.15); } }
-@keyframes train-clouds { to { transform: translateX(-24px); } }
+@keyframes train-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
 @keyframes passenger-wave { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(3deg); } }
 @keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2px) rotate(-2deg); } }
 @keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px) rotate(2deg); } }
 @media (max-width: 800px) { .deliveryPath { grid-template-columns: repeat(2,minmax(0,1fr)); } .trainSection { padding: var(--space-4); } .laneChoices { gap: var(--space-2); } .laneChoices button { padding: var(--space-3); } }
 @media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .laneChoices { grid-template-columns: 1fr; } .laneChoices button { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); } .laneChoices strong { margin: 0; } .routeDescription { min-height: 0; } .stations { gap: 0; } .stations button { padding: var(--space-1); font-size: 11px; overflow-wrap: anywhere; } .journeyDetail { min-height: 0; padding-left: var(--space-3); } .sectionTop h2 { font-size: var(--text-xl); } .guideNav a { flex: 1 1 auto; } }
-@media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .trainBounce, .wheel, .steam, .clouds, .passenger { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .trainBounce, .passenger { animation: none !important; } }
+
+@media (max-width: 520px) { .sceneSvg { height: 260px; aspect-ratio: auto; } }

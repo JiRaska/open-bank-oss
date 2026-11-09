@@ -17,6 +17,14 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   await expect(scene).toHaveAccessibleDescription(/čekají na nástupišti|wait on the platform/)
   for (let i = 0; i < 2; i++) await train.getByRole('button', { name: /Další stanice|Next station/ }).click()
   await expect(scene).toHaveAccessibleDescription(/nastoupili|have boarded/)
+  // A captured frame must include decoded passengers, not just the faster backdrop.
+  await page.evaluate(async () => {
+    await Promise.all(['/brand/sdlc/train-passengers.png', '/brand/sdlc/train-atlas-v2.webp', '/brand/sdlc/prague-station-v2.webp', '/brand/sdlc/openbank-mark.svg'].map(async src => {
+      const image = new Image()
+      image.src = src
+      await image.decode()
+    }))
+  })
   await scene.screenshot({ path: testInfo.outputPath('ci-lion-train.png') })
   await train.getByRole('button', { name: /Co když kontrola selže|What if a check fails/ }).click()
   await expect(train.getByRole('region', { name: /Co se právě děje|What is happening now/ })).toContainText(/dávka půlí|halves the batch/)
@@ -31,13 +39,14 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
 
 test('CD distinguishes declared canary weights, missing measurements and data recovery', async ({ page }, testInfo) => {
   await page.goto('/devops/sdlc/cd')
+  const main = page.getByRole('main')
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/CD:/)
-  await expect(page.getByText(/nikoli právě běžící cluster|not the live cluster/)).toBeVisible()
+  await expect(main.getByText(/nikoli právě běžící cluster|not the live cluster/)).toBeVisible()
   await page.getByRole('heading', { name: /Canary:/ }).scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('cd-current-state.png') })
-  await page.getByText(/Přesné podmínky a limity|Exact configured conditions/).click()
+  await main.getByText(/Přesné podmínky a limity|Exact configured conditions/).click()
   await expect(page.getByRole('table')).toContainText('failureLimit')
-  await expect(page.getByText(/Návrat image nevrací|Rolling back an image does not undo/)).toBeVisible()
+  await expect(main.getByText(/Návrat image nevrací|Rolling back an image does not undo/)).toBeVisible()
 })
 
 for (const route of ['ci', 'cd']) {
