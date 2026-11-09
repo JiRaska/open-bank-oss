@@ -1044,6 +1044,8 @@ capabilities:
     })
     expect(report.testCases).toEqual([expect.objectContaining({
       component: 'openbank-simulation', state: 'stable', observations: 1,
+      lastRun: expect.objectContaining({ id: 'simulation-42', commit: 'abcdef012345', observedAt: '2026-08-22T10:00:00Z' }),
+      recentRuns: [expect.objectContaining({ state: 'passed', durationMs: 100, run: expect.objectContaining({ id: 'simulation-42' }) })],
     })])
     expect(report.totals).toMatchObject({ componentsWithExecutionEvidence: 1, missingEvidence: 0 })
   })

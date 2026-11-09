@@ -21,9 +21,9 @@ describe('infra-status probe definitions', () => {
     }
   })
 
-  it('probes Temporal on its verified frontend Service DNS + port', () => {
+  it('reads Temporal readiness from kube-state-metrics instead of dialling its unauthenticated gRPC port', () => {
     const temporal = CLUSTER_INFRA.find(d => d.id === 'temporal')
-    expect(temporal?.probe).toEqual({ kind: 'tcp', host: 'temporal-frontend.temporal.svc', port: 7233 })
+    expect(temporal?.probe).toEqual({ kind: 'prometheus-deployment', namespace: 'temporal', deployment: 'temporal-frontend' })
   })
 
   it('uses Kafka’s only configured listener and never probes the removed plaintext port', () => {

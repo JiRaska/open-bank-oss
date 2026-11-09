@@ -494,6 +494,34 @@ class DayCloseParticipantsIT {
             Claim(key = "client_id", value = "openbank-interest"),
         ],
     )
+    fun `report rejects null job names without appending`() {
+        val date = LocalDate.of(2019, 7, 12)
+        seedManualDay(date)
+        val path = "/api/v1/ledger/accounting-days/$date/participants/interest"
+        for (jobs in listOf(listOf(null), listOf("accrual", null))) {
+            given().contentType("application/json")
+                .body(mapOf("outcome" to "RAN", "exercisedJobs" to jobs))
+                .put(path).then().statusCode(400)
+            assertReasonHistory(date, 0, null)
+        }
+        given().contentType("application/json")
+            .body(
+                mapOf("outcome" to "RAN", "exercisedJobs" to listOf("accrual"), "reason" to "completed accrual"),
+            )
+            .put(path).then().statusCode(200)
+        assertReasonHistory(date, 1, "completed accrual")
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-interest", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-interest"),
+            Claim(key = "sub", value = "interest-machine-sub"),
+            Claim(key = "preferred_username", value = "service-account-openbank-interest"),
+            Claim(key = "client_id", value = "openbank-interest"),
+        ],
+    )
     fun `report rejects oversized reasons without appending and accepts a Unicode boundary`() {
         val date = LocalDate.of(2019, 7, 10)
         seedManualDay(date)

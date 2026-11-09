@@ -101,7 +101,9 @@ class CloseParticipationResource(private val useCase: CloseParticipationUseCase)
                 itemsProcessed = request.itemsProcessed ?: 0,
                 reason = request.reason,
                 callerPrincipal = ServiceAccountIdentity.verifiedPrincipalName(identity),
-                exercisedJobs = request.exercisedJobs.orEmpty(),
+                exercisedJobs = request.exercisedJobs.orEmpty().map {
+                    requireNotNull(it) { "exercisedJobs must not contain null" }
+                }.toSet(),
                 sourceRunId = request.sourceRunId,
             ),
         )
@@ -162,7 +164,7 @@ data class ReportParticipationRequest(
     val journalsPosted: Int?,
     val itemsProcessed: Int?,
     val reason: String?,
-    val exercisedJobs: Set<String>? = null,
+    val exercisedJobs: Set<String?>? = null,
     val sourceRunId: String? = null,
 )
 

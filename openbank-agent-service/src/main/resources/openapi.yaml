@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.18.1"
+  version: "1.19.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -746,6 +746,11 @@ components:
           nullable: true
           description: Page context passed by the admin UI (e.g. "admin page /accounts")
 
+        allowTools:
+          type: boolean
+          default: true
+          description: Set false to offer no tools and reject any unsolicited tool invocation. Cannot expand charter permissions.
+
     ToolCallRecord:
       type: object
       required: [tool, allowed, resultPreview]
@@ -775,6 +780,10 @@ components:
           items:
             $ref: '#/components/schemas/ToolCallRecord'
           description: Transparent record of every tool the loop attempted
+
+        toolsRestricted:
+          type: boolean
+          description: True when the server enforced allowTools=false for this turn.
 
     ModelInfo:
       type: object
@@ -821,6 +830,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelInfo'
+
+        capabilities:
+          type: object
+          properties:
+            toolFreeChat:
+              type: boolean
+              description: The server supports allowTools=false and toolsRestricted acknowledgement.
 
     CatalogReviewCapability:
       type: object

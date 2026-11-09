@@ -541,7 +541,7 @@ class SyntheticClockTest(unittest.TestCase):
 
 
 class ApprovalChainTest(unittest.TestCase):
-    """An approval on H covers H' only through main-update merges git itself would produce."""
+    """Main-update topology preserves revocation bounds, never an ancestor approval."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -615,6 +615,51 @@ class ApprovalChainTest(unittest.TestCase):
         rows.clear()
         self.assertIsNone(train.owner_decision(gh, ["h1", "h0"]))
 
+    def test_clean_main_update_cannot_inherit_ancestor_approval(self):
+        self.assertEqual(self.update().returncode, 0)
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        chain = self.chain(head)
+        self.assertEqual(chain, [head, self.h0])
+        gh = Mock()
+        gh.app_status_latest.side_effect = lambda sha, _ctx: (1, "success", "owner-approved PR #7") if sha == self.h0 else None
+        app = train.with_owner_decision(gh, {}, chain)
+        self.assertFalse(train.owner_approval_valid(7, "codex/x", app))
+
+    def test_final_intent_refuses_ancestor_approval_even_with_derived_chain(self):
+        self.assertEqual(self.update().returncode, 0)
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        gh = Mock(branch="main", repo="owner/repo")
+        gh.approval_chains = {head: self.chain(head)}
+        gh.pr.return_value = {"number": 7, "state": "open", "draft": False, "auto_merge": {"x": 1},
+                              "head": {"sha": head, "ref": "codex/x", "repo": {"full_name": "owner/repo"}},
+                              "base": {"ref": "main", "repo": {"full_name": "owner/repo"}}}
+        gh.app_status_latest.side_effect = lambda sha, _ctx: (1, "success", "owner-approved PR #7") if sha == self.h0 else None
+        self.assertFalse(train.live_source_intent(gh, 7, head))
+
+    def test_current_approval_and_current_revoke_apply_after_main_update(self):
+        self.assertEqual(self.update().returncode, 0)
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        gh = Mock()
+        rows = {self.h0: (1, "success", "owner-approved PR #7"), head: (2, "success", "owner-approved PR #7")}
+        gh.app_status_latest.side_effect = lambda sha, _ctx: rows.get(sha)
+        self.assertTrue(train.owner_approval_valid(7, "codex/x", train.with_owner_decision(gh, {}, self.chain(head))))
+        rows[head] = (3, "failure", "owner-revoked PR #7")
+        self.assertFalse(train.owner_approval_valid(7, "codex/x", train.with_owner_decision(gh, {}, self.chain(head))))
+
+    def test_ancestor_approval_cannot_override_current_approval_or_revoke(self):
+        gh = Mock()
+        rows = {"h1": (5, "success", "owner-approved PR #7"), "h0": (9, "success", "owner-approved PR #7")}
+        gh.app_status_latest.side_effect = lambda sha, _ctx: rows.get(sha)
+        self.assertEqual(train.owner_decision(gh, ["h1", "h0"]), ("success", "owner-approved PR #7"))
+        rows["h1"] = (6, "failure", "owner-revoked PR #7")
+        self.assertEqual(train.owner_decision(gh, ["h1", "h0"]), ("failure", "owner-revoked PR #7"))
+
+    def test_current_approval_supersedes_older_ancestor_revoke(self):
+        gh = Mock()
+        rows = {"h1": (10, "success", "owner-approved PR #7"), "h0": (9, "failure", "owner-revoked PR #7")}
+        gh.app_status_latest.side_effect = lambda sha, _ctx: rows.get(sha)
+        self.assertEqual(train.owner_decision(gh, ["h1", "h0"]), ("success", "owner-approved PR #7"))
+
     def test_live_intent_without_a_derived_chain_reads_only_the_exact_head(self):
         gh = Mock(spec=["pr", "branch", "repo", "app_status_latest", "app_statuses"])
         gh.app_statuses.return_value = {}
@@ -626,7 +671,7 @@ class ApprovalChainTest(unittest.TestCase):
         gh.app_status_latest.side_effect = lambda sha, ctx: (1, "success", "owner-approved PR #7") if sha == "a" * 40 else None
         self.assertFalse(train.live_source_intent(gh, 7, head))
         gh.approval_chains = {head: [head, "a" * 40]}
-        self.assertTrue(train.live_source_intent(gh, 7, head))
+        self.assertFalse(train.live_source_intent(gh, 7, head))
 
 if __name__ == "__main__":
     unittest.main()
