@@ -8,11 +8,7 @@ import java.math.BigDecimal
 import java.security.MessageDigest
 
 /** One closing leg of the year-end result allocation: the account, the side and the amount. */
-data class ResultAllocationLeg(
-    val glAccountCode: String,
-    val side: JournalSide,
-    val amount: BigDecimal,
-)
+data class ResultAllocationLeg(val glAccountCode: String, val side: JournalSide, val amount: BigDecimal)
 
 /**
  * The year-end result allocation (ADR-0096 D3): the closing journal that zeroes every income and

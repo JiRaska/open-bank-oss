@@ -2442,6 +2442,11 @@ components:
     YearCloseRecordResponse:
       type: object
       properties:
+        allocatedBy:
+          type: [string, 'null']
+          description: Maker of the year-end result allocation (ADR-0096 D3); may never attest the year.
+        allocatedAt: {type: [string, 'null'], format: date-time}
+        allocationJournalId: {type: [string, 'null'], format: uuid}
         id:
           type: string
           format: uuid

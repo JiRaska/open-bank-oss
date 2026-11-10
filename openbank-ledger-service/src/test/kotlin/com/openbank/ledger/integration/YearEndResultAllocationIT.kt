@@ -39,6 +39,11 @@ class YearEndResultAllocationIT {
     fun `maker books a year of income and expense`() {
         post(INCOME, credit = true, amount = "1000")
         post(EXPENSE, credit = false, amount = "300")
+        // No DRAFT yet: the allocation is a maker action on the year close and is refused.
+        given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR/result-allocation")
+            .then().statusCode(409)
+        given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR")
+            .then().statusCode(200)
         val preview = preview()
         assertThat(preview.getBoolean("posted")).isFalse()
         assertThat(BigDecimal(preview.getString("netResult"))).isEqualByComparingTo("-700")
@@ -81,12 +86,27 @@ class YearEndResultAllocationIT {
         val tb = trialBalance()
         assertThat(net(tb, "4100")).isEqualByComparingTo("0")
         assertThat(net(tb, "6020")).isEqualByComparingTo("-740")
-        given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR")
-            .then().statusCode(200)
     }
 
     @Test
     @Order(5)
+    @TestSecurity(user = "rea-refresher", roles = ["ROLE_OPERATOR"])
+    fun `another operator refreshes the stale draft`() {
+        val record = given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR")
+            .then().statusCode(200).extract().jsonPath()
+        assertThat(record.getString("draftedBy")).isEqualTo("rea-refresher")
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = "rea-maker", roles = ["ROLE_OPERATOR"])
+    fun `the allocator cannot attest the year it allocated`() {
+        given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR/attest")
+            .then().statusCode(409)
+    }
+
+    @Test
+    @Order(7)
     @TestSecurity(user = "rea-checker", roles = ["ROLE_OPERATOR"])
     fun `the allocated year attests, after which allocation is refused`() {
         given().contentType("application/json").`when`().post("/api/v1/ledger/close/$YEAR/attest")
@@ -96,7 +116,7 @@ class YearEndResultAllocationIT {
     }
 
     @Test
-    @Order(6)
+    @Order(8)
     @TestSecurity(user = "rea-maker", roles = ["ROLE_OPERATOR"])
     fun `the current, unfinished year is refused`() {
         val thisYear = java.time.LocalDate.now().year
@@ -105,7 +125,7 @@ class YearEndResultAllocationIT {
     }
 
     @Test
-    @Order(7)
+    @Order(9)
     @TestSecurity(user = "rea-viewer", roles = ["ROLE_VIEWER"])
     fun `a viewer can preview but cannot allocate`() {
         preview()
@@ -126,10 +146,12 @@ class YearEndResultAllocationIT {
         .then().statusCode(200).extract().jsonPath()
 
     private fun net(tb: JsonPath, code: String): BigDecimal {
-        val lines = tb.getList<Map<String, Any>>("sections.lines").flatten()
+        val lines: List<Map<String, Any>> = tb.getList<List<Map<String, Any>>>("sections.lines").flatten()
         val matching = lines.filter { it["code"] == code }
         return matching.fold(BigDecimal.ZERO) { acc, l ->
-            acc.add(BigDecimal(l.getValue("totalDebit").toString())).subtract(BigDecimal(l.getValue("totalCredit").toString()))
+            acc.add(
+                BigDecimal(l.getValue("totalDebit").toString()),
+            ).subtract(BigDecimal(l.getValue("totalCredit").toString()))
         }
     }
 

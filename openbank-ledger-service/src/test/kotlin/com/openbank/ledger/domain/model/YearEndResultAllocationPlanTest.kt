@@ -13,7 +13,15 @@ import java.util.UUID
 class YearEndResultAllocationPlanTest {
 
     private fun line(code: String, type: GlAccountType, debit: String, credit: String, currency: String = "CZK") =
-        TrialBalanceLine(UUID.randomUUID(), code, "Account $code", type, currency, BigDecimal(debit), BigDecimal(credit))
+        TrialBalanceLine(
+            UUID.randomUUID(),
+            code,
+            "Account $code",
+            type,
+            currency,
+            BigDecimal(debit),
+            BigDecimal(credit),
+        )
 
     private fun plan(vararg lines: TrialBalanceLine) = YearEndResultAllocationPlan.plan(2025, lines.toList(), "6020")
 

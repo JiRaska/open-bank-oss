@@ -51,6 +51,23 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
         }
     }.awaitSuspending().toDomain()
 
+    override suspend fun recordAllocation(
+        fiscalYear: Int,
+        allocatedBy: String,
+        allocatedAt: Instant,
+        journalId: UUID,
+    ): YearCloseRecord? = Panache.withTransaction {
+        find("fiscalYear = ?1 and status = ?2", fiscalYear, YearCloseStatus.DRAFT.name).firstResult()
+            .map { existing ->
+                existing?.also {
+                    it.allocatedBy = allocatedBy
+                    it.allocatedAt = allocatedAt
+                    it.allocationJournalId = journalId
+                    it.updatedAt = Instant.now(clock)
+                }
+            }
+    }.awaitSuspending()?.toDomain()
+
     override suspend fun saveAttested(record: YearCloseRecord, outbox: OutboxMessage): YearCloseRecord =
         // Status flip + outbox row in ONE transaction (transactional outbox, ADR-0003/0050) —
         // either the attestation and its YearCloseAttested event both commit, or neither does.
@@ -93,5 +110,8 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
         draftedBy = draftedBy,
         attestedBy = attestedBy,
         attestedAt = attestedAt,
+        allocatedBy = allocatedBy,
+        allocatedAt = allocatedAt,
+        allocationJournalId = allocationJournalId,
     )
 }

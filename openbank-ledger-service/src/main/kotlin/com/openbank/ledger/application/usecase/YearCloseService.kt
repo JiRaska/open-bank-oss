@@ -104,21 +104,8 @@ class YearCloseService(
             )
         }
 
-        // Four-eyes (maker != checker, #869): the attestor must differ from the draft author.
-        // Fail-closed on a null author — a draft created before four-eyes tracking has no recorded
-        // maker, so we CANNOT prove separation of duties and must reject rather than silently pass.
-        if (record.draftedBy == null) {
-            throw YearCloseConflictException(
-                "Year close ${command.fiscalYear} draft predates four-eyes tracking " +
-                    "(no recorded author) — refresh it so a maker is recorded, then attest as a different user",
-            )
-        }
-        if (record.draftedBy == command.attestedBy) {
-            throw YearCloseConflictException(
-                "Four-eyes: the attestor must differ from the draft author ${record.draftedBy} " +
-                    "for year ${command.fiscalYear}",
-            )
-        }
+        requireFourEyes(record, command)
+        requireNotAllocator(record, command)
 
         val attested = record.attest(attestedBy = command.attestedBy, attestedAt = Instant.now(clock))
         val outbox = OutboxMessage(
@@ -182,6 +169,35 @@ class YearCloseService(
             fiscalYear = fiscalYear,
             lines = journalRepository.trialBalanceForPeriod(from, to),
         )
+    }
+
+    private fun requireFourEyes(record: YearCloseRecord, command: AttestYearCloseCommand) {
+        // Four-eyes (maker != checker, #869): the attestor must differ from the draft author.
+        // Fail-closed on a null author — a draft created before four-eyes tracking has no recorded
+        // maker, so we CANNOT prove separation of duties and must reject rather than silently pass.
+        if (record.draftedBy == null) {
+            throw YearCloseConflictException(
+                "Year close ${command.fiscalYear} draft predates four-eyes tracking " +
+                    "(no recorded author) — refresh it so a maker is recorded, then attest as a different user",
+            )
+        }
+        if (record.draftedBy == command.attestedBy) {
+            throw YearCloseConflictException(
+                "Four-eyes: the attestor must differ from the draft author ${record.draftedBy} " +
+                    "for year ${command.fiscalYear}",
+            )
+        }
+    }
+
+    private fun requireNotAllocator(record: YearCloseRecord, command: AttestYearCloseCommand) {
+        // Four-eyes over the result allocation (ADR-0096 D3): its closing journal is posted by the
+        // system poster, so the allocating maker is only on this record — and may not attest.
+        if (record.allocatedBy != null && record.allocatedBy == command.attestedBy) {
+            throw YearCloseConflictException(
+                "Four-eyes: the attestor must differ from the result allocator ${record.allocatedBy} " +
+                    "for year ${command.fiscalYear}",
+            )
+        }
     }
 
     private fun requireBalanced(trialBalance: FiscalYearTrialBalance) {

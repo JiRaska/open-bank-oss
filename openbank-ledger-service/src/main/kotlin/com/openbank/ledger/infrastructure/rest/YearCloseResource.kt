@@ -4,14 +4,14 @@
 
 package com.openbank.ledger.infrastructure.rest
 
+import com.openbank.ledger.application.port.`in`.AllocateYearEndResultCommand
 import com.openbank.ledger.application.port.`in`.AttestYearCloseCommand
 import com.openbank.ledger.application.port.`in`.CreateYearCloseDraftCommand
 import com.openbank.ledger.application.port.`in`.GetFiscalYearTrialBalanceQuery
 import com.openbank.ledger.application.port.`in`.GetYearCloseQuery
+import com.openbank.ledger.application.port.`in`.PreviewYearEndResultQuery
 import com.openbank.ledger.application.port.`in`.VerifyYearCloseQuery
 import com.openbank.ledger.application.port.`in`.YearCloseUseCase
-import com.openbank.ledger.application.port.`in`.AllocateYearEndResultCommand
-import com.openbank.ledger.application.port.`in`.PreviewYearEndResultQuery
 import com.openbank.ledger.application.port.`in`.YearEndResultAllocationResult
 import com.openbank.ledger.application.port.`in`.YearEndResultAllocationUseCase
 import com.openbank.ledger.domain.model.FiscalYearTrialBalance
@@ -141,7 +141,9 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
     @Authorize(action = "ledger.close.draft", resource = "#fiscalYear")
     @Operation(summary = "Allocate the fiscal year's result to retained earnings (closing journal, before attestation)")
     suspend fun allocateResult(@PathParam("fiscalYear") fiscalYear: Int): Response {
-        val result = resultAllocation.allocate(AllocateYearEndResultCommand(fiscalYear, requestedBy = actingPrincipal()))
+        val result = resultAllocation.allocate(
+            AllocateYearEndResultCommand(fiscalYear, requestedBy = actingPrincipal()),
+        )
         return Response.ok(result.toResponse()).build()
     }
 
@@ -194,6 +196,9 @@ data class YearCloseRecordResponse(
     val draftedBy: String?,
     val attestedBy: String?,
     val attestedAt: String?,
+    val allocatedBy: String? = null,
+    val allocatedAt: String? = null,
+    val allocationJournalId: UUID? = null,
 )
 
 private fun FiscalYearTrialBalance.toResponse() = FiscalYearTrialBalanceResponse(
@@ -257,6 +262,9 @@ private fun YearCloseRecord.toResponse() = YearCloseRecordResponse(
     draftedBy = draftedBy,
     attestedBy = attestedBy,
     attestedAt = attestedAt?.toString(),
+    allocatedBy = allocatedBy,
+    allocatedAt = allocatedAt?.toString(),
+    allocationJournalId = allocationJournalId,
 )
 
 data class ResultAllocationLegResponse(val glAccountCode: String, val side: String, val amount: BigDecimal)

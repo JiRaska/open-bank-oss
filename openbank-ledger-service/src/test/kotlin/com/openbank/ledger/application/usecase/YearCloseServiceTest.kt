@@ -310,6 +310,22 @@ class YearCloseServiceTest {
         }
 
         @Test
+        fun `four-eyes - the result allocator cannot attest even after someone else refreshed the draft`(): Unit =
+            runBlocking {
+                val draft = draftFor(balancedLines(), draftedBy = "refresher-sub").copy(allocatedBy = "maker-sub")
+                stubPeriodLines(2025, balancedLines())
+                coEvery { yearCloseRepository.findByFiscalYear(2025) } returns draft
+
+                assertThatThrownBy {
+                    runBlocking { service.attest(AttestYearCloseCommand(2025, attestedBy = "maker-sub")) }
+                }
+                    .isInstanceOf(YearCloseConflictException::class.java)
+                    .hasMessageContaining("result allocator maker-sub")
+                coVerify(exactly = 0) { yearCloseRepository.saveAttested(any(), any()) }
+                Unit
+            }
+
+        @Test
         fun `four-eyes - a draft with a null maker fails closed (cannot attest)`(): Unit = runBlocking {
             // A draft created before four-eyes tracking has no recorded author.
             val draft = draftFor(balancedLines(), draftedBy = null)
