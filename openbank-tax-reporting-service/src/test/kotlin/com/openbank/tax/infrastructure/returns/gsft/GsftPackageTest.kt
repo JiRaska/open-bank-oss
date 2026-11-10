@@ -11,13 +11,16 @@ import org.bouncycastle.bcpg.ArmoredOutputStream
 import org.bouncycastle.bcpg.HashAlgorithmTags
 import org.bouncycastle.bcpg.PublicKeyAlgorithmTags
 import org.bouncycastle.bcpg.SymmetricKeyAlgorithmTags
+import org.bouncycastle.bcpg.sig.KeyFlags
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.openpgp.PGPEncryptedDataList
+import org.bouncycastle.openpgp.PGPException
 import org.bouncycastle.openpgp.PGPKeyPair
 import org.bouncycastle.openpgp.PGPKeyRingGenerator
 import org.bouncycastle.openpgp.PGPLiteralData
 import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
 import org.bouncycastle.openpgp.PGPSignature
+import org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator
 import org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPContentSignerBuilder
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPDigestCalculatorProviderBuilder
@@ -140,11 +143,84 @@ class GsftPackageTest {
             "x.zip",
             GsftPackage.readPublicKey(armored(keyPair())),
         )
-        assertThatThrownBy { decrypt(message, keyPair()) }.isNotNull()
+        assertThatThrownBy { decrypt(message, keyPair()) }.isInstanceOf(PGPException::class.java)
     }
 
     @Test
     fun `a key ring with no key fails clearly`() {
-        assertThatThrownBy { GsftPackage.readPublicKey("not a key") }.isNotNull()
+        assertThatThrownBy { GsftPackage.readPublicKey("not a key") }
+            .isInstanceOf(TaxValidationException::class.java)
+    }
+
+    private fun flags(value: Int, expirySeconds: Long = 0) = PGPSignatureSubpacketGenerator().apply {
+        setKeyFlags(false, value)
+        if (expirySeconds > 0) setKeyExpirationTime(false, expirySeconds)
+    }.generate()
+
+    /** A sign-only primary plus the given subkeys, each with its own binding flags/expiry. */
+    private fun ring(master: PGPKeyPair, subkeys: List<Triple<PGPKeyPair, Int, Long>>): String {
+        val sha1 = JcaPGPDigestCalculatorProviderBuilder().build().get(HashAlgorithmTags.SHA1)
+        val gen = PGPKeyRingGenerator(
+            PGPSignature.POSITIVE_CERTIFICATION,
+            master,
+            "test-recipient",
+            sha1,
+            flags(KeyFlags.CERTIFY_OTHER or KeyFlags.SIGN_DATA),
+            null,
+            JcaPGPContentSignerBuilder(master.publicKey.algorithm, HashAlgorithmTags.SHA256).setProvider(bc),
+            JcePBESecretKeyEncryptorBuilder(SymmetricKeyAlgorithmTags.AES_256, sha1).setProvider(bc)
+                .build("x".toCharArray()),
+        )
+        subkeys.forEach { (pair, f, expiry) -> gen.addSubKey(pair, flags(f, expiry), null) }
+        val out = ByteArrayOutputStream()
+        ArmoredOutputStream(out).use { gen.generatePublicKeyRing().encode(it) }
+        return out.toString(Charsets.US_ASCII)
+    }
+
+    private fun keyPairAt(created: Date): PGPKeyPair {
+        val kpg = KeyPairGenerator.getInstance("RSA", bc).apply { initialize(2048) }
+        return JcaPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, kpg.generateKeyPair(), created)
+    }
+
+    @Test
+    fun `picks the encryption subkey, never a sign-only primary`() {
+        val master = keyPair()
+        val enc = keyPair()
+        val key = GsftPackage.readPublicKey(
+            ring(
+                master,
+                listOf(
+                    Triple(
+                        enc,
+                        KeyFlags.ENCRYPT_COMMS or KeyFlags.ENCRYPT_STORAGE,
+                        0L,
+                    ),
+                ),
+            ),
+        )
+        assertThat(key.keyID).isEqualTo(enc.keyID)
+    }
+
+    @Test
+    fun `skips an expired subkey and a signing-only subkey`() {
+        val now = Date()
+        val old = keyPairAt(Date(now.time - 10 * 86_400_000L))
+        val sign = keyPair()
+        val good = keyPairAt(Date(now.time - 86_400_000L))
+        val armored = ring(
+            keyPair(),
+            listOf(
+                Triple(old, KeyFlags.ENCRYPT_COMMS, 86_400L),
+                Triple(sign, KeyFlags.SIGN_DATA, 0L),
+                Triple(good, KeyFlags.ENCRYPT_STORAGE, 0L),
+            ),
+        )
+        assertThat(GsftPackage.readPublicKey(armored).keyID).isEqualTo(good.keyID)
+    }
+
+    @Test
+    fun `a block with only a sign-only primary is refused`() {
+        assertThatThrownBy { GsftPackage.readPublicKey(ring(keyPair(), emptyList())) }
+            .isInstanceOf(TaxValidationException::class.java).hasMessageContaining("no valid encryption key")
     }
 }
