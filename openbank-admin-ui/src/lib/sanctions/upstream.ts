@@ -24,10 +24,21 @@
 
 import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
+import { serverSvcUrl } from '@/lib/services/bff'
 
 // Deployed, SANCTIONS_SERVICE_URL is the in-cluster ClusterIP DNS name. The fallback is the
 // docker-compose service name, which is what local dev resolves.
-const BASE = process.env.SANCTIONS_SERVICE_URL ?? 'http://openbank-sanctions-service:8123'
+/**
+ * Upstream URL for `path`. The Service is `sanctions-service` in namespace `sanctions`; the old
+ * hard-coded default `http://openbank-sanctions-service:8123` named a host that does not exist in
+ * the cluster and admin-ui's manifest never set SANCTIONS_SERVICE_URL, so every call from the
+ * Sanctions page failed. Resolve through [serverSvcUrl] like every other server-side BFF, keeping
+ * the env var as an explicit override.
+ */
+function upstreamUrl(path: string): string {
+  const override = process.env.SANCTIONS_SERVICE_URL
+  return override ? `${override.replace(/\/+$/, '')}${path}` : serverSvcUrl('sanctions-service', 'sanctions', 8123, path)
+}
 
 /**
  * Session-gate the call, then forward `method <BASE><path>` with the operator's bearer.
@@ -56,7 +67,7 @@ export async function forwardToSanctionsService(
   }
 
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(upstreamUrl(path), {
       method,
       headers: {
         Authorization: `Bearer ${accessToken}`,
