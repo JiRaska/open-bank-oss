@@ -63,6 +63,8 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: vertx-reactive:postgresql://localhost:5432/openbank_finrep
+      idle-timeout: 5M
+      max-lifetime: 30M
       max-size: 10
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_finrep
