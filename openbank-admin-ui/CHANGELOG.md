@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.1...admin-ui-v4.10.2) (2026-11-10)
+
+
+### Bug Fixes
+
+* **ai-platform:** unblock the Langfuse → Prometheus bridge for FinOps AI costs ([#15506](https://github.com/JiRaska/open-bank-oss/issues/15506)) ([1a77eaa](https://github.com/JiRaska/open-bank-oss/commit/1a77eaa86a8f0f4f6d1b4dec10fb5f7974f56769))
+
 ## [4.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.0...admin-ui-v4.10.1) (2026-11-10)
 
 
