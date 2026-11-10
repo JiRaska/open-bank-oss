@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "90a75fe78b083306"
+    openbank.tech/policy-checksum: "72f2914572fb313e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1515,6 +1515,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read
