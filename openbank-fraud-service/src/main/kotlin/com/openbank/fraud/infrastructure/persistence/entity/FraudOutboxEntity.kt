@@ -10,7 +10,7 @@ import jakarta.persistence.Table
 
 /**
  * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
- * [PanacheOutboxEntityV2]; the table gains `next_attempt_at` in `V10__outbox_v2.sql`.
+ * [PanacheOutboxEntityV2]; the table gains `next_attempt_at` in `V11__outbox_v2.sql`.
  */
 @Entity
 @Table(name = "fraud_outbox")

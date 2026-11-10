@@ -8,7 +8,7 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 
 ## Odesílání z outboxu (jaderný repozitář)
 
-`FraudOutboxRepositoryImpl` dědí z `AbstractPanacheOutboxRepository` z libs-runtime. Claim bere u každé strany (`aggregate_id`) jen nejstarší rozpracovaný řádek, takže události `fraud.hold_changed` jedné strany zůstávají v pořadí i při více replikách. Selhaný řádek tu stranu podrží až do svého opakování. Opakování mají exponenciální odstup přes `next_attempt_at` a po sdíleném limitu pokusů končí jako DEAD. `V10__outbox_v2.sql` přidává sloupec a dva částečné indexy, `ix_fraud_outbox_claim` a `ix_fraud_outbox_inflight_aggregate`.
+`FraudOutboxRepositoryImpl` dědí z `AbstractPanacheOutboxRepository` z libs-runtime. Claim bere u každé strany (`aggregate_id`) jen nejstarší rozpracovaný řádek, takže události `fraud.hold_changed` jedné strany zůstávají v pořadí i při více replikách. Selhaný řádek tu stranu podrží až do svého opakování. Opakování mají exponenciální odstup přes `next_attempt_at` a po sdíleném limitu pokusů končí jako DEAD. `V11__outbox_v2.sql` přidává sloupec a dva částečné indexy, `ix_fraud_outbox_claim` a `ix_fraud_outbox_inflight_aggregate`.
 
 - Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
 - Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.
