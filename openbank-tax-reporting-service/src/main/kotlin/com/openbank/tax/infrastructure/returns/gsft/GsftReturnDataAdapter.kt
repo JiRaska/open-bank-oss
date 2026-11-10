@@ -48,6 +48,9 @@ class GsftReturnDataAdapter(
     @ConfigProperty(name = "openbank.gsft.bank-code") private val bankCode: Optional<String>,
     @ConfigProperty(name = "openbank.gsft.branch-country") private val branchCountry: Optional<String>,
 ) {
+    // `entityId` is part of the router's adapter signature; GSFT reports for the company alone and
+    // numbers batches per bank code, so nothing here depends on it.
+    @Suppress("UnusedParameter")
     suspend fun fetch(
         catalogue: ReturnCatalogue,
         definition: ReturnDefinition,
