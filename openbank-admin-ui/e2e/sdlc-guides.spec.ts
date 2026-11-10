@@ -14,7 +14,9 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   const train = page.getByRole('region', { name: /Více kolejí|Several tracks/ })
   await expect(train).toBeVisible()
   const scene = train.getByRole('img', { name: /Lví vláček|Lion change train/ })
-  await train.getByRole('button', { name: /^Pozastavit$|^Pause$/ }).click()
+  const playback = train.locator('[data-play-control]')
+  if (await playback.getAttribute('aria-pressed') === 'true') await playback.click()
+  await expect(playback).toHaveAttribute('aria-pressed', 'false')
   await expect(scene).toHaveAccessibleDescription(/tří souběžných kolejí|three concurrent tracks/)
   await expect(scene.locator('[data-lane]')).toHaveCount(3)
   await expect(scene).toHaveAccessibleDescription(/čeká na ověření|awaits verification/)
@@ -42,6 +44,46 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   await expect(scene).toHaveAccessibleDescription(/oslavují|celebrate/)
   await page.getByRole('navigation', { name: /SDLC/ }).getByRole('link', { name: /^CD/ }).click()
   await expect(page).toHaveURL(/\/devops\/sdlc\/cd$/)
+})
+
+test('CI scene, lane selection and phases fit together in the viewport', async ({ page }, testInfo) => {
+  await page.goto('/devops/sdlc/ci')
+  const train = page.getByRole('region', { name: /Více kolejí|Several tracks/ })
+  const board = train.locator('[data-train-board]')
+  const playback = train.locator('[data-play-control]')
+  if (await playback.getAttribute('aria-pressed') === 'true') await playback.click()
+  await expect(playback).toHaveAttribute('aria-pressed', 'false')
+  for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }, { width: 375, height: 812 }]) {
+    await page.setViewportSize(viewport)
+    await board.scrollIntoViewIfNeeded()
+    const geometry = await board.evaluate(element => {
+      const box = element.getBoundingClientRect()
+      const controls = Array.from(element.querySelectorAll('button')).map(button => button.getBoundingClientRect())
+      return {
+        height: box.height,
+        overflow: document.documentElement.scrollWidth > window.innerWidth || element.scrollWidth > element.clientWidth,
+        controlsInside: controls.every(control => control.left >= box.left && control.right <= box.right + 1 && control.top >= box.top && control.bottom <= box.bottom + 1),
+        minTarget: Math.min(...controls.map(control => Math.min(control.width, control.height))),
+      }
+    })
+    // Reserve space for the real app header; shrinking the illustration must keep native controls readable.
+    expect(geometry.height).toBeLessThanOrEqual(viewport.height - 96)
+    expect(geometry.overflow).toBe(false)
+    expect(geometry.controlsInside).toBe(true)
+    expect(geometry.minTarget).toBeGreaterThanOrEqual(viewport.width < 620 ? 44 : 36)
+    const fast = board.getByRole('button', { name: /Rychlá kolej|Fast lane/ })
+    await fast.focus()
+    await fast.press('Enter')
+    await expect(fast).toHaveAttribute('aria-pressed', 'true')
+    await board.getByRole('button', { name: /Závěrečné ověření|Final check/ }).click()
+    await board.getByRole('button', { name: /Dávkový vlak|Batch train/ }).click()
+    await fast.click()
+    await expect(board.locator('[data-lane="fast"]')).toHaveAttribute('data-step', '3')
+    await board.getByText(/Jak to funguje|How does it work/).click()
+    await expect(board.getByText(/Společný carrier není potřeba|No shared carrier is needed/).last()).toBeVisible()
+    await board.getByText(/Jak to funguje|How does it work/).click()
+    await board.screenshot({ path: testInfo.outputPath(`ci-integrated-${viewport.width}.png`) })
+  }
 })
 
 test('CD distinguishes declared canary weights, missing measurements and data recovery', async ({ page }, testInfo) => {
