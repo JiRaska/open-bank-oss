@@ -319,6 +319,9 @@ locals {
     # lands and is applied BEFORE the cluster that archives with it, so WAL archiving never runs
     # without credentials.
     tax-reporting = { namespace = "tax-reporting", sa = "tax-reporting-db" }
+    # finrep-db: supervisory submission attempts + acknowledgements (ADR-0097 follow-up).
+    # Association lands and is applied BEFORE the cluster that archives with it.
+    finrep = { namespace = "finrep", sa = "finrep-db" }
     # ADR-0337: the pension company keeps its own books in its own ledger and treasury
     # instances (#12425). Associations land and are applied BEFORE the clusters that archive
     # with them, so WAL archiving never runs without credentials.
