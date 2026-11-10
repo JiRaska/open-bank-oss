@@ -6,8 +6,8 @@ package com.openbank.libs.llm
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.security.BoundedBodyHandlers
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.openbank.libs.security.HttpExchangeDeadline
+import kotlinx.coroutines.CancellationException
 import org.jboss.logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
@@ -84,7 +84,8 @@ class LlamaGuardContentSafetyAdapter(
                     ),
                 )
                 .build()
-            val resp = withContext(Dispatchers.IO) { http.send(request, BoundedBodyHandlers.ofString()) }
+            val resp =
+                HttpExchangeDeadline.sendCancellable(http, request, BoundedBodyHandlers.ofString())
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("content-safety backend returned HTTP %d", resp.statusCode())
                 callMetrics.recordCall(
@@ -105,6 +106,8 @@ class LlamaGuardContentSafetyAdapter(
                 System.nanoTime() - startedAt,
             )
             interpret(role, parsed.choices.firstOrNull()?.message?.content)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (ex: Exception) {
             log.warnf("content-safety call failed: %s", ex.message)
             callMetrics.recordCall(model, LlmCallMetricsPort.OUTCOME_EXCEPTION, 0, 0, System.nanoTime() - startedAt)
