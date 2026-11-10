@@ -1,6 +1,6 @@
 ---
 date: 2026-10-09
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "#12385 — the dedicated PENSION_OPERATION SCA purpose and pension's consumer pacts (#12401, #12408) are unbuilt"
 authors: [Jiri Raska]

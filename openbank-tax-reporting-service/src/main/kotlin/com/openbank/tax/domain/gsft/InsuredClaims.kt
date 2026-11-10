@@ -77,6 +77,12 @@ data class DepositAccount(
     val accruedInterest: BigDecimal,
     val holders: List<Holding>,
     val synthetic: Boolean,
+    /**
+     * An account in the special regime (účet ve speciálním režimu, § 41f): the owner holds it for
+     * beneficiaries (podílníci) listed in DII. Decree annex 1.2.2, DIC.PAYMENT: the cover limit
+     * does not apply to the owner of such an account.
+     */
+    val specialRegime: Boolean = false,
 ) {
     init {
         requireValid(holders.isNotEmpty()) { "account $accountId has no holder" }
@@ -203,10 +209,14 @@ object InsuredClaims {
             if (held.isEmpty()) return@mapNotNull null
             // Each account converts to CZK and rounds FIRST, then splits in haléře, so the shares
             // reported in DIL sum exactly to the DIA total and DIC reconciles with both.
-            val balance = held.fold(BigDecimal.ZERO.setScale(MONEY_SCALE)) { sum, a ->
+            fun shareSum(of: List<DepositAccount>) = of.fold(BigDecimal.ZERO.setScale(MONEY_SCALE)) { sum, a ->
                 sum.add(a.split(a.totalCzk(rates)).getValue(depositor.partyId))
             }
-            val compensation = balance.max(BigDecimal.ZERO).min(coverLimitCzk)
+            val (special, ordinary) = held.partition { it.specialRegime }
+            val balance = shareSum(held)
+            // Annex 1.2.2 DIC.PAYMENT: the limit does not apply to the owner of a special-regime
+            // account, so those balances are added uncapped on top of the capped ordinary claim.
+            val compensation = shareSum(ordinary).max(BigDecimal.ZERO).min(coverLimitCzk).add(shareSum(special))
             InsuredClaim(depositor.partyId, balance, compensation, held.map { it.accountId }.sorted())
         }.sortedBy { it.partyId }.let { base ->
             if (qualifyingCredits.isEmpty()) return@let base
@@ -227,7 +237,7 @@ object InsuredClaims {
             relevantDay = relevantDay,
             coverLimitCzk = coverLimitCzk,
             claims = claims,
-            cappedClaims = claims.count { it.eligibleBalanceCzk > coverLimitCzk },
+            cappedClaims = claims.count { it.compensationCzk < it.eligibleBalanceCzk },
             temporarilyHighClaims = claims.count { it.increasedCompensationCzk.signum() > 0 },
             temporarilyHighCompensationCzk = claims.fold(BigDecimal.ZERO) { s, c -> s.add(c.increasedCompensationCzk) },
             refusedQualifyingCredits = refused,

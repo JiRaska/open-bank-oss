@@ -37,10 +37,22 @@ import java.util.UUID
  *   1.2.3   DIA — one record per (owner, account) with the account's TOTAL balance
  *   1.2.4   DIL — one record per share of a joint account; an account in DIL is also in DIA under
  *           each owner, and its DIA balance is not counted again in DIC.T_CLAIM
+ *   1.2.5   DII — one record per beneficiary (podílník) share of a special-regime account: IDR "D",
+ *           IDC, TYPE, ORDER_P, ACCOUNT, CURRENCY, AMOUNT, AMOUNT_CZK, sorted by IDC, TYPE, ORDER_P,
+ *           ACCOUNT. The account must also be in DIA under its OWNER; the beneficiary must NOT be in
+ *           DIA. A person whose funds are only in special-regime accounts has DIC.PAYMENT 0.
+ *
+ * DII — WHAT IS NOT DECIDED HERE (docs/gsft-depositor-data.md, "unverified")
+ *   - The coefficient k (1.2.5.1), applied when a beneficiary holds funds through TWO OR MORE
+ *     owners, is not computed: such a beneficiary FAILS the batch rather than being reported with
+ *     an amount the decree would compute differently.
+ *   - A beneficiary who is also a depositor in their own right fails the batch: whether the DII
+ *     shares merge into that person's single DIC record is not stated by the annex.
+ *   - DIC.T_CLAIM of a beneficiary-only person is the sum of their DII shares in CZK (the annex
+ *     says only "sum of all accounts under I_IDC"); unverified.
  *
  * NOT RENDERED HERE
- *   DII (institutional accounts, § 41f odst. 7–8) — not modelled by [InsuredClaims] yet, so
- *   N_SPECIAL is 0. Compression into one ZIP and PGP encryption (1.1.6) are transport, done by the
+ *   Compression into one ZIP and PGP encryption (1.1.6) are transport, done by the
  *   adapter that holds GSFT's public key; this file returns the plain CSV files by name.
  *   SUSPENSION (§ 41g) is left empty: a filled value requires a matching DIN control record,
  *   which this renderer does not produce.
@@ -65,6 +77,9 @@ private val TIMESTAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd
 private val HUNDRED = BigDecimal.ONE.movePointRight(2)
 private const val FIRST_PAYOUT = "00001"
 private const val SORT_KEY_FIELDS = 4
+private const val DIC_SORT_FIELDS = 3
+private const val MONEY_SCALE = 2
+private const val SHARE_SCALE = 12
 
 /** DIC.TYPE. */
 enum class EntitledPersonType(val code: String) {
@@ -101,6 +116,12 @@ data class BatchHeader(
     val branchCountry: String = "",
 )
 
+/**
+ * One beneficiary's share of a special-regime account (DII). [amount] is in the account currency;
+ * the CZK column converts it at the relevant day's rate.
+ */
+data class SpecialRegimeShare(val beneficiary: DepositorIdentity, val accountId: UUID, val amount: BigDecimal)
+
 /** A person left out of the batch, with the reason an operator needs to correct the data. */
 data class RejectedPerson(val partyId: UUID, val reason: String)
 
@@ -121,6 +142,21 @@ data class GsftBatch(
 
 private class PersonRecords(val dic: List<String>, val dia: List<List<String>>, val dil: List<List<String>>)
 
+private class RenderedPeople(val rejected: List<RejectedPerson>, val accounts: Set<UUID>, val totalPayment: BigDecimal)
+
+private class ClaimRecords(
+    val dic: MutableList<List<String>>,
+    val dia: MutableList<List<String>>,
+    val dil: MutableList<List<String>>,
+    val people: RenderedPeople,
+)
+
+private class SpecialRecords(
+    val dic: List<List<String>>,
+    val dii: MutableList<List<String>>,
+    val rejected: List<RejectedPerson>,
+)
+
 object GsftBatchRenderer {
 
     fun render(
@@ -129,15 +165,9 @@ object GsftBatchRenderer {
         identities: Collection<DepositorIdentity>,
         rates: FxRates,
         header: BatchHeader,
+        specialShares: Collection<SpecialRegimeShare> = emptyList(),
     ): GsftBatch {
-        val bankCode = header.bankCode
-        val batchNumber = header.batchNumber
-        val branchCountry = header.branchCountry
-        requireValid(bankCode.length == BANK_CODE_LENGTH) { "bank code must be 4 characters, was '$bankCode'" }
-        requireValid(branchCountry.isEmpty() || branchCountry.length == 2) {
-            "branch country must be empty or 2 letters"
-        }
-        requireValid(batchNumber in 1..BATCH_MAX) { "batch number must be 1..$BATCH_MAX" }
+        validateHeader(header)
         requireValid(rates.day == assembly.relevantDay) { "FX rates are not for the relevant day" }
         val who = identities.associateBy { it.partyId }
         requireValid(who.size == identities.size) { "an identity is listed twice for one party" }
@@ -147,66 +177,66 @@ object GsftBatchRenderer {
         // (a corrected or supplementary payout) take 2, 3, ... and are not produced here.
         val order = FIRST_PAYOUT
 
-        // One entitled person's data must never stop the whole delivery — the bank has 3 working
-        // days. A person whose records cannot be rendered is left out of THIS batch and listed in
-        // [GsftBatch.rejected] for an operator to correct and send in a follow-up tranche.
-        val rejected = mutableListOf<RejectedPerson>()
-        val dic = mutableListOf<List<String>>()
-        val dia = mutableListOf<List<String>>()
-        val dil = mutableListOf<List<String>>()
-        var totalPayment = BigDecimal.ZERO
-        val ordered = assembly.claims.sortedWith(
-            compareBy({ who[it.partyId]?.idc ?: "" }, {
-                who[it.partyId]?.type?.code
-                    ?: ""
-            }),
-        )
-        for (claim in ordered) {
-            val records = try {
-                personRecords(claim, who[claim.partyId], byAccount, rates, order)
-            } catch (e: TaxValidationException) {
-                rejected += RejectedPerson(claim.partyId, e.message ?: "invalid record")
-                continue
-            }
-            dic += records.dic
-            dia += records.dia
-            dil += records.dil
-            totalPayment = totalPayment.add(claim.compensationCzk)
-        }
+        val claimed = renderClaims(assembly, who, byAccount, rates, order)
+        val dic = claimed.dic
+        val dia = claimed.dia
+        val dil = claimed.dil
+        val people = claimed.people
+        val rejected = people.rejected
+        val renderedAccounts = people.accounts
+        val totalPayment = people.totalPayment
         // Sorted by IDC, TYPE, ORDER_P, ACCOUNT (1.2.3, 1.2.4): the record's fields after IDR.
         val byKey = compareBy<List<String>> { it.drop(1).take(SORT_KEY_FIELDS).joinToString("\u0000") }
         dia.sortWith(byKey)
         dil.sortWith(byKey)
 
-        val diw = diwRecord(header, dic.size, dia.size, dil.size, totalPayment)
+        val dii = specialRecords(
+            byAccount,
+            specialShares,
+            rates,
+            order,
+            assembly.claims.map { it.partyId }.toSet(),
+            renderedAccounts,
+        )
+        dic += dii.dic
+        dic.sortWith(compareBy { it.drop(1).take(DIC_SORT_FIELDS).joinToString("\u0000") })
+        dii.dii.sortWith(byKey)
 
-        val suffix = "$bankCode$branchCountry.${String.format(Locale.ROOT, "%05d", batchNumber)}"
-        val files = linkedMapOf("DIW$suffix" to encode(listOf(diw)))
-        if (dic.isNotEmpty()) files["DIC$suffix"] = encode(dic)
-        if (dia.isNotEmpty()) files["DIA$suffix"] = encode(dia)
-        if (dil.isNotEmpty()) files["DIL$suffix"] = encode(dil)
-        return batch(assembly, files, totalPayment, rejected)
+        val diw = diwRecord(header, dic.size, dia.size, dil.size, dii.dii.size, totalPayment)
+
+        val suffix = "${header.bankCode}${header.branchCountry}.${String.format(
+            Locale.ROOT,
+            "%05d",
+            header.batchNumber,
+        )}"
+        return GsftBatch(
+            files = files(
+                suffix,
+                listOf(
+                    "DIW" to listOf(diw),
+                    "DIC" to dic,
+                    "DIA" to dia,
+                    "DIL" to dil,
+                    "DII" to dii.dii,
+                ),
+            ),
+            totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
+            rejected = rejected + dii.rejected,
+            droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
+            droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
+            droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
+            excludedDepositors = assembly.excludedDepositors,
+            cappedClaims = assembly.cappedClaims,
+            temporarilyHighClaims = assembly.temporarilyHighClaims,
+            temporarilyHighCompensationCzk = assembly.temporarilyHighCompensationCzk,
+            refusedQualifyingCredits = assembly.refusedQualifyingCredits,
+        )
     }
 
-    /** Carries the assembly's exclusion and cover evidence into the batch. */
-    private fun batch(
-        assembly: InsuredClaimsAssembly,
-        files: Map<String, ByteArray>,
-        totalPayment: BigDecimal,
-        rejected: List<RejectedPerson>,
-    ): GsftBatch = GsftBatch(
-        files = files,
-        totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
-        rejected = rejected,
-        droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
-        droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
-        droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
-        excludedDepositors = assembly.excludedDepositors,
-        cappedClaims = assembly.cappedClaims,
-        temporarilyHighClaims = assembly.temporarilyHighClaims,
-        temporarilyHighCompensationCzk = assembly.temporarilyHighCompensationCzk,
-        refusedQualifyingCredits = assembly.refusedQualifyingCredits,
-    )
+    /** 1.1.3: DIW always exists; any other file with zero records must not. */
+    private fun files(suffix: String, records: List<Pair<String, List<List<String>>>>): Map<String, ByteArray> =
+        records.filter { (prefix, rows) -> prefix == "DIW" || rows.isNotEmpty() }
+            .associateTo(linkedMapOf()) { (prefix, rows) -> "$prefix$suffix" to encode(rows) }
 
     private fun personRecords(
         claim: InsuredClaim,
@@ -247,21 +277,166 @@ object GsftBatchRenderer {
         return PersonRecords(dic, dia, dil)
     }
 
-    private fun diwRecord(header: BatchHeader, clients: Int, accounts: Int, shares: Int, totalPayment: BigDecimal) =
-        listOf(
-            "R",
-            header.createdAt.format(TIMESTAMP),
-            String.format(Locale.ROOT, "%05d", header.batchNumber),
-            GsftFields.count(clients),
-            GsftFields.count(accounts),
-            GsftFields.count(shares),
-            GsftFields.count(0),
-            GsftFields.count(0),
-            GsftFields.count(0),
-            GsftFields.amount(totalPayment),
-            "1",
-            header.mode.code,
+    /**
+     * DII rows plus a DIC record (PAYMENT 0) per beneficiary. Every failure here is batch-level:
+     * a DII row that does not reconcile with its owner's DIA row would misstate the owner's payout.
+     */
+    private fun renderClaims(
+        assembly: InsuredClaimsAssembly,
+        who: Map<UUID, DepositorIdentity>,
+        byAccount: Map<UUID, DepositAccount>,
+        rates: FxRates,
+        order: String,
+    ): ClaimRecords {
+        // One entitled person's data must never stop the whole delivery — the bank has 3 working
+        // days. A person whose records cannot be rendered is left out of THIS batch and listed in
+        // [GsftBatch.rejected] for an operator to correct and send in a follow-up tranche.
+        val rejected = mutableListOf<RejectedPerson>()
+        val dic = mutableListOf<List<String>>()
+        val dia = mutableListOf<List<String>>()
+        val dil = mutableListOf<List<String>>()
+        val renderedAccounts = mutableSetOf<UUID>()
+        var totalPayment = BigDecimal.ZERO
+        val ordered = assembly.claims.sortedWith(
+            compareBy({ who[it.partyId]?.idc ?: "" }, {
+                who[it.partyId]?.type?.code
+                    ?: ""
+            }),
         )
+        for (claim in ordered) {
+            val records = try {
+                personRecords(claim, who[claim.partyId], byAccount, rates, order)
+            } catch (e: TaxValidationException) {
+                rejected += RejectedPerson(claim.partyId, e.message ?: "invalid record")
+                continue
+            }
+            dic += records.dic
+            dia += records.dia
+            dil += records.dil
+            renderedAccounts += claim.accountIds
+            totalPayment = totalPayment.add(claim.compensationCzk)
+        }
+        return ClaimRecords(dic, dia, dil, RenderedPeople(rejected, renderedAccounts, totalPayment))
+    }
+
+    private fun validateHeader(header: BatchHeader) {
+        requireValid(header.bankCode.length == BANK_CODE_LENGTH) {
+            "bank code must be 4 characters, was '${header.bankCode}'"
+        }
+        requireValid(header.branchCountry.isEmpty() || header.branchCountry.length == 2) {
+            "branch country must be empty or 2 letters"
+        }
+        requireValid(header.batchNumber in 1..BATCH_MAX) { "batch number must be 1..$BATCH_MAX" }
+    }
+
+    /** [reported] holds only accounts actually rendered in DIA: a rejected owner takes theirs out. */
+    private fun validateShares(
+        byAccount: Map<UUID, DepositAccount>,
+        shares: Collection<SpecialRegimeShare>,
+        depositorIds: Set<UUID>,
+        reported: Set<UUID>,
+    ) {
+        shares.forEach { share ->
+            val account = byAccount[share.accountId]
+            requireValid(account != null && account.specialRegime) {
+                "DII share references ${share.accountId}, which is not a special-regime account"
+            }
+            requireValid(share.accountId in reported) {
+                "special-regime account ${share.accountId} is not in DIA under its owner"
+            }
+            requireValid(share.beneficiary.partyId !in depositorIds) {
+                "beneficiary ${share.beneficiary.partyId} is also a depositor; merging DII into DIC is unresolved"
+            }
+            requireValid(share.amount.signum() >= 0) { "DII share of ${share.accountId} is negative" }
+            requireValid(share.amount.stripTrailingZeros().scale() <= MONEY_SCALE) {
+                "DII share of ${share.accountId} is finer than hundredths"
+            }
+        }
+        shares.groupBy { it.accountId }.forEach { (accountId, of) ->
+            val sum = of.fold(BigDecimal.ZERO) { s, x -> s.add(x.amount) }
+            requireValid(sum <= byAccount.getValue(accountId).total()) {
+                "DII shares of $accountId exceed the account balance"
+            }
+        }
+    }
+
+    private fun specialRecords(
+        byAccount: Map<UUID, DepositAccount>,
+        shares: Collection<SpecialRegimeShare>,
+        rates: FxRates,
+        order: String,
+        depositorIds: Set<UUID>,
+        reported: Set<UUID>,
+    ): SpecialRecords {
+        if (shares.isEmpty()) return SpecialRecords(emptyList(), mutableListOf(), emptyList())
+        validateShares(byAccount, shares, depositorIds, reported)
+        val czk = shares.groupBy { it.accountId }.flatMap { (accountId, of) ->
+            of.zip(GsftShareSplit.shareCzk(byAccount.getValue(accountId), of, rates))
+        }.toMap()
+        val rows = mutableListOf<List<String>>()
+        val dic = mutableListOf<List<String>>()
+        val rejected = mutableListOf<RejectedPerson>()
+        shares.groupBy { it.beneficiary.partyId }.forEach { (_, of) ->
+            val owners = of.map { s -> byAccount.getValue(s.accountId).holders.map { it.partyId }.toSet() }.toSet()
+            requireValid(owners.size == 1) {
+                "beneficiary ${of.first().beneficiary.partyId} holds funds through several owners; " +
+                    "coefficient k (annex 1.2.5.1) is not computed"
+            }
+            val id = of.first().beneficiary
+            requireValid(of.all { it.beneficiary == id }) { "beneficiary ${id.partyId} has two identities" }
+            // Like an owner, one beneficiary's bad data rejects that beneficiary only.
+            try {
+                val mine = of.map { s ->
+                    val account = byAccount.getValue(s.accountId)
+                    listOf(
+                        "D",
+                        GsftFields.nonBlank(GsftFields.text(id.idc, IDC_MAX, "IDC"), "IDC"),
+                        id.type.code,
+                        order,
+                        GsftFields.iban(account.iban),
+                        account.currency,
+                        GsftFields.amount(s.amount),
+                        GsftFields.amount(czk.getValue(s)),
+                    )
+                }
+                val claim = of.fold(BigDecimal.ZERO.setScale(MONEY_SCALE)) { sum, x -> sum.add(czk.getValue(x)) }
+                val record = dicRecord(InsuredClaim(id.partyId, claim, BigDecimal.ZERO, emptyList()), id, order)
+                (listOf(record) + mine).flatten().forEach { field ->
+                    requireValid(field.none { it < ' ' }) { "a DII field contains a control character" }
+                    requireValid(CP1250.newEncoder().canEncode(field)) { "a DII field cannot be encoded in CP-1250" }
+                }
+                rows += mine
+                dic += record
+            } catch (e: TaxValidationException) {
+                rejected += RejectedPerson(id.partyId, e.message ?: "invalid DII record")
+            }
+        }
+        val keys = rows.map { it.drop(1).take(SORT_KEY_FIELDS) }
+        requireValid(keys.toSet().size == keys.size) { "a beneficiary is listed twice on one special account" }
+        return SpecialRecords(dic, rows, rejected)
+    }
+
+    private fun diwRecord(
+        header: BatchHeader,
+        clients: Int,
+        accounts: Int,
+        shares: Int,
+        special: Int,
+        totalPayment: BigDecimal,
+    ) = listOf(
+        "R",
+        header.createdAt.format(TIMESTAMP),
+        String.format(Locale.ROOT, "%05d", header.batchNumber),
+        GsftFields.count(clients),
+        GsftFields.count(accounts),
+        GsftFields.count(shares),
+        GsftFields.count(special),
+        GsftFields.count(0),
+        GsftFields.count(0),
+        GsftFields.amount(totalPayment),
+        "1",
+        header.mode.code,
+    )
 
     private fun dicRecord(claim: InsuredClaim, id: DepositorIdentity, order: String): List<String> = listOf(
         "E",
@@ -295,6 +470,39 @@ object GsftBatchRenderer {
             error("unreachable")
         }
         return ByteArray(buffer.remaining()).also { buffer.get(it) }
+    }
+}
+
+/** DII CZK amounts, reconciled with the owner's DIA row. */
+internal object GsftShareSplit {
+    /**
+     * CZK of each share, split from the account's DIA CZK total in haléře by largest remainder (the
+     * unallocated rest of the account is the last part), so DII AMOUNT_CZK never sums past DIA.
+     */
+    fun shareCzk(account: DepositAccount, of: List<SpecialRegimeShare>, rates: FxRates): List<BigDecimal> {
+        val total = account.total()
+        val rest = total.subtract(of.fold(BigDecimal.ZERO) { s, x -> s.add(x.amount) })
+        val parts = of.map { it.amount } + rest
+        if (total.signum() == 0) return of.map { BigDecimal.ZERO.setScale(MONEY_SCALE) }
+        return weightedSplit(account.totalCzk(rates), parts, total).dropLast(1)
+    }
+
+    /** [amount] split in haléře in proportion parts/whole, largest remainder, ties to list order. */
+    private fun weightedSplit(amount: BigDecimal, parts: List<BigDecimal>, whole: BigDecimal): List<BigDecimal> {
+        val minor = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY).unscaledValue()
+        val exact = parts.map { BigDecimal(minor).multiply(it).divide(whole, SHARE_SCALE, RoundingMode.HALF_EVEN) }
+        val floors = exact.map { it.setScale(0, RoundingMode.FLOOR).toBigIntegerExact() }
+        var leftover = minor.subtract(floors.fold(java.math.BigInteger.ZERO, java.math.BigInteger::add)).toInt()
+        val result = floors.toMutableList()
+        val order = parts.indices.sortedWith(
+            compareByDescending<Int> { exact[it].subtract(BigDecimal(floors[it])) }.thenBy { it },
+        )
+        for (i in order) {
+            if (leftover <= 0) break
+            result[i] = result[i].add(java.math.BigInteger.ONE)
+            leftover--
+        }
+        return result.map { BigDecimal(it, MONEY_SCALE) }
     }
 }
 

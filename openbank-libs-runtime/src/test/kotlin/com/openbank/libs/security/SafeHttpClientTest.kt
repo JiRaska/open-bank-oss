@@ -276,7 +276,7 @@ class SafeHttpClientTest {
     }
 
     /** A server TLS context with a fresh self-signed cert for [san], and a trust store holding only it. */
-    private fun tlsContexts(dir: Path, san: String): Pair<SSLContext, KeyStore> {
+    internal fun tlsContexts(dir: Path, san: String): Pair<SSLContext, KeyStore> {
         val ks = dir.resolve("ks.p12").toString()
         val keytool = Path.of(System.getProperty("java.home"), "bin", "keytool").toString()
         val proc =
