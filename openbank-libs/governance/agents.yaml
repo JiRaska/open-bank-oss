@@ -524,9 +524,16 @@ agents:
   # work is mostly confirmation: fetch the cited source, compare it with the row, and propose the
   # correction with the quote that justifies it.
   #
-  # WHY IT IS PROPOSAL-ONLY: a regulatory duty is an interpretation of law. The agent proposes an
-  # issue citing the source; a human decides and changes the register in a reviewed PR. Write and
-  # execute tiers are denied EXPLICITLY.
+  # WHY IT IS PROPOSAL-ONLY: a regulatory duty is an interpretation of law. The agent's only
+  # output is a governance issue (draft.ticket) citing the source; it opens no PR and never writes
+  # the register. A human decides and changes the register in a reviewed PR.
+  #
+  # ENFORCEMENT, STATED HONESTLY: the write and execute tiers are listed under tools.deny, but
+  # agents.rego only evaluates a tier/resource deny when the caller sends input.tier; the MCP and
+  # REST paths do not. What actually protects today is deny-by-default (nothing outside the allow
+  # list is granted), not the deny list. The PR that enables this charter must carry an `opa eval`
+  # run against the served bundle with a must-DENY (write/execute) and a must-ALLOW (read,
+  # draft.ticket) control.
   #
   # `enabled: false` ON PURPOSE: it needs an allow-listed outbound fetch of the cited public
   # sources (zakonyprolidi.cz, e-sbirka.cz, eur-lex.europa.eu, cnb.cz, gsft.cz, fau.gov.cz,
@@ -538,8 +545,9 @@ agents:
     description: >
       Re-reads the legal texts and authority specifications cited by the regulatory obligations
       register, flags amendments, changed deadlines or formats and still-unverified rows, and files
-      one governance issue per finding citing the source. Read-only: it never edits the register,
-      a report, or a filing.
+      one governance issue per finding citing the source. It reads sources and may only file a
+      governance issue (draft.ticket); it opens no PR and never writes the register, a report or
+      a filing.
     enabled: false
     enforcement: block
     schedule:
@@ -564,6 +572,7 @@ agents:
           resources:
             - '*'
     requires_human:
+      - every: proposal
       - any_legal_interpretation
       - any_register_change
     limits:
