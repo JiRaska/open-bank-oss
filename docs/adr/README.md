@@ -347,7 +347,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0340](0340-crs-fatca-information-exchange-reporting-is-a-tax-reporting-service-capability-and-the-sole-tin-consumer.md) | CRS/FATCA information-exchange reporting is a tax-reporting-service capability and the sole TIN consumer | Proposed | Planned | tax,regulatory-reporting,privacy-gdpr,compliance | — |
 | [0341](0341-pinned-product-revision-is-the-single-source-of-price-accounting-class-and-regulatory-class.md) | Pinned product revision is the single source of price, accounting class and regulatory class | Proposed | Planned | product-catalog,fees-billing,ledger,regulatory-reporting | — |
 | [0342](0342-product-services-are-day-close-participants-the-accounting-day-waits-for.md) | Product services are day-close participants the accounting day waits for | Proposed | Partial | accounting-close,ledger,interest | — |
-| [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Proposed | Partial | ci,governance,release-versioning | — |
+| [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Accepted | Shipped | ci,governance,release-versioning | — |
 | [0344](0344-treasury-instrument-model-multi-leg-schedules-fixings-and-the-cash-flow-ledger.md) | Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain | Proposed | Partial | architecture,ledger,payments,accounting-close | — |
 | [0345](0345-catalog-packs-declare-revision-approval-policy-as-data-legacy-v1-vocabulary-is-frozen.md) | Catalog packs declare revision approval policy as data; legacy v1 vocabulary is frozen | Accepted | Partial | product-catalog,governance,api-contract | — |
 | [0346](0346-shared-library-delivery-and-quality-evidence.md) | Shared library delivery and quality evidence | Proposed | Partial | libs,architecture,testing,resilience | — |
@@ -364,15 +364,15 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
 | [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
 | [0359](0359-visual-regression-lane-with-committed-container-rendered-baselines.md) | Visual regression lane with committed container-rendered baselines | Accepted | Partial | admin-ui,testing | — |
-| [0360](0360-fast-lane-gets-a-turn-whenever-a-strict-lane-reservation-ends.md) | Fast lane gets a turn whenever a strict-lane reservation ends | Proposed | Planned | ci,governance | — |
+| [0360](0360-fast-lane-gets-a-turn-whenever-a-strict-lane-reservation-ends.md) | Fast lane gets a turn whenever a strict-lane reservation ends | Accepted | Partial | ci,governance | — |
 | [0361](0361-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
-| [0362](0362-ci-cd-throughput-and-safety-no-downgrade-and-no-stale-as-enforced-invariants-waste-cut-by-measurement.md) | CI/CD throughput and safety: no-downgrade and no-stale as enforced invariants, waste cut by measurement | Proposed | Partial | ci,gitops,governance | — |
+| [0362](0362-ci-cd-throughput-and-safety-no-downgrade-and-no-stale-as-enforced-invariants-waste-cut-by-measurement.md) | CI/CD throughput and safety: no-downgrade and no-stale as enforced invariants, waste cut by measurement | Accepted | Partial | ci,gitops,governance | — |
 | [0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md) | Remote Gradle build cache for hosted CI, written only from main | Proposed | Partial | ci,supply-chain,capacity | — |
 | [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Proposed | Shipped | architecture,governance,gitops | — |
 | [0365](0365-pension-book-accounting-close.md) | Source-bound pension accounting and independent book close | Proposed | Partial | ledger,accounting-close | — |
 | [0366](0366-ci-fetches-external-tools-and-charts-through-a-pinned-lock-a-resolver-and-a-mirror-outside-github.md) | CI fetches external tools and charts through a pinned lock, a resolver and a mirror outside GitHub | Proposed | Planned | ci,supply-chain,resilience | — |
 | [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Proposed | Partial | regulatory-reporting,compliance,governance,ai-agents | — |
-| [0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md) | Deploy every Services CI service from its completed main-push run, not from the push | Proposed | Partial | ci,gitops,api-contract | — |
+| [0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md) | Deploy every Services CI service from its completed main-push run, not from the push | Accepted | Partial | ci,gitops,api-contract | — |
 
 ## By tag
 

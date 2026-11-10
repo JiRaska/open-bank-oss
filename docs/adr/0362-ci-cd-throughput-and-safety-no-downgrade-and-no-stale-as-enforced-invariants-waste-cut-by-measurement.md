@@ -1,14 +1,14 @@
 ---
 date: 2026-11-03
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
+followup: "auto-deploy union-of-newer pins (decision item 3) is unbuilt; items 1, 2, 4 and 5 shipped (#14698, #14700, #14706, #14414) and the pin gate backstops item 3"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, gitops, governance]
 summary: "No-downgrade and no-stale become enforced invariants (a GitOps pin only moves forward from live main; every test script is run by something); CI waste is cut only where a 7-day measurement locates it."
-followup: "#14705 — the merge-train self-test spawn ceiling (#14706), auto-deploy union-of-newer pins and the pin-only deploy-PR fleet exemption are planned; the pin gate (#14698) and the reachability gate (#14700) shipped as PRs"
 ---
 
 # ADR-0362 — CI/CD throughput and safety: no-downgrade and no-stale as enforced invariants, waste cut by measurement
