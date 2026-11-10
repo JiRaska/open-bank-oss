@@ -19,7 +19,8 @@
           "type": "string",
           "pattern": "^(|https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[^/?#]+)$"
         },
-        "observedAt": { "type": "string", "format": "date-time" }
+        "observedAt": { "type": "string", "format": "date-time" },
+        "testTaskOutcome": { "enum": ["executed", "reused"] }
       },
       "additionalProperties": false
     },

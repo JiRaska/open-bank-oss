@@ -1272,7 +1272,7 @@ jobs:
       - name: Open GitOps PR (auto-merge)
         id: gitops_pr
         if: ${{ steps.build_admission.outputs.proceed == 'true' && steps.rewrite.outputs.changed == 'true' }}
-        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        uses: peter-evans/create-pull-request@15733dbdfeedb4f7fdb73d13c6f5ac83b710fab8 # v8.1.2
         with:
           # The source-validation job checks out the admitted immutable SHA, which leaves
           # the worktree detached. Explicitly set the PR base so the action can create the

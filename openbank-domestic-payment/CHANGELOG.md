@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.4.0...domestic-payment-v1.5.0) (2026-11-10)
+
+
+### Features
+
+* **domestic-payment:** measure fraud hold wait time and enforce holds in sandbox ([#15198](https://github.com/JiRaska/open-bank-oss/issues/15198)) ([2caa703](https://github.com/JiRaska/open-bank-oss/commit/2caa703b063394402963f88e9b138351ffaf507c))
+
 ## [1.4.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v1.3.1...domestic-payment-v1.4.0) (2026-11-07)
 
 
