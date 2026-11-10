@@ -1,11 +1,12 @@
 ---
 date: 2026-11-08
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
+followup: "#15292, #15356 — CEU daily filing and GSFT depositor data are still in open PRs; the obligations register and its gate ship here"
 tags: [regulatory-reporting, compliance, governance, ai-agents]
 summary: "Every regulatory return is a declared spec in the repo, computed only in a backend and filed on the ADR-0336 lifecycle; the admin-ui catalogue derives from specs. AI explains and drafts, never files. CEÚ daily feed is the pilot."
 ---

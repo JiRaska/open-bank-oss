@@ -54,6 +54,9 @@
         "observedAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "testTaskOutcome": {
+          "enum": ["executed", "reused"]
         }
       },
       "additionalProperties": false
