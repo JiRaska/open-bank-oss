@@ -7,7 +7,7 @@ CREATE TABLE finrep_submission (
     reference_period            DATE         NOT NULL,
     revision                    INTEGER      NOT NULL CHECK (revision >= 1),
     state                       VARCHAR(16)  NOT NULL
-        CHECK (state IN ('DRAFT', 'PACKAGED', 'SUBMITTED', 'ACKNOWLEDGED', 'REJECTED')),
+        CHECK (state IN ('DRAFT', 'PACKAGED', 'SUBMITTING', 'SUBMITTED', 'ACKNOWLEDGED', 'REJECTED')),
     created_by                  VARCHAR(255) NOT NULL,
     created_at                  TIMESTAMPTZ  NOT NULL,
     reporting_framework_version VARCHAR(32),

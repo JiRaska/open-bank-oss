@@ -43,6 +43,12 @@ interface SupervisorySubmissionRepository {
     /** Upsert of the submission row (application-assigned id). */
     suspend fun save(submission: SupervisorySubmission): SupervisorySubmission
 
+    /**
+     * Atomically moves the submission PACKAGED -> SUBMITTING. False when another caller already
+     * holds the claim or the return is no longer PACKAGED. This is what prevents a double filing.
+     */
+    suspend fun claimForSubmission(id: UUID): Boolean
+
     /** Saves the submission and appends the attempt in ONE transaction. */
     suspend fun saveWithAttempt(submission: SupervisorySubmission, attempt: SubmissionAttempt): SupervisorySubmission
 

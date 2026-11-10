@@ -67,6 +67,6 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 ## Supervisory submission lifecycle
 
-`/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
+`/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTING (an exclusive claim held while the transport is called, so concurrent submits transmit once), SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
 
 Every submit is recorded as an attempt. No supervisory transmission channel is configured, so the default transport transmits nothing and records `DRY_RUN`, which leaves the submission PACKAGED. Only a `SUBMITTED` transport outcome reaches SUBMITTED, and only a SUBMITTED return can have an acknowledgement recorded. Submissions and attempts live in the service's own Postgres database (`finrep-db`).

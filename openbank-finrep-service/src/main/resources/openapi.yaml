@@ -356,7 +356,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SupervisorySubmission' }
         '409':
-          description: Submission is still DRAFT
+          description: >-
+            Submission is still DRAFT, or another request holds the transmission claim
+            (SUBMISSION_IN_PROGRESS). The claim is a conditional PACKAGED -> SUBMITTING update, so
+            concurrent submits never call the transport twice.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
@@ -463,7 +466,7 @@ components:
         templateId: { type: string }
         referencePeriod: { type: string, format: date }
         revision: { type: integer }
-        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTED, ACKNOWLEDGED, REJECTED] }
+        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTING, SUBMITTED, ACKNOWLEDGED, REJECTED] }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         reportingFrameworkVersion: { type: string, nullable: true }

@@ -41,6 +41,9 @@ class SupervisorySubmissionService(
     private val clock: Clock,
 ) : SupervisorySubmissionUseCase {
 
+    // A concurrent open of the same revision loses the unique-key race at INSERT; whatever the
+    // persistence exception type, the row that won is the answer (200), never an unmapped 500.
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun open(key: SubmissionKey, actor: String): Pair<SupervisorySubmission, Boolean> {
         repository.findByKey(key)?.let { return it to false }
         val draft = SupervisorySubmission(
@@ -50,7 +53,14 @@ class SupervisorySubmissionService(
             createdBy = actor,
             createdAt = clock.instant(),
         )
-        return repository.save(draft) to true
+        return try {
+            repository.save(draft) to true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val winner = repository.findByKey(key) ?: throw e
+            winner to false
+        }
     }
 
     override suspend fun pkg(id: UUID, actor: String): SupervisorySubmission {
@@ -84,8 +94,18 @@ class SupervisorySubmissionService(
 
             SubmissionState.SUBMITTED, SubmissionState.ACKNOWLEDGED, SubmissionState.REJECTED -> return current
 
+            SubmissionState.SUBMITTING -> throw inProgress(id)
+
             SubmissionState.PACKAGED -> Unit
         }
+        // Claim BEFORE calling the transport: with a live adapter two concurrent calls would be a
+        // double filing. Losing the claim means another caller is transmitting, or has finished.
+        if (!repository.claimForSubmission(current.id)) {
+            val now = get(id)
+            if (now.state in SETTLED) return now
+            throw inProgress(id)
+        }
+        val claimed = current.claimed()
         val pkg = SupervisoryReturnPackage(
             submissionId = current.id,
             key = current.key,
@@ -112,7 +132,7 @@ class SupervisorySubmissionService(
             attemptedBy = actor,
             attemptedAt = now,
         )
-        return repository.saveWithAttempt(current.afterTransport(result.outcome, result.reference, now), attempt)
+        return repository.saveWithAttempt(claimed.afterTransport(result.outcome, result.reference, now), attempt)
     }
 
     override suspend fun acknowledge(
@@ -137,7 +157,12 @@ class SupervisorySubmissionService(
         return repository.attempts(id)
     }
 
+    private fun inProgress(id: UUID) =
+        ResourceConflictException("submission $id is being transmitted by another request", "SUBMISSION_IN_PROGRESS")
+
     internal companion object {
+        private val SETTLED = setOf(SubmissionState.SUBMITTED, SubmissionState.ACKNOWLEDGED, SubmissionState.REJECTED)
+
         fun manifestHash(key: SubmissionKey, framework: String, dpm: String, taxonomy: String): String {
             val canonical = listOf(
                 key.templateId,

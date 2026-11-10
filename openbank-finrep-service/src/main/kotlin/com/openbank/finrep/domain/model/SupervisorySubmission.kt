@@ -9,12 +9,16 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * Lifecycle of one supervisory return revision: DRAFT -> PACKAGED -> SUBMITTED -> ACKNOWLEDGED | REJECTED.
+ * Lifecycle of one supervisory return revision:
+ * DRAFT -> PACKAGED -> SUBMITTING -> SUBMITTED -> ACKNOWLEDGED | REJECTED.
  *
  * A transport outcome other than [TransportOutcome.SUBMITTED] never moves the return to SUBMITTED:
- * a dry run or a failed transmission leaves it PACKAGED, so "nothing was sent" can never read as sent.
+ * a dry run or a failed transmission releases it to PACKAGED, so "nothing was sent" never reads as sent.
+ *
+ * SUBMITTING is the claim held while the transport is called: only one caller can move a return
+ * PACKAGED -> SUBMITTING (a conditional UPDATE), so two concurrent submits never both transmit.
  */
-enum class SubmissionState { DRAFT, PACKAGED, SUBMITTED, ACKNOWLEDGED, REJECTED }
+enum class SubmissionState { DRAFT, PACKAGED, SUBMITTING, SUBMITTED, ACKNOWLEDGED, REJECTED }
 
 /**
  * What a [com.openbank.finrep.application.port.out.SupervisoryReturnTransport] did with a package.
@@ -88,9 +92,15 @@ data class SupervisorySubmission(
         )
     }
 
-    /** Applies a transport outcome. Only SUBMITTED and REJECTED change state. */
-    fun afterTransport(outcome: TransportOutcome, reference: String?, at: Instant): SupervisorySubmission {
+    /** The in-memory image of the claim the repository takes with a conditional UPDATE. */
+    fun claimed(): SupervisorySubmission {
         requireState(SubmissionState.PACKAGED, "submit")
+        return copy(state = SubmissionState.SUBMITTING)
+    }
+
+    /** Applies a transport outcome to a claimed return. DRY_RUN and FAILED release it to PACKAGED. */
+    fun afterTransport(outcome: TransportOutcome, reference: String?, at: Instant): SupervisorySubmission {
+        requireState(SubmissionState.SUBMITTING, "record a transport outcome for")
         return when (outcome) {
             TransportOutcome.SUBMITTED -> copy(
                 state = SubmissionState.SUBMITTED,
@@ -100,7 +110,7 @@ data class SupervisorySubmission(
 
             TransportOutcome.REJECTED -> copy(state = SubmissionState.REJECTED, transportReference = reference)
 
-            TransportOutcome.DRY_RUN, TransportOutcome.FAILED -> this
+            TransportOutcome.DRY_RUN, TransportOutcome.FAILED -> copy(state = SubmissionState.PACKAGED)
         }
     }
 

@@ -158,6 +158,10 @@ class PanacheSupervisorySubmissionRepository(
         Panache.getSession().flatMap { it.merge(submission.toEntity()) }
     }.awaitSuspending().toDomain()
 
+    override suspend fun claimForSubmission(id: UUID): Boolean = Panache.withTransaction {
+        submissions.update("state = 'SUBMITTING' where id = ?1 and state = 'PACKAGED'", id)
+    }.awaitSuspending() == 1
+
     override suspend fun saveWithAttempt(
         submission: SupervisorySubmission,
         attempt: SubmissionAttempt,

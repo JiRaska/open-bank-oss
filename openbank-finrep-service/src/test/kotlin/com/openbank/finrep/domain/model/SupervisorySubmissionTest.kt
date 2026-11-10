@@ -21,27 +21,36 @@ class SupervisorySubmissionTest {
         createdAt = at,
     )
     private val packaged = draft.packaged("4.2", "4.2.0.0", "a".repeat(64), "op", at)
+    private val claimed = packaged.claimed()
 
     @Test
     fun `dry run and failure leave the return PACKAGED - nothing sent never reads as sent`() {
         assertThat(
-            packaged.afterTransport(TransportOutcome.DRY_RUN, null, at).state,
+            claimed.afterTransport(TransportOutcome.DRY_RUN, null, at).state,
         ).isEqualTo(SubmissionState.PACKAGED)
-        assertThat(packaged.afterTransport(TransportOutcome.FAILED, null, at).state).isEqualTo(SubmissionState.PACKAGED)
-        assertThat(packaged.afterTransport(TransportOutcome.DRY_RUN, null, at).submittedAt).isNull()
+        assertThat(claimed.afterTransport(TransportOutcome.FAILED, null, at).state).isEqualTo(SubmissionState.PACKAGED)
+        assertThat(claimed.afterTransport(TransportOutcome.DRY_RUN, null, at).submittedAt).isNull()
     }
 
     @Test
     fun `only a SUBMITTED outcome reaches SUBMITTED, and acknowledgement then settles it`() {
-        val submitted = packaged.afterTransport(TransportOutcome.SUBMITTED, "R-1", at)
+        val submitted = claimed.afterTransport(TransportOutcome.SUBMITTED, "R-1", at)
         assertThat(submitted.state).isEqualTo(SubmissionState.SUBMITTED)
         assertThat(submitted.submittedAt).isEqualTo(at)
         val ack = SubmissionAcknowledgement(true, "ACK-1", null, "op", at)
         assertThat(submitted.acknowledged(ack).state).isEqualTo(SubmissionState.ACKNOWLEDGED)
         assertThat(submitted.acknowledged(ack.copy(accepted = false)).state).isEqualTo(SubmissionState.REJECTED)
         assertThat(
-            packaged.afterTransport(TransportOutcome.REJECTED, "R-2", at).state,
+            claimed.afterTransport(TransportOutcome.REJECTED, "R-2", at).state,
         ).isEqualTo(SubmissionState.REJECTED)
+    }
+
+    @Test
+    fun `the transmission claim is exclusive and a transport outcome needs it`() {
+        assertThat(claimed.state).isEqualTo(SubmissionState.SUBMITTING)
+        assertThatThrownBy { claimed.claimed() }.isInstanceOf(SubmissionStateException::class.java)
+        assertThatThrownBy { packaged.afterTransport(TransportOutcome.SUBMITTED, null, at) }
+            .isInstanceOf(SubmissionStateException::class.java)
     }
 
     @Test
