@@ -432,6 +432,19 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     exit 1
   fi
 
+  # A service whose whole history holds no proven source is refused individually through the
+  # partial resolver; alone in the batch, that still empties the deployment set.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"
+  if RESOLVER_UNRESOLVED='["openbank-demo-service"]' PACT_CLI_MODE=success \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/unresolved-log" 2>&1 || \
+     ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q 'no successful exact-main Services CI build+contract with an exact' "$tmp/unresolved-log" || \
+     grep -q -- '--pacticipant openbank-demo-service' "$PACT_CLI_LOG"; then
+    echo "FAIL: an unresolved historical source was not refused individually before Pact" >&2
+    cat "$GITHUB_OUTPUT" "$tmp/unresolved-log" >&2
+    exit 1
+  fi
+
   # The existing non-push probe proves Git equivalence. Its ordinary per-service
   # verdict must still ask about that exact version without reconcile preflight.
   : > "$GITHUB_OUTPUT"

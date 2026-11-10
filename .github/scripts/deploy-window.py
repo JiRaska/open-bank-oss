@@ -183,7 +183,9 @@ def conflicted(prs: list[dict]) -> list[dict]:
     without the producer's checks. Close it instead: the scheduled reconcile derives lag from
     the pins on main and re-offers each of its services from current main.
     """
-    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("conflicted")]
+    # gitops only: admin-ui has no reconcile, so closing one would delay it to the next daily build.
+    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES[0]) and p.get("conflicted")
+            and not p.get("repair_priority")]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -458,6 +460,9 @@ def self_test() -> int:
     check("an unarmed stuck PR is never offered for arming",
           flush_candidates([dirty], T, None, W) == [])
     check("a conflicted deploy PR is named for closing", [p["number"] for p in conflicted([dirty])] == [15])
+    check("a conflicted admin-ui PR is not closed (no reconcile re-offers it)",
+          conflicted([{**dirty, "head": DEPLOY_PREFIXES[1] + "x"}]) == [])
+    check("a conflicted repair PR is not closed", conflicted([{**dirty, "repair_priority": True}]) == [])
     check("a merely stuck (failed check) PR is not closed",
           conflicted([{**dirty, "conflicted": False}]) == [])
     check("a FAILURE check is stuck", is_stuck(roll("SUCCESS", "FAILURE")))
