@@ -98,6 +98,23 @@ class PilotSourceTest(unittest.TestCase):
         runner = (ROOT/'openbank-infra/aws/envs/sandbox-platform/arc-runners.tf').read_text()
         self.assertIn(INIT['image'].split('@sha256:')[1], runner)
 
+    def test_model_credential_reaches_the_existing_optional_config_lookup(self):
+        # A healthy pod and a completed scan also occur when every diagnosis uses fallback.
+        # Follow the secret reference through ESO to the exact property read by the producer.
+        env = next(e for e in APP['env'] if e['name'] == 'FLAKY_TEST_HUNTER_MODEL_API_KEY')
+        ref = env['valueFrom']['secretKeyRef']
+        self.assertIs(ref['optional'], True)
+        secrets = list(yaml.safe_load_all((MANIFEST.parent/'model-externalsecret.yaml').read_text()))
+        model = next(s for s in secrets if s['spec']['target']['name'] == ref['name'])
+        binding = next(d for d in model['spec']['data'] if d['secretKey'] == ref['key'])
+        self.assertEqual(binding['remoteRef'], {'key': 'litellm', 'property': 'KEY_FLAKY_TEST_HUNTER'})
+        self.assertNotEqual(ref['name'], 'flaky-test-hunter-secrets')
+        producer = (ROOT/'openbank-flaky-test-hunter/src/main/kotlin/com/openbank/flakytest/'
+                    'infrastructure/config/LlmGatewayProducer.kt').read_text()
+        self.assertIn('"flaky-test-hunter.model.api-key"', producer)
+        self.assertEqual(env['name'].lower().replace('_', ''),
+                         'flaky-test-hunter.model.api-key'.replace('-', '').replace('.', ''))
+
 
 if __name__ == '__main__':
     unittest.main()
