@@ -30,7 +30,12 @@ class OnboardingAuthorizeCoverageTest {
     private fun Method.isEndpoint() = listOf(GET::class, POST::class, PUT::class, DELETE::class, PATCH::class)
         .any { getAnnotation(it.java) != null }
 
-    private val endpoints = resources.flatMap { r -> r.declaredMethods.filter { it.isEndpoint() } }
+    // Kotlin emits a static `$suspendImpl` twin carrying the same annotations for every suspend fun.
+    private fun Method.isSuspendTwin() = name.endsWith("\$suspendImpl")
+
+    private val endpoints = resources.flatMap { r ->
+        r.declaredMethods.filter { it.isEndpoint() && !it.isSuspendTwin() }
+    }
 
     @Test
     fun `every onboarding endpoint carries @Authorize`() {
