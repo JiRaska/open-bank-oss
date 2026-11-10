@@ -629,6 +629,11 @@ def _selftest_trace_file(gate, is_pr: bool):
     return f.name, ""
 
 
+def _trace_refused(gate, trace_file) -> bool:
+    """`require` mode fails a self-test that could not be traced — but not one that opted out."""
+    return trace_file is None and _trace_mode() == "require" and gate.get("selftest_trace") is not False
+
+
 _BASELINE_CACHE = {}
 
 
@@ -707,7 +712,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
         trace_file, trace_note = _selftest_trace_file(gate, is_pr)
         if trace_note:
             buf.append(trace_note)
-            if trace_file is None and _trace_mode() == "require":
+            if _trace_refused(gate, trace_file):
                 r.status, r.failure_kind = "failed", "setup"
                 r.output = "".join(buf)
                 return r
@@ -1881,6 +1886,10 @@ def self_test():
                 os.unlink(traced)
             if optout or "NOT traced" not in note:
                 bad.append("selftest_trace: false was traced, or skipped without saying so")
+            if _trace_refused({**g, "selftest_trace": False}, optout):
+                bad.append("require mode fails a gate that opted out with selftest_trace: false")
+            if not _trace_refused(g, None):
+                bad.append("require mode no longer fails a gate whose self-test could not be traced")
         finally:
             sit.strace_usable = saved_usable
             if saved_mode is None:
