@@ -918,6 +918,34 @@ def culprit_description(failing: list[str], base: str) -> str:
     return f"{CULPRIT_PREFIX}{', '.join(failing)} red on a train over main {base[:12]}"[:140]
 
 
+def likely_flake_rerun(gh, git, sha: str, failing: list[str], head: str, base: str,
+                       extra: dict[str, str] | None = None, inconclusive=()) -> str | None:
+    """Before blaming a carrier's ONLY member (#15420): when every failing context is green on that
+    member's own head AND green in main's CI at the carrier's base, the red says the combination OR the
+    run is bad, and a flaky gate (#15416/#15344, #15419) is the cheaper explanation. Re-run the failed
+    jobs once — the same App `merge-train/rerun` marker as an inconclusive carrier, so a carrier head
+    gets at most ONE rerun of either kind, never a second. A cancelled context next to the red one is
+    re-run in the same request, so the rerun can end in a full verdict. Returns the reason it re-ran, else None
+    (the caller blames as before: red on the head, red or unknown on main, already re-run, refused)."""
+    if not failing or gh.app_statuses(sha).get(RERUN_CONTEXT, ("", ""))[0]:
+        return None
+    extra = extra or {}
+    own = gh.checks(head)
+    cache: dict = {}
+    for ctx in failing:
+        state = (gh.extra_checks(head, {ctx: extra[ctx]}).get(ctx) if ctx in extra else own.get(ctx))
+        if state not in OK_STATES:
+            return None
+        at_main = main_ci_result(gh, git, ctx, base, cache)
+        if not at_main or at_main[1] not in OK_STATES:
+            return None
+    if not gh.rerun_inconclusive(sha, sorted(set(failing) | set(inconclusive))):
+        return None
+    why = f"{', '.join(failing)} green on the member head and on main {base[:12]}"
+    gh.post_status(sha, "success", ("rerun 1 of 1, likely flake: " + why)[:140], context=RERUN_CONTEXT)
+    return why
+
+
 def main_red_reason(ctxs, main_red: dict[str, str]) -> str:
     ctxs = sorted(ctxs)
     return f"waiting for main ({', '.join(ctxs)} red on main {main_red[ctxs[0]][:12]})"
@@ -2983,6 +3011,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             failing = [c for c in failing if c not in main_red]  # blame names only what main is green on
             if len(members) == 1:
                 n, head = members[0]
+                # Order with the stale-culprit refresh below: the one likely-flake rerun (failed jobs only,
+                # minutes) comes first; only a red that survives it is blamed, and only then may a behind-main
+                # culprit get its one update-branch (a full CI run). A flake therefore never costs a refresh.
+                flake = likely_flake_rerun(gh, git, sha, failing, head, chain[0], extra, inconclusive)
+                if flake:
+                    log(f"carrier #{carrier}: {flake} — re-ran once before blaming #{n}, in flight")
+                    summary["rerun"].append(carrier)
+                    summary["in_flight"] = True
+                    carrier_in_flight = True
+                    continue
                 gh.post_status(head, "failure", culprit_description(failing, chain[0]))
                 summary["culprits"].append(n)
                 # A train member was admitted with every required context green on its OWN head. If that
@@ -4081,6 +4119,12 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
             # about a stale verdict; a strict culprit was already judged on today's main.
             if len(members) == 1:
                 n, head = members[0]
+                flake = likely_flake_rerun(gh, git, sha, failing, head, chain[0], extra, inconclusive)
+                if flake:
+                    log(f"strict carrier #{carrier}: {flake} — re-ran once before blaming #{n}, in flight")
+                    summary["rerun"].append(carrier)
+                    open_after = True
+                    continue
                 gh.post_status(head, "failure", culprit_description(failing, chain[0]))
                 gh.comment(n, CULPRIT_MESSAGE)
                 summary["culprits"].append(n)
@@ -5079,7 +5123,13 @@ def retry_planner_self_test(check) -> None:
 # ceiling 17,800 (~3 % headroom), under the 18,534 that first overran the shard budget.
 # Both merged (#15400 over #15374): stacking cases plus the stale-culprit refresh cases: spawns=18,176 at
 # 677 cases, measured on the merged tree; ceiling 18,600 (~2.3 %).
-SELF_TEST_SPAWN_CEILING = 18600
+# Likely-flake rerun before a lone-member blame (#15420): three fast-carrier cases and one extra settle
+# each in five existing culprit cases: spawns=16,663 at 670 cases, measured locally; ceiling 17,000.
+# Both merged (#15430 over #15374): each lone culprit carrier is re-run once before its blame, plus the
+# first-parent lineage case: spawns=18,070 at 678 cases, measured on the merged tree; ceiling 18,500 (~2.4 %).
+# All three merged (#15430 over #15400 + #15374): spawns=19,251 at 696 cases, measured on the merged tree;
+# ceiling 19,700 (~2.3 %).
+SELF_TEST_SPAWN_CEILING = 19700
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -5404,6 +5454,50 @@ def self_test() -> int:
     check("classify: stale is inconclusive, a pending context is pending", f == [] and inc == ["gates (data)"] and pnd == ["derived"])
     check("culprit description carries the prefix and the failing contexts",
           culprit_description(["gates (data)"], "a" * 40) == "culprit: gates (data) red on a train over main aaaaaaaaaaaa")
+
+    # ---- likely flake (#15420): one rerun before blaming a lone member green on its head and on main ----
+    class _FlakeGH:
+        def __init__(self, head, main, marked=False, ok=True):
+            self.head, self.main, self.ok, self.reruns, self.posted = head, main, ok, [], []
+            self.marks = {RERUN_CONTEXT: ("success", "rerun 1 of 1")} if marked else {}
+        def app_statuses(self, sha): return self.marks if sha == "carrier" else {}
+        def checks(self, sha): return self.head if sha == "head" else self.main
+        def extra_checks(self, sha, gates): return {g: self.head.get(g) for g in gates} if sha == "head" else {}
+        def rerun_inconclusive(self, sha, contexts):
+            self.reruns.append((sha, list(contexts)))
+            return self.ok
+        def post_status(self, sha, state, desc, context=STATUS_CONTEXT, **_kw): self.posted.append((sha, state, context))
+
+    class _FlakeOut:
+        stdout = "m1\n"
+
+    def flake(head, main, failing=("gates (data)",), extra=None, **kw):
+        fgh = _FlakeGH(head, main, **kw)
+        why = likely_flake_rerun(fgh, lambda *a, **k: _FlakeOut(), "carrier", list(failing), "head", "m1" * 20, extra)
+        return why, fgh
+
+    fgreen = {"gates (data)": "success", "Trivy": "success"}
+    why, fgh = flake(fgreen, fgreen)
+    check("flake: a lone member green on its head and on main -> ONE rerun of exactly the failing contexts, marked",
+          why is not None and fgh.reruns == [("carrier", ["gates (data)"])]
+          and fgh.posted == [("carrier", "success", RERUN_CONTEXT)], f"{why} {fgh.reruns} {fgh.posted}")
+    why, fgh = flake({**fgreen, "gates (data)": "failure"}, fgreen)
+    check("flake: red on the member's OWN head -> no rerun (blame as today)", why is None and fgh.reruns == [], str(fgh.reruns))
+    why, fgh = flake({**fgreen, "gates (data)": None}, fgreen)
+    check("flake: pending/absent on the member head is not green -> no rerun", why is None and fgh.reruns == [])
+    why, fgh = flake(fgreen, {**fgreen, "gates (data)": "failure"})
+    check("flake: red on main at the carrier base -> no rerun", why is None and fgh.reruns == [], str(fgh.reruns))
+    why, fgh = flake(fgreen, {"Trivy": "success"})
+    check("flake: no verdict on main at all -> no rerun (unknown is not green)", why is None and fgh.reruns == [])
+    why, fgh = flake(fgreen, fgreen, marked=True)
+    check("flake: a carrier head already re-run once (either kind) -> never a second rerun",
+          why is None and fgh.reruns == [] and fgh.posted == [], str(fgh.reruns))
+    why, fgh = flake(fgreen, fgreen, ok=False)
+    check("flake: a refused rerun posts no marker and blames as today", why is None and fgh.posted == [], str(fgh.posted))
+    why, fgh = flake(fgreen, fgreen, failing=("gates (data)", "Trivy"), extra={"Trivy": "security.yml"})
+    check("flake: an extra gate is judged by its pinned run on the head", why is not None, str(why))
+    why, fgh = flake({**fgreen, "Trivy": "failure"}, fgreen, failing=("Trivy",), extra={"Trivy": "security.yml"})
+    check("flake: an extra gate red on the head -> no rerun", why is None and fgh.reruns == [])
     legacy = {STATUS_CONTEXT: ("failure", "isolated as the cause of a red train over main 0123456789ab")}
     check("qualifies: a LEGACY culprit mark (pre-inconclusive rule) is re-evaluated, not final",
           qualifies({**base_pr, "files": ["svc/a"]}, req, green, legacy)[0])
@@ -5903,6 +5997,13 @@ def self_test() -> int:
                   and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure",
                   f"{gh.comments} updates={gh.updates}")
             check("ticks: every carrier was closed", all(c["state"] == "closed" for c in gh.carriers.values()))
+            # Combined with the stale-culprit refresh (#15374): #3 is isolated twice — behind main, then on its
+            # refreshed head — so there are TWO lone carriers, each re-run once before its blame (the rerun
+            # marker is per carrier head), never two reruns of one carrier.
+            check("ticks: each lone #3 carrier was re-run exactly once before its blame (#15420 + #15374)",
+                  len(gh.reruns) == 2 and len({sha for sha, _ in gh.reruns}) == 2
+                  and all(ctx == ["Validate manifests"] for _, ctx in gh.reruns), str(gh.reruns))
+            gh.reruns.clear()
             check("ticks: the refreshed culprit, isolated again up to date, is not refreshed a second time",
                   3 not in gh.merged and gh.updates.count(3) == 1 and (3, CULPRIT_MESSAGE) in gh.comments,
                   f"merged={gh.merged} updates={gh.updates} {gh.comments}")
@@ -5918,6 +6019,17 @@ def self_test() -> int:
                   3 not in gh.updates and (3, CULPRIT_MESSAGE) in gh.comments
                   and (3, STALE_CULPRIT_MESSAGE) not in gh.comments, f"{gh.comments} updates={gh.updates}")
             reset()
+            # ... and the marker on the head's FIRST PARENT (the head update-branch produced, then main moved
+            # again): the case above marks the head itself, so it cannot see the first-parent half; this one
+            # fails if the lookup reads only the head.
+            open_only("p1", "p3")
+            parent = gh.g("rev-parse", gh.prs[3]["head"]["sha"] + "^1").stdout.strip()
+            gh.post_status(parent, "success", "update-branched once", context=STALE_CULPRIT_CONTEXT)
+            drain()
+            check("ticks: a culprit whose FIRST PARENT carries the refresh marker is not refreshed again",
+                  3 not in gh.updates and (3, CULPRIT_MESSAGE) in gh.comments
+                  and (3, STALE_CULPRIT_MESSAGE) not in gh.comments, f"{gh.comments} updates={gh.updates}")
+            reset()
 
             # A culprit that is NOT behind main is red on its own merits: ordinary message, no update-branch.
             open_only("p3")
@@ -5927,6 +6039,12 @@ def self_test() -> int:
                   and gh.updates == []
                   and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure",
                   f"{gh.comments} updates={gh.updates}")
+            # Each lone #3 carrier above was re-run once (#15420) before its blame; a single rerun per carrier.
+            # (The two lineage cases build byte-identical carriers, so the same sha may appear twice — once per
+            # fixture reset, which clears the marker.)
+            check("ticks: the three refresh-rule culprits were each re-run once before the blame",
+                  len(gh.reruns) == 3 and all(ctx == ["Validate manifests"] for _, ctx in gh.reruns), str(gh.reruns))
+            gh.reruns.clear()
             reset()
 
             def settle_once():
@@ -5978,14 +6096,61 @@ def self_test() -> int:
             gh.carrier_override = {"issue-hygiene": "cancelled"}
             real = [c for c in SYN_REQUIRED[:3] if gh.checks(open_carriers()[0]["head"]["sha"]).get(c) == "failure"]
             gh.carrier_override = {"derived": "cancelled"} if "derived" not in real else {"gates (data)": "cancelled"}
+            s1 = settle_once()
+            check("mix: green on #3's head and on main -> ONE rerun covering the red AND the cancelled context",
+                  s1["culprits"] == [] and len(gh.reruns) == 1
+                  and sorted(gh.reruns[0][1]) == sorted(set(real) | set(gh.carrier_override)), f"{s1} {gh.reruns}")
             s = settle_once()
             st, desc = mt_status(3)
             check("mix: a real failure next to a cancelled job still names the culprit",
-                  s["culprits"] == [3] and st == "failure" and desc.startswith(CULPRIT_PREFIX) and gh.reruns == [],
+                  s["culprits"] == [3] and st == "failure" and desc.startswith(CULPRIT_PREFIX) and len(gh.reruns) == 1,
                   f"{s} {st} {desc!r}")
+            gh.reruns.clear()
             check("mix: the culprit status names only the really failing context(s), never the cancelled one",
                   all(c in desc for c in real) and not any(c in desc for c in gh.carrier_override), f"{desc!r} real={real}")
             gh.carrier_override = {}
+            reset()
+
+            # Likely flake (#15420, carrier #15416 blamed #15344): a lone member red on a context that is
+            # green on its own head and on main gets ONE rerun, no culprit; a green rerun merges it.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure"}
+            gh.on_rerun = lambda: gh.carrier_override.clear()
+            s = settle_once()
+            check("flake: a lone member green on its head and on main is re-run once, not blamed, in flight",
+                  s["culprits"] == [] and s["bisected"] == [] and gh.reruns and gh.reruns[0][1] == ["gates (data)"]
+                  and s["in_flight"] and len(open_carriers()) == 1 and mt_status(1)[0] != "failure" and not gh.comments,
+                  f"{s} reruns={gh.reruns} status={mt_status(1)}")
+            s = settle_once()
+            gh.on_rerun = None
+            check("flake: the rerun finishes green -> the member merges, nobody blamed",
+                  gh.merged == [1] and s["culprits"] == [] and len(gh.reruns) == 1, f"{s} merged={gh.merged}")
+            gh.reruns.clear()
+            reset()
+            # ... still red after the one rerun: the culprit, and never a second rerun.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure"}
+            s1 = settle_once()
+            s2 = settle_once()
+            check("flake: still red after the one rerun -> culprit, exactly one rerun ever",
+                  s1["culprits"] == [] and s2["culprits"] == [1] and len(gh.reruns) == 1 and mt_status(1)[0] == "failure"
+                  and mt_status(1)[1].startswith(CULPRIT_PREFIX) and (1, CULPRIT_MESSAGE) in gh.comments,
+                  f"{s1} {s2} reruns={gh.reruns} {mt_status(1)}")
+            gh.carrier_override = {}
+            gh.reruns.clear()
+            reset()
+            # ... red on the member's OWN head too: today's immediate culprit, no rerun.
+            open_only("p1")
+            tick()
+            gh.carrier_override = {"gates (data)": "failure"}
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {"gates (data)": "failure"}
+            s = settle_once()
+            check("flake: a context red on the member's own head -> immediate culprit, no rerun",
+                  s["culprits"] == [1] and gh.reruns == [] and mt_status(1)[0] == "failure", f"{s} reruns={gh.reruns}")
+            gh.carrier_override = {}
+            gh.head_checks.clear()
             reset()
 
             # #13400 (carrier #13501 blamed #13137): gates that PASSED on content but overran their budget,
@@ -6013,19 +6178,24 @@ def self_test() -> int:
             gh.carrier_override = {"gates (data)": "failure", "Validate manifests": "failure"}
             gh.gate_records = {"data": [{"id": "a", "status": "failed", "failure_kind": "budget"},
                                         {"id": "b", "status": "failed", "failure_kind": "content"}]}
+            # Red on #1's own head too, so the likely-flake rerun (#15420) stays out of this control.
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {"gates (data)": "failure", "Validate manifests": "failure"}
             s = settle_once()
             check("budget control: a content failure next to a budget overrun is still a culprit",
                   s["culprits"] == [1] and gh.reruns == [] and mt_status(1)[0] == "failure", f"{s} {mt_status(1)}")
             gh.carrier_override, gh.gate_records = {}, {}
+            gh.head_checks.clear()
             reset()
             # Control: no machine-readable verdict (artifact missing / pre-#13400 runner) stays conclusive.
             open_only("p1")
             tick()
             gh.carrier_override = {"gates (data)": "failure"}
+            gh.head_checks[gh.prs[1]["head"]["sha"]] = {"gates (data)": "failure"}
             s = settle_once()
             check("budget control: a red shard with no gate-results artifact is still a culprit",
                   s["culprits"] == [1] and gh.reruns == [], str(s))
             gh.carrier_override = {}
+            gh.head_checks.clear()
             reset()
 
             # #13400 livelock (2026-10-24): a gate whose time grows with the train overran its budget on
@@ -6608,6 +6778,9 @@ def self_test() -> int:
                       status == want and gh.merged == [], f"publish={status} merged={gh.merged}")
             # ... and a train over an older main, after main moved.
             gh.statuses.clear()
+            for c in gh.carriers.values():   # a lone-member red carrier above may be open on its one rerun (#15420)
+                c["state"] = "closed"
+            gh.reruns.clear()
             gh.g("checkout", "-q", "-f", "main")
             pathlib.Path(origin, "svc").mkdir(exist_ok=True)
             pathlib.Path(origin, "svc/later.txt").write_text("x\n")
@@ -7112,6 +7285,7 @@ def self_test() -> int:
 
             # (8) red carrier of four: halved across ticks; the innocents are rebatched and merge; the one
             # red member is isolated as the culprit on a one-member strict carrier.
+            gh.reruns.clear()
             open_only("pW2", "pP1", "pPbad", "pP2")
             advance_main()
             s1 = settle_strict(cap=8)                       # carrier [36, 88, 89, 90], red
@@ -7122,16 +7296,22 @@ def self_test() -> int:
                   f"{s1.get('strict_batch')} {s2}")
             s3 = settle_strict(cap=8)                       # [36, 88] green: merged; carrier [89, 90]
             s4 = settle_strict(cap=8)                       # [89, 90] red: bisect 1; carrier [89]
-            s5 = settle_strict(cap=8)                       # [89] red alone: culprit; carrier [90]
+            s5r = settle_strict(cap=8)                      # [89] red alone, green on its head and main: ONE rerun
+            check("strict carrier (8): a lone member green on its head and on main is re-run once before blame (#15420)",
+                  s5r["culprits"] == [] and s5r["rerun"] and len(gh.reruns) == 1 and sc_desc(89)[0] != "failure"
+                  and len(strict_open()) == 1 and carrier_members(strict_open()[0]) == [89],
+                  f"{s5r} reruns={gh.reruns} {sc_desc(89)}")
+            s5 = settle_strict(cap=8)                       # [89] still red after the rerun: culprit; carrier [90]
             s6 = settle_strict(cap=8)                       # [90] green: merged
             check("strict carrier (8): innocents rebatched and merged, the red member isolated as the culprit",
-                  gh.merged == [36, 88, 90] and s5["culprits"] == [89] and sc_desc(89)[0] == "failure"
+                  gh.merged == [36, 88, 90] and s5["culprits"] == [89] and sc_desc(89)[0] == "failure" and len(gh.reruns) == 1
                   and sc_desc(89)[1].startswith(CULPRIT_PREFIX) and (89, CULPRIT_MESSAGE) in gh.comments
                   and s3.get("strict_batch") == [89, 90] and s4.get("strict_batch") == [89] and s5.get("strict_batch") == [90],
                   f"merged={gh.merged} s3={s3.get('strict_batch')} s4={s4.get('strict_batch')} s5={s5.get('strict_batch')} s6={s6}")
             s7 = settle_strict(cap=8)
             check("strict carrier (8): the culprit waits for a push — no further carrier, no update-branch",
                   not strict_open() and gh.updates == [] and 89 not in gh.merged, f"{s7} updates={gh.updates}")
+            gh.reruns.clear()
             reset()
 
             # (9) a member's head or source intent changed while the carrier ran: not merged.
@@ -8413,6 +8593,10 @@ def self_test() -> int:
             gh.prs[3]["created_at"] = "2026-01-00"
             tick(batch_size=1)
             gh.head_checks.clear()
+            gh.reruns.clear()
+            s1 = settle_now()
+            check("main red: the lone member is re-run once first, and only on the context main is green on (#15420)",
+                  s1["culprits"] == [] and len(gh.reruns) == 1 and "gates (data)" not in gh.reruns[0][1], f"{s1} {gh.reruns}")
             gh.update_refuse = True   # the refusal path: a behind-main culprit whose update-branch fails
             s = settle_now()
             gh.update_refuse = False
@@ -8421,7 +8605,8 @@ def self_test() -> int:
                   and 3 not in s["refreshed"], f"{s} {gh.comments}")
             check("main red: a context main is green on still names the culprit, and only that context",
                   s["culprits"] == [3] and mt_status(3)[1].startswith(CULPRIT_PREFIX + "Validate manifests red")
-                  and "gates (data)" not in mt_status(3)[1], f"{s} status={mt_status(3)}")
+                  and "gates (data)" not in mt_status(3)[1] and len(gh.reruns) == 1, f"{s} status={mt_status(3)}")
+            gh.reruns.clear()
             main_red_done()
 
             # Every open PR leaves a decision line, armed or not (a disarmed fix was invisible in the log).
