@@ -34,7 +34,7 @@ class TemporarilyHighBalancesTest {
         amount: String,
         on: LocalDate = day.minusMonths(1),
         party: UUID = alice,
-        applied: Boolean = true,
+        appliedOn: LocalDate? = day.plusDays(10),
     ) = QualifyingCredit(
         party,
         acc.accountId,
@@ -42,7 +42,7 @@ class TemporarilyHighBalancesTest {
         on,
         QualifyingEvent.RESIDENTIAL_PROPERTY_SALE,
         "KN-V-1/2026",
-        applied,
+        appliedOn,
     )
 
     private fun run(
@@ -123,7 +123,7 @@ class TemporarilyHighBalancesTest {
     @Test
     fun `refuses a credit the depositor did not apply for`() {
         val acc = account("3000000", alice)
-        val r = run(acc, credit(acc, "1000", applied = false))
+        val r = run(acc, credit(acc, "1000", appliedOn = null))
         assertThat(r.claims.single().increasedCompensationCzk).isEqualByComparingTo("0")
         assertThat(r.refusedQualifyingCredits).isEqualTo(1)
     }
@@ -152,18 +152,84 @@ class TemporarilyHighBalancesTest {
     }
 
     @Test
-    fun `fails on a credit naming an account the party does not hold`() {
+    fun `refuses, without failing the batch, a credit on an account the party does not hold`() {
         val acc = account("3000000", alice)
-        val other = account("1", alice)
-        assertThatThrownBy { run(acc, credit(other, "1000")) }.isInstanceOf(TaxValidationException::class.java)
+        val other = account("500000", alice)
+        val r = run(acc, credit(other, "1000"), credit(acc, "2000"))
+        assertThat(r.claims.single().increasedCompensationCzk).isEqualByComparingTo("2000.00")
+        assertThat(r.refusedQualifyingCredits).isEqualTo(1)
+    }
+
+    @Test
+    fun `accepts an application on the last day of the 2-month deadline and refuses one a day later`() {
+        val acc = account("3000000", alice)
+        val last = run(acc, credit(acc, "1000", appliedOn = LocalDate.of(2027, 1, 9)))
+        assertThat(last.claims.single().increasedCompensationCzk).isEqualByComparingTo("1000.00")
+        val late = run(acc, credit(acc, "1000", appliedOn = LocalDate.of(2027, 1, 10)))
+        assertThat(late.claims.single().increasedCompensationCzk).isEqualByComparingTo("0")
+        assertThat(late.refusedQualifyingCredits).isEqualTo(1)
+    }
+
+    @Test
+    fun `a credit since spent is not paid out of older savings`() {
+        val savings = account("3000000", alice)
+        val spent = account("1000", alice)
+        val r = InsuredClaims.assemble(
+            day,
+            listOf(Depositor(alice, null, false, true)),
+            listOf(savings, spent),
+            rates,
+            listOf(credit(spent, "400000")),
+        )
+        assertThat(r.claims.single().increasedCompensationCzk).isEqualByComparingTo("1000.00")
+        assertThat(r.refusedQualifyingCredits).isZero()
+    }
+
+    @Test
+    fun `a spent credit with nothing left is refused and counted`() {
+        val savings = account("3000000", alice)
+        val empty = account("0", alice)
+        val r = InsuredClaims.assemble(
+            day,
+            listOf(Depositor(alice, null, false, true)),
+            listOf(savings, empty),
+            rates,
+            listOf(credit(empty, "400000")),
+        )
+        assertThat(r.claims.single().increasedCompensationCzk).isEqualByComparingTo("0")
+        assertThat(r.temporarilyHighClaims).isZero()
+        assertThat(r.refusedQualifyingCredits).isEqualTo(1)
+    }
+
+    @Test
+    fun `a joint-account credit is apportioned by holder share and a duplicate filing is refused`() {
+        val bob = UUID.fromString("00000000-0000-0000-0000-00000000000b")
+        val joint = DepositAccount(
+            UUID.randomUUID(),
+            "CZ6508000000192000145399",
+            "CZK",
+            BigDecimal("8000000"),
+            BigDecimal.ZERO,
+            listOf(Holding(alice, null), Holding(bob, null)),
+            false,
+        )
+        val people = listOf(Depositor(alice, null, false, true), Depositor(bob, null, false, true))
+        val credits = listOf(credit(joint, "600000"), credit(joint, "600000"), credit(joint, "600000", party = bob))
+        val r = InsuredClaims.assemble(day, people, listOf(joint), rates, credits)
+        assertThat(r.claims.map { it.increasedCompensationCzk }).allSatisfy {
+            assertThat(it).isEqualByComparingTo("300000.00")
+        }
+        assertThat(r.temporarilyHighCompensationCzk).isEqualByComparingTo("600000.00")
+        assertThat(r.temporarilyHighClaims).isEqualTo(2)
+        assertThat(r.refusedQualifyingCredits).isEqualTo(1)
     }
 
     @Test
     fun `a credit needs evidence and a positive amount`() {
         val id = UUID.randomUUID()
-        assertThatThrownBy { QualifyingCredit(alice, id, BigDecimal.ONE, day, QualifyingEvent.SEVERANCE, " ", true) }
+        assertThatThrownBy { QualifyingCredit(alice, id, BigDecimal.ONE, day, QualifyingEvent.SEVERANCE, " ", day) }
             .isInstanceOf(TaxValidationException::class.java)
-        assertThatThrownBy { QualifyingCredit(alice, id, BigDecimal.ZERO, day, QualifyingEvent.SEVERANCE, "x", true) }
+        assertThatThrownBy { QualifyingCredit(alice, id, BigDecimal.ZERO, day, QualifyingEvent.SEVERANCE, "x", day) }
             .isInstanceOf(TaxValidationException::class.java)
     }
 
