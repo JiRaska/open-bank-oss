@@ -59,6 +59,7 @@ NO_CORPUS = {
     # own stub first). No repo corpus to floor.
     "agent-review-proof-falsifiable",
     "argocd-sync-integrity-unit-test",
+    "langfuse-exporter-unit-test",  # unit suite over the ConfigMap-shipped exporter; fixtures only
     "agent-review-scope-falsifiable",
     "alert-rca-ledger-guards",
     "auto-deploy-reconcile-probe-unit-test",

@@ -55,11 +55,25 @@ data:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     UNATTRIBUTED = "unattributed"
+    ROW_LIMIT = 1000
 
 
-    def build_query(agent_dimension, now):
-        """Today and yesterday (UTC), per day, per model and agent dimension."""
-        start = (now - dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    def query_days(now):
+        """Yesterday and today (UTC) as (day, start, end) windows; today ends at `now`."""
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday = today - dt.timedelta(days=1)
+        return [(yesterday.strftime("%Y-%m-%d"), yesterday, today),
+                (today.strftime("%Y-%m-%d"), today, now)]
+
+
+    def build_query(agent_dimension, start, end):
+        """One UTC day, per model and agent dimension.
+
+        Langfuse 4.50 treats `userId` as a high-cardinality dimension. It answers 400 for one
+        combined with `timeDimension`, and 400 again unless the query carries `config.row_limit`
+        plus an `orderBy` desc on a measure. One query per day window gives the same per-day sums
+        without a time series. A result that fills ROW_LIMIT may be truncated; poll_once refuses it.
+        """
         return {
             "view": "observations",
             "metrics": [
@@ -68,9 +82,10 @@ data:
             ],
             "dimensions": [{"field": "providedModelName"}, {"field": agent_dimension}],
             "filters": [],
-            "timeDimension": {"granularity": "day"},
             "fromTimestamp": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "toTimestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "toTimestamp": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "orderBy": [{"field": "sum_totalTokens", "direction": "desc"}],
+            "config": {"row_limit": ROW_LIMIT},
         }
 
 
@@ -82,15 +97,14 @@ data:
         return number if number == number and number >= 0 else 0.0
 
 
-    def parse_rows(payload, agent_dimension):
-        """-> {(agent, model, day): (tokens, cost)}. Rows without a model are skipped."""
+    def parse_rows(payload, agent_dimension, day):
+        """-> {(agent, model, day): (tokens, cost)} for one day's query. Rows without a model are skipped."""
         out = {}
         for row in payload.get("data", []):
             model = row.get("providedModelName")
             if not model:
                 continue
             agent = row.get(agent_dimension) or UNATTRIBUTED
-            day = str(row.get("time_dimension", ""))[:10]
             key = (str(agent), str(model), day)
             tokens, cost = out.get(key, (0.0, 0.0))
             out[key] = (tokens + _num(row.get("sum_totalTokens")), cost + _num(row.get("sum_totalCost")))
@@ -185,10 +199,17 @@ data:
     def poll_once(state, fetcher, agent_dimension, now=None):
         now = now or dt.datetime.now(dt.timezone.utc)
         try:
-            payload = fetcher(build_query(agent_dimension, now))
-            if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-                raise ValueError("unexpected metrics payload shape")
-            state.apply(parse_rows(payload, agent_dimension), now.timestamp())
+            rows = {}
+            for day, start, end in query_days(now):
+                payload = fetcher(build_query(agent_dimension, start, end))
+                if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                    raise ValueError("unexpected metrics payload shape")
+                if len(payload["data"]) >= ROW_LIMIT:
+                    # A full page may be truncated: exporting it would undercount silently.
+                    raise ValueError(f"metrics result for {day} reached row_limit {ROW_LIMIT}")
+                rows.update(parse_rows(payload, agent_dimension, day))
+            # Both days or neither: a half-applied poll would age out the missing day's state.
+            state.apply(rows, now.timestamp())
         except Exception as exc:  # noqa: BLE001 - any failure is "Langfuse unavailable"
             print(f"langfuse-exporter: poll failed: {type(exc).__name__}: {exc}", flush=True)
             state.fail()
@@ -250,6 +271,11 @@ spec:
       app.kubernetes.io/name: langfuse-exporter
   template:
     metadata:
+      # The script is read once at start, so a ConfigMap edit alone never reaches the running
+      # process. This hash rolls the pod on every script change; langfuse_exporter_test.py
+      # fails when it is stale.
+      annotations:
+        openbank.io/script-sha256: "8053df5354298c5704ef4d283ffcce94ee68b1a6be21d8cfa1f516ba26308e56"
       labels:
         app.kubernetes.io/name: langfuse-exporter
         app.kubernetes.io/part-of: ai-platform

@@ -34,6 +34,11 @@ def payload(*rows):
     ]}
 
 
+def rows_for(*rows):
+    """A fake Langfuse that answers each per-day query with that day's rows only."""
+    return lambda q: payload(*[r for r in rows if r[2] == q["fromTimestamp"][:10]])
+
+
 def sample(text, name, **labels):
     want = ",".join(f'{k}="{v}"' for k, v in labels.items())
     pattern = rf"^{name}{{{re.escape(want)}}} (\S+)$" if labels else rf"^{name} (\S+)$"
@@ -47,7 +52,7 @@ class ExporterTest(unittest.TestCase):
         queried = set(re.findall(r"\blangfuse_[a-z_]+", route))
         self.assertEqual(queried, {"langfuse_up", "langfuse_agent_tokens_total", "langfuse_model_cost_per_token"})
         state = ex.State()
-        ex.poll_once(state, lambda q: payload(("copilot", "m1", "2026-10-30", 10, 0.1)), "userId", NOW)
+        ex.poll_once(state, rows_for(("copilot", "m1", "2026-10-30", 10, 0.1)), "userId", NOW)
         exported = set(re.findall(r"^(langfuse_[a-z_]+)", state.render(), re.M))
         self.assertTrue(queried <= exported, queried - exported)
         # The route joins on(model) and filters agent_id: both labels must exist with these names.
@@ -56,9 +61,9 @@ class ExporterTest(unittest.TestCase):
 
     def test_first_poll_seeds_then_only_growth_is_counted(self):
         state = ex.State()
-        ex.poll_once(state, lambda q: payload(("copilot", "m1", "2026-10-30", 1000, 2.0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("copilot", "m1", "2026-10-30", 1000, 2.0)), "userId", NOW)
         self.assertEqual(sample(state.render(), "langfuse_agent_tokens_total", agent_id="copilot", model="m1"), 0.0)
-        ex.poll_once(state, lambda q: payload(("copilot", "m1", "2026-10-30", 1500, 3.0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("copilot", "m1", "2026-10-30", 1500, 3.0)), "userId", NOW)
         out = state.render()
         self.assertEqual(sample(out, "langfuse_agent_tokens_total", agent_id="copilot", model="m1"), 500.0)
         self.assertEqual(sample(out, "langfuse_agent_cost_usd_total", agent_id="copilot", model="m1"), 1.0)
@@ -66,26 +71,27 @@ class ExporterTest(unittest.TestCase):
 
     def test_a_day_ageing_out_never_decreases_the_counter(self):
         state = ex.State()
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-29", 100, 0), ("a", "m", "2026-10-30", 10, 0)), "userId", NOW)
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 30, 0)), "userId", NOW)
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 25, 0)), "userId", NOW)  # late shrink
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-29", 100, 0), ("a", "m", "2026-10-30", 10, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 30, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 25, 0)), "userId", NOW)  # late shrink
         self.assertEqual(sample(state.render(), "langfuse_agent_tokens_total", agent_id="a", model="m"), 20.0)
 
     def test_new_day_after_seed_counts_from_zero(self):
         state = ex.State()
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 100, 0)), "userId", NOW)
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 100, 0), ("a", "m", "2026-10-31", 7, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 100, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 100, 0), ("a", "m", "2026-10-31", 7, 0)), "userId",
+                     NOW + dt.timedelta(days=1))
         self.assertEqual(sample(state.render(), "langfuse_agent_tokens_total", agent_id="a", model="m"), 7.0)
 
     def test_missing_agent_is_unattributed_not_dropped(self):
         state = ex.State()
-        ex.poll_once(state, lambda q: payload((None, "m", "2026-10-30", 5, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for((None, "m", "2026-10-30", 5, 0)), "userId", NOW)
         self.assertIn('agent_id="unattributed"', state.render())
 
     def test_negative_langfuse_unreachable_sets_up_zero_and_keeps_counters(self):
         state = ex.State()
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 1, 0)), "userId", NOW)
-        ex.poll_once(state, lambda q: payload(("a", "m", "2026-10-30", 4, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 1, 0)), "userId", NOW)
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 4, 0)), "userId", NOW)
         self.assertEqual(sample(state.render(), "langfuse_up"), 1.0)
 
         def boom(_q):
@@ -102,12 +108,47 @@ class ExporterTest(unittest.TestCase):
         ex.poll_once(state, lambda q: {"message": "events_only"}, "userId", NOW)
         self.assertEqual(sample(state.render(), "langfuse_up"), 0.0)
 
-    def test_query_targets_v2_observations_per_day(self):
-        q = ex.build_query("userId", NOW)
-        self.assertEqual(q["view"], "observations")
-        self.assertEqual(q["timeDimension"], {"granularity": "day"})
-        self.assertEqual(q["fromTimestamp"], "2026-10-29T00:00:00Z")
-        self.assertIn({"field": "userId"}, q["dimensions"])
+    def test_query_targets_v2_observations_one_query_per_day(self):
+        seen = []
+        ex.poll_once(ex.State(), lambda q: seen.append(q) or payload(), "userId", NOW)
+        self.assertEqual([(q["fromTimestamp"], q["toTimestamp"]) for q in seen],
+                         [("2026-10-29T00:00:00Z", "2026-10-30T00:00:00Z"),
+                          ("2026-10-30T00:00:00Z", "2026-10-30T12:00:00Z")])
+        for q in seen:
+            self.assertEqual(q["view"], "observations")
+            self.assertIn({"field": "userId"}, q["dimensions"])
+            # Langfuse 4.50 rejects a high-cardinality dimension (userId) with a timeDimension.
+            self.assertNotIn("timeDimension", q)
+            # ...and requires a row limit plus a desc order on a measure.
+            self.assertEqual(q["config"], {"row_limit": ex.ROW_LIMIT})
+            self.assertEqual(q["orderBy"], [{"field": "sum_totalTokens", "direction": "desc"}])
+
+    def test_negative_a_full_page_is_refused_not_undercounted(self):
+        state = ex.State()
+        full = [("a%d" % i, "m", "2026-10-30", 1, 0) for i in range(ex.ROW_LIMIT)]
+        ex.poll_once(state, rows_for(*full), "userId", NOW)
+        self.assertEqual(sample(state.render(), "langfuse_up"), 0.0)
+
+    def test_negative_one_failed_day_fails_the_whole_poll(self):
+        state = ex.State()
+        ex.poll_once(state, rows_for(("a", "m", "2026-10-30", 1, 0)), "userId", NOW)
+        calls = []
+
+        def second_day_fails(q):
+            calls.append(q)
+            if len(calls) == 2:
+                raise OSError("HTTP Error 400: Bad Request")
+            return payload()
+
+        ex.poll_once(state, second_day_fails, "userId", NOW)
+        self.assertEqual(sample(state.render(), "langfuse_up"), 0.0)
+
+    def test_pod_rolls_when_the_script_changes(self):
+        import hashlib
+        deploy = next(d for d in yaml.safe_load_all(_MANIFEST.read_text()) if d and d["kind"] == "Deployment")
+        want = hashlib.sha256(_cm["data"]["langfuse_exporter.py"].encode()).hexdigest()
+        got = deploy["spec"]["template"]["metadata"]["annotations"]["openbank.io/script-sha256"]
+        self.assertEqual(got, want, "update openbank.io/script-sha256 so the exporter pod restarts")
 
 
 if __name__ == "__main__":

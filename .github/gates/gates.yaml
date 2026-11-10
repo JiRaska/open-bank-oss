@@ -7451,6 +7451,21 @@ gates:
       python3 -m unittest openbank-infra/scripts/check_argocd_sync_integrity_test.py
       python3 .github/scripts/check-argocd-sync-integrity.py --check-wiring
 
+  # The Langfuse -> Prometheus bridge broke silently on the Langfuse 4.50 upgrade: its metrics
+  # query answered 400 (high-cardinality `userId` needs per-day queries with a row limit), and
+  # langfuse_up stayed 0 until LangfuseExporterDown fired. The script ships inside a ConfigMap,
+  # so this suite is the only thing that exercises it before it reaches the cluster.
+  - id: langfuse-exporter-unit-test
+    name: "the Langfuse -> Prometheus bridge still parses, counts and rolls its pod (enforced)"
+    group: gitops
+    budget_seconds: 30
+    mode: enforced
+    selftest_exempt: "is-a-test-suite — the run: exercises the exporter script loaded from its ConfigMap"
+    rationale: "The exporter's script ships in a ConfigMap and its test file was never run by CI; a Langfuse API change then broke FinOps AI-cost metrics with nothing red before the alert."
+    review_after: "2027-02-10"
+    run: |
+      python3 -m unittest openbank-infra/scripts/langfuse_exporter_test.py
+
   # Audit Top-50 follow-ups (2026-09-03, docs/audit-2026-09-03-top50.md).
   # no-epoch-instant-default: an `Instant = Instant.EPOCH` default on a field meaning "when did
   # this happen" is a lie every test agrees with — isNotNull() passes against 1970-01-01 (#3882),
