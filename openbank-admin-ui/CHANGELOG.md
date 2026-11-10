@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.0...admin-ui-v4.10.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **admin-ui:** address sanctions-service by its in-cluster Service name ([#15509](https://github.com/JiRaska/open-bank-oss/issues/15509)) ([5755a73](https://github.com/JiRaska/open-bank-oss/commit/5755a736035191bb17aaa7b9db1da0d81fe95e4e))
+
 ## [4.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.9.1...admin-ui-v4.10.0) (2026-11-10)
 
 
