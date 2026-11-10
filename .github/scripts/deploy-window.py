@@ -113,7 +113,9 @@ def flush_candidates(prs: list[dict], now: int, last_deploy: int | None | dict[s
         return []
     # An armed PR marked `stuck` (cannot merge: conflict or failed check, #14498) no longer holds
     # its kind; stuck_armed() names it so the workflow disarms it before arming a successor.
-    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and not (p.get("armed") and p.get("stuck"))]
+    # An UNARMED stuck PR is excluded too: re-arming it only for the next run to disarm it again
+    # is a loop that never deploys (2026-11-09, #15411 armed/disarmed for 5h while DIRTY).
+    deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and not p.get("stuck")]
     armed_kinds = {_kind(p["head"]) for p in deploy if p.get("armed")}
     pending = sorted((p for p in deploy if not p.get("armed") and _kind(p["head"]) not in armed_kinds),
                      key=lambda p: (p["created_at"], p["number"]))
@@ -156,6 +158,11 @@ def flush(prs: list[dict], now: int, last_deploy: int | None | dict[str, int | N
 STUCK_CONCLUSIONS = {"FAILURE", "TIMED_OUT"}
 
 
+def is_conflicted(view: dict) -> bool:
+    """view: `gh pr view --json mergeStateStatus`."""
+    return view.get("mergeStateStatus") == "DIRTY"
+
+
 def is_stuck(view: dict) -> bool:
     """view: `gh pr view --json mergeStateStatus,statusCheckRollup`."""
     if view.get("mergeStateStatus") == "DIRTY":
@@ -167,6 +174,16 @@ def is_stuck(view: dict) -> bool:
 def stuck_armed(prs: list[dict]) -> list[dict]:
     """Armed deploy PRs that cannot merge; each freezes its kind until disarmed (#14498)."""
     return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("armed") and p.get("stuck")]
+
+
+def conflicted(prs: list[dict]) -> list[dict]:
+    """Deploy PRs in merge conflict with main: a derived artifact that can never merge.
+
+    Nothing resolves a deploy PR's conflict, and resolving it by hand would re-derive pins
+    without the producer's checks. Close it instead: the scheduled reconcile derives lag from
+    the pins on main and re-offers each of its services from current main.
+    """
+    return [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES) and p.get("conflicted")]
 
 
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
@@ -432,6 +449,17 @@ def self_test() -> int:
     check("a stuck armed PR is named for disarming", [p["number"] for p in stuck_armed(prs + [stuck])] == [13])
     roll = lambda *cs: {"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"conclusion": c} for c in cs]}
     check("a merge conflict is stuck", is_stuck({"mergeStateStatus": "DIRTY", "statusCheckRollup": []}))
+    check("a merge conflict is conflicted", is_conflicted({"mergeStateStatus": "DIRTY"}))
+    check("a failed check is not a conflict",
+          not is_conflicted({"mergeStateStatus": "BLOCKED", "statusCheckRollup": [{"conclusion": "FAILURE"}]}))
+    # #15411: an UNARMED conflicted PR was offered, armed, disarmed next run, offered again.
+    dirty = {"number": 15, "head": DEPLOY_PREFIXES[0] + "dirty", "created_at": "2026-09-30T09:00:00Z",
+             "armed": False, "stuck": True, "conflicted": True}
+    check("an unarmed stuck PR is never offered for arming",
+          flush_candidates([dirty], T, None, W) == [])
+    check("a conflicted deploy PR is named for closing", [p["number"] for p in conflicted([dirty])] == [15])
+    check("a merely stuck (failed check) PR is not closed",
+          conflicted([{**dirty, "conflicted": False}]) == [])
     check("a FAILURE check is stuck", is_stuck(roll("SUCCESS", "FAILURE")))
     check("a TIMED_OUT check is stuck", is_stuck(roll("TIMED_OUT")))
     check("a single CANCELLED check is NOT stuck", not is_stuck(roll("SUCCESS", "CANCELLED")))
@@ -624,7 +652,8 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
-    sub.add_parser("stuck", help="stdin: gh pr view --json mergeStateStatus,statusCheckRollup; prints true/false")
+    st = sub.add_parser("stuck", help="stdin: gh pr view --json mergeStateStatus,statusCheckRollup; prints true/false")
+    st.add_argument("--conflicted", action="store_true", help="only a merge conflict with main counts")
     sel = sub.add_parser("select", help="arm-candidate fall-through: verify + supersede per kind")
     sel.add_argument("--root", default=".")
     sel.add_argument("--candidates", required=True, help="space-separated number:head pairs from flush")
@@ -656,6 +685,11 @@ def main() -> int:
         # number:head pairs in order; the workflow falls through to the next on a hold refusal.
         if stuck:
             print(f"disarm={' '.join(str(p['number']) for p in stuck)}")
+        dirty = conflicted(prs)
+        for p in dirty:
+            print(f"::warning::deploy window: deploy PR #{p['number']} conflicts with main; closing it so reconcile re-offers its services", file=sys.stderr)
+        if dirty:
+            print(f"close={' '.join(str(p['number']) for p in dirty)}")
         print("candidates=" + " ".join(f"{p['number']}:{p['head']}" for p in cands))
         return 0
     if a.cmd == "carry":
@@ -664,7 +698,11 @@ def main() -> int:
             print(f"  [carried] {line}")
         return 0
     if a.cmd == "stuck":
-        print("true" if is_stuck(json.load(sys.stdin)) else "false")
+        view = json.load(sys.stdin)
+        if a.conflicted:
+            print("true" if is_conflicted(view) else "false")
+        else:
+            print("true" if is_stuck(view) else "false")
         return 0
     if a.cmd == "select":
         repo = os.environ["GITHUB_REPOSITORY"]

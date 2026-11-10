@@ -987,6 +987,42 @@ class ResolveReconcileSourceTest(unittest.TestCase):
                 "https://api.github.test",
             )
 
+    def test_partial_resolution_reports_unresolved_instead_of_failing(self):
+        # No candidate run proves the service: with `unresolved` the caller gets the miss as a
+        # per-service fact; without it the same history is still a batch refusal.
+        def fake_urlopen(request, timeout):
+            del timeout
+            if urlsplit(request.full_url).path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": []})
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        unresolved: list[str] = []
+        with patch.object(MODULE, "urlopen", fake_urlopen):
+            resolved = MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test",
+                unresolved=unresolved,
+            )
+            self.assertEqual(resolved, {})
+            self.assertEqual(unresolved, [SERVICE])
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.resolve_reconcile_service_sources(
+                    [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test",
+                )
+
+    def test_partial_resolution_still_refuses_api_failure(self):
+        def fail_urlopen(_request, timeout):
+            del timeout
+            raise URLError("unavailable")
+
+        with (
+            patch.object(MODULE, "urlopen", fail_urlopen),
+            self.assertRaises(MODULE.VerificationError),
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE], self.TIP, REPOSITORY, "fixture-token", "https://api.github.test",
+                unresolved=[],
+            )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
