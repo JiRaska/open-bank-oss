@@ -42,6 +42,9 @@ interface GitHubMetricsPort {
 
 interface FindingRepository {
     suspend fun save(finding: DevOpsFinding): DevOpsFinding
+
+    /** Atomically insert an advisory once; retain the entire existing HITL lifecycle on conflict. */
+    suspend fun saveAdvisoryIfAbsent(finding: DevOpsFinding): DevOpsFinding
     suspend fun findActive(): List<DevOpsFinding>
     suspend fun findById(id: String): DevOpsFinding?
     suspend fun update(finding: DevOpsFinding): DevOpsFinding

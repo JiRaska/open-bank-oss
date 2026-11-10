@@ -2,9 +2,10 @@
 import React from 'react'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parse as parseYaml } from 'yaml'
+import { navigationAreas } from '@/lib/navigation/catalog'
 import { Sidebar } from '@/components/layout/Sidebar'
 import { DomainOwnershipProvider, type DomainOwnership } from '@/components/layout/DomainOwnershipContext'
 import { DOMAIN_GROUPS, domainLabel, isDomainId } from '@/lib/governance/domains'
@@ -14,7 +15,7 @@ import { readSidebarDestinations } from '../../e2e/helpers/navigation-inventory'
 
 const state = vi.hoisted(() => ({ language: 'en' as 'en' | 'cs', roles: ['ROLE_ADMIN'], pathname: '/dashboard' }))
 vi.mock('next/navigation', () => ({ usePathname: () => state.pathname }))
-vi.mock('next-auth/react', () => ({ useSession: () => ({ data: { user: { roles: state.roles } } }) }))
+vi.mock('next-auth/react', () => ({ useSession: () => ({ data: { user: { id: 'domain-test', roles: state.roles } } }) }))
 vi.mock('@/lib/i18n/LanguageContext', () => ({
   useLanguage: () => ({ language: state.language, t: (cs: string, en: string) => state.language === 'cs' ? cs : en }),
 }))
@@ -41,7 +42,13 @@ function destinations() {
     .map(link => link.getAttribute('href')))].sort()
 }
 
+function selectArea(label: string) {
+  fireEvent.click(screen.getByRole('button', { name: /Workspace area|Pracovní oblast/ }))
+  fireEvent.click(within(document.getElementById('navigation-areas')!).getByRole('button', { name: label, exact: true }))
+}
+
 beforeEach(() => {
+  localStorage.clear()
   state.language = 'en'
   state.roles = [ROLES.ADMIN]
   state.pathname = '/dashboard'
@@ -82,24 +89,37 @@ describe('sidebar business-domain ownership', () => {
       ['/document-templates', 'openbank-document-service'],
       ['/regulatory', 'openbank-finrep-service'],
     ]
+    const expectedByDomain = new Map<string, string[]>()
     for (const [href, module] of examples) {
-      const region = screen.getByRole('region', { name: domainLabel(ownershipByModule[module], language) })
-      expect(within(region).getAllByRole('link').map(link => link.getAttribute('href')), href).toContain(href)
+      const label = domainLabel(ownershipByModule[module], language)
+      expectedByDomain.set(label, [...(expectedByDomain.get(label) ?? []), href])
+    }
+    for (const [label, hrefs] of expectedByDomain) {
+      selectArea(label)
+      const region = screen.getByRole('region', { name: label })
+      const renderedHrefs = within(region).getAllByRole('link').map(link => link.getAttribute('href'))
+      for (const href of hrefs) expect(renderedHrefs, href).toContain(href)
     }
     const labels = screen.getAllByRole('region').map(region => region.getAttribute('aria-label'))
     expect(labels).toEqual(DOMAIN_GROUPS.map(domain => domainLabel(domain, language)).filter(label => labels.includes(label)))
-  })
+  }, 15_000)
 
   it('retains every inventoried destination for the declared role union', () => {
     state.roles = Object.values(ROLES).filter(role => role !== ROLES.DEMO)
     mount()
-    expect(destinations()).toEqual([...new Set(readSidebarDestinations().map(item => item.href))].sort())
+    const found = new Set(destinations())
+    for (const area of navigationAreas(state.roles, sourceOwnership)) {
+      selectArea(area.nameEn)
+      for (const href of destinations()) found.add(href)
+    }
+    expect([...found].sort()).toEqual([...new Set(readSidebarDestinations().map(item => item.href))].sort())
     expect(screen.queryByRole('region', { name: 'Unclassified', exact: true })).not.toBeInTheDocument()
   })
 
   it('uses reviewed ownership updates without changing the route or access permission', () => {
     state.roles = [ROLES.VIEWER]
     mount({ ...sourceOwnership, account: 'wealth' })
+    selectArea(domainLabel('wealth', 'en'))
     const wealth = screen.getByRole('region', { name: domainLabel('wealth', 'en') })
     expect(within(wealth).getByRole('link', { name: 'Accounts', exact: true })).toHaveAttribute('href', '/accounts')
     expect(screen.queryByRole('region', { name: domainLabel('pensions', 'en') })).not.toBeInTheDocument()
@@ -111,8 +131,10 @@ describe('sidebar business-domain ownership', () => {
     ['/cards', 'Cards', 'card-issuance', 'card-processing'],
   ])('follows the exact owning service for %s even when a sibling currently shares its domain', (href, label, owner, sibling) => {
     mount({ ...sourceOwnership, [owner]: 'wealth', [sibling]: 'treasury' })
+    selectArea(domainLabel('wealth', 'en'))
     const owningRegion = screen.getByRole('region', { name: domainLabel('wealth', 'en') })
     expect(within(owningRegion).getByRole('link', { name: label, exact: true })).toHaveAttribute('href', href)
+    selectArea(domainLabel('treasury', 'en'))
     const siblingRegion = screen.getByRole('region', { name: domainLabel('treasury', 'en') })
     expect(within(siblingRegion).queryByRole('link', { name: label, exact: true })).not.toBeInTheDocument()
   })
@@ -121,6 +143,7 @@ describe('sidebar business-domain ownership', () => {
     const ownership = { ...sourceOwnership }
     delete ownership.account
     mount(ownership)
+    selectArea(domainLabel('unclassified', 'en'))
     const unknown = screen.getByRole('region', { name: domainLabel('unclassified', 'en') })
     expect(within(unknown).getByRole('link', { name: 'Accounts', exact: true })).toHaveAttribute('href', '/accounts')
     const platform = screen.queryByRole('region', { name: domainLabel('platform', 'en') })
@@ -130,14 +153,14 @@ describe('sidebar business-domain ownership', () => {
   it('does not expand role access when business links are regrouped', () => {
     state.roles = [ROLES.RISK]
     mount()
-    const original = destinations()
+    const original = navigationAreas(state.roles, sourceOwnership).flatMap(area => area.items.map(item => item.href)).sort()
     expect(original).toContain('/balance-sheet/snapshots')
     expect(original).not.toContain('/balance-sheet/ledger-backfill')
     expect(original).not.toContain('/treasury/deals/new')
     expect(original).not.toContain('/pension')
     cleanup()
     mount(Object.fromEntries(Object.keys(sourceOwnership).map(module => [module, 'wealth'])) as DomainOwnership)
-    expect(destinations()).toEqual(original)
+    expect(navigationAreas(state.roles, Object.fromEntries(Object.keys(sourceOwnership).map(module => [module, 'wealth'])) as DomainOwnership).flatMap(area => area.items.map(item => item.href)).sort()).toEqual(original)
     expect(screen.queryByRole('region', { name: domainLabel('pensions', 'en') })).not.toBeInTheDocument()
   })
 

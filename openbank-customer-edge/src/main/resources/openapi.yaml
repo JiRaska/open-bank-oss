@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.90.0
+  version: 1.91.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -123,6 +123,11 @@ paths:
       description: OFF and inactive chapters are absent. Beta is a presentation hint, not a privileged entitlement. No marketing consent is required for an opened game.
       security: [{customerOidc: []}]
       parameters:
+        - in: query
+          name: contentSchema
+          required: false
+          description: Set to 1 only if the app can validate and play remotely authored course content. Legacy clients receive bundled chapters only.
+          schema: {type: integer, minimum: 0, maximum: 1, default: 0}
         - {name: beta, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
@@ -7023,6 +7028,162 @@ components:
           type: array
           maxItems: 30
           items: {$ref: '#/components/schemas/CustomerGameLevel'}
+    GameCourse:
+      type: object
+      description: Version 1 playable course. Unknown engine themes require an app release. The mobile engine validates before play and retains its last known configuration offline.
+      required: [id, theme, ground, platforms, coins, vampires, bats, piggies, shields, vaultX, levelEnd]
+      properties:
+        schema: {type: integer, enum: [1], default: 1}
+        id: {type: string, pattern: '^[a-z][a-z0-9_]{0,63}$'}
+        theme: {type: string, enum: [embankment, rooftops, charles_bridge]}
+        vaultX: {type: number, minimum: 0, maximum: 50000}
+        levelEnd: {type: number, minimum: 1000, maximum: 50000}
+        pickpocketBoss: {type: boolean, default: false}
+        paperworkBossX: {type: number, nullable: true, minimum: 0, maximum: 50000}
+        piggies: {type: array, maxItems: 200, items: {type: number, minimum: 0, maximum: 50000}}
+        ground:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        platforms:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        coins:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        vampires:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bats:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        shields:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        slopes:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        thieves:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        dropZones:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        rooftopObjects:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        pigeons:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bridgePlatforms:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
+        bridgeTraps:
+          type: array
+          maxItems: 200
+          items:
+            type: object
+            maxProperties: 16
+            additionalProperties:
+              oneOf:
+                - {type: number, minimum: -50000, maximum: 50000}
+                - {type: boolean}
+                - {type: string, maxLength: 64}
     CustomerGameLevel:
       type: object
       required: [id, theme, order, titleCs, titleEn, state, unlocked, completed]
@@ -7034,6 +7195,7 @@ components:
         titleEn: {type: string, minLength: 1, maxLength: 80}
         state: {type: string, enum: [OFF, BETA, LIVE]}
         requirement: {$ref: '#/components/schemas/GameRequirement'}
+        content: {$ref: '#/components/schemas/GameCourse'}
         unlocked: {type: boolean}
         completed: {type: boolean}
     BusinessPaymentBatchDraftItem:

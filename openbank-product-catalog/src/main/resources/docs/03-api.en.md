@@ -189,6 +189,13 @@ copy or invalid signature fails closed (no evaluation, no posting), each counted
 revision); the catalog is a publication authority, never a dependency on
 the posting path. The API contract version is 2.9.0; the change is additive.
 
+In `openbao` mode the catalog logs in with Kubernetes auth role `product-catalog-ir-signing` as
+its own ServiceAccount `product-catalog`, and reaches OpenBao only over TLS
+(`https://openbao.vault.svc:8203`). `openbank.catalog.ir-signing.openbao.ca-file` names the PEM
+CA it trusts for that connection (the deployment points it at the private CA of `internal-tls`);
+unset, the JVM default trust store applies. The Transit key, policy and role are provisioned by
+runbook 0027, section "Product IR signing".
+
 ### Linting a product IR (ADR-0352 phase 5b)
 
 `POST /api/v2/product-ir/lint` is the server-side dry run behind the Studio IR editor. The body is `{"ir": {...}}`, a Product IR v1 document exactly as it would be sent as a revision's `behaviour`. The endpoint applies the same trusted-profile bound and the same shared `ProductIrParser` as a revision write, so the editor cannot accept an IR the write would refuse, nor refuse one it would accept. It stores, signs and publishes nothing.

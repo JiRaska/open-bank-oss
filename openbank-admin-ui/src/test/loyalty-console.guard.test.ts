@@ -104,15 +104,16 @@ describe('the legal section stays honest about what is not settled', () => {
 
 describe('the lifecycle diagram parses as Mermaid and avoids the two label traps', () => {
   // Parsed with the same mermaid the console renders with, so this is not a convention check
-  // dressed up as a verification. The probe is held to a known-positive first: the three forms
-  // below are the ones this repository has actually been broken by, and mermaid must reject all
-  // three or the parse assertion under them proves nothing. An earlier version of this probe used
-  // `A[Outbox @Scheduled every 5s]`, which mermaid ACCEPTS — so it would have reported a clean
-  // parse while being unable to detect the defect it was written for.
+  // dressed up as a verification. The probe is held to a known-positive first: mermaid must reject
+  // every form below or the parse assertion under them proves nothing. The set tracks the installed
+  // mermaid, not history: up to 12.2 a bare `@` inside a bracketed label (`A[@Scheduled]`) was a
+  // parse error, and 12.3 accepts it, so keeping those forms here would make this probe vacuous.
+  // What still breaks a parse in 12.3 is the `@{...}` node-metadata shorthand with an invalid
+  // body, a literal `;` in a sequence message, and an unbalanced bracket.
   const TRAPS = [
-    'graph TD\n  outbox[Outbox<br/>Dispatcher<br/>@Scheduled every 5s] --> db[(DB)]\n',
+    'graph LR\n  A@{ shape: nope } --> B\n',
     'sequenceDiagram\n  A->>B: do it; then stop\n',
-    'graph LR\n  A[@Scheduled] --> B[x]\n',
+    'graph LR\n  A[open --> B\n',
   ]
 
   // Loading mermaid is slow enough to exceed the default 5s timeout when the whole suite runs
@@ -161,7 +162,7 @@ describe('the console route and its permission agree', () => {
   })
 
   it('the sidebar entry and the route table name the same path and permission', () => {
-    const sidebar = read('components/layout/Sidebar.tsx')
+    const sidebar = read('lib/navigation/catalog.ts')
     expect(sidebar).toMatch(/href: '\/loyalty',\s+icon: Leaf,\s+permission: 'loyalty:view'/)
     expect(read('lib/auth/roles.ts')).toMatch(/\['loyalty:view', \['\/loyalty'\]\]/)
   })

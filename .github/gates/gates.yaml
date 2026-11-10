@@ -90,6 +90,21 @@ gates:
     run: |
       python3 .github/scripts/check-capacity-profile.py --root .
 
+  - id: verification-metadata-additive-check
+    name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
+    group: supplychain
+    mode: enforced
+    rationale: "The privileged workflow_run push trusts this validator with an artifact produced by a build that ran the bump's own plugins. Its self-test must stay red-reachable on every PR, not first run after merge, and main's own file must still parse under its strict rules or every refresh would be refused."
+    review_after: "2027-05-09"
+    budget_seconds: 30
+    # main pins ~7,000 artifacts; a count near zero means the parse or the path broke.
+    min_subjects: 1000
+    selftest: python3 .github/scripts/check-verification-metadata-additive.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-verification-metadata-additive.py"]
+    run: |
+      python3 .github/scripts/check-verification-metadata-additive.py gradle/verification-metadata.xml gradle/verification-metadata.xml
+
   - id: test-intelligence-ecosystem
     name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
     group: kotlin
@@ -1317,17 +1332,16 @@ gates:
       loaded, health=ok and promtool-clean for the whole 8h40m it failed to fire.
     review_after: "2027-02-28"
     min_subjects: 2   # 2 test files today; grows with each alert given a behavioural test
-    env:
-      PROMETHEUS_VERSION: "3.14.0"
-      PROMETHEUS_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"
-    # `install-promtool.sh` pins promtool (PROMETHEUS_VERSION lives in this gate's env: below,
-    # so a version bump is a gates.yaml change and re-falsifies universally) and run.sh IS the
+    # `install-promtool.sh` installs promtool at the version and sha256 pinned in
+    # ci/artifacts.lock (#15216; the lock is a selftest input, so a bump re-falsifies) and run.sh IS the
     # harness under test. The PrometheusRule manifests are NOT inputs to the falsification:
     # measured 2026-09-02, corrupting the LogQL in prometheus-rules-accounting-day.yaml leaves
     # the self-test verdict unchanged -- see the reason assertion below for why that used to be
     # true for the wrong reason, and no longer is.
     selftest_inputs:
       - ".github/scripts/install-promtool.sh"
+      - ".github/scripts/fetch-artifact.py"
+      - "ci/artifacts.lock"
       - "openbank-infra/tests/promtool/run.sh"
     selftest: |
       bash .github/scripts/install-promtool.sh
@@ -3233,6 +3247,28 @@ gates:
   # known-positive plus the known-negatives; this gate keeps the workflow invoking the script
   # and refuses an inline `listWorkflowRuns`, so the decision cannot quietly move back to where
   # nothing can falsify it.
+  # The merge train can run on schedule and merge NOTHING for hours (2026-11-09, three times, each
+  # noticed by a human). The watch keeps one issue naming the systemic cause; this gate holds its
+  # decision logic to a falsified self-test and its wiring (workflow_run on the train, --write, label).
+  - id: merge-train-stall-watch-declaration
+    name: "merge-train throughput stall watch is falsified and wired to the train (enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 10   # <1s measured; offline, three files read
+    review_after: "2027-05-09"
+    rationale: >-
+      Existing controls prove train runs happen and flag PRs told of a refusal, but nothing alerts
+      on "armed PRs, runs happening, no merge". The watch's decisions (threshold, systemic grouping,
+      could-not-look, idempotent issue) are unreachable except on a real stall, so the self-test is
+      the only executor of the failure path. Re-examine if the train itself publishes a throughput SLO.
+    min_subjects: 1
+    selftest: |
+      python3 .github/scripts/merge-train-stall-watch.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/merge-train-stall-watch.py", ".github/workflows/merge-train-stall-watch.yml", ".github/labels.yml", ".github/workflows/merge-train.yml"]
+    run: |
+      python3 .github/scripts/merge-train-stall-watch.py --check-declaration
+
   - id: auto-deploy-red-watch-declaration
     name: "auto-deploy red watch reads the scheduled lane only, via a falsified script (issue #9130, enforced)"
     group: registry
@@ -5895,11 +5931,49 @@ gates:
     review_after: "2027-02-13"
     selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-helm-values-keys.py"]
+    selftest_inputs: [".github/scripts/check-helm-values-keys.py", ".github/scripts/fetch-artifact.py", "ci/artifacts.lock"]
     min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
     budget_seconds: 180
     run: |
       python3 .github/scripts/check-helm-values-keys.py
+
+  # #15216: ci/artifacts.lock is the one trust anchor for every external tool and chart CI
+  # fetches; fetch-artifact.py accepts bytes from any tier only when they match its sha256.
+  - id: ci-artifact-lock-integrity
+    name: "ci/artifacts.lock is well-formed: unique names, sha256 digests, no latest (#15216, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "The resolver trusts whatever digest the lock states, so a missing or malformed sha256, a duplicated name or a latest tag would let unverified bytes run in CI while every fetch reports verified."
+    review_after: "2027-05-08"
+    budget_seconds: 30
+    min_subjects: 20   # 23 artifacts on 2026-11-08: gitleaks, promtool, 21 Helm charts
+    selftest_inputs:
+      - ".github/scripts/check-artifact-lock.py"
+      - ".github/scripts/fetch-artifact.py"
+      - ".github/scripts/fetch_artifact_test.py"
+    selftest: |
+      python3 -I .github/scripts/check-artifact-lock.py --self-test
+      python3 -I .github/scripts/fetch_artifact_test.py
+    selftest_expect: pass
+    run: |
+      python3 -I .github/scripts/check-artifact-lock.py
+
+  # #15216: downloads of lock-eligible upstreams must go through fetch-artifact.py.
+  # Advisory until rollout step 3 migrates the existing call sites; they print as known debt.
+  - id: ci-artifact-fetch-via-resolver
+    name: "CI downloads of GitHub Releases / *.github.io / OPA go through fetch-artifact.py (#15216, advisory)"
+    group: lint
+    mode: advisory
+    rationale: "A direct curl or helm pull trusts whatever bytes arrive and turns an upstream outage into a red required check; on 2026-11-08 GitHub Releases 504s reddened Gitleaks and helm-values-key-effect with no change at fault."
+    review_after: "2027-02-08"
+    verified: "2026-11-08 — 11 direct downloads remain after PR 1 migrated gitleaks (secret-scan.yml), promtool and the helm-values charts: cosign x5, opa x3, oasdiff x2, gitleaks in public-readiness.yml; all #15216 rollout step 3 debt"
+    budget_seconds: 30
+    min_subjects: 300   # 735 files under .github/ on 2026-11-08
+    selftest_inputs: [".github/scripts/check-artifact-fetch-via-resolver.py"]
+    selftest: python3 -I .github/scripts/check-artifact-fetch-via-resolver.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 -I .github/scripts/check-artifact-fetch-via-resolver.py
 
   # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
   # threat model. stdlib-only gate, ratchets coverage (a new money-path
@@ -6861,7 +6935,10 @@ gates:
     mode: enforced
     selftest: bash .github/scripts/check-governance-manifest.sh --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-governance-manifest.sh"]
+    # The self-test runs admin-ui's own node modules, so a lockfile bump is a change to this gate's
+    # code: without the lockfile here, mermaid 12.3 (#15330) skipped the self-test on its PR and made
+    # it vacuous on main instead (#15383).
+    selftest_inputs: [".github/scripts/check-governance-manifest.sh", "openbank-admin-ui/package-lock.json"]
     min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
     run: |
       bash .github/scripts/check-governance-manifest.sh
@@ -6883,7 +6960,10 @@ gates:
     review_after: "2027-02-19"
     selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-mermaid-parses.sh"]
+    # The self-test runs admin-ui's own node modules, so a lockfile bump is a change to this gate's
+    # code: without the lockfile here, mermaid 12.3 (#15330) skipped the self-test on its PR and made
+    # it vacuous on main instead (#15383).
+    selftest_inputs: [".github/scripts/check-mermaid-parses.sh", "openbank-admin-ui/package-lock.json"]
     min_subjects: 220   # 362 diagrams today (2026-08-22): 248 ```mermaid blocks + 114 .mmd files (#6495)
     run: |
       bash .github/scripts/check-mermaid-parses.sh

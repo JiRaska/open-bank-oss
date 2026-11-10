@@ -120,10 +120,18 @@ class GitHubProposalAdapterTest {
     private var lastIssueRequestBody: String? = null
 
     /** GitHub Issues stub: GET lists what `openIssues` holds, POST creates and echoes an html_url. */
-    private fun startIssuesStub(openIssues: List<Map<String, String>> = emptyList(), createStatus: Int = 201): String {
+    private fun startIssuesStub(
+        openIssues: List<Map<String, String>> = emptyList(),
+        createStatus: Int = 201,
+        requireUserAgent: Boolean = false,
+    ): String {
         val srv = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         srv.createContext("/repos/test-owner/test-repo/issues") { ex: HttpExchange ->
             requestsSeen.incrementAndGet()
+            if (requireUserAgent && ex.requestHeaders.getFirst("User-Agent").isNullOrBlank()) {
+                respond(ex, 403, """{"message":"User agent required"}""")
+                return@createContext
+            }
             when (ex.requestMethod) {
                 "GET" -> {
                     val query = ex.requestURI.rawQuery.orEmpty().split('&').associate {
@@ -181,6 +189,17 @@ class GitHubProposalAdapterTest {
         adapter.allowedHosts = listOfNotNull(server?.let { "stub.test:${it.address.port};http;private" })
         adapter.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         return adapter
+    }
+
+    @Test
+    fun `ticket delivery satisfies the GitHub User-Agent requirement`() {
+        val baseUrl = startIssuesStub(requireUserAgent = true)
+        val adapter = adapterFor(configWithToken(baseUrl, Optional.of("fine-grained-test-token")))
+
+        val url = runBlocking { adapter.openTicket(ticketOnlyFinding, "Human triage is required") }
+
+        assertThat(url).isEqualTo("https://github.com/test-owner/test-repo/issues/4242")
+        assertThat(requestsSeen.get()).isEqualTo(2)
     }
 
     @Test

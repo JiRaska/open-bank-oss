@@ -175,6 +175,9 @@ def generate(repo, output, env, extra_arguments=()):
                 'GITHUB_DEPENDENCY_GRAPH_JOB_ID', 'GITHUB_DEPENDENCY_GRAPH_JOB_CORRELATOR')
     if any(not env.get(key) for key in required):
         raise ValueError('missing dependency graph identity from setup-gradle')
+    plugin_version = env.get('DEPENDENCY_GRAPH_PLUGIN_VERSION', '')
+    if not re.fullmatch(r'\d+\.\d+\.\d+', plugin_version):
+        raise ValueError('DEPENDENCY_GRAPH_PLUGIN_VERSION must pin the dependency graph plugin (x.y.z)')
     if sha != env['GITHUB_DEPENDENCY_GRAPH_SHA']:
         raise ValueError('checkout and dependency graph SHA differ')
     source_ref = ('refs/heads/' + env['GITHUB_HEAD_REF']
@@ -204,7 +207,7 @@ def generate(repo, output, env, extra_arguments=()):
     expected = [f'shard-{i // PROJECTS_PER_SHARD:02}' for i in range(0, len(modules), PROJECTS_PER_SHARD)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
-                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
+                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': plugin_version,
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
     for i in range(0, len(modules), PROJECTS_PER_SHARD):

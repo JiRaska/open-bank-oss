@@ -31,21 +31,21 @@ import java.time.LocalDate
  * Reports lending-service's day-close participation to ledger-service (ADR-0342). The same shape
  * as interest-service's `InterestCloseParticipationScheduler`, which is the reference.
  *
- * Every tick re-offers the last [lookbackDays] completed accounting days. Lending's two posting
+ * Every tick refreshes the configured recovery window and the whole readiness month. Lending's two posting
  * jobs ([InterestAccrualScheduler], [ProvisioningCycleScheduler]) run on an INTERVAL, not a cron,
  * so both are due on every day on which they are switched on. Their `lending_close_job_run` rows
  * are folded by [CloseParticipationAssembler]: a due job with no row for the day means the day is
- * not reported at all and the ledger keeps it in CUTOFF — lending running late holds the close.
+ * explicitly REFUSED, revoking any earlier completion and keeping the close held.
  * Both switched off (`off`/`disabled`) is reported SKIPPED with that reason.
  *
- * Two more holds, both "not reported yet", never a guess:
+ * Other incomplete work also emits a stable REFUSED receipt:
  *  - **in flight** — a pass for the day has marked itself started and not finished, so an earlier
  *    RAN row may be about to change (a pass running across midnight). A marker older than
  *    [LendingCloseJobs.staleAfter] is a pass that died: that job is reported REFUSED `pass started and never completed`,
  *    so a crash cannot hold the day unresolvably;
  *  - **allowance journals pending** — provisioning queues its allowance journals in the outbox, so the
- *    day waits until every `lending.allowance.posting` row for it has been delivered. SENT rows count as
- *    provisioning's journals; DEAD rows (the outbox gave up, e.g. on the ledger's closed-day 409) make
+ *    day waits until every `lending.allowance.posting` row for it has been delivered. Durable delivery receipts count as
+ *    provisioning's journals after ordinary SENT retention; DEAD rows (the outbox gave up, e.g. on the ledger's closed-day 409) make
  *    the day REFUSED.
  *
  * A report the ledger receives for a day it has already TIED_OUT or LOCKED is stored with `late = true`
@@ -116,22 +116,26 @@ class LendingCloseParticipationScheduler(
         val allDelivered: Boolean get() = delivered == attempted
     }
 
-    /** Report every completed day in `[today - lookbackDays, today - 1]`. Visible for tests. */
+    /** Refresh completed days across the recovery window and the readiness month. Visible for tests. */
     fun reportDays(today: LocalDate): Uni<TickResult> {
-        val from = today.minusDays(lookbackDays)
+        val from = CloseParticipationAssembler.reportingFrom(today, lookbackDays)
         val to = today.minusDays(1)
         val days = generateSequence(from) { it.plusDays(1) }.takeWhile { it <= to }.toList()
-        return evidence.findBetween(from, to).flatMap { runs ->
-            evidence.inFlightBetween(from, to).flatMap { inFlight ->
-                Multi.createFrom().iterable(days)
-                    .onItem().transformToUniAndConcatenate { day -> assemble(day, runs, inFlight) }
-                    .collect().asList()
-                    .flatMap { assembled ->
-                        Multi.createFrom().iterable(assembled.filterNotNull())
-                            .onItem().transformToUniAndConcatenate { reporter.report(it) }
-                            .collect().asList()
-                    }
-                    .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+        return evidence.requiredJobs(from, to, days.associateWith { dueJobs() }).flatMap { required ->
+            evidence.findBetween(from, to).flatMap { runs ->
+                evidence.inFlightBetween(from, to).flatMap { inFlight ->
+                    Multi.createFrom().iterable(days)
+                        .onItem().transformToUniAndConcatenate { day ->
+                            assemble(day, runs, inFlight, required[day].orEmpty())
+                        }
+                        .collect().asList()
+                        .flatMap { assembled ->
+                            Multi.createFrom().iterable(assembled.filterNotNull())
+                                .onItem().transformToUniAndConcatenate { reporter.report(it) }
+                                .collect().asList()
+                        }
+                        .map { results -> TickResult(attempted = results.size, delivered = results.count { it }) }
+                }
             }
         }
     }
@@ -140,13 +144,23 @@ class LendingCloseParticipationScheduler(
         day: LocalDate,
         runs: List<CloseJobRun>,
         inFlight: List<InFlightRun>,
+        required: Set<String>,
     ): Uni<CloseParticipationReport?> {
-        val due = dueJobs()
+        val due = required + runs.filter { it.businessDate == day }.map { it.job } +
+            inFlight.filter { it.businessDate == day }.map { it.job }
         val now = clock.instant()
         val flying = inFlight.filter { it.businessDate == day && it.job in due }
         if (flying.any { it.startedAt.plus(staleAfter).isAfter(now) }) {
-            log.infof("lending day-close for %s not reported: a pass for it is still in flight", day)
-            return Uni.createFrom().nullItem()
+            log.infof("lending day-close for %s refused: a pass for it is still in flight", day)
+            return Uni.createFrom().item(
+                CloseParticipationAssembler.incomplete(
+                    day,
+                    "Lending pass is still running",
+                    flying.map {
+                        it.toString()
+                    },
+                ),
+            )
         }
         // A marker past staleAfter is a pass that died: that job is REFUSED, never "still running".
         val abandoned = flying.map {
@@ -154,19 +168,10 @@ class LendingCloseParticipationScheduler(
         }
         val forDay = runs.filter { it.businessDate == day }
             .filterNot { run -> abandoned.any { it.job == run.job } } + abandoned
-        val provisioning = forDay.firstOrNull { it.job == LendingCloseJobs.PROVISIONING }
-        if (provisioning == null || LendingCloseJobs.PROVISIONING !in due) {
-            return Uni.createFrom().item(assembleOrLog(day, due, forDay))
-        }
         return evidence.postingsFor(day).map { postings ->
-            if (postings.pending > 0) {
-                log.infof(
-                    "lending day-close for %s not reported: %d allowance journal(s) still in the outbox",
-                    day,
-                    postings.pending,
-                )
-                return@map null
-            }
+            allowanceGap(day, postings, forDay)?.let { return@map it }
+            val provisioning = forDay.firstOrNull { it.job == LendingCloseJobs.PROVISIONING }
+                ?: return@map assembleOrLog(day, due, forDay)
             val folded = if (postings.dead > 0) {
                 val reasons = listOfNotNull(
                     provisioning.refusalReason?.let { "${provisioning.refused} $it" },
@@ -184,10 +189,28 @@ class LendingCloseParticipationScheduler(
         }
     }
 
-    private fun assembleOrLog(day: LocalDate, due: Set<String>, runs: List<CloseJobRun>): CloseParticipationReport? =
-        CloseParticipationAssembler.assemble(day, due, runs, skipReason = SKIP_REASON).also {
-            if (it == null) log.infof("lending day-close for %s not reported: a due job has not run", day)
+    private fun allowanceGap(
+        day: LocalDate,
+        postings: com.openbank.lending.application.port.out.AllowancePostings,
+        runs: List<CloseJobRun>,
+    ): CloseParticipationReport? {
+        val reason = when {
+            !postings.covered -> "ALLOWANCE_RECEIPTS_NOT_COVERED"
+            postings.pending > 0 -> "Lending allowance delivery is pending"
+            runs.none { it.job == LendingCloseJobs.PROVISIONING } && (postings.dead > 0 || postings.posted > 0) ->
+                "Allowance delivery has no completed provisioning source"
+            else -> return null
         }
+        return CloseParticipationAssembler.incomplete(day, reason, runs.map { it.toString() } + postings.toString())
+    }
+
+    private fun assembleOrLog(day: LocalDate, due: Set<String>, runs: List<CloseJobRun>): CloseParticipationReport? =
+        CloseParticipationAssembler.assemble(day, due, runs, skipReason = SKIP_REASON)
+            ?: CloseParticipationAssembler.incomplete(
+                day,
+                "Lending due job has not completed",
+                due.sorted() + runs.map { it.toString() },
+            )
 
     /** Interval jobs are due every day they are switched on. */
     internal fun dueJobs(): Set<String> = buildSet {

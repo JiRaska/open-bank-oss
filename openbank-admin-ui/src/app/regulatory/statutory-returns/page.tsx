@@ -11,7 +11,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { loadStatutoryReturns, type ReturnBreach, type ReturnCapability, type StatutoryReturn } from '@/components/regulatory/statutoryReturns'
 
-type Snapshot = { capability: ReturnCapability; returns: StatutoryReturn[]; breaches: ReturnBreach[] }
+type Snapshot = { capability: ReturnCapability; returns: StatutoryReturn[]; breaches: ReturnBreach[] | null }
 type State = { status: 'loading' } | { status: 'error'; kind: UnavailableKind } | { status: 'ready'; data: Snapshot }
 
 export default function StatutoryReturnsPage() {
@@ -45,7 +45,8 @@ export default function StatutoryReturnsPage() {
         </section>
         <section aria-labelledby="breaches-heading" className="card" style={{ padding: 20, marginBottom: 16 }}>
           <h2 id="breaches-heading">{t('Překročené termíny', 'Missed deadlines')}</h2>
-          {state.data.breaches.length === 0 ? <p>{t('API nehlásí žádný překročený termín.', 'The API reports no missed deadline.')}</p> :
+          {state.data.breaches === null ? <p role="status">{t('Kontrolu termínů nelze vyhodnotit: služba ji odmítla spočítat (např. není nastaven začátek reportingu). Nejde o potvrzení, že žádný termín nebyl překročen.', 'Deadline status cannot be evaluated: the service refused to compute it (for example, no reporting start is configured). This is not a confirmation that no deadline was missed.')}</p> :
+            state.data.breaches.length === 0 ? <p>{t('API nehlásí žádný překročený termín.', 'The API reports no missed deadline.')}</p> :
             <ul>{state.data.breaches.map(item =>
               <li key={`${item.catalogueId}/${item.returnCode}/${item.entityId}/${item.period}`}>
                 {item.returnCode} · {item.entityId} · {item.period} · {item.kind} · {t('termín', 'due')} {item.dueDate}

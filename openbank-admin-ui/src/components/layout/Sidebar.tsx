@@ -4,279 +4,18 @@
 
 'use client'
 
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { useInitialRoles } from '@/components/auth/InitialRolesContext'
-import {
-  Activity,
-  FilePlus,
-  FileSearch,
-  Gauge,
-  Handshake,
-  Inbox,
-  Landmark,
-  Wallet,
-  AlertOctagon,
-  ArrowLeftRight,
-  Banknote,
-  BarChart3,
-  Bell,
-  Bluetooth,
-  QrCode,
-  BookOpen,
-  Bot,
-  Boxes,
-  Bug,
-  ClipboardCheck,
-  ClipboardList,
-  Cloud,
-  CreditCard,
-  DollarSign,
-  FileCode,
-  FileSignature,
-  FileText,
-  Fingerprint,
-  Flag,
-  FlaskConical,
-  GitBranch,
-  Globe,
-  HeartPulse,
-  Layers,
-  LayoutDashboard,
-  Leaf,
-  Library,
-  Lock,
-  Map,
-  Megaphone,
-  MessageSquareWarning,
-  MessagesSquare,
-  Network,
-  Package,
-  PiggyBank,
-  Radar,
-  Receipt,
-  Repeat,
-  Scale,
-  ScanLine,
-  ScrollText,
-  Server,
-  Settings,
-  Share2,
-  Shield,
-  ShieldAlert,
-  ShieldCheck,
-  SlidersHorizontal,
-  Smartphone,
-  Store,
-  Target,
-  TrendingUp,
-  Users,
-  Waypoints,
-  Workflow,
-  Zap,
-  Building2,
-  Gift,
-  Gamepad2,
-  Undo2,
-} from 'lucide-react'
-import { hasPermission, Permission } from '@/lib/auth/roles'
+import { ChevronDown, Lock, Star, X as XIcon, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ALL_NAV, coreNav, currentNavigation, isNavLocked, navigationAreas, visibleNavigation, type NavItem } from '@/lib/navigation/catalog'
+import { useNavigationPreferences } from '@/lib/navigation/preferences'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { DOMAIN_GROUPS, domainLabel } from '@/lib/governance/domains'
 import { useDomainOwnership } from '@/components/layout/DomainOwnershipContext'
 import styles from './Sidebar.module.css'
-
-// `external: true` marks a destination that is NOT a Next.js route — today the
-// internal tool UIs served as sub-paths of this same host by their own Ingress
-// (ADR-0234). They must render as a plain <a>: a next/link would try a
-// client-side navigation into the App Router and 404, because no page.tsx backs
-// the path. Same origin, so the session cookie still rides along and the edge
-// gate can read it.
-// `deniedRole` mirrors the per-tool deny-list in src/app/api/gate/route.ts. The
-// gate is what ENFORCES it; this only decides how the entry renders, so a denied
-// tool shows as a disabled item with the demo-account tooltip instead of a live
-// link that 403s. A link that visibly fails reads as a broken platform, which for
-// the public demo account is the outcome worth avoiding.
-/** owner references an existing ServiceEntry.id; fleet membership and domains come from the catalog. */
-type NavItem = { owner?: string; nameCs: string; nameEn: string; href: string; icon: React.ElementType; permission?: Permission; lockedPermission?: Permission; deniedRole?: string; badge?: string; external?: boolean }
-
-// Static inventory chunks support route auditing; they do not assign business domains.
-// Rendering groups ALL_NAV by each destination owner in reviewed governance.
-const coreNav: NavItem[] = [
-  { nameCs: 'Přehled',      nameEn: 'Dashboard',    href: '/dashboard',    icon: LayoutDashboard },
-  { nameCs: 'Účty',         nameEn: 'Accounts',     href: '/accounts',     icon: CreditCard,      permission: 'accounts:view', owner: 'account' },
-  { nameCs: 'Transakce',    nameEn: 'Transactions', href: '/transactions', icon: ArrowLeftRight,  permission: 'transactions:view', owner: 'transaction' },
-  { nameCs: 'Hlavní kniha', nameEn: 'Ledger',       href: '/ledger',       icon: BookOpen,        permission: 'accounts:view', owner: 'ledger' },
-  { nameCs: 'Závěrky',      nameEn: 'Closings',     href: '/day-end',      icon: Scale,           permission: 'accounts:view', owner: 'ledger' },
-]
-
-const revenueNav: NavItem[] = [
-  { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view', owner: 'lending' },
-  { nameCs: 'Kreditní riziko', nameEn: 'Credit risk', href: '/lending/risk', icon: ShieldAlert, permission: 'lending:risk:view', owner: 'lending' },
-  { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view', owner: 'product-catalog' },
-]
-
-// #10618: risk-engine snapshots/curves and the lending ledger backfill, for the risk and finance
-// departments. Each entry carries the permission of the page it opens (roles.ts).
-const balanceSheetNav: NavItem[] = [
-  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view', owner: 'risk-engine' },
-  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view', owner: 'risk-engine' },
-  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view', owner: 'lending' },
-  { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view', owner: 'lending' },
-]
-
-// ADR-0334 / #12350: the pension back office — participant contracts and their queues
-// (openbank-pension-service) and fund administration (openbank-pension-fund-service).
-const pensionNav: NavItem[] = [
-  { nameCs: 'Penzijní smlouvy',     nameEn: 'Pension contracts',    href: '/pension',               icon: PiggyBank,  permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Sjednání a převody',   nameEn: 'Onboarding & transfers', href: '/pension/queues',      icon: Inbox,      permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Nespárované příspěvky', nameEn: 'Unmatched contributions', href: '/pension/contributions', icon: FileSearch, permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Státní příspěvky',     nameEn: 'State incentives',     href: '/pension/incentives',    icon: Gift,       permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Příkazy k úhradě',     nameEn: 'Contribution mandates', href: '/pension/mandates',    icon: Repeat,     permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Výplaty a úmrtí',      nameEn: 'Payouts & death claims', href: '/pension/payouts',     icon: Wallet,     permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Anuitní partneři',     nameEn: 'Annuity partners',     href: '/pension/annuity',       icon: Handshake,  permission: 'pension:view', owner: 'pension' },
-  { nameCs: 'Fondy a NAV',          nameEn: 'Funds & NAV',          href: '/pension/funds',         icon: Landmark,   permission: 'pension:view', owner: 'pension-fund' },
-  { nameCs: 'Strategie',            nameEn: 'Strategies',           href: '/pension/strategies',    icon: Scale,      permission: 'pension:view', owner: 'pension-fund' },
-  { nameCs: 'Podílové jednotky',    nameEn: 'Unit holdings',        href: '/pension/holdings',      icon: Layers,     permission: 'pension:view', owner: 'pension-fund' },
-]
-
-// ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
-// permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
-const treasuryNav: NavItem[] = [
-  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view', owner: 'treasury' },
-  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create', owner: 'treasury' },
-  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve', owner: 'treasury' },
-  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view', owner: 'treasury' },
-  { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view', owner: 'treasury' },
-  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view', owner: 'treasury' },
-  { nameCs: 'Nostro rekonciliace', nameEn: 'Nostro reconciliation', href: '/treasury/nostro',  icon: FileSearch, permission: 'treasury:nostro:read', owner: 'treasury' },
-]
-
-const customerNav: NavItem[] = [
-  { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view', owner: 'party' },
-  { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view', owner: 'kyc' },
-  { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view', owner: 'onboarding' },
-  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view', owner: 'pid' },
-  { nameCs: 'Firemní onboarding', nameEn: 'Business Onboarding', href: '/business-onboarding', icon: Building2, permission: 'business-onboarding:view', owner: 'kyb' },
-  { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view', owner: 'delegation' },
-]
-
-const paymentsNav: NavItem[] = [
-  { nameCs: 'Katalog produktů',  nameEn: 'Product Catalog',  href: '/product-catalog',   icon: Package,   permission: 'payments:view', owner: 'product-catalog' },
-  { nameCs: 'Produktové studio', nameEn: 'Product Studio',   href: '/product-studio',    icon: Boxes,     permission: 'catalog:read', owner: 'product-catalog' },
-  { nameCs: 'Lípa (věrnost)',    nameEn: 'Lípa (Loyalty)',   href: '/loyalty',           icon: Leaf,      permission: 'loyalty:view', owner: 'loyalty' },
-  { nameCs: 'Lví stezka — správa hry', nameEn: 'Lion Quest — game management', href: '/loyalty/game', icon: Gamepad2, permission: 'game:view', owner: 'loyalty' },
-  { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view', owner: 'sepa-payment' },
-  { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view', owner: 'standing-order' },
-  { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payment-rails:view', owner: 'sdd' },
-  { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view', owner: 'fx' },
-  { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payment-rails:view', owner: 'swift' },
-  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view', owner: 'card-issuance' },
-  { nameCs: 'Obchodníci',        nameEn: 'Merchants',        href: '/merchants',         icon: Store,     permission: 'transactions:view', owner: 'transaction' },
-  { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payment-rails:view', owner: 'clearing' },
-  { nameCs: 'Stav settlementu',  nameEn: 'Settlement status', href: '/settlements',     icon: Layers,    permission: 'settlements:view', owner: 'settlement' },
-  { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view', owner: 'interest' },
-  { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view', owner: 'document' },
-
-]
-
-const complianceNav: NavItem[] = [
-  { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view', owner: 'aml' },
-  { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view', owner: 'fraud' },
-  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view', owner: 'sanctions' },
-  { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view', owner: 'dispute' },
-  { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
-  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view', owner: 'campaign' },
-  { nameCs: 'MGM programy',        nameEn: 'MGM Programs',     href: '/campaigns/referrals', icon: Gift,                  permission: 'campaign:view', owner: 'referral' },
-  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view', owner: 'campaign' },
-  { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view', owner: 'consent' },
-  // ADR-0212 D4: four-eyes activation of jurisdictional credit compliance packs in lending.
-  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view', owner: 'lending' },
-  { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view', owner: 'audit' },
-  { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view', owner: 'finrep' },
-  // ADR-0286: warehouse-backed risk reporting via the governed query registry + embedded Grafana.
-  { nameCs: 'Reporting (DWH)',    nameEn: 'Reporting (DWH)',  href: '/reporting',         icon: BarChart3,             permission: 'compliance:view' },
-]
-
-const opsNav: NavItem[] = [
-  { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'pid:view', owner: 'pid' },
-  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view', owner: 'notification' },
-  // ADR-0285 D7 — how the bank speaks, for bots and staff alike. Inventory entries beside
-  // Notifications (what we send): both resolve to customer engagement through governance.
-  // The audience is the contact centre and back-office, not agent operators.
-  { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view', owner: 'communication' },
-  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:view', owner: 'notification' },
-  { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
-  { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
-]
-
-const docsNav: NavItem[] = [
-  { nameCs: 'Dokumentace',    nameEn: 'Docs Home',          href: '/docs',             icon: Library,     permission: 'docs:view' },
-  { nameCs: 'Dokumentace služeb', nameEn: 'Service Docs',   href: '/services',         icon: BookOpen,    permission: 'docs:view' },
-  { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
-  { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
-  { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
-  { nameCs: 'QR fotoaparátem', nameEn: 'Camera QR',        href: '/docs/spayd-uri',   icon: QrCode,     permission: 'docs:view' },
-  { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
-  { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
-  { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
-  { nameCs: 'Cluster & kontejner', nameEn: 'Cluster & Container', href: '/docs/cluster', icon: Boxes, permission: 'docs:view' },
-  { nameCs: 'Mapa služeb',    nameEn: 'Service Map',        href: '/docs/service-map', icon: Map,         permission: 'docs:view' },
-  { nameCs: 'Datová lineage', nameEn: 'Data Lineage',       href: '/docs/lineage',     icon: Waypoints,   permission: 'docs:view' },
-  { nameCs: 'BPMN',           nameEn: 'BPMN',               href: '/docs/bpmn',        icon: FileCode,    permission: 'docs:view' },
-  { nameCs: 'Katalog API',    nameEn: 'API Catalog',        href: '/docs/api',         icon: FileCode,    permission: 'docs:view' },
-  { nameCs: 'Feature flagy',  nameEn: 'Feature Flags',      href: '/docs/flags',       icon: Flag,        permission: 'docs:view' },
-  { nameCs: 'Compliance',     nameEn: 'Compliance',         href: '/docs/compliance',  icon: Shield,      permission: 'compliance:view' },
-  { nameCs: 'BCP',            nameEn: 'BCP',                href: '/docs/bcp',         icon: ShieldAlert, permission: 'compliance:view' },
-]
-
-const platformNav: NavItem[] = [
-  // Test evidence is a first-class platform capability. Keeping the only link
-  // near the bottom of System made an implemented route effectively invisible.
-  { nameCs: 'Test Intelligence', nameEn: 'Test Intelligence', href: '/system/tests', icon: FlaskConical, permission: 'system:view', badge: 'LIVE' },
-  { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
-  { nameCs: 'SDLC / CI·CD', nameEn: 'SDLC / CI·CD', href: '/devops/sdlc', icon: Workflow, permission: 'system:view', badge: 'GUIDE' },
-  { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
-  { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
-  { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },
-  { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
-  { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
-  { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
-  { nameCs: 'Observability', nameEn: 'Observability', href: '/observability', icon: Activity, permission: 'system:view' },
-  { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'approvals:view' },
-]
-
-// Internal tool UIs, reachable at /tools/<tool> on this same host behind the
-// identity-aware edge gate (ADR-0234). The permission here MUST match the one
-// `src/app/api/gate/route.ts` requires for the tool — the gate is what actually
-// enforces it, this only decides whether the operator sees the link.
-const toolsNav: NavItem[] = [
-  { nameCs: 'Grafana',        nameEn: 'Grafana',        href: '/tools/grafana',      icon: Activity,    permission: 'system:view', external: true },
-  // Denied to the public demo account: Alertmanager has no role model, so anything
-  // that can load its UI can silence alerts platform-wide (gate route.ts).
-  { nameCs: 'Alerty',         nameEn: 'Alertmanager',   href: '/tools/alertmanager', icon: Bell,        permission: 'system:view', external: true, deniedRole: 'ROLE_DEMO' },
-  { nameCs: 'SLO (Pyrra)',    nameEn: 'SLO (Pyrra)',    href: '/tools/pyrra',        icon: Scale,       permission: 'system:view', external: true },
-]
-
-const sysNav: NavItem[] = [
-  { nameCs: 'Zdraví systému',   nameEn: 'System Health',   href: '/system/health',    icon: HeartPulse,        permission: 'system:view' },
-  { nameCs: 'Tech Inventory',   nameEn: 'Tech Inventory',  href: '/system/inventory', icon: Package,           permission: 'system:view' },
-  { nameCs: 'Infrastruktura',   nameEn: 'Infrastructure',  href: '/infrastructure',   icon: Server,            permission: 'system:view' },
-  { nameCs: 'Topologie infra',  nameEn: 'Infra Topology',  href: '/infrastructure/topology', icon: Network,     permission: 'system:view' },
-  { nameCs: 'Připravenost prod',nameEn: 'Prod Readiness',  href: '/system/readiness', icon: ClipboardCheck,    permission: 'system:view' },
-  { nameCs: 'Konfigurace',      nameEn: 'Configuration',   href: '/system/config',    icon: SlidersHorizontal, permission: 'system:config' },
-  { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'agent:view' },
-  { nameCs: 'Nastavení',        nameEn: 'Settings',        href: '/settings',         icon: Settings, lockedPermission: 'settings:view' },
-]
-
-const SCROLL_KEY = 'ob.sidebar.scroll'
-
-const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...pensionNav, ...customerNav, ...paymentsNav,
-  ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
-]
 
 export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
@@ -291,14 +30,33 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   // re-paint). When the session lands with identical roles the re-render is a no-op.
   const roles: string[] = session?.user?.roles ?? initialRoles ?? []
   const roleSignature = roles.join('\u0000')
-  const filter = (items: NavItem[]) => items.filter(i => !i.permission || hasPermission(roles, i.permission))
-  const isLocked = (item: NavItem) =>
-    (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
-    (!!item.deniedRole && roles.includes(item.deniedRole))
-  const currentHref = ALL_NAV
-    .filter(item => pathname === item.href || pathname.startsWith(`${item.href}/`))
-    .sort((a, b) => b.href.length - a.href.length)[0]?.href
-
+  const filter = (items: NavItem[]) => items.filter(i => visibleNavigation(roles).some(item => item.href === i.href))
+  const isLocked = (item: NavItem) => isNavLocked(item, roles)
+  const currentItem = currentNavigation(pathname)
+  const currentHref = currentItem?.href
+  const areas = navigationAreas(roles, ownership)
+  const preferences = useNavigationPreferences()
+  const [areaPickerOpen, setAreaPickerOpen] = useState(false)
+  const routeArea = areas.find(area => area.items.some(item => item.href === currentHref))
+  const preferredHref = workspaceFor(personaForRoles(roles))[0]?.href
+  const preferredArea = areas.find(area => area.items.some(item => item.href === preferredHref))
+  const selectedArea = areas.find(area => area.id === preferences.area) ?? routeArea ?? preferredArea ?? areas[0]
+  const activeArea = routeArea ?? selectedArea
+  const shownArea = selectedArea
+  const pickerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!areaPickerOpen) return
+    const close = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setAreaPickerOpen(false)
+    }
+    document.addEventListener('pointerdown', close)
+    return () => document.removeEventListener('pointerdown', close)
+  }, [areaPickerOpen])
+  useEffect(() => {
+    if (routeArea) preferences.selectArea(routeArea.id)
+  // Follow route changes, while allowing an explicit area selection before navigating.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // follows canonical business ownership. Each link inherits its permission from the same destination's nav entry.
   const persona = personaForRoles(roles)
@@ -311,7 +69,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
     if (!nav) return []
     return [{
       nameCs: link.nameCs, nameEn: link.nameEn, href: link.href,
-      icon: nav.icon, permission: nav.permission,
+      icon: nav.icon, permission: nav.permission, lockedPermission: nav.lockedPermission, deniedRole: nav.deniedRole, external: nav.external,
     }]
   })
 
@@ -343,19 +101,19 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
     const frame = requestAnimationFrame(() => {
       const aside = asideRef.current
       if (!aside || document.activeElement !== document.body) return
-      aside.querySelector<HTMLElement>('a, button:not([disabled])')?.focus()
+      aside.querySelector<HTMLElement>('a, button:not([disabled]), input:not([disabled])')?.focus()
     })
     return () => { cancelAnimationFrame(frame) }
   }, [mobileOpen, roleSignature])
   useEffect(() => {
     const el = navRef.current
     if (!el) return
-    const saved = sessionStorage.getItem(SCROLL_KEY)
+    const saved = sessionStorage.getItem('ob.sidebar.scroll')
     if (saved) el.scrollTop = Number(saved)
     let raf = 0
     const onScroll = () => {
       cancelAnimationFrame(raf)
-      raf = requestAnimationFrame(() => sessionStorage.setItem(SCROLL_KEY, String(el.scrollTop)))
+      raf = requestAnimationFrame(() => sessionStorage.setItem('ob.sidebar.scroll', String(el.scrollTop)))
     }
     el.addEventListener('scroll', onScroll, { passive: true })
     return () => { cancelAnimationFrame(raf); el.removeEventListener('scroll', onScroll) }
@@ -367,13 +125,21 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       id="admin-sidebar"
       tabIndex={-1}
       aria-label={t('Hlavní navigace', 'Main navigation')}
-      className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}
+      style={{ width: preferences.width, flexBasis: preferences.width }}
+      className={`${styles.sidebar} ${preferences.compact ? styles.compact : ''} ${mobileOpen ? styles.mobileOpen : ''}`}
       onTransitionEnd={event => {
         if (mobileOpen && event.propertyName === 'transform' && !event.currentTarget.contains(document.activeElement)) {
           event.currentTarget.focus()
         }
       }}
       onKeyDown={event => {
+        if (areaPickerOpen && event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          setAreaPickerOpen(false)
+          pickerRef.current?.querySelector('button')?.focus()
+          return
+        }
         if (!mobileOpen) return
         if (event.key === 'Escape') {
           event.preventDefault()
@@ -381,7 +147,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
           return
         }
         if (event.key !== 'Tab') return
-        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a, button:not([disabled])'))
+        const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('a, button:not([disabled]), input:not([disabled])'))
         const first = focusable[0]
         const last = focusable.at(-1)
         if (!first || !last) return
@@ -412,33 +178,51 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
         </div>
       </div>
 
-      {/* Nav — the only scrollable region; brand + footer stay pinned. */}
+      <div className={styles.areaPicker} ref={pickerRef}>
+        <button type="button" className={styles.areaTrigger} aria-expanded={areaPickerOpen}
+          aria-controls="navigation-areas" onClick={() => setAreaPickerOpen(value => !value)}>
+          <span><small>{t('Pracovní oblast', 'Workspace area')}</small><strong>{shownArea ? t(shownArea.nameCs, shownArea.nameEn) : t('Můj prostor', 'My workspace')}</strong></span>
+          <ChevronDown size={16} aria-hidden="true" />
+        </button>
+        {areaPickerOpen && <div id="navigation-areas" className={styles.areaList}>
+          {areas.map(area => <button type="button" key={area.id} aria-label={t(area.nameCs, area.nameEn)} aria-pressed={shownArea?.id === area.id}
+            onClick={() => { preferences.selectArea(area.id); setAreaPickerOpen(false); if (navRef.current) navRef.current.scrollTop = 0 }}>
+            <span>{t(area.nameCs, area.nameEn)}</span><small>{area.items.length}</small>
+          </button>)}
+        </div>}
+      </div>
       <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
-        <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
-        <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
         <NavSection items={filter(coreNav.filter(item => !item.owner))} currentHref={currentHref} />
-        {DOMAIN_GROUPS.map(domain => {
-          const items = filter(ALL_NAV.filter(item => item.owner && (ownership[item.owner] ?? 'unclassified') === domain))
-          if (!items.length) return null
-          return (
-            <section key={domain} aria-label={domainLabel(domain, language === 'cs' ? 'cs' : 'en')}>
-              <SectionLabel>{domainLabel(domain, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
-              <NavSection items={items} currentHref={currentHref} />
-            </section>
-          )
-        })}
-        <SectionLabel>{t('Průřezové přehledy a operace', 'Cross-domain views & operations')}</SectionLabel>
-        <NavSection items={filter([...complianceNav, ...opsNav].filter(item => !item.owner))} currentHref={currentHref} />
-        <SectionLabel>{t('Řízení platformy', 'Platform operations')}</SectionLabel>
-        <NavSection items={filter(platformNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
-        <NavSection items={filter(docsNav)} currentHref={currentHref} />
-        <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
-        <NavSection items={filter(toolsNav)} currentHref={currentHref} isLocked={isLocked} />
-        <SectionLabel>{t('Systém', 'System')}</SectionLabel>
-        <NavSection items={filter(sysNav)} currentHref={currentHref} isLocked={isLocked} />
+        <SectionLabel>{t('Můj prostor', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
+        <NavSection items={filter(workspace).filter(item => !isLocked(item))} currentHref={currentHref}
+          announceCurrent={!shownArea?.items.some(item => item.href === currentHref)} />
+        <SectionLabel>{t('Připnuté pohledy', 'Pinned views')}</SectionLabel>
+        {preferences.pins.filter(pin => filter(ALL_NAV).some(item => item.href === pin.pathname && !isLocked(item))).map(pin =>
+          <div key={pin.href} className={styles.pinRow}>
+            {ALL_NAV.find(item => item.href === pin.pathname)?.external
+              ? <a href={pin.href} title={pin.label} className={styles.navItem}><Star size={14} aria-hidden="true" /><span className={styles.navLabel}>{pin.label}</span></a>
+              : <Link href={pin.href} title={pin.label} className={styles.navItem}><Star size={14} aria-hidden="true" /><span className={styles.navLabel}>{pin.label}</span></Link>}
+            <button type="button" className={styles.unpin} aria-label={`${t('Odepnout', 'Unpin')} ${pin.label}`} onClick={() => preferences.togglePin(pin)}><XIcon /></button>
+          </div>)}
+        {!preferences.pins.length && <p className={styles.hint}>{t('Připněte si stránku nebo její aktuální filtry.', 'Pin a page or its current filters.')}</p>}
+        {shownArea && <section aria-label={t(shownArea.nameCs, shownArea.nameEn)}>
+          <SectionLabel>{t(shownArea.nameCs, shownArea.nameEn)}</SectionLabel>
+          <NavSection items={shownArea.items} currentHref={currentHref} isLocked={isLocked} />
+        </section>}
+        {activeArea && activeArea.id !== shownArea?.id && <p className={styles.hint}>{t('Otevřená stránka patří do oblasti', 'Current page belongs to')} {t(activeArea.nameCs, activeArea.nameEn)}</p>}
+        <button type="button" className={styles.allAreas} onClick={() => setAreaPickerOpen(value => !value)}>
+          {t('Všechny oblasti', 'All areas')} <ChevronDown size={14} aria-hidden="true" />
+        </button>
       </nav>
 
+      <div className={styles.preferences}>
+        <button type="button" aria-pressed={preferences.compact} onClick={preferences.toggleCompact}>
+          {preferences.compact ? <PanelLeftOpen size={14} aria-hidden="true" /> : <PanelLeftClose size={14} aria-hidden="true" />}
+          {t('Kompaktní menu', 'Compact menu')}
+        </button>
+        <label>{t('Šířka', 'Width')}<input type="range" min="248" max="360" step="8" value={preferences.width}
+          aria-label={t('Šířka navigace', 'Navigation width')} onChange={event => preferences.setWidth(Number(event.target.value))} /></label>
+      </div>
       {/* Footer */}
       <div className={styles.footer}>
         <div className={styles.footerVersion}>{t('OpenBank Admin portál', 'OpenBank Admin Portal')}</div>
@@ -482,9 +266,7 @@ function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { 
             <div className={`${styles.navItem} ${active ? styles.active : ''}`}>
               <Icon aria-hidden="true" size={16} className={styles.navIcon} />
               <span className={styles.navLabel}>{displayName}</span>
-              {item.badge && (
-                <span className={styles.navBadge}>{item.badge}</span>
-              )}
+
             </div>
         )
 
@@ -492,9 +274,9 @@ function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { 
         // next/link would client-side navigate and 404 (ADR-0234). Plain <a>,
         // same origin, so the session cookie reaches the edge gate.
         return item.external ? (
-          <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</a>
+          <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} title={displayName} style={{ textDecoration: 'none' }}>{row}</a>
         ) : (
-          <Link key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</Link>
+          <Link key={item.href} href={item.href} aria-current={active ? 'page' : undefined} title={displayName} style={{ textDecoration: 'none' }}>{row}</Link>
         )
       })}
     </>
