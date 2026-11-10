@@ -107,6 +107,42 @@ def valid_build_attestation(value) -> bool:
             and value["matched"] == matching_build_shas(value["requestedSha"], value["observedSha"]))
 
 
+RUN_FIELDS = {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}
+TEST_TASK_OUTCOMES = {"executed", "reused"}
+
+
+def test_task_outcome(service: Path, commit: str) -> str | None:
+    """Did THIS commit execute the Gradle `test` task, or were its outputs reused?
+
+    The test task may be restored FROM-CACHE/UP-TO-DATE from a commit with identical sources
+    (openbank.test-provenance), leaving JUnit XML and Kover data that this commit never
+    produced. `openbank.test-provenance` writes `build/test-task-outcome/test.properties` only
+    when the task body actually runs, stamped with GITHUB_SHA; a missing or foreign stamp means
+    the results were reused. No test results at all claims nothing (None)."""
+    if not (service / "build/test-results/test").is_dir():
+        return None
+    marker = service / "build/test-task-outcome/test.properties"
+    try:
+        stamped = dict(line.split("=", 1) for line in marker.read_text().splitlines() if "=" in line)
+    except OSError:
+        return "reused"
+    return "executed" if stamped.get("executedCommit") == commit else "reused"
+
+
+def validate_run(run: dict) -> datetime:
+    if not RUN_FIELDS.issubset(run) or set(run) - (RUN_FIELDS | {"testTaskOutcome"}):
+        raise ValueError("run provenance fields are incomplete")
+    if "testTaskOutcome" in run and run["testTaskOutcome"] not in TEST_TASK_OUTCOMES:
+        raise ValueError("run.testTaskOutcome is invalid")
+    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
+            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
+        raise ValueError("run provenance values are invalid")
+    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
+    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
+        raise ValueError("run.observedAt exceeds the allowed clock skew")
+    return run_observed_at
+
+
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -116,14 +152,7 @@ def validate_envelope(envelope: dict) -> None:
     if not str(envelope["component"]).startswith("openbank-"):
         raise ValueError("run envelope schemaVersion/component is invalid")
     run = envelope["run"]
-    if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
-        raise ValueError("run provenance fields are incomplete")
-    if (not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"]
-            or not run["workflow"] or not trusted_run_url(str(run["url"]), str(run["id"]))):
-        raise ValueError("run provenance values are invalid")
-    run_observed_at = parse_timestamp(run["observedAt"], "run.observedAt")
-    if run_observed_at - datetime.now(timezone.utc) > MAX_FUTURE_SKEW:
-        raise ValueError("run.observedAt exceeds the allowed clock skew")
+    run_observed_at = validate_run(run)
     for suite in envelope["suites"]:
         if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
             raise ValueError("suite kind/state is invalid")
@@ -1735,6 +1764,29 @@ def main() -> None:
             assert got == ["approvals/A1"], f"verifies: Playwright title tag not read: {got}"
             assert verifies_ids(service, "nav.spec.ts", "loads the inbox @verifies:nonsense") == [], \
                 "verifies: unscoped title id accepted"
+        # A `test` task restored FROM-CACHE/UP-TO-DATE leaves XML and Kover data produced for an
+        # EARLIER commit. Only a marker written by THIS commit's execution may claim "executed".
+        with tempfile.TemporaryDirectory() as directory:
+            service = Path(directory)
+            assert test_task_outcome(service, "a" * 40) is None, "no test results must not claim an outcome"
+            (service / "build/test-results/test").mkdir(parents=True)
+            assert test_task_outcome(service, "a" * 40) == "reused", "results without a marker were credited as executed"
+            marker = service / "build/test-task-outcome/test.properties"
+            marker.parent.mkdir(parents=True)
+            marker.write_text("executedCommit=" + "b" * 40 + "\n")
+            assert test_task_outcome(service, "a" * 40) == "reused", "a stale marker from another commit was credited"
+            marker.write_text("executedCommit=" + "a" * 40 + "\n")
+            assert test_task_outcome(service, "a" * 40) == "executed", "this commit's execution was not recognised"
+            example = {"id": "1", "attempt": 1, "commit": "a" * 40, "branch": "b", "workflow": "w", "url": "",
+                       "observedAt": "2026-01-01T00:00:00Z"}
+            for outcome in ("executed", "reused"):
+                validate_run(example | {"testTaskOutcome": outcome})
+            for bad in ({"testTaskOutcome": "cached"}, {"unknownField": 1}):
+                try:
+                    validate_run(example | bad)
+                except ValueError:
+                    continue
+                raise AssertionError(f"run provenance accepted {bad}")
         print("test-run evidence collector self-test: classification and runtime red/green paths proven")
         return
     if not args.service or not args.out:
@@ -1780,6 +1832,11 @@ def main() -> None:
         "specializedEvidence": specialized,
         "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
+    # `commit`/`observedAt` describe this CI run; whether the test suite itself ran for this
+    # commit is a separate fact (a cache hit replays results from an identical-source commit).
+    outcome = test_task_outcome(service, envelope["run"]["commit"])
+    if outcome:
+        envelope["run"]["testTaskOutcome"] = outcome
     validate_envelope(envelope)
     output = Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -48,6 +48,10 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
     echo "::error::exact-main Services CI evidence is unavailable" >&2
     exit 1
   fi
+  if [ -n "${SERVICE_CI_FAIL_SHA:-}" ] && [ "${3:-}" = "$SERVICE_CI_FAIL_SHA" ]; then
+    echo "::error::no successful exact-main Services CI attempt proves ${2:-} for ${3:-}" >&2
+    exit 1
+  fi
   if [ -n "${SERVICE_CI_EXPECTED_SOURCE:-}" ] && [ "${3:-}" != "$SERVICE_CI_EXPECTED_SOURCE" ]; then
     echo "::error::Services CI was not checked for the expected source SHA" >&2
     exit 1
@@ -459,6 +463,38 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/equivalent-counterpart-log" >&2
     exit 1
   fi
+
+  # The Broker holds a Pact version for the current SHA, but push Services CI is
+  # path-scoped and never built the service on this docs-only commit. Reconcile must not
+  # refuse forever: it resolves the earlier exact successful source and deploys on it.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  if ! BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" SERVICE_CI_EXPECTED_SOURCE="" \
+     RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA" PACT_CLI_MODE=success \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/tip-without-ci-log" 2>&1 || \
+     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+     ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
+    echo "FAIL: Pact at current SHA without exact Services CI did not fall back to the historical source" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/tip-without-ci-log" >&2
+    exit 1
+  fi
+  echo "PASS: Pact at current SHA without exact Services CI deploys on the resolved earlier source"
+
+  # Same shape, but no earlier proof exists either: still fail closed before any verdict.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+  if BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" SERVICE_CI_EXPECTED_SOURCE="" \
+     RESOLVER_MODE=failure PACT_CLI_MODE=success \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/tip-without-ci-none-log" 2>&1; then
+    echo "FAIL: missing exact and historical Services CI evidence was accepted" >&2
+    cat "$GITHUB_OUTPUT" "$tmp/tip-without-ci-none-log" >&2
+    exit 1
+  fi
+  if ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+    echo "FAIL: unproven fallback reached a Pact verdict or emitted deployable services" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/tip-without-ci-none-log" >&2
+    exit 1
+  fi
+  echo "PASS: no exact and no historical Services CI evidence still fails closed"
 )
 echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA over a mismatched latest-main version"
 

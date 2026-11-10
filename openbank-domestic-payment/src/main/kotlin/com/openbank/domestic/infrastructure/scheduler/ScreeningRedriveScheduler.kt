@@ -5,11 +5,15 @@ package com.openbank.domestic.infrastructure.scheduler
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
+import io.temporal.api.enums.v1.WorkflowIdConflictPolicy
+import io.temporal.api.enums.v1.WorkflowIdReusePolicy
 import io.temporal.client.WorkflowClient
+import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
@@ -127,15 +131,27 @@ class ScreeningRedriveScheduler {
                         DomesticPaymentWorkflow::class.java,
                         WorkflowOptions.newBuilder()
                             .setTaskQueue(temporalTaskQueue)
-                            // Distinct id per attempt: the original workflow already completed, and
-                            // reusing its id would make the outcome depend on the server's id-reuse
-                            // policy rather than on this decision.
-                            .setWorkflowId("domestic-payment-$paymentId-redrive-${Instant.now(clock).toEpochMilli()}")
+                            // The SAME id as the first run, with the reuse policy stated rather than
+                            // inherited: a new run may start only once the previous one has closed.
+                            // A fraud-hold decision is signalled to this id and so always reaches the
+                            // current run; a per-attempt id stranded it on the closed one and let the
+                            // re-driven hold time out into REJECTED.
+                            .setWorkflowId(domesticPaymentWorkflowId(paymentId))
+                            .setWorkflowIdReusePolicy(WorkflowIdReusePolicy.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE)
+                            .setWorkflowIdConflictPolicy(WorkflowIdConflictPolicy.WORKFLOW_ID_CONFLICT_POLICY_FAIL)
                             .build(),
                     )
                     WorkflowClient.start(stub::process, paymentId)
                 }
                 log.infof("[screening-redrive] re-drove payment %s", paymentId)
+            } catch (_: WorkflowExecutionAlreadyStarted) {
+                // A run for this payment is still open — typically a fraud hold awaiting an analyst,
+                // during which the payment stays RECEIVED. Starting a second run would re-screen,
+                // re-score and hold the payment twice in parallel; leaving it alone is correct.
+                // The attempt counted above is spent without a re-drive, and that is harmless: a run
+                // that reached the fraud hold has already cleared screening, so it ends VALIDATED or
+                // REJECTED and never returns the payment to RECEIVED for this sweep to need.
+                log.infof("[screening-redrive] payment %s still has an open run; not re-driven", paymentId)
             } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
                 // One payment must not abort the sweep for the rest — the #846 shape.
                 hadFailure = true

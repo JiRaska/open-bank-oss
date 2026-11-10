@@ -58,10 +58,15 @@ marker_commit() {
     return
   fi
   # Commits touching the file, newest first; the marker is the oldest whose content has the text.
-  local found="" sha
-  for sha in $(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha'); do
-    if gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}" \
-        | grep -qF "$MARKER_TEXT"; then
+  # An API failure (rate limit, transport) is exit 2, never an empty answer: an empty marker reads
+  # as "Phase 1 is not on main", a FINDING the gate cannot have established (2026-11-09: the CI
+  # installation token ran dry and #15443 went red on that false finding).
+  local found="" sha shas content
+  shas="$(gh api "repos/${REPO}/commits?path=${MARKER_FILE}&sha=main&per_page=100" --jq '.[].sha')" || return 2
+  [ -n "$shas" ] || return 2
+  for sha in $shas; do
+    content="$(gh api -H 'Accept: application/vnd.github.raw' "repos/${REPO}/contents/${MARKER_FILE}?ref=${sha}")" || return 2
+    if grep -qF "$MARKER_TEXT" <<< "$content"; then
       found="$sha"
     else
       break
@@ -160,7 +165,13 @@ run() {
     # shellcheck disable=SC2064 # expand now: the path is fixed for this invocation
     trap "rm -rf '$COMPARE_CACHE_DIR'" EXIT
   fi
-  marker="$(marker_commit)"
+  local marker_rc=0
+  marker="$(marker_commit)" || marker_rc=$?
+  if [ "$marker_rc" -eq 2 ]; then
+    echo "::error::could not read ${MARKER_FILE} history from the GitHub API (rate limit or transport) — rollout not evaluated" >&2
+    echo "GATE_VERDICT=NOT_EVALUATED"
+    return 1
+  fi
   if [ -z "$marker" ]; then
     echo "::error::Phase 1 (libs-runtime sending service_account) is not on canonical main: no commit adds '${MARKER_TEXT}' to ${MARKER_FILE}." >&2
     return 1
@@ -259,6 +270,19 @@ selftest() {
     API=1
     marker="$(marker_commit)"
     [ "$marker" = "$shipped" ] || { echo "selftest FAIL: API marker does not follow canonical main" >&2; f=1; }
+    # An API that cannot answer is "could not look" (exit 2), never "no marker": the empty answer
+    # is what the gate reports as a Phase-1 finding.
+    gh() { echo "gh: API rate limit exceeded for installation" >&2; return 1; }
+    mrc=0; marker="$(marker_commit)" || mrc=$?
+    [ "$mrc" -eq 2 ] || { echo "selftest FAIL: an unreachable API read as a definitive marker answer (rc=$mrc, marker='$marker')" >&2; f=1; }
+    gh() {
+      case "$*" in
+        *"commits?path="*) printf '%s\n' "$shipped" ;;
+        *) echo "gh: API rate limit exceeded" >&2; return 1 ;;
+      esac
+    }
+    mrc=0; marker="$(marker_commit)" || mrc=$?
+    [ "$mrc" -eq 2 ] || { echo "selftest FAIL: a failed contents read was taken as 'no marker text' (rc=$mrc)" >&2; f=1; }
     unset -f gh
     # Compare cache (#14011) is exercised with a single attempt so a scripted transport error is observable.
     export PDP_ROLLOUT_API_ATTEMPTS=1

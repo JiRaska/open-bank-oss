@@ -3,6 +3,6 @@
   "private": true,
   "description": "Pinned, npm-ci-installable dependency for the agent-review workflow's Claude Code CLI (OpenSSF Scorecard Pinned-Dependencies: npmCommand). npm ci verifies package-lock.json hashes, which a bare npm install -g cannot.",
   "dependencies": {
-    "@anthropic-ai/claude-code": "2.1.233"
+    "@anthropic-ai/claude-code": "2.1.251"
   }
 }
