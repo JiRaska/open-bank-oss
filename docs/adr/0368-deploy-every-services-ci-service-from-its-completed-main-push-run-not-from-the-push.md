@@ -1,14 +1,14 @@
 ---
 date: 2026-11-08
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
+followup: "#15294 — lane enabled 2026-11-09; the 7-day delivery check is due 2026-11-16"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, gitops, api-contract]
 summary: "Auto deploy deploys every service Services CI builds from that run's successful main-push completion, when its Pact version exists, instead of racing it from the push; only self-built images stay on the push lane."
-followup: "#15294 — DEPLOY_AFTER_SERVICES_CI_ENABLED stays off until the owner enables it; the delivery check below then runs against one week of Auto deploy runs."
 ---
 
 # ADR-0368 — Deploy every Services CI service from its completed main-push run, not from the push
