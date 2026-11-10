@@ -107,9 +107,13 @@ jobs:
           - openbank-card-issuance-service
           - openbank-treasury-service
           # 2026-11-10 (ADR-0063): pension (392 branch sites over 31 domain files) and pension-fund
-          # (98 over 8) were money-path and never measured. Baselines are recorded from the first
-          # weekly run; check-pitest-money-path-coverage.py keeps this list reconciled with
-          # rules.yaml money_path_services.
+          # (98 over 8) were money-path and never measured. Local baselines (2026-11-10,
+          # `./gradlew :<svc>:pitest`, domain.* targets, domain+application tests):
+          #   pension-fund  523 mutations, 369 killed = 71%
+          #   pension      2331 mutations, 646 killed = 28%; 1530 are NO_COVERAGE (the domain is
+          #     exercised by funding/ and integration tests that targetTests does not select), ~19 min
+          # check-pitest-money-path-coverage.py keeps this list reconciled with rules.yaml
+          # money_path_services.
           - openbank-pension-service
           - openbank-pension-fund-service
 
