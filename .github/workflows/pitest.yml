@@ -13,7 +13,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-pension-service openbank-pension-fund-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -106,6 +106,12 @@ jobs:
           #     NO_COVERAGE, mostly the Nostro* reconciliation classes, which no unit test reaches.
           - openbank-card-issuance-service
           - openbank-treasury-service
+          # 2026-11-10 (ADR-0063): pension (392 branch sites over 31 domain files) and pension-fund
+          # (98 over 8) were money-path and never measured. Baselines are recorded from the first
+          # weekly run; check-pitest-money-path-coverage.py keeps this list reconciled with
+          # rules.yaml money_path_services.
+          - openbank-pension-service
+          - openbank-pension-fund-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
