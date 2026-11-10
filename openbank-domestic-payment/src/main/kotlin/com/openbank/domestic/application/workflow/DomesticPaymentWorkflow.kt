@@ -27,3 +27,12 @@ interface DomesticPaymentWorkflow {
     @SignalMethod
     fun resolveFraudHold(decision: FraudReviewDecision, caseIdempotencyKey: String?)
 }
+
+/**
+ * The ONE workflow id every run for [paymentId] carries: the first start and every screening re-drive.
+ * A fraud-hold decision is signalled to this id with no run id, which Temporal routes to the CURRENT
+ * run, so it reaches a re-driven hold exactly as it reaches the first one. A per-attempt id left the
+ * decision addressed to a closed run while the live one timed out into REJECTED. One id also means
+ * at most one open run per payment: a re-drive while a run is still open is refused by Temporal.
+ */
+fun domesticPaymentWorkflowId(paymentId: UUID): String = "domestic-payment-$paymentId"

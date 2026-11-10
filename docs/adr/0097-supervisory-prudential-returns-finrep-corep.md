@@ -15,6 +15,20 @@ summary: "FINREP and COREP supervisory returns are derived from the attested sta
 Phase 1 implemented: openbank-finrep-service derives F01.01+F02.00 from ledger trial balance. Phase 2 (COREP+XBRL transmission) tracked separately.
 Author(s): @JiRaska
 
+**Delivery note (updated 2026-11-10, measured against `main`):**
+- **Attested-close source** — ✅ Built: FINREP and COREP read the ledger's frozen closed-period
+  endpoints (`/api/v1/ledger/periods/MONTH/{asOf}/frozen-*`, `LedgerClient`) by default; the live
+  trial balance is only a labelled `LIVE_PREVIEW` evidence mode. The 2026-07-08 note below that calls
+  the source "live/point-in-time" is superseded.
+- **Contract** — ✅ The finrep→ledger consumer pact (`pacts/openbank-finrep-service-openbank-ledger-service.json`)
+  is replayed by ledger's `@PactFolder` provider verification on every PR (gate `check-pact-provider-replay.py`).
+- **Templates** — ✅ F 01.01, F 01.02, F 01.03, F 02.00; COREP C 01.00, C 02.00, C 72.00, C 73.00, C 74.00, C 76.00
+  mappers exist. ADR-0344 treasury instrument accounts are classified (#14290).
+- **Output** — 🟡 EBA XBRL-CSV *preflight* only (`/xbrl-csv/preflight`); no filed package.
+- **Still not built:** ČNB transmission adapter, persisted submission attempts/acknowledgements, the
+  statements tie-out against ADR-0096 statutory statements, admin-ui submission status. Transmission
+  needs regulator onboarding/credentials (owner-gated).
+
 **Delivery note (updated 2026-07-08):**
 - **Phase 1 (FINREP core) — deployment** — ✅ Shipped: `openbank-finrep-service` is registered with ArgoCD
   (`openbank-infra/gitops/apps/finrep.yaml`) alongside its existing Deployment/Service/Namespace/NetworkPolicy

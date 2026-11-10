@@ -107,6 +107,11 @@ jobs:
           # trusted base branch; base.sha is frozen for older pull requests.
           ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
+      # Per-job gh call counter (#15483), from the trusted base so admission's calls are counted too.
+      - name: gh-call-counter install
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - id: admit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,12 +124,22 @@ jobs:
           fi
           python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
           "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          # REST quota exhaustion falls back to GraphQL (fetch-open-prs.py). The guard keeps the old
+          # listing for a base that predates the script; drop it once main has carried it a while.
+          if [ -f .github/scripts/fetch-open-prs.py ]; then
+            python3 .github/scripts/fetch-open-prs.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/agent-prs.json"
+          else
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          fi
           "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
       - if: steps.admit.outputs.proceed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: gh-call-counter install
+        if: steps.admit.outputs.proceed == 'true' && github.event_name != 'pull_request'
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: verification module selection self-test
         if: steps.admit.outputs.proceed == 'true'
         run: python3 .github/scripts/derive-verification-modules.py --self-test
@@ -191,6 +206,10 @@ jobs:
           line="$GITHUB_WORKFLOW/$GITHUB_JOB end $q"
           echo "::notice title=quota-meter::$line"
           echo "quota-meter: $line" >> "$GITHUB_STEP_SUMMARY" || true
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   renderer-tests:
     name: Renderer font and request security tests

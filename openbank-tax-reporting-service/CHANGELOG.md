@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.48.0...tax-reporting-service-v0.49.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** CEU daily overview filing on the statutory lifecycle ([#15308](https://github.com/JiRaska/open-bank-oss/issues/15308)) ([0829d98](https://github.com/JiRaska/open-bank-oss/commit/0829d98e12e6de53a5e1ca51d653e045875542a4))
+
 ## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.3...tax-reporting-service-v0.48.0) (2026-11-10)
 
 

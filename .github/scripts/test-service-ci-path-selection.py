@@ -23,6 +23,14 @@ cases=[('governance-reader',['openbank-libs/governance/agents.yaml'],'charter'),
  ('gitops-payments',['openbank-infra/gitops/components/payments/payments-services.yaml'],'readers:openbank-domestic-payment,openbank-mcp-service,openbank-sepa-instant,openbank-settlement-service'),
  ('gitops-no-reader',['openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml'],'empty'),
  ('detekt-config',['config/detekt/detekt.yml'],'full')]
+# Tool-only config is inert (no Gradle/Dockerfile/JVM-test reader, measured 2026-11-09);
+# .dockerignore and build-logic stay global. Verification metadata alone: PR -> shards only.
+cases += [('root-scanner-config', ['.gitleaks.toml', '.gitleaksignore'], 'empty'),
+          ('portal-security-txt', ['openbank-developer-portal/site/.well-known/security.txt'], 'empty'),
+          ('scanner-config-plus-module', ['.gitleaks.toml', 'openbank-account-service/src/main/kotlin/Sample.kt'], 'account-scoped'),
+          ('root-dockerignore', ['.dockerignore'], 'full'), ('build-logic-script', ['build-logic/build.gradle.kts'], 'full'),
+          ('verification-metadata-only', ['gradle/verification-metadata.xml'], 'vmeta'),
+          ('verification-metadata-and-catalog', ['gradle/verification-metadata.xml', 'gradle/libs.versions.toml'], 'full')]
 cases += [('canonical-runtime-image', ['.github/workflows/Dockerfile.deploy'], 'full'), ('shared-benchmark-build', ['openbank-libs-benchmarks/build.gradle.kts'], 'full'), ('shared-detekt-source', ['openbank-libs-detekt-rules/src/main/kotlin/Sample.kt'], 'full')]
 # #11560: a shared library's own src/test edit (exact #12298 path) builds only its owner alone;
 # mixed with a docs page it adds only that page's own readers, never the fleet or another library.
@@ -48,6 +56,8 @@ with tempfile.TemporaryDirectory(prefix='ob-selector-') as tmp:
    elif expected=='charter':assert {'openbank-agent-service','openbank-mcp-service'} <= selected and selected!=allmods,(event,name,selected)
    elif expected=='resource-copy':assert {'openbank-pension-service','openbank-agent-service','openbank-mcp-service','openbank-libs-runtime'} <= selected and selected!=allmods,(event,name,selected)
    elif expected=='resource-copy-negative':assert 'openbank-pension-service' in selected and not {'openbank-agent-service','openbank-mcp-service'} & selected and selected!=allmods,(event,name,selected)
+   elif expected=='account-scoped':assert 'openbank-account-service' in selected and selected!=allmods,(event,name,sorted(selected))
+   elif expected=='vmeta':assert selected==(set() if event=='pull_request' else allmods),(event,name,sorted(selected))
    elif expected=='canary':assert selected=={'openbank-libs'},(event,name,selected)
    elif expected.startswith('readers:'):assert selected==set(expected[8:].split(',')),(event,name,sorted(selected))
    else:assert 'openbank-account-service' in selected and 'openbank-libs-runtime' in selected and selected!=allmods,(event,name,selected)
