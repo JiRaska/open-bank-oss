@@ -2458,6 +2458,104 @@ def conflict_paths(git, base: str, head: str) -> list[str] | None:
     return sorted({f for f in r.stdout.split("\0")[1:] if f})
 
 
+# A green carrier over main M0 when main is now M1 (M0 an ancestor of M1). Today it is discarded and
+# rebuilt (~52 min p50 for a full-fleet carrier, so any concurrent merge voids it: on 2026-11-10 a carrier
+# ran CI 16:02-16:49, one merge landed at 16:06, and the queue merged nothing 16:06-17:40). It is kept ONLY
+# when the move provably cannot change what the carrier's CI verified; anything else is today's rebuild.
+# Shared roots: a change under any of these can alter every module's build or the gates themselves.
+MOVED_MAIN_SHARED_PREFIXES = (".github/", "build-logic/", "gradle/", "openbank-libs")
+MOVED_MAIN_ROOT_FILES = ("settings.gradle.kts", "build.gradle.kts", "gradle.properties", "gradlew")
+
+
+def _moved_main_shared(path: str) -> bool:
+    # Any root-level file (no directory) counts as shared, the named ones included: fail closed.
+    return "/" not in path or path in MOVED_MAIN_ROOT_FILES or path.startswith(MOVED_MAIN_SHARED_PREFIXES)
+
+
+def _moved_main_non_build(path: str) -> bool:
+    """A path no Gradle module, no CI job and no gate's verdict about other files can depend on. There is
+    no exact build closure to consult (derive-verification-modules.py only maps build.gradle.kts edits),
+    so this is an allow-list: prose under docs/ outside the ADR registry (its derived files are gated
+    against each other), and Markdown that is not agent guidance. Everything else is build-affecting."""
+    if _moved_main_shared(path) or path.startswith("docs/adr/"):
+        return False
+    return path.startswith("docs/") or (path.endswith(".md") and not path.endswith("CLAUDE.md"))
+
+
+def moved_main_overlap(moved: list[str], carrier: list[str]) -> str | None:
+    """Why main's move M0..M1 (`moved` paths) can affect what a carrier changing `carrier` paths verified,
+    or None when it provably cannot. Pure, fails closed: an empty list is never 'disjoint', and a move is
+    harmless only when it selects ZERO modules (every path non-build) and shares no path with the carrier."""
+    if not moved or not carrier:
+        return "changed-file lists unavailable"
+    shared = sorted(f for f in moved if _moved_main_shared(f))
+    if shared:
+        return f"main changed shared build/CI path(s) {', '.join(shared[:3])}"
+    build = sorted(f for f in moved if not _moved_main_non_build(f))
+    if build:
+        return f"main changed build-affecting path(s) {', '.join(build[:3])}"
+    both = sorted(set(moved) & set(carrier))
+    if both:
+        return f"main and the carrier both changed {', '.join(both[:3])}"
+    return None
+
+
+def predict_squash_tree(gh, git, main: str, members: list[tuple[int, str]]) -> tuple[list[str], str | None]:
+    """The trees main will carry after each member's squash lands, predicted BEFORE any merge: member i's
+    squash is `git merge-tree --write-tree <before> <head>` (git's own merge base, as GitHub's), `before`
+    starting at `main` and then a synthetic commit of the previous prediction. -> (trees, None), or
+    ([], why) on any fetch / merge-tree failure (fail closed)."""
+    before, trees = main, []
+    for n, head in members:
+        ref = f"refs/merge-train/moved-member-{n}"
+        if (git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:{ref}", check=False).returncode != 0
+                or git("rev-parse", ref, check=False).stdout.strip() != head):
+            return [], f"#{n}'s head could not be read at {head[:12]}"
+        r = git("merge-tree", "--write-tree", before, head, check=False)
+        tree = r.stdout.split()[0] if r.returncode == 0 and r.stdout.split() else ""
+        if not tree:
+            return [], f"#{n}'s squash over {before[:12]} does not merge cleanly"
+        c = git("commit-tree", tree, "-p", before, "-m", f"predicted squash of #{n}", check=False)
+        if c.returncode != 0 or not c.stdout.strip():
+            return [], f"#{n}'s predicted squash could not be recorded"
+        trees.append(tree)
+        before = c.stdout.strip()
+    return trees, None
+
+
+def moved_main_prediction_problem(gh, git, main: str, members: list[tuple[int, str]], kept_tree: str
+                                  ) -> tuple[list[str], str | None]:
+    """(per-member predicted trees, None) when the members' squashes over `main` end on exactly the carrier
+    re-derived onto it, else ([], why) — refused before anything merges."""
+    trees, why = predict_squash_tree(gh, git, main, members)
+    if why:
+        return [], why
+    if not trees or trees[-1] != kept_tree:
+        return [], "the members' predicted squashes over live main do not end on the re-derived carrier tree"
+    return trees, None
+
+
+def carrier_over_moved_main(git, m0: str, m1: str, carrier: str) -> tuple[str | None, str]:
+    """(re-derived tree of the carrier's content over m1, "") when keeping the carrier is provably safe,
+    else (None, reason). Execution-free: ancestry, two name-only diffs and one 3-way merge-tree with
+    merge base m0, so the tree is exactly the carrier's verified delta applied onto m1."""
+    if git("merge-base", "--is-ancestor", m0, m1, check=False).returncode != 0:
+        return None, "main was rewritten, not advanced"
+    def names(a: str, b: str) -> list[str] | None:
+        r = git("diff", "--name-only", "-z", "--no-renames", a, b, check=False)
+        return None if r.returncode != 0 else sorted({f for f in r.stdout.split("\0") if f})
+    moved, own = names(m0, m1), names(m0, carrier)
+    if moved is None or own is None:
+        return None, "changed-file lists unavailable"
+    why = moved_main_overlap(moved, own)
+    if why:
+        return None, why
+    r = git("merge-tree", "--write-tree", "--merge-base", m0, m1, carrier, check=False)
+    if r.returncode != 0 or not r.stdout.split():
+        return None, "carrier does not merge cleanly over live main"
+    return r.stdout.split()[0], ""
+
+
 def workflow_merge_blobs(git, base: str, head: str) -> list[str]:
     """Workflow files whose clean merge of `head` into `base` equals NEITHER parent; [] when the merge
     conflicts or undecidable. Execution-free, like conflict_paths."""
@@ -2846,11 +2944,25 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if not problem and chain is None:
             problem = "head is not a chain of the train's own commits"
         live_main = gh.main_sha()
+        moved_main_tree, moved_main_steps = None, []
         if not problem and chain[0] != live_main and not (
                 stacked_over is not None and chain[0] == stacked_over and git.tree(live_main) == git.tree(chain[0])):
             # A stacked carrier is accepted over a moved main ONLY when main's tree is exactly the holder
             # head's tree it was verified over (the holder's squash), re-read against live main here.
-            problem = "main moved since publish — the next tick rebuilds"
+            kept_tree, why = (None, "carrier is stacked") if stacked_over is not None else (
+                carrier_over_moved_main(git, chain[0], live_main, sha))
+            if kept_tree is None:
+                problem = f"main moved since publish — the next tick rebuilds ({why})"
+                log(f"carrier #{carrier}: over moved main {chain[0][:12]}..{live_main[:12]}: rebuilt — {why}")
+            else:
+                moved_main_steps, why = moved_main_prediction_problem(gh, git, live_main, chain[1], kept_tree)
+                if why:
+                    problem = f"main moved since publish — the next tick rebuilds ({why})"
+                    log(f"carrier #{carrier}: over moved main {chain[0][:12]}..{live_main[:12]}: rebuilt — {why}")
+            if kept_tree is not None and not problem:
+                moved_main_tree = kept_tree
+                log(f"carrier #{carrier}: accepted over moved main {chain[0][:12]}..{live_main[:12]} — "
+                    f"disjoint from every module and shared path it verified, clean re-derivation {kept_tree[:12]}")
         if not problem and not failing and holder is not None:
             hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
             if (hstate == "green" and not shadow and len(chain[1]) <= STRICT_FIRST_MAX_MEMBERS
@@ -2959,6 +3071,18 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     break
                 expected = merged
                 summary["merged"].append(n)
+                if moved_main_tree is not None:
+                    # Each squash is pinned to its verified head and was predicted over the exact main it
+                    # lands on; main must now carry that prediction, or it is alerted and nothing further
+                    # merges. A fetch failure raises: fail closed.
+                    git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/moved-main")
+                    if git.tree(merged) != moved_main_steps[i]:
+                        log(f"::error::carrier #{carrier}: main {merged[:12]} after #{n} is not the predicted squash "
+                            f"of the carrier over moved main — stopping")
+                        gh.post_status(merged, "failure", f"ALERT: tree after #{n} differs from carrier #{carrier} "
+                                       "re-derived over moved main", context=STACK_CONTEXT)
+                        summary.setdefault("moved_main_tree_mismatch", []).append(n)
+                        break
                 if stacked_steps:
                     # Verified tree == merged tree, step by step: GitHub's squash of a member over main-after-H
                     # is a different 3-way merge from publish's restack, so it is compared, never assumed.
@@ -5161,6 +5285,75 @@ def self_test() -> int:
     )
     check("main-red freshness: actual settle/strict controller regressions", freshness.returncode == 0,
           freshness.stdout + freshness.stderr)
+
+    # ---- carrier kept over a moved main (disjoint, clean, re-derived) -------------------------------
+    mo = moved_main_overlap
+    check("moved main: a docs-only move under a module carrier is accepted",
+          mo(["docs/runbooks/x.md", "openbank-fx-service/README.md"], ["openbank-ledger-service/src/main/B.kt"]) is None)
+    check("moved main: a move in ANOTHER module (a dependency the carrier may build against) is rejected",
+          mo(["openbank-fx-service/src/main/A.kt"], ["openbank-ledger-service/src/main/B.kt"]) is not None)
+    check("moved main: a dependency-module build file move is rejected",
+          mo(["openbank-party-service/build.gradle.kts"], ["openbank-ledger-service/B.kt"]) is not None)
+    for nb in ("docs/adr/0001-x.md", "openbank-fx-service/CLAUDE.md"):
+        check(f"moved main: {nb} is not a harmless move", mo([nb], ["openbank-ledger-service/B.kt"]) is not None)
+    check("moved main: overlapping files rejected",
+          mo(["docs/a.md"], ["docs/a.md"]) is not None and mo(["openbank-fx-service/A.kt"], ["openbank-fx-service/A.kt"]) is not None)
+    check("moved main: same module, different file rejected (module the carrier built)",
+          mo(["openbank-fx-service/B.kt"], ["openbank-fx-service/A.kt"]) is not None)
+    for shared in (".github/workflows/ci.yml", ".github/scripts/x.py", "build-logic/a.kts", "gradle/libs.versions.toml",
+                   "settings.gradle.kts", "build.gradle.kts", "openbank-libs-runtime/A.kt", "README.md"):
+        check(f"moved main: {shared} change on main rejected", mo([shared], ["openbank-ledger-service/B.kt"]) is not None)
+    check("moved main: a full-fleet (openbank-libs) carrier keeps a docs-only move",
+          mo(["docs/runbooks/x.md"], ["openbank-libs-domain/X.kt"]) is None)
+    check("moved main: empty lists fail closed", mo([], ["a/b"]) is not None and mo(["a/b"], []) is not None)
+
+    class _R:
+        def __init__(self, rc, out=""):
+            self.returncode, self.stdout = rc, out
+    def _fake(anc=0, moved="docs/runbooks/a.md", own="openbank-ledger-service/B.kt", mt=(0, "t" * 40 + "\n")):
+        def g(*a, check=True):
+            if a[0] == "merge-base":
+                return _R(anc)
+            if a[0] == "diff":
+                return _R(0, (moved if a[-1] == "M1" else own) + "\0")
+            if a[0] == "merge-tree":
+                return _R(*mt)
+            raise AssertionError(a)
+        return g
+    check("moved main: clean disjoint move re-derives the carrier tree over M1",
+          carrier_over_moved_main(_fake(), "M0", "M1", "C") == ("t" * 40, ""))
+    check("moved main: conflict over M1 rejected",
+          carrier_over_moved_main(_fake(mt=(1, "x\n")), "M0", "M1", "C")[0] is None)
+    check("moved main: rewritten (non-ancestor) main rejected",
+          carrier_over_moved_main(_fake(anc=1), "M0", "M1", "C")[0] is None)
+    check("moved main: .github change on main rejected end to end",
+          carrier_over_moved_main(_fake(moved=".github/workflows/ci.yml"), "M0", "M1", "C")[0] is None)
+    class _GhP:
+        @staticmethod
+        def head_refspec(n):
+            return f"refs/pull/{n}/head"
+    def _pfake(trees):
+        it = iter(trees)
+        def g(*a, check=True):
+            if a[0] == "fetch":
+                return _R(0)
+            if a[0] == "rev-parse":
+                return _R(0, "H" + a[1].rsplit("-", 1)[1] + "\n")
+            if a[0] == "merge-tree":
+                return _R(0, next(it) + "\n")
+            if a[0] == "commit-tree":
+                return _R(0, "c" + a[1] + "\n")
+            raise AssertionError(a)
+        return g
+    mem = [(1, "H1"), (2, "H2")]
+    check("moved main: members' predicted squashes ending on the re-derived tree are accepted",
+          moved_main_prediction_problem(_GhP, _pfake(["t1", "T"]), "M1", mem, "T") == (["t1", "T"], None))
+    check("moved main: a predicted-tree mismatch refuses before any merge",
+          moved_main_prediction_problem(_GhP, _pfake(["t1", "X"]), "M1", mem, "T")[1] is not None)
+    check("moved main: a member head that moved refuses",
+          moved_main_prediction_problem(_GhP, _pfake(["t1", "T"]), "M1", [(1, "H1"), (2, "OTHER")], "T")[1] is not None)
+    check("moved main: overlapping change rejected end to end",
+          carrier_over_moved_main(_fake(moved="openbank-ledger-service/B.kt"), "M0", "M1", "C")[0] is None)
 
     # ---- qualifies -----------------------------------------------------------------------
     req = ["all-green", "Gitleaks", STATUS_CONTEXT]
