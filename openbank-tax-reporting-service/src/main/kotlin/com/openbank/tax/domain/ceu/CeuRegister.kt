@@ -56,6 +56,16 @@ sealed interface RegisterFact {
     ) : RegisterFact {
         init {
             requireValid(accountNumber.isNotBlank()) { "account $accountId: account number must not be blank" }
+            requireValid(accountNumber.length <= MAX_ACCOUNT_NUMBER_LENGTH) {
+                "account $accountId: account number longer than $MAX_ACCOUNT_NUMBER_LENGTH characters"
+            }
+            requireValid(CURRENCY.matches(currency)) { "account $accountId: currency '$currency' is not ISO 4217" }
+        }
+
+        companion object {
+            /** `ceu_register_fact.account_number` is VARCHAR(64) (V5). */
+            const val MAX_ACCOUNT_NUMBER_LENGTH = 64
+            private val CURRENCY = Regex("^[A-Z]{3}$")
         }
     }
 
@@ -134,11 +144,11 @@ data class RegisterSnapshot(
             facts: Collection<RegisterFact>,
             validOn: LocalDate,
             knownAt: Instant,
-            syntheticParties: Set<UUID> = emptySet(),
+            syntheticParties: Set<UUID>,
         ): RegisterSnapshot {
             val visible = facts
                 .filter { !it.recordedAt.isAfter(knownAt) && !it.effectiveOn.isAfter(validOn) }
-                .sortedWith(compareBy<RegisterFact>({ it.effectiveOn }, { it.recordedAt }, { it.eventId }))
+                .sortedWith(FACT_ORDER)
 
             // An account is synthetic when its opening event was tainted OR its holder is a
             // party-service SYNTHETIC party (ADR-0252 classification). The second catches a canary
@@ -149,55 +159,77 @@ data class RegisterSnapshot(
                         .filter { it.role == CeuRole.HOLDER && it.partyId in syntheticParties }
                         .map { it.accountId }
                 ).toSet()
+            val fold = Fold(syntheticRelations(visible), syntheticParties)
+            visible.filter { it.accountId !in syntheticAccounts }.forEach(fold::apply)
 
-            val opened = mutableMapOf<UUID, RegisterFact.AccountOpened>()
-            val closedOn = mutableMapOf<UUID, LocalDate>()
-            val relations = linkedMapOf<UUID, RegisterFact.RelationStarted>()
-            var droppedRelations = 0
-            // A relation any of whose starts was tainted stays out, so a later untainted
-            // reinstatement cannot bring a synthetic grant back into the register.
-            val taintedRelations = visible.filterIsInstance<RegisterFact.RelationStarted>()
-                .filter { it.synthetic }
-                .map { it.relationId }
-                .toSet()
-
-            visible.forEach { fact ->
-                if (fact.accountId in syntheticAccounts) return@forEach
-                when (fact) {
-                    is RegisterFact.AccountOpened -> if (!fact.synthetic) opened.putIfAbsent(fact.accountId, fact)
-                    is RegisterFact.AccountClosed -> closedOn[fact.accountId] = fact.effectiveOn
-                    is RegisterFact.RelationStarted ->
-                        if (fact.relationId in taintedRelations || fact.partyId in syntheticParties) {
-                            droppedRelations++
-                        } else {
-                            relations[fact.relationId] = fact
-                        }
-                    is RegisterFact.RelationEnded -> relations.remove(fact.relationId)
-                }
-            }
-
-            val accounts = opened.values.associate { open ->
-                val persons = relations.values
-                    .filter { it.accountId == open.accountId }
-                    .map { RegisterPerson(it.partyId, it.role, it.effectiveOn) }
-                    .toSet()
-                open.accountId to RegisterAccount(
-                    accountId = open.accountId,
-                    accountNumber = open.accountNumber,
-                    currency = open.currency,
-                    openedOn = open.effectiveOn,
-                    closedOn = closedOn[open.accountId],
-                    persons = persons,
-                )
-            }
             return RegisterSnapshot(
                 validOn,
                 knownAt,
-                accounts,
+                fold.accounts(),
                 syntheticAccounts.count { id ->
                     visible.any { it is RegisterFact.AccountOpened && it.accountId == id }
                 },
-                droppedRelations,
+                fold.droppedRelations,
+            )
+        }
+
+        private val FACT_ORDER = compareBy<RegisterFact>({ it.effectiveOn }, { it.recordedAt }, { it.eventId })
+
+        /**
+         * A relation is synthetic iff its EARLIEST start is tainted. Then every later start of it
+         * stays out too, so an untainted reinstatement cannot bring a synthetic grant back; a
+         * real relation's later tainted start is skipped on its own and leaves the real tie.
+         */
+        private fun syntheticRelations(sorted: List<RegisterFact>): Set<UUID> =
+            sorted.filterIsInstance<RegisterFact.RelationStarted>()
+                .groupBy { it.relationId }
+                .filterValues { it.first().synthetic }
+                .keys
+    }
+
+    /** Mutable fold state; a tainted fact is counted and never changes real state. */
+    private class Fold(private val syntheticRelations: Set<UUID>, private val syntheticParties: Set<UUID>) {
+        private val opened = mutableMapOf<UUID, RegisterFact.AccountOpened>()
+        private val closedOn = mutableMapOf<UUID, LocalDate>()
+        private val relations = linkedMapOf<UUID, RegisterFact.RelationStarted>()
+        var droppedRelations = 0
+            private set
+
+        fun apply(fact: RegisterFact) {
+            if (fact.synthetic && fact !is RegisterFact.RelationStarted) {
+                // A tainted open on a real account cannot reach here (the account would be
+                // synthetic); a tainted close or end of real state is skipped, with evidence.
+                droppedRelations++
+                return
+            }
+            when (fact) {
+                is RegisterFact.AccountOpened -> opened.putIfAbsent(fact.accountId, fact)
+                is RegisterFact.AccountClosed -> closedOn[fact.accountId] = fact.effectiveOn
+                is RegisterFact.RelationStarted -> start(fact)
+                is RegisterFact.RelationEnded -> relations.remove(fact.relationId)
+            }
+        }
+
+        private fun start(fact: RegisterFact.RelationStarted) {
+            if (fact.synthetic || fact.relationId in syntheticRelations || fact.partyId in syntheticParties) {
+                droppedRelations++
+            } else {
+                relations[fact.relationId] = fact
+            }
+        }
+
+        fun accounts(): Map<UUID, RegisterAccount> = opened.values.associate { open ->
+            val persons = relations.values
+                .filter { it.accountId == open.accountId }
+                .map { RegisterPerson(it.partyId, it.role, it.effectiveOn) }
+                .toSet()
+            open.accountId to RegisterAccount(
+                accountId = open.accountId,
+                accountNumber = open.accountNumber,
+                currency = open.currency,
+                openedOn = open.effectiveOn,
+                closedOn = closedOn[open.accountId],
+                persons = persons,
             )
         }
     }

@@ -17,7 +17,10 @@ interface CeuRegisterRepository {
     /** The first observed start of [relationId], or null if none has been observed. */
     suspend fun startOf(relationId: UUID): RegisterFact.RelationStarted?
 
-    /** Record a party's ADR-0252 classification; the first observation wins (it is immutable). */
+    /**
+     * Record a party's ADR-0252 classification: insert if absent, upgrade a real party to
+     * SYNTHETIC when a later observation says so, never downgrade SYNTHETIC. True if it changed.
+     */
     suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean
 
     /** Parties classified SYNTHETIC as known at [knownAt]. */
