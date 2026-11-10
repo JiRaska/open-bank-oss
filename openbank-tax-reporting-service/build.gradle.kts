@@ -28,6 +28,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    // #15356: OpenPGP encryption of the GSFT depositor batch (decree annex 1.1.6).
+    // Pinned to the catalog `bouncycastle` line (1.86) so it stays aligned with bcprov.
+    implementation("org.bouncycastle:bcpg-jdk18on:1.86")
+    implementation(libs.bouncycastle.bcprov)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
 
