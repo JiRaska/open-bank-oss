@@ -5,38 +5,44 @@ import { useEffect, useState } from 'react'
 import { ArrowLeft, ArrowRight, Check, CircleHelp, Pause, Play, RotateCcw, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
-import { TRAIN_LANES, type TrainLane } from './sdlc-content'
+import { TRAIN_LANES, type TrainLane, type TrainProgress } from './sdlc-content'
 import { TrainScene } from './TrainScene'
 import styles from './SdlcGuide.module.css'
 
 export function MergeTrainJourney() {
   const { language, t } = useLanguage()
   const [lane, setLane] = useState<TrainLane>('batch')
-  const [step, setStep] = useState(0)
+  const [steps, setSteps] = useState<TrainProgress>({ batch: 0, fast: 1, strict: 2 })
+  const step = steps[lane]
   const [failed, setFailed] = useState(false)
   const [playing, setPlaying] = useFlowAnimation()
   const selected = TRAIN_LANES[lane]
+  const complete = Object.values(steps).every(value => value === 4)
   useEffect(() => {
-    if (!playing || failed || step === 4) return
-    const timer = window.setTimeout(() => setStep(current => Math.min(4, current + 1)), 8000)
-    return () => window.clearTimeout(timer)
-  }, [playing, failed, step])
-  const move = (value: number) => { setPlaying(false); setFailed(false); setStep(value) }
+    if (!playing || complete) return
+    const cadence: Record<TrainLane, number> = { batch: 8000, fast: 5000, strict: 10000 }
+    const timers = (Object.keys(TRAIN_LANES) as TrainLane[]).map(key => window.setInterval(() => {
+      setSteps(current => ({ ...current, [key]: Math.min(4, current[key] + 1) }))
+    }, cadence[key]))
+    return () => timers.forEach(timer => window.clearInterval(timer))
+  }, [playing, complete])
+  const move = (value: number) => { setPlaying(false); setFailed(false); setSteps(current => ({ ...current, [lane]: value })) }
   return <section className={styles.trainSection} aria-labelledby="train-title" onFocusCapture={event => { if (!(event.target as HTMLElement).closest('[data-play-control]')) setPlaying(false) }}>
     <div className={styles.sectionTop}>
-      <div><span className={styles.eyebrow}>{t('Nádraží změn', 'Change station')}</span><h2 id="train-title">{t('Každý lvíček veze jednu změnu', 'Every lion carries a change')}</h2></div>
-      <button className={styles.button} type="button" data-play-control aria-pressed={playing} onClick={() => { if (step === 4) setStep(0); setFailed(false); setPlaying(current => !current) }}>
+      <div><span className={styles.eyebrow}>{t('Nádraží změn', 'Change station')}</span><h2 id="train-title">{t('Více kolejí. Kontroly běží souběžně.', 'Several tracks. Checks run concurrently.')}</h2></div>
+      <button className={styles.button} type="button" data-play-control aria-pressed={playing} onClick={() => { if (Object.values(steps).every(value => value === 4)) setSteps({ batch: 0, fast: 1, strict: 2 }); setFailed(false); setPlaying(current => !current) }}>
         {playing ? <Pause size={16} aria-hidden="true" /> : <Play size={16} aria-hidden="true" />}{playing ? t('Pozastavit', 'Pause') : t('Přehrát cestu', 'Play journey')}
       </button>
     </div>
     <p className={styles.muted}>{t('Modelový příběh, ne živá fronta GitHubu. Vagón je PR, lokomotiva znázorňuje odbavení botem a cílová stanice je hlavní větev main. Dávkový vlak má společný ověřovací PR, rychlá kolej ho nepotřebuje.', 'An illustrative story, not the live GitHub queue. A coach is a PR, the engine represents bot settlement and the destination is the main branch. A batch train has a shared test PR; the fast lane does not need one.')}</p>
+    <p className={styles.parallelNote}>{t('Každá kolej má vlastní průběh a může ověřovat změny současně s ostatními. Přepnutím koleje pouze zvolíte detail; její rozpracovaný stav zůstává. CI přísné koleje a dávkového carrieru se může v povoleném okně překrýt. Zápisy do main ale probíhají řízeně v pořadí: rezervace může zadržet i jinak připravenou rychlou kolej. Tempa v animaci jsou ilustrační.', 'Each track has its own progress and can check changes alongside the others. Switching tracks selects a detail and preserves its progress. Strict-lane CI and a batch carrier can overlap within the allowed window. Writes to main still follow governed ordering: a reservation can hold an otherwise ready fast lane. Animation timings are illustrative.')}</p>
     <div className={styles.laneChoices} aria-label={t('Vyberte kolej', 'Choose a lane')}>
-      {(Object.keys(TRAIN_LANES) as TrainLane[]).map(key => <button key={key} type="button" aria-pressed={lane === key} onClick={() => { setLane(key); move(0) }}>
+      {(Object.keys(TRAIN_LANES) as TrainLane[]).map(key => <button key={key} type="button" aria-pressed={lane === key} onClick={() => { setLane(key); setPlaying(false); setFailed(false) }}>
         <strong>{TRAIN_LANES[key].title[language]}</strong><span>{TRAIN_LANES[key].subtitle[language]}</span>
       </button>)}
     </div>
     <p className={styles.routeDescription}>{selected.description[language]}</p>
-    <TrainScene lane={lane} step={step} playing={playing} failed={failed} />
+    <TrainScene lane={lane} steps={steps} playing={playing} failed={failed} />
     <ol className={styles.stations} aria-label={t('Stanice cesty změny', 'Stations on the change journey')}>
       {selected.stops.map((stop, index) => <li key={index}><button type="button" aria-current={step === index ? 'step' : undefined} onClick={() => move(index)}><span>{index < step ? <Check size={14} aria-hidden="true" /> : index + 1}</span>{stop[language]}</button></li>)}
     </ol>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { bi, type Bilingual as Copy } from '@/lib/i18n/bilingual'
 export type TrainLane = 'batch' | 'fast' | 'strict'
+export type TrainProgress = Record<TrainLane, number>
 
 export const TRAIN_LANES = {
   batch: {
@@ -12,7 +13,7 @@ export const TRAIN_LANES = {
       bi('Lvíček přináší návrh změny. Pull request (PR) je balíček úprav s vysvětlením, proč vznikl, a s testy nového chování.', 'A lion brings a proposed change. A pull request (PR) is a package of edits explaining why they exist, with tests for the new behaviour.'),
       bi('Každý cestující potřebuje vlastní jízdenku: úspěšné povinné i dodatečné kontroly. Musí být zapnuté automatické sloučení a splněná pravidla přijetí.', 'Every passenger needs their own ticket: successful required and additional checks. Auto-merge must be enabled and admission rules satisfied.'),
       bi('Výpravčí vybere připravené PR, obvykle od nejstarších. Složí je nad aktuální main, obnoví potřebné odvozené soubory a ověří přesný obsah společného ověřovacího PR — carrieru.', 'The dispatcher selects ready PRs, normally oldest first. It combines them over current main, regenerates derived files where needed and verifies the exact content of a shared test PR — the carrier.'),
-      bi('Vlak má vlastní CI. Testuje se společný výsledek: dvě zelené změny si totiž mohou navzájem překážet. Cestující čekají na verdikt celé soupravy.', 'The train has its own CI. It tests the combined result: two green changes can still interfere with each other. The passengers wait for the whole train’s verdict.'),
+      bi('Vlak má vlastní CI. Testuje se společný výsledek: dvě zelené změny si totiž mohou navzájem překážet. Cestující čekají na verdikt celé soupravy. Mezitím může probíhat CI dalších PR i rezervované přísné koleje; souběh kontrol ještě nedává soupravám právo současně měnit main.', 'The train has its own CI. It tests the combined result: two green changes can still interfere with each other. The passengers wait for the whole train’s verdict. Other PR checks and a reserved strict lane can run CI meanwhile; concurrent checks do not give trains permission to change main simultaneously.'),
       bi('Po úspěšném ověření bot slučuje zdrojové PR jednotlivě v pořadí vlaku. Před každým znovu ověří jejich aktuální podobu a záměr sloučit. Cizí posun main nebo změna PR odbavení zastaví.', 'After successful verification the bot merges the source PRs individually in train order. Before each merge it rechecks the current head and merge intent. An outside change to main or a changed PR stops settlement.'),
     ],
   },

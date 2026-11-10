@@ -1,0 +1,140 @@
+# Dependency-verification metadata refresh for Dependabot PRs: the PRIVILEGED half.
+#
+# See dependabot-verification-metadata.yml for why the refresh is split. This workflow
+# runs from the default branch (workflow_run), so its code and the validator are
+# trusted; the artifact it downloads is not. It:
+#   1. admits only a successful pull_request run by Dependabot on a same-repo
+#      dependabot/gradle/* branch whose PR is still open at the SAME head;
+#   2. downloads the regenerated file into a directory outside the checkout, so an
+#      artifact can never overwrite the trusted scripts;
+#   3. accepts it only if it is purely additive against the file at that head
+#      (no <configuration> change, no changed pin);
+#   4. commits it through the Git Data API with parent == that head and moves the ref
+#      without force, so a branch that moved in between is refused, not overwritten.
+# It never checks out, builds or runs PR code. A push made with the App token (not
+# GITHUB_TOKEN) re-triggers the PR's checks, which is the point.
+name: Push Dependabot verification metadata
+
+on:
+  workflow_run:
+    workflows: ["Dependabot verification metadata"]
+    types: [completed]
+    branches: ["dependabot/gradle/**"]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: dependabot-verification-metadata-push-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  push:
+    name: Push additive metadata to the Dependabot branch
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.actor.login == 'dependabot[bot]' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      startsWith(github.event.workflow_run.head_branch, 'dependabot/gradle/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_REPO: ${{ github.repository }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test the validator
+        run: python3 .github/scripts/check-verification-metadata-additive.py --selftest
+
+      - name: Find the regenerated file
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          count="$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/artifacts" \
+            --jq '[.artifacts[] | select(.name == "verification-metadata" and .expired == false)] | length')"
+          if [ "$count" = "0" ]; then
+            echo "the regeneration produced no change; nothing to push"
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download it outside the checkout
+        if: steps.artifact.outputs.present == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verification-metadata
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/untrusted
+
+      - name: Verify the PR head and the additive change
+        if: steps.artifact.outputs.present == 'true'
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::invalid head sha"; exit 1; }
+          if [[ ! "$HEAD_BRANCH" =~ ^dependabot/gradle/[A-Za-z0-9._/-]+$ || "$HEAD_BRANCH" == *..* ||
+                "$HEAD_BRANCH" == *//* || "$HEAD_BRANCH" == */ ]]; then
+            echo "::error::unexpected branch name"; exit 1
+          fi
+          pr="$(gh api "repos/${GH_REPO}/pulls?state=open&head=${GH_REPO%%/*}:${HEAD_BRANCH}" --jq '
+            [.[] | select(.user.login == "dependabot[bot]" and .head.sha == env.HEAD_SHA)] |
+            if length == 1 then .[0].number else empty end')"
+          if [ -z "$pr" ]; then
+            echo "no open Dependabot PR at ${HEAD_SHA}; the branch moved or closed, nothing to push"
+            echo "admitted=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          gh api -H "Accept: application/vnd.github.raw" \
+            "repos/${GH_REPO}/contents/gradle/verification-metadata.xml?ref=${HEAD_SHA}" \
+            > "$RUNNER_TEMP/base.xml"
+          python3 .github/scripts/check-verification-metadata-additive.py \
+            "$RUNNER_TEMP/base.xml" "$RUNNER_TEMP/untrusted/verification-metadata.xml"
+          echo "admitted=true" >> "$GITHUB_OUTPUT"
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint repository-scoped GitHub App token
+        if: steps.verify.outputs.admitted == 'true'
+        id: app_token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Commit onto the resolved head without force
+        if: steps.verify.outputs.admitted == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          PR_NUMBER: ${{ steps.verify.outputs.pr }}
+        run: |
+          set -euo pipefail
+          file="$RUNNER_TEMP/untrusted/verification-metadata.xml"
+          base_tree="$(gh api "repos/${GH_REPO}/git/commits/${HEAD_SHA}" --jq .tree.sha)"
+          blob="$(base64 -w0 < "$file" | jq -Rs '{content: ., encoding: "base64"}' |
+            gh api "repos/${GH_REPO}/git/blobs" --input - --jq .sha)"
+          tree="$(jq -n --arg base "$base_tree" --arg blob "$blob" '{base_tree: $base, tree: [
+            {path: "gradle/verification-metadata.xml", mode: "100644", type: "blob", sha: $blob}]}' |
+            gh api "repos/${GH_REPO}/git/trees" --input - --jq .sha)"
+          commit="$(jq -n --arg tree "$tree" --arg parent "$HEAD_SHA" '{tree: $tree, parents: [$parent],
+            message: "chore(deps): refresh dependency-verification metadata for this bump"}' |
+            gh api "repos/${GH_REPO}/git/commits" --input - --jq .sha)"
+          # force=false: if the branch moved since the regeneration, GitHub refuses the
+          # non-fast-forward update instead of discarding whatever landed.
+          jq -n --arg sha "$commit" '{sha: $sha, force: false}' |
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/heads/${HEAD_BRANCH}" --input - >/dev/null
+          echo "pushed ${commit} onto ${HEAD_BRANCH} (PR #${PR_NUMBER})"

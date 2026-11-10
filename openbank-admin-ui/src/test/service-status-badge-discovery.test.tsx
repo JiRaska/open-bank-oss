@@ -18,6 +18,7 @@ describe('ServiceStatusBadge discovery uncertainty', () => {
     const badge = screen.getByText('ledger-service :8102')
     expect(badge).toHaveAttribute('title', 'Deployment status is unknown')
     expect(badge).not.toHaveAttribute('title', 'down')
-    expect(badge).toHaveStyle({ color: 'var(--warning-text)' })
+    // Authored token: jsdom >= 31 resolves var() in computed style, and no theme sheet is loaded here.
+    expect(badge.style.getPropertyValue('color')).toBe('var(--warning-text)')
   })
 })

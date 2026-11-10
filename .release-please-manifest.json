@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.36.1",
-  "openbank-admin-ui": "4.9.0",
+  "openbank-admin-ui": "4.9.1",
   "openbank-agent-service": "1.33.1",
   "openbank-aml-service": "0.14.1",
   "openbank-anacredit-service": "0.10.0",
@@ -59,7 +59,7 @@
   "openbank-transaction-service": "2.0.1",
   "openbank-vop-service": "0.5.3",
   "openbank-campaign-service": "0.42.2",
-  "openbank-tax-reporting-service": "0.47.2",
+  "openbank-tax-reporting-service": "0.47.3",
   "openbank-delegation-service": "0.23.5",
   "openbank-kyb-service": "0.8.5",
   "openbank-case-coordinator-agent": "0.12.4",

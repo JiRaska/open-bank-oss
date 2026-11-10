@@ -21,16 +21,15 @@
 .laneChoices button[aria-pressed="true"] { background: var(--ob-accent-light); border-color: var(--ob-accent); box-shadow: inset 0 0 0 1px var(--ob-accent); }
 .laneChoices strong { display: block; font-size: var(--text-md); margin-bottom: var(--space-1); }
 .laneChoices span { display: block; color: var(--text-secondary); font-size: var(--text-xs); }
+.parallelNote { margin: var(--space-4) 0; color: var(--text-secondary); line-height: 1.7; }
 .routeDescription { min-height: 3.5em; margin: var(--space-4) 0; color: var(--text-secondary); line-height: 1.7; }
 .scene { border-radius: calc(var(--radius) * 1.5); background: #071425; overflow: hidden; border: 1px solid #243a52; box-shadow: inset 0 0 50px #030a14; }
-.sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; }
+.sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; }
 .trainPosition { transition: transform 1.8s cubic-bezier(.2,.8,.2,1); }
-.trainBounce { animation: train-bounce 2.2s ease-in-out infinite; }
-.passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 1.4s ease-in-out infinite; }
+.passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 3.2s ease-in-out infinite; }
 .passenger[data-mood="1"] { animation-name: passenger-worry; animation-duration: 2.8s; }
-.passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: .9s; }
+.passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: 2.2s; }
 .scene[data-playing="false"] .passenger { animation-play-state: paused; }
-.scene[data-moving="false"] .trainBounce { animation-play-state: paused; }
 .stations { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); list-style: none; margin: var(--space-5) 0; padding: 0; }
 .stations button { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); width: 100%; min-height: 68px; padding: var(--space-2); background: transparent; border: 0; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); text-align: center; cursor: pointer; }
 .stations button > span { display: flex; align-items: center; justify-content: center; height: 27px; width: 27px; border-radius: 50%; background: var(--surface-3); color: var(--text-secondary); font-weight: var(--font-semibold); }
@@ -81,12 +80,11 @@
 .sources { padding-top: var(--space-4); border-top: 1px solid var(--border-strong); color: var(--text-secondary); font-size: var(--text-xs); }
 .sources ul { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); list-style: none; padding: 0; }
 .nextChapter { display: flex; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; padding: var(--space-5) 0; margin-top: var(--space-6); }
-@keyframes train-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
-@keyframes passenger-wave { 0%,100% { transform: rotate(-2deg); } 50% { transform: rotate(3deg); } }
-@keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(2px) rotate(-2deg); } }
-@keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-4px) rotate(2deg); } }
+@keyframes passenger-wave { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+@keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+@keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 @media (max-width: 800px) { .deliveryPath { grid-template-columns: repeat(2,minmax(0,1fr)); } .trainSection { padding: var(--space-4); } .laneChoices { gap: var(--space-2); } .laneChoices button { padding: var(--space-3); } }
 @media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .laneChoices { grid-template-columns: 1fr; } .laneChoices button { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); } .laneChoices strong { margin: 0; } .routeDescription { min-height: 0; } .stations { gap: 0; } .stations button { padding: var(--space-1); font-size: 11px; overflow-wrap: anywhere; } .journeyDetail { min-height: 0; padding-left: var(--space-3); } .sectionTop h2 { font-size: var(--text-xl); } .guideNav a { flex: 1 1 auto; } }
-@media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .trainBounce, .passenger { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .passenger { animation: none !important; } }
 
 @media (max-width: 520px) { .scene { overflow-x: auto; } .sceneSvg { width: 720px; max-width: none; } }
