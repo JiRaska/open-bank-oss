@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.42.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.41.0...ledger-service-v1.42.0) (2026-11-09)
+
+
+### Features
+
+* **ledger:** add segregated pension fee accounting and close evidence ([#15210](https://github.com/JiRaska/open-bank-oss/issues/15210)) ([7bfb640](https://github.com/JiRaska/open-bank-oss/commit/7bfb640b41dfb2a75e7f32c120341b42c286cb9d))
+
 ## [1.41.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.40.0...ledger-service-v1.41.0) (2026-11-09)
 
 

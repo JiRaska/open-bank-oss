@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.ledger.application.port.out.CloseEvidenceRepository
 import com.openbank.ledger.application.usecase.CloseParticipantsConfig
 import com.openbank.ledger.application.usecase.CloseReadinessConfig
+import com.openbank.ledger.application.usecase.PensionBookIdentity
 import com.openbank.ledger.domain.model.AccountingDayRecord
 import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.ClosedDayParticipation
@@ -30,6 +31,7 @@ class CloseEvidenceStore(
     private val participantsConfig: CloseParticipantsConfig,
     private val readinessConfig: CloseReadinessConfig,
     private val clock: Clock,
+    private val book: PensionBookIdentity,
 ) : CloseEvidenceRepository {
     override suspend fun findMonth(from: LocalDate, to: LocalDate): List<ClosedDayParticipation> = Panache.withSession {
         Panache.getSession().flatMap { session ->
@@ -62,6 +64,8 @@ class CloseEvidenceStore(
             tieOutRunId = row[TIE_OUT_RUN]?.let { UUID.fromString(it.toString()) },
             postingsUnchanged = row[POSTINGS_UNCHANGED] == true,
             sourceEvidenceUnchanged = row[SOURCE_EVIDENCE_UNCHANGED] == true,
+            bookKind = row[BOOK_KIND].toString(),
+            bookId = row[BOOK_ID]?.let { UUID.fromString(it.toString()) },
         )
     }
 
@@ -86,6 +90,8 @@ class CloseEvidenceStore(
                         .setParameter("d", record.businessDate)
                         .setParameter("at", clock.instant())
                         .setParameter("mode", participantsConfig.participantsMode())
+                        .setParameter("bookKind", book.kind.name)
+                        .setParameter("bookId", book.bookId)
                         .setParameter("fingerprint", population.fingerprint)
                         .setParameter("journalCount", population.count)
                         .setParameter(
@@ -119,14 +125,16 @@ class CloseEvidenceStore(
         const val TIE_OUT_RUN = 6
         const val POSTINGS_UNCHANGED = 7
         const val SOURCE_EVIDENCE_UNCHANGED = 8
+        const val BOOK_KIND = 9
+        const val BOOK_ID = 10
         const val CAPTURE_SQL = "INSERT INTO ledger_close_evidence " +
             "(business_date, observed_at, mode, expected_principals, expected_jobs, tie_out_run_id, " +
-            "reports, journal_count, journal_fingerprint) " +
+            "reports, journal_count, journal_fingerprint, book_kind, book_id) " +
             "VALUES (:d, :at, :mode, CAST(CAST(:expected AS text) AS jsonb), " +
             "CAST(CAST(:expectedJobs AS text) AS jsonb), " +
             "(SELECT t.id FROM (SELECT id, status, run_at, started_at, journal_count, journal_fingerprint, " +
             "accounts_checked, breaks, errors " +
-            "FROM ledger_tieout_runs WHERE as_of = :d " +
+            "FROM ledger_tieout_runs WHERE as_of = :d AND control_kind = :bookKind " +
             "ORDER BY run_at DESC, id DESC LIMIT 1) t WHERE t.status = 'OK' AND t.accounts_checked > 0 " +
             "AND t.breaks = 0 AND t.errors = 0 AND t.run_at <= :at AND t.started_at >= " +
             "GREATEST((SELECT cutoff_at FROM ledger_accounting_day WHERE business_date = :d), " +
@@ -140,7 +148,7 @@ class CloseEvidenceStore(
             "FROM (SELECT DISTINCT ON (participant) participant, outcome, reported_by, reason, exercised_jobs, " +
             "source_run_id, seq, reported_at " +
             "FROM ledger_close_participation WHERE business_date = :d ORDER BY participant, seq DESC) p), " +
-            ":journalCount, :fingerprint)"
+            ":journalCount, :fingerprint, :bookKind, :bookId)"
 
         val READ_SQL = "SELECT business_date, observed_at, mode, " +
             "CAST(expected_principals AS text), CAST(reports AS text), CAST(expected_jobs AS text), tie_out_run_id, " +
@@ -153,7 +161,7 @@ class CloseEvidenceStore(
             "WHERE r.report->>'participant' = declared.participant AND r.report->>'receiptSeq' IS NOT NULL " +
             "AND NOT EXISTS (SELECT 1 FROM ledger_close_participation p " +
             "WHERE p.business_date = e.business_date AND p.participant = declared.participant " +
-            "AND p.seq > CAST(r.report->>'receiptSeq' AS bigint)))) FROM ledger_close_evidence e " +
+            "AND p.seq > CAST(r.report->>'receiptSeq' AS bigint)))), book_kind, book_id FROM ledger_close_evidence e " +
             "WHERE business_date >= :fromDate AND business_date <= :toDate ORDER BY business_date"
     }
 }

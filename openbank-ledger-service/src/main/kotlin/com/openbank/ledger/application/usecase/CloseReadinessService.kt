@@ -16,6 +16,7 @@ class CloseReadinessService(
     private val config: CloseParticipantsConfig,
     private val clock: Clock,
     private val readinessConfig: CloseReadinessConfig,
+    private val book: PensionBookIdentity,
 ) {
     suspend fun get(month: String?): CloseReadiness {
         val today = AccountingClock.bank(clock).today()
@@ -34,8 +35,10 @@ class CloseReadinessService(
             period,
             today,
             config.participants().mapValues { it.value.principal() },
-            repository.findMonth(period.atDay(1), period.atEndOfMonth()),
+            repository.findMonth(period.atDay(1), period.atEndOfMonth()).filter {
+                it.bookKind == book.kind.name && it.bookId == book.bookId
+            },
             readinessConfig.requiredJobs(),
-        )
+        ).copy(bookKind = book.kind.name, bookId = book.bookId)
     }
 }

@@ -10,7 +10,7 @@ info:
   # 2.0.0: ADR-0341 requires an explicit published productRevisionId on fund creation.
   #        This is a breaking contract: all business routes move to /api/v2; consumers migrate
   #        explicitly. Amendments retain their existing pin and cannot change the fee.
-  version: 2.0.0
+  version: 2.1.0
   description: |
     Provider side of the pension platform (ADR-0334 §1): segregated funds, fund strategies with
     lifecycle glide paths, the unit register and NAV.
@@ -33,6 +33,32 @@ security:
   - bearerAuth: []
 
 paths:
+  /api/v2/funds/{fundId}/accounting-days/{date}:
+    get:
+      tags: [Funds]
+      operationId: getFundAccountingDayEvidence
+      summary: Read NAV and fee delivery gaps for this fund and own book
+      description: >
+        A read-only source view, not full-book close authorization. Missing NAV/calendar, historical
+        NAV without an intent, partial delivery, late posting and synthetic sources remain explicit
+        blockers. Cash, custody and settlement completion are owned by separate producers.
+      parameters:
+        - {name: fundId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: date, in: path, required: true, schema: {type: string, format: date}}
+        - name: bookKind
+          in: query
+          required: false
+          schema: {type: string, enum: [PENSION_FUND, PENSION_COMPANY], default: PENSION_FUND}
+      responses:
+        '200':
+          description: Observed source completion and gaps; disabled delivery never reports success
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/FundAccountingDayEvidence'}
+        '400': {description: Invalid date or book kind}
+        '401': {description: Unauthenticated}
+        '403': {description: Not authorized to read this fund}
+        '404': {description: Unknown fund}
   /api/v2/funds:
     post:
       parameters: [ { $ref: '#/components/parameters/WriteIdempotencyKey' } ]
@@ -771,6 +797,20 @@ components:
     FourEyes: { description: The maker cannot be the checker, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   schemas:
+    FundAccountingDayEvidence:
+      type: object
+      required: [fundId, businessDate, bookKind, sourceNavs, journalsPosted, complete, blockers]
+      properties:
+        fundId: {type: string, format: uuid}
+        businessDate: {type: string, format: date}
+        bookKind: {type: string, enum: [PENSION_FUND, PENSION_COMPANY]}
+        sourceRunId: {type: [string, 'null'], pattern: '^[a-f0-9]{64}$'}
+        sourceNavs: {type: integer, minimum: 0}
+        journalsPosted: {type: integer, minimum: 0}
+        complete: {type: boolean}
+        blockers:
+          type: array
+          items: {type: string}
     Error:
       type: object
       properties:

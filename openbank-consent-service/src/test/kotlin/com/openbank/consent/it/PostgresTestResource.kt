@@ -55,6 +55,6 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     private companion object {
         val RESOURCE_SCOPE_ID = UUID.randomUUID().toString()
         const val POSTGRES_IMAGE = "postgres:18.6-alpine"
-        const val VALKEY_IMAGE = "docker.io/valkey/valkey:8-alpine"
+        const val VALKEY_IMAGE = "docker.io/valkey/valkey:9.1.3-alpine"
     }
 }
