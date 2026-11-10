@@ -144,13 +144,14 @@ class StatutoryReturnResource(
     )
     suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response {
         val returnId = parseId(id)
+        val actor = actingPrincipal()
         // A GSFT batch is filed only through its delivery route, which verifies the stored package
         // against the attested hashes and encrypts it; recording a reference here would file a
         // return whose package nobody checked.
         if (service.get(returnId).catalogueId == GsftReturnDataAdapter.CATALOGUE_ID) {
             throw TaxConflictException("A GSFT return is submitted through POST /{id}/gsft-delivery, not /submitted")
         }
-        return Response.ok(service.submit(returnId, request.reference, actingPrincipal()).toResponse()).build()
+        return Response.ok(service.submit(returnId, request.reference, actor).toResponse()).build()
     }
 
     @POST
