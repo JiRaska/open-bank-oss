@@ -189,8 +189,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "c2ceebd64df70231",
-      "count": 22,
+      "sha256": "b507ff3d567e8805",
+      "count": 23,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -201,6 +201,7 @@
         "mcp-anonymous",
         "ap2-anonymous",
         "card-scheme-bulletin-agent",
+        "regulatory-obligations-watcher",
         "card-dispute-evidence-agent",
         "treasury-dealing-assistant",
         "finops-agent",
@@ -216,7 +217,7 @@
         "business-copilot"
       ],
       "byPlane": {
-        "control": 15,
+        "control": 16,
         "development": 2,
         "customer": 3,
         "business": 2
@@ -228,11 +229,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "e234b0a1950b0c30",
+      "sha256": "28d88f1e5a5575b3",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 6,
+        "pending": 7,
         "registered": 12
       },
       "idsByStatus": {
@@ -248,6 +249,7 @@
           "product-author",
           "card-scheme-bulletin-agent",
           "card-dispute-evidence-agent",
+          "regulatory-obligations-watcher",
           "treasury-dealing-assistant",
           "kyb-analyst",
           "business-copilot"
@@ -296,6 +298,7 @@
         "ledger-domain-engineer": [],
         "card-scheme-bulletin-agent": [],
         "card-dispute-evidence-agent": [],
+        "regulatory-obligations-watcher": [],
         "treasury-dealing-assistant": [],
         "mcp-anonymous": [],
         "ap2-anonymous": [],
