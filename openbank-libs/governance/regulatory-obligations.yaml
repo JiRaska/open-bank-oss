@@ -30,8 +30,11 @@
 #   - `reports` lists ids from the admin-ui regulatory catalogue; the checker fails on an unknown id
 #     and on any catalogue entry that no obligation claims.
 #
-# Watched by agent `regulatory-obligations-watcher` (agents.yaml), which proposes issues for
-# changes in the cited sources and never edits this file outside a reviewed PR.
+# A watcher charter (`regulatory-obligations-watcher`) is PROPOSED separately and lands disabled
+# until a source fetcher is wired; nothing watches the cited sources today. Changes to this file
+# happen only through a reviewed PR.
+# `personal_data` values are QUOTED on purpose: unquoted yes/no are YAML 1.1 booleans to PyYAML
+# and would render as True/False (the checker rejects a non-string value).
 
 schema_version: 1
 
@@ -79,7 +82,7 @@ obligations:
     cadence_confidence: verified
     kind: granular-feed
     transport: SDAT
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
     note: Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
@@ -95,7 +98,7 @@ obligations:
     cadence_confidence: unverified
     kind: register
     transport: SDAT
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-tax-reporting-service], tracking: ADR-0367 }
   - id: cnb-anacredit
@@ -110,7 +113,7 @@ obligations:
     cadence_confidence: unverified
     kind: granular-feed
     transport: SDAT
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-anacredit-service], tracking: null }
     note: Služba existuje, ale v regulatorním katalogu není a nemá záznam podání.
@@ -126,7 +129,7 @@ obligations:
     cadence_confidence: unverified
     kind: granular-feed
     transport: SDAT
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
 
@@ -143,7 +146,7 @@ obligations:
     cadence_confidence: verified
     kind: event
     transport: "Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)"
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
     note: Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
@@ -159,7 +162,7 @@ obligations:
     cadence_confidence: verified
     kind: event
     transport: dávkové soubory pro GSFT
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
   - id: gsft-contribution-base
@@ -174,7 +177,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: "#15356" }
   - id: resolution-fund-contribution
@@ -189,7 +192,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-mrel-resolution
@@ -204,7 +207,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-recovery-plan
@@ -219,7 +222,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka / SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
     note: Dokument řízení banky, nikoli výstup core-banking platformy.
@@ -237,7 +240,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT (XBRL-CSV)
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: filed-return, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: null }
   - id: eba-corep-own-funds
@@ -252,7 +255,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: filed-return, reports: [cnb-capital], services: [openbank-finrep-service], tracking: null }
   - id: eba-lcr
@@ -267,7 +270,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: filed-return, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: null }
   - id: eba-nsfr
@@ -282,7 +285,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
   - id: eba-leverage
@@ -297,7 +300,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: eba-large-exposures
@@ -312,7 +315,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
   - id: eba-almm
@@ -327,7 +330,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: eba-asset-encumbrance
@@ -342,7 +345,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: eba-irrbb
@@ -357,7 +360,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
   - id: eba-remuneration
@@ -372,22 +375,22 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
   - id: eba-funding-plans
     area: prudential
     name: { cs: Plány financování, en: Funding plans }
     authority: cnb
-    legal_basis: EBA GL/2019/05
+    legal_basis: EBA GL/2019/05 (vydané podle čl. 16 nařízení (EU) č. 1093/2010)
     sources:
-      law: https://www.eba.europa.eu/
+      law: https://eur-lex.europa.eu/eli/reg/2010/1093/oj
       spec: https://www.eba.europa.eu/
     cadence: Ročně, nad prahem velikosti.
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: instituce nad prahem EBA GL/2019/05"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: eba-supervisory-benchmarking
@@ -402,7 +405,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: banka používá IRB nebo interní modely"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: cnb-icaap-ilaap
@@ -417,7 +420,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
   - id: eba-esg-supervisory
@@ -432,7 +435,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
 
@@ -449,7 +452,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: bff-only, reports: [sdat-accounts], services: [], tracking: ADR-0367 }
   - id: cnb-mir-interest-rates
@@ -464,7 +467,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-payment-statistics
@@ -479,7 +482,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: bff-only, reports: [sdat-payments, ecb-payments], services: [], tracking: ADR-0367 }
     note: Katalog cituje u ECB výkazu nařízení ECB/2013/43, které bylo nahrazeno nařízením (EU) 2020/2011.
@@ -495,7 +498,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-minimum-reserves
@@ -510,7 +513,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-risk-engine], tracking: null }
   - id: cnb-mortgage-survey
@@ -525,7 +528,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: csu-surveys
@@ -540,7 +543,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: DANTE web
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
 
@@ -557,7 +560,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: psd2-tra-fraud-monitoring
@@ -572,7 +575,7 @@ obligations:
     cadence_confidence: known-eu
     kind: event
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: psd2-api-statistics
@@ -587,7 +590,7 @@ obligations:
     cadence_confidence: known-eu
     kind: disclosure
     transport: web banky
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-psd2-service], tracking: null }
   - id: instant-payments-reporting
@@ -602,7 +605,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: ifr-interchange
@@ -617,7 +620,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
 
@@ -634,7 +637,7 @@ obligations:
     cadence_confidence: known-eu
     kind: event
     transport: kanál ČNB pro DORA
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: bff-only, reports: [dora-ict], services: [], tracking: ADR-0367 }
     note: Pro úvěrové instituce nahrazuje hlášení incidentů podle PSD2 čl. 96.
@@ -647,10 +650,10 @@ obligations:
       law: https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj
       spec: https://www.cnb.cz/cs/statistika/metodicke-informace/dora/
     cadence: "Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU."
-    cadence_confidence: verified
+    cadence_confidence: unverified
     kind: register
     transport: SDAT
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: dora-critical-ict-contract
@@ -665,7 +668,7 @@ obligations:
     cadence_confidence: known-eu
     kind: event
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: dora-tlpt
@@ -680,7 +683,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: instituce určená ČNB k TLPT"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: nis2-cyber-incident
@@ -689,13 +692,13 @@ obligations:
     authority: nukib
     legal_basis: zákon o kybernetické bezpečnosti (NIS2); DORA jako lex specialis pro banky
     sources:
-      law: https://nukib.gov.cz/
+      law: https://eur-lex.europa.eu/eli/dir/2022/2555/oj
       spec: null
     cadence: Při události.
     cadence_confidence: unverified
     kind: event
     transport: neověřeno
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: použitelnost vedle DORA neověřena"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: uoou-personal-data-breach
@@ -710,7 +713,7 @@ obligations:
     cadence_confidence: known-eu
     kind: event
     transport: formulář ÚOOÚ / datová schránka
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
 
@@ -727,7 +730,7 @@ obligations:
     cadence_confidence: verified
     kind: event
     transport: "písemně nebo elektronicky se zajištěním důvěrnosti (§ 18 odst. 4, § 19); konkrétní kanál neověřen"
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: bff-only, reports: [aml-far], services: [openbank-aml-service], tracking: ADR-0367 }
     note: Zákaz informování klienta (§ 38).
@@ -743,7 +746,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: MoneyWeb / datová schránka
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: fau-sanctions-assets
@@ -758,7 +761,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka / MoneyWeb
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-sanctions-service], tracking: null }
   - id: eu-russia-belarus-deposits
@@ -773,7 +776,7 @@ obligations:
     cadence_confidence: known-eu
     kind: periodic-aggregate
     transport: neověřeno
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: beneficial-owner-discrepancy
@@ -788,7 +791,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: neověřeno
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-kyb-service], tracking: null }
 
@@ -805,7 +808,7 @@ obligations:
     cadence_confidence: verified
     kind: granular-feed
     transport: EPO / MOJE daně (XML)
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service, openbank-party-service], tracking: ADR-0340 }
     note: Daňová rezidence je atribut osoby (ADR-0339); hrubý výnos je zaznamenáván z událostí srážkové daně.
@@ -821,7 +824,7 @@ obligations:
     cadence_confidence: unverified
     kind: granular-feed
     transport: EPO
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: bff-only, reports: [fatca-report], services: [openbank-tax-reporting-service], tracking: ADR-0340 }
   - id: fs-withholding-tax
@@ -836,7 +839,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: EPO / MOJE daně
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service, openbank-interest-service], tracking: null }
     note: Tax-reporting-service sestavuje měsíční podání podle § 38d odst. 3; v regulatorním katalogu není.
@@ -852,7 +855,7 @@ obligations:
     cadence_confidence: unverified
     kind: granular-feed
     transport: EPO
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service], tracking: null }
   - id: fs-dac6
@@ -867,7 +870,7 @@ obligations:
     cadence_confidence: known-eu
     kind: event
     transport: EPO
-    personal_data: yes
+    personal_data: "yes"
     applicability: "conditional: banka vystupuje jako zprostředkovatel uspořádání"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: fs-dac8-crypto
@@ -882,7 +885,7 @@ obligations:
     cadence_confidence: known-eu
     kind: granular-feed
     transport: neověřeno
-    personal_data: yes
+    personal_data: "yes"
     applicability: "conditional: banka poskytuje služby kryptoaktiv podle MiCA"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: fs-corporate-taxes
@@ -897,7 +900,7 @@ obligations:
     cadence_confidence: unverified
     kind: periodic-aggregate
     transport: EPO / MOJE daně
-    personal_data: partial
+    personal_data: "partial"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-tax-reporting-service], tracking: null }
     note: Korporátní registr faktů (CorporateRegister) v tax-reporting-service; samotné přiznání mimo katalog.
@@ -915,7 +918,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: court-executor-requests
@@ -930,12 +933,12 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka / elektronické rozhraní exekutorů
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: social-body-requests
     area: requests
-    name: { cs: Součinnost ČSSZ, zdravotním pojišťovnám a úřadům práce, en: Social security and health insurer requests }
+    name: { cs: "Součinnost ČSSZ, zdravotním pojišťovnám a úřadům práce", en: Social security and health insurer requests }
     authority: social
     legal_basis: zákony č. 582/1991 Sb., 592/1992 Sb., 111/2006 Sb.
     sources:
@@ -945,7 +948,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: cnb-notifications
@@ -960,7 +963,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka / SDAT
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
   - id: complaints-and-arbiter
@@ -975,7 +978,7 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: datová schránka
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
 
@@ -992,7 +995,7 @@ obligations:
     cadence_confidence: unverified
     kind: disclosure
     transport: web banky; datový hub EBA
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: annual-report
@@ -1007,7 +1010,7 @@ obligations:
     cadence_confidence: unverified
     kind: disclosure
     transport: Sbírka listin / web / datová schránka
-    personal_data: no
+    personal_data: "no"
     applicability: always
     coverage: { status: external, reports: [], services: [], tracking: null }
   - id: sustainability-statement
@@ -1022,7 +1025,7 @@ obligations:
     cadence_confidence: unverified
     kind: disclosure
     transport: výroční zpráva
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: banka v rozsahu CSRD po změnách Omnibus"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: annual-fee-statement
@@ -1037,7 +1040,7 @@ obligations:
     cadence_confidence: known-eu
     kind: disclosure
     transport: klientský kanál
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [], tracking: null }
   - id: currency-conversion-charges
@@ -1052,7 +1055,7 @@ obligations:
     cadence_confidence: known-eu
     kind: disclosure
     transport: klientský kanál
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: missing, reports: [], services: [openbank-fx-service], tracking: null }
 
@@ -1069,7 +1072,7 @@ obligations:
     cadence_confidence: known-eu
     kind: granular-feed
     transport: registr obchodních údajů
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: banka uzavírá derivátové obchody (např. zajištění)"
     coverage: { status: missing, reports: [], services: [openbank-treasury-service], tracking: null }
   - id: sftr
@@ -1084,7 +1087,7 @@ obligations:
     cadence_confidence: known-eu
     kind: granular-feed
     transport: registr obchodních údajů
-    personal_data: no
+    personal_data: "no"
     applicability: "conditional: banka provádí repo obchody mimo výjimku pro centrální banku"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: mifir-transactions
@@ -1099,7 +1102,7 @@ obligations:
     cadence_confidence: known-eu
     kind: granular-feed
     transport: ARM / ČNB
-    personal_data: yes
+    personal_data: "yes"
     applicability: "conditional: banka poskytuje investiční služby ve finančních nástrojích"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: pension-distribution
@@ -1114,7 +1117,7 @@ obligations:
     cadence_confidence: unverified
     kind: register
     transport: registr ČNB
-    personal_data: yes
+    personal_data: "yes"
     applicability: always
     coverage: { status: data-only, reports: [], services: [openbank-pension-service, openbank-tax-reporting-service], tracking: ADR-0336 }
     note: Výkazy za fondy penzijní společnosti jsou ve stránce Statutární výkazy (ADR-0336).
@@ -1130,7 +1133,7 @@ obligations:
     cadence_confidence: unverified
     kind: register
     transport: registr ČNB
-    personal_data: yes
+    personal_data: "yes"
     applicability: "conditional: banka využívá vázané zástupce"
     coverage: { status: conditional, reports: [], services: [], tracking: null }
   - id: cash-counterfeits
@@ -1145,6 +1148,6 @@ obligations:
     cadence_confidence: unverified
     kind: event
     transport: neověřeno
-    personal_data: partial
+    personal_data: "partial"
     applicability: "conditional: banka zpracovává hotovost"
     coverage: { status: conditional, reports: [], services: [], tracking: null }

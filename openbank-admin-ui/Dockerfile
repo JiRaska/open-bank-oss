@@ -327,6 +327,11 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/gate-catalog.json ./gate-catalog.json
+# Baked by prebuild:image from openbank-libs/governance/*.yaml; read at runtime from cwd (/app)
+# by src/lib/cards/capabilities.ts and src/lib/regulatory/obligations.ts. Without these the
+# /cards and /regulatory pages render an empty register in the image only.
+COPY --from=build /app/card-capabilities.json ./card-capabilities.json
+COPY --from=build /app/regulatory-obligations.json ./regulatory-obligations.json
 # OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
 # bundle because Next.js only emits application code there; a --require preload is invisible to
 # its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from

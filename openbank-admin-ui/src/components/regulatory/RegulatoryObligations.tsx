@@ -113,8 +113,8 @@ export function RegulatoryObligations({ register }: { register: ObligationRegist
         </p>
         <p>
           {t(
-            'Lhůty nesou míru jistoty. „NEOVĚŘENO“ je stopa pro ověření, ne fakt — před podáním vždy ověřte aktuální znění předpisu. Změny ve zdrojích sleduje agent regulatory-obligations-watcher, který je navrhuje jako issue; registr mění jen schválený PR.',
-            'Deadlines carry a confidence. “UNVERIFIED” is a lead, not a fact — check the current text before filing. Changes in the sources are watched by the regulatory-obligations-watcher agent, which proposes them as issues; only a reviewed PR changes the register.',
+            'Lhůty nesou míru jistoty. „NEOVĚŘENO“ je stopa pro ověření, ne fakt — před podáním vždy ověřte aktuální znění předpisu. Charta agenta regulatory-obligations-watcher je navržena, ale je vypnutá, dokud nebude zapojen stahovač zdrojů — dnes zdroje nikdo automaticky nesleduje. Registr mění jen schválený PR.',
+            'Deadlines carry a confidence. “UNVERIFIED” is a lead, not a fact — check the current text before filing. A regulatory-obligations-watcher agent charter is proposed but disabled until a source fetcher is wired — nothing watches the sources automatically today. Only a reviewed PR changes the register.',
           )}
         </p>
         <p style={{ marginBottom: 0 }}>

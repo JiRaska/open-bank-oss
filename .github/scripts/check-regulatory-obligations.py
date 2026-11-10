@@ -25,6 +25,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from urllib.parse import urlparse
+
 import yaml
 
 REGISTER = Path("openbank-libs/governance/regulatory-obligations.yaml")
@@ -35,13 +37,20 @@ DOC = Path("docs/compliance/regulatory-obligations.md")
 class _UniqueKeyLoader(yaml.SafeLoader):
     """PyYAML keeps the LAST of a repeated key and says nothing. In this register that happens
     whenever an unquoted flow value contains a comma (`{ cs: A, B, en: C }`), so a name is
-    silently truncated. Fail instead."""
+    silently truncated. Fail instead.
+
+    Note the docstring shape itself (`{ cs: A, B, en: C }`) produces NO duplicate: it parses as
+    `cs: A`, `B: null`, `en: C`. So a flow-map entry with no colon (an empty plain value) is
+    rejected too — that is the comma case that does not repeat a key."""
 
 
 def _construct_unique(loader, node, deep=False):
     keys = set()
-    for k, _ in node.value:
+    for k, v in node.value:
         key = loader.construct_object(k, deep=deep)
+        if (node.flow_style and isinstance(v, yaml.ScalarNode) and v.value == "" and v.style is None):
+            raise yaml.constructor.ConstructorError(
+                None, None, f"flow-map entry {key!r} has no value (unquoted comma?)", k.start_mark)
         if key in keys:
             raise yaml.constructor.ConstructorError(None, None, f"duplicate key {key!r} (unquoted comma?)", k.start_mark)
         keys.add(key)
@@ -103,8 +112,14 @@ def validate(root: Path, reg: dict) -> list[str]:
             errs.append(f"{oid}: unknown kind {o.get('kind')}")
         if o.get("cadence_confidence") not in confs:
             errs.append(f"{oid}: unknown cadence_confidence {o.get('cadence_confidence')}")
-        if not (o.get("sources") or {}).get("law"):
+        law = (o.get("sources") or {}).get("law")
+        if not law:
             errs.append(f"{oid}: sources.law is required — an obligation without its legal text is an assertion")
+        elif urlparse(str(law)).path in ("", "/"):
+            errs.append(f"{oid}: sources.law {law} is a site root, not the legal text")
+        if "personal_data" in o and not isinstance(o["personal_data"], str):
+            errs.append(f"{oid}: personal_data must be a quoted string, got {o['personal_data']!r} "
+                        "(unquoted yes/no is a YAML 1.1 boolean)")
         cov = o.get("coverage") or {}
         st = cov.get("status")
         if st not in statuses:
@@ -159,8 +174,9 @@ def render(reg: dict) -> str:
     L += [
         "- Výkazy z regulatorního katalogu (`/regulatory`) se odkazují svým id; každý výkaz katalogu musí",
         "  patřit k nějaké povinnosti (gate `regulatory-obligations-register`).",
-        "- Agent `regulatory-obligations-watcher` sleduje citované zdroje a změny navrhuje jako issue;",
-        "  sám registr nemění (ADR-0367, rozhodnutí 6).",
+        "- Charta agenta `regulatory-obligations-watcher` (sledování citovaných zdrojů, návrhy jako",
+        "  issue) je navržena, ale vypnutá, dokud nebude zapojen stahovač zdrojů — dnes zdroje nikdo",
+        "  automaticky nesleduje. Registr mění jen schválený PR (ADR-0367, rozhodnutí 6).",
         "",
         "## Souhrn",
         "",
@@ -250,7 +266,7 @@ def self_test() -> int:
     }
     catalog = "const REPORT_CATALOG = [\n  {\n    id: 'r1',\n  },\n]\n"
 
-    def case(mutate, catalog_text, expect_ok, label, write_first=True):
+    def case(mutate, catalog_text, expect_ok, label, write_first=True, after_write=None):
         import copy
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -262,6 +278,10 @@ def self_test() -> int:
             (root / REGISTER).write_text(yaml.safe_dump(reg, allow_unicode=True))
             if write_first:
                 run(root, write=True)
+            if after_write:
+                assert (root / DOC).exists() or not write_first
+                after_write(root)
+                assert (root / DOC).exists(), "stale-doc fixture must leave a doc in place"
             rc = run(root, write=False)
             ok = (rc == 0) == expect_ok
             print(f"self-test {'PASS' if ok else 'FAIL'}: {label}")
@@ -271,17 +291,36 @@ def self_test() -> int:
     def bad_status(r): r["obligations"][0]["coverage"]["status"] = "done"
     def unknown_report(r): r["obligations"][0]["coverage"]["reports"] = ["nope"]
     def missing_with_report(r): r["obligations"][0]["coverage"]["status"] = "missing"
-    def dup_key_rejected() -> bool:
+    def bare_law(r): r["obligations"][0]["sources"]["law"] = "https://example.invalid/"
+    def bool_pd(r): r["obligations"][0]["personal_data"] = True
+
+    def yaml_rejected(text: str, label: str) -> bool:
         try:
-            load_register("x: { cs: A (p, q), en: B (p, q) }\n")
+            load_register(text)
         except yaml.YAMLError:
-            print("self-test PASS: unquoted comma in a flow map (duplicate key) is rejected")
+            print(f"self-test PASS: {label}")
             return True
-        print("self-test FAIL: duplicate key accepted")
+        print(f"self-test FAIL: {label}")
         return False
 
+    def yaml_accepted(text: str, label: str) -> bool:
+        try:
+            load_register(text)
+        except yaml.YAMLError as exc:
+            print(f"self-test FAIL: {label} ({exc})")
+            return False
+        print(f"self-test PASS: {label}")
+        return True
+
+    def stale_doc(root: Path) -> None:
+        # A doc that EXISTS but is out of date, so the content comparison (not the existence
+        # check) is what must reject it.
+        (root / DOC).write_text(render(load_register((root / REGISTER).read_text())).replace("A", "Z", 1))
+
     results = [
-        dup_key_rejected(),
+        yaml_rejected("x: { cs: A (p, q), en: B (p, q) }\n", "unquoted comma repeating a key is rejected"),
+        yaml_rejected("x: { cs: A, B, en: C }\n", "flow-map entry without colon `{ cs: A, B, en: C }` is rejected"),
+        yaml_accepted("x: { cs: 'A, B', en: C }\n", "quoted comma in a flow map is accepted"),
         case(lambda r: None, catalog, True, "clean register passes"),
         case(no_law, catalog, False, "obligation without legal source is rejected"),
         case(bad_status, catalog, False, "unknown status is rejected"),
@@ -289,7 +328,10 @@ def self_test() -> int:
         case(missing_with_report, catalog, False, "'missing' that claims a report is rejected"),
         case(lambda r: None, catalog.replace("  },\n]", "  },\n  {\n    id: 'r2',\n  },\n]"), False,
              "unclaimed catalogue report is rejected"),
-        case(lambda r: None, catalog, False, "stale doc is rejected", write_first=False),
+        case(lambda r: None, catalog, False, "missing doc is rejected", write_first=False),
+        case(lambda r: None, catalog, False, "stale-but-present doc is rejected", after_write=stale_doc),
+        case(bare_law, catalog, False, "sources.law that is a site root is rejected"),
+        case(bool_pd, catalog, False, "boolean personal_data is rejected"),
     ]
     return 0 if all(results) else 1
 

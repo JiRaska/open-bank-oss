@@ -24,8 +24,9 @@ kódu (CEÚ, GSFT) nebyly vidět. Registr to obrací — každá povinnost je ř
   - `conditional` — jen za podmínky
 - Výkazy z regulatorního katalogu (`/regulatory`) se odkazují svým id; každý výkaz katalogu musí
   patřit k nějaké povinnosti (gate `regulatory-obligations-register`).
-- Agent `regulatory-obligations-watcher` sleduje citované zdroje a změny navrhuje jako issue;
-  sám registr nemění (ADR-0367, rozhodnutí 6).
+- Charta agenta `regulatory-obligations-watcher` (sledování citovaných zdrojů, návrhy jako
+  issue) je navržena, ale vypnutá, dokud nebude zapojen stahovač zdrojů — dnes zdroje nikdo
+  automaticky nesleduje. Registr mění jen schválený PR (ADR-0367, rozhodnutí 6).
 
 ## Souhrn
 
@@ -51,7 +52,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2016-300) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/centralni-evidence-uctu/)
 - **Lhůta:** Každý pracovní den do 12:00 za změny předchozího pracovního dne. *(ověřeno)*
 - **Druh / kanál:** granular-feed · SDAT
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; služby `openbank-tax-reporting-service`; sleduje ADR-0367
 - **Poznámka:** Registrový feed, ne součet za období — hlásí se delta stavu účtů a osob s nimi spojených. Syntetické klienty (ADR-0252) je nutné vyloučit.
 
@@ -64,7 +65,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2017-30) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/centralni-evidence-uctu/)
 - **Lhůta:** Při zahájení činnosti a na žádost ČNB. *(NEOVĚŘENO)*
 - **Druh / kanál:** register · SDAT
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; služby `openbank-tax-reporting-service`; sleduje ADR-0367
 
 ### AnaCredit – granulární údaje o úvěrech
@@ -103,7 +104,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2011-71) · [specifikace úřadu](https://www.gsft.cz/)
 - **Lhůta:** Do 3 pracovních dnů od rozhodného dne (údaje podle § 41f odst. 7–8 do 10 pracovních dnů); evidenci je nutné vést trvale. *(ověřeno)*
 - **Druh / kanál:** event · Dávka CSV (CP-1250) souborů DIW/DIC/DIA/DIL/DII, ZIP, šifrováno PGP nebo jiným dohodnutým způsobem (příloha vyhlášky 71/2011 Sb., bod 1.1.6)
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; sleduje #15356
 - **Poznámka:** Evidence pojištěných pohledávek na klienta (souhrn přes účty, limit 100 000 EUR, výjimky, dočasně vysoké zůstatky). Syntetické klienty nutno vyloučit — jinak by se vyplácela náhrada fiktivním osobám.
 
@@ -116,7 +117,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21) · [specifikace úřadu](https://www.gsft.cz/)
 - **Lhůta:** GSFT ověřuje systém vyplácení nejméně jednou ročně; údaje na žádost ve lhůtě nejméně 3 pracovních dnů; zátěžový test nejméně jednou za 3 roky. Testovací dávky nesou atribut TEST. *(ověřeno)*
 - **Druh / kanál:** event · dávkové soubory pro GSFT
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; sleduje #15356
 
 ### Podklady pro příspěvek do Fondu pojištění vkladů
@@ -128,7 +129,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21) · [specifikace úřadu](https://www.gsft.cz/)
 - **Lhůta:** Ročně: ČNB stanoví příspěvek do 31. 5. z evidence banky, banka platí do 30. 6.; zda banka podává samostatný podklad, neověřeno. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí; sleduje #15356
 
 ### Podklady pro příspěvek do Fondu pro řešení krize
@@ -140,7 +141,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2015-374)
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### MREL a výkazy pro plánování řešení krize
@@ -152,7 +153,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2015-374)
 - **Lhůta:** MREL pololetně nebo ročně; výkazy plánování ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Ozdravný plán
@@ -164,7 +165,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2015-374)
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka / SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `external` — mimo platformu záměrně
 - **Poznámka:** Dokument řízení banky, nikoli výstup core-banking platformy.
 
@@ -179,7 +180,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_impl/2024/3117/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně (12. 5., 11. 8., 11. 11., 11. 2.); některé šablony pololetně/ročně. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT (XBRL-CSV)
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-finrep`; služby `openbank-finrep-service`
 
 ### COREP – kapitál a kapitálové požadavky
@@ -191,7 +192,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně, stejné termíny jako FINREP. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-capital`; služby `openbank-finrep-service`
 
 ### Ukazatel krytí likviditou (LCR)
@@ -203,7 +204,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_del/2015/61/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Měsíčně, 15 kalendářních dnů po referenčním dni. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`
 
 ### Ukazatel čistého stabilního financování (NSFR)
@@ -215,7 +216,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-risk-engine`
 
 ### Pákový poměr
@@ -227,7 +228,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Velké expozice
@@ -251,7 +252,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Měsíčně (malé a nekomplexní instituce čtvrtletně). *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Zatížení aktiv
@@ -263,7 +264,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně, pololetně nebo ročně podle šablony. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Úrokové riziko investičního portfolia (IRRBB)
@@ -275,7 +276,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks)
 - **Lhůta:** Čtvrtletně nebo pololetně podle velikosti. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-risk-engine`
 
 ### Odměňování – benchmarking a vysoce odměňovaní
@@ -295,11 +296,11 @@ Celkem povinností: **70**.
 *Funding plans* · `eba-funding-plans`
 
 - **Adresát:** Česká národní banka
-- **Právní základ:** EBA GL/2019/05
-- **Zdroj:** [znění předpisu](https://www.eba.europa.eu/) · [specifikace úřadu](https://www.eba.europa.eu/)
+- **Právní základ:** EBA GL/2019/05 (vydané podle čl. 16 nařízení (EU) č. 1093/2010)
+- **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2010/1093/oj) · [specifikace úřadu](https://www.eba.europa.eu/)
 - **Lhůta:** Ročně, nad prahem velikosti. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** instituce nad prahem EBA GL/2019/05
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -312,7 +313,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/dir/2013/36/oj) · [specifikace úřadu](https://www.eba.europa.eu/)
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** banka používá IRB nebo interní modely
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -325,7 +326,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21)
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `external` — mimo platformu záměrně
 
 ### Výkaznictví ESG rizik
@@ -337,7 +338,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2024/1623/oj) · [specifikace úřadu](https://www.eba.europa.eu/)
 - **Lhůta:** Neověřeno (stav ITS k listopadu 2026). *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ## Statistické výkaznictví
@@ -351,7 +352,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1993-6) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/)
 - **Lhůta:** Měsíčně a čtvrtletně podle výkazu (kalendář ČNB). *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `sdat-accounts`; sleduje ADR-0367
 
 ### Úrokové sazby MFI (MIR)
@@ -363,7 +364,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/1072/oj) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/)
 - **Lhůta:** Měsíčně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Statistika platebního styku
@@ -375,7 +376,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2020/2011/oj) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/vykaznictvi-sber-dat/vykaznictvi-banky-PZB/)
 - **Lhůta:** Měsíčně až pololetně podle výkazu. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `sdat-payments`, `ecb-payments`; sleduje ADR-0367
 - **Poznámka:** Katalog cituje u ECB výkazu nařízení ECB/2013/43, které bylo nahrazeno nařízením (EU) 2020/2011.
 
@@ -388,7 +389,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1995-219)
 - **Lhůta:** Měsíčně nebo čtvrtletně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Povinné minimální rezervy – báze
@@ -400,7 +401,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1993-6)
 - **Lhůta:** Za každé udržovací období. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-risk-engine`
 
 ### Šetření o úvěrech na bydlení (LTV/DTI/DSTI)
@@ -412,7 +413,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1993-6)
 - **Lhůta:** Pololetně. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Statistická zjištění ČSÚ
@@ -424,7 +425,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1995-89)
 - **Lhůta:** Podle ročního programu. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · DANTE web
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `external` — mimo platformu záměrně
 
 ## Platební styk
@@ -438,7 +439,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2017-370) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/pss/)
 - **Lhůta:** Pololetně, výkaz PSSIVYP22 (platební statistika včetně podvodů); lhůta podle metadat SDAT neověřena. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Monitoring míry podvodů pro výjimku TRA
@@ -450,7 +451,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_del/2018/389/oj)
 - **Lhůta:** Čtvrtletně interně; oznámení ČNB při překročení prahu. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Statistiky dostupnosti rozhraní PSD2
@@ -462,7 +463,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_del/2018/389/oj)
 - **Lhůta:** Čtvrtletní zveřejnění. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** disclosure · web banky
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí; služby `openbank-psd2-service`
 
 ### Okamžité platby – reporting poplatků a odmítnutí
@@ -474,7 +475,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2024/886/oj)
 - **Lhůta:** Ročně; časování pro stát mimo eurozónu neověřeno. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Údaje o mezibankovních poplatcích (karty)
@@ -486,7 +487,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2015/751/oj)
 - **Lhůta:** Na žádost. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ## Provozní odolnost a ICT
@@ -500,7 +501,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2022/2554/oj) · [specifikace úřadu](https://www.cnb.cz/)
 - **Lhůta:** Počáteční do 4 h od klasifikace (nejpozději 24 h od zjištění), průběžné do 72 h, závěrečné do 1 měsíce. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · kanál ČNB pro DORA
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `dora-ict`; sleduje ADR-0367
 - **Poznámka:** Pro úvěrové instituce nahrazuje hlášení incidentů podle PSD2 čl. 96.
 
@@ -511,9 +512,9 @@ Celkem povinností: **70**.
 - **Adresát:** Česká národní banka
 - **Právní základ:** DORA čl. 28 odst. 3; prováděcí nařízení (EU) 2024/2956
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg_impl/2024/2956/oj) · [specifikace úřadu](https://www.cnb.cz/cs/statistika/metodicke-informace/dora/)
-- **Lhůta:** Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU. *(ověřeno)*
+- **Lhůta:** Na výzvu ČNB přes SDAT; poslední sběr do 2. 3. 2026, na nejvyšší úrovni konsolidace v EU. *(NEOVĚŘENO)*
 - **Druh / kanál:** register · SDAT
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Oznámení smlouvy na kritické nebo důležité funkce IKT
@@ -525,7 +526,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2022/2554/oj)
 - **Lhůta:** Při události. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Penetrační testy vedené hrozbami (TLPT)
@@ -537,7 +538,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2022/2554/oj)
 - **Lhůta:** Každé 3 roky, pokud je instituce určena. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** instituce určená ČNB k TLPT
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -547,10 +548,10 @@ Celkem povinností: **70**.
 
 - **Adresát:** Národní úřad pro kybernetickou a informační bezpečnost
 - **Právní základ:** zákon o kybernetické bezpečnosti (NIS2); DORA jako lex specialis pro banky
-- **Zdroj:** [znění předpisu](https://nukib.gov.cz/)
+- **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/dir/2022/2555/oj)
 - **Lhůta:** Při události. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** použitelnost vedle DORA neověřena
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -563,7 +564,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2016/679/oj) · [specifikace úřadu](https://uoou.gov.cz/)
 - **Lhůta:** Do 72 hodin od zjištění. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · formulář ÚOOÚ / datová schránka
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ## AML a mezinárodní sankce
@@ -577,7 +578,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2008-253) · [specifikace úřadu](https://www.fau.gov.cz/)
 - **Lhůta:** Bez zbytečného odkladu, a hrozí-li nebezpečí z prodlení, ihned po zjištění (§ 18 odst. 1). *(ověřeno)*
 - **Druh / kanál:** event · písemně nebo elektronicky se zajištěním důvěrnosti (§ 18 odst. 4, § 19); konkrétní kanál neověřen
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `aml-far`; služby `openbank-aml-service`; sleduje ADR-0367
 - **Poznámka:** Zákaz informování klienta (§ 38).
 
@@ -590,7 +591,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2008-253) · [specifikace úřadu](https://www.fau.gov.cz/)
 - **Lhůta:** Ve lhůtě stanovené FAÚ. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · MoneyWeb / datová schránka
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ### Oznámení o majetku podléhajícím mezinárodní sankci
@@ -602,7 +603,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2006-69) · [specifikace úřadu](https://www.fau.gov.cz/)
 - **Lhůta:** Bez zbytečného odkladu. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka / MoneyWeb
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; služby `openbank-sanctions-service`
 
 ### Vklady ruských a běloruských osob nad 100 000 EUR
@@ -626,7 +627,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2021-37)
 - **Lhůta:** Při zjištění. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · neověřeno
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; služby `openbank-kyb-service`
 
 ## Daně a výměna informací
@@ -640,7 +641,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2013-164) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
 - **Lhůta:** Oznámení do 30. 6. roku následujícího po vykazovaném roce, pouze elektronicky; předběžné ohlášení do 31. 5. *(ověřeno)*
 - **Druh / kanál:** granular-feed · EPO / MOJE daně (XML)
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-tax-reporting-service`, `openbank-party-service`; sleduje ADR-0340
 - **Poznámka:** Daňová rezidence je atribut osoby (ADR-0339); hrubý výnos je zaznamenáván z událostí srážkové daně.
 
@@ -653,7 +654,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2013-164) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
 - **Lhůta:** Ročně, do 30. 6. *(NEOVĚŘENO)*
 - **Druh / kanál:** granular-feed · EPO
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367); výkazy `fatca-report`; služby `openbank-tax-reporting-service`; sleduje ADR-0340
 
 ### Odvod a vyúčtování daně vybírané srážkou (úroky)
@@ -665,7 +666,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-586) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
 - **Lhůta:** Odvod do konce měsíce následujícího po měsíci srážky (ověřeno, § 38d odst. 3); lhůta ročního vyúčtování (§ 38d odst. 9) neověřena. *(NEOVĚŘENO)*
 - **Druh / kanál:** periodic-aggregate · EPO / MOJE daně
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-tax-reporting-service`, `openbank-interest-service`
 - **Poznámka:** Tax-reporting-service sestavuje měsíční podání podle § 38d odst. 3; v regulatorním katalogu není.
 
@@ -678,7 +679,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-586) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
 - **Lhůta:** Měsíčně. *(NEOVĚŘENO)*
 - **Druh / kanál:** granular-feed · EPO
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-tax-reporting-service`
 
 ### Oznámení přeshraničních uspořádání (DAC6)
@@ -690,7 +691,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2013-164) · [specifikace úřadu](https://www.financnisprava.gov.cz/)
 - **Lhůta:** Do 30 dnů od události. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · EPO
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Použitelnost:** banka vystupuje jako zprostředkovatel uspořádání
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -703,7 +704,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/dir/2023/2226/oj)
 - **Lhůta:** Ročně od vykazovacího roku 2026. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** granular-feed · neověřeno
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Použitelnost:** banka poskytuje služby kryptoaktiv podle MiCA
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -731,7 +732,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2009-280)
 - **Lhůta:** Při žádosti. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ### Součinnost exekutorům, soudům a orgánům činným v trestním řízení
@@ -743,10 +744,10 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2001-120)
 - **Lhůta:** Při žádosti; lhůty neověřeny. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka / elektronické rozhraní exekutorů
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
-### Součinnost ČSSZ
+### Součinnost ČSSZ, zdravotním pojišťovnám a úřadům práce
 
 *Social security and health insurer requests* · `social-body-requests`
 
@@ -755,7 +756,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1991-582)
 - **Lhůta:** Při žádosti. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ### Oznámení ČNB (vedoucí osoby, kvalifikované účasti, outsourcing)
@@ -767,7 +768,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1992-21)
 - **Lhůta:** Při události. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka / SDAT
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `external` — mimo platformu záměrně
 
 ### Stížnosti klientů a součinnost s finančním arbitrem
@@ -779,7 +780,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2002-229)
 - **Lhůta:** Při žádosti; existence pravidelného výkazu neověřena. *(NEOVĚŘENO)*
 - **Druh / kanál:** event · datová schránka
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ## Uveřejňování a klientské informace
@@ -793,7 +794,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2013/575/oj) · [specifikace úřadu](https://www.eba.europa.eu/)
 - **Lhůta:** Ročně, pololetně nebo čtvrtletně podle velikosti. *(NEOVĚŘENO)*
 - **Druh / kanál:** disclosure · web banky; datový hub EBA
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `missing` — chybí
 
 ### Výroční zpráva a účetní závěrka
@@ -805,7 +806,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/1991-563)
 - **Lhůta:** Ročně. *(NEOVĚŘENO)*
 - **Druh / kanál:** disclosure · Sbírka listin / web / datová schránka
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Pokrytí:** `external` — mimo platformu záměrně
 
 ### Zpráva o udržitelnosti (CSRD/ESRS)
@@ -817,7 +818,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/dir/2022/2464/oj)
 - **Lhůta:** Ročně; rozsah a časování změněny balíčkem Omnibus. *(NEOVĚŘENO)*
 - **Druh / kanál:** disclosure · výroční zpráva
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** banka v rozsahu CSRD po změnách Omnibus
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -830,7 +831,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2017-370)
 - **Lhůta:** Ročně každému klientovi. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** disclosure · klientský kanál
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí
 
 ### Oznámení poplatků za převod měn
@@ -842,7 +843,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2021/1230/oj)
 - **Lhůta:** U každé transakce. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** disclosure · klientský kanál
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; služby `openbank-fx-service`
 
 ## Trhy a distribuce
@@ -856,7 +857,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2012/648/oj)
 - **Lhůta:** T+1. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** granular-feed · registr obchodních údajů
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** banka uzavírá derivátové obchody (např. zajištění)
 - **Pokrytí:** `missing` — chybí; služby `openbank-treasury-service`
 
@@ -869,7 +870,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2015/2365/oj)
 - **Lhůta:** T+1. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** granular-feed · registr obchodních údajů
-- **Osobní údaje:** False
+- **Osobní údaje:** no
 - **Použitelnost:** banka provádí repo obchody mimo výjimku pro centrální banku
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -882,7 +883,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://eur-lex.europa.eu/eli/reg/2014/600/oj)
 - **Lhůta:** T+1. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** granular-feed · ARM / ČNB
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Použitelnost:** banka poskytuje investiční služby ve finančních nástrojích
 - **Pokrytí:** `conditional` — jen za podmínky
 
@@ -895,7 +896,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2011-427)
 - **Lhůta:** Registrace distributorů při události; pravidelný výkaz neověřen. *(NEOVĚŘENO)*
 - **Druh / kanál:** register · registr ČNB
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Pokrytí:** `data-only` — data existují, výkaz chybí; služby `openbank-pension-service`, `openbank-tax-reporting-service`; sleduje ADR-0336
 - **Poznámka:** Výkazy za fondy penzijní společnosti jsou ve stránce Statutární výkazy (ADR-0336).
 
@@ -908,7 +909,7 @@ Celkem povinností: **70**.
 - **Zdroj:** [znění předpisu](https://www.zakonyprolidi.cz/cs/2016-257)
 - **Lhůta:** Při události. *(NEOVĚŘENO)*
 - **Druh / kanál:** register · registr ČNB
-- **Osobní údaje:** True
+- **Osobní údaje:** yes
 - **Použitelnost:** banka využívá vázané zástupce
 - **Pokrytí:** `conditional` — jen za podmínky
 
