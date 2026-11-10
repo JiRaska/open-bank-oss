@@ -4,7 +4,11 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 
 ## Retence outboxu (řádky SENT)
 
-`fraud_outbox` je doručovací buffer, ne záznam. Řádky, které už dorazily do brokeru (`status = 'SENT'`), se mažou, jakmile je jejich `sent_at` starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329, ADR-0327 D8). Repozitář se zapojuje delegací `SentOutboxRetention` na `PanacheOutboxRetention`.
+`fraud_outbox` je doručovací buffer, ne záznam. Řádky, které už dorazily do brokeru (`status = 'SENT'`), se mažou, jakmile je jejich `sent_at` starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329, ADR-0327 D8). Repozitář je jaderný `AbstractPanacheOutboxRepository` (ADR-0327 fáze 2) a job volá jeho `purgeSent`.
+
+## Odesílání z outboxu (jaderný repozitář)
+
+`FraudOutboxRepositoryImpl` dědí z `AbstractPanacheOutboxRepository` z libs-runtime. Claim bere u každé strany (`aggregate_id`) jen nejstarší rozpracovaný řádek, takže události `fraud.hold_changed` jedné strany zůstávají v pořadí i při více replikách. Selhaný řádek tu stranu podrží až do svého opakování. Opakování mají exponenciální odstup přes `next_attempt_at` a po sdíleném limitu pokusů končí jako DEAD. `V10__outbox_v2.sql` přidává sloupec a dva částečné indexy, `ix_fraud_outbox_claim` a `ix_fraud_outbox_inflight_aggregate`.
 
 - Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
 - Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.

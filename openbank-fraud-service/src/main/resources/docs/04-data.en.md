@@ -4,7 +4,11 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 
 ## Outbox retention (SENT rows)
 
-`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`.
+`fraud_outbox` is a delivery buffer, not a record. Rows that reached the broker (`status = 'SENT'`) are deleted once their `sent_at` is older than `openbank.outbox.retention.sent-days` (default **7**), by libs-runtime's shared `OutboxSentRetentionJob` (ADR-0329, ADR-0327 D8). The repository is the kernel `AbstractPanacheOutboxRepository` (ADR-0327 phase 2), whose `purgeSent` the job calls.
+
+## Outbox dispatch (kernel repository)
+
+`FraudOutboxRepositoryImpl` extends libs-runtime's `AbstractPanacheOutboxRepository`. The claim takes only the oldest in-flight row of each party (`aggregate_id`), so `fraud.hold_changed` events of one party stay in order across replicas. A failed row parks that party until its retry. Retries back off exponentially via `next_attempt_at` and go DEAD after the shared attempt limit. `V10__outbox_v2.sql` adds the column and two partial indexes, `ix_fraud_outbox_claim` and `ix_fraud_outbox_inflight_aggregate`.
 
 - Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
 - PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
