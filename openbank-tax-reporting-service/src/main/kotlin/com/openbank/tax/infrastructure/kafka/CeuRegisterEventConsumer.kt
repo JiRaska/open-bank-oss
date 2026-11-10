@@ -127,7 +127,8 @@ class CeuRegisterEventConsumer(
 
     /**
      * party-service lifecycle envelopes carry `classification` (CUSTOMER | SYNTHETIC, ADR-0252).
-     * SYNTHETIC is also inferred from the record's taint header, fail-to-real otherwise.
+     * SYNTHETIC is also inferred from the record's taint header, fail-to-real otherwise. SYNTHETIC
+     * wins on any observation; an event with neither a classification nor a taint records nothing.
      */
     @Incoming("ceu-party-events-in")
     suspend fun consumeParty(record: ConsumerRecord<String, String>) {
@@ -136,8 +137,12 @@ class CeuRegisterEventConsumer(
         val node = decode(record, STREAM_PARTY)
         val partyId = runCatching { UUID.fromString(node.path("partyId").asText()) }.getOrNull()
             ?: malformed(STREAM_PARTY)
-        val synthetic = node.path("classification").asText() == "SYNTHETIC" ||
-            SyntheticTaint.isTainted(header(record, OutboxKafkaHeaders.HEADER_SYNTHETIC))
+        val classification = node.path("classification").takeIf { it.isTextual }?.asText()
+        val tainted = SyntheticTaint.isTainted(header(record, OutboxKafkaHeaders.HEADER_SYNTHETIC))
+        // An event that states no classification says nothing about it: record nothing rather
+        // than default to CUSTOMER — unless its taint header says SYNTHETIC.
+        if (classification == null && !tainted) return count(STREAM_PARTY, OUTCOME_IGNORED)
+        val synthetic = classification == "SYNTHETIC" || tainted
         val now = Instant.now(clock)
         store(STREAM_PARTY, partyId) { service.classifyParty(partyId, synthetic, now) }
     }

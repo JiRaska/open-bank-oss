@@ -38,8 +38,12 @@ class CeuRegisterEventConsumerTest {
 
         val parties = linkedMapOf<UUID, Boolean>()
 
-        override suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean =
-            parties.putIfAbsent(partyId, synthetic) == null
+        override suspend fun classifyParty(partyId: UUID, synthetic: Boolean, recordedAt: Instant): Boolean {
+            val existing = parties[partyId]
+            if (existing == true || (existing == false && !synthetic)) return false
+            parties[partyId] = synthetic
+            return true
+        }
 
         override suspend fun syntheticParties(knownAt: Instant): Set<UUID> = parties.filterValues { it }.keys
     }
@@ -136,6 +140,15 @@ class CeuRegisterEventConsumerTest {
         assertThrows<IllegalArgumentException> {
             consumer.consumeAccount(record("AccountCreated", """{"aggregateId":"not-a-uuid"}"""))
         }
+        assertThrows<IllegalArgumentException> {
+            consumer.consumeAccount(
+                record(
+                    "AccountCreated",
+                    """{"aggregateId":"$account","accountNumber":"1","currency":"CZKX","partyId":"$holder",
+                       "occurredAt":"2026-11-02T23:30:00Z"}""",
+                ),
+            )
+        }
         assertThat(repo.facts).isEmpty()
     }
 
@@ -150,4 +163,24 @@ class CeuRegisterEventConsumerTest {
             assertThat(repo.syntheticParties(Instant.MAX)).containsExactly(canary)
             assertThat(repo.parties).hasSize(2)
         }
+
+    @Test
+    fun `SYNTHETIC wins on any observation and is never downgraded`(): Unit = runBlocking {
+        val party = UUID.randomUUID()
+        consumer.consumeParty(record("PARTY_CREATED", """{"partyId":"$party","classification":"CUSTOMER"}"""))
+        assertThat(repo.syntheticParties(Instant.MAX)).doesNotContain(party)
+        consumer.consumeParty(record("PARTY_UPDATED", """{"partyId":"$party","classification":"SYNTHETIC"}"""))
+        assertThat(repo.syntheticParties(Instant.MAX)).containsExactly(party)
+        consumer.consumeParty(record("PARTY_UPDATED", """{"partyId":"$party","classification":"CUSTOMER"}"""))
+        assertThat(repo.syntheticParties(Instant.MAX)).containsExactly(party)
+    }
+
+    @Test
+    fun `a party event without classification records nothing`(): Unit = runBlocking {
+        val party = UUID.randomUUID()
+        consumer.consumeParty(record("PARTY_CREATED", """{"partyId":"$party"}"""))
+        assertThat(repo.parties).doesNotContainKey(party)
+        consumer.consumeParty(record("PARTY_CREATED", """{"partyId":"$party"}""", synthetic = "true"))
+        assertThat(repo.parties[party]).isTrue()
+    }
 }

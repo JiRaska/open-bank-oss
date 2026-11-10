@@ -39,7 +39,7 @@ class CeuRegisterTest {
     @Test
     fun `initial full load reports every real account as NEW with its persons`() {
         val facts = listOf(opened(), tie(acc, holder, CeuRole.HOLDER))
-        val now = RegisterSnapshot.fold(facts, mon, t0)
+        val now = RegisterSnapshot.fold(facts, mon, t0, emptySet())
 
         val overview = ChangeOverview.diff(window(tue), RegisterSnapshot.empty(mon, t0), now)
 
@@ -53,14 +53,20 @@ class CeuRegisterTest {
     @Test
     fun `an unchanged account produces no record and a new disposer produces CHANGED`() {
         val base = listOf(opened(), tie(acc, holder, CeuRole.HOLDER))
-        val reported = RegisterSnapshot.fold(base, mon, t0)
+        val reported = RegisterSnapshot.fold(base, mon, t0, emptySet())
         val later = Instant.parse("2026-11-03T08:00:00Z")
 
-        assertThat(ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(base, tue, later)).changes)
+        assertThat(
+            ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(base, tue, later, emptySet())).changes,
+        )
             .isEmpty()
 
         val withDisposer = base + tie(UUID.randomUUID(), disposer, CeuRole.DISPOSER, on = tue, at = later)
-        val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(withDisposer, tue, later))
+        val overview = ChangeOverview.diff(
+            window(wed),
+            reported,
+            RegisterSnapshot.fold(withDisposer, tue, later, emptySet()),
+        )
 
         assertThat(overview.changes).singleElement().satisfies({
             assertThat(it.kind).isEqualTo(ChangeKind.CHANGED)
@@ -73,14 +79,18 @@ class CeuRegisterTest {
         val grant = UUID.randomUUID()
         val later = Instant.parse("2026-11-03T08:00:00Z")
         val base = listOf(opened(), tie(acc, holder, CeuRole.HOLDER), tie(grant, disposer, CeuRole.DISPOSER))
-        val reported = RegisterSnapshot.fold(base, mon, t0)
+        val reported = RegisterSnapshot.fold(base, mon, t0, emptySet())
 
         val ended = base + RegisterFact.RelationEnded(UUID.randomUUID(), grant, acc, tue, later, false)
-        assertThat(RegisterSnapshot.fold(ended, tue, later).accounts.getValue(acc).persons.map { it.partyId })
+        assertThat(
+            RegisterSnapshot.fold(ended, tue, later, emptySet()).accounts.getValue(acc).persons.map {
+                it.partyId
+            },
+        )
             .containsExactly(holder)
 
         val closed = ended + RegisterFact.AccountClosed(UUID.randomUUID(), acc, tue, later, false)
-        val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(closed, tue, later))
+        val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(closed, tue, later, emptySet()))
         assertThat(overview.changes).singleElement().satisfies({
             assertThat(it.kind).isEqualTo(ChangeKind.CLOSED)
             assertThat(it.account.closedOn).isEqualTo(tue)
@@ -98,7 +108,7 @@ class CeuRegisterTest {
             tie(synthAcc, UUID.randomUUID(), CeuRole.HOLDER, account = synthAcc, synthetic = true),
         )
 
-        val snapshot = RegisterSnapshot.fold(facts, mon, t0)
+        val snapshot = RegisterSnapshot.fold(facts, mon, t0, emptySet())
         val overview = ChangeOverview.diff(window(tue), RegisterSnapshot.empty(mon, t0), snapshot)
 
         assertThat(snapshot.accounts.keys).containsExactly(acc)
@@ -124,9 +134,61 @@ class CeuRegisterTest {
             synthStart.copy(eventId = UUID.randomUUID(), effectiveOn = wed, recordedAt = latest, synthetic = false),
         )
 
-        val snapshot = RegisterSnapshot.fold(facts, wed, latest)
+        val snapshot = RegisterSnapshot.fold(facts, wed, latest, emptySet())
 
         assertThat(snapshot.accounts.getValue(acc).persons.map { it.partyId }).containsExactly(holder)
+    }
+
+    @Test
+    fun `a tainted reinstatement of a real grant is skipped and the real person stays`() {
+        val grant = UUID.randomUUID()
+        val latest = Instant.parse("2026-11-04T08:00:00Z")
+        val realStart = tie(grant, disposer, CeuRole.DISPOSER)
+        val facts = listOf(
+            opened(),
+            tie(acc, holder, CeuRole.HOLDER),
+            realStart,
+            realStart.copy(eventId = UUID.randomUUID(), effectiveOn = wed, recordedAt = latest, synthetic = true),
+        )
+
+        val snapshot = RegisterSnapshot.fold(facts, wed, latest, emptySet())
+
+        assertThat(
+            snapshot.accounts.getValue(acc).persons.map {
+                it.partyId
+            },
+        ).containsExactlyInAnyOrder(holder, disposer)
+        assertThat(snapshot.droppedSyntheticRelations).isEqualTo(1)
+    }
+
+    @Test
+    fun `a tainted close or end never changes a real account`() {
+        val grant = UUID.randomUUID()
+        val later = Instant.parse("2026-11-03T08:00:00Z")
+        val facts = listOf(
+            opened(),
+            tie(acc, holder, CeuRole.HOLDER),
+            tie(grant, disposer, CeuRole.DISPOSER),
+            RegisterFact.RelationEnded(UUID.randomUUID(), grant, acc, tue, later, true),
+            RegisterFact.AccountClosed(UUID.randomUUID(), acc, wed, later.plusSeconds(3600), true),
+        )
+
+        val real = RegisterSnapshot.fold(facts.take(3), wed, later.plusSeconds(7200), emptySet())
+        val snapshot = RegisterSnapshot.fold(facts, wed, later.plusSeconds(7200), emptySet())
+
+        assertThat(snapshot.accounts.getValue(acc)).isEqualTo(real.accounts.getValue(acc))
+        assertThat(snapshot.accounts.getValue(acc).closedOn).isNull()
+        assertThat(snapshot.droppedSyntheticRelations).isEqualTo(2)
+    }
+
+    @Test
+    fun `an opening with a malformed currency or an over-long account number is rejected`() {
+        assertThatThrownBy {
+            RegisterFact.AccountOpened(UUID.randomUUID(), acc, "123", "czk", mon, t0, false)
+        }.isInstanceOf(TaxValidationException::class.java)
+        assertThatThrownBy {
+            RegisterFact.AccountOpened(UUID.randomUUID(), acc, "1".repeat(65), "CZK", mon, t0, false)
+        }.isInstanceOf(TaxValidationException::class.java)
     }
 
     @Test
@@ -140,16 +202,16 @@ class CeuRegisterTest {
             tie(UUID.randomUUID(), disposer, CeuRole.DISPOSER, on = mon, at = lateAt),
         )
 
-        val reported = RegisterSnapshot.fold(facts, mon, reportedAt)
+        val reported = RegisterSnapshot.fold(facts, mon, reportedAt, emptySet())
         assertThat(reported.accounts.getValue(acc).persons).hasSize(1)
 
-        val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(facts, tue, lateAt))
+        val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.fold(facts, tue, lateAt, emptySet()))
         assertThat(overview.changes).singleElement().extracting { it.kind }.isEqualTo(ChangeKind.CHANGED)
     }
 
     @Test
     fun `an account that disappears without a closing fact is reported CLOSED, never silently dropped`() {
-        val reported = RegisterSnapshot.fold(listOf(opened()), mon, t0)
+        val reported = RegisterSnapshot.fold(listOf(opened()), mon, t0, emptySet())
         val overview = ChangeOverview.diff(window(wed), reported, RegisterSnapshot.empty(tue, t0))
 
         assertThat(overview.changes).singleElement().satisfies({
@@ -161,9 +223,13 @@ class CeuRegisterTest {
     @Test
     fun `facts are not visible before their valid day or their record time`() {
         val facts = listOf(opened(on = tue, at = Instant.parse("2026-11-03T08:00:00Z")))
-        assertThat(RegisterSnapshot.fold(facts, mon, Instant.parse("2026-11-05T00:00:00Z")).accounts).isEmpty()
-        assertThat(RegisterSnapshot.fold(facts, wed, t0).accounts).isEmpty()
-        assertThat(RegisterSnapshot.fold(facts, wed, Instant.parse("2026-11-05T00:00:00Z")).accounts).hasSize(1)
+        assertThat(
+            RegisterSnapshot.fold(facts, mon, Instant.parse("2026-11-05T00:00:00Z"), emptySet()).accounts,
+        ).isEmpty()
+        assertThat(RegisterSnapshot.fold(facts, wed, t0, emptySet()).accounts).isEmpty()
+        assertThat(
+            RegisterSnapshot.fold(facts, wed, Instant.parse("2026-11-05T00:00:00Z"), emptySet()).accounts,
+        ).hasSize(1)
     }
 
     @Test
@@ -194,6 +260,6 @@ class CeuRegisterTest {
         assertThat(snapshot.droppedSyntheticAccounts).isEqualTo(1)
         assertThat(snapshot.droppedSyntheticRelations).isEqualTo(1)
         // Negative control: without the classification the same facts report the canary account.
-        assertThat(RegisterSnapshot.fold(facts, mon, t0).accounts.keys).contains(canaryAccount)
+        assertThat(RegisterSnapshot.fold(facts, mon, t0, emptySet()).accounts.keys).contains(canaryAccount)
     }
 }

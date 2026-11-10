@@ -97,7 +97,17 @@ class PanacheCeuRegisterRepository(private val parties: PanacheCeuPartyClassific
         Panache.withTransaction {
             parties.findById(partyId).onItem().transformToUni { existing ->
                 if (existing != null) {
-                    Uni.createFrom().item(false)
+                    // SYNTHETIC wins on any observation and is never downgraded. An UPDATE, not
+                    // persist: the @Id is assigned, so persist would only ever INSERT.
+                    if (synthetic && !existing.synthetic) {
+                        parties.update(
+                            "synthetic = true, recordedAt = ?1 where partyId = ?2",
+                            recordedAt,
+                            partyId,
+                        ).map { it > 0 }
+                    } else {
+                        Uni.createFrom().item(false)
+                    }
                 } else {
                     parties.persist(
                         CeuPartyClassificationEntity().also {
