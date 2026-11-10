@@ -245,7 +245,7 @@ gates:
     rationale: "run-gates.py can enforce a wall-time ceiling and a subject floor per gate, but only where the manifest declares them; measured on the ci_gate_runs warehouse only 18 of 197 gates declare a budget, so 179 gates can slow down without limit and nothing objects. Ratcheting the undeclared count means a new gate arrives declared, and the tail is paid down deliberately."
     selftest: python3 .github/scripts/check-gate-observability-declarations.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-gate-observability-declarations.py"]
+    selftest_inputs: [".github/scripts/check-gate-observability-declarations.py", ".github/scripts/derive-gate-runtime-measurements.py", ".github/gates/gate-runtime-measurements.json"]
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
@@ -1247,7 +1247,7 @@ gates:
       a money-path service.
     review_after: 2027-04-17
     min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
-    budget_seconds: 20
+    budget_seconds: 29
     selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
     selftest_expect: pass
     selftest: |
@@ -2170,7 +2170,7 @@ gates:
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
     review_after: "2027-05-03"
-    budget_seconds: 240
+    budget_seconds: 380
     run: |
       set -e
       python3 .github/scripts/test-sbom-effective-model-guard.py
@@ -3464,7 +3464,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 300   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07, 300 = ~1.5x
+    budget_seconds: 302   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07; 302 = ceil(1.5 x p95 200.83 s over 30 main runs, gate-runtime-measurements.json)
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
@@ -7498,7 +7498,7 @@ gates:
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
-    budget_seconds: 15
+    budget_seconds: 21
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
     selftest_expect: pass
     selftest_inputs:
