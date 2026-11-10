@@ -21,7 +21,7 @@ class SupervisorySubmissionTest {
         createdAt = at,
     )
     private val packaged = draft.packaged("4.2", "4.2.0.0", "a".repeat(64), "op", at)
-    private val claimed = packaged.claimed()
+    private val claimed = packaged.claimed(at)
 
     @Test
     fun `dry run and failure leave the return PACKAGED - nothing sent never reads as sent`() {
@@ -48,9 +48,30 @@ class SupervisorySubmissionTest {
     @Test
     fun `the transmission claim is exclusive and a transport outcome needs it`() {
         assertThat(claimed.state).isEqualTo(SubmissionState.SUBMITTING)
-        assertThatThrownBy { claimed.claimed() }.isInstanceOf(SubmissionStateException::class.java)
+        assertThatThrownBy { claimed.claimed(at) }.isInstanceOf(SubmissionStateException::class.java)
         assertThatThrownBy { packaged.afterTransport(TransportOutcome.SUBMITTED, null, at) }
             .isInstanceOf(SubmissionStateException::class.java)
+    }
+
+    @Test
+    fun `an unknown outcome is never resubmittable and only reconcile resolves it`() {
+        val unknown = claimed.afterTransport(TransportOutcome.UNKNOWN, null, at)
+        assertThat(unknown.state).isEqualTo(SubmissionState.OUTCOME_UNKNOWN)
+        assertThat(unknown.claimedAt).isNull()
+        assertThatThrownBy { unknown.claimed(at) }.isInstanceOf(SubmissionStateException::class.java)
+        assertThat(unknown.reconciled(sent = true, reference = "R", at = at).state).isEqualTo(SubmissionState.SUBMITTED)
+        assertThat(
+            unknown.reconciled(sent = false, reference = null, at = at).state,
+        ).isEqualTo(SubmissionState.PACKAGED)
+    }
+
+    @Test
+    fun `a claim lapses only after its lease`() {
+        val lease = java.time.Duration.ofMinutes(15)
+        assertThat(claimed.claimExpired(at.plusSeconds(60), lease)).isFalse()
+        assertThat(claimed.claimExpired(at.plus(lease).plusSeconds(1), lease)).isTrue()
+        assertThat(claimed.claimLapsed().state).isEqualTo(SubmissionState.OUTCOME_UNKNOWN)
+        assertThat(packaged.claimExpired(at.plus(lease).plusSeconds(1), lease)).isFalse()
     }
 
     @Test

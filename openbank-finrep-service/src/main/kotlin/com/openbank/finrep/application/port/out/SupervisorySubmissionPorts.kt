@@ -6,8 +6,10 @@ package com.openbank.finrep.application.port.out
 
 import com.openbank.finrep.domain.model.SubmissionAttempt
 import com.openbank.finrep.domain.model.SubmissionKey
+import com.openbank.finrep.domain.model.SubmissionState
 import com.openbank.finrep.domain.model.SupervisorySubmission
 import com.openbank.finrep.domain.model.TransportOutcome
+import java.time.Instant
 import java.util.UUID
 
 /** The package handed to a transport: identity plus the content hash the attempt is bound to. */
@@ -47,10 +49,19 @@ interface SupervisorySubmissionRepository {
      * Atomically moves the submission PACKAGED -> SUBMITTING. False when another caller already
      * holds the claim or the return is no longer PACKAGED. This is what prevents a double filing.
      */
-    suspend fun claimForSubmission(id: UUID): Boolean
+    suspend fun claimForSubmission(id: UUID, at: Instant): Boolean
 
-    /** Saves the submission and appends the attempt in ONE transaction. */
-    suspend fun saveWithAttempt(submission: SupervisorySubmission, attempt: SubmissionAttempt): SupervisorySubmission
+    /**
+     * Conditional final transition, in ONE transaction: `UPDATE … WHERE id = ? AND state = [expected]`
+     * (and, when [claimedBefore] is set, `AND claimed_at < claimedBefore`). The attempt row is
+     * appended only when exactly one row moved; false means someone else already moved it.
+     */
+    suspend fun transition(
+        expected: SubmissionState,
+        next: SupervisorySubmission,
+        attempt: SubmissionAttempt,
+        claimedBefore: Instant? = null,
+    ): Boolean
 
     suspend fun attempts(submissionId: UUID): List<SubmissionAttempt>
 }

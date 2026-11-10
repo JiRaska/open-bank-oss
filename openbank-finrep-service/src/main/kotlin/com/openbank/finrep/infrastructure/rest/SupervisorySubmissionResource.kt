@@ -4,6 +4,7 @@
 
 package com.openbank.finrep.infrastructure.rest
 
+import com.openbank.finrep.application.port.inbound.ReconcileCommand
 import com.openbank.finrep.application.port.inbound.RecordAcknowledgementCommand
 import com.openbank.finrep.application.port.inbound.SupervisorySubmissionUseCase
 import com.openbank.finrep.domain.model.SubmissionAttempt
@@ -32,6 +33,8 @@ data class OpenSubmissionRequest(
     val revision: Int? = null,
 )
 
+data class ReconcileRequest(val sent: Boolean? = null, val reference: String? = null, val note: String? = null)
+
 data class AcknowledgementRequest(
     val accepted: Boolean? = null,
     val reference: String? = null,
@@ -55,6 +58,7 @@ data class SubmissionResponse(
     val acknowledgementAccepted: Boolean?,
     val acknowledgementReference: String?,
     val acknowledgedAt: Instant?,
+    val claimedAt: Instant?,
 )
 
 data class SubmissionAttemptResponse(
@@ -123,6 +127,21 @@ class SupervisorySubmissionResource(
         return useCase.acknowledge(id, command, actor()).toResponse()
     }
 
+    /** ADMIN only: an operator confirms with the supervisor whether an unknown-outcome return arrived. */
+    @POST
+    @Path("/{id}/reconcile")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @RolesAllowed(Roles.ADMIN)
+    suspend fun reconcile(@PathParam("id") id: UUID, request: ReconcileRequest?): SubmissionResponse {
+        val body = requireNotNull(request) { "request body is required" }
+        val command = ReconcileCommand(
+            sent = requireNotNull(body.sent) { "sent is required" },
+            reference = body.reference,
+            note = body.note,
+        )
+        return useCase.reconcile(id, command, actor()).toResponse()
+    }
+
     @GET
     @Path("/{id}/attempts")
     suspend fun attempts(@PathParam("id") id: UUID): List<SubmissionAttemptResponse> =
@@ -148,6 +167,7 @@ internal fun SupervisorySubmission.toResponse() = SubmissionResponse(
     acknowledgementAccepted = acknowledgement?.accepted,
     acknowledgementReference = acknowledgement?.reference,
     acknowledgedAt = acknowledgement?.recordedAt,
+    claimedAt = claimedAt,
 )
 
 internal fun SubmissionAttempt.toResponse() = SubmissionAttemptResponse(

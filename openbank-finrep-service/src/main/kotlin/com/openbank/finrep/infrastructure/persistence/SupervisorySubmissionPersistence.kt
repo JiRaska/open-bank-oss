@@ -14,6 +14,7 @@ import com.openbank.finrep.domain.model.TransportOutcome
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepositoryBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
@@ -84,6 +85,9 @@ class SubmissionEntity : PanacheEntityBase {
 
     @Column(name = "ack_recorded_at")
     var ackRecordedAt: Instant? = null
+
+    @Column(name = "claimed_at")
+    var claimedAt: Instant? = null
 }
 
 @Entity
@@ -158,18 +162,52 @@ class PanacheSupervisorySubmissionRepository(
         Panache.getSession().flatMap { it.merge(submission.toEntity()) }
     }.awaitSuspending().toDomain()
 
-    override suspend fun claimForSubmission(id: UUID): Boolean = Panache.withTransaction {
-        submissions.update("state = 'SUBMITTING' where id = ?1 and state = 'PACKAGED'", id)
+    override suspend fun claimForSubmission(id: UUID, at: Instant): Boolean = Panache.withTransaction {
+        submissions.update(
+            "state = 'SUBMITTING', claimedAt = ?2 where id = ?1 and state = 'PACKAGED'",
+            id,
+            at,
+        )
     }.awaitSuspending() == 1
 
-    override suspend fun saveWithAttempt(
-        submission: SupervisorySubmission,
+    override suspend fun transition(
+        expected: SubmissionState,
+        next: SupervisorySubmission,
         attempt: SubmissionAttempt,
-    ): SupervisorySubmission = Panache.withTransaction {
-        Panache.getSession().flatMap { session ->
-            session.merge(attempt.toEntity()).flatMap { session.merge(submission.toEntity()) }
+        claimedBefore: Instant?,
+    ): Boolean = Panache.withTransaction {
+        val set = "state = ?1, submittedAt = ?2, transportReference = ?3, claimedAt = ?4 " +
+            "where id = ?5 and state = ?6"
+        val moved = if (claimedBefore == null) {
+            submissions.update(
+                set,
+                next.state.name,
+                next.submittedAt,
+                next.transportReference,
+                next.claimedAt,
+                next.id,
+                expected.name,
+            )
+        } else {
+            submissions.update(
+                "$set and claimedAt < ?7",
+                next.state.name,
+                next.submittedAt,
+                next.transportReference,
+                next.claimedAt,
+                next.id,
+                expected.name,
+                claimedBefore,
+            )
         }
-    }.awaitSuspending().toDomain()
+        moved.flatMap { rows ->
+            if (rows == 1) {
+                Panache.getSession().flatMap { it.merge(attempt.toEntity()) }.map { true }
+            } else {
+                Uni.createFrom().item(false)
+            }
+        }
+    }.awaitSuspending()
 
     override suspend fun attempts(submissionId: UUID): List<SubmissionAttempt> = Panache.withSession {
         attemptRepository.find("submissionId = ?1 order by attemptNo", submissionId).list()
@@ -196,6 +234,7 @@ private fun SupervisorySubmission.toEntity() = SubmissionEntity().also {
     it.ackMessage = acknowledgement?.message
     it.ackRecordedBy = acknowledgement?.recordedBy
     it.ackRecordedAt = acknowledgement?.recordedAt
+    it.claimedAt = claimedAt
 }
 
 private fun SubmissionEntity.toDomain() = SupervisorySubmission(
@@ -211,6 +250,7 @@ private fun SubmissionEntity.toDomain() = SupervisorySubmission(
     packagedAt = packagedAt,
     submittedAt = submittedAt,
     transportReference = transportReference,
+    claimedAt = claimedAt,
     acknowledgement = ackReference?.let {
         SubmissionAcknowledgement(
             accepted = requireNotNull(ackAccepted),

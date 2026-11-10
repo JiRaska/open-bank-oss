@@ -5,6 +5,7 @@
 package com.openbank.finrep.application.usecase
 
 import com.openbank.finrep.application.port.inbound.GetXbrlCsvPreflightQuery
+import com.openbank.finrep.application.port.inbound.ReconcileCommand
 import com.openbank.finrep.application.port.inbound.RecordAcknowledgementCommand
 import com.openbank.finrep.application.port.inbound.SupervisorySubmissionUseCase
 import com.openbank.finrep.application.port.inbound.XbrlCsvPreflightUseCase
@@ -23,8 +24,14 @@ import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.Logger
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -39,6 +46,10 @@ class SupervisorySubmissionService(
     private val preflight: XbrlCsvPreflightUseCase,
     private val transport: SupervisoryReturnTransport,
     private val clock: Clock,
+    // How long a SUBMITTING claim may be held before its holder is presumed dead. Must exceed the
+    // transport's own timeout, or a slow but live transmission would be marked OUTCOME_UNKNOWN.
+    @ConfigProperty(name = "openbank.finrep.submission.claim-lease", defaultValue = "PT15M")
+    private val lease: Duration,
 ) : SupervisorySubmissionUseCase {
 
     // A concurrent open of the same revision loses the unique-key race at INSERT; whatever the
@@ -82,8 +93,6 @@ class SupervisorySubmissionService(
         )
     }
 
-    // Any adapter failure must become a recorded FAILED attempt, never an unrecorded 500.
-    @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(id: UUID, actor: String): SupervisorySubmission {
         val current = get(id)
         when (current.state) {
@@ -94,46 +103,139 @@ class SupervisorySubmissionService(
 
             SubmissionState.SUBMITTED, SubmissionState.ACKNOWLEDGED, SubmissionState.REJECTED -> return current
 
-            SubmissionState.SUBMITTING -> throw inProgress(id)
+            SubmissionState.OUTCOME_UNKNOWN -> throw outcomeUnknown(id)
+
+            SubmissionState.SUBMITTING -> {
+                // A dead holder's claim must not wedge the return forever, nor be resubmitted:
+                // the transport may have delivered, so a lapsed claim becomes OUTCOME_UNKNOWN.
+                if (current.claimExpired(clock.instant(), lease)) return lapse(current, actor)
+                throw inProgress(id)
+            }
 
             SubmissionState.PACKAGED -> Unit
         }
         // Claim BEFORE calling the transport: with a live adapter two concurrent calls would be a
         // double filing. Losing the claim means another caller is transmitting, or has finished.
-        if (!repository.claimForSubmission(current.id)) {
+        val claimedAt = clock.instant()
+        if (!repository.claimForSubmission(current.id, claimedAt)) {
             val now = get(id)
             if (now.state in SETTLED) return now
             throw inProgress(id)
         }
-        val claimed = current.claimed()
-        val pkg = SupervisoryReturnPackage(
-            submissionId = current.id,
-            key = current.key,
-            reportingFrameworkVersion = requireNotNull(current.reportingFrameworkVersion),
-            taxonomyVersion = requireNotNull(current.taxonomyVersion),
-            packageHash = requireNotNull(current.packageHash),
-        )
+        return transmitClaimed(current.claimed(claimedAt), actor)
+    }
+
+    /**
+     * Holds the claim from here on: every path out of this function records an outcome, and the
+     * recording runs NonCancellable so a client disconnect cannot leave the row SUBMITTING.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun transmitClaimed(claimed: SupervisorySubmission, actor: String): SupervisorySubmission {
         val result = try {
-            transport.transmit(pkg)
+            transport.transmit(claimed.toPackage())
         } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                record(claimed, TransportResult(TransportOutcome.UNKNOWN, detail = "cancelled mid-transmission"), actor)
+            }
             throw e
         } catch (e: Exception) {
-            TransportResult(TransportOutcome.FAILED, detail = e.javaClass.simpleName)
+            // The adapter threw: it may have delivered before failing. Never assume FAILED.
+            TransportResult(TransportOutcome.UNKNOWN, detail = "transport threw ${e.javaClass.simpleName}")
+        }
+        return withContext(NonCancellable) { record(claimed, result, actor) }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun record(
+        claimed: SupervisorySubmission,
+        result: TransportResult,
+        actor: String,
+    ): SupervisorySubmission {
+        val now = clock.instant()
+        val next = claimed.afterTransport(result.outcome, result.reference, now)
+        val attempt = attempt(claimed, transport.name, result.outcome, result.reference, result.detail, actor, now)
+        val moved = try {
+            repository.transition(SubmissionState.SUBMITTING, next, attempt)
+        } catch (e: Exception) {
+            // One retry; if the store is down the claim stays SUBMITTING and lapses to
+            // OUTCOME_UNKNOWN after the lease — never back to a resubmittable PACKAGED.
+            log.warnf(e, "recording outcome %s for submission %s failed; retrying once", result.outcome, claimed.id)
+            repository.transition(SubmissionState.SUBMITTING, next, attempt)
+        }
+        // The claim lapsed while we transmitted: a late but real answer still beats "unknown".
+        if (!moved) repository.transition(SubmissionState.OUTCOME_UNKNOWN, next, attempt)
+        return get(claimed.id)
+    }
+
+    private suspend fun lapse(current: SupervisorySubmission, actor: String): SupervisorySubmission {
+        val now = clock.instant()
+        val attempt = attempt(
+            current,
+            "claim-lease",
+            TransportOutcome.UNKNOWN,
+            null,
+            "claim lease expired; delivery unknown — reconcile with the supervisor",
+            actor,
+            now,
+        )
+        repository.transition(
+            SubmissionState.SUBMITTING,
+            current.claimLapsed(),
+            attempt,
+            claimedBefore = now.minus(lease),
+        )
+        return get(current.id)
+    }
+
+    override suspend fun reconcile(id: UUID, command: ReconcileCommand, actor: String): SupervisorySubmission {
+        if (command.sent) require(!command.reference.isNullOrBlank()) { "reference is required when sent = true" }
+        var current = get(id)
+        if (current.state == SubmissionState.SUBMITTING && current.claimExpired(clock.instant(), lease)) {
+            current = lapse(current, actor)
+        }
+        if (current.state != SubmissionState.OUTCOME_UNKNOWN) {
+            throw ResourceConflictException(
+                "only an OUTCOME_UNKNOWN submission (or an expired claim) can be reconciled; state is ${current.state}",
+                "NOT_RECONCILABLE",
+            )
         }
         val now = clock.instant()
-        val attempt = SubmissionAttempt(
-            id = Ids.newId(),
-            submissionId = current.id,
-            attemptNo = repository.attempts(current.id).size + 1,
-            transport = transport.name,
-            outcome = result.outcome,
-            transportReference = result.reference,
-            detail = result.detail,
-            attemptedBy = actor,
-            attemptedAt = now,
-        )
-        return repository.saveWithAttempt(claimed.afterTransport(result.outcome, result.reference, now), attempt)
+        val next = current.reconciled(command.sent, command.reference, now)
+        val outcome = if (command.sent) TransportOutcome.SUBMITTED else TransportOutcome.FAILED
+        val attempt = attempt(current, "operator-reconcile", outcome, command.reference, command.note, actor, now)
+        if (!repository.transition(SubmissionState.OUTCOME_UNKNOWN, next, attempt)) {
+            throw ResourceConflictException("submission $id changed while reconciling", "CONFLICT")
+        }
+        return get(id)
     }
+
+    private suspend fun attempt(
+        submission: SupervisorySubmission,
+        transportName: String,
+        outcome: TransportOutcome,
+        reference: String?,
+        detail: String?,
+        actor: String,
+        at: Instant,
+    ) = SubmissionAttempt(
+        id = Ids.newId(),
+        submissionId = submission.id,
+        attemptNo = repository.attempts(submission.id).size + 1,
+        transport = transportName,
+        outcome = outcome,
+        transportReference = reference,
+        detail = detail,
+        attemptedBy = actor,
+        attemptedAt = at,
+    )
+
+    private fun SupervisorySubmission.toPackage() = SupervisoryReturnPackage(
+        submissionId = id,
+        key = key,
+        reportingFrameworkVersion = requireNotNull(reportingFrameworkVersion),
+        taxonomyVersion = requireNotNull(taxonomyVersion),
+        packageHash = requireNotNull(packageHash),
+    )
 
     override suspend fun acknowledge(
         id: UUID,
@@ -157,10 +259,16 @@ class SupervisorySubmissionService(
         return repository.attempts(id)
     }
 
+    private fun outcomeUnknown(id: UUID) = ResourceConflictException(
+        "submission $id may already have been delivered; an ADMIN must reconcile it before any resubmit",
+        "OUTCOME_UNKNOWN",
+    )
+
     private fun inProgress(id: UUID) =
         ResourceConflictException("submission $id is being transmitted by another request", "SUBMISSION_IN_PROGRESS")
 
     internal companion object {
+        private val log: Logger = Logger.getLogger(SupervisorySubmissionService::class.java)
         private val SETTLED = setOf(SubmissionState.SUBMITTED, SubmissionState.ACKNOWLEDGED, SubmissionState.REJECTED)
 
         fun manifestHash(key: SubmissionKey, framework: String, dpm: String, taxonomy: String): String {

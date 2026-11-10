@@ -9,6 +9,9 @@ import com.openbank.finrep.domain.model.SubmissionKey
 import com.openbank.finrep.domain.model.SupervisorySubmission
 import java.util.UUID
 
+/** Operator resolution of an OUTCOME_UNKNOWN return: [sent] after confirming with the supervisor. */
+data class ReconcileCommand(val sent: Boolean, val reference: String?, val note: String?)
+
 data class RecordAcknowledgementCommand(val accepted: Boolean, val reference: String, val message: String?)
 
 interface SupervisorySubmissionUseCase {
@@ -20,6 +23,9 @@ interface SupervisorySubmissionUseCase {
     suspend fun submit(id: UUID, actor: String): SupervisorySubmission
 
     suspend fun acknowledge(id: UUID, command: RecordAcknowledgementCommand, actor: String): SupervisorySubmission
+
+    /** ADMIN-only: resolves OUTCOME_UNKNOWN (or a SUBMITTING claim whose lease expired). */
+    suspend fun reconcile(id: UUID, command: ReconcileCommand, actor: String): SupervisorySubmission
 
     suspend fun get(id: UUID): SupervisorySubmission
 

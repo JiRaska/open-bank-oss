@@ -358,8 +358,10 @@ paths:
         '409':
           description: >-
             Submission is still DRAFT, or another request holds the transmission claim
-            (SUBMISSION_IN_PROGRESS). The claim is a conditional PACKAGED -> SUBMITTING update, so
-            concurrent submits never call the transport twice.
+            (SUBMISSION_IN_PROGRESS), or its outcome is unknown and an ADMIN must reconcile it
+            (OUTCOME_UNKNOWN). The claim is a conditional PACKAGED -> SUBMITTING update, so
+            concurrent submits never call the transport twice. A transport error or a cancelled
+            request records UNKNOWN and moves the return to OUTCOME_UNKNOWN, never back to PACKAGED.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
@@ -414,6 +416,52 @@ paths:
         '403':
           description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
 
+  /api/v1/finrep/submissions/{id}/reconcile:
+    post:
+      tags: [Submissions]
+      summary: Resolve an OUTCOME_UNKNOWN return after checking with the supervisor (ADMIN only)
+      description: >-
+        Allowed from OUTCOME_UNKNOWN, or from SUBMITTING once the claim lease has expired (the
+        claim is lapsed to OUTCOME_UNKNOWN first). `sent: true` (with the supervisor's reference)
+        moves the return to SUBMITTED; `sent: false` releases it to PACKAGED. Recorded as an
+        attempt by `operator-reconcile`.
+      operationId: reconcileFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReconcileRequest' }
+      responses:
+        '200':
+          description: Submission after reconciliation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing field, or sent=true without a reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: Submission is not in a reconcilable state (NOT_RECONCILABLE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN
+
   /api/v1/finrep/submissions/{id}/attempts:
     get:
       tags: [Submissions]
@@ -451,6 +499,13 @@ components:
         templateId: { type: string }
         referencePeriod: { type: string, format: date }
         revision: { type: integer, minimum: 1 }
+    ReconcileRequest:
+      type: object
+      required: [sent]
+      properties:
+        sent: { type: boolean }
+        reference: { type: string }
+        note: { type: string }
     AcknowledgementRequest:
       type: object
       required: [accepted, reference]
@@ -466,7 +521,7 @@ components:
         templateId: { type: string }
         referencePeriod: { type: string, format: date }
         revision: { type: integer }
-        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTING, SUBMITTED, ACKNOWLEDGED, REJECTED] }
+        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTING, OUTCOME_UNKNOWN, SUBMITTED, ACKNOWLEDGED, REJECTED] }
         createdBy: { type: string }
         createdAt: { type: string, format: date-time }
         reportingFrameworkVersion: { type: string, nullable: true }
@@ -478,13 +533,14 @@ components:
         acknowledgementAccepted: { type: boolean, nullable: true }
         acknowledgementReference: { type: string, nullable: true }
         acknowledgedAt: { type: string, format: date-time, nullable: true }
+        claimedAt: { type: string, format: date-time, nullable: true }
     SubmissionAttempt:
       type: object
       required: [attemptNo, transport, outcome, attemptedBy, attemptedAt]
       properties:
         attemptNo: { type: integer }
         transport: { type: string }
-        outcome: { type: string, enum: [SUBMITTED, DRY_RUN, REJECTED, FAILED] }
+        outcome: { type: string, enum: [SUBMITTED, DRY_RUN, REJECTED, FAILED, UNKNOWN] }
         transportReference: { type: string, nullable: true }
         detail: { type: string, nullable: true }
         attemptedBy: { type: string }
