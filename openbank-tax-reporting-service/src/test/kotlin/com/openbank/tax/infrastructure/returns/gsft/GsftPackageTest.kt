@@ -18,8 +18,11 @@ import org.bouncycastle.openpgp.PGPException
 import org.bouncycastle.openpgp.PGPKeyPair
 import org.bouncycastle.openpgp.PGPKeyRingGenerator
 import org.bouncycastle.openpgp.PGPLiteralData
+import org.bouncycastle.openpgp.PGPPublicKey
 import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
+import org.bouncycastle.openpgp.PGPPublicKeyRing
 import org.bouncycastle.openpgp.PGPSignature
+import org.bouncycastle.openpgp.PGPSignatureGenerator
 import org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator
 import org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory
 import org.bouncycastle.openpgp.operator.jcajce.JcaPGPContentSignerBuilder
@@ -158,23 +161,34 @@ class GsftPackageTest {
     }.generate()
 
     /** A sign-only primary plus the given subkeys, each with its own binding flags/expiry. */
-    private fun ring(master: PGPKeyPair, subkeys: List<Triple<PGPKeyPair, Int, Long>>): String {
+    private fun ring(master: PGPKeyPair, subkeys: List<Triple<PGPKeyPair, Int, Long>>, masterExpiry: Long = 0): String =
+        armor(ringObject(master, subkeys, masterExpiry))
+
+    private fun armor(ring: PGPPublicKeyRing): String {
+        val out = ByteArrayOutputStream()
+        ArmoredOutputStream(out).use { ring.encode(it) }
+        return out.toString(Charsets.US_ASCII)
+    }
+
+    private fun ringObject(
+        master: PGPKeyPair,
+        subkeys: List<Triple<PGPKeyPair, Int, Long>>,
+        masterExpiry: Long = 0,
+    ): PGPPublicKeyRing {
         val sha1 = JcaPGPDigestCalculatorProviderBuilder().build().get(HashAlgorithmTags.SHA1)
         val gen = PGPKeyRingGenerator(
             PGPSignature.POSITIVE_CERTIFICATION,
             master,
             "test-recipient",
             sha1,
-            flags(KeyFlags.CERTIFY_OTHER or KeyFlags.SIGN_DATA),
+            flags(KeyFlags.CERTIFY_OTHER or KeyFlags.SIGN_DATA, masterExpiry),
             null,
             JcaPGPContentSignerBuilder(master.publicKey.algorithm, HashAlgorithmTags.SHA256).setProvider(bc),
             JcePBESecretKeyEncryptorBuilder(SymmetricKeyAlgorithmTags.AES_256, sha1).setProvider(bc)
                 .build("x".toCharArray()),
         )
         subkeys.forEach { (pair, f, expiry) -> gen.addSubKey(pair, flags(f, expiry), null) }
-        val out = ByteArrayOutputStream()
-        ArmoredOutputStream(out).use { gen.generatePublicKeyRing().encode(it) }
-        return out.toString(Charsets.US_ASCII)
+        return gen.generatePublicKeyRing()
     }
 
     private fun keyPairAt(created: Date): PGPKeyPair {
@@ -222,5 +236,30 @@ class GsftPackageTest {
     fun `a block with only a sign-only primary is refused`() {
         assertThatThrownBy { GsftPackage.readPublicKey(ring(keyPair(), emptyList())) }
             .isInstanceOf(TaxValidationException::class.java).hasMessageContaining("no valid encryption key")
+    }
+
+    private val encryptOnly = KeyFlags.ENCRYPT_COMMS or KeyFlags.ENCRYPT_STORAGE
+
+    @Test
+    fun `a ring whose primary is revoked is rejected whole, valid subkey included`() {
+        val master = keyPair()
+        val ring = ringObject(master, listOf(Triple(keyPair(), encryptOnly, 0L)))
+        val signer = PGPSignatureGenerator(
+            JcaPGPContentSignerBuilder(master.publicKey.algorithm, HashAlgorithmTags.SHA256).setProvider(bc),
+        ).apply { init(PGPSignature.KEY_REVOCATION, master.privateKey) }
+        val revoked = PGPPublicKey.addCertification(ring.publicKey, signer.generateCertification(ring.publicKey))
+        assertThatThrownBy { GsftPackage.readPublicKey(armor(PGPPublicKeyRing.insertPublicKey(ring, revoked))) }
+            .isInstanceOf(TaxValidationException::class.java).hasMessageContaining("no valid encryption key")
+    }
+
+    @Test
+    fun `a ring whose primary has expired is rejected whole, valid subkey included`() {
+        val master = keyPairAt(Date(System.currentTimeMillis() - 10 * 86_400_000L))
+        val armored = ring(master, listOf(Triple(keyPair(), encryptOnly, 0L)), masterExpiry = 86_400L)
+        assertThatThrownBy { GsftPackage.readPublicKey(armored) }
+            .isInstanceOf(TaxValidationException::class.java).hasMessageContaining("no valid encryption key")
+        // Control: the same shape with a live primary yields the subkey.
+        val live = ring(keyPair(), listOf(Triple(keyPair(), encryptOnly, 0L)), masterExpiry = 10 * 86_400L)
+        assertThat(GsftPackage.readPublicKey(live).isMasterKey).isFalse()
     }
 }
