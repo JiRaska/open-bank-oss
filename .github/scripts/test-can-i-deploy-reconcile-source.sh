@@ -498,7 +498,7 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
   if ! BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" SERVICE_CI_EXPECTED_SOURCE="" \
      RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA" PACT_CLI_MODE=success \
      bash .github/scripts/can-i-deploy-gate.sh >"$tmp/tip-without-ci-log" 2>&1 || \
-     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--resolve-reconcile-sources-partial [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
      ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: Pact at current SHA without exact Services CI did not fall back to the historical source" >&2
@@ -691,6 +691,9 @@ run_unproven_member_case() {
   export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule GITHUB_SHA="$sha" GITHUB_REF=refs/heads/main
   [ "$atomic" != true ] || export EVENT_NAME=workflow_dispatch GITHUB_EVENT_NAME=workflow_dispatch
   export GH_TOKEN=fixture SERVICE_CI_MODE=fail-one SERVICE_CI_FAIL_SERVICE=openbank-bad-service
+  # No exact Services CI for bad-service routes it to the historical resolver (#15454), which
+  # finds no proven source either: only then is it refused, and refused alone.
+  export RESOLVER_MODE=success RESOLVER_SHA="$sha" RESOLVER_UNRESOLVED='["openbank-bad-service"]'
   export SERVICE_CI_EXPECTED_SOURCE="$sha" PACT_CLI_MODE=success
   export IMAGE_TAGS='{"openbank-good-service":"sandbox-01234567","openbank-bad-service":"sandbox-01234567"}'
   export IMAGE_DIGESTS='{"openbank-good-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","openbank-bad-service":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
@@ -713,6 +716,9 @@ run_unproven_member_case() {
        ! grep -q 'no successful exact-main Services CI build+contract' "$tmp/unproven-log"; then
     echo "FAIL: one unproven member starved its proven peer or lost its refusal" >&2
     cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/unproven-log" >&2; exit 1
+  fi
+  if ! grep -F -- '--resolve-reconcile-sources-partial ["openbank-bad-service"]' "$SERVICE_CI_LOG" >/dev/null; then
+    echo "FAIL: the unproven member was refused without consulting the historical resolver" >&2; exit 1
   fi
   echo "PASS: unproven member refused alone / atomic=$atomic"
 }
