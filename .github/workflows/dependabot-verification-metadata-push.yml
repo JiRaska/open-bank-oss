@@ -9,7 +9,11 @@
 #      artifact can never overwrite the trusted scripts;
 #   3. accepts it only if it is purely additive against the file at that head
 #      (no <configuration> change, no changed pin);
-#   4. commits it through the Git Data API with parent == that head and moves the ref
+#   4. downloads every ADDED artifact from the allowlisted public repositories the build
+#      declares and requires its sha256 to equal the added value; a <pgp>/<also-trust>/
+#      non-sha256 addition, an unfetchable artifact or an over-cap refresh is refused and
+#      the PR gets a fixed explanatory comment (verify-added-checksums.py);
+#   5. commits it through the Git Data API with parent == that head and moves the ref
 #      without force, so a branch that moved in between is refused, not overwritten.
 # It never checks out, builds or runs PR code. A push made with the App token (not
 # GITHUB_TOKEN) re-triggers the PR's checks, which is the point.
@@ -39,7 +43,11 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository &&
       startsWith(github.event.workflow_run.head_branch, 'dependabot/gradle/')
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write  # only for the fixed refusal comment; the push uses the App token
     env:
       GH_REPO: ${{ github.repository }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -51,8 +59,10 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
-      - name: Test the validator
-        run: python3 .github/scripts/check-verification-metadata-additive.py --selftest
+      - name: Test the validators
+        run: |
+          python3 .github/scripts/check-verification-metadata-additive.py --selftest
+          python3 .github/scripts/verify-added-checksums.py --self-test
 
       - name: Find the regenerated file
         id: artifact
@@ -98,16 +108,43 @@ jobs:
             echo "admitted=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
           gh api -H "Accept: application/vnd.github.raw" \
             "repos/${GH_REPO}/contents/gradle/verification-metadata.xml?ref=${HEAD_SHA}" \
             > "$RUNNER_TEMP/base.xml"
           python3 .github/scripts/check-verification-metadata-additive.py \
             "$RUNNER_TEMP/base.xml" "$RUNNER_TEMP/untrusted/verification-metadata.xml"
           echo "admitted=true" >> "$GITHUB_OUTPUT"
-          echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+
+      # Additive is not trusted: an added entry could pin any coordinate to a hash the
+      # untrusted build chose. Recompute every added sha256 from the upstream repositories,
+      # with no build and no PR code; any refusal fails the job before a token is minted.
+      - name: Verify every added checksum against the upstream repositories
+        if: steps.verify.outputs.admitted == 'true'
+        id: added
+        run: |
+          python3 .github/scripts/verify-added-checksums.py \
+            "$RUNNER_TEMP/base.xml" "$RUNNER_TEMP/untrusted/verification-metadata.xml"
+
+      - name: Explain a refused refresh on the PR
+        if: failure() && steps.verify.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.verify.outputs.pr }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          # Fixed text only: nothing from the untrusted file reaches the comment.
+          cat > "$RUNNER_TEMP/comment.md" <<EOF
+          The dependency-verification metadata refresh for this bump was **refused** and nothing
+          was pushed. The regenerated file was not purely additive, or an added checksum could not
+          be confirmed by downloading the artifact from an allowlisted public repository (or it
+          added a non-sha256 entry, or exceeded the review cap). See ${RUN_URL} for the reason.
+          This needs human review; do not hand-copy the regenerated file onto the branch.
+          EOF
+          gh pr comment "$PR_NUMBER" --repo "$GH_REPO" --body-file "$RUNNER_TEMP/comment.md"
 
       - name: Mint repository-scoped GitHub App token
-        if: steps.verify.outputs.admitted == 'true'
+        if: steps.verify.outputs.admitted == 'true' && steps.added.outcome == 'success'
         id: app_token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -117,7 +154,7 @@ jobs:
           permission-contents: write
 
       - name: Commit onto the resolved head without force
-        if: steps.verify.outputs.admitted == 'true'
+        if: steps.verify.outputs.admitted == 'true' && steps.added.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           PR_NUMBER: ${{ steps.verify.outputs.pr }}
