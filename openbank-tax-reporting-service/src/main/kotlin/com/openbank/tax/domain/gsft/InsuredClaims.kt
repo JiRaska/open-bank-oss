@@ -6,6 +6,7 @@ package com.openbank.tax.domain.gsft
 
 import com.openbank.tax.domain.model.requireValid
 import java.math.BigDecimal
+import java.math.BigInteger
 import java.math.RoundingMode
 import java.time.LocalDate
 import java.util.UUID
@@ -95,6 +96,37 @@ data class DepositAccount(
         val holding = holders.first { it.partyId == partyId }
         return holding.share ?: BigDecimal.ONE.divide(BigDecimal(holders.size), SHARE_SCALE, RoundingMode.HALF_EVEN)
     }
+
+    /** principal + accrued interest, rounded to hundredths. */
+    fun total(): BigDecimal = principal.add(accruedInterest).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+
+    /** The account total in CZK, rounded to haléře BEFORE any split. */
+    fun totalCzk(rates: FxRates): BigDecimal =
+        rates.toCzk(principal.add(accruedInterest), currency).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+
+    /**
+     * Splits [amount] (already at hundredths) between the holders in minor units with the
+     * largest-remainder method, so the parts sum EXACTLY to [amount]. Ties go to holder order.
+     */
+    fun split(amount: BigDecimal): Map<UUID, BigDecimal> {
+        val minor = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY).unscaledValue()
+        val equal = holders.first().share == null
+        val weights = holders.map { if (equal) BigDecimal.ONE else it.share!! }
+        val weightSum = weights.fold(BigDecimal.ZERO, BigDecimal::add)
+        val exact = weights.map { BigDecimal(minor).multiply(it) }
+        val floors = exact.map { it.divideToIntegralValue(weightSum).toBigIntegerExact() }
+        val remainders = exact.mapIndexed { i, e -> e.subtract(BigDecimal(floors[i]).multiply(weightSum)) }
+        var leftover = minor.subtract(floors.fold(BigInteger.ZERO, BigInteger::add)).toInt()
+        val parts = floors.toMutableList()
+        val sign = if (leftover < 0) BigInteger.ONE.negate() else BigInteger.ONE
+        val order = holders.indices.sortedWith(compareByDescending<Int> { remainders[it].abs() }.thenBy { it })
+        for (i in order) {
+            if (leftover == 0) break
+            parts[i] = parts[i].add(sign)
+            leftover -= sign.toInt()
+        }
+        return holders.indices.associate { holders[it].partyId to BigDecimal(parts[it], MONEY_SCALE) }
+    }
 }
 
 /** CZK per one unit of currency, ČNB fixing of the relevant day. */
@@ -122,6 +154,8 @@ data class InsuredClaimsAssembly(
     val droppedSyntheticAccounts: Int,
     val droppedOverdrawnAccounts: Int,
     val excludedDepositors: Map<ExclusionReason, Int>,
+    /** Claims whose eligible balance exceeds the cover limit and are paid at the limit. */
+    val cappedClaims: Int = 0,
 )
 
 object InsuredClaims {
@@ -135,6 +169,7 @@ object InsuredClaims {
         requireValid(rates.day == relevantDay) { "FX rates are for ${rates.day}, the relevant day is $relevantDay" }
         val byId = depositors.associateBy { it.partyId }
         requireValid(byId.size == depositors.size) { "a depositor is listed twice" }
+        requireValid(accounts.map { it.accountId }.toSet().size == accounts.size) { "an account is listed twice" }
         accounts.flatMap { a -> a.holders.map { it.partyId } }.forEach { holder ->
             requireValid(holder in byId) { "account holder $holder is not among the depositors" }
         }
@@ -149,10 +184,11 @@ object InsuredClaims {
         val claims = eligible.mapNotNull { depositor ->
             val held = liveAccounts.filter { a -> a.holders.any { it.partyId == depositor.partyId } }
             if (held.isEmpty()) return@mapNotNull null
-            val balance = held.fold(BigDecimal.ZERO) { sum, a ->
-                val total = a.principal.add(a.accruedInterest)
-                sum.add(rates.toCzk(total, a.currency).multiply(a.shareOf(depositor.partyId)))
-            }.setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+            // Each account converts to CZK and rounds FIRST, then splits in haléře, so the shares
+            // reported in DIL sum exactly to the DIA total and DIC reconciles with both.
+            val balance = held.fold(BigDecimal.ZERO.setScale(MONEY_SCALE)) { sum, a ->
+                sum.add(a.split(a.totalCzk(rates)).getValue(depositor.partyId))
+            }
             val compensation = balance.max(BigDecimal.ZERO).min(coverLimitCzk)
             InsuredClaim(depositor.partyId, balance, compensation, held.map { it.accountId }.sorted())
         }.sortedBy { it.partyId }
@@ -161,6 +197,7 @@ object InsuredClaims {
             relevantDay = relevantDay,
             coverLimitCzk = coverLimitCzk,
             claims = claims,
+            cappedClaims = claims.count { it.eligibleBalanceCzk > coverLimitCzk },
             droppedSyntheticDepositors = depositors.count { it.synthetic },
             droppedSyntheticAccounts = accounts.count { it.synthetic },
             droppedOverdrawnAccounts = overdrawn.size,

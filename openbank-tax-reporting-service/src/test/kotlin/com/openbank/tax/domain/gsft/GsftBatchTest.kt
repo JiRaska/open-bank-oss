@@ -169,4 +169,116 @@ class GsftBatchTest {
         assertThat(GsftFields.csvField("A \"B\"")).isEqualTo("\"A \"\"B\"\"\"")
         assertThat(GsftFields.csvField("plain")).isEqualTo("plain")
     }
+
+    private val carol = UUID.fromString("00000000-0000-0000-0000-00000000000c")
+
+    private fun amountAt(line: String, fromEnd: Int) = BigDecimal(line.split(",").reversed()[fromEnd]).movePointLeft(2)
+
+    private fun assertConserves(principal: String, holders: List<UUID>, currency: String, fx: FxRates) {
+        val joint = account("CZ0100000000000000000009", principal, *holders.toTypedArray(), currency = currency)
+        val ids = holders.mapIndexed { i, h -> identity(h, "800101000$i", "Person $i") }
+        val assembly = InsuredClaims.assemble(day, holders.map { Depositor(it, null, false) }, listOf(joint), fx)
+        val batch = GsftBatchRenderer.render(assembly, listOf(joint), ids, fx, header)
+        val dia = lines(batch, "DIA")
+        val dil = lines(batch, "DIL")
+        val diaCzk = amountAt(dia.first(), 0)
+        val diaOrig = amountAt(dia.first(), 1)
+        assertThat(dil).hasSize(holders.size)
+        assertThat(dil.map { amountAt(it, 0) }.reduce(BigDecimal::add)).isEqualByComparingTo(diaCzk)
+        assertThat(dil.map { amountAt(it, 1) }.reduce(BigDecimal::add)).isEqualByComparingTo(diaOrig)
+        val dicClaims = lines(batch, "DIC").map { amountAt(it, 6) }
+        assertThat(dicClaims.reduce(BigDecimal::add)).isEqualByComparingTo(diaCzk)
+        assertThat(assembly.claims.map { it.eligibleBalanceCzk }.reduce(BigDecimal::add)).isEqualByComparingTo(diaCzk)
+        assertThat(batch.totalPaymentCzk).isEqualByComparingTo(diaCzk)
+    }
+
+    @Test
+    fun `joint shares of 1000_01 between two holders sum exactly to the total`() =
+        assertConserves("1000.01", listOf(alice, bob), "CZK", rates)
+
+    @Test
+    fun `joint shares of 1000_00 between three holders sum exactly to the total`() =
+        assertConserves("1000.00", listOf(alice, bob, carol), "CZK", rates)
+
+    @Test
+    fun `joint shares after FX conversion sum exactly to the converted total`() = assertConserves(
+        "333.34",
+        listOf(alice, bob, carol),
+        "EUR",
+        FxRates(day, mapOf("EUR" to BigDecimal("25.017"))),
+    )
+
+    @Test
+    fun `a control character in a text field rejects that person only`() {
+        for (bad in listOf("Jana\r\nNováková", "Jana\tNováková", "Jana\u0001")) {
+            val batch = render(
+                listOf(account("CZ0100000000000000000001", "1", alice), account("CZ0100000000000000000002", "2", bob)),
+                listOf(identity(alice, "8001010009", bad), identity(bob, "8501010006", "Petr Novák")),
+            )
+            assertThat(batch.rejected.map { it.partyId }).containsExactly(alice)
+            assertThat(batch.rejected.single().reason).contains("control character")
+            assertThat(lines(batch, "DIC")).hasSize(1)
+        }
+    }
+
+    @Test
+    fun `a blank IDC or NAME rejects that person`() {
+        val accounts = listOf(account("CZ0100000000000000000001", "1", alice))
+        assertThat(render(accounts, listOf(identity(alice, "  "))).rejected.single().reason).contains("IDC")
+        assertThat(render(accounts, listOf(identity(alice, "8001010009", " "))).rejected.single().reason)
+            .contains("NAME")
+    }
+
+    @Test
+    fun `a duplicated identity or account fails the whole batch`() {
+        val acc = account("CZ0100000000000000000001", "1", alice)
+        val assembly = InsuredClaims.assemble(day, listOf(Depositor(alice, null, false)), listOf(acc), rates)
+        val id = identity(alice, "8001010009")
+        assertThatThrownBy { GsftBatchRenderer.render(assembly, listOf(acc), listOf(id, id), rates, header) }
+            .isInstanceOf(TaxValidationException::class.java)
+        assertThatThrownBy { GsftBatchRenderer.render(assembly, listOf(acc, acc), listOf(id), rates, header) }
+            .isInstanceOf(TaxValidationException::class.java)
+    }
+
+    @Test
+    fun `carries exclusion and cap counts into the batch`() {
+        val big = account("CZ0100000000000000000001", "3000000", alice)
+        val synth =
+            DepositAccount(
+                UUID.randomUUID(),
+                "CZ02",
+                "CZK",
+                BigDecimal.ONE,
+                BigDecimal.ZERO,
+                listOf(Holding(alice, null)),
+                true,
+            )
+        val people = listOf(Depositor(alice, null, false), Depositor(bob, ExclusionReason.CREDIT_INSTITUTION, false))
+        val assembly = InsuredClaims.assemble(day, people, listOf(big, synth), rates)
+        val batch = GsftBatchRenderer.render(
+            assembly,
+            listOf(big, synth),
+            listOf(identity(alice, "8001010009")),
+            rates,
+            header,
+        )
+        assertThat(batch.cappedClaims).isEqualTo(1)
+        assertThat(batch.droppedSyntheticAccounts).isEqualTo(1)
+        assertThat(batch.excludedDepositors).containsEntry(ExclusionReason.CREDIT_INSTITUTION, 1)
+    }
+
+    @Test
+    fun `encodes Czech letters as CP-1250 bytes`() {
+        val batch = render(
+            listOf(account("CZ0100000000000000000001", "1", alice)),
+            listOf(identity(alice, "8001010009", "Šťastný Zdeněk ň")),
+        )
+        val bytes = batch.files.getValue("DIC6363.00001")
+        val name = "E,8001010009,F,00001,1,".toByteArray(Charsets.US_ASCII).size
+        assertThat(bytes[name]).isEqualTo(0x8A.toByte())
+        assertThat(bytes.indexOf(0xF2.toByte())).isGreaterThan(name)
+        assertThat(
+            bytes.toList().subList(name, name + 3),
+        ).containsExactly(0x8A.toByte(), 0x9D.toByte(), 'a'.code.toByte())
+    }
 }

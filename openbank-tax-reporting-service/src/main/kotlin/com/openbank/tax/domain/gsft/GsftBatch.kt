@@ -15,6 +15,7 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 
 /*
@@ -107,6 +108,12 @@ data class GsftBatch(
     val files: Map<String, ByteArray>,
     val totalPaymentCzk: BigDecimal,
     val rejected: List<RejectedPerson>,
+    /** Exclusion evidence carried from the assembly, so the delivery records what it left out. */
+    val droppedSyntheticDepositors: Int = 0,
+    val droppedSyntheticAccounts: Int = 0,
+    val droppedOverdrawnAccounts: Int = 0,
+    val excludedDepositors: Map<ExclusionReason, Int> = emptyMap(),
+    val cappedClaims: Int = 0,
 )
 
 private class PersonRecords(val dic: List<String>, val dia: List<List<String>>, val dil: List<List<String>>)
@@ -130,7 +137,9 @@ object GsftBatchRenderer {
         requireValid(batchNumber in 1..BATCH_MAX) { "batch number must be 1..$BATCH_MAX" }
         requireValid(rates.day == assembly.relevantDay) { "FX rates are not for the relevant day" }
         val who = identities.associateBy { it.partyId }
+        requireValid(who.size == identities.size) { "an identity is listed twice for one party" }
         val byAccount = accounts.associateBy { it.accountId }
+        requireValid(byAccount.size == accounts.size) { "an account is listed twice" }
         // ORDER_P: the first payout of each entitled person. Later tranches for the same person
         // (a corrected or supplementary payout) take 2, 3, ... and are not produced here.
         val order = FIRST_PAYOUT
@@ -168,12 +177,21 @@ object GsftBatchRenderer {
 
         val diw = diwRecord(header, dic.size, dia.size, dil.size, totalPayment)
 
-        val suffix = "$bankCode$branchCountry.${"%05d".format(batchNumber)}"
+        val suffix = "$bankCode$branchCountry.${String.format(Locale.ROOT, "%05d", batchNumber)}"
         val files = linkedMapOf("DIW$suffix" to encode(listOf(diw)))
         if (dic.isNotEmpty()) files["DIC$suffix"] = encode(dic)
         if (dia.isNotEmpty()) files["DIA$suffix"] = encode(dia)
         if (dil.isNotEmpty()) files["DIL$suffix"] = encode(dil)
-        return GsftBatch(files, totalPayment.setScale(2, RoundingMode.HALF_UP), rejected)
+        return GsftBatch(
+            files = files,
+            totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
+            rejected = rejected,
+            droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
+            droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
+            droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
+            excludedDepositors = assembly.excludedDepositors,
+            cappedClaims = assembly.cappedClaims,
+        )
     }
 
     private fun personRecords(
@@ -189,19 +207,25 @@ object GsftBatchRenderer {
         for (accountId in claim.accountIds) {
             val account =
                 byAccount[accountId] ?: throw TaxValidationException("claim references unknown account $accountId")
-            val total = account.principal.add(account.accruedInterest)
-            val totalCzk = rates.toCzk(total, account.currency)
+            val total = account.total()
+            val totalCzk = account.totalCzk(rates)
             val key = listOf(identity.idc, identity.type.code, order, GsftFields.iban(account.iban), account.currency)
             dia += listOf("T") + key + listOf(GsftFields.amount(total), GsftFields.amount(totalCzk))
             if (account.holders.size > 1) {
-                val share = account.shareOf(claim.partyId)
+                // Both columns split in minor units, so each account's shares sum to its DIA row.
                 dil +=
                     listOf("O") + key +
-                    listOf(GsftFields.amount(total.multiply(share)), GsftFields.amount(totalCzk.multiply(share)))
+                    listOf(
+                        GsftFields.amount(account.split(total).getValue(claim.partyId)),
+                        GsftFields.amount(account.split(totalCzk).getValue(claim.partyId)),
+                    )
             }
         }
         val dic = dicRecord(claim, identity, order)
         (listOf(dic) + dia + dil).flatten().forEach { field ->
+            requireValid(field.none { it < ' ' }) {
+                "a field contains a control character (CR, LF or below 0x20): '${field.filter { it >= ' ' }}'"
+            }
             requireValid(CP1250.newEncoder().canEncode(field)) {
                 "a field contains a character CP-1250 cannot encode: '$field'"
             }
@@ -213,7 +237,7 @@ object GsftBatchRenderer {
         listOf(
             "R",
             header.createdAt.format(TIMESTAMP),
-            "%05d".format(header.batchNumber),
+            String.format(Locale.ROOT, "%05d", header.batchNumber),
             GsftFields.count(clients),
             GsftFields.count(accounts),
             GsftFields.count(shares),
@@ -227,11 +251,11 @@ object GsftBatchRenderer {
 
     private fun dicRecord(claim: InsuredClaim, id: DepositorIdentity, order: String): List<String> = listOf(
         "E",
-        GsftFields.text(id.idc, IDC_MAX, "IDC"),
+        GsftFields.nonBlank(GsftFields.text(id.idc, IDC_MAX, "IDC"), "IDC"),
         id.type.code,
         order,
         if (id.type == EntitledPersonType.NATURAL_PERSON) "1" else "0",
-        GsftFields.text(id.name, TEXT_MAX, "NAME"),
+        GsftFields.nonBlank(GsftFields.text(id.name, TEXT_MAX, "NAME"), "NAME"),
         GsftFields.text(id.street, TEXT_MAX, "STREET"),
         GsftFields.text(id.city, TEXT_MAX, "CITY"),
         GsftFields.text(id.zip, ZIP_MAX, "ZIP"),
@@ -271,7 +295,7 @@ internal object GsftFields {
         return digits.padStart(AMOUNT_DIGITS, '0')
     }
 
-    fun count(n: Int) = "%09d".format(n)
+    fun count(n: Int) = String.format(Locale.ROOT, "%09d", n)
 
     fun iban(value: String): String {
         val compact = value.replace(" ", "")
@@ -281,6 +305,11 @@ internal object GsftFields {
 
     fun text(value: String, max: Int, field: String): String {
         requireValid(value.length <= max) { "$field is longer than $max characters" }
+        return value
+    }
+
+    fun nonBlank(value: String, field: String): String {
+        requireValid(value.isNotBlank()) { "$field is blank" }
         return value
     }
 
