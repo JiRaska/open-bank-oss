@@ -174,7 +174,8 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     const rows = screen.getAllByRole('option')
     expect(rows[0].getAttribute('aria-selected')).toBe('true')
     expect((rows[0] as HTMLElement).style.background).toBe('var(--sidebar-active-bg)')
-    expect((rows[1] as HTMLElement).style.background).toBe('transparent')
+    // Longhand: jsdom >= 31 serializes the `background: transparent` shorthand as 'none'.
+    expect((rows[1] as HTMLElement).style.backgroundColor).toBe('transparent')
   })
 
   it('closes on Escape', async () => {
