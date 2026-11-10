@@ -50,15 +50,6 @@ class YearCloseEntity : PanacheEntityBase {
     @Column(name = "attested_by")
     var attestedBy: String? = null
 
-    @Column(name = "allocated_by")
-    var allocatedBy: String? = null
-
-    @Column(name = "allocated_at")
-    var allocatedAt: Instant? = null
-
-    @Column(name = "allocation_journal_id")
-    var allocationJournalId: UUID? = null
-
     @Column(name = "attested_at")
     var attestedAt: Instant? = null
 

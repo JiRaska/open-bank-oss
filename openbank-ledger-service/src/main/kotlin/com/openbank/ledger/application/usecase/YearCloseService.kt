@@ -13,6 +13,7 @@ import com.openbank.ledger.application.port.`in`.VerifyYearCloseQuery
 import com.openbank.ledger.application.port.`in`.YearCloseUseCase
 import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.application.port.out.YearCloseRepository
+import com.openbank.ledger.application.port.out.YearEndAllocationRepository
 import com.openbank.ledger.domain.event.YearCloseAttestedEvent
 import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.YearCloseRecord
@@ -45,6 +46,7 @@ class YearCloseService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val accountingClock: AccountingClock,
+    private val allocations: YearEndAllocationRepository,
 ) : YearCloseUseCase {
     // Single constructor = the CDI entry point. ADR-0207 D1: the second, @Inject constructor that
     // used to sit here built `Clock.system(Europe/Prague)` while this service's ClockProducer
@@ -105,7 +107,7 @@ class YearCloseService(
         }
 
         requireFourEyes(record, command)
-        requireNotAllocator(record, command)
+        requireAllocationsAttributed(command)
 
         val attested = record.attest(attestedBy = command.attestedBy, attestedAt = Instant.now(clock))
         val outbox = OutboxMessage(
@@ -189,15 +191,27 @@ class YearCloseService(
         }
     }
 
-    private fun requireNotAllocator(record: YearCloseRecord, command: AttestYearCloseCommand) {
-        // Four-eyes over the result allocation (ADR-0096 D3): its closing journal is posted by the
-        // system poster, so the allocating maker is only on this record — and may not attest.
-        if (record.allocatedBy != null && record.allocatedBy == command.attestedBy) {
-            throw YearCloseConflictException(
-                "Four-eyes: the attestor must differ from the result allocator ${record.allocatedBy} " +
-                    "for year ${command.fiscalYear}",
-            )
+    /**
+     * ADR-0096 D3 four-eyes over the result allocation. Its closing journal is posted by the system
+     * poster, so attribution lives only in `ledger_year_close_allocation`. Fail closed when an
+     * allocation is still PENDING (a crash mid-allocation, recovered by re-running the allocation),
+     * when any `year-end-result:{year}:*` journal has no POSTED attribution, or when the attestor
+     * is ANY of the year's allocators. The repository's conditional flip re-checks the same facts
+     * atomically, so this is the readable refusal and that is the guarantee.
+     */
+    private suspend fun requireAllocationsAttributed(command: AttestYearCloseCommand) {
+        val year = command.fiscalYear
+        val pending = allocations.findPending(year)
+        val unattributed = allocations.unattributedJournalKeys(year)
+        val problem = when {
+            pending != null ->
+                "a result allocation is PENDING (${pending.idempotencyKey}) — re-run the allocation to reconcile it"
+            unattributed.isNotEmpty() -> "closing journal(s) $unattributed have no allocator attribution"
+            command.attestedBy in allocations.allocators(year) ->
+                "Four-eyes: the attestor ${command.attestedBy} allocated the result"
+            else -> null
         }
+        if (problem != null) throw YearCloseConflictException("Year close $year cannot be attested: $problem")
     }
 
     private fun requireBalanced(trialBalance: FiscalYearTrialBalance) {

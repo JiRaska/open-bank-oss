@@ -115,8 +115,8 @@ Decision point 3 (EoY result allocation and opening-balance roll) builds on the 
 attestation (ADR-0078 D5 / #868) and is a separate increment.
 
 **Increment 2 — D3 result allocation (CZK). Shipped.** `POST /api/v1/ledger/close/{fiscalYear}/result-allocation`
-(maker, `ledger.close.draft`, requires a DRAFT and records `allocatedBy` on it — attestation refuses the
-allocator as well as the drafter) posts the closing journal dated 31 December that zeroes the year's
+(maker, `ledger.close.draft`, requires a DRAFT; every allocator is kept in `ledger_year_close_allocation`, written before the journal
+and recovered by key after a crash, and attestation refuses every allocator as well as the drafter) posts the closing journal dated 31 December that zeroes the year's
 income and expense accounts into Retained Earnings `6020`, through the ordinary posting path, before
 attestation — the attestation's fresh-hash re-verify is the checker step over it. Carry-relative and
 idempotent (`year-end-result:{year}:{plan digest}:{ordinal}`, a replay is refused, and the plan must be

@@ -2,17 +2,38 @@
 -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 -- See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 --
--- ADR-0096 D3: the year-end result allocation is a maker action on the year close. Record WHO
--- allocated, when, and which journal it posted, on the year-close row itself, so attestation can
--- refuse an attestor who also allocated (four-eyes) — the journal is posted by the system poster
--- and its description is not a control.
+-- ADR-0096 D3: every year-end result allocation, one row per closing-journal idempotency key.
 --
--- Additive, nullable columns on a small table (one row per fiscal year); online-safe.
--- Rollback (only before any allocation was recorded, or accepting loss of the maker trail):
---   ALTER TABLE ledger_year_close DROP COLUMN allocation_journal_id,
---     DROP COLUMN allocated_at, DROP COLUMN allocated_by;
+-- The closing journal is posted by the system poster, so this table is the ONLY attribution of
+-- who allocated. It is append-and-complete, never overwritten: a year allocated twice by two
+-- principals keeps both, and attestation refuses every one of them (four-eyes).
+--
+-- Write order is PENDING first, then the journal, then POSTED. The journal posting owns its own
+-- transaction (locks, idempotency replay recovery), so the two cannot share one; instead the
+-- attribution is committed BEFORE the money moves. A crash after the PENDING row is recovered
+-- deterministically by idempotency key: a journal under that key ⇒ POSTED, none ⇒ ABANDONED.
+-- Attestation refuses a year with a PENDING row or with any `year-end-result:{year}:*` journal
+-- that no POSTED row attributes.
+--
+-- The partial unique index admits one PENDING allocation per year, so two concurrent
+-- allocations cannot both start.
+--
+-- Additive, new table; online-safe.
+-- Rollback (loses the four-eyes trail of any allocation already made — reverse those journals
+-- first): DROP TABLE ledger_year_close_allocation;
 
-ALTER TABLE ledger_year_close
-    ADD COLUMN allocated_by          VARCHAR(255),
-    ADD COLUMN allocated_at          TIMESTAMPTZ,
-    ADD COLUMN allocation_journal_id UUID;
+CREATE TABLE ledger_year_close_allocation (
+    idempotency_key VARCHAR(255) PRIMARY KEY,
+    fiscal_year     INT          NOT NULL,
+    status          VARCHAR(16)  NOT NULL
+        CONSTRAINT chk_year_close_allocation_status CHECK (status IN ('PENDING', 'POSTED', 'ABANDONED')),
+    allocated_by    VARCHAR(255) NOT NULL,
+    requested_at    TIMESTAMPTZ  NOT NULL,
+    journal_id      UUID,
+    completed_at    TIMESTAMPTZ,
+    CONSTRAINT chk_year_close_allocation_posted CHECK (status <> 'POSTED' OR journal_id IS NOT NULL)
+);
+
+CREATE INDEX idx_year_close_allocation_year ON ledger_year_close_allocation (fiscal_year);
+CREATE UNIQUE INDEX uq_year_close_allocation_one_pending
+    ON ledger_year_close_allocation (fiscal_year) WHERE status = 'PENDING';

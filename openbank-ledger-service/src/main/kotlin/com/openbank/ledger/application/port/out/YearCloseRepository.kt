@@ -6,8 +6,6 @@ package com.openbank.ledger.application.port.out
 
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.libs.persistence.outbox.OutboxMessage
-import java.time.Instant
-import java.util.UUID
 
 /** Outbound persistence port for fiscal-year close records (ADR-0078 D5, increment 1). */
 interface YearCloseRepository {
@@ -29,16 +27,5 @@ interface YearCloseRepository {
      * database transaction (transactional outbox, ADR-0003/0050 — the invariant whose violation
      * in statement-service ADR-0078 explicitly calls out): either both commit or neither does.
      */
-    /**
-     * Record the result-allocation maker on the existing DRAFT (ADR-0096 D3). Returns null when
-     * there is no DRAFT for the year (absent or already ATTESTED) — the caller refuses then.
-     */
-    suspend fun recordAllocation(
-        fiscalYear: Int,
-        allocatedBy: String,
-        allocatedAt: Instant,
-        journalId: UUID,
-    ): YearCloseRecord?
-
     suspend fun saveAttested(record: YearCloseRecord, outbox: OutboxMessage): YearCloseRecord
 }

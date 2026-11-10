@@ -196,9 +196,6 @@ data class YearCloseRecordResponse(
     val draftedBy: String?,
     val attestedBy: String?,
     val attestedAt: String?,
-    val allocatedBy: String? = null,
-    val allocatedAt: String? = null,
-    val allocationJournalId: UUID? = null,
 )
 
 private fun FiscalYearTrialBalance.toResponse() = FiscalYearTrialBalanceResponse(
@@ -262,9 +259,6 @@ private fun YearCloseRecord.toResponse() = YearCloseRecordResponse(
     draftedBy = draftedBy,
     attestedBy = attestedBy,
     attestedAt = attestedAt?.toString(),
-    allocatedBy = allocatedBy,
-    allocatedAt = allocatedAt?.toString(),
-    allocationJournalId = allocationJournalId,
 )
 
 data class ResultAllocationLegResponse(val glAccountCode: String, val side: String, val amount: BigDecimal)

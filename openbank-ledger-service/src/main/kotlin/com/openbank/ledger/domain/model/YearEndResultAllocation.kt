@@ -91,3 +91,14 @@ data class YearEndResultAllocationPlan(
         }
     }
 }
+
+enum class YearEndAllocationStatus { PENDING, POSTED, ABANDONED }
+
+/** One attributed allocation attempt (ADR-0096 D3); the four-eyes record the journal cannot carry. */
+data class YearEndAllocationRecord(
+    val idempotencyKey: String,
+    val fiscalYear: Int,
+    val status: YearEndAllocationStatus,
+    val allocatedBy: String,
+    val journalId: java.util.UUID?,
+)

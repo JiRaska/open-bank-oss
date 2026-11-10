@@ -256,22 +256,28 @@ set) apply equally to the new `ledger.approval.decide` action.
   journal goes through the ordinary posting path, so the day, period and fiscal-year locks apply,
   and the attestation (four-eyes, fresh-hash re-verify) is the checker step that reviews it; an
   ATTESTED year refuses allocation (409). *Spoofing/four-eyes* — the closing journal is posted by
-  the system poster, so the description is NOT the control: allocation requires an existing year-close
-  DRAFT and records the allocating principal on it (`allocated_by`, `allocated_at`,
-  `allocation_journal_id`, V42); attestation refuses an attestor equal to the drafter OR the
-  allocator, in the service and in the aggregate. *Repudiation* — those structured fields plus the
-  log line attribute every allocation. *Integrity* — carry-relative: the plan is derived from
-  the year's own trial balance and the journal lands inside that year. The idempotency key is
-  `year-end-result:{year}:{plan digest}:{n}` with n the first unused ordinal, so a recurring residual
-  cannot replay an older journal; a replayed key (concurrent run) is refused as 409 rather than
-  reported posted, and after posting the plan is recomputed and must be empty (else 409, residual
-  named). Proven by `YearEndResultAllocationServiceTest` and
-  `YearEndResultAllocationIT` on Postgres. *Information disclosure* — the preview is a read with
-  the same roles as the trial balance. Residual: a non-CZK income/expense balance is refused rather
-  than translated (no year-end translation rate is decided); the opening-balance roll and an
-  attest-time "P&L must be zero" gate are not built; the journal post and the `allocated_by` write are
-  two transactions — a crash between them leaves an unattributed closing journal, detectable as
-  `allocation_journal_id` null while preview is empty, and corrected by reversal. Rollback: revert; already-posted closing
+  the system poster, so its description is NOT the control. Every allocation is a row in
+  `ledger_year_close_allocation` (V42) keyed by the journal's idempotency key; rows are never
+  overwritten, so a year allocated by two principals keeps both, and attestation refuses ALL of
+  them as well as the drafter. *Atomicity* — the journal posting owns its own transaction (locks,
+  idempotency-replay recovery), so attribution cannot share it; instead the PENDING row is committed
+  BEFORE the money moves, under `SELECT … FOR UPDATE` on the DRAFT year-close row, then completed
+  POSTED with the journal id. A crash in between is recovered deterministically by key on the next
+  run (journal under the key ⇒ POSTED, none ⇒ ABANDONED). Attestation fails closed while any row is
+  PENDING or any `year-end-result:{year}:*` journal lacks a POSTED attribution, and every allocation
+  run — an empty plan included — performs the same attribution check. A partial unique index admits
+  one PENDING allocation per year. *TOCTOU* — the attest flip is a single conditional UPDATE
+  (`status='DRAFT' AND content_hash=:reviewed AND NOT EXISTS (pending allocation OR the attestor
+  allocated)`); allocation locks the same row, so the two serialise and an earlier check cannot go
+  stale. *Integrity* — carry-relative: the plan comes from the year's own trial balance and the
+  journal lands inside that year; the key `year-end-result:{year}:{plan digest}:{n}` takes the
+  first ordinal unused by both journals and attributions, a replayed key is a 409 and never
+  "posted", and after posting the plan must be empty. Proven on Postgres by
+  `YearEndResultAllocationIT` and `YearEndResultAllocationRecoveryIT` (both crash points, an
+  orphan journal, racing allocations, racing attestations), plus `YearEndResultAllocationServiceTest`.
+  *Information disclosure* — the preview is a read with the same roles as the trial balance.
+  Residual: a non-CZK income/expense balance is refused rather than translated; the opening-balance
+  roll and an attest-time "P&L must be zero" gate are not built. Rollback: revert; already-posted closing
   journals are corrected by reversal, like any journal.
 
 - **2026-10-28** — **Journal-approval OPA grants restored (#12906).** `ledger.approval.read` and

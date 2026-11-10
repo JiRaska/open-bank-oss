@@ -116,10 +116,6 @@ data class YearCloseRecord(
     val draftedBy: String? = null,
     val attestedBy: String? = null,
     val attestedAt: Instant? = null,
-    /** Maker of the year-end result allocation (ADR-0096 D3); may never attest the same year. */
-    val allocatedBy: String? = null,
-    val allocatedAt: Instant? = null,
-    val allocationJournalId: UUID? = null,
 ) {
     init {
         requireValid(fiscalYear in MIN_FISCAL_YEAR..MAX_FISCAL_YEAR) { "fiscalYear out of range: $fiscalYear" }
@@ -140,9 +136,6 @@ data class YearCloseRecord(
         }
         checkConflict(draftedBy != attestedBy) {
             "Four-eyes violation: attestor $attestedBy must differ from the draft author for year $fiscalYear"
-        }
-        checkConflict(allocatedBy != attestedBy) {
-            "Four-eyes violation: attestor $attestedBy allocated the result for year $fiscalYear"
         }
         return copy(status = YearCloseStatus.ATTESTED, attestedBy = attestedBy, attestedAt = attestedAt)
     }
