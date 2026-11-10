@@ -113,9 +113,13 @@ jobs:
     # Otherwise a service listed in the repo variable MINI_RUNNER_SERVICES (a JSON array)
     # builds on the owner's Mac mini pool `openbank-mini` (ephemeral Linux arm64 runners,
     # rules.yaml: ci_runners.static_hosts.mac_mini) to add slots beyond the hosted
-    # concurrency cap. Never for fork PRs. Unset or empty variable => every build is hosted,
-    # which is the kill switch when the Mac is down: a queued job has no hosted fallback.
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini' || 'ubuntu-latest') }}
+    # concurrency cap. Only for `schedule` and `workflow_dispatch`, where nobody waits: on
+    # 2026-11-04 the pool's ~4 slots queued PR and train-carrier builds 19 min p50 /
+    # 82 min p90 (140 jobs), with no hosted fallback once queued. PRs (incl. carriers) and
+    # main pushes, which gate merges and deploys, always build hosted. The pool is capacity
+    # only (rules.yaml: owner_managed_accelerator); the recipe is identical on both pools.
+    # Unset or empty variable => every build is hosted (the kill switch when the Mac is down).
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
     # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
     # holder of the cache write secret; every other event runs without an environment. The secret
@@ -211,7 +215,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -646,7 +650,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -673,6 +677,9 @@ jobs:
           # in-cluster remote build cache (GRADLE_REMOTE_CACHE_URL, arc-runners.tf) instead.
           cache-disabled: true
           gradle-home-cache-strict-match: false
+
+      - name: Install pinned Gradle distribution
+        run: bash -e "$SERVICE_CI_HELPERS/install-gradle-distribution.sh"
 
       # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
       #

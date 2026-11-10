@@ -405,7 +405,7 @@ for svc in $SERVICES; do
   DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
   DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
   DBUSER="$(printf '%s' "$DBUSER" | tr -d "\"'" | sed -E 's/^\$\{[A-Za-z_][A-Za-z0-9_]*:?-?([^}]*)\}$/\1/')"
-  if [ -z "$DBUSER" ] || printf '%s' "$DBUSER" | grep -q '[^A-Za-z0-9_]'; then
+  if [ -z "$DBUSER" ] || grep -q '[^A-Za-z0-9_]' <<< "$DBUSER"; then
     echo "::error::[${svc}] could not resolve a usable datasource username from ${APP_YAML} (got '${DBUSER}') — skip"
     OVERALL=1; continue
   fi
