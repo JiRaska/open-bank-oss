@@ -26,6 +26,9 @@ labels:
   - name: merge-train-stuck
     color: "b60205"
     description: "Tracking issue the merge train keeps: armed PRs it cannot serve until someone acts (ADR-0343)."
+  - name: merge-train-stall
+    color: "b60205"
+    description: "Tracking issue: armed PRs exist, the train runs, yet nothing merged for 60+ min (stall watch)."
   # --- VEX / vulnerability triage (ADR-0030 D1, vex-triage.yml) -------------------------
   - name: vex-triage
     color: "b60205"

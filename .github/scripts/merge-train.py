@@ -229,6 +229,7 @@ RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's in
 RELEASED_CONTEXT = "merge-train/strict-released"  # App marker: this head's reservation timed out once (#14302)
 CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
+STALE_CULPRIT_CONTEXT = "merge-train/stale-culprit-refresh"   # App marker: this culprit head was update-branched once
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
 # the carrier-attestation rule existed (#12506, #13137 were marked by those defects), so it is NOT
@@ -372,6 +373,10 @@ DROP_MESSAGE = ("merge-train: this PR did not apply cleanly on top of main toget
 CULPRIT_MESSAGE = ("merge-train: a train over main isolated this PR as the cause of a failing required "
                    "check, and its `merge-train` status is now failure. Push a fix; the next train that "
                    "passes clears it. The workflow run linked from the status has the details.")
+STALE_CULPRIT_MESSAGE = ("merge-train: a train over main isolated this PR as the cause of a failing required "
+                         "check while its own CI was green against an older main, so a rule that landed on main "
+                         "since is the likely cause. The train has merged main into the branch once; its own "
+                         "CI now shows the failure on this PR. Push a fix if it stays red.")
 MANUAL_LANE_MESSAGE = ("merge-train: the train containing only this PR could not be verified by the merge "
                        "train (for example, it adds a symlink or its regeneration touches a file outside the "
                        "derived-output inventory). It needs the owner's manual lane; see ADR-0343.")
@@ -2679,7 +2684,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
     summary: dict = {"in_flight": False, "merged": [], "culprits": [], "bisected": [], "rejected": [], "fast": [],
-                     "inconclusive": [], "rerun": [], "refreshed": []}
+                     "inconclusive": [], "rerun": [], "refreshed": [], "culprit_refreshed": []}
     if not shadow:
         # Phase 1 is gated on the live ruleset, not on the env flag alone: until it requires the App-pinned
         # context with strict off, behave exactly as shadow. Flip order of env vs ruleset is irrelevant.
@@ -2801,7 +2806,7 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
             hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
-            if (hstate == "green" and not shadow
+            if (hstate == "green" and not shadow and len(chain[1]) <= STRICT_FIRST_MAX_MEMBERS
                     and git("merge-base", "--is-ancestor", live_main, hview["head_sha"], check=False).returncode == 0
                     and gh.app_statuses(hview["head_sha"]).get(CARRIER_YIELD_CONTEXT, ("", ""))[0] != "success"
                     and gh.app_statuses(hview["head_sha"]).get(DEFER_CONTEXT, ("", ""))[0] != "success"):
@@ -2825,8 +2830,11 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 # record through the first parent and no further carrier is built under it.
                 gh.post_status(hview["head_sha"], "success", f"green carrier #{carrier} waited one tick for this head",
                                context=CARRIER_YIELD_CONTEXT)
+                # The holder's merge moves main, so next tick this carrier is rejected as "main moved since
+                # publish" and rebuilt: yielding VOIDS the carrier, it does not delay it. That is why the
+                # yield is limited to a carrier of STRICT_FIRST_MAX_MEMBERS (see there).
                 log(f"carrier #{carrier}: green, but strict-lane #{holder} is green and up to date — it merges "
-                    f"first, the carrier waits one tick")
+                    f"first; this {len(chain[1])}-member carrier is voided by that merge and rebuilt")
                 continue
             # Green carrier first (#13400): VERIFIED green on its exact head over live main, extra gates
             # satisfied, so it merges now, before strict_lane runs below — never held for a RUNNING holder,
@@ -2836,6 +2844,13 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             # under it. Before merging, withdraw any `merge-train` success the App left on the holder's
             # head (a refused merge earlier): auto-merge must not act on it while main moves under it.
             if hview is not None and not shadow:
+                if hstate == "green" and len(chain[1]) > STRICT_FIRST_MAX_MEMBERS:
+                    # A green holder pre-empted by the size rule has not deferred (no DEFER_CONTEXT): record
+                    # the pre-emption as its one deferral, so its update-branch inherits it through the first
+                    # parent (deferral_used) and no further carrier is built under it — ADR-0343's
+                    # "pre-empted at most once", whichever rule did the pre-empting.
+                    gh.post_status(hview["head_sha"], "success", f"pre-empted once by green carrier #{carrier}",
+                                   context=DEFER_CONTEXT)
                 hstate = gh.app_statuses(hview["head_sha"]).get(STATUS_CONTEXT, ("", ""))[0]
                 if hstate == "success":
                     gh.post_status(hview["head_sha"], "pending", f"strict lane: green carrier #{carrier} merges first — next tick")
@@ -2872,6 +2887,9 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             failing = [c for c in failing if c not in main_red]  # blame names only what main is green on
             if len(members) == 1:
                 n, head = members[0]
+                # Order with the stale-culprit refresh below: the one likely-flake rerun (failed jobs only,
+                # minutes) comes first; only a red that survives it is blamed, and only then may a behind-main
+                # culprit get its one update-branch (a full CI run). A flake therefore never costs a refresh.
                 flake = likely_flake_rerun(gh, git, sha, failing, head, chain[0], extra, inconclusive)
                 if flake:
                     log(f"carrier #{carrier}: {flake} — re-ran once before blaming #{n}, in flight")
@@ -2880,8 +2898,30 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     carrier_in_flight = True
                     continue
                 gh.post_status(head, "failure", culprit_description(failing, chain[0]))
-                gh.comment(n, CULPRIT_MESSAGE)
                 summary["culprits"].append(n)
+                # A train member was admitted with every required context green on its OWN head. If that
+                # head is behind the main it was trained over, the red is most likely a rule main gained
+                # after the PR's CI ran (#15254: a chart bump green against a main without the ADR-0366
+                # lock). Waiting for a push leaves it stuck until someone diagnoses it from the carrier;
+                # one update-branch moves its CI onto today's main, where the author sees the failure on
+                # the PR itself. No loop: afterwards the merge-base is that main, and a culprit that is
+                # not behind main gets the ordinary message and waits for a push.
+                # One refresh per lineage: a head that was itself refreshed, or whose first parent was
+                # (the head update-branch produced), is never refreshed again, however often main moves
+                # under it — the same first-parent rule as deferral_used. A separate summary key keeps
+                # these out of STALE_RED_CAP, which bounds the stale-red refresh below.
+                behind = git("merge-base", "--is-ancestor", chain[0], head, check=False).returncode == 1
+                parents = git("rev-list", "--parents", "-n", "1", head, check=False).stdout.split()
+                refreshed_before = any(gh.app_statuses(sha).get(STALE_CULPRIT_CONTEXT, ("", ""))[0] == "success"
+                                       for sha in [head] + parents[1:2])
+                if behind and not refreshed_before and not shadow and gh.update_branch(n, head):
+                    gh.post_status(head, "success", f"update-branched once as a culprit behind main {chain[0][:12]}",
+                                   context=STALE_CULPRIT_CONTEXT)
+                    gh.comment(n, STALE_CULPRIT_MESSAGE)
+                    summary["culprit_refreshed"].append(n)
+                    log(f"#{n:>6} culprit behind main {chain[0][:12]}: update-branch requested")
+                else:
+                    gh.comment(n, CULPRIT_MESSAGE)
             else:
                 for _n, head in members:
                     gh.post_status(head, "pending", f"bisect size {max(1, len(members) // 2)}")
@@ -3806,6 +3846,9 @@ def judge_strict_carriers(gh, git, repo: str, base: str, required: list[str], ma
             close_strict_carrier(gh, git, summary, carrier, branch, "rejected")
             continue
         if failing:
+            # No stale-culprit refresh here (contrast the train path): a strict carrier is built by merging
+            # main into each member, so its members are behind main by construction and "behind" says nothing
+            # about a stale verdict; a strict culprit was already judged on today's main.
             if len(members) == 1:
                 n, head = members[0]
                 flake = likely_flake_rerun(gh, git, sha, failing, head, chain[0], extra, inconclusive)
@@ -4111,6 +4154,7 @@ class FakeGitHub:
         self.head_checks: dict[str, dict] = {}   # PR head sha -> check overrides (red, pending, guard)
         self.pending_shas: set[str] = set()      # carrier heads whose CI is still running
         self.updates: list[int] = []             # update-branch calls, in order
+        self.update_refuse = False               # True: update-branch answers as GitHub does on a refusal
         self.notice_times: dict[str, str] = {}   # head -> when its notice was posted (statuses here have no clock)
         self.stuck_open: tuple = (None, None)    # the tracking issue: (number, body)
         self.stuck_writes: list = []             # tracking-issue writes; None is a close
@@ -4250,7 +4294,7 @@ class FakeGitHub:
 
     def update_branch(self, n, head):
         p = self.prs[n]
-        if p["head"]["sha"] != head:
+        if self.update_refuse or p["head"]["sha"] != head:
             return False
         # A fresh branch, so the fixture branch itself stays as cut for later cases.
         br = f"{p['head']['ref']}-upd{len(self.updates)}"
@@ -4795,9 +4839,23 @@ def retry_planner_self_test(check) -> None:
 # overran the shard budget. Re-review of #14891 (judge-alone sequences, the inverse-rule ticks, the
 # post-merge tree check): spawns=15,550 at 594 cases before trimming two no-op ticks; ceiling 15,800.
 # Strict carrier serving order, workflow members and the refused push: spawns=15,928 at 605 cases; ceiling 16,200.
+# 2026-11-09 (#15254 shape): the stale-culprit refresh cases add an up-to-date culprit drain and the
+# refused-update path, the one-refresh-per-lineage drain and the multi-member carrier case: baseline
+# spawns=16,105 at 653 cases, 16,995 at 659 (measured on this PR's full run); ceiling 17,400 (~2.4 %).
 # Likely-flake rerun before a lone-member blame (#15420): three fast-carrier cases and one extra settle
 # each in five existing culprit cases: spawns=16,663 at 670 cases, measured locally; ceiling 17,000.
-SELF_TEST_SPAWN_CEILING = 17000
+# Both merged (#15430 over #15374): each lone culprit carrier is re-run once before its blame, plus the
+# first-parent lineage case: spawns=18,070 at 678 cases, measured on the merged tree; ceiling 18,500 (~2.4 %).
+SELF_TEST_SPAWN_CEILING = 18500
+
+# A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
+# merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
+# carrier #15368: published 10:11Z, green ~11:00Z, voided by #15295's 11:01Z merge, rebuilt as #15369);
+# carrier first pushes the holder behind main (update-branch + ~1.5 h of full CI, #14191 / #14183).
+# In PR-minutes that is N members x ~50 against 1 holder x ~90, so the holder goes first only for a
+# carrier of ONE member; any larger green carrier merges first and the holder is update-branched with
+# its deferral record, exactly as on the green-carrier-first path that already existed.
+STRICT_FIRST_MAX_MEMBERS = 1
 
 
 
@@ -5245,7 +5303,7 @@ def self_test() -> int:
           "not the recorded tree" in (record_problem(f"tree={t1}", BOT_LOGIN, t2) or ""))
     check("record: a record by any other creator is refused", record_problem(f"tree={t1}", "someone", t1) is not None)
     check("record: a malformed record is refused", record_problem(f"tree={t1} members=1", BOT_LOGIN, t1) is not None)
-    check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE
+    check("comments: fixed texts carry no placeholders", "{" not in DROP_MESSAGE + CULPRIT_MESSAGE + STALE_CULPRIT_MESSAGE + MANUAL_LANE_MESSAGE
           + EXTRA_GATE_MESSAGE)
 
     # ---- main history API budget: use the real checks + pagination over canned GETs ---------
@@ -5547,6 +5605,7 @@ def self_test() -> int:
                 gh.merged.clear()
                 gh.comments.clear()
                 gh.statuses.clear()
+                gh.updates.clear()
                 gh.g("checkout", "-q", "-f", "main")
                 gh.g("reset", "-q", "--hard", base0)
 
@@ -5643,12 +5702,63 @@ def self_test() -> int:
             open_only("p1", "p2", "p3", "p4")
             drain()
             check("ticks: 4-PR batch with #3 bad merges 1, 2 and 4", sorted(gh.merged) == [1, 2, 4], str(gh.merged))
-            check("ticks: #3 is the culprit (App failure + fixed comment)",
-                  (3, CULPRIT_MESSAGE) in gh.comments
-                  and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure", str(gh.comments))
+            # #3 was cut from the main #1 and #2 then advanced, so its isolation is the #15254 shape: the
+            # train refreshes it once instead of leaving it to wait for a push nobody knows to make.
+            # The fake's own-head checks stay green after the refresh, so #3 rides again and is isolated
+            # a second time; by then it is up to date, so that isolation is the ordinary culprit. One
+            # refresh per behind-main isolation, never a second one on the refreshed head: no loop.
+            check("ticks: #3 is the culprit, behind main -> exactly one update-branch and the stale-culprit comment",
+                  (3, STALE_CULPRIT_MESSAGE) in gh.comments and gh.updates.count(3) == 1
+                  and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure",
+                  f"{gh.comments} updates={gh.updates}")
             check("ticks: every carrier was closed", all(c["state"] == "closed" for c in gh.carriers.values()))
-            check("ticks: the lone #3 carrier was re-run exactly once before the blame (#15420)",
-                  len(gh.reruns) == 1, str(gh.reruns))
+            # Combined with the stale-culprit refresh (#15374): #3 is isolated twice — behind main, then on its
+            # refreshed head — so there are TWO lone carriers, each re-run once before its blame (the rerun
+            # marker is per carrier head), never two reruns of one carrier.
+            check("ticks: each lone #3 carrier was re-run exactly once before its blame (#15420 + #15374)",
+                  len(gh.reruns) == 2 and len({sha for sha, _ in gh.reruns}) == 2
+                  and all(ctx == ["Validate manifests"] for _, ctx in gh.reruns), str(gh.reruns))
+            gh.reruns.clear()
+            check("ticks: the refreshed culprit, isolated again up to date, is not refreshed a second time",
+                  3 not in gh.merged and gh.updates.count(3) == 1 and (3, CULPRIT_MESSAGE) in gh.comments,
+                  f"merged={gh.merged} updates={gh.updates} {gh.comments}")
+            reset()
+
+            # One refresh per lineage: the same behind-main isolation, but the head already carries the
+            # refresh marker (main moved again under a refreshed head). Must-FAIL case: without the
+            # first-parent marker check, #3 is update-branched a second time.
+            open_only("p1", "p3")   # two members suffice: #1 merges, #3 is isolated behind the main it moved
+            gh.post_status(gh.prs[3]["head"]["sha"], "success", "update-branched once", context=STALE_CULPRIT_CONTEXT)
+            drain()
+            check("ticks: a culprit whose lineage was already refreshed is not refreshed again",
+                  3 not in gh.updates and (3, CULPRIT_MESSAGE) in gh.comments
+                  and (3, STALE_CULPRIT_MESSAGE) not in gh.comments, f"{gh.comments} updates={gh.updates}")
+            reset()
+            # ... and the marker on the head's FIRST PARENT (the head update-branch produced, then main moved
+            # again): the case above marks the head itself, so it cannot see the first-parent half; this one
+            # fails if the lookup reads only the head.
+            open_only("p1", "p3")
+            parent = gh.g("rev-parse", gh.prs[3]["head"]["sha"] + "^1").stdout.strip()
+            gh.post_status(parent, "success", "update-branched once", context=STALE_CULPRIT_CONTEXT)
+            drain()
+            check("ticks: a culprit whose FIRST PARENT carries the refresh marker is not refreshed again",
+                  3 not in gh.updates and (3, CULPRIT_MESSAGE) in gh.comments
+                  and (3, STALE_CULPRIT_MESSAGE) not in gh.comments, f"{gh.comments} updates={gh.updates}")
+            reset()
+
+            # A culprit that is NOT behind main is red on its own merits: ordinary message, no update-branch.
+            open_only("p3")
+            drain()
+            check("ticks: an up-to-date culprit gets the ordinary comment and waits for a push",
+                  (3, CULPRIT_MESSAGE) in gh.comments and (3, STALE_CULPRIT_MESSAGE) not in gh.comments
+                  and gh.updates == []
+                  and gh.app_statuses(gh.prs[3]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] == "failure",
+                  f"{gh.comments} updates={gh.updates}")
+            # Each lone #3 carrier above was re-run once (#15420) before its blame; a single rerun per carrier.
+            # (The two lineage cases build byte-identical carriers, so the same sha may appear twice — once per
+            # fixture reset, which clears the marker.)
+            check("ticks: the three refresh-rule culprits were each re-run once before the blame",
+                  len(gh.reruns) == 3 and all(ctx == ["Validate manifests"] for _, ctx in gh.reruns), str(gh.reruns))
             gh.reruns.clear()
             reset()
 
@@ -7216,6 +7326,28 @@ def self_test() -> int:
             gh.updates.clear()
             reset()
 
+            # (3-nm) The same two green heads, but the carrier has TWO members. Yielding would void it
+            # (the holder's merge moves main and the carrier is rebuilt, #15368 -> #15369, ~50 min for every
+            # member), which costs more PR-time than pushing the one holder behind main. So the carrier
+            # merges first and the holder is update-branched. Must-FAIL case: with the size limit removed,
+            # the holder merges alone and neither p1 nor p2 does.
+            gh.updates.clear()
+            open_only("pW")
+            gh.head_checks[gh.prs[35]["head"]["sha"]] = {"gates (data)": None}
+            open_only("p1", "p2")
+            tick()
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.statuses[pw_head] = [r for r in gh.statuses.get(pw_head, []) if r[0] != DEFER_CONTEXT]
+            gh.head_checks.clear()
+            s = settle_now()
+            check("multi-member carrier first: green 2-member carrier + green holder -> the carrier merges, the holder does not",
+                  sorted(gh.merged) == [1, 2] and 35 not in gh.merged and yielded(pw_head) != "success",
+                  f"{s} merged={gh.merged} yielded={yielded(pw_head)!r}")
+            check("multi-member carrier first: the pre-emption is recorded as the holder's one deferral (ADR-0343 bound)",
+                  deferral(pw_head) == "success", f"defer={deferral(pw_head)!r}")
+            gh.updates.clear()
+            reset()
+
             # (3a) BOUNDED WAIT, and the old green-carrier-first case restored: the holder is green but
             # its merge is REFUSED on tick 1 (a stale `merge-train` success is left on it). The carrier
             # waited ONE tick; on tick 2 the holder is still green and unmerged, so the carrier merges
@@ -7972,7 +8104,12 @@ def self_test() -> int:
             s1 = settle_now()
             check("main red: the lone member is re-run once first, and only on the context main is green on (#15420)",
                   s1["culprits"] == [] and len(gh.reruns) == 1 and "gates (data)" not in gh.reruns[0][1], f"{s1} {gh.reruns}")
+            gh.update_refuse = True   # the refusal path: a behind-main culprit whose update-branch fails
             s = settle_now()
+            gh.update_refuse = False
+            check("main red: a refused update-branch leaves the ordinary culprit comment and no refresh",
+                  (3, CULPRIT_MESSAGE) in gh.comments and (3, STALE_CULPRIT_MESSAGE) not in gh.comments
+                  and 3 not in s["refreshed"], f"{s} {gh.comments}")
             check("main red: a context main is green on still names the culprit, and only that context",
                   s["culprits"] == [3] and mt_status(3)[1].startswith(CULPRIT_PREFIX + "Validate manifests red")
                   and "gates (data)" not in mt_status(3)[1] and len(gh.reruns) == 1, f"{s} status={mt_status(3)}")
