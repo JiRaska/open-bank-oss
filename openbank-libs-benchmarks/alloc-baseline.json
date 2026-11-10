@@ -21,7 +21,18 @@
     "com.openbank.libs.benchmarks.PiiMaskBench.iban": 352.0,
     "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0,
     "com.openbank.libs.benchmarks.ProductBehaviourDiffBench.diffThousandAccountsYear": 5423543997.3,
-    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": 15251.6
+    "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": 15251.6,
+    "com.openbank.libs.benchmarks.LendingBench.aprcAnnualHalfUpTie": 592.0,
+    "com.openbank.libs.benchmarks.LendingBench.aprcMixedUniqueInRange": 285772.6,
+    "com.openbank.libs.benchmarks.LendingBench.aprcMonthly120": 9555806.6,
+    "com.openbank.libs.benchmarks.LendingBench.aprcMonthly360": 31206616.2,
+    "com.openbank.libs.benchmarks.LendingBench.aprcMonthly480": 38789058.9,
+    "com.openbank.libs.benchmarks.LendingBench.aprcNonannualTwoYear": 194223.0,
+    "com.openbank.libs.benchmarks.LendingBench.aprcTinyAnnual": 616.0,
+    "com.openbank.libs.benchmarks.LendingBench.scheduleAnnual191Fallback": 960911.9,
+    "com.openbank.libs.benchmarks.LendingBench.scheduleMonthly120": 78427.1,
+    "com.openbank.libs.benchmarks.LendingBench.scheduleMonthly360Golden": 400739.8,
+    "com.openbank.libs.benchmarks.LendingBench.scheduleMonthly480Catalog": 284719.4
   },
   "latency_bounds": {
     "com.openbank.libs.benchmarks.ProductInterpreterBench.evaluateGoldenSet": {
