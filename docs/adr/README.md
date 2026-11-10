@@ -371,7 +371,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Proposed | Shipped | architecture,governance,gitops | — |
 | [0365](0365-pension-book-accounting-close.md) | Source-bound pension accounting and independent book close | Proposed | Partial | ledger,accounting-close | — |
 | [0366](0366-ci-fetches-external-tools-and-charts-through-a-pinned-lock-a-resolver-and-a-mirror-outside-github.md) | CI fetches external tools and charts through a pinned lock, a resolver and a mirror outside GitHub | Proposed | Planned | ci,supply-chain,resilience | — |
-| [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Proposed | Planned | regulatory-reporting,compliance,governance,ai-agents | — |
+| [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Proposed | Partial | regulatory-reporting,compliance,governance,ai-agents | — |
 | [0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md) | Deploy every Services CI service from its completed main-push run, not from the push | Proposed | Partial | ci,gitops,api-contract | — |
 
 ## By tag

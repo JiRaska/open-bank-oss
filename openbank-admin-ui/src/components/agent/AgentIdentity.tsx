@@ -208,6 +208,15 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Čtení pozic', en: 'Position reading' }, { cs: 'Kontrola limitu', en: 'Limit checks' }, { cs: 'Návrh obchodu', en: 'Deal drafting' }],
     accent: '#0e7490', glow: '#a5f3fc', shell: '#ecfeff', variant: 'lens', icon: ChartNoAxesCombined,
   },
+  // The regulatory obligations watcher ships enabled:false and proposal-only; the persona exists
+  // so the charter does not render as "Nový kolega".
+  'regulatory-obligations-watcher': {
+    name: { cs: 'Lex', en: 'Lex' }, role: { cs: 'Hlídač regulatorních povinností', en: 'Regulatory obligations watcher' },
+    purpose: { cs: 'Porovnává registr povinností s citovaným zákonem a zadáním úřadu a navrhuje opravy, když se zdroj změní.', en: 'Compares the obligations register with the cited law and the authority specification, and proposes corrections when a source changes.' },
+    value: { cs: 'Změna vyhlášky nebo formátu se objeví jako návrh, ne až jako zmeškaný termín; o změně rozhoduje člověk.', en: 'An amended decree or format surfaces as a proposal, not as a missed deadline; a human decides the change.' },
+    talents: [{ cs: 'Čtení předpisů', en: 'Reading legislation' }, { cs: 'Ověření lhůt', en: 'Deadline verification' }, { cs: 'Návrh opravy registru', en: 'Register corrections' }],
+    accent: '#4338ca', glow: '#c7d2fe', shell: '#eef2ff', variant: 'lens', icon: Scale,
+  },
 }
 
 const FALLBACK: PersonaDefinition = {
