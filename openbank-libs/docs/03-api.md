@@ -312,3 +312,17 @@ BuildInfo.toStack()  // returns LinkedHashMap suitable for JSON serialization
 `openbank-build-info.properties` generuje `openbank-libs-domain` (vedle `BuildInfo`, který ho čte) z version catalogu. Dřív žil v umbrella JARu `openbank-libs`, který služby závislé přímo na domain/runtime nemají, a `/api/v1/info` proto hlásilo Quarkus/Gradle/libs jako `unknown`. Git commit ani čas buildu se do `libs-domain` nerazítkují (JAR zůstává mezi commity stejný); `buildTime` je proto `unknown` a commit běžící služby pochází z `openbank-service-build.properties`. `BuildInfoTest` porovnává hodnoty s catalogem, takže chybějící resource build shodí.
 
 `ServiceInfoResource` automaticky vrací `toStack()` v `/api/v1/info` response.
+## storage — ObjectStorePort
+
+`ObjectStorePort.get` vrací celý objekt jako `ByteArray`. Při použití `S3ObjectStore`
+vlastní SDK response stream adaptér a uzavírá jej po úspěšném čtení, po přečtení
+prázdného objektu i při chybě čtení. Volající žádný stream k uzavření nedostává.
+Pokud selže čtení i uzavření, chyba čtení zůstává primární a chyba uzavření je
+potlačená výjimka (`suppressed`). Diagnostika coroutines může původní výjimku
+zachovat jako příčinu obnovené výjimky. Samotná chyba uzavření po úspěšném čtení
+se také propaguje volajícímu.
+
+S3 backend nadále vybírá konzument konfigurací a přidáním AWS SDK do vlastních
+závislostí; SDK zůstává v `libs-runtime` jako `compileOnly`. Vlastnictví response
+streamu nevyjadřuje limit velikosti objektu ani garanci omezené doby rušení
+přenosu. Chování transportu při `close` a `abort` je nutné posuzovat samostatně.

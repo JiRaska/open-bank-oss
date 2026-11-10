@@ -13,31 +13,58 @@
 .intro h2 { font-size: clamp(1.5rem, 2.5vw, 2rem); line-height: 1.25; letter-spacing: -.03em; margin-bottom: var(--space-3); }
 .intro p, .muted { color: var(--text-secondary); line-height: 1.75; }
 .eyebrow { display: block; color: var(--ob-accent-text); font-size: var(--text-xs); letter-spacing: .12em; font-weight: var(--font-semibold); text-transform: uppercase; margin-bottom: var(--space-2); }
-.trainSection { background: var(--surface); border: 1px solid var(--border-strong); border-radius: calc(var(--radius) * 2); padding: var(--space-6); margin: var(--space-6) 0 var(--space-8); overflow: hidden; }
-.sectionTop { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-3); }
-.sectionTop h2 { margin: 0; font-size: var(--text-2xl); letter-spacing: -.025em; }
-.laneChoices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-6); }
-.laneChoices button { padding: var(--space-4); border: 1px solid var(--border-strong); border-radius: calc(var(--radius) * 1.5); background: var(--surface-2); color: var(--text-primary); text-align: left; cursor: pointer; }
-.laneChoices button[aria-pressed="true"] { background: var(--ob-accent-light); border-color: var(--ob-accent); box-shadow: inset 0 0 0 1px var(--ob-accent); }
-.laneChoices strong { display: block; font-size: var(--text-md); margin-bottom: var(--space-1); }
-.laneChoices span { display: block; color: var(--text-secondary); font-size: var(--text-xs); }
-.parallelNote { margin: var(--space-4) 0; color: var(--text-secondary); line-height: 1.7; }
-.routeDescription { min-height: 3.5em; margin: var(--space-4) 0; color: var(--text-secondary); line-height: 1.7; }
-.scene { border-radius: calc(var(--radius) * 1.5); background: #071425; overflow: hidden; border: 1px solid #243a52; box-shadow: inset 0 0 50px #030a14; }
-.sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 3 / 2; }
+.trainSection { width: 100%; max-width: min(1280px, max(640px, calc((100svh - 392px) * 2.543))); margin: var(--space-6) auto var(--space-8); container-type: inline-size; }
+.trainBoard { overflow: hidden; border: 1px solid #354b60; border-radius: 16px; background: #0b1928; color: #edf6fa; }
+.trainToolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; }
+.trainToolbar h2 { margin: 0; font-size: 18px; line-height: 1.3; letter-spacing: -.025em; }
+.trainToolbar p { margin: 4px 0 0; color: #c1d4df; font-size: 12px; }
+.scene { position: relative; background: #071425; }
+.sceneSvg { display: block; width: 100%; height: auto; aspect-ratio: 1536 / 604; }
+.sceneLanes button { position: absolute; z-index: 1; left: 2.7%; width: 15.4%; min-height: 48px; height: 15.1%; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 5px 8px; border: 1px solid #8b9ba7; border-radius: 6px; background: #0b1928ed; color: #edf6fa; text-align: left; cursor: pointer; font: inherit; }
+.sceneLanes button[aria-pressed="true"] { border-color: #73d6ff; box-shadow: inset 3px 0 #73d6ff; background: #102f43f5; }
+.sceneLanes button:hover { background: #173e54; }
+.sceneLanes strong { font-size: clamp(11px, 1.55cqi, 16px); line-height: 1.2; }
+.sceneLanes span { color: #c1d4df; font-size: clamp(10px, 1.2cqi, 12px); line-height: 1.2; }
+.sceneLanes span:first-child { font-size: 10px; letter-spacing: .08em; }
+.trainBoard button:focus-visible, .trainBoard summary:focus-visible { outline: 3px solid #fff; outline-offset: -4px; }
 .trainPosition { transition: transform 1.8s cubic-bezier(.2,.8,.2,1); }
 .passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 3.2s ease-in-out infinite; }
 .passenger[data-mood="1"] { animation-name: passenger-worry; animation-duration: 2.8s; }
 .passenger[data-mood="2"] { animation-name: passenger-cheer; animation-duration: 2.2s; }
 .scene[data-playing="false"] .passenger { animation-play-state: paused; }
-.stations { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2); list-style: none; margin: var(--space-5) 0; padding: 0; }
-.stations button { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); width: 100%; min-height: 68px; padding: var(--space-2); background: transparent; border: 0; color: var(--text-secondary); font: inherit; font-size: var(--text-xs); text-align: center; cursor: pointer; }
-.stations button > span { display: flex; align-items: center; justify-content: center; height: 27px; width: 27px; border-radius: 50%; background: var(--surface-3); color: var(--text-secondary); font-weight: var(--font-semibold); }
-.stations button[aria-current="step"] { color: var(--ob-accent-text); font-weight: var(--font-semibold); }
-.stations button[aria-current="step"] > span { color: var(--text-inverse); background: var(--ob-accent); }
-.journeyDetail { border-left: 3px solid var(--ob-accent); padding: var(--space-2) var(--space-5); min-height: 165px; margin-bottom: var(--space-5); }
-.journeyDetail h3 { font-size: var(--text-xl); margin: 0 0 var(--space-2); }
-.journeyDetail p { color: var(--text-secondary); line-height: 1.75; margin: 0; }
+.stations { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; list-style: none; margin: 0; padding: 8px 12px; border-bottom: 1px solid #354b60; }
+.stations button { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 44px; padding: 6px; border: 1px solid transparent; border-radius: 6px; color: #d4e3ee; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.stations button:hover { background: #1b344a; }
+.stations button > span { display: flex; flex-shrink: 0; align-items: center; justify-content: center; width: 20px; height: 20px; border: 1px solid #637d91; border-radius: 50%; font-size: 11px; }
+.stations button[aria-current="step"] { color: #fff; background: #1c435d; border-color: #73d6ff; font-weight: 600; }
+.stations button[aria-current="step"] > span { color: #071425; background: #73d6ff; border-color: #73d6ff; }
+.journeyDetail { padding: 10px 16px 6px; }
+.journeySummary h3 { font-size: 14px; line-height: 1.4; margin: 0 0 3px; color: #fff; }
+.journeySummary p { margin: 0; font-size: 13px; line-height: 1.45; color: #d4e3ee; }
+.journeyExplanation summary { color: #9bdfff; cursor: pointer; font-size: 12px; padding: 6px 0; min-height: 28px; }
+.journeyExplanation p { color: #d4e3ee; font-size: 13px; line-height: 1.6; margin: 8px 0; }
+.trainBoard .controls { padding: 0 16px 8px; }
+.trainBoard .button, .trainBoard .textButton { min-height: 36px; padding: 6px 10px; font-size: 12px; background: #152d42; border-color: #526b80; color: #edf6fa; }
+.trainBoard .primaryButton { background: #1e526e; border-color: #73d6ff; }
+.trainBoard .textButton { border-color: transparent; background: transparent; color: #c1d4df; }
+.trainCaption { margin: 0; padding: 0 16px 10px; color: #a8c6d8; font-size: 11px; line-height: 1.4; }
+@container (max-width: 620px) {
+  .trainToolbar { align-items: flex-start; padding: 10px; }
+  .trainToolbar h2 { font-size: 16px; }
+  .trainToolbar p { font-size: 12px; }
+  .trainToolbar .button { flex-shrink: 0; padding: 8px; min-height: 44px; }
+  .sceneLanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 0 8px 8px; }
+  .sceneLanes button { position: static; width: 100%; height: auto; min-height: 60px; padding: 6px; gap: 4px; }
+  .sceneLanes strong { font-size: 12px; }
+  .sceneLanes span { font-size: 11px; }
+  .sceneLanes span:first-child { display: none; }
+  .stations { padding: 6px; gap: 2px; }
+  .stations button { flex-direction: column; gap: 4px; padding: 4px 2px; font-size: 11px; min-height: 58px; overflow-wrap: anywhere; }
+  .journeyDetail { padding: 10px 10px 4px; }
+  .trainBoard .controls { padding: 0 10px 8px; gap: 4px; }
+  .trainBoard .controls .button, .trainBoard .controls .textButton { min-height: 44px; }
+  .trainCaption { padding: 0 10px 10px; }
+}
 .controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .button, .textButton { display: inline-flex; gap: var(--space-2); align-items: center; justify-content: center; min-height: 42px; padding: var(--space-2) var(--space-4); border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface); color: var(--text-primary); font: inherit; font-size: var(--text-sm); cursor: pointer; text-decoration: none; }
 .primaryButton { color: var(--text-inverse); background: var(--ob-accent); border-color: var(--ob-accent); }
@@ -83,8 +110,6 @@
 @keyframes passenger-wave { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
 @keyframes passenger-worry { 0%,100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
 @keyframes passenger-cheer { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
-@media (max-width: 800px) { .deliveryPath { grid-template-columns: repeat(2,minmax(0,1fr)); } .trainSection { padding: var(--space-4); } .laneChoices { gap: var(--space-2); } .laneChoices button { padding: var(--space-3); } }
-@media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .laneChoices { grid-template-columns: 1fr; } .laneChoices button { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); } .laneChoices strong { margin: 0; } .routeDescription { min-height: 0; } .stations { gap: 0; } .stations button { padding: var(--space-1); font-size: 11px; overflow-wrap: anywhere; } .journeyDetail { min-height: 0; padding-left: var(--space-3); } .sectionTop h2 { font-size: var(--text-xl); } .guideNav a { flex: 1 1 auto; } }
+@media (max-width: 800px) { .deliveryPath { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 520px) { .grid, .facts { grid-template-columns: 1fr; } .guideNav a { flex: 1 1 auto; } }
 @media (prefers-reduced-motion: reduce) { .trainPosition { transition: none; } .passenger { animation: none !important; } }
-
-@media (max-width: 520px) { .scene { overflow-x: auto; } .sceneSvg { width: 720px; max-width: none; } }
