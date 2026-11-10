@@ -2,7 +2,7 @@
 date: 2026-11-03
 decision-status: accepted
 delivery-status: partial
-followup: "auto-deploy union-of-newer pins (decision item 3) is unbuilt; items 1, 2, 4 and 5 shipped (#14698, #14700, #14706, #14414) and the pin gate backstops item 3"
+followup: "#14698, #14700, #14706, #14414 — items 1, 2, 4 and 5 shipped; auto-deploy union-of-newer pins (decision item 3) is unbuilt and the pin gate backstops it"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

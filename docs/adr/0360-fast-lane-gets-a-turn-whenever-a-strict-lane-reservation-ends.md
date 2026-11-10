@@ -2,7 +2,7 @@
 date: 2026-11-03
 decision-status: accepted
 delivery-status: partial
-followup: "#14652 merged; a live merge-train/fast-turn status on a main head has not yet been observed"
+followup: "#14652 — merged; a live merge-train/fast-turn status on a main head has not yet been observed"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
