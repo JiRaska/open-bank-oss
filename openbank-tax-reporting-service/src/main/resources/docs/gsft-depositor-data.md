@@ -216,13 +216,14 @@ days** of the relevant day (zákon č. 21/1992 Sb. § 41d odst. 4), so the perio
 itself (`Periodicity.DAY`) and the deadline counts working days (`DeadlineBasis.WORKING_DAYS`):
 Monday's relevant day is due on Thursday. The return is `onDemand` — an insured event or a test
 request names the day, so the deadline check never reports an un-named day as missing; a stored
-revision that is not filed by its due date is still a breach.
+LIVE revision that is not filed by its due date is still a breach. `GSFT-DIW-TEST` carries
+`filingObligation: false` — a dry run is never a breach, assembled or not.
 
 | Step | Route | Guard |
 |---|---|---|
 | Assemble | `POST /api/v1/statutory-returns/assemble`, `catalogueId: cz-gsft`, `returnCode: GSFT-DIW-TEST` (DIW.TEST = `TEST`) or `GSFT-DIW-LIVE` (`KEEN`, only when named), `period: <relevant day>` | snapshot → `requireComplete()` → `InsuredClaims.assemble` → `GsftBatchRenderer.render` → `GsftPackage.zip`; refused (503) with every open gap named; refused while `openbank.gsft.bank-code` is unset |
 | Approve | `POST /{id}/approve` | four-eyes: the assembler is refused (409); attests the content hash |
-| Submit | `POST /{id}/gsft-delivery` with `reference` | reloads the archive by the attested SHA-256, refuses unless it and every file inside hash to the attested lines, encrypts it to `openbank.gsft.pgp-public-key` (Optional; 503 while unset, boot unaffected), then records the submission and returns the encrypted package. The generic `/submitted` refuses a GSFT return. |
+| Submit | `POST /{id}/gsft-delivery` with `reference` | reloads the archive by the attested SHA-256, refuses unless it and every file inside hash to the attested lines, encrypts it to `openbank.gsft.pgp-public-key` (Optional; 503 while unset, boot unaffected), PERSISTS the encrypted artefact (`gsft_delivery`), then records the submission and returns it. Repeating the call with the same reference while SUBMITTED re-fetches the stored artefact; a different reference, or an answered return, is 409. The generic `/submitted` refuses a GSFT return. |
 | Answer | `POST /{id}/acknowledgement` | GSFT's acknowledgement reference or rejection reason |
 
 Every route is operator-only, `@Authorize`d (`tax.statutory-return.deliver` is the new action) and
@@ -231,14 +232,22 @@ refuses a service-account. The datapoints are the batch's own figures — `N_CLI
 time — plus the exclusion and cover evidence (rejected, excluded, capped, synthetic, overdrawn, THB
 counts); each is held non-negative. The lines are one per decree file and one for the ZIP, each with
 its SHA-256 and size, so the approval attests the exact package. The ZIP itself is stored
-content-addressed (`gsft_package`, V7) and holds depositor personal data; only the delivery route
-reads it.
+content-addressed (`gsft_package`, V7), written only after its return has validated and been
+stored, with `INSERT … ON CONFLICT DO NOTHING` so concurrent assemblies cannot race.
+
+**Personal data at rest — accepted control, open gap.** `gsft_package.archive` holds depositor
+names, birth numbers and addresses in cleartext. This service has no envelope-encryption (transit)
+protector; the accepted control is the database's own (storage and backup encryption, a
+service-only role, one reading route). Retention rule: a return's archive and delivery rows are to
+be deleted once it is ACKNOWLEDGED or REJECTED with no correction open. **No purge job exists, and
+column-level envelope encryption is not built** — both are open on #15356.
 
 **Unverified / unresolved in the filing:**
 
-- the **batch number** is one more than the revisions already stored for that return code (TEST
-  and LIVE number separately); the annex says only that numbering starts at 00001 — confirm the
-  sequence GSFT expects;
+- the **batch number** comes from one atomic per-bank counter (`gsft_batch_counter`) shared by TEST
+  and LIVE; a number is consumed even when rendering then fails, so the sequence can have gaps. The
+  annex says only that numbering starts at 00001 — the scope (per bank, TEST and LIVE together, gaps
+  allowed) is **unverified**; confirm the sequence GSFT expects;
 - the **working-day calendar** is the CERTIS (Czech public-holiday) calendar; the statute's
   "pracovní den" is assumed to match it;
 - the archive name, PGP cipher and binary output (see Transport) are still unconfirmed;
@@ -251,4 +260,5 @@ reads it.
 ## Not yet here
 
 Closing the data-sourcing gaps above (each needs a provider-side read in another service), a
-scheduled yearly TEST run, and the delivery channel to GSFT are follow-ups on #15356.
+scheduled yearly TEST run, the delivery channel to GSFT, envelope encryption of the stored archive
+and the retention purge are follow-ups on #15356.

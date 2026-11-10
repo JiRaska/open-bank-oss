@@ -24,11 +24,16 @@ class GsftDeliveryResult(val statutoryReturn: StatutoryReturn, val fileName: Str
 /**
  * Submits an APPROVED `cz-gsft` return (issue #15356): reloads the stored archive by the SHA-256
  * the approver attested, proves the archive and every file inside it still hash to the attested
- * lines, encrypts it to GSFT's configured public key and only then records the submission.
+ * lines, encrypts it to GSFT's configured public key, PERSISTS that encrypted artefact, and only
+ * then records the submission. A return is therefore never SUBMITTED without the artefact that
+ * left; if the process dies in between, the retry re-uses the stored artefact.
+ *
+ * While the return is SUBMITTED and GSFT has not yet answered, the same call with the same
+ * reference hands back the stored artefact unchanged (re-fetch); a different reference, or any
+ * other state, is a conflict.
  *
  * The key is `openbank.gsft.pgp-public-key`, read as Optional so the service boots without it;
- * delivery refuses by name while it is absent. Encryption runs BEFORE the state change, so a
- * key or package failure never leaves a return SUBMITTED with nothing delivered.
+ * delivery refuses by name while it is absent.
  */
 @ApplicationScoped
 class GsftDelivery(
@@ -44,22 +49,39 @@ class GsftDelivery(
             )
         }
         val current = service.get(id)
-        if (current.catalogueId != GsftReturnDataAdapter.CATALOGUE_ID) {
-            throw TaxConflictException("${current.returnCode} is not a GSFT return")
+        checkConflict(current.catalogueId == GsftReturnDataAdapter.CATALOGUE_ID) {
+            "${current.returnCode} is not a GSFT return"
         }
-        if (current.status != ReturnStatus.APPROVED) {
-            throw TaxConflictException(
+        return when (current.status) {
+            ReturnStatus.SUBMITTED -> refetch(current, reference)
+            ReturnStatus.APPROVED -> {
+                val artefact = packages.delivery(id) ?: encryptAndStore(current, armored)
+                val submitted = service.submit(id, reference, by)
+                GsftDeliveryResult(submitted, artefact.fileName, artefact.encrypted)
+            }
+            else -> throw TaxConflictException(
                 "${current.returnCode} ${current.period.label} is not APPROVED (status=${current.status})",
             )
         }
+    }
+
+    private suspend fun refetch(current: StatutoryReturn, reference: String): GsftDeliveryResult {
+        checkConflict(current.submissionReference == reference) {
+            "${current.returnCode} ${current.period.label} was submitted under another reference"
+        }
+        val artefact = packages.delivery(current.id)
+            ?: throw TaxConflictException("${current.returnCode}: no delivered artefact is stored")
+        return GsftDeliveryResult(current, artefact.fileName, artefact.encrypted)
+    }
+
+    private suspend fun encryptAndStore(current: StatutoryReturn, armored: String): StoredGsftDelivery {
         val stored = verifiedArchive(current)
         val encrypted = GsftPackage.encrypt(
             stored.archive,
             stored.archiveName,
             GsftPackage.readPublicKey(armored, clock.instant()),
         )
-        val submitted = service.submit(id, reference, by)
-        return GsftDeliveryResult(submitted, "${stored.archiveName}.pgp", encrypted)
+        return packages.putDelivery(current.id, "${stored.archiveName}.pgp", encrypted, clock.instant())
     }
 
     /** The stored archive, refused unless it and each entry match the attested lines exactly. */

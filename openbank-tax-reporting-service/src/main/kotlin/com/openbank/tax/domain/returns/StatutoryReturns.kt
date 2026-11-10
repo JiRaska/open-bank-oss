@@ -196,6 +196,11 @@ data class ReturnDefinition(
      * one as NOT_ASSEMBLED; a stored revision still breaches when it is not filed by its due date.
      */
     val onDemand: Boolean = false,
+    /**
+     * False for a return nobody is obliged to file (GSFT's TEST dry run): it follows the lifecycle
+     * but is never a deadline breach, assembled or not.
+     */
+    val filingObligation: Boolean = true,
 ) {
     init {
         requireValid(code.isNotBlank()) { "return code must not be blank" }

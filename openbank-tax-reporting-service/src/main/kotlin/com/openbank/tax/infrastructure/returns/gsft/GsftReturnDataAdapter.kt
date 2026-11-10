@@ -7,7 +7,6 @@ package com.openbank.tax.infrastructure.returns.gsft
 import com.openbank.tax.application.port.out.GsftSnapshotPort
 import com.openbank.tax.application.port.out.ReturnAssemblyData
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
-import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.gsft.BatchHeader
 import com.openbank.tax.domain.gsft.BatchMode
 import com.openbank.tax.domain.gsft.GsftBatch
@@ -45,7 +44,6 @@ import java.util.Optional
 class GsftReturnDataAdapter(
     private val snapshots: GsftSnapshotPort,
     private val packages: GsftPackageStore,
-    private val returns: StatutoryReturnRepository,
     private val clock: Clock,
     @ConfigProperty(name = "openbank.gsft.bank-code") private val bankCode: Optional<String>,
     @ConfigProperty(name = "openbank.gsft.branch-country") private val branchCountry: Optional<String>,
@@ -73,7 +71,7 @@ class GsftReturnDataAdapter(
         val createdAt = clock.instant().truncatedTo(ChronoUnit.SECONDS)
         val header = BatchHeader(
             bankCode = bank,
-            batchNumber = nextBatchNumber(catalogue.id, definition.code, entityId),
+            batchNumber = packages.nextBatchNumber(bank),
             createdAt = LocalDateTime.ofInstant(createdAt, PRAGUE),
             mode = mode,
             branchCountry = branchCountry.map { it.trim() }.orElse(""),
@@ -88,23 +86,15 @@ class GsftReturnDataAdapter(
         )
         val archive = GsftPackage.zip(batch.files)
         val archiveName = GsftPackage.archiveName(batch.files.keys.first { it.startsWith("DIW") }.drop(PREFIX))
-        val archiveSha = packages.put(archiveName, archive, createdAt)
+        val archiveSha = sha256Hex(archive)
         return ReturnAssemblyData(
             values = figures(batch, header, createdAt.epochSecond),
             lines = batch.files.map { (name, bytes) -> line(KIND_FILE, name, sha256Hex(bytes), bytes.size) } +
                 line(KIND_ARCHIVE, archiveName, archiveSha, archive.size),
+            // The personal-data archive is stored only once its return has validated and been stored.
+            onStored = { packages.put(archiveName, archive, createdAt) },
         )
     }
-
-    /**
-     * 1.1.1: batches are numbered from 00001. Here: one more than the revisions already stored for
-     * this return code across every relevant day (unverified — see the docs).
-     */
-    private suspend fun nextBatchNumber(catalogueId: String, code: String, entityId: String): Int =
-        returns.listReturns().count {
-            it.catalogueId == catalogueId && it.returnCode == code && it.entityId == entityId
-        } +
-            1
 
     private fun figures(batch: GsftBatch, header: BatchHeader, createdAtEpoch: Long): Map<String, BigDecimal> {
         fun records(prefix: String): Int = batch.files.entries.firstOrNull { it.key.startsWith(prefix) }

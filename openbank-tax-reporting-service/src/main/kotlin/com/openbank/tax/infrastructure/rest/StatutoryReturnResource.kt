@@ -234,6 +234,7 @@ data class ReturnDefinitionResponse(
     val datapoints: List<String>,
     val deadlineBasis: String,
     val onDemand: Boolean,
+    val filingObligation: Boolean,
 )
 
 data class ReturnCatalogueResponse(
@@ -295,6 +296,7 @@ private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(
             it.datapoints,
             it.deadlineBasis.name,
             it.onDemand,
+            it.filingObligation,
         )
     },
 )

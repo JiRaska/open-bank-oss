@@ -612,7 +612,7 @@ components:
         kind: { type: string, enum: [NOT_ASSEMBLED, NOT_SUBMITTED] }
     ReturnDefinitionResponse:
       type: object
-      required: [code, name, scope, periodicity, deadlineDaysAfterPeriodEnd, legalBasis, datapoints, deadlineBasis, onDemand]
+      required: [code, name, scope, periodicity, deadlineDaysAfterPeriodEnd, legalBasis, datapoints, deadlineBasis, onDemand, filingObligation]
       properties:
         code: { type: string }
         name: { type: string }
@@ -628,6 +628,9 @@ components:
         onDemand:
           type: boolean
           description: An event-driven return (GSFT) — no period is expected, so none is reported NOT_ASSEMBLED
+        filingObligation:
+          type: boolean
+          description: False for a return nobody must file (the GSFT TEST dry run) — never a deadline breach
     ReturnCatalogueResponse:
       type: object
       required: [id, version, jurisdiction, wireFormatVerified, returns]

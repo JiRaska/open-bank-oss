@@ -35,9 +35,9 @@ data class GsftSnapshot(
     val rates: FxRates?,
     val gaps: Set<GsftDataGap>,
     /** Beneficiary shares of special-regime accounts (DII); no owning service models them yet. */
-    val specialShares: List<SpecialRegimeShare> = emptyList(),
+    val specialShares: List<SpecialRegimeShare>,
     /** § 41e odst. 3 credits a depositor has claimed; claim-based, so empty until one is filed. */
-    val qualifyingCredits: List<QualifyingCredit> = emptyList(),
+    val qualifyingCredits: List<QualifyingCredit>,
 ) {
     val complete: Boolean get() = gaps.isEmpty()
 

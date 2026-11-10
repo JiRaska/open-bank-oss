@@ -220,6 +220,35 @@ class StatutoryReturnServiceTest {
     }
 
     @Test
+    fun `a return with no filing obligation is never a breach, stored and overdue or not`(): Unit = runBlocking {
+        val dryRun = ReturnDefinition(
+            code = "D-TEST",
+            name = "dry run",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+            filingObligation = false,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(dryRun)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        svc.assemble("ev", "D-TEST", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches()).isEmpty()
+    }
+
+    @Test
     fun `an assembled but unsubmitted return past its deadline is a breach until submitted`(): Unit = runBlocking {
         val svc = service()
         val ret = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")

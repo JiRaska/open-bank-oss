@@ -1,5 +1,5 @@
 {
-  "_comment": "Issue #15356. GSFT depositor data delivery (data o vkladatelích) for one relevant day (rozhodný den), due within 3 working days of it (zákon č. 21/1992 Sb. § 41d odst. 4). The period is the relevant day itself (periodicity DAY) and the return is on demand: an insured event or a test request names the day, the calendar never does, so no day is expected. The two returns differ only in DIW.TEST: GSFT-DIW-TEST renders TEST (the § 41n verification run), GSFT-DIW-LIVE renders KEEN and is assembled only when an operator names it. The FILE FORMAT is verified against the decree annex (wireFormatVerified true); the datapoints and line fields are PLATFORM identifiers that attest the package (record counts from the rendered files, evidence counts from the assembly, and one line per file plus one for the ZIP archive with its SHA-256). Unverified items (archive name, PGP cipher, batch numbering, working-day calendar) are listed in docs/gsft-depositor-data.md.",
+  "_comment": "Issue #15356. GSFT depositor data delivery (data o vkladatelích) for one relevant day (rozhodný den), due within 3 working days of it (zákon č. 21/1992 Sb. § 41d odst. 4). The period is the relevant day itself (periodicity DAY) and the return is on demand: an insured event or a test request names the day, the calendar never does, so no day is expected. The two returns differ only in DIW.TEST: GSFT-DIW-TEST renders TEST (the § 41n verification run), GSFT-DIW-LIVE renders KEEN and is assembled only when an operator names it. The FILE FORMAT is verified against the decree annex (wireFormatVerified true); the datapoints and line fields are PLATFORM identifiers that attest the package (record counts from the rendered files, evidence counts from the assembly, and one line per file plus one for the ZIP archive with its SHA-256). Unverified items (archive name, PGP cipher, batch numbering, working-day calendar) are listed in docs/gsft-depositor-data.md. GSFT-DIW-TEST is not a filing obligation (filingObligation false): it never counts as a deadline breach.",
   "id": "cz-gsft",
   "version": 1,
   "jurisdiction": "CZ",
@@ -63,7 +63,8 @@
             "FILES"
           ]
         }
-      ]
+      ],
+      "filingObligation": false
     },
     {
       "code": "GSFT-DIW-LIVE",
@@ -123,7 +124,8 @@
             "FILES"
           ]
         }
-      ]
+      ],
+      "filingObligation": true
     }
   ]
 }

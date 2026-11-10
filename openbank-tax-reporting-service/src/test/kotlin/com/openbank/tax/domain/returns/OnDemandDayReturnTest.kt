@@ -35,6 +35,9 @@ class OnDemandDayReturnTest {
         val test = gsft.definition("GSFT-DIW-TEST")!!
         assertThat(test.deadlineBasis).isEqualTo(DeadlineBasis.WORKING_DAYS)
         assertThat(test.onDemand).isTrue()
+        // A TEST dry run is not a filing obligation; the LIVE batch is.
+        assertThat(test.filingObligation).isFalse()
+        assertThat(gsft.definition("GSFT-DIW-LIVE")!!.filingObligation).isTrue()
         // Monday -> Thursday.
         assertThat(test.dueDate(ReportingPeriod(Periodicity.DAY, day("2026-11-02")))).isEqualTo(day("2026-11-05"))
         // Friday 13 Nov: Mon 16, (Tue 17 Nov is a public holiday), Wed 18, Thu 19.

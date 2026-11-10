@@ -106,7 +106,16 @@ class GsftDeliveryDryRunIT {
     @ApplicationScoped
     class FixtureSnapshots : GsftSnapshotPort {
         override suspend fun snapshot(relevantDay: LocalDate): GsftSnapshot = if (relevantDay == GAPPED_DAY) {
-            GsftSnapshot(relevantDay, emptyList(), emptyList(), emptyList(), null, GsftDataGap.entries.toSet())
+            GsftSnapshot(
+                relevantDay,
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                null,
+                GsftDataGap.entries.toSet(),
+                specialShares = emptyList(),
+                qualifyingCredits = emptyList(),
+            )
         } else {
             complete(relevantDay)
         }
@@ -188,6 +197,19 @@ class GsftDeliveryDryRunIT {
         post("/$id/approve", "{}").then().statusCode(200)
             .body("status", equalTo("APPROVED")).body("approvedBy", equalTo("bob"))
 
+        // Archive intact, but an attested FILE hash no longer matches its entry: refused at entry level.
+        val lineIndex = 1
+        val attestedLine = lineJson(id, lineIndex)
+        setLineJson(
+            id,
+            lineIndex,
+            attestedLine.replace(Regex("\"sha256\":\"[0-9a-f]{64}\""), "\"sha256\":\"${"0".repeat(64)}\""),
+        )
+        post("/$id/gsft-delivery", """{"reference":"GSFT-T-1"}""").then().statusCode(409)
+            .body("error", containsString("files do not match the attested files"))
+        setLineJson(id, lineIndex, attestedLine)
+        status(id, "APPROVED")
+
         val sha = lines(id).single { it["kind"] == "ARCHIVE" }.getValue("sha256")
         val original = storedArchive(sha)
         val tampered = original.copyOf().also { it[it.size - 1] = (it[it.size - 1] + 1).toByte() }
@@ -207,19 +229,29 @@ class GsftDeliveryDryRunIT {
         assertThat(clear).isEqualTo(original)
         val attested = lines(id).filter { it["kind"] == "FILE" }.associate { it["name"] to it["sha256"] }
         assertThat(unzip(clear).mapValues { sha256(it.value) }).isEqualTo(attested)
+        // The artefact that left is persisted, and can be fetched again until GSFT answers.
+        val encrypted = Base64.getDecoder().decode(delivered.path<String>("encryptedPackage"))
+        assertThat(storedDelivery(id)).isEqualTo(encrypted)
+        val again = post("/$id/gsft-delivery", """{"reference":"GSFT-T-1"}""").then().statusCode(200)
+            .body("statutoryReturn.status", equalTo("SUBMITTED")).extract().path<String>("encryptedPackage")
+        assertThat(Base64.getDecoder().decode(again)).isEqualTo(encrypted)
+        post("/$id/gsft-delivery", """{"reference":"GSFT-T-2"}""").then().statusCode(409)
+            .body("error", containsString("another reference"))
 
         post("/$id/acknowledgement", """{"accepted":true,"reference":"GSFT-ACK-1"}""").then().statusCode(200)
             .body("status", equalTo("ACKNOWLEDGED")).body("acknowledgement", equalTo("GSFT-ACK-1"))
+        post("/$id/gsft-delivery", """{"reference":"GSFT-T-1"}""").then().statusCode(409)
     }
 
     @Test
     @Order(5)
     @TestSecurity(user = "alice", roles = ["ROLE_OPERATOR"])
-    fun `KEEN is rendered only for the explicitly named LIVE return`() {
+    fun `KEEN is rendered only for the explicitly named LIVE return, numbered after the TEST batch`() {
         val liveId: String = assemble(LIVE_CODE, DAY).then().statusCode(200)
             .body("returnCode", equalTo(LIVE_CODE)).extract().path("id")
         val sha = lines(liveId).single { it["kind"] == "ARCHIVE" }.getValue("sha256")
-        val diw = String(unzip(storedArchive(sha)).getValue("DIW$BANK.00001"), CP1250)
+        // TEST and LIVE share the bank's batch sequence: the TEST batch was 00001.
+        val diw = String(unzip(storedArchive(sha)).getValue("DIW$BANK.00002"), CP1250)
         assertThat(diw).endsWith(",000000327500000,1,KEEN\r\n")
     }
 
@@ -253,6 +285,40 @@ class GsftDeliveryDryRunIT {
             s.setBytes(1, bytes)
             s.setString(2, sha)
             check(s.executeUpdate() == 1)
+        }
+    }
+
+    private fun lineJson(returnId: String, index: Int): String = jdbc { c ->
+        c.prepareStatement(
+            "select fields_json from statutory_return_line where return_id = ?::uuid and line_index = ?",
+        ).use { s ->
+            s.setString(1, returnId)
+            s.setInt(2, index)
+            s.executeQuery().use { rs ->
+                check(rs.next())
+                rs.getString(1)
+            }
+        }
+    }
+
+    private fun setLineJson(returnId: String, index: Int, json: String) = jdbc { c ->
+        c.prepareStatement(
+            "update statutory_return_line set fields_json = ? where return_id = ?::uuid and line_index = ?",
+        ).use { s ->
+            s.setString(1, json)
+            s.setString(2, returnId)
+            s.setInt(3, index)
+            check(s.executeUpdate() == 1)
+        }
+    }
+
+    private fun storedDelivery(returnId: String): ByteArray = jdbc { c ->
+        c.prepareStatement("select encrypted from gsft_delivery where return_id = ?::uuid").use { s ->
+            s.setString(1, returnId)
+            s.executeQuery().use { rs ->
+                check(rs.next()) { "no delivery stored for $returnId" }
+                rs.getBytes(1)
+            }
         }
     }
 
@@ -420,6 +486,7 @@ class GsftDeliveryDryRunIT {
                 specialShares = listOf(
                     SpecialRegimeShare(person(beneficiary, "9001010008"), special.accountId, BigDecimal("400000.00")),
                 ),
+                qualifyingCredits = emptyList(),
             )
         }
     }
