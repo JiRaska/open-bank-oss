@@ -19,24 +19,43 @@ import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
 import com.openbank.tax.domain.returns.ReturnLine
+import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
 import com.openbank.tax.domain.returns.ValidationFinding
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
+
+/** Why a CEÚ overview is held rather than assembled. Each is a distinct, logged scheduler outcome. */
+enum class CeuHoldReason { WAITING_FOR_ACKNOWLEDGEMENT, INITIAL_LOAD_NOT_ATTESTED }
+
+/**
+ * A CEÚ overview cannot be assembled YET — not a data fault. An [IllegalStateException], so a
+ * manual `POST /assemble` answers 422 with the reason.
+ */
+class CeuFilingHeldException(val reason: CeuHoldReason, message: String) : IllegalStateException(message)
 
 /**
  * Assembles one CEÚ working-day change overview (ADR-0367 D7, #15292).
  *
- * The baseline is what ČNB already HOLDS: the latest filed (SUBMITTED or ACKNOWLEDGED) overview
- * for an earlier window, re-derived from the projection as known at the instant that overview
- * read it (`register_known_at_epoch_ms`, part of its attested content). So:
+ * The baseline is what ČNB has ACCEPTED: the latest ACKNOWLEDGED overview for an earlier window,
+ * re-derived from the projection as known at the instant that overview read it
+ * (`register_known_at_epoch_ms`, part of its attested content, millisecond precision — the
+ * current snapshot is cut at the same truncated instant, so re-derivation is exact). So:
  *
- *  - no filed predecessor ⇒ the overview diffs against an empty register — the initial full load;
+ *  - while the latest filed overview is SUBMITTED with no ČNB answer, nothing is assembled
+ *    ([CeuHoldReason.WAITING_FOR_ACKNOWLEDGEMENT]): its answer decides the baseline;
+ *  - no acknowledged predecessor ⇒ the overview diffs against an empty register — the initial
+ *    full load, refused unless `openbank.ceu.initial-load-attested` is true
+ *    ([CeuHoldReason.INITIAL_LOAD_NOT_ATTESTED]): the projection only holds what the consumers have
+ *    seen, so someone must attest it is the complete register before it is filed as one;
  *  - a predecessor that was rejected or never filed is not a baseline, so its changes roll into
- *    this overview instead of being lost;
+ *    this overview instead of being lost; a REJECTED window may itself be re-assembled as a new
+ *    revision, diffed against the same acknowledged baseline;
  *  - a late fact for an already-reported day is invisible to the baseline and visible now, so it
  *    is reported as a change here.
  *
@@ -49,6 +68,8 @@ class CeuReturnDataAdapter(
     private val register: CeuRegisterRepository,
     private val returns: StatutoryReturnRepository,
     private val clock: Clock,
+    @ConfigProperty(name = "openbank.ceu.initial-load-attested", defaultValue = "false")
+    private val initialLoadAttested: Boolean,
 ) {
     suspend fun fetch(
         catalogue: ReturnCatalogue,
@@ -64,7 +85,9 @@ class CeuReturnDataAdapter(
             reportingDay,
             ReportingPeriod.WORKING_DAYS.previousBusinessDay(reportingDay),
         )
-        val now = Instant.now(clock)
+        // Truncated so the stored KNOWN_AT and this snapshot's cut are the same instant: a fact
+        // recorded within the dropped sub-millisecond would otherwise be in neither or both.
+        val now = Instant.now(clock).truncatedTo(ChronoUnit.MILLIS)
         val baseline = baselineFor(catalogue, definition, entityId, period)
         val current = snapshot(period, now)
         val overview = ChangeOverview.diff(window, baseline, current)
@@ -81,21 +104,46 @@ class CeuReturnDataAdapter(
         entityId: String,
         period: ReportingPeriod,
     ): RegisterSnapshot {
-        val filed = returns.listReturns()
-            .filter {
-                it.catalogueId == catalogue.id &&
-                    it.returnCode == definition.code &&
-                    it.entityId == entityId &&
-                    it.period.endDate.isBefore(period.endDate) &&
-                    it.status.filed
-            }
-            .maxWithOrNull(compareBy<StatutoryReturn>({ it.period.endDate }, { it.revision }))
-            ?: return RegisterSnapshot.empty(period.endDate, Instant.EPOCH)
+        val order = compareBy<StatutoryReturn>({ it.period.endDate }, { it.revision })
+        val ours = returns.listReturns().filter {
+            it.catalogueId == catalogue.id && it.returnCode == definition.code && it.entityId == entityId
+        }
+        // Any window up to and including this one: a SUBMITTED correction of this very window
+        // is as unanswered as yesterday's.
+        requireAnswered(
+            ours.filter { !it.period.endDate.isAfter(period.endDate) && it.status.filed }.maxWithOrNull(order),
+            definition,
+            period,
+        )
+        val filed = ours.filter { it.period.endDate.isBefore(period.endDate) && it.status == ReturnStatus.ACKNOWLEDGED }
+            .maxWithOrNull(order)
+            ?: return initialLoad(definition, period)
         val knownAt = filed.datapoints[KNOWN_AT]?.let { Instant.ofEpochMilli(it.toLong()) }
             ?: throw ReturnDataUnavailableException(
                 "${definition.code} ${filed.period.label} r${filed.revision} carries no $KNOWN_AT; its baseline cannot be re-derived",
             )
         return snapshot(filed.period, knownAt)
+    }
+
+    private fun requireAnswered(latestFiled: StatutoryReturn?, definition: ReturnDefinition, period: ReportingPeriod) {
+        if (latestFiled?.status == ReturnStatus.SUBMITTED) {
+            throw CeuFilingHeldException(
+                CeuHoldReason.WAITING_FOR_ACKNOWLEDGEMENT,
+                "${definition.code} ${latestFiled.period.label} r${latestFiled.revision} is SUBMITTED without a " +
+                    "ČNB answer; record its acknowledgement or rejection before assembling ${period.label}",
+            )
+        }
+    }
+
+    private fun initialLoad(definition: ReturnDefinition, period: ReportingPeriod): RegisterSnapshot {
+        if (!initialLoadAttested) {
+            throw CeuFilingHeldException(
+                CeuHoldReason.INITIAL_LOAD_NOT_ATTESTED,
+                "${definition.code} ${period.label} would be the initial full load; set " +
+                    "openbank.ceu.initial-load-attested=true once the register projection is attested complete",
+            )
+        }
+        return RegisterSnapshot.empty(period.endDate, Instant.EPOCH)
     }
 
     private suspend fun snapshot(period: ReportingPeriod, knownAt: Instant): RegisterSnapshot = RegisterSnapshot.fold(

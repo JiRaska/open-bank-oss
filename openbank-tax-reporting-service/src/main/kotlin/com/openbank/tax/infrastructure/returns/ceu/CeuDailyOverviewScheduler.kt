@@ -27,9 +27,23 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.cancellation.CancellationException
 
 /** What one tick of the CEÚ job concluded. Returned so tests assert the decision, not a log line. */
-enum class CeuTickOutcome { UNCONFIGURED, NOT_A_WORKING_DAY, BEFORE_START, ASSEMBLED, ALREADY_ASSEMBLED, FAILED }
+enum class CeuTickOutcome {
+    UNCONFIGURED,
+    NOT_A_WORKING_DAY,
+    BEFORE_START,
+    ASSEMBLED,
+    ALREADY_ASSEMBLED,
+
+    /** The latest filed overview is SUBMITTED with no ČNB answer; nothing new is assembled until it has one. */
+    WAITING_FOR_ACKNOWLEDGEMENT,
+
+    /** The initial full load is refused until `openbank.ceu.initial-load-attested` is true. */
+    INITIAL_LOAD_NOT_ATTESTED,
+    FAILED,
+}
 
 /**
  * The CEÚ daily change overview job (ADR-0367 D7, #15292).
@@ -86,6 +100,10 @@ class CeuDailyOverviewScheduler(
         tick()
     }
 
+    /**
+     * A cancelled coroutine (shutdown) is not a failed tick; [CancellationException] is an
+     * IllegalStateException, so it is rethrown before the generic branch could swallow it.
+     */
     @Suppress("TooGenericExceptionCaught") // any failure leaves liveness unrecorded, which is the alarm
     suspend fun tick(): CeuTickOutcome {
         val start = start()
@@ -109,23 +127,15 @@ class CeuDailyOverviewScheduler(
         return try {
             val existing = returns.latestRevision(CATALOGUE, CODE, entities.companyId, period)
             val outcome = if (existing == null) {
-                val assembled = service.assemble(CATALOGUE, CODE, entities.companyId, period.label, ACTOR)
-                log.infof(
-                    "[ceu] assembled %s %s r%d: %s changes, %s synthetic accounts dropped",
-                    CODE,
-                    period.label,
-                    assembled.revision,
-                    assembled.datapoints["changes_total"]?.toPlainString(),
-                    assembled.datapoints["synthetic_accounts_dropped"]?.toPlainString(),
-                )
-                publishUnfiled(unfiledFlag(assembled, now))
-                CeuTickOutcome.ASSEMBLED
+                assembleNow(period, now)
             } else {
                 publishUnfiled(unfiledFlag(existing, now))
                 CeuTickOutcome.ALREADY_ASSEMBLED
             }
             liveness.recordSuccess()
             outcome
+        } catch (e: CeuFilingHeldException) {
+            held(e, period, now)
         } catch (e: ReturnValidationException) {
             // Rule ids and a count only: finding messages name account numbers, which do not
             // belong in logs. The full findings are reproduced by re-assembling through the API.
@@ -142,9 +152,40 @@ class CeuDailyOverviewScheduler(
             log.errorf("[ceu] %s %s cannot be assembled: %s", CODE, period.label, e.message)
             publishUnfiled(unfiledFlag(null, now))
             CeuTickOutcome.FAILED
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: RuntimeException) {
             log.errorf(e, "[ceu] %s %s tick failed", CODE, period.label)
+            publishUnfiled(unfiledFlag(null, now))
             CeuTickOutcome.FAILED
+        }
+    }
+
+    private suspend fun assembleNow(period: ReportingPeriod, now: Instant): CeuTickOutcome {
+        val assembled = service.assemble(CATALOGUE, CODE, entities.companyId, period.label, ACTOR)
+        log.infof(
+            "[ceu] assembled %s %s r%d: %s changes, %s synthetic accounts dropped",
+            CODE,
+            period.label,
+            assembled.revision,
+            assembled.datapoints["changes_total"]?.toPlainString(),
+            assembled.datapoints["synthetic_accounts_dropped"]?.toPlainString(),
+        )
+        publishUnfiled(unfiledFlag(assembled, now))
+        return CeuTickOutcome.ASSEMBLED
+    }
+
+    /**
+     * The job is healthy; the filing is held by design. The unfiled gauge stays up past the
+     * cutoff, which is the operator's prompt to record ČNB's answer or attest the load.
+     */
+    private fun held(e: CeuFilingHeldException, period: ReportingPeriod, now: Instant): CeuTickOutcome {
+        log.warnf("[ceu] %s %s held (%s): %s", CODE, period.label, e.reason, e.message)
+        publishUnfiled(unfiledFlag(null, now))
+        liveness.recordSuccess()
+        return when (e.reason) {
+            CeuHoldReason.WAITING_FOR_ACKNOWLEDGEMENT -> CeuTickOutcome.WAITING_FOR_ACKNOWLEDGEMENT
+            CeuHoldReason.INITIAL_LOAD_NOT_ATTESTED -> CeuTickOutcome.INITIAL_LOAD_NOT_ATTESTED
         }
     }
 

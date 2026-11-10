@@ -55,6 +55,8 @@ class CeuDailyOverviewSchedulerIT {
             "quarkus.flyway.locations" to "db/migration,db/ceu-it-seed",
             "openbank.ceu.tick-every" to "1s",
             "openbank.ceu.reporting-start" to "2026-11-01",
+            // The seeded register is the whole register: the initial full load is attested.
+            "openbank.ceu.initial-load-attested" to "true",
             // Keep the unrelated deadline job quiet.
             "openbank.statutory-returns.deadline-check-every" to "1h",
         )
@@ -116,6 +118,18 @@ class CeuDailyOverviewSchedulerIT {
             .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(200)
             .body("status", equalTo("ACKNOWLEDGED"))
             .body("acknowledgement", equalTo("CEU-ACK-7781"))
+        // A retried identical answer is idempotent: 200 with the current state.
+        given().contentType(ContentType.JSON).body("""{"accepted":true,"reference":"CEU-ACK-7781"}""")
+            .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(200)
+            .body("status", equalTo("ACKNOWLEDGED"))
+            .body("acknowledgement", equalTo("CEU-ACK-7781"))
+        // A different answer to an answered submission is a conflict.
+        given().contentType(ContentType.JSON).body("""{"accepted":true,"reference":"CEU-ACK-9999"}""")
+            .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(409)
+        given().contentType(ContentType.JSON).body("""{"accepted":false,"reason":"CEU-ACK-7781"}""")
+            .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(409)
+        given().contentType(ContentType.JSON).body("""{"accepted":true,"reference":"${"x".repeat(1025)}"}""")
+            .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(400)
         given().contentType(ContentType.JSON).body("""{"accepted":true}""")
             .post("/api/v1/statutory-returns/$id/acknowledgement").then().statusCode(400)
     }

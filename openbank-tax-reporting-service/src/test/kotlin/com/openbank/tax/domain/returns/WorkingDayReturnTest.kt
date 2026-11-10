@@ -109,4 +109,26 @@ class WorkingDayReturnTest {
         assertThatThrownBy { submitted().acknowledge(false, " ", "bob", at) }
             .isInstanceOf(TaxValidationException::class.java)
     }
+
+    @Test
+    fun `an identical repeated answer is a no-op, a different one is a conflict`() {
+        val ack = submitted().acknowledge(true, "CNB-ACK-42", "bob", at)
+        assertThat(ack.acknowledge(true, "CNB-ACK-42", "carol", at.plusSeconds(60))).isSameAs(ack)
+        assertThatThrownBy { ack.acknowledge(true, "CNB-ACK-43", "bob", at) }
+            .isInstanceOf(TaxConflictException::class.java)
+        assertThatThrownBy { ack.acknowledge(false, "CNB-ACK-42", "bob", at) }
+            .isInstanceOf(TaxConflictException::class.java)
+        val rejected = submitted().acknowledge(false, "XSD", "bob", at)
+        assertThat(rejected.acknowledge(false, "XSD", "bob", at)).isSameAs(rejected)
+    }
+
+    @Test
+    fun `an overlong reference or reason is invalid`() {
+        val max = StatutoryReturn.MAX_ACKNOWLEDGEMENT_LENGTH
+        assertThat(
+            submitted().acknowledge(true, "x".repeat(max), "bob", at).status,
+        ).isEqualTo(ReturnStatus.ACKNOWLEDGED)
+        assertThatThrownBy { submitted().acknowledge(false, "x".repeat(max + 1), "bob", at) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 }

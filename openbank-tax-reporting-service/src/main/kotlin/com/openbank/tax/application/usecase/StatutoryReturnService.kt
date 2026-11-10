@@ -127,10 +127,10 @@ class StatutoryReturnService(
     /** Record the regulator's acknowledgement (accepted) or rejection of a SUBMITTED revision. */
     suspend fun acknowledge(id: UUID, accepted: Boolean, detail: String, by: String): StatutoryReturn {
         val current = get(id)
-        return repository.save(
-            current.acknowledge(accepted, detail, by, Instant.now(clock)),
-            expectedVersion = current.version,
-        )
+        val answered = current.acknowledge(accepted, detail, by, Instant.now(clock))
+        // An identical repeat returns the stored state unchanged; nothing to save.
+        if (answered === current) return current
+        return repository.save(answered, expectedVersion = current.version)
     }
 
     suspend fun get(id: UUID): StatutoryReturn =

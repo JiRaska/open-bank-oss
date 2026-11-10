@@ -32,8 +32,16 @@ Today's overview is not filed and the 12:00 deadline is under an hour away.
    `POST /api/v1/statutory-returns/{id}/approve`.
 4. **APPROVED:** deliver through SDAT, then `POST /{id}/submitted` with the SDAT reference.
 5. When ČNB answers, `POST /{id}/acknowledgement` with `{"accepted":true,"reference":...}`, or
-   `{"accepted":false,"reason":...}`. A rejected overview is not a baseline: the next assembled
-   revision or the next day's overview carries its changes again.
+   `{"accepted":false,"reason":...}` (at most 1024 characters). Repeating the identical answer
+   returns 200; a different answer is 409. A rejected overview is not a baseline: re-assemble that
+   window (`POST /assemble` with the same period creates the next revision, diffed against the last
+   ACKNOWLEDGED overview), or the next day's overview carries its changes.
+6. **Log says `held (WAITING_FOR_ACKNOWLEDGEMENT)`:** an earlier overview is SUBMITTED with no
+   recorded ČNB answer, and no new overview is assembled until it has one. Record the answer
+   (step 5); the next tick assembles.
+7. **Log says `held (INITIAL_LOAD_NOT_ATTESTED)`:** there is no acknowledged overview, so this
+   would be the initial full load. It is refused until `OPENBANK_CEU_INITIAL_LOAD_ATTESTED=true`,
+   which must be set only once the register projection is attested complete.
 
 The CEUSIFE10 XML file itself is not rendered by the platform yet: its schema is published only
 inside SDAT. Until it is, step 4 is a manual SDAT delivery of the attested content.

@@ -67,8 +67,8 @@ class CeuReturnDataAdapterTest {
     private val monday = ReportingPeriod(Periodicity.WORKING_DAY, LocalDate.parse("2026-11-08"))
     private val tuesday = ReportingPeriod(Periodicity.WORKING_DAY, LocalDate.parse("2026-11-09"))
 
-    private fun adapter(now: String) =
-        CeuReturnDataAdapter(register, returns, Clock.fixed(Instant.parse(now), ZoneOffset.UTC))
+    private fun adapter(now: String, initialLoadAttested: Boolean = true) =
+        CeuReturnDataAdapter(register, returns, Clock.fixed(Instant.parse(now), ZoneOffset.UTC), initialLoadAttested)
 
     private fun open(account: UUID, holder: UUID, on: String, at: String, synthetic: Boolean = false) {
         val day = LocalDate.parse(on)
@@ -87,13 +87,81 @@ class CeuReturnDataAdapterTest {
         )
     }
 
-    private suspend fun assembleAndFile(period: ReportingPeriod, now: String): StatutoryReturn {
+    /** Assemble, approve and submit; ČNB's answer is [acknowledged] (true), a rejection (false) or none (null). */
+    private suspend fun assembleAndFile(
+        period: ReportingPeriod,
+        now: String,
+        acknowledged: Boolean? = true,
+        revision: Int = 1,
+    ): StatutoryReturn {
         val data = adapter(now).fetch(catalogue, definition, "company", period)
-        val r = StatutoryReturn.assemble(
-            catalogue, definition, "company", period, 1, data.values, data.lines, "system:ceu", Instant.parse(now),
-        ).approve("alice", Instant.parse(now)).submit("SDAT", "alice", Instant.parse(now))
+        val at = Instant.parse(now)
+        val submitted = StatutoryReturn.assemble(
+            catalogue, definition, "company", period, revision, data.values, data.lines, "system:ceu", at,
+        ).approve("alice", at).submit("SDAT", "alice", at)
+        val r = acknowledged?.let { submitted.acknowledge(it, if (it) "ACK" else "rejected", "bob", at) } ?: submitted
         returns.insert(r)
         return r
+    }
+
+    @Test
+    fun `a fact recorded within the truncated sub-millisecond is reported exactly once`(): Unit = runBlocking {
+        open(UUID.randomUUID(), UUID.randomUUID(), "2026-11-06", "2026-11-06T10:00:00Z")
+        // Recorded 500 µs after the millisecond Monday's overview stores as its knownAt, but before
+        // Monday's raw clock reading: an untruncated cut would include it in Monday while the
+        // re-derived baseline (millisecond) would not, reporting it twice.
+        val edge = UUID.randomUUID()
+        open(edge, UUID.randomUUID(), "2026-11-08", "2026-11-09T05:00:00.000500Z")
+        assembleAndFile(monday, "2026-11-09T05:00:00.000999Z")
+
+        val monLines = returns.stored.single().lines.map { it.fields["account_id"] }
+        val tue = adapter("2026-11-10T05:00:00Z").fetch(catalogue, definition, "company", tuesday)
+        val tueLines = tue.lines.map { it.fields["account_id"] }
+
+        assertThat(
+            monLines + tueLines,
+        ).describedAs("reported in exactly one overview").containsOnlyOnce(edge.toString())
+        assertThat(tueLines).containsExactly(edge.toString())
+        assertThat(tue.values.getValue(CeuReturnDataAdapter.KNOWN_AT))
+            .isEqualByComparingTo(Instant.parse("2026-11-10T05:00:00Z").toEpochMilli().toBigDecimal())
+    }
+
+    @Test
+    fun `nothing is assembled while the latest filed overview awaits the CNB answer`(): Unit = runBlocking {
+        open(UUID.randomUUID(), UUID.randomUUID(), "2026-11-06", "2026-11-06T10:00:00Z")
+        assembleAndFile(monday, "2026-11-09T05:00:00Z", acknowledged = null)
+
+        val e = assertThrows<CeuFilingHeldException> {
+            adapter("2026-11-10T05:00:00Z").fetch(catalogue, definition, "company", tuesday)
+        }
+        assertThat(e.reason).isEqualTo(CeuHoldReason.WAITING_FOR_ACKNOWLEDGEMENT)
+        assertThat(e).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `a rejected window is re-assembled as a new revision against the last acknowledged baseline`(): Unit =
+        runBlocking {
+            val first = UUID.randomUUID()
+            open(first, UUID.randomUUID(), "2026-11-06", "2026-11-06T10:00:00Z")
+            assembleAndFile(monday, "2026-11-09T05:00:00Z")
+            val second = UUID.randomUUID()
+            open(second, UUID.randomUUID(), "2026-11-09", "2026-11-09T12:00:00Z")
+            assembleAndFile(tuesday, "2026-11-10T05:00:00Z", acknowledged = false)
+
+            val data = adapter("2026-11-10T06:00:00Z").fetch(catalogue, definition, "company", tuesday)
+
+            assertThat(data.values.getValue("initial_load")).isEqualByComparingTo("0")
+            assertThat(data.lines.map { it.fields["account_id"] }).containsExactly(second.toString())
+        }
+
+    @Test
+    fun `the initial full load is refused until it is attested`(): Unit = runBlocking {
+        open(UUID.randomUUID(), UUID.randomUUID(), "2026-11-06", "2026-11-06T10:00:00Z")
+
+        val e = assertThrows<CeuFilingHeldException> {
+            adapter("2026-11-09T05:00:00Z", initialLoadAttested = false).fetch(catalogue, definition, "company", monday)
+        }
+        assertThat(e.reason).isEqualTo(CeuHoldReason.INITIAL_LOAD_NOT_ATTESTED)
     }
 
     @Test
@@ -133,16 +201,7 @@ class CeuReturnDataAdapterTest {
     fun `a rejected predecessor is no baseline, so its changes roll forward`(): Unit = runBlocking {
         val account = UUID.randomUUID()
         open(account, UUID.randomUUID(), "2026-11-06", "2026-11-06T10:00:00Z")
-        val filed = assembleAndFile(monday, "2026-11-09T05:00:00Z")
-        returns.stored.replaceAll {
-            if (it.id ==
-                filed.id
-            ) {
-                it.acknowledge(false, "rejected", "bob", Instant.now())
-            } else {
-                it
-            }
-        }
+        assembleAndFile(monday, "2026-11-09T05:00:00Z", acknowledged = false)
 
         val data = adapter("2026-11-10T05:00:00Z").fetch(catalogue, definition, "company", tuesday)
 

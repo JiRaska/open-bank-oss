@@ -360,6 +360,14 @@ data class StatutoryReturn(
 
     /** Record the regulator's answer to this submission: its acknowledgement reference, or a rejection reason. */
     fun acknowledge(accepted: Boolean, detail: String, by: String, at: Instant): StatutoryReturn {
+        // A malformed request, not a business-rule failure: IllegalArgumentException → 400 (libs-runtime).
+        require(detail.length <= MAX_ACKNOWLEDGEMENT_LENGTH) {
+            "An acknowledgement reference or rejection reason is at most $MAX_ACKNOWLEDGEMENT_LENGTH characters"
+        }
+        // A retried POST of the SAME answer is a no-op that returns the current state; a different
+        // answer to an already-answered submission is a conflict.
+        val answered = if (accepted) ReturnStatus.ACKNOWLEDGED else ReturnStatus.REJECTED
+        if (status == answered && acknowledgement == detail) return this
         checkConflict(status == ReturnStatus.SUBMITTED) {
             "$returnCode ${period.label} is not SUBMITTED (status=$status) — nothing to acknowledge"
         }
@@ -379,6 +387,9 @@ data class StatutoryReturn(
     fun isOverdueAt(date: LocalDate): Boolean = !status.filed && date.isAfter(dueDate)
 
     companion object {
+        /** Upper bound on the regulator's acknowledgement reference or rejection reason. */
+        const val MAX_ACKNOWLEDGEMENT_LENGTH = 1024
+
         /** Validate and assemble; invalid figures never become a stored return. */
         @Suppress("LongParameterList")
         fun assemble(

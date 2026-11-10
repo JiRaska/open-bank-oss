@@ -94,16 +94,16 @@ allowed_reasons contains "operator-statutory-return-lifecycle" if {
 # ---------------------------------------------------------------------------------------
 
 allowed_reasons contains "staff-corporate-register-inspect" if {
-	input.principal.type == "HUMAN"
-	not principal_is_machine
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
-	role in input.principal.roles
-	input.action == "tax.corporate-register.inspect"
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_VIEWER", "ROLE_COMPLIANCE"}
+    role in input.principal.roles
+    input.action == "tax.corporate-register.inspect"
 }
 
 allowed_reasons contains "operator-corporate-register-change" if {
-	input.principal.type == "HUMAN"
-	not principal_is_machine
-	"ROLE_OPERATOR" in input.principal.roles
-	input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
+    input.principal.type == "HUMAN"
+    not principal_is_machine
+    "ROLE_OPERATOR" in input.principal.roles
+    input.action in {"tax.corporate-register.propose", "tax.corporate-register.approve", "tax.corporate-register.reject"}
 }
