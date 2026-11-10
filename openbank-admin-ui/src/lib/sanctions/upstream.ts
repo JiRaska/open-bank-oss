@@ -26,8 +26,6 @@ import { NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { serverSvcUrl } from '@/lib/services/bff'
 
-// Deployed, SANCTIONS_SERVICE_URL is the in-cluster ClusterIP DNS name. The fallback is the
-// docker-compose service name, which is what local dev resolves.
 /**
  * Upstream URL for `path`. The Service is `sanctions-service` in namespace `sanctions`; the old
  * hard-coded default `http://openbank-sanctions-service:8123` named a host that does not exist in
@@ -41,7 +39,7 @@ function upstreamUrl(path: string): string {
 }
 
 /**
- * Session-gate the call, then forward `method <BASE><path>` with the operator's bearer.
+ * Session-gate the call, then forward `method <upstreamUrl(path)>` with the operator's bearer.
  *
  * `body` is sent as JSON when present. `timeoutMs` defaults to a read-shaped 10s; the
  * screening and refresh calls do real work upstream and pass a longer budget.
