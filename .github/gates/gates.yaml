@@ -245,7 +245,7 @@ gates:
     rationale: "run-gates.py can enforce a wall-time ceiling and a subject floor per gate, but only where the manifest declares them; measured on the ci_gate_runs warehouse only 18 of 197 gates declare a budget, so 179 gates can slow down without limit and nothing objects. Ratcheting the undeclared count means a new gate arrives declared, and the tail is paid down deliberately."
     selftest: python3 .github/scripts/check-gate-observability-declarations.py --self-test
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-gate-observability-declarations.py"]
+    selftest_inputs: [".github/scripts/check-gate-observability-declarations.py", ".github/scripts/derive-gate-runtime-measurements.py", ".github/gates/gate-runtime-measurements.json"]
     run: |
       python3 .github/scripts/check-gate-observability-declarations.py --enforce
 
@@ -1247,7 +1247,7 @@ gates:
       a money-path service.
     review_after: 2027-04-17
     min_subjects: 15   # 18 services use the Redis ApprovalStore today (2026-10-17)
-    budget_seconds: 20
+    budget_seconds: 29
     selftest_inputs: [".github/scripts/check-approval-store-redis-host.py"]
     selftest_expect: pass
     selftest: |
@@ -2170,7 +2170,7 @@ gates:
     mode: enforced
     rationale: "These suites prove deploy-side checkers (SBOM effective model, record-deployment manifest resolution, deploy publication race) and were committed without any invocation; a regression in the code they cover was invisible until #14697 showed the class."
     review_after: "2027-05-03"
-    budget_seconds: 240
+    budget_seconds: 380
     run: |
       set -e
       python3 .github/scripts/test-sbom-effective-model-guard.py
@@ -2372,6 +2372,7 @@ gates:
     budget_seconds: 30
     run: |
       bash .github/scripts/test-deploy-code-lag-report.sh
+      python3 .github/scripts/test-deploy-lag-blockers.py
 
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
@@ -3463,7 +3464,7 @@ gates:
     mode: enforced
     rationale: "A train pushed with GITHUB_TOKEN is never built by CI and a train that merges outside shadow before the ruleset requires its status bypasses ADR-0343 phase 0; both are silent misconfigurations with no runtime signal."
     review_after: "2027-04-18"
-    budget_seconds: 300   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07, 300 = ~1.5x
+    budget_seconds: 302   # self-test drives ~25 settle/build/publish ticks over a synthetic origin; 6 main CI runs 2026-11-03: 105.9 77.3 104.6 109.2 104.1 103.4 s (median ~104 s); with the strict-carrier cases (619) CI read 199.6 s on 2026-11-07; 302 = ceil(1.5 x p95 200.83 s over 30 main runs, gate-runtime-measurements.json)
     min_subjects: 25   # 35 today: 5 top-level + 1 token + 18 per-job must + 10 per-job forbid, 2026-10-18
     selftest: |
       python3 .github/scripts/merge-train.py --self-test
@@ -3859,6 +3860,28 @@ gates:
     selftest_expect: pass
     selftest_inputs: [".github/scripts/gen-card-capability-matrix.py"]
     run: python3 .github/scripts/gen-card-capability-matrix.py --check
+
+  # The regulatory obligations register (ADR-0367) starts from the LAW and maps each duty onto the
+  # admin-ui report catalogue. The inventory it replaces was built from the code, so a duty with no
+  # code (CEÚ, GSFT) was invisible to it. This gate keeps the two views joined: every catalogue
+  # report must belong to an obligation, every claimed report must exist, every obligation must cite
+  # its legal text, and the documentation page must equal what the register renders. It also
+  # rejects duplicate YAML keys — an unquoted comma in a flow map silently truncated six names
+  # under PyYAML before this check existed.
+  - id: regulatory-obligations-register
+    name: "regulatory obligations register: sourced, catalogue fully claimed, doc derived (ADR-0367, enforced)"
+    group: registry
+    mode: enforced
+    budget_seconds: 20   # ~0.3s locally
+    # 70 obligations today. The floor stops a renamed key turning the coverage check into a
+    # green no-op over an empty register.
+    min_subjects: 50
+    review_after: "2027-11-09"
+    rationale: "A regulatory duty nobody has mapped is a filing nobody makes. The register is the only place the platform states what it owes which authority; a catalogue report with no stated legal duty, or a documentation page that disagrees with the register, misleads the person deciding what to file."
+    selftest: python3 .github/scripts/check-regulatory-obligations.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-regulatory-obligations.py"]
+    run: python3 .github/scripts/check-regulatory-obligations.py
 
   - id: ai-governance-snapshot-drift
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
@@ -7475,7 +7498,7 @@ gates:
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
     review_after: "2026-12-08"
-    budget_seconds: 15
+    budget_seconds: 21
     min_subjects: 80  # measured workflow files; both .yml and .yaml are scanned
     selftest_expect: pass
     selftest_inputs:
@@ -7485,6 +7508,8 @@ gates:
       - ".github/scripts/test-infracost-scope.py"
       - ".github/scripts/agent-admission.py"
       - ".github/scripts/test-agent-admission.py"
+      - ".github/scripts/fetch-open-prs.py"
+      - ".github/scripts/test-intelligence-recently-published.py"
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/scripts/shard-verification-modules.py"
@@ -7495,6 +7520,8 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
+      python3 .github/scripts/fetch-open-prs.py --self-test
+      python3 .github/scripts/test-intelligence-recently-published.py --self-test
       python3 .github/scripts/test-await-admin-ui-source-validation.py
       python3 .github/scripts/shard-verification-modules.py --self-test
     run: python3 .github/scripts/check-workflow-supply-chain.py
@@ -7864,3 +7891,27 @@ gates:
     selftest_inputs: [".github/scripts/check-enum-reference-data.py", ".github/scripts/enum-reference-data-baseline.txt"]
     run: |
       python3 .github/scripts/check-enum-reference-data.py --root .
+
+  # Real cache mutations run for build-logic changes and all main pushes. The
+  # structural guard stays cheap for unrelated PRs (standard selftest_inputs policy).
+  # Keep the Gradle self-test in supplychain, whose runner provisions/caches the
+  # pinned wrapper distribution before gates; other shards do not bootstrap Gradle.
+  - id: test-provenance-cache
+    rationale: "Source-only test cache normalization must preserve all non-SHA inputs and must never let Quarkus package a stale identity or broaden broker verification reuse."
+    review_after: "2027-02-06"
+    name: "test cache excludes only source SHA while artifact provenance remains exact"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 120
+    run: python3 .github/scripts/check-test-provenance-cache.py
+    selftest: |
+      python3 .github/scripts/check-test-provenance-cache.py --self-test
+      ./gradlew -p build-logic test --build-cache --console=plain --max-workers=2
+    selftest_inputs:
+      - build-logic/
+      - openbank-libs/gradle/libs.versions.toml
+      - gradle/
+      - gradlew
+      - settings.gradle.kts
+      - .github/scripts/check-test-provenance-cache.py
+    min_subjects: 6

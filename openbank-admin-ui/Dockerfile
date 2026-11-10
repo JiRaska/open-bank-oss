@@ -109,6 +109,7 @@ RUN set -e; \
     cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
     test -s /governance-src/openbank-libs/governance/rules.yaml; \
     test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
+    test -s /governance-src/openbank-libs/governance/regulatory-obligations.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
@@ -326,6 +327,11 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/gate-catalog.json ./gate-catalog.json
+# Baked by prebuild:image from openbank-libs/governance/*.yaml; read at runtime from cwd (/app)
+# by src/lib/cards/capabilities.ts and src/lib/regulatory/obligations.ts. Without these the
+# /cards and /regulatory pages render an empty register in the image only.
+COPY --from=build /app/card-capabilities.json ./card-capabilities.json
+COPY --from=build /app/regulatory-obligations.json ./regulatory-obligations.json
 # OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
 # bundle because Next.js only emits application code there; a --require preload is invisible to
 # its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from

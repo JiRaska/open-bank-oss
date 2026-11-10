@@ -46,14 +46,13 @@ const WHEEL_CONTACT_Y = 680
 function LaneTrain({ lane, step, failed, playing, selected, railY, x: trackX }: {
   lane: TrainLane; step: number; failed: boolean; playing: boolean; selected: boolean; railY: number; x: number
 }) {
-  const { language, t } = useLanguage()
+  const { t } = useLanguage()
   const id = useId().replaceAll(':', '')
   const cars = lane === 'batch' ? 3 : 1
   const onboard = step >= 2
   const mood = failed || step === 3 ? 1 : step === 4 ? 2 : 0
   const engineX = cars * 300
   const moving = playing && onboard && step < 4 && !failed
-  const status = failed ? t('Kontrola selhala', 'Check failed') : TRAIN_LANES[lane].stops[step][language]
   return <g data-lane={lane} data-step={step} data-selected={selected} data-moving={moving}>
     <defs>
       <linearGradient id={`${id}-glass`} x2="1" y2="1"><stop stopColor="#b8d4ec" stopOpacity=".1" /><stop offset=".4" stopColor="#b8d4ec" stopOpacity="0" /><stop offset="1" stopColor="#06101f" stopOpacity=".18" /></linearGradient>
@@ -97,12 +96,6 @@ function LaneTrain({ lane, step, failed, playing, selected, railY, x: trackX }: 
         </g>
       </g>
     </g>
-    <g transform={`translate(42 ${railY - 130})`} aria-hidden="true">
-      <rect width="235" height="91" rx="5" fill="#0b1928" fillOpacity=".92" stroke={selected ? '#46c7ff' : '#8b9ba7'} strokeOpacity={selected ? 1 : .45} />
-      <text x="16" y="25" fill="#a8c6d8" fontSize="13" letterSpacing="2">{t('KOLEJ', 'TRACK')} {TRACKS.findIndex(track => track.lane === lane) + 1}</text>
-      <text x="16" y="50" fill="#edf6fa" fontSize="20" fontWeight="600">{TRAIN_LANES[lane].title[language]}</text>
-      <text x="16" y="74" fill={failed ? '#ffb1a8' : '#c1d4df'} fontSize="15">{status}</text>
-    </g>
     <g transform={`translate(1462 ${railY - 110})`} aria-hidden="true">
       <path d="M14 79v31" stroke="#263743" strokeWidth="5" />
       <rect width="28" height="79" rx="12" fill="#0b1928" stroke="#748696" />
@@ -114,12 +107,20 @@ function LaneTrain({ lane, step, failed, playing, selected, railY, x: trackX }: 
 }
 
 /** Independent CI lanes share a station; merging still obeys main's reservations. */
-export function TrainScene({ lane, steps, playing, failed }: { lane: TrainLane; steps: TrainProgress; playing: boolean; failed: boolean }) {
-  const { t } = useLanguage()
+export function TrainScene({ lane, steps, playing, failed, onSelectLane }: { lane: TrainLane; steps: TrainProgress; playing: boolean; failed: boolean; onSelectLane: (lane: TrainLane) => void }) {
+  const { language, t } = useLanguage()
   const id = useId().replaceAll(':', '')
   const step = steps[lane]
   return <div className={styles.scene} data-playing={playing}>
-    <svg viewBox="0 0 1536 1024" className={styles.sceneSvg} role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-desc`}>
+    <div className={styles.sceneLanes} role="group" aria-label={t('Vyberte kolej', 'Choose a lane')}>
+      {TRACKS.map((track, index) => <button key={track.lane} type="button" aria-pressed={lane === track.lane} onClick={() => onSelectLane(track.lane)} style={{ top: `${(track.railY - 550) / 604 * 100}%` }}>
+        <span>{t('KOLEJ', 'TRACK')} {index + 1}</span>
+        <strong>{TRAIN_LANES[track.lane].title[language]}</strong>
+        <span>{failed && lane === track.lane ? t('Kontrola selhala', 'Check failed') : TRAIN_LANES[track.lane].stops[steps[track.lane]][language]}</span>
+        <span className="sr-only">{TRAIN_LANES[track.lane].subtitle[language]}</span>
+      </button>)}
+    </div>
+    <svg viewBox="0 420 1536 604" className={styles.sceneSvg} role="img" aria-labelledby={`${id}-title`} aria-describedby={`${id}-desc`}>
       <title id={`${id}-title`}>{t('Lví vláček změn', 'Lion change train')}</title>
       <desc id={`${id}-desc`}>{t(
         `Modelový příklad tří souběžných kolejí inspirovaný Masarykovým nádražím. Vybraná kolej: ${TRAIN_LANES[lane].title.cs}. ${lane === 'batch' ? 'Tři návrhy změn' : 'Jeden návrh změny'}. ${failed ? 'Neúspěšná kontrola zastavila tuto kolej.' : step === 4 ? 'Lvíčci oslavují úspěšné sloučení.' : step >= 2 ? 'Lvíčci nastoupili do vagónů.' : step === 1 ? 'Kontrola jízdenek představuje kontroly PR před nástupem.' : 'Návrh změny čeká na ověření před nástupem.'} Kontroly mohou běžet souběžně; sloučení do main se řídí pořadím a rezervacemi.`,
@@ -128,14 +129,7 @@ export function TrainScene({ lane, steps, playing, failed }: { lane: TrainLane; 
       <defs><linearGradient id={`${id}-shade`} x2="0" y2="1"><stop stopColor="#06101f" stopOpacity=".75" /><stop offset=".28" stopColor="#06101f" stopOpacity=".05" /><stop offset="1" stopColor="#06101f" stopOpacity=".12" /></linearGradient></defs>
       <image href="/brand/sdlc/masaryk-station-parallel.webp" width="1536" height="1024" />
       <rect width="1536" height="1024" fill={`url(#${id}-shade)`} />
-      <g aria-hidden="true" className={styles.sceneMasthead}>
-        <image href="/brand/sdlc/openbank-mark.svg" x="62" y="34" width="58" height="38" />
-        <text x="138" y="59" fill="#e7f6ff" fontSize="20" letterSpacing="5">{t('OpenBank / CI EXPRESS', 'OpenBank / CI EXPRESS')}</text>
-        <text x="64" y="105" fill="#c3d8eb" fontSize="17">{t('Praha · inspirace Masarykovým nádražím', 'Prague · inspired by Masaryk station')}</text>
-        <text x="64" y="139" fill="#c3d8eb" fontSize="16">{t('Souběžné kontroly · řízené sloučení do main', 'Concurrent checks · governed merges into main')}</text>
-      </g>
       {TRACKS.map(track => <LaneTrain key={track.lane} {...track} step={steps[track.lane]} failed={failed && lane === track.lane} playing={playing} selected={lane === track.lane} />)}
-      <text x="64" y="1008" fill="#d1dce3" fontSize="13" letterSpacing="2" aria-hidden="true">{t('ILUSTRAČNÍ PROVOZ · NEJDE O ŽIVOU FRONTU', 'ILLUSTRATIVE OPERATIONS · NOT A LIVE QUEUE')}</text>
     </svg>
   </div>
 }

@@ -9,6 +9,7 @@ import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnDefinition
+import com.openbank.tax.infrastructure.returns.ceu.CeuReturnDataAdapter
 import com.openbank.tax.infrastructure.returns.crsfatca.CrsFatcaReturnDataAdapter
 import com.openbank.tax.infrastructure.returns.pension.PensionReturnDataAdapter
 import jakarta.enterprise.context.ApplicationScoped
@@ -23,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped
 class CatalogueRoutingReturnDataPort(
     private val pension: PensionReturnDataAdapter,
     private val crsFatca: CrsFatcaReturnDataAdapter,
+    private val ceu: CeuReturnDataAdapter,
 ) : ReturnDataPort {
     override val available: Boolean = true
 
@@ -34,6 +36,8 @@ class CatalogueRoutingReturnDataPort(
     ) = when (catalogue.id) {
         CrsFatcaReturnDataAdapter.CATALOGUE_ID ->
             crsFatca.fetch(catalogue, definition, entityId, period)
+        CeuReturnDataAdapter.CATALOGUE_ID ->
+            ceu.fetch(catalogue, definition, entityId, period)
         PENSION_CATALOGUE_ID ->
             pension.fetch(catalogue, definition, entityId, period)
         else -> throw ReturnDataUnavailableException("no data adapter is bound to catalogue ${catalogue.id}")

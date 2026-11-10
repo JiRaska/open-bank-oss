@@ -98,7 +98,7 @@ jobs:
             jq -e --arg source "$SOURCE_COMMIT" --arg workflow "${GITHUB_WORKFLOW_SHA:-$GITHUB_SHA}" \
               '.materials[0].digest.sha1 == $source and .invocation.configSource.digest.sha1 == $workflow' >/dev/null
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -106,9 +106,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           cache-read-only: true    # evidence builds restore without consuming writer budget
 

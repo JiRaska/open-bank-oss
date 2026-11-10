@@ -219,6 +219,9 @@ openbank-admin-ui/quality-report.json
 # (scripts/generate-card-capabilities.mjs, ADR-0283 phase 3). Derived from
 # openbank-libs/governance/card-capabilities.yaml — edit the registry, never this.
 openbank-admin-ui/card-capabilities.json
+# Baked by scripts/generate-regulatory-obligations.mjs from
+# openbank-libs/governance/regulatory-obligations.yaml (ADR-0367) — edit the register, never this.
+openbank-admin-ui/regulatory-obligations.json
 openbank-admin-ui/test-intelligence.json
 openbank-admin-ui/perf-artifacts/
 openbank-admin-ui/test-intelligence-history/
