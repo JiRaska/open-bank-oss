@@ -15,7 +15,7 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   await expect(train).toBeVisible()
   const scene = train.getByRole('img', { name: /Lví vláček|Lion change train/ })
   const playback = train.locator('[data-play-control]')
-  if (await playback.getAttribute('aria-pressed') === 'true') await playback.click()
+  // The shared reduced-motion fixture pauses after hydration; toggling the SSR state races that effect.
   await expect(playback).toHaveAttribute('aria-pressed', 'false')
   await expect(scene).toHaveAccessibleDescription(/tří souběžných kolejí|three concurrent tracks/)
   await expect(scene.locator('[data-lane]')).toHaveCount(3)
@@ -51,7 +51,7 @@ test('CI scene, lane selection and phases fit together in the viewport', async (
   const train = page.getByRole('region', { name: /Více kolejí|Several tracks/ })
   const board = train.locator('[data-train-board]')
   const playback = train.locator('[data-play-control]')
-  if (await playback.getAttribute('aria-pressed') === 'true') await playback.click()
+  // The shared reduced-motion fixture pauses after hydration; toggling the SSR state races that effect.
   await expect(playback).toHaveAttribute('aria-pressed', 'false')
   for (const viewport of [{ width: 1280, height: 720 }, { width: 1920, height: 1080 }, { width: 375, height: 812 }]) {
     await page.setViewportSize(viewport)
@@ -103,6 +103,7 @@ for (const route of ['ci', 'cd']) {
     await page.goto(`/devops/sdlc/${route}`)
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
     if (route === 'ci') {
+      await expect(page.locator('[data-play-control]')).toHaveAttribute('aria-pressed', 'false')
       const lane = page.getByRole('button', { name: /Přísná kolej|Strict lane/ })
       await lane.focus()
       await lane.press('Enter')
