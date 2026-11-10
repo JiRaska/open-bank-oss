@@ -147,8 +147,14 @@ not change any existing request's outcome until explicitly flipped.
   that case is the one an analyst decides. Bounded by the decision itself needing the decision roles,
   and the payment id being server-generated. Tampering is bounded because a signal can only choose
   between the two outcomes of a waiting run, first answer wins, and sanctions screening has already
-  passed. Known limit: a run re-driven by the screening sweep
-  has a suffixed workflow id, so a decision misses it (`delivery="NOT_WAITING"`) and it fails closed.
+  passed. Routing (#15198 review fix): every run of a payment, including a screening re-drive, carries the
+  one workflow id `domestic-payment-<paymentId>` (explicit ALLOW_DUPLICATE reuse, FAIL on conflict), and
+  the decision is signalled to that id with no run id, so it reaches the current run and never a stale
+  one. The re-drive previously used a suffixed id, so an analyst CLEAR on a re-driven hold missed it and
+  the hold timed out into a false REJECT; it also started a parallel second run while the first was
+  still holding, which Temporal now refuses. `delivery="NOT_WAITING"` remains only for a decision
+  arriving after the hold ended; it is returned, counted and logged at WARN, and no hold is left
+  pending behind it.
 
 - **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
   New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
