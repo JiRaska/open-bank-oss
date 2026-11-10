@@ -103,7 +103,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 is the bounded non-money development pilot; phases 4–5 (money-path development and independently verifiable provenance) remain future steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps declares a controlled PR-writer pilot with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true and a read-only snapshot of this service's own test sources. The snapshot is collected from public main at pod startup, never built or executed, and its revision is logged. A false writer switch returns DENY; it never bypasses policy. No fleet sweep cron is enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). The dated phase-3 evidence is in docs/runbooks/evidence/ai-phase3/2026-11-10.md: a completed source scan with a persisted ticket proposal, an independently verified human merge and hash-chained audit event, image attestations, and matching sandbox Pact deployment records. These observations grant no wider write scope. A ticket-only scan is not proof of a successful mechanical code PR, and a deterministic fallback is not a model completion."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phase 3 is the bounded non-money development pilot; phases 4–5 (money-path development and independently verifiable provenance) remain future steps. Phase-3 mechanism implemented: flaky-test-hunter's PR path checks the packaged agents.yaml charter in process and queries the OPA sidecar. Both fail CLOSED before any branch or PR is created, including on any PDP outage (advisory degradation is not acceptable there; every decision is audited as agent.github.pr_open with policy_decision). GitOps declares a controlled PR-writer pilot with FLAKY_TEST_HUNTER_POLICY_GATE_ENABLED=true and a read-only snapshot of this service's own test sources. The snapshot is collected from public main at pod startup, never built or executed, and its revision is logged. A false writer switch returns DENY; it never bypasses policy. No fleet sweep cron is enabled. The recorded-human-merge mechanism is implemented: record-agent-merge workflow → POST /api/v1/agent-merge-records → agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent telemetry). The dated phase-3 evidence is in docs/runbooks/evidence/ai-phase3/2026-11-10.md: a completed source scan with two persisted model-backed diagnoses, independently confirmed gateway completions, a ticket proposal, an independently verified human merge and hash-chained audit event, image attestations, and matching sandbox Pact deployment records. These observations grant no wider write scope. A ticket-only scan is not proof of a successful mechanical code PR, and a deterministic fallback is not a model completion."
     }
   ],
   "decisionSummary": {
@@ -176,7 +176,7 @@
       "Audit envelope + Kafka pipeline",
       "Hash-chain (record_hash/prev_hash, V5)",
       "Externally-signed anchors (V6; AWS KMS signer configured in sandbox)",
-      "Bounded source pilot completed with a persisted ticket proposal (dated evidence, 2026-11-10)",
+      "Bounded source pilot completed with model-backed diagnoses and a persisted ticket proposal (dated evidence, 2026-11-10)",
       "Human agent-PR merge independently verified in the merge store, outbox and separate audit store"
     ],
     "planned": [
@@ -466,7 +466,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "5f7e76146d232457"
+        "sha256": "39b4692cb2763371"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

@@ -159,8 +159,9 @@ decisions:
       POST /api/v1/agent-merge-records →
       agent_merge_record (V6) + agent.pr.merged audit (actorType=HUMAN, out-of-band of agent
       telemetry). The dated phase-3 evidence is in
-      docs/runbooks/evidence/ai-phase3/2026-11-10.md: a completed source scan with a
-      persisted ticket proposal, an independently verified human merge and hash-chained
+      docs/runbooks/evidence/ai-phase3/2026-11-10.md: a completed source scan with two
+      persisted model-backed diagnoses, independently confirmed gateway completions, a ticket
+      proposal, an independently verified human merge and hash-chained
       audit event, image attestations, and matching sandbox Pact deployment records.
       These observations grant no wider write scope. A ticket-only scan is not proof of a
       successful mechanical code PR, and a deterministic fallback is not a model completion.
@@ -215,7 +216,7 @@ auditTrail:
     - Audit envelope + Kafka pipeline
     - Hash-chain (record_hash/prev_hash, V5)
     - Externally-signed anchors (V6; AWS KMS signer configured in sandbox)
-    - Bounded source pilot completed with a persisted ticket proposal (dated evidence, 2026-11-10)
+    - Bounded source pilot completed with model-backed diagnoses and a persisted ticket proposal (dated evidence, 2026-11-10)
     - Human agent-PR merge independently verified in the merge store, outbox and separate audit store
   planned:
     - First live policy-allowed mechanical repair PR from the deployed bounded writer
