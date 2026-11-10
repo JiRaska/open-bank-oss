@@ -45,8 +45,33 @@ listed in `GsftBatch.rejected` with the reason, for correction and a follow-up t
 `T_PAYMENT` counts only persons actually rendered. Only batch-level errors (bank code, batch
 number, rate day) fail the render.
 
+## Special-regime accounts (`DII`)
+
+An account in the special regime (účet ve speciálním režimu, § 41f) is held by an owner for
+beneficiaries (podílníci). Verified against the annex (1.2.2, 1.2.5):
+
+- the account is in `DIA` under its owner; a beneficiary is never in `DIA`;
+- `DII` carries one record per beneficiary share: `D`, IDC, TYPE, ORDER_P, ACCOUNT, CURRENCY,
+  AMOUNT, AMOUNT_CZK, sorted by IDC, TYPE, ORDER_P, ACCOUNT; `DIW.N_SPECIAL` counts them and a
+  zero count means no `DII` file;
+- the cover limit does not apply to the owner's `PAYMENT`, so special-regime balances are added
+  uncapped on top of the owner's capped ordinary claim;
+- a person whose funds are only on special-regime accounts has `PAYMENT` 0.
+
+**Unverified / unresolved — the batch FAILS rather than guess:**
+
+- the coefficient *k* (1.2.5.1), applied when a beneficiary holds funds through two or more
+  owners, is not computed;
+- whether a beneficiary who is also a depositor in their own right gets their `DII` shares merged
+  into one `DIC` record is not stated;
+- a beneficiary-only `DIC.T_CLAIM` is the sum of their `DII` shares in CZK — the annex says only
+  "sum of all accounts under I_IDC" (*unverified*).
+
+No owning service models special-regime accounts or their beneficiaries today, so nothing feeds
+`SpecialRegimeShare` yet; the format is ready for when one does.
+
 ## Not yet here
 
-Data sourcing from the account register and balances, the institutional file (`DII`), ZIP/PGP
+Data sourcing from the account register and balances, ZIP/PGP
 transport, four-eyes attestation and filing, the scheduled TEST dry run, and temporarily high
 balances are follow-ups on #15356.
