@@ -26,9 +26,17 @@ import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
-data class OpenSubmissionRequest(val templateId: String? = null, val referencePeriod: String? = null, val revision: Int? = null)
+data class OpenSubmissionRequest(
+    val templateId: String? = null,
+    val referencePeriod: String? = null,
+    val revision: Int? = null,
+)
 
-data class AcknowledgementRequest(val accepted: Boolean? = null, val reference: String? = null, val message: String? = null)
+data class AcknowledgementRequest(
+    val accepted: Boolean? = null,
+    val reference: String? = null,
+    val message: String? = null,
+)
 
 data class SubmissionResponse(
     val id: UUID,

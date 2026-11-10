@@ -76,11 +76,17 @@ class SupervisorySubmissionApiIT {
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `open is idempotent, dry-run submit records an attempt and leaves the return PACKAGED`() {
         val body = """{"templateId":"F01.01","referencePeriod":"2026-06-30","revision":1}"""
-        val id: String = Given { contentType("application/json"); body(body) } When { post(path) } Then {
+        val id: String = Given {
+            contentType("application/json")
+            body(body)
+        } When { post(path) } Then {
             statusCode(201)
             body("state", equalTo("DRAFT"))
         } Extract { path("id") }
-        Given { contentType("application/json"); body(body) } When { post(path) } Then {
+        Given {
+            contentType("application/json")
+            body(body)
+        } When { post(path) } Then {
             statusCode(200)
             body("id", equalTo(id))
         }
@@ -149,7 +155,10 @@ class SupervisorySubmissionApiIT {
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `missing fields are a 400, unknown id a 404`() {
-        Given { contentType("application/json"); body("""{"templateId":"F01.01"}""") } When { post(path) } Then {
+        Given {
+            contentType("application/json")
+            body("""{"templateId":"F01.01"}""")
+        } When { post(path) } Then {
             statusCode(400)
         }
         Given { this } When { get("$path/00000000-0000-0000-0000-000000000099") } Then { statusCode(404) }

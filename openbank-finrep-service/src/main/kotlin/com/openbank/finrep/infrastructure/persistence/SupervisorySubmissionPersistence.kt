@@ -137,41 +137,39 @@ class PanacheSupervisorySubmissionRepository(
     override suspend fun findById(id: UUID): SupervisorySubmission? =
         Panache.withSession { submissions.findById(id) }.awaitSuspending()?.toDomain()
 
-    override suspend fun findByKey(key: SubmissionKey): SupervisorySubmission? =
-        Panache.withSession {
-            submissions.find(
-                "templateId = ?1 and referencePeriod = ?2 and revision = ?3",
-                key.templateId,
-                key.referencePeriod,
-                key.revision,
-            ).firstResult()
-        }.awaitSuspending()?.toDomain()
+    override suspend fun findByKey(key: SubmissionKey): SupervisorySubmission? = Panache.withSession {
+        submissions.find(
+            "templateId = ?1 and referencePeriod = ?2 and revision = ?3",
+            key.templateId,
+            key.referencePeriod,
+            key.revision,
+        ).firstResult()
+    }.awaitSuspending()?.toDomain()
 
-    override suspend fun list(templateId: String?): List<SupervisorySubmission> =
-        Panache.withSession {
-            if (templateId == null) {
-                submissions.find("order by referencePeriod desc, templateId, revision desc").list()
-            } else {
-                submissions.find("templateId = ?1 order by referencePeriod desc, revision desc", templateId).list()
-            }
-        }.awaitSuspending().map { it.toDomain() }
+    override suspend fun list(templateId: String?): List<SupervisorySubmission> = Panache.withSession {
+        if (templateId == null) {
+            submissions.find("order by referencePeriod desc, templateId, revision desc").list()
+        } else {
+            submissions.find("templateId = ?1 order by referencePeriod desc, revision desc", templateId).list()
+        }
+    }.awaitSuspending().map { it.toDomain() }
 
-    override suspend fun save(submission: SupervisorySubmission): SupervisorySubmission =
-        Panache.withTransaction {
-            Panache.getSession().flatMap { it.merge(submission.toEntity()) }
-        }.awaitSuspending().toDomain()
+    override suspend fun save(submission: SupervisorySubmission): SupervisorySubmission = Panache.withTransaction {
+        Panache.getSession().flatMap { it.merge(submission.toEntity()) }
+    }.awaitSuspending().toDomain()
 
-    override suspend fun saveWithAttempt(submission: SupervisorySubmission, attempt: SubmissionAttempt): SupervisorySubmission =
-        Panache.withTransaction {
-            Panache.getSession().flatMap { session ->
-                session.merge(attempt.toEntity()).flatMap { session.merge(submission.toEntity()) }
-            }
-        }.awaitSuspending().toDomain()
+    override suspend fun saveWithAttempt(
+        submission: SupervisorySubmission,
+        attempt: SubmissionAttempt,
+    ): SupervisorySubmission = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.merge(attempt.toEntity()).flatMap { session.merge(submission.toEntity()) }
+        }
+    }.awaitSuspending().toDomain()
 
-    override suspend fun attempts(submissionId: UUID): List<SubmissionAttempt> =
-        Panache.withSession {
-            attemptRepository.find("submissionId = ?1 order by attemptNo", submissionId).list()
-        }.awaitSuspending().map { it.toDomain() }
+    override suspend fun attempts(submissionId: UUID): List<SubmissionAttempt> = Panache.withSession {
+        attemptRepository.find("submissionId = ?1 order by attemptNo", submissionId).list()
+    }.awaitSuspending().map { it.toDomain() }
 }
 
 private fun SupervisorySubmission.toEntity() = SubmissionEntity().also {

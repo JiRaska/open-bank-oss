@@ -24,7 +24,9 @@ class SupervisorySubmissionTest {
 
     @Test
     fun `dry run and failure leave the return PACKAGED - nothing sent never reads as sent`() {
-        assertThat(packaged.afterTransport(TransportOutcome.DRY_RUN, null, at).state).isEqualTo(SubmissionState.PACKAGED)
+        assertThat(
+            packaged.afterTransport(TransportOutcome.DRY_RUN, null, at).state,
+        ).isEqualTo(SubmissionState.PACKAGED)
         assertThat(packaged.afterTransport(TransportOutcome.FAILED, null, at).state).isEqualTo(SubmissionState.PACKAGED)
         assertThat(packaged.afterTransport(TransportOutcome.DRY_RUN, null, at).submittedAt).isNull()
     }
@@ -37,7 +39,9 @@ class SupervisorySubmissionTest {
         val ack = SubmissionAcknowledgement(true, "ACK-1", null, "op", at)
         assertThat(submitted.acknowledged(ack).state).isEqualTo(SubmissionState.ACKNOWLEDGED)
         assertThat(submitted.acknowledged(ack.copy(accepted = false)).state).isEqualTo(SubmissionState.REJECTED)
-        assertThat(packaged.afterTransport(TransportOutcome.REJECTED, "R-2", at).state).isEqualTo(SubmissionState.REJECTED)
+        assertThat(
+            packaged.afterTransport(TransportOutcome.REJECTED, "R-2", at).state,
+        ).isEqualTo(SubmissionState.REJECTED)
     }
 
     @Test
@@ -53,6 +57,8 @@ class SupervisorySubmissionTest {
     @Test
     fun `key rejects blank template and non-positive revision`() {
         assertThatThrownBy { SubmissionKey(" ", LocalDate.EPOCH, 1) }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { SubmissionKey("F01.01", LocalDate.EPOCH, 0) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            SubmissionKey("F01.01", LocalDate.EPOCH, 0)
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

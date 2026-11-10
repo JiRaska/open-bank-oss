@@ -56,14 +56,17 @@ class SupervisorySubmissionService(
     override suspend fun pkg(id: UUID, actor: String): SupervisorySubmission {
         val current = get(id)
         if (current.state != SubmissionState.DRAFT) return current
-        val result = preflight.getPreflight(GetXbrlCsvPreflightQuery(current.key.templateId, current.key.referencePeriod))
+        val result = preflight.getPreflight(
+            GetXbrlCsvPreflightQuery(current.key.templateId, current.key.referencePeriod),
+        )
         if (result.state != XbrlCsvPreflightState.READY_FOR_RENDERING) {
             throw ResourceConflictException(
                 "preflight BLOCKED: " + result.blockers.joinToString { it.code },
                 code = "PREFLIGHT_BLOCKED",
             )
         }
-        val hash = manifestHash(current.key, result.reportingFrameworkVersion, result.dpmVersion, result.taxonomyVersion)
+        val hash =
+            manifestHash(current.key, result.reportingFrameworkVersion, result.dpmVersion, result.taxonomyVersion)
         return repository.save(
             current.packaged(result.reportingFrameworkVersion, result.taxonomyVersion, hash, actor, clock.instant()),
         )
@@ -74,8 +77,13 @@ class SupervisorySubmissionService(
     override suspend fun submit(id: UUID, actor: String): SupervisorySubmission {
         val current = get(id)
         when (current.state) {
-            SubmissionState.DRAFT -> throw ResourceConflictException("package the submission before submitting it", "NOT_PACKAGED")
+            SubmissionState.DRAFT -> throw ResourceConflictException(
+                "package the submission before submitting it",
+                "NOT_PACKAGED",
+            )
+
             SubmissionState.SUBMITTED, SubmissionState.ACKNOWLEDGED, SubmissionState.REJECTED -> return current
+
             SubmissionState.PACKAGED -> Unit
         }
         val pkg = SupervisoryReturnPackage(
@@ -107,10 +115,15 @@ class SupervisorySubmissionService(
         return repository.saveWithAttempt(current.afterTransport(result.outcome, result.reference, now), attempt)
     }
 
-    override suspend fun acknowledge(id: UUID, command: RecordAcknowledgementCommand, actor: String): SupervisorySubmission {
+    override suspend fun acknowledge(
+        id: UUID,
+        command: RecordAcknowledgementCommand,
+        actor: String,
+    ): SupervisorySubmission {
         require(command.reference.isNotBlank()) { "acknowledgement reference is required" }
         val current = get(id)
-        val ack = SubmissionAcknowledgement(command.accepted, command.reference, command.message, actor, clock.instant())
+        val ack =
+            SubmissionAcknowledgement(command.accepted, command.reference, command.message, actor, clock.instant())
         return repository.save(current.acknowledged(ack))
     }
 
@@ -126,7 +139,14 @@ class SupervisorySubmissionService(
 
     internal companion object {
         fun manifestHash(key: SubmissionKey, framework: String, dpm: String, taxonomy: String): String {
-            val canonical = listOf(key.templateId, key.referencePeriod.toString(), key.revision.toString(), framework, dpm, taxonomy)
+            val canonical = listOf(
+                key.templateId,
+                key.referencePeriod.toString(),
+                key.revision.toString(),
+                framework,
+                dpm,
+                taxonomy,
+            )
                 .joinToString("|")
             return MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray())
                 .joinToString("") { "%02x".format(it) }

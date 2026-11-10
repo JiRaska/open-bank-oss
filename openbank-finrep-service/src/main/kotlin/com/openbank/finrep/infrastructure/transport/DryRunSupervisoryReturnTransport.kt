@@ -30,7 +30,10 @@ class DryRunSupervisoryReturnTransport : SupervisoryReturnTransport {
             pkg.key.referencePeriod,
             pkg.key.revision,
         )
-        return TransportResult(TransportOutcome.DRY_RUN, detail = "no supervisory transport configured; nothing transmitted")
+        return TransportResult(
+            TransportOutcome.DRY_RUN,
+            detail = "no supervisory transport configured; nothing transmitted",
+        )
     }
 
     private companion object {

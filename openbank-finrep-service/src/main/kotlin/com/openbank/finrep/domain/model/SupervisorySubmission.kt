@@ -70,7 +70,13 @@ data class SupervisorySubmission(
     val transportReference: String? = null,
     val acknowledgement: SubmissionAcknowledgement? = null,
 ) {
-    fun packaged(frameworkVersion: String, taxonomy: String, hash: String, by: String, at: Instant): SupervisorySubmission {
+    fun packaged(
+        frameworkVersion: String,
+        taxonomy: String,
+        hash: String,
+        by: String,
+        at: Instant,
+    ): SupervisorySubmission {
         requireState(SubmissionState.DRAFT, "package")
         return copy(
             state = SubmissionState.PACKAGED,
@@ -86,8 +92,14 @@ data class SupervisorySubmission(
     fun afterTransport(outcome: TransportOutcome, reference: String?, at: Instant): SupervisorySubmission {
         requireState(SubmissionState.PACKAGED, "submit")
         return when (outcome) {
-            TransportOutcome.SUBMITTED -> copy(state = SubmissionState.SUBMITTED, submittedAt = at, transportReference = reference)
+            TransportOutcome.SUBMITTED -> copy(
+                state = SubmissionState.SUBMITTED,
+                submittedAt = at,
+                transportReference = reference,
+            )
+
             TransportOutcome.REJECTED -> copy(state = SubmissionState.REJECTED, transportReference = reference)
+
             TransportOutcome.DRY_RUN, TransportOutcome.FAILED -> this
         }
     }
