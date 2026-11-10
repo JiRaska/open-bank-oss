@@ -184,23 +184,35 @@ class PanacheSupervisorySubmissionRepository(
         claimId: UUID,
         claimedBefore: Instant?,
     ): Boolean = Panache.withTransaction {
-        val params = mutableListOf<Any?>(
-            next.state.name,
-            next.submittedAt,
-            next.transportReference,
-            next.claimedAt,
-            next.claimId,
-            next.id,
-            expected.name,
-            claimId,
-        )
-        var query = "state = ?1, submittedAt = ?2, transportReference = ?3, claimedAt = ?4, claimId = ?5 " +
+        val set = "state = ?1, submittedAt = ?2, transportReference = ?3, claimedAt = ?4, claimId = ?5 " +
             "where id = ?6 and state = ?7 and claimId = ?8"
-        if (claimedBefore != null) {
-            params += claimedBefore
-            query += " and claimedAt < ?9"
+        val moved = if (claimedBefore == null) {
+            submissions.update(
+                set,
+                next.state.name,
+                next.submittedAt,
+                next.transportReference,
+                next.claimedAt,
+                next.claimId,
+                next.id,
+                expected.name,
+                claimId,
+            )
+        } else {
+            submissions.update(
+                "$set and claimedAt < ?9",
+                next.state.name,
+                next.submittedAt,
+                next.transportReference,
+                next.claimedAt,
+                next.claimId,
+                next.id,
+                expected.name,
+                claimId,
+                claimedBefore,
+            )
         }
-        submissions.update(query, *params.toTypedArray()).flatMap { rows ->
+        moved.flatMap { rows ->
             if (rows == 1) {
                 Panache.getSession().flatMap { it.merge(attempt.toEntity()) }.map { true }
             } else {

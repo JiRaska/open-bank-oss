@@ -37,10 +37,11 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Claim fencing. Holder A claims and is stuck in the transport; its lease lapses, an ADMIN
- * reconciles the return to PACKAGED, and holder B claims and files it. When A's transport finally
- * answers, A's transition must move nothing (its claim id no longer matches) and A's late result
- * is recorded only as an UNKNOWN attempt under A's own claim id. Without the claim_id fence, A's
- * `WHERE state = 'SUBMITTING'` update would land on B's row.
+ * reconciles the return to PACKAGED, and holder B claims it and is itself mid-transmission. When
+ * A's transport answers then, A's transition must move nothing (its claim id no longer matches)
+ * and A's late result is recorded only as an UNKNOWN attempt under A's own claim id. Without the
+ * claim_id fence, A's `WHERE state = 'SUBMITTING'` update lands on B's row (verified: the test
+ * fails with the fence removed).
  */
 @QuarkusTest
 class SupervisorySubmissionFencingIT {
@@ -48,6 +49,8 @@ class SupervisorySubmissionFencingIT {
     private val calls = AtomicInteger()
     private val aEntered = CountDownLatch(1)
     private val releaseA = CountDownLatch(1)
+    private val bEntered = CountDownLatch(1)
+    private val releaseB = CountDownLatch(1)
 
     @BeforeEach
     fun mocks() {
@@ -74,6 +77,8 @@ class SupervisorySubmissionFencingIT {
                 withContext(Dispatchers.IO) { releaseA.await(WAIT_SECONDS, TimeUnit.SECONDS) }
                 TransportResult(TransportOutcome.SUBMITTED, reference = "REF-A")
             } else {
+                bEntered.countDown()
+                withContext(Dispatchers.IO) { releaseB.await(WAIT_SECONDS, TimeUnit.SECONDS) }
                 TransportResult(TransportOutcome.SUBMITTED, reference = "REF-B")
             }
         }
@@ -99,16 +104,21 @@ class SupervisorySubmissionFencingIT {
             body("""{"sent":false,"note":"supervisor has no record"}""")
         } When { post("$path/$id/reconcile") } Then { body("state", equalTo("PACKAGED")) }
 
-        // Holder B claims and files.
-        Given { this } When { post("$path/$id/submit") } Then {
-            statusCode(200)
-            body("state", equalTo("SUBMITTED"))
-            body("transportReference", equalTo("REF-B"))
-        }
+        // Holder B claims and is now mid-transmission: the row is SUBMITTING again, under B's claim.
+        val holderB = CompletableFuture.supplyAsync { RestAssured.given().post("$path/$id/submit").statusCode }
+        assertThat(bEntered.await(WAIT_SECONDS, TimeUnit.SECONDS)).isTrue()
+        val claimB = scalar("select claim_id::text from finrep_submission where id = '$id'::uuid")
+        assertThat(claimB).isNotEqualTo(claimA)
 
-        // A finally answers. Its transition must be a no-op.
+        // A answers late WHILE B holds the claim. `state = 'SUBMITTING'` alone would match B's
+        // row here; only the claim_id fence keeps A's result off it.
         releaseA.countDown()
         assertThat(holderA.get(WAIT_SECONDS, TimeUnit.SECONDS)).isEqualTo(200)
+        assertThat(scalar("select state || ':' || claim_id from finrep_submission where id = '$id'::uuid"))
+            .isEqualTo("SUBMITTING:$claimB")
+
+        releaseB.countDown()
+        assertThat(holderB.get(WAIT_SECONDS, TimeUnit.SECONDS)).isEqualTo(200)
 
         assertThat(calls.get()).isEqualTo(2)
         assertThat(scalar("select transport_reference from finrep_submission where id = '$id'::uuid"))
