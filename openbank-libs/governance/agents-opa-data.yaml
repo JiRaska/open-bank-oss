@@ -182,6 +182,22 @@ agents:
     - tier: execute
       resources:
       - '*'
+- id: regulatory-obligations-watcher
+  tools:
+    allow:
+    - tier: read
+      resources:
+      - read.governance
+    - tier: write_proposal
+      resources:
+      - draft.ticket
+    deny:
+    - tier: write
+      resources:
+      - '*'
+    - tier: execute
+      resources:
+      - '*'
 - id: card-dispute-evidence-agent
   tools:
     allow:
