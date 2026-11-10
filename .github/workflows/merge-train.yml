@@ -79,6 +79,9 @@ env:
   # Strict carrier (ADR-0343 amendment 2026-11-05): members per execution-free strict carrier built by
   # settle over live main. "1" is the rollback: no strict carrier, one update-branch per 2.4 h slot as before.
   MERGE_TRAIN_STRICT_BATCH_CAP: "8"
+  # Speculative stacking (ADR-0343 amendment 2026-11-09): the train carrier may be published over a
+  # running strict holder's up-to-date head instead of over main. "false" is the rollback: bounded deferral as before.
+  MERGE_TRAIN_SPECULATIVE_STACK: "true"
 
 jobs:
   settle:
@@ -91,6 +94,9 @@ jobs:
       contents: read
     outputs:
       in_flight: ${{ steps.settle.outputs.in_flight }}
+      # Speculative-stacking window (holder PR, holder head): data only, re-validated live by publish.
+      stack_pr: ${{ steps.settle.outputs.stack_pr }}
+      stack_head: ${{ steps.settle.outputs.stack_head }}
     steps:
       - name: Mint the GitHub App installation token
         id: app_token
@@ -130,6 +136,7 @@ jobs:
           # Strict carrier: settle builds it with execution-free git (merge-tree, commit-tree) and pushes its
           # own commits to train/strict-<run_id>-<attempt>; the cap is the rollback switch (1 = off).
           STRICT_BATCH_CAP: ${{ env.MERGE_TRAIN_STRICT_BATCH_CAP }}
+          SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}
           # Isolated git config for THIS step only. At job level it also reached actions/checkout,
           # whose safe.directory write then failed: "could not lock config file /dev/null".
           GIT_CONFIG_NOSYSTEM: "1"
@@ -166,6 +173,9 @@ jobs:
           # No credential survives into the repository the generators run against.
           persist-credentials: false
 
+      - name: gh-call-counter install
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh install
       - name: Install OPA
         env:
           GH_TOKEN: ${{ github.token }}
@@ -221,10 +231,14 @@ jobs:
             ${{ runner.temp }}/merge-train-bundle/drops.txt
           retention-days: 1
           if-no-files-found: error
+      - name: gh-call-counter report
+        if: always()
+        continue-on-error: true
+        run: bash .github/scripts/gh-call-counter.sh report
 
   publish:
     name: verify by re-derivation, push own commits (App token, git only)
-    needs: build
+    needs: [settle, build]
     if: needs.build.outputs.has_train == 'true' || needs.build.outputs.has_drops == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -254,6 +268,9 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           MERGE_TRAIN_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TRAIN_BATCH_SIZE: ${{ inputs.batch_size || 16 }}
+          # Settle's stacking window; publish re-validates both values from live data before using them.
+          STACK_PR: ${{ needs.settle.outputs.stack_pr }}
+          STACK_HEAD: ${{ needs.settle.outputs.stack_head }}
           # Isolated git config for THIS step only (see settle).
           GIT_CONFIG_NOSYSTEM: "1"
           GIT_CONFIG_GLOBAL: /dev/null

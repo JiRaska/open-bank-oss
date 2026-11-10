@@ -229,6 +229,24 @@ RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's in
 RELEASED_CONTEXT = "merge-train/strict-released"  # App marker: this head's reservation timed out once (#14302)
 CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
+# Speculative stacking (ADR-0343 amendment 2026-11-09): while a strict holder H is reserved and its CI
+# runs on an up-to-date head h, the train carrier is published over h instead of over main, so the two
+# CIs run at once instead of one after the other. Build is unchanged (it builds over main, with main's
+# generators); publish re-applies its own verified chain onto h execution-free (3-way merge-tree with
+# main as the merge base) and records STACK_CONTEXT on h. Settle never merges the stacked carrier
+# before H: it waits while H runs, and once H has merged it accepts the carrier only if main's TREE is
+# h's tree (the squash of an up-to-date head), proven with git alone. H failing, moving, closing or
+# being released voids the carrier with no verdict: nobody is blamed. One stacked carrier per holder head.
+# On by default because the path is the common case, not a spare part: measured 2026-11-09 16:18Z, 7
+# strict PRs queued behind one reservation while a 2-member carrier ran, and nothing merged 15:31-16:18Z;
+# a train carrier's CI is ~45-50 min against a strict holder's ~90 min, so serialising them costs the
+# shorter one per reservation, while the bounded deferral that overlaps them pre-empts the holder instead
+# (green carrier #15368 voided by strict #15295's merge, rebuilt as #15369: ~45 min lost). Rollback:
+# MERGE_TRAIN_SPECULATIVE_STACK "false" — the bounded deferral then behaves exactly as before.
+STACK_CONTEXT = "merge-train/stacked-carrier"   # App marker: a carrier was stacked (or refused) on this head
+STACK_DESC_RE = re.compile(r"^stacked carrier (train/[0-9]+-[0-9]+) over #([0-9]+)$")   # on the holder head
+STACK_TIP_RE = re.compile(r"^stacked over ([0-9a-f]{40}) of #([0-9]+)$")                  # on the carrier head
+SPECULATIVE_STACK_DEFAULT = True
 STALE_CULPRIT_CONTEXT = "merge-train/stale-culprit-refresh"   # App marker: this culprit head was update-branched once
 # Every culprit status starts with CULPRIT_PREFIX; a member carrying it waits for a push. A failure
 # whose description starts with LEGACY_CULPRIT_PREFIX was written before the inconclusive rule and
@@ -2602,8 +2620,10 @@ def mark_unverifiable(gh, batch: list[Member]) -> None:
         gh.post_status(m.head_sha, "pending", f"bisect size {max(1, len(batch) // 2)}")
 
 
-def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str, batch_size: int) -> str:
-    """Returns one of: idle, in-flight, rejected, published."""
+def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str, batch_size: int,
+                 stack: tuple[int, str] | None = None) -> str:
+    """Returns one of: idle, in-flight, rejected, published. `stack` = (holder PR, holder head) from
+    settle's speculative-stacking window: re-validated from live data here, never trusted as given."""
     if any_carrier_open(gh, repo):   # a train carrier, or a strict carrier holding the strict reservation
         return "in-flight"
     branch = train_branch(run_id, attempt)
@@ -2646,6 +2666,32 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         if not live_source_intent(gh, n, heads[n]):
             log(f"::notice::#{n} source intent or head changed — carrier not published")
             return "rejected"
+    if stack:
+        hn, hh = stack
+        why = stack_target_problem(gh, git, base, hn, hh)
+        stacked = None
+        if why is None:
+            try:
+                stacked = restack_chain(git, base, hh, v.tip)
+            except Reject as exc:
+                why = str(exc)
+                # One attempt per holder head: settle does not reopen the window on it.
+                gh.post_status(hh, "failure", f"stack refused: {why}"[:140], context=STACK_CONTEXT)
+        if stacked is not None:
+            tip, tree = stacked
+            Pusher(git, branch, gh.remote).push(tip)
+            gh.post_status(tip, "success", f"tree={tree}", context=RECORD_CONTEXT)
+            gh.post_status(tip, "success", f"stacked over {hh} of #{hn}", context=STACK_CONTEXT)
+            # Recorded on the holder head BEFORE the carrier exists: settle identifies a stacked carrier by it.
+            gh.post_status(hh, "success", f"stacked carrier {branch} over #{hn}", context=STACK_CONTEXT)
+            gh.create_carrier(branch)
+            log(f"published {branch} STACKED over #{hn} head {hh[:12]} (main {base[:12]}): members {v.applied}")
+            return "published"
+        log(f"::notice::not stacked over #{hn}: {why}")
+        if SHA_RE.fullmatch(hh or "") and deferral_used(gh, git, hh):
+            # Over main it could merge past a holder that already yielded once: never pre-empted twice.
+            log(f"::notice::#{hn} already yielded once — carrier not published over main either")
+            return "rejected"
     Pusher(git, branch, gh.remote).push(v.tip)
     gh.post_status(v.tip, "success", f"tree={v.tree}", context=RECORD_CONTEXT)
     gh.create_carrier(branch)
@@ -2679,7 +2725,7 @@ def defer_recovered_main_red(gh, base: str, main_red: dict[str, str], summary: d
 
 
 def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str = "",
-                strict_cap: int = STRICT_BATCH_CAP_DEFAULT) -> dict:
+                strict_cap: int = STRICT_BATCH_CAP_DEFAULT, stack: bool = SPECULATIVE_STACK_DEFAULT) -> dict:
     """Judge every finished App carrier (strict carriers first), build the next strict carrier when the
     strict lane is free, then post the fast lane from live data. `run_id`/`attempt` name the strict
     carrier branch; without them (or at `strict_cap` 1) the strict lane behaves exactly as before."""
@@ -2711,6 +2757,22 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         carrier_in_flight = True
     for p in [p for p in gh.open_prs() if is_carrier(p, repo)]:
         sha, branch, carrier = p["head"]["sha"], p["head"]["ref"], p["number"]
+        # Speculative stacking: judged BEFORE any verdict on the carrier's own CI, so a red stacked carrier
+        # over a holder without a verdict can never blame, bisect or halve anything.
+        stacked, stack_why = stack_verdict(gh, git, p, gh.main_sha())
+        if stacked == "wait":
+            # Not carrier_in_flight: the holder must still be free to merge in this tick's strict_lane.
+            log(f"carrier #{carrier}: stacked, {stack_why} — waits, never merged before its holder")
+            summary["in_flight"] = True
+            continue
+        if stacked in ("void", "reject"):
+            log(f"::warning::carrier #{carrier}: stacked, {stack_why} — closed with no verdict, nobody blamed")
+            summary["inconclusive" if stacked == "void" else "rejected"].append(carrier)
+            gh.close_carrier(carrier)
+            Pusher(git, branch, gh.remote).delete()
+            acted = True
+            continue
+        stacked_over = stack_why if stacked == "merged" else None
         extra = train_extra_gates(git, base)
         if extra is None:   # fail closed: no carrier is judged (nothing merges, nobody blamed) until fixed
             summary["in_flight"] = True
@@ -2725,6 +2787,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             checks = own_workflow_checks(checks, extra, changed_paths(git, f"{base}...{sha}") if ok else None)
         failing, pending, inconclusive = classify_carrier(
             checks, carrier_contexts(train_required, extra, checks))
+        if stacked_over is not None and failing:
+            # A stacked carrier is accepted green or not at all: its members were regenerated over main,
+            # never over the holder, so a red one (derived drift of holder + member, say) names no culprit.
+            log(f"::warning::carrier #{carrier}: stacked, red on {', '.join(failing)} — closed with no verdict, "
+                f"nobody blamed; the next tick rebuilds over main")
+            summary["inconclusive"].append(carrier)
+            gh.close_carrier(carrier)
+            Pusher(git, branch, gh.remote).delete()
+            acted = True
+            continue
         gate_inconclusive = False   # inconclusive because a GATE overran its budget / was not evaluated
         main_extra = [c for c in failing if c in extra and c in main_red]
         failing = [c for c in failing if c not in main_extra]   # red on main too: never a culprit
@@ -2802,7 +2874,10 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
         if not problem and chain is None:
             problem = "head is not a chain of the train's own commits"
         live_main = gh.main_sha()
-        if not problem and chain[0] != live_main:
+        if not problem and chain[0] != live_main and not (
+                stacked_over is not None and chain[0] == stacked_over and git.tree(live_main) == git.tree(chain[0])):
+            # A stacked carrier is accepted over a moved main ONLY when main's tree is exactly the holder
+            # head's tree it was verified over (the holder's squash), re-read against live main here.
             problem = "main moved since publish — the next tick rebuilds"
         if not problem and not failing and holder is not None:
             hstate, hview = next(((st, v) for st, v in strict if v["number"] == holder), (None, None))
@@ -2855,18 +2930,53 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 if hstate == "success":
                     gh.post_status(hview["head_sha"], "pending", f"strict lane: green carrier #{carrier} merges first — next tick")
             log(f"carrier #{carrier}: green — merging before strict-lane #{holder} (green carrier first)")
+        stacked_steps: list[str] = []
+        if not problem and not failing and stacked_over is not None:
+            # The holder that is running NOW (reserved in the tick its predecessor merged) contains main ==
+            # tree(h); this merge puts it behind main, i.e. pre-empts it. Same bound as the deferral: once.
+            running = next((v for st, v in strict if v["number"] == holder and st == "pending"), None)
+            if (running is not None
+                    and git("merge-base", "--is-ancestor", live_main, running["head_sha"], check=False).returncode == 0):
+                if deferral_used(gh, git, running["head_sha"]):
+                    problem = f"strict-lane #{holder} already yielded once — not pre-empted again"
+                elif not shadow:
+                    gh.post_status(running["head_sha"], "success",
+                                   f"strict lane: yielded once to stacked carrier {branch}; priority from here",
+                                   context=DEFER_CONTEXT)
+            stacked_steps = git("rev-list", "--reverse", "--first-parent", f"{chain[0]}..{sha}").stdout.split()
+            if len(stacked_steps) != len(chain[1]):
+                problem = problem or "stacked chain does not match its members"
+            elif not problem:
+                # BEFORE any merge: the squash GitHub will make of each member (merge-tree of the member head
+                # over the tree before it) must be exactly the verified stacked step, or nothing merges.
+                why = stacked_squash_mismatch(gh, git, live_main, chain[1], stacked_steps)
+                if why:
+                    log(f"::warning::carrier #{carrier}: stacked, {why} — closed with no verdict, nothing merged, "
+                        f"nobody blamed")
+                    summary["inconclusive"].append(carrier)
+                    gh.close_carrier(carrier)
+                    Pusher(git, branch, gh.remote).delete()
+                    acted = True
+                    continue
         acted = True
         if problem:
             log(f"::warning::carrier #{carrier}: {problem}")
             summary["rejected"].append(carrier)
         elif not failing:
             expected = live_main
-            for n, head in chain[1]:
+            for i, (n, head) in enumerate(chain[1]):
                 if not live_source_intent(gh, n, head):
                     log(f"#{n} source intent or head changed since the train was verified; stopping")
                     break
                 if not shadow and gh.main_sha() != expected:
                     log("main advanced by a foreign merge; stopping, the next tick rebuilds")
+                    break
+                if stacked_steps and not shadow and stacked_squash_mismatch(
+                        gh, git, expected, [(n, head)], [stacked_steps[i]]):
+                    # Re-predicted over the exact main this merge lands on: still the verified tree, or stop.
+                    log(f"::error::carrier #{carrier}: #{n}'s squash over main {expected[:12]} is not the verified "
+                        f"stacked tree — not merged, stopping")
+                    summary.setdefault("stack_tree_mismatch", []).append(n)
                     break
                 gh.post_status(head, "success", f"verified on train over main {chain[0][:12]}", source_number=n)
                 if shadow:
@@ -2877,6 +2987,20 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                     break
                 expected = merged
                 summary["merged"].append(n)
+                if stacked_steps:
+                    # Verified tree == merged tree, step by step: GitHub's squash of a member over main-after-H
+                    # is a different 3-way merge from publish's restack, so it is compared, never assumed.
+                    # A fetch failure raises: fail closed, nothing further merges.
+                    git("fetch", "-q", "origin", f"+refs/heads/{gh.branch}:refs/merge-train/stack-main")
+                    if git.tree(merged) != git.tree(stacked_steps[i]):
+                        # Second line of defence only (the pre-check above should make this unreachable):
+                        # main moved to an unverified tree, so stop and raise an alert on main itself.
+                        log(f"::error::carrier #{carrier}: main {merged[:12]} after #{n} is not the verified "
+                            f"stacked tree — stopping")
+                        gh.post_status(merged, "failure", f"ALERT: tree after #{n} differs from stacked carrier "
+                                       f"#{carrier}'s verified tree", context=STACK_CONTEXT)
+                        summary.setdefault("stack_tree_mismatch", []).append(n)
+                        break
         elif not [c for c in failing if c not in main_red]:
             # Red only on contexts main itself is red on: says nothing about any member — never a culprit,
             # never a bisect (a bisect ends in a culprit). Closed with no verdict; nobody is blamed.
@@ -2987,7 +3111,16 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
                 yield_why)
     if summary.get("main_health_deferred"):
         return summary
-    if (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
+    stack_head = next((v["head_sha"] for st, v in strict if v["number"] == holder and st == "pending"), None)
+    if (stack and not shadow and stack_head and not carrier_in_flight and not summary["updated"]
+            and not summary["strict"] and train_waiting and not main_red and not any_carrier_open(gh, repo)
+            and stack_target_problem(gh, git, base, holder, stack_head, main_red) is None):
+        # Speculative stacking: the carrier is built as today and publish stacks it over the holder's
+        # running up-to-date head instead of over main; the holder is never pre-empted (no deferral used).
+        log(f"strict-lane #{holder} CI running on {stack_head[:12]}: the train carrier may be stacked over it")
+        summary["in_flight"] = False
+        summary["stack_window"] = (holder, stack_head)
+    elif (holder is not None and not carrier_in_flight and not summary["updated"] and not summary["strict"]
             and train_waiting and not main_red and not any_carrier_open(gh, repo)
             and deferral_state(gh, git, strict, holder) == "open"):
         # Bounded deferral (#13400): the running reservation lets ONE carrier be built from green
@@ -3292,6 +3425,141 @@ def record_deferral(gh, git, repo: str, base: str, carrier_branch: str) -> list[
         log(f"#{n:>6} strict    deferral recorded: carrier {carrier_branch} published during its CI")
         out.append(n)
     return out
+
+
+# --------------------------------------------------------------------------- speculative stacking
+def stack_target_problem(gh, git, base: str, n: int, head: str, main_red: dict | None = None) -> str | None:
+    """Why the train carrier may NOT be stacked over strict PR `n`'s head `head`, or None. Read from live
+    data by settle (opening the window) and again by publish (acting on it): open, armed, not a draft,
+    still at `head`, the head contains live main, its CI is RUNNING with nothing failed, never released,
+    never stacked on before (STACK_CONTEXT in any state), and main is not red."""
+    if not SHA_RE.fullmatch(head or ""):
+        return "holder head is not a full sha"
+    pr = gh.pr(n)
+    if (pr.get("state") != "open" or pr.get("draft") or not pr.get("auto_merge")
+            or (pr.get("head") or {}).get("sha") != head):
+        return "holder is not open and armed at this head"
+    if git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:refs/merge-train/stack-holder", check=False).returncode != 0:
+        return "holder head could not be fetched"
+    if git("rev-parse", "refs/merge-train/stack-holder", check=False).stdout.strip() != head:
+        return "holder head moved"
+    if git("merge-base", "--is-ancestor", base, head, check=False).returncode != 0:
+        return "holder head is behind main"
+    apps = gh.app_statuses(head)
+    if STACK_CONTEXT in apps:
+        return "a carrier was already stacked on this head"
+    if RELEASED_CONTEXT in apps:
+        return "holder reservation was released on this head"
+    required = [c for c in gh.required() if c != STATUS_CONTEXT]
+    checks = gh.checks(head)
+    if any(checks.get(c) not in (None, "success") for c in required):
+        return "holder is red"
+    if all(checks.get(c) == "success" for c in required):
+        return "holder CI is not running"
+    if main_red is None:
+        main_red = main_red_contexts(gh, git, gh.required(), base)
+    if main_red:
+        return "main is red"
+    return None
+
+
+def restack_chain(git, base: str, head: str, tip: str) -> tuple[str, str]:
+    """Re-apply publish's own verified chain base..tip onto `head` (which contains `base`), execution-free:
+    each step is `git merge-tree --merge-base <prev> <stacked prev> <commit>`. -> (stacked tip, its tree).
+    Raises Reject (never a member fault): a regeneration commit (computed over main, not over head), a
+    conflict with the holder, a member already contained in the holder, or a new symlink/gitlink."""
+    chain = git("rev-list", "--reverse", "--first-parent", f"{base}..{tip}").stdout.split()
+    if not chain:
+        raise Reject("nothing to stack", member_fault=False)
+    prev, own = base, head
+    for c in chain:
+        msg = git("log", "-1", "--format=%B", c).stdout.rstrip("\n") + "\n"
+        if not OWN_MEMBER_RE.fullmatch(msg):
+            raise Reject("a stacked carrier never carries a regeneration commit", member_fault=False)
+        r = git("merge-tree", "--write-tree", "--merge-base", prev, own, c, check=False)
+        if r.returncode != 0 or not r.stdout.split():
+            raise Reject(f"member commit {c[:12]} does not apply cleanly over the holder", member_fault=False)
+        tree = r.stdout.split()[0]
+        if tree == git.tree(own):
+            raise Reject(f"member commit {c[:12]} is empty over the holder", member_fault=False)
+        own = git("commit-tree", tree, "-p", own, "-m", msg.rstrip("\n")).stdout.strip()
+        prev = c
+    if git.special_entries(own) - git.special_entries(head):
+        raise Reject("stacked tree contains a symlink/gitlink the holder does not", member_fault=False)
+    return own, git.tree(own)
+
+
+def stacked_squash_mismatch(gh, git, main: str, members: list[tuple[int, str]], steps: list[str]) -> str | None:
+    """Why the squash merges GitHub will make would NOT reproduce the verified stacked trees, or None.
+    Execution-free: member i's squash over the tree before it is `git merge-tree --write-tree <before> <head>`
+    (git's own merge base, as GitHub's), required equal to tree(steps[i]); `main` is the first `before`, each
+    later one the previous verified step. Any fetch or merge-tree failure is a mismatch (fail closed)."""
+    before = main
+    if len(members) != len(steps):
+        return "member count does not match the stacked chain"
+    for (n, head), step in zip(members, steps, strict=True):
+        ref = f"refs/merge-train/stack-member-{n}"
+        if (git("fetch", "-q", "origin", f"+{gh.head_refspec(n)}:{ref}", check=False).returncode != 0
+                or git("rev-parse", ref, check=False).stdout.strip() != head):
+            return f"#{n}'s head could not be read at {head[:12]}"
+        r = git("merge-tree", "--write-tree", before, head, check=False)
+        tree = r.stdout.split()[0] if r.returncode == 0 and r.stdout.split() else ""
+        if not tree or tree != git.tree(step):
+            return f"#{n}'s squash over {before[:12]} is not the verified stacked tree"
+        before = step
+    return None
+
+
+def stack_verdict(gh, git, p: dict, live_main: str) -> tuple[str, str]:
+    """Is carrier `p` stacked over a strict holder, and where does that holder stand? -> (kind, detail):
+    ("none", "") not a stacked carrier (judged as before); ("merged", h) the holder merged and main's
+    tree IS h's tree, so the carrier verifies main-after-H and is judged like a carrier over main;
+    ("wait", why) the holder has no verdict yet — never merged, never blamed, whatever the carrier's CI
+    says; ("void", why) the holder failed, moved, closed or was released — closed, nobody blamed;
+    ("reject", why) main moved to a tree that is not h's — closed, nobody blamed (as "main moved")."""
+    branch, sha = p["head"]["ref"], p["head"]["sha"]
+    if not TRAIN_BRANCH_RE.fullmatch(branch):
+        return "none", ""
+    # Classified by publish's marker on the carrier's OWN head, read from the API before any git read:
+    # an unreadable branch then makes a stacked carrier wait (fail closed), never judged as an ordinary one.
+    tstate, tdesc = gh.app_statuses(sha).get(STACK_CONTEXT, ("", ""))
+    tm = STACK_TIP_RE.fullmatch(tdesc or "") if tstate == "success" else None
+    if tm is None:
+        return "none", ""
+    h, n = tm.group(1), int(tm.group(2))
+    age = carrier_age_s(p)
+    if age is not None and age > RESERVATION_CEILING_S:
+        return "void", f"stacked {age // 60:.0f} min, past the {RESERVATION_CEILING_S // 60} min reservation ceiling"
+    if git("fetch", "-q", "origin", f"+refs/heads/{branch}:refs/merge-train/stack", check=False).returncode != 0:
+        return "wait", "carrier branch could not be read"
+    chain = parse_own_chain(git, sha) if git("rev-parse", "refs/merge-train/stack", check=False).stdout.strip() == sha else None
+    if chain is None or chain[0] != h:
+        return "void", "carrier head is not publish's stacked chain over the recorded holder head"
+    state, desc = gh.app_statuses(h).get(STACK_CONTEXT, ("", ""))
+    m = STACK_DESC_RE.fullmatch(desc or "")
+    if state != "success" or not m or m.group(1) != branch or int(m.group(2)) != n:
+        return "void", "holder head carries no matching stacking record"
+    pr = gh.pr(n)
+    tree_main, tree_h = git.tree(live_main), git.tree(h)
+    if pr.get("merged_at") and tree_main and tree_main == tree_h:
+        return "merged", h
+    if pr.get("merged_at") or pr.get("state") != "open":
+        if pr.get("merged_at"):
+            return "reject", f"holder #{n} merged but main's tree is not its verified head's tree"
+        return "void", f"holder #{n} closed unmerged"
+    if (pr.get("head") or {}).get("sha") != h:
+        return "void", f"holder #{n} head moved"
+    if pr.get("draft") or not pr.get("auto_merge"):
+        return "void", f"holder #{n} disarmed or a draft"
+    if git("merge-base", "--is-ancestor", live_main, h, check=False).returncode != 0:
+        return "void", f"main moved under holder #{n}"
+    if RELEASED_CONTEXT in gh.app_statuses(h):
+        return "void", f"holder #{n} reservation released"
+    required = [c for c in gh.required() if c != STATUS_CONTEXT]
+    checks = gh.checks(h)
+    if any(checks.get(c) not in (None, "success") for c in required):
+        return "void", f"holder #{n} is red"
+    return "wait", f"holder #{n} has no verdict yet"
 
 
 def strict_reservation(git, base: str, strict: list, shadow: bool = False, now: float | None = None,
@@ -4047,6 +4315,13 @@ def check_declaration() -> int:
     # The strict batch cap is the rollback switch of the strict carrier: declared, a positive integer.
     if not re.search(r'^\s*MERGE_TRAIN_STRICT_BATCH_CAP: "[1-9][0-9]*"\s*$', code, re.MULTILINE):
         fails.append('MERGE_TRAIN_STRICT_BATCH_CAP must be declared as a positive integer ("1" = no strict carrier)')
+    # Speculative stacking's rollback switch: declared outright, carried by settle, its window handed to publish.
+    if not re.search(r'^\s*MERGE_TRAIN_SPECULATIVE_STACK: "(true|false)"\s*$', code, re.MULTILINE):
+        fails.append('MERGE_TRAIN_SPECULATIVE_STACK must be declared as "true" or "false" ("false" = no stacking)')
+    if "SPECULATIVE_STACK: ${{ env.MERGE_TRAIN_SPECULATIVE_STACK }}" not in jobs.get("settle", ""):
+        fails.append("settle must carry MERGE_TRAIN_SPECULATIVE_STACK")
+    if "STACK_HEAD: ${{ needs.settle.outputs.stack_head }}" not in jobs.get("publish", ""):
+        fails.append("publish must receive settle's stacking window (stack_pr / stack_head)")
     # The safety is a runtime property: settle must consult the live ruleset before merging, whatever the flag says.
     guard_src = inspect.getsource(mode_settle)
     if "gh.merge_guard()" not in guard_src or inspect.getsource(ruleset_guard).count("integration_id") < 1:
@@ -4272,6 +4547,7 @@ class FakeGitHub:
         self.g("commit", "-q", "-m", f"#{n}")
         sha = self.main_sha()
         self.prs[n]["state"] = "closed"
+        self.prs[n]["merged_at"] = "2026-01-01T00:00:00Z"
         self.merged.append(n)
         if self.foreign_after_merge:
             p = pathlib.Path(self.origin, self.foreign_after_merge)
@@ -4842,11 +5118,18 @@ def retry_planner_self_test(check) -> None:
 # 2026-11-09 (#15254 shape): the stale-culprit refresh cases add an up-to-date culprit drain and the
 # refused-update path, the one-refresh-per-lineage drain and the multi-member carrier case: baseline
 # spawns=16,105 at 653 cases, 16,995 at 659 (measured on this PR's full run); ceiling 17,400 (~2.4 %).
+# Speculative stacking (2026-11-09): the S1-S10 cases drive ~20 more settle/build/publish ticks. Measured on
+# the same machine, same day: origin/main 16,105 spawns at 653 cases, this change 17,286 at 671 (+1,181);
+# ceiling 17,800 (~3 % headroom), under the 18,534 that first overran the shard budget.
+# Both merged (#15400 over #15374): stacking cases plus the stale-culprit refresh cases: spawns=18,176 at
+# 677 cases, measured on the merged tree; ceiling 18,600 (~2.3 %).
 # Likely-flake rerun before a lone-member blame (#15420): three fast-carrier cases and one extra settle
 # each in five existing culprit cases: spawns=16,663 at 670 cases, measured locally; ceiling 17,000.
 # Both merged (#15430 over #15374): each lone culprit carrier is re-run once before its blame, plus the
 # first-parent lineage case: spawns=18,070 at 678 cases, measured on the merged tree; ceiling 18,500 (~2.4 %).
-SELF_TEST_SPAWN_CEILING = 18500
+# All three merged (#15430 over #15400 + #15374): spawns=19,251 at 696 cases, measured on the merged tree;
+# ceiling 19,700 (~2.3 %).
+SELF_TEST_SPAWN_CEILING = 19700
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -5573,8 +5856,10 @@ def self_test() -> int:
                 return d
 
             def tick(regen=None, batch_size=8):
-                """settle -> build -> publish, each in its own fresh clone, as on three runners."""
-                s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                """settle -> build -> publish, each in its own fresh clone, as on three runners. Speculative
+                stacking off (MERGE_TRAIN_SPECULATIVE_STACK=false): these cases pin the bounded deferral,
+                which is exactly the rollback behaviour; stacking is exercised by stack_tick below."""
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
                 if s["in_flight"]:
                     return s, "in-flight"
                 counter[0] += 1
@@ -6531,7 +6816,7 @@ def self_test() -> int:
                   33 not in sm["fast"] and not gh.app_statuses(gh.prs[33]["head"]["sha"])
                   # run_id/attempt name the strict carrier branch and strict_cap bounds it: none is a classification.
                   and set(mode_settle.__code__.co_varnames[:mode_settle.__code__.co_argcount])
-                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap"})
+                  == {"gh", "git", "repo", "shadow", "run_id", "attempt", "strict_cap", "stack"})
             reset()
 
             # Bundle verification, directly.
@@ -7242,6 +7527,214 @@ def self_test() -> int:
             check("green carrier first: the pre-empted strict PR, now behind, is update-branched next tick",
                   gh.merged == [1] and gh.updates == [35], f"{s} merged={gh.merged} updates={gh.updates}")
             gh.updates.clear()
+            reset()
+
+            # SPECULATIVE STACKING (ADR-0343 amendment 2026-11-09): while strict holder pW (35) runs CI on an
+            # up-to-date head h, the train carrier for p1 is published over h, never merged before pW, and
+            # accepted after pW's merge only when main's tree is h's tree. Each case below is must-FAIL for
+            # the rule it names (mutated off in a throwaway copy, see the PR).
+            def stack_tick():
+                s = mode_settle(gh, Git(clone("settle")), "o/r", False)
+                if s["in_flight"]:
+                    return s, "in-flight"
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",),
+                                 overlay_roots=(".github/scripts",))
+                b.env["PROBE_OUT"] = probe
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                mode_build(gh, Git(bdir), b, "o/r", out, 8)
+                return s, mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8,
+                                       stack=s.get("stack_window"))
+
+            def stacked_setup():
+                open_only("pW")
+                h = gh.prs[35]["head"]["sha"]
+                gh.head_checks[h] = {"gates (data)": None}      # holder up to date, CI running
+                open_only("p1")                                  # a green train candidate
+                s, st = stack_tick()
+                return h, s, st
+
+            def open_carriers():
+                return [c for c in gh.carriers.values() if c["state"] == "open"]
+
+            def stack_mark(sha):
+                return gh.app_statuses(sha).get(STACK_CONTEXT, ("", ""))
+
+            def blamed(n):
+                return (any(n == c for c, _ in gh.comments)
+                        or gh.app_statuses(gh.prs[n]["head"]["sha"]).get(STATUS_CONTEXT, ("", ""))[0] == "failure")
+
+            # (S1) published over the holder head, recorded on it, no deferral consumed, nothing merged.
+            h, s, st = stacked_setup()
+            oc = open_carriers()
+            sg = Git(clone("stackchk"))
+            sg("fetch", "-q", "origin", "+refs/heads/*:refs/remotes/origin/*")
+            chain = parse_own_chain(sg, oc[0]["head"]["sha"]) if oc else None
+            check("stacking (S1): a running up-to-date holder + green candidate -> a carrier stacked over the holder head",
+                  st == "published" and s.get("stack_window") == (35, h) and len(oc) == 1 and chain is not None
+                  and chain[0] == h and [n for n, _ in chain[1]] == [1] and stack_mark(h)[0] == "success"
+                  and gh.app_statuses(h).get(DEFER_CONTEXT, ("", ""))[0] != "success" and gh.merged == [],
+                  f"{s} st={st} chain={chain} mark={stack_mark(h)}")
+            # (S2) carrier green, holder still running: never merged before the holder.
+            s = settle_now()
+            check("stacking (S2): a green stacked carrier waits while its holder runs — nothing merged, carrier open",
+                  gh.merged == [] and len(open_carriers()) == 1 and s["in_flight"] and not s["rejected"], f"{s} merged={gh.merged}")
+            # (S3) carrier RED before the holder's verdict: no culprit, no bisect, still waiting.
+            gh.carrier_override = {"gates (data)": "failure"}
+            s = settle_now()
+            check("stacking (S3): a red stacked carrier before the holder's verdict blames nobody and bisects nothing",
+                  not s["culprits"] and not s["bisected"] and not blamed(1) and len(open_carriers()) == 1 and gh.merged == [],
+                  f"{s} comments={gh.comments}")
+            gh.carrier_override = {}
+            # (S4) holder green but its merge refused: the carrier still waits (never before the holder).
+            gh.head_checks.clear()
+            gh.refuse_merge = {35}
+            s = settle_now()
+            check("stacking (S4): holder green but unmerged -> the green stacked carrier still does not merge",
+                  gh.merged == [] and len(open_carriers()) == 1, f"{s} merged={gh.merged}")
+            gh.refuse_merge = set()
+            # (S5) the holder merges; main's tree == h's tree, so next tick the carrier merges WITHOUT a rebuild.
+            s = settle_now()
+            made = len(gh.carriers)
+            ok_tree = Git(origin).tree(gh.main_sha()) == Git(origin).tree(h)
+            s2 = settle_now()
+            check("stacking (S5): holder merges first, then the stacked carrier's member merges on main == tree(h), no rebuild",
+                  ok_tree and gh.merged == [35, 1] and len(gh.carriers) == made and not open_carriers() and not s2["rejected"],
+                  f"{s} {s2} merged={gh.merged} tree_eq={ok_tree}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S6) tree mismatch: something else lands with the holder, so main's tree is not h's -> rejected,
+            # nobody blamed, the member does not merge.
+            h, s, st = stacked_setup()
+            gh.head_checks.clear()
+            gh.foreign_after_merge = "docs/foreign-stack.md"
+            settle_now()
+            s = settle_now()
+            check("stacking (S6): main's tree differs from the holder head's -> the stacked carrier is rejected, member unmerged",
+                  st == "published" and gh.merged == [35] and not open_carriers() and s["rejected"] and not blamed(1),
+                  f"st={st} {s} merged={gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S6b) red AFTER the holder merged with main == tree(h): still no culprit — a stacked carrier is
+            # accepted green or not at all (its members were never regenerated over the holder).
+            h, s, st = stacked_setup()
+            gh.head_checks.clear()
+            settle_now()                                     # the holder merges
+            gh.carrier_override = {"gates (data)": "failure"}
+            s = settle_now()
+            check("stacking (S6b): a red stacked carrier over a merged holder blames nobody and bisects nothing",
+                  st == "published" and gh.merged == [35] and not open_carriers() and s["inconclusive"]
+                  and not s["culprits"] and not s["bisected"] and not blamed(1), f"st={st} {s} merged={gh.merged}")
+            gh.carrier_override = {}
+            gh.head_checks.clear()
+            reset()
+
+            # (S6c) holder DISARMED while the carrier waits: voided, not a wait forever.
+            h, s, st = stacked_setup()
+            gh.prs[35]["auto_merge"] = None
+            s = settle_now()
+            check("stacking (S6c): a holder disarmed while its stacked carrier waits voids the carrier, nobody blamed",
+                  st == "published" and not open_carriers() and s["inconclusive"] and not blamed(1) and gh.merged == [],
+                  f"st={st} {s}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S6d) the member's squash would NOT reproduce the verified stacked step (here the carrier's step
+            # carries an extra file, re-recorded as if publish had pushed it): checked BEFORE any merge, so the
+            # member never merges and nobody is blamed. Must-FAIL without the pre-merge check.
+            h, s, st = stacked_setup()
+            c = open_carriers()[0]
+            tip = c["head"]["sha"]
+            msg = gh.g("log", "-1", "--format=%B", tip).stdout.rstrip("\n")
+            gh.g("checkout", "-q", "-f", "--detach", tip)
+            pathlib.Path(origin, "docs", "unverified-extra.md").write_text("x\n")
+            gh.g("add", "docs/unverified-extra.md")
+            gh.g("commit", "-q", "--amend", "-m", msg)
+            forged = gh.g("rev-parse", "HEAD").stdout.strip()
+            gh.g("checkout", "-q", "-f", "main")
+            gh.g("update-ref", f"refs/heads/{c['head']['ref']}", forged)
+            c["head"]["sha"] = forged
+            gh.post_status(forged, "success", f"tree={Git(origin).tree(forged)}", context=RECORD_CONTEXT)
+            gh.post_status(forged, "success", f"stacked over {h} of #35", context=STACK_CONTEXT)
+            gh.head_checks.clear()
+            settle_now()                                     # the holder merges
+            s = settle_now()
+            check("stacking (S6d): a member whose squash differs from the verified stacked step is never merged",
+                  st == "published" and gh.merged == [35] and not open_carriers() and s["inconclusive"]
+                  and not blamed(1), f"st={st} {s} merged={gh.merged}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S7) holder RED: the stacked carrier is voided as inconclusive, nobody blamed.
+            h, s, st = stacked_setup()
+            gh.carrier_override = {"gates (data)": "failure"}
+            gh.head_checks[h] = {"gates (data)": "failure"}
+            s = settle_now()
+            check("stacking (S7): holder red -> stacked carrier closed inconclusive, no culprit, no bisect, nothing merged",
+                  st == "published" and not open_carriers() and s["inconclusive"] and not s["culprits"]
+                  and not s["bisected"] and not blamed(1) and gh.merged == [], f"st={st} {s}")
+            gh.carrier_override = {}
+            # (S8) one stacked carrier per holder head: the same head running again opens no second window.
+            gh.head_checks[h] = {"gates (data)": None}
+            s = settle_now()
+            check("stacking (S8): a holder head that already had a stacked carrier gets no second one",
+                  "stack_window" not in s and stack_mark(h)[0] == "success", f"{s}")
+            gh.statuses[h] = [r for r in gh.statuses.get(h, []) if r[0] != STACK_CONTEXT]
+            s = settle_now()
+            check("stacking (S8 control): the same state with the marker removed DOES open a window",
+                  s.get("stack_window") == (35, h), f"{s}")
+            gh.head_checks.clear()
+            reset()
+
+            # (S9) no stacking over a holder behind main, nor while main is red (direct, then through settle).
+            open_only("pW")
+            h = gh.prs[35]["head"]["sha"]
+            gh.head_checks[h] = {"gates (data)": None}
+            sg = Git(clone("stackchk"))
+            behind = stack_target_problem(gh, sg, gh.g("rev-parse", "p1").stdout.strip(), 35, h, {})   # p1 is not in pW
+            check("stacking (S9): a holder head that does not contain main is never stacked over",
+                  behind == "holder head is behind main", str(behind))
+            check("stacking (S9): no stacking while main is red",
+                  stack_target_problem(gh, sg, gh.main_sha(), 35, h, {"gates (data)": "x"}) == "main is red")
+            gh.head_checks.clear()
+            reset()
+
+            def stack_state():
+                open_only("pW")
+                hh = gh.prs[35]["head"]["sha"]
+                gh.head_checks[hh] = {"gates (data)": None}
+                open_only("p1")
+                return hh
+
+            # Known-positive control for every settle case below: this state DOES open a window.
+            h = stack_state()
+            s = settle_now()
+            check("stacking (S9/S10 control): running holder + green candidate -> a stacking window, not the deferral",
+                  s.get("stack_window") == (35, h) and "deferral_window" not in s, f"{s}")
+            gh.head_checks.clear()
+            reset()
+            h = stack_state()
+            gh.main_override = {"gates (data)": "failure"}
+            s = settle_now()
+            check("stacking (S9): main red -> settle opens no stacking window", "stack_window" not in s, f"{s}")
+            gh.main_override = {}
+            gh.head_checks.clear()
+            reset()
+            # (S10) shadow does nothing: no window, no marker; and the switch off keeps the bounded deferral.
+            h = stack_state()
+            s = mode_settle(gh, Git(clone("settle")), "o/r", True)
+            check("stacking (S10): shadow opens no stacking window and writes no stacking marker",
+                  "stack_window" not in s and not stack_mark(h)[0] and gh.merged == [], f"{s}")
+            gh.head_checks.clear()
+            reset()
+            h = stack_state()
+            s = mode_settle(gh, Git(clone("settle")), "o/r", False, stack=False)
+            check("stacking (S10): MERGE_TRAIN_SPECULATIVE_STACK false -> the bounded deferral window as before",
+                  "stack_window" not in s and s.get("deferral_window") == 35, f"{s}")
+            gh.head_checks.clear()
             reset()
 
             # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
@@ -8802,6 +9295,13 @@ def main() -> int:
     ap.add_argument("--strict-batch-cap", type=int,
                     default=int(os.environ.get("STRICT_BATCH_CAP", str(STRICT_BATCH_CAP_DEFAULT))),
                     help="settle: members per strict carrier (1 = no strict carrier, update-branch as before)")
+    ap.add_argument("--speculative-stack", choices=["true", "false"],
+                    default=os.environ.get("SPECULATIVE_STACK", "true" if SPECULATIVE_STACK_DEFAULT else "false"),
+                    help="settle: open a speculative-stacking window over a running strict holder")
+    ap.add_argument("--stack-pr", default=os.environ.get("STACK_PR", ""),
+                    help="publish: settle's stacking window, holder PR number (re-validated live)")
+    ap.add_argument("--stack-head", default=os.environ.get("STACK_HEAD", ""),
+                    help="publish: settle's stacking window, holder head sha (re-validated live)")
     ap.add_argument("--out", default="", help="build: directory for train.bundle")
     ap.add_argument("--bundle", default="", help="publish: directory holding train.bundle")
     ap.add_argument("--run-id", default="")
@@ -8872,12 +9372,20 @@ def run_mode(gh, args, ap) -> int:
         if not args.bundle or not args.run_id or not args.attempt:
             ap.error("publish needs --bundle, --run-id and --attempt")
         log(f"publish: notices {mode_notice_drops(gh, git, args.bundle)}")
-        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size)}")
+        stack = None
+        if args.stack_pr or args.stack_head:
+            if not (re.fullmatch(r"[0-9]+", args.stack_pr) and SHA_RE.fullmatch(args.stack_head)):
+                ap.error("--stack-pr must be a PR number and --stack-head a full sha")
+            stack = (int(args.stack_pr), args.stack_head)
+        log(f"publish: {mode_publish(gh, git, args.repo, args.bundle, args.run_id, args.attempt, args.batch_size, stack)}")
         return 0
     s = mode_settle(gh, git, args.repo, args.shadow, run_id=args.run_id, attempt=args.attempt,
-                    strict_cap=args.strict_batch_cap)
+                    strict_cap=args.strict_batch_cap, stack=args.speculative_stack == "true")
     log(f"settle: {s}")
     write_output("in_flight", "true" if s["in_flight"] else "false")
+    window = s.get("stack_window")
+    write_output("stack_pr", str(window[0]) if window else "")
+    write_output("stack_head", window[1] if window else "")
     return 0
 
 

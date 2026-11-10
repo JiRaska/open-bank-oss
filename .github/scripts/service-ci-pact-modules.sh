@@ -82,6 +82,16 @@ is_inert_service_path() {
       return 0 ;;
     openbank-admin-ui/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
       return 0 ;;
+    .gitleaks.toml|.gitleaksignore|openbank-developer-portal/site/.well-known/*)
+      # Tool-only config: the secret scanner's rules/allow-list and the static portal's
+      # RFC 9116 security.txt. Measured 2026-11-09: no Gradle script, build-logic plugin,
+      # service Dockerfile or JVM source names either path, and the portal is not a Gradle
+      # module. A test that later reads one by literal path is still built — both selectors
+      # run derive-fleet-scanning-test-modules.py --expand over every changed path.
+      # Deliberately NOT here: .dockerignore (image build context), .editorconfig (ktlint
+      # input), gradle/, build-logic/, settings, libs. Measured: 8 of 65 sampled full-fleet
+      # PR runs (86 modules each) were caused by these two paths alone.
+      return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -192,6 +202,20 @@ pact_build_modules_self_test() {
     || { echo "selector self-test: root Gradle input must remain relevant" >&2; return 1; }
   global_service_build_input_changed "build.gradle.kts" \
     || { echo "selector self-test: root Gradle input must select the full fleet" >&2; return 1; }
+  is_inert_service_path ".gitleaks.toml" \
+    || { echo "selector self-test: secret-scanner config is not a JVM input" >&2; return 1; }
+  is_inert_service_path "openbank-developer-portal/site/.well-known/security.txt" \
+    || { echo "selector self-test: portal security.txt is not a JVM input" >&2; return 1; }
+  ! is_inert_service_path ".gitleaks.toml.bak" \
+    || { echo "selector self-test: an unknown root sibling must retain safe fallback" >&2; return 1; }
+  ! is_inert_service_path ".dockerignore" \
+    || { echo "selector self-test: .dockerignore is an image build input" >&2; return 1; }
+  ! is_inert_service_path ".editorconfig" \
+    || { echo "selector self-test: .editorconfig drives ktlint" >&2; return 1; }
+  ! is_inert_service_path "openbank-developer-portal/Dockerfile" \
+    || { echo "selector self-test: only the portal's .well-known tree is inert" >&2; return 1; }
+  ! is_inert_service_path "gradle/verification-metadata.xml" \
+    || { echo "selector self-test: verification metadata is never inert" >&2; return 1; }
   is_inert_service_path ".github/workflows/security-regression-test.yml" \
     || { echo "selector self-test: unrelated workflow must be inert" >&2; return 1; }
   # Under .github/, "unknown" no longer means "rebuild the fleet": the build job can only
