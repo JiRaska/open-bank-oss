@@ -42,11 +42,21 @@ Friday to Sunday, and a holiday folds into the next window.
 
 `CeuReturnDataAdapter` diffs that day's register against a baseline:
 
-- The baseline is the latest **filed** overview (SUBMITTED or ACKNOWLEDGED), re-derived as known
-  at the instant stored in its `register_known_at_epoch_ms` datapoint.
-- No filed predecessor means an **initial full load** (`initial_load = 1`).
+- The baseline is the latest **ACKNOWLEDGED** overview, re-derived as known at the instant stored
+  in its `register_known_at_epoch_ms` datapoint. That instant is truncated to the millisecond and
+  the current snapshot is cut at the same truncated instant, so a fact is never in both or neither.
+- While the latest filed overview is **SUBMITTED** with no ČNB answer, nothing new is assembled:
+  the tick ends `WAITING_FOR_ACKNOWLEDGEMENT` (logged as `held`), and a manual
+  `POST /api/v1/statutory-returns/assemble` answers 422. The unfiled gauge stays published.
+- No acknowledged predecessor means an **initial full load** (`initial_load = 1`). It is refused
+  (`INITIAL_LOAD_NOT_ATTESTED`, 422 on the API) unless `openbank.ceu.initial-load-attested` is
+  `true` (`OPENBANK_CEU_INITIAL_LOAD_ATTESTED`, default `false`). Set it only once someone has
+  attested that the projection holds the complete register (see Known gaps: there is no roster
+  seed).
 - A rejected or never-filed predecessor is not a baseline, so its changes roll forward into the
-  next overview. A late fact surfaces there too.
+  next overview. A late fact surfaces there too. A **REJECTED** window may be re-assembled through
+  the API as a new revision of that window; it is diffed against the same last acknowledged
+  baseline. The job itself does not re-assemble a rejected window.
 
 The job is the maker only, acting as `system:ceu-daily-overview`. A human approves the overview
 (four-eyes) and submits it through SDAT. ČNB's acknowledgement or rejection is then recorded with
