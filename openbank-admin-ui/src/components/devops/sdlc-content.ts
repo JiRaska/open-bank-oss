@@ -9,6 +9,13 @@ export const TRAIN_LANES = {
     subtitle: bi('Společná zkušební jízda', 'A shared test ride'),
     description: bi('Několik připravených změn se sveze společně. Bot sestaví jejich kombinaci nad aktuální hlavní větví a nechá ji znovu prověřit.', 'Several ready changes travel together. The bot combines them over the current main branch and has that combination checked again.'),
     stops: [bi('Nápad', 'Idea'), bi('Kontroly PR', 'PR checks'), bi('Nástup', 'Boarding'), bi('Společná jízda', 'Combined checks'), bi('Main', 'Main')],
+    summaries: [
+      bi('Návrh změny čeká na ověření.', 'A proposed change awaits verification.'),
+      bi('Každý PR potřebuje vlastní úspěšné kontroly a povolení ke sloučení.', 'Each PR needs its own passing checks and merge authorization.'),
+      bi('Bot sestavuje připravené PR do společného ověřovacího vlaku.', 'The bot combines ready PRs into a shared verification train.'),
+      bi('CI prověřuje, že změny fungují i společně. Ostatní koleje mohou ověřovat souběžně.', 'CI checks that the changes work together. Other tracks can check concurrently.'),
+      bi('Ověřené PR se slučují v řízeném pořadí. Nasazení teprve navazuje.', 'Verified PRs merge in governed order. Deployment comes next.'),
+    ],
     steps: [
       bi('Lvíček přináší návrh změny. Pull request (PR) je balíček úprav s vysvětlením, proč vznikl, a s testy nového chování.', 'A lion brings a proposed change. A pull request (PR) is a package of edits explaining why they exist, with tests for the new behaviour.'),
       bi('Každý cestující potřebuje vlastní jízdenku: úspěšné povinné i dodatečné kontroly. Musí být zapnuté automatické sloučení a splněná pravidla přijetí.', 'Every passenger needs their own ticket: successful required and additional checks. Auto-merge must be enabled and admission rules satisfied.'),
@@ -22,6 +29,13 @@ export const TRAIN_LANES = {
     subtitle: bi('Pro nezávislou změnu', 'For an independent change'),
     description: bi('Jeden cestující může kratší cestou, když se jeho soubory nepřekrývají s ostatními kandidáty ani s novými změnami na main a nejsou v chráněných cestách.', 'One passenger can take a shorter route when their files overlap neither other candidates nor new changes on main, and do not touch protected paths.'),
     stops: [bi('Nápad', 'Idea'), bi('Kontroly PR', 'PR checks'), bi('Nezávislost', 'Independence'), bi('Závěrečné ověření', 'Final check'), bi('Main', 'Main')],
+    summaries: [
+      bi('Jeden nezávislý PR může využít kratší cestu.', 'One independent PR can take the shorter route.'),
+      bi('Ani rychlá kolej nevynechává vlastní kontroly PR.', 'The fast lane still requires its own PR checks.'),
+      bi('Bot ověřuje, že se změněné soubory nepřekrývají s jinými změnami.', 'The bot checks that changed files do not overlap other changes.'),
+      bi('Společný carrier není potřeba. Bot ověří aktuální podklady a rezervace main.', 'No shared carrier is needed. The bot checks current evidence and main reservations.'),
+      bi('Ověřený PR se může sloučit. Nasazení teprve navazuje.', 'The verified PR may merge. Deployment comes next.'),
+    ],
     steps: [
       bi('Tentokrát cestuje jeden návrh změny. Rychlost vyplývá z nezávislosti změny, ne z jejího názvu či malé velikosti.', 'One proposed change is travelling this time. Its independence earns the shorter route, not its name or small size.'),
       bi('Vlastní CI i pravidla přijetí platí stejně jako na ostatních kolejích. Červená kontrola rychlou kolej nepustí.', 'The same own-PR CI and admission rules apply as on other lanes. A red check blocks the fast lane too.'),
@@ -35,6 +49,13 @@ export const TRAIN_LANES = {
     subtitle: bi('Když měníme i výpravčího', 'When the dispatcher changes too'),
     description: bi('Změny workflow, generátorů a citlivých pravidel mají zvláštní cestu. Ověřují se s aktuální main, aniž by získaly možnost samy si udělit povolení.', 'Workflow, generator and sensitive-rule changes take a special route. They are verified with current main without gaining the power to authorize themselves.'),
     stops: [bi('Citlivá změna', 'Sensitive change'), bi('Kontroly PR', 'PR checks'), bi('Volba cesty', 'Route selection'), bi('CI s main', 'CI with main'), bi('Main', 'Main')],
+    summaries: [
+      bi('Změna workflow nebo pravidel potřebuje zvláštní ověření.', 'A workflow or rules change needs special verification.'),
+      bi('Také citlivá změna musí splnit kontroly a pravidla přijetí.', 'A sensitive change must also pass checks and admission rules.'),
+      bi('Bot zvolí povolený strict carrier nebo aktualizaci vlastní větve.', 'The bot selects an allowed strict carrier or a branch update.'),
+      bi('CI ověřuje změnu s aktuální main. Rezervace chrání ověřovanou kombinaci.', 'CI checks the change with current main. A reservation protects that combination.'),
+      bi('Sloučí se jen ověřená revize. Ostatní koleje pokračují podle pravidel.', 'Only the verified revision merges. Other tracks proceed according to the rules.'),
+    ],
     steps: [
       bi('Mění se například workflow nebo generátor. Je to jako upravovat návěstidla, zatímco vlaky používají koleje: potřebujeme zvláštní ověření.', 'A workflow or generator is changing. It is like changing signals while trains use the tracks: special verification is needed.'),
       bi('Také tento PR musí splnit kontroly a pravidla přijetí. U codex/ je rozhodnutí vlastníka vázané na přesnou aktuální revizi; po změně obsahu je potřeba nové.', 'This PR also needs its checks and admission rules. For codex/ the owner’s decision binds to the exact current revision; a changed head needs a fresh decision.'),
@@ -43,7 +64,7 @@ export const TRAIN_LANES = {
       bi('Sloučit lze jen ověřenou podobu s platným záměrem a kontrolami. Následují další koleje podle pravidel přednosti a střídání.', 'Only the verified revision with valid intent and checks may merge. Other lanes then take their turns according to priority and fairness rules.'),
     ],
   },
-} satisfies Record<TrainLane, { title: Copy; subtitle: Copy; description: Copy; stops: Copy[]; steps: Copy[] }>
+} satisfies Record<TrainLane, { title: Copy; subtitle: Copy; description: Copy; stops: Copy[]; summaries: Copy[]; steps: Copy[] }>
 
 export const CI_CHECKS = [
   [bi('Dá se aplikace sestavit?', 'Can the application be built?'), bi('Sestavení, kontrola stylu a statická analýza hledají chyby ještě před spuštěním.', 'Build, style checks and static analysis look for problems before execution.')],
