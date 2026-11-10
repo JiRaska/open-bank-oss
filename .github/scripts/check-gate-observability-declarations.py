@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import sys
 import tempfile
@@ -63,6 +64,14 @@ except ImportError:  # pragma: no cover - PyYAML is a run-gates.py prerequisite
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / ".github" / "gates" / "gates.yaml"
 BASELINE = ROOT / ".github" / "gates" / "observability-baseline.json"
+# Measured wall time per gate, derived from CI's own --json artifacts by
+# derive-gate-runtime-measurements.py. A declared budget below p95 * HEADROOM is a budget the
+# gate already overruns on ordinary runs, so it flaps on runner load (service-ci-explicit-jobs
+# failed at 10.1s until #14590 re-derived its budget). MIN_SAMPLES keeps a rarely seen gate
+# from being judged on noise.
+MEASUREMENTS = ROOT / ".github" / "gates" / "gate-runtime-measurements.json"
+HEADROOM = 1.5
+MIN_SAMPLES = 10
 
 
 def load(manifest_path: pathlib.Path, baseline_path: pathlib.Path):
@@ -71,7 +80,37 @@ def load(manifest_path: pathlib.Path, baseline_path: pathlib.Path):
     return gates, baseline
 
 
-def evaluate(gates, baseline):
+def budget_findings(gates, measurements):
+    """A declared budget_seconds below ceil(measured p95 * HEADROOM) is a finding."""
+    out = []
+    measured = (measurements or {}).get("gates", {})
+    for g in gates:
+        budget, m = g.get("budget_seconds"), measured.get(g["id"])
+        if budget is None or not m or m.get("n", 0) < MIN_SAMPLES:
+            continue
+        floor = math.ceil(m["p95_seconds"] * HEADROOM)
+        if budget < floor:
+            out.append(
+                f"{g['id']}: budget_seconds {budget} is below measured p95 {m['p95_seconds']}s x "
+                f"{HEADROOM} headroom = {floor}s (n={m['n']}, max {m['max_seconds']}s). Ordinary "
+                f"runs already overrun it: a WARN on every loaded runner, and a FAIL whenever the "
+                f"gate is CPU-bound. Raise it to at least {floor}."
+            )
+    return out
+
+
+def load_measurements(path: pathlib.Path):
+    """The snapshot, or (None, reason). Absent or empty fails CLOSED: an empty `gates` map would
+    otherwise pass every budget."""
+    if not path.exists():
+        return None, f"{path.name} is missing"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc.get("gates"), dict) or not doc["gates"]:
+        return None, f"{path.name} has no measured gates"
+    return doc, None
+
+
+def evaluate(gates, baseline, measurements=None):
     """Return (findings, counts). findings is a list of human-readable strings."""
     emitting = set(baseline.get("subject_emitting_gate_ids", []))
     ids = [g["id"] for g in gates]
@@ -126,6 +165,7 @@ def evaluate(gates, baseline):
             "baseline.subject_emitting_gate_ids names gates that no longer exist: "
             + ", ".join(stale_emitting)
         )
+    findings.extend(budget_findings(gates, measurements))
     return findings, counts
 
 
@@ -240,11 +280,40 @@ def self_test() -> int:
         if not any("ghost" in x for x in f):
             bad.append(f"a baseline entry for a deleted gate was not reported: {f}")
 
+        # 7. A budget below measured p95 x headroom must go red (the flapping-budget class);
+        #    at the floor, or with too few samples, it must not.
+        m, b = _write(tmp, SELFTEST_MANIFEST, {
+            "allowed": {"missing_budget_seconds": 1, "missing_min_subjects": 0},
+            "known": {"missing_budget_seconds": ["beta"], "missing_min_subjects": []},
+            "subject_emitting_gate_ids": ["alpha"],
+        })
+        gates, base = load(m, b)
+        low = {"gates": {"alpha": {"n": 30, "p95_seconds": 4.0, "max_seconds": 4.2}}}
+        f, _ = evaluate(gates, base, low)
+        if not any("alpha: budget_seconds 5 is below" in x for x in f):
+            bad.append(f"a budget below measured p95 x headroom was not reported: {f}")
+        at_floor = {"gates": {"alpha": {"n": 30, "p95_seconds": 3.3, "max_seconds": 3.4}}}
+        f, _ = evaluate(gates, base, at_floor)
+        if f:
+            bad.append(f"a budget at p95 x headroom was wrongly reported: {f}")
+        for content in ("", "{}", '{"gates": {}}'):
+            snap = tmp / "snap.json"
+            if content:
+                snap.write_text(content, encoding="utf-8")
+            elif snap.exists():
+                snap.unlink()
+            if load_measurements(snap)[0] is not None:
+                bad.append(f"an absent/empty measurement snapshot was accepted: {content!r}")
+        few = {"gates": {"alpha": {"n": MIN_SAMPLES - 1, "p95_seconds": 40.0, "max_seconds": 40.0}}}
+        f, _ = evaluate(gates, base, few)
+        if f:
+            bad.append(f"a gate with too few samples was judged: {f}")
+
     if bad:
         for x in bad:
             print(f"::error::self-test: {x}")
         return 1
-    print("[gate-observability] self-test OK -- 6 cases, 5 red + 1 green")
+    print("[gate-observability] self-test OK -- 7 cases, 6 red + 1 green, plus 2 budget controls")
     return 0
 
 
@@ -255,7 +324,11 @@ def main() -> int:
     args = ap.parse_args()
     if args.self_test:
         return self_test()
-    findings, counts = evaluate(*load(MANIFEST, BASELINE))
+    measurements, why = load_measurements(MEASUREMENTS)
+    if measurements is None:
+        print(f"::error::{why} -- regenerate it with derive-gate-runtime-measurements.py")
+        return 1
+    findings, counts = evaluate(*load(MANIFEST, BASELINE), measurements)
     return report(findings, counts, args.enforce)
 
 

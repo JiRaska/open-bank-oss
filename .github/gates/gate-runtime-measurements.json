@@ -1,0 +1,1713 @@
+{
+  "_comment": "DERIVED, not hand-written. Regenerate with .github/scripts/derive-gate-runtime-measurements.py.",
+  "_provenance": {
+    "source": "ci.yml gate-results-* artifacts (ADR-0255 --json), field `seconds`",
+    "query": "gh api 'repos/JiRaska/open-bank-oss/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=30'",
+    "runs_used": 30,
+    "newest_run": 42707765059,
+    "oldest_run": 42605639416,
+    "derived_at": "2026-11-09T22:18:14Z"
+  },
+  "gates": {
+    "accounting-clock-gate": {
+      "n": 30,
+      "p95_seconds": 2.68,
+      "max_seconds": 2.76
+    },
+    "admin-ui-a11y-route-coverage": {
+      "n": 30,
+      "p95_seconds": 0.74,
+      "max_seconds": 0.76
+    },
+    "admin-ui-request-trace-fixtures": {
+      "n": 30,
+      "p95_seconds": 19.38,
+      "max_seconds": 19.89
+    },
+    "admin-ui-version-sync-guard": {
+      "n": 30,
+      "p95_seconds": 0.48,
+      "max_seconds": 0.51
+    },
+    "adr-delivery-evidence": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.44
+    },
+    "adr-delivery-scripts": {
+      "n": 30,
+      "p95_seconds": 5.55,
+      "max_seconds": 5.67
+    },
+    "adr-partial-followup": {
+      "n": 30,
+      "p95_seconds": 0.52,
+      "max_seconds": 0.65
+    },
+    "adr-proposed-staleness": {
+      "n": 30,
+      "p95_seconds": 1.01,
+      "max_seconds": 1.06
+    },
+    "adr-registry-integrity-check": {
+      "n": 30,
+      "p95_seconds": 37.53,
+      "max_seconds": 37.54
+    },
+    "adversarial-contract-test": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "advisory-finding-staleness": {
+      "n": 30,
+      "p95_seconds": 1.47,
+      "max_seconds": 1.47
+    },
+    "advisory-gate-registration": {
+      "n": 30,
+      "p95_seconds": 4.28,
+      "max_seconds": 4.53
+    },
+    "agent-bounded-write-surface": {
+      "n": 30,
+      "p95_seconds": 1.02,
+      "max_seconds": 1.03
+    },
+    "agent-case-schema": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.38
+    },
+    "agent-charter-registry-parity": {
+      "n": 30,
+      "p95_seconds": 0.82,
+      "max_seconds": 0.84
+    },
+    "agent-merge-authorization-selftest": {
+      "n": 30,
+      "p95_seconds": 0.59,
+      "max_seconds": 0.6
+    },
+    "agent-merge-pr-policy-selftest": {
+      "n": 30,
+      "p95_seconds": 9.25,
+      "max_seconds": 9.27
+    },
+    "agent-merge-recorder-selftest": {
+      "n": 30,
+      "p95_seconds": 20.21,
+      "max_seconds": 20.36
+    },
+    "agent-model-parity": {
+      "n": 30,
+      "p95_seconds": 0.46,
+      "max_seconds": 0.47
+    },
+    "agent-pr-guard": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "agent-review-proof-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.53,
+      "max_seconds": 0.61
+    },
+    "agent-review-scope-falsifiable": {
+      "n": 30,
+      "p95_seconds": 0.19,
+      "max_seconds": 0.19
+    },
+    "agent-schedule-matches-charter": {
+      "n": 30,
+      "p95_seconds": 0.65,
+      "max_seconds": 0.66
+    },
+    "agent-virtual-keys": {
+      "n": 30,
+      "p95_seconds": 12.68,
+      "max_seconds": 13.01
+    },
+    "aggregate-type-case-fold": {
+      "n": 30,
+      "p95_seconds": 0.88,
+      "max_seconds": 1.04
+    },
+    "ai-act-high-risk-inventory-vs-code": {
+      "n": 30,
+      "p95_seconds": 8.75,
+      "max_seconds": 9.1
+    },
+    "ai-governance-snapshot-drift": {
+      "n": 30,
+      "p95_seconds": 0.41,
+      "max_seconds": 0.41
+    },
+    "alert-metric-emitted": {
+      "n": 30,
+      "p95_seconds": 1.93,
+      "max_seconds": 1.94
+    },
+    "alert-rca-ledger-guards": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.37
+    },
+    "alert-window-vs-subject-period": {
+      "n": 30,
+      "p95_seconds": 24.67,
+      "max_seconds": 24.84
+    },
+    "alertmanager-url-route-prefix": {
+      "n": 30,
+      "p95_seconds": 1.35,
+      "max_seconds": 1.48
+    },
+    "api-contract-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "approval-store-redis-host": {
+      "n": 30,
+      "p95_seconds": 19.09,
+      "max_seconds": 19.1
+    },
+    "argocd-sync-integrity-unit-test": {
+      "n": 30,
+      "p95_seconds": 2.94,
+      "max_seconds": 3.33
+    },
+    "asvs-l3-mechanical-subset": {
+      "n": 30,
+      "p95_seconds": 6.59,
+      "max_seconds": 6.86
+    },
+    "asyncapi-doc-discriminator": {
+      "n": 30,
+      "p95_seconds": 2.45,
+      "max_seconds": 2.52
+    },
+    "audit-anchor-offline-verifier-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.37,
+      "max_seconds": 1.55
+    },
+    "audit-money-path-subscription": {
+      "n": 30,
+      "p95_seconds": 1.16,
+      "max_seconds": 1.16
+    },
+    "authz-enforce-money-path": {
+      "n": 30,
+      "p95_seconds": 5.47,
+      "max_seconds": 5.59
+    },
+    "authz-enforce-pdp-sidecar-parity": {
+      "n": 30,
+      "p95_seconds": 3.92,
+      "max_seconds": 4.19
+    },
+    "auto-deploy-reconcile-probe-unit-test": {
+      "n": 30,
+      "p95_seconds": 51.17,
+      "max_seconds": 51.58
+    },
+    "auto-deploy-red-watch-declaration": {
+      "n": 30,
+      "p95_seconds": 0.34,
+      "max_seconds": 0.37
+    },
+    "auto-update-armed-prs-declaration": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.34
+    },
+    "blocking-counterpart-probe-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.55,
+      "max_seconds": 1.56
+    },
+    "build-time-bean-selection": {
+      "n": 30,
+      "p95_seconds": 16.26,
+      "max_seconds": 16.4
+    },
+    "buildx-push-single-manifest": {
+      "n": 30,
+      "p95_seconds": 0.57,
+      "max_seconds": 0.63
+    },
+    "can-i-deploy-block-classifier-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.77,
+      "max_seconds": 1.88
+    },
+    "can-i-deploy-codeploy-selector-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.93,
+      "max_seconds": 0.93
+    },
+    "can-i-deploy-version-selector-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.38,
+      "max_seconds": 0.41
+    },
+    "capacity-profile-consistency": {
+      "n": 30,
+      "p95_seconds": 1.44,
+      "max_seconds": 1.49
+    },
+    "card-capability-matrix-drift": {
+      "n": 30,
+      "p95_seconds": 0.26,
+      "max_seconds": 0.27
+    },
+    "catalog-kernel-industry-neutral": {
+      "n": 30,
+      "p95_seconds": 0.97,
+      "max_seconds": 0.97
+    },
+    "ci-artifact-fetch-via-resolver": {
+      "n": 30,
+      "p95_seconds": 0.53,
+      "max_seconds": 0.61
+    },
+    "ci-artifact-lock-integrity": {
+      "n": 30,
+      "p95_seconds": 9.4,
+      "max_seconds": 9.44
+    },
+    "ci-reconcile-selector-selftest": {
+      "n": 30,
+      "p95_seconds": 0.09,
+      "max_seconds": 0.15
+    },
+    "ci-runner-pool-capacity": {
+      "n": 30,
+      "p95_seconds": 2.44,
+      "max_seconds": 2.49
+    },
+    "ci-script-tests-previously-unreachable": {
+      "n": 30,
+      "p95_seconds": 145.35,
+      "max_seconds": 150.64
+    },
+    "claude-md-identifiers-exist": {
+      "n": 30,
+      "p95_seconds": 7.71,
+      "max_seconds": 7.99
+    },
+    "clickhouse-ddl-configmap-parity": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.25
+    },
+    "clickhouse-migration-configmap-sync": {
+      "n": 30,
+      "p95_seconds": 0.44,
+      "max_seconds": 0.45
+    },
+    "clock-injection-gate": {
+      "n": 30,
+      "p95_seconds": 5.77,
+      "max_seconds": 5.8
+    },
+    "close-participants-declared": {
+      "n": 30,
+      "p95_seconds": 1.32,
+      "max_seconds": 1.48
+    },
+    "cnpg-backup-declared-gate": {
+      "n": 30,
+      "p95_seconds": 12.08,
+      "max_seconds": 12.32
+    },
+    "cnpg-postgres-minor-floor": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "cnpg-scrape-coverage": {
+      "n": 30,
+      "p95_seconds": 1.28,
+      "max_seconds": 1.3
+    },
+    "cnpg-update-resilience": {
+      "n": 30,
+      "p95_seconds": 1.08,
+      "max_seconds": 1.12
+    },
+    "co-deploy-set-derivation-unit-test": {
+      "n": 30,
+      "p95_seconds": 0.87,
+      "max_seconds": 0.97
+    },
+    "compliance-matrix": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.38
+    },
+    "compliance-page-evidence": {
+      "n": 30,
+      "p95_seconds": 2.1,
+      "max_seconds": 2.11
+    },
+    "configproperty-kotlin-defaults": {
+      "n": 30,
+      "p95_seconds": 0.4,
+      "max_seconds": 0.41
+    },
+    "configproperty-supplied": {
+      "n": 30,
+      "p95_seconds": 1.76,
+      "max_seconds": 1.86
+    },
+    "container-listen-port-collisions": {
+      "n": 30,
+      "p95_seconds": 3.47,
+      "max_seconds": 3.5
+    },
+    "coverage-floor-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "credential-deadline-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "critical-alert-egress": {
+      "n": 30,
+      "p95_seconds": 1.25,
+      "max_seconds": 1.51
+    },
+    "cronjob-max-success-age": {
+      "n": 30,
+      "p95_seconds": 1.73,
+      "max_seconds": 1.74
+    },
+    "dashboard-metric-emitted": {
+      "n": 30,
+      "p95_seconds": 1.5,
+      "max_seconds": 1.64
+    },
+    "dast-zap-coverage-selftest": {
+      "n": 30,
+      "p95_seconds": 0.54,
+      "max_seconds": 0.62
+    },
+    "datasource-pool-self-heal": {
+      "n": 30,
+      "p95_seconds": 0.2,
+      "max_seconds": 0.2
+    },
+    "db-backup-association-gate": {
+      "n": 30,
+      "p95_seconds": 2.55,
+      "max_seconds": 2.69
+    },
+    "db-backup-prefix-scope": {
+      "n": 30,
+      "p95_seconds": 2.26,
+      "max_seconds": 2.63
+    },
+    "db-migration-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "default-nodepool-budget-shape": {
+      "n": 30,
+      "p95_seconds": 0.23,
+      "max_seconds": 0.24
+    },
+    "deploy-code-lag-report-unit-test": {
+      "n": 30,
+      "p95_seconds": 2.44,
+      "max_seconds": 2.5
+    },
+    "deploy-coverage-guard": {
+      "n": 30,
+      "p95_seconds": 3.79,
+      "max_seconds": 3.92
+    },
+    "deploy-drift-declaration": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.71
+    },
+    "deploy-hold-image-pins": {
+      "n": 30,
+      "p95_seconds": 4.51,
+      "max_seconds": 4.93
+    },
+    "deploy-pin-monotonic": {
+      "n": 30,
+      "p95_seconds": 2.66,
+      "max_seconds": 2.78
+    },
+    "deploy-script-tests-previously-unreachable": {
+      "n": 30,
+      "p95_seconds": 253.08,
+      "max_seconds": 256.38
+    },
+    "deploy-window-decision": {
+      "n": 30,
+      "p95_seconds": 10.41,
+      "max_seconds": 10.8
+    },
+    "dockerfile-runtime-only": {
+      "n": 30,
+      "p95_seconds": 0.4,
+      "max_seconds": 0.73
+    },
+    "domain-purity-gate": {
+      "n": 30,
+      "p95_seconds": 1.58,
+      "max_seconds": 1.59
+    },
+    "domainevent-occurredat-constructor-guard": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.57
+    },
+    "dotted-mp-messaging-key-guard": {
+      "n": 30,
+      "p95_seconds": 0.84,
+      "max_seconds": 0.86
+    },
+    "dr-restore-orchestration": {
+      "n": 30,
+      "p95_seconds": 13.09,
+      "max_seconds": 13.4
+    },
+    "duplicate-test-files": {
+      "n": 30,
+      "p95_seconds": 0.89,
+      "max_seconds": 0.9
+    },
+    "duplicate-yaml-key-guard": {
+      "n": 30,
+      "p95_seconds": 6.03,
+      "max_seconds": 6.5
+    },
+    "dynamic-db-roles-declared": {
+      "n": 30,
+      "p95_seconds": 0.39,
+      "max_seconds": 0.39
+    },
+    "ecr-live-tags-selftest": {
+      "n": 30,
+      "p95_seconds": 0.1,
+      "max_seconds": 0.12
+    },
+    "edge-decoy-rule-parity": {
+      "n": 30,
+      "p95_seconds": 1.63,
+      "max_seconds": 1.71
+    },
+    "enforcement-reachability": {
+      "n": 30,
+      "p95_seconds": 7.39,
+      "max_seconds": 7.42
+    },
+    "ensure-ecr-repository": {
+      "n": 30,
+      "p95_seconds": 0.53,
+      "max_seconds": 0.66
+    },
+    "entity-column-names": {
+      "n": 30,
+      "p95_seconds": 0.79,
+      "max_seconds": 0.86
+    },
+    "enum-reference-data-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.16,
+      "max_seconds": 1.18
+    },
+    "eso-crd-api-version": {
+      "n": 30,
+      "p95_seconds": 1.25,
+      "max_seconds": 1.25
+    },
+    "eu-ai-act-inventory-drift": {
+      "n": 30,
+      "p95_seconds": 0.76,
+      "max_seconds": 1.24
+    },
+    "evals-gate-replay": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.4
+    },
+    "evals-registry-integrity": {
+      "n": 30,
+      "p95_seconds": 0.48,
+      "max_seconds": 0.55
+    },
+    "event-consumer-liveness": {
+      "n": 30,
+      "p95_seconds": 1.58,
+      "max_seconds": 1.62
+    },
+    "event-contract-code-agreement": {
+      "n": 30,
+      "p95_seconds": 20.34,
+      "max_seconds": 20.51
+    },
+    "event-contract-coverage-ratchet": {
+      "n": 30,
+      "p95_seconds": 3.49,
+      "max_seconds": 3.58
+    },
+    "event-handler-swallows": {
+      "n": 30,
+      "p95_seconds": 4.68,
+      "max_seconds": 4.68
+    },
+    "extension-bean-config": {
+      "n": 30,
+      "p95_seconds": 3.99,
+      "max_seconds": 4.0
+    },
+    "external-feed-declaration-drift": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.79
+    },
+    "feature-flag-governance": {
+      "n": 30,
+      "p95_seconds": 0.85,
+      "max_seconds": 1.06
+    },
+    "field-crypto-in-libs": {
+      "n": 30,
+      "p95_seconds": 3.91,
+      "max_seconds": 3.93
+    },
+    "finops-tier-drift": {
+      "n": 30,
+      "p95_seconds": 0.23,
+      "max_seconds": 0.26
+    },
+    "fleet-attestation-classifier": {
+      "n": 30,
+      "p95_seconds": 10.72,
+      "max_seconds": 10.87
+    },
+    "fleet-scanning-test-edges": {
+      "n": 30,
+      "p95_seconds": 1.67,
+      "max_seconds": 1.71
+    },
+    "flyway-default-datasource": {
+      "n": 30,
+      "p95_seconds": 2.86,
+      "max_seconds": 3.06
+    },
+    "flyway-version-commit-order": {
+      "n": 30,
+      "p95_seconds": 25.76,
+      "max_seconds": 27.33
+    },
+    "four-eyes-verb-grantable": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "gate-graduation-guard": {
+      "n": 30,
+      "p95_seconds": 1.05,
+      "max_seconds": 1.18
+    },
+    "gate-invocation-reachability": {
+      "n": 30,
+      "p95_seconds": 0.56,
+      "max_seconds": 0.66
+    },
+    "gate-lifecycle-metadata": {
+      "n": 30,
+      "p95_seconds": 1.39,
+      "max_seconds": 1.39
+    },
+    "gate-observability-declarations": {
+      "n": 30,
+      "p95_seconds": 0.84,
+      "max_seconds": 0.84
+    },
+    "gate-runner-self-test": {
+      "n": 30,
+      "p95_seconds": 26.73,
+      "max_seconds": 26.83
+    },
+    "gate-script-registration": {
+      "n": 30,
+      "p95_seconds": 3.54,
+      "max_seconds": 3.61
+    },
+    "gate-selftest-declaration": {
+      "n": 30,
+      "p95_seconds": 1.15,
+      "max_seconds": 1.2
+    },
+    "gate-subject-floor": {
+      "n": 30,
+      "p95_seconds": 1.13,
+      "max_seconds": 1.22
+    },
+    "gates-not-deregistered": {
+      "n": 30,
+      "p95_seconds": 2.7,
+      "max_seconds": 2.76
+    },
+    "gen-network-policies-drift-gate": {
+      "n": 30,
+      "p95_seconds": 14.58,
+      "max_seconds": 15.09
+    },
+    "gen-service-alert-rules-drift-gate": {
+      "n": 30,
+      "p95_seconds": 0.61,
+      "max_seconds": 0.68
+    },
+    "gh-repo-context-in-checkoutless-jobs": {
+      "n": 30,
+      "p95_seconds": 1.86,
+      "max_seconds": 1.88
+    },
+    "gh-retry-selftest": {
+      "n": 30,
+      "p95_seconds": 3.14,
+      "max_seconds": 3.41
+    },
+    "git-fixture-hermetic": {
+      "n": 30,
+      "p95_seconds": 2.25,
+      "max_seconds": 2.3
+    },
+    "gitops-duplicate-resources": {
+      "n": 30,
+      "p95_seconds": 0.86,
+      "max_seconds": 0.86
+    },
+    "gitops-image-pin-only": {
+      "n": 30,
+      "p95_seconds": 4.68,
+      "max_seconds": 4.75
+    },
+    "gitops-ref-integrity-guard": {
+      "n": 30,
+      "p95_seconds": 10.55,
+      "max_seconds": 11.95
+    },
+    "governance-lineage-vs-code-audit": {
+      "n": 30,
+      "p95_seconds": 0.88,
+      "max_seconds": 0.94
+    },
+    "governance-manifest": {
+      "n": 30,
+      "p95_seconds": 2.97,
+      "max_seconds": 3.01
+    },
+    "governance-script-unit-tests": {
+      "n": 30,
+      "p95_seconds": 115.48,
+      "max_seconds": 120.38
+    },
+    "gradle-cache-writer-budget": {
+      "n": 30,
+      "p95_seconds": 2.5,
+      "max_seconds": 2.83
+    },
+    "gradle-home-isolation-on-self-hosted-runners": {
+      "n": 30,
+      "p95_seconds": 1.91,
+      "max_seconds": 1.92
+    },
+    "helm-values-key-effect": {
+      "n": 30,
+      "p95_seconds": 17.95,
+      "max_seconds": 18.15
+    },
+    "hibernate-sequence-guard": {
+      "n": 30,
+      "p95_seconds": 9.9,
+      "max_seconds": 10.32
+    },
+    "honeytoken-wiring": {
+      "n": 30,
+      "p95_seconds": 8.22,
+      "max_seconds": 8.75
+    },
+    "idempotency-contract-parity": {
+      "n": 30,
+      "p95_seconds": 7.71,
+      "max_seconds": 7.81
+    },
+    "idempotency-coverage-money-path": {
+      "n": 30,
+      "p95_seconds": 1.47,
+      "max_seconds": 1.49
+    },
+    "identifier-intent-guard": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.77
+    },
+    "incluster-hostname-resolution": {
+      "n": 30,
+      "p95_seconds": 4.12,
+      "max_seconds": 4.17
+    },
+    "incoming-dlq-wiring": {
+      "n": 30,
+      "p95_seconds": 1.41,
+      "max_seconds": 1.45
+    },
+    "issue-kind-classifier-self-test": {
+      "n": 30,
+      "p95_seconds": 0.51,
+      "max_seconds": 0.51
+    },
+    "jaxrs-path-not-hijacked-by-toplevel-fun": {
+      "n": 30,
+      "p95_seconds": 0.85,
+      "max_seconds": 0.85
+    },
+    "jaxrs-path-prefix-leading-slash": {
+      "n": 30,
+      "p95_seconds": 1.54,
+      "max_seconds": 1.55
+    },
+    "journey-catalog-integrity": {
+      "n": 30,
+      "p95_seconds": 12.84,
+      "max_seconds": 12.92
+    },
+    "journey-money-path-accountability": {
+      "n": 30,
+      "p95_seconds": 0.71,
+      "max_seconds": 0.73
+    },
+    "json-logging-extension-present": {
+      "n": 30,
+      "p95_seconds": 0.62,
+      "max_seconds": 0.64
+    },
+    "kafka-acl-coverage": {
+      "n": 30,
+      "p95_seconds": 0.92,
+      "max_seconds": 0.96
+    },
+    "kafka-cert-reader-grant": {
+      "n": 30,
+      "p95_seconds": 0.84,
+      "max_seconds": 0.86
+    },
+    "kafka-deployment-wiring": {
+      "n": 30,
+      "p95_seconds": 12.46,
+      "max_seconds": 12.49
+    },
+    "kafka-dotted-key-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.54,
+      "max_seconds": 1.56
+    },
+    "kafka-topic-existence": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.62
+    },
+    "label-description-length": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.39
+    },
+    "ledger-instance-switches-off": {
+      "n": 30,
+      "p95_seconds": 0.43,
+      "max_seconds": 0.52
+    },
+    "lib-test-only-not-code-global": {
+      "n": 30,
+      "p95_seconds": 0.16,
+      "max_seconds": 0.18
+    },
+    "libs-annotations-implemented": {
+      "n": 30,
+      "p95_seconds": 5.13,
+      "max_seconds": 5.5
+    },
+    "libs-bench-alloc-baseline": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.25
+    },
+    "libs-change-dependents": {
+      "n": 30,
+      "p95_seconds": 1.2,
+      "max_seconds": 1.22
+    },
+    "libs-core-purity": {
+      "n": 30,
+      "p95_seconds": 0.29,
+      "max_seconds": 0.3
+    },
+    "license-header-consistency": {
+      "n": 30,
+      "p95_seconds": 4.43,
+      "max_seconds": 4.72
+    },
+    "litellm-config-revision": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "litellm-model-costs": {
+      "n": 30,
+      "p95_seconds": 0.17,
+      "max_seconds": 0.23
+    },
+    "llm-price-book": {
+      "n": 30,
+      "p95_seconds": 0.17,
+      "max_seconds": 0.19
+    },
+    "log-trace-id-path": {
+      "n": 30,
+      "p95_seconds": 0.28,
+      "max_seconds": 0.3
+    },
+    "loki-rule-load-test": {
+      "n": 30,
+      "p95_seconds": 46.65,
+      "max_seconds": 48.27
+    },
+    "loki-rule-self-match": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.7
+    },
+    "main-red-watch-declaration": {
+      "n": 30,
+      "p95_seconds": 2.09,
+      "max_seconds": 2.13
+    },
+    "manifest-types-only": {
+      "n": 30,
+      "p95_seconds": 0.17,
+      "max_seconds": 0.2
+    },
+    "matrix-sa-excluded-actions": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.63
+    },
+    "matrix-write-grants": {
+      "n": 30,
+      "p95_seconds": 0.81,
+      "max_seconds": 0.82
+    },
+    "mcp-charter-data-scope-binding": {
+      "n": 30,
+      "p95_seconds": 0.49,
+      "max_seconds": 0.6
+    },
+    "mcp-real-port-requires-caller-auth-first": {
+      "n": 30,
+      "p95_seconds": 1.51,
+      "max_seconds": 2.01
+    },
+    "merge-train-carrier-fetch-selftest": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.66
+    },
+    "merge-train-declaration": {
+      "n": 30,
+      "p95_seconds": 200.83,
+      "max_seconds": 201.46
+    },
+    "merged-past-red-check-declaration": {
+      "n": 30,
+      "p95_seconds": 0.29,
+      "max_seconds": 0.31
+    },
+    "mermaid-parses": {
+      "n": 30,
+      "p95_seconds": 19.04,
+      "max_seconds": 21.3
+    },
+    "metric-name-prefix": {
+      "n": 30,
+      "p95_seconds": 1.64,
+      "max_seconds": 1.99
+    },
+    "model-residency-claims": {
+      "n": 30,
+      "p95_seconds": 16.51,
+      "max_seconds": 17.08
+    },
+    "money-path-pact-coverage": {
+      "n": 30,
+      "p95_seconds": 0.48,
+      "max_seconds": 0.57
+    },
+    "money-rounding-inline-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.83,
+      "max_seconds": 0.84
+    },
+    "msg-channel-image-parity": {
+      "n": 30,
+      "p95_seconds": 5.78,
+      "max_seconds": 9.29
+    },
+    "mtls-bearer-only": {
+      "n": 30,
+      "p95_seconds": 1.86,
+      "max_seconds": 1.87
+    },
+    "mtls-keeps-http-port": {
+      "n": 30,
+      "p95_seconds": 1.42,
+      "max_seconds": 1.42
+    },
+    "nat-ami-pinned": {
+      "n": 30,
+      "p95_seconds": 0.29,
+      "max_seconds": 0.3
+    },
+    "native-auto-merge-holds": {
+      "n": 30,
+      "p95_seconds": 2.6,
+      "max_seconds": 2.62
+    },
+    "netpol-coverage-kpi": {
+      "n": 30,
+      "p95_seconds": 0.23,
+      "max_seconds": 0.27
+    },
+    "network-policy-code-edges": {
+      "n": 30,
+      "p95_seconds": 4.55,
+      "max_seconds": 4.63
+    },
+    "no-allow-all-pdp-in-main": {
+      "n": 30,
+      "p95_seconds": 2.02,
+      "max_seconds": 2.05
+    },
+    "no-dead-code-service-principal-rego-rule": {
+      "n": 30,
+      "p95_seconds": 2.44,
+      "max_seconds": 2.75
+    },
+    "no-epoch-instant-default": {
+      "n": 30,
+      "p95_seconds": 5.21,
+      "max_seconds": 5.36
+    },
+    "no-handrolled-cosign": {
+      "n": 30,
+      "p95_seconds": 3.95,
+      "max_seconds": 4.34
+    },
+    "no-local-daycount-or-calendar": {
+      "n": 30,
+      "p95_seconds": 2.62,
+      "max_seconds": 2.66
+    },
+    "no-runblocking-in-a-scheduled-body": {
+      "n": 30,
+      "p95_seconds": 1.54,
+      "max_seconds": 1.54
+    },
+    "no-service-local-exceptionmapper-collision-with-libs-runtime": {
+      "n": 30,
+      "p95_seconds": 1.26,
+      "max_seconds": 1.27
+    },
+    "nonnull-jaxrs-param-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.09,
+      "max_seconds": 1.09
+    },
+    "noop-not-success-ratchet": {
+      "n": 30,
+      "p95_seconds": 2.7,
+      "max_seconds": 2.78
+    },
+    "null-array-element-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.66,
+      "max_seconds": 1.66
+    },
+    "object-store-blobs-migration": {
+      "n": 30,
+      "p95_seconds": 0.56,
+      "max_seconds": 0.56
+    },
+    "oidc-client-configured": {
+      "n": 30,
+      "p95_seconds": 1.1,
+      "max_seconds": 1.31
+    },
+    "oidc-client-secret-wiring": {
+      "n": 30,
+      "p95_seconds": 10.12,
+      "max_seconds": 10.94
+    },
+    "oidc-secret-convention": {
+      "n": 30,
+      "p95_seconds": 1.78,
+      "max_seconds": 1.84
+    },
+    "oidc-tls-verification-profile-scoped": {
+      "n": 30,
+      "p95_seconds": 1.04,
+      "max_seconds": 1.07
+    },
+    "opa-bundle-apply-size": {
+      "n": 30,
+      "p95_seconds": 14.55,
+      "max_seconds": 14.59
+    },
+    "opa-bundle-parses": {
+      "n": 30,
+      "p95_seconds": 5.29,
+      "max_seconds": 5.44
+    },
+    "opa-sidecar-bundle-shape": {
+      "n": 30,
+      "p95_seconds": 0.78,
+      "max_seconds": 0.8
+    },
+    "openapi-enum-domain-drift": {
+      "n": 30,
+      "p95_seconds": 0.57,
+      "max_seconds": 0.59
+    },
+    "openapi-route-conformance": {
+      "n": 30,
+      "p95_seconds": 1.23,
+      "max_seconds": 1.24
+    },
+    "openapi-server-port": {
+      "n": 30,
+      "p95_seconds": 0.3,
+      "max_seconds": 0.31
+    },
+    "openapi-version-not-taken": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "openssf-gold-evidence": {
+      "n": 30,
+      "p95_seconds": 0.21,
+      "max_seconds": 0.32
+    },
+    "operator-write-naming": {
+      "n": 30,
+      "p95_seconds": 0.17,
+      "max_seconds": 0.17
+    },
+    "ops-cli-client-contract": {
+      "n": 30,
+      "p95_seconds": 0.32,
+      "max_seconds": 0.36
+    },
+    "otel-endpoint-declared": {
+      "n": 30,
+      "p95_seconds": 3.28,
+      "max_seconds": 3.34
+    },
+    "otel-exporter-endpoint": {
+      "n": 30,
+      "p95_seconds": 1.07,
+      "max_seconds": 1.08
+    },
+    "outbox-claim-sql-ratchet": {
+      "n": 30,
+      "p95_seconds": 5.17,
+      "max_seconds": 5.33
+    },
+    "outbox-conformance-it-present": {
+      "n": 30,
+      "p95_seconds": 6.37,
+      "max_seconds": 6.38
+    },
+    "outbox-dispatch-enabled-guard": {
+      "n": 30,
+      "p95_seconds": 1.74,
+      "max_seconds": 1.74
+    },
+    "outbox-has-writer": {
+      "n": 30,
+      "p95_seconds": 7.91,
+      "max_seconds": 7.96
+    },
+    "outbox-sent-retention": {
+      "n": 30,
+      "p95_seconds": 6.1,
+      "max_seconds": 6.14
+    },
+    "pact-deployed-record-reconcile": {
+      "n": 30,
+      "p95_seconds": 0.15,
+      "max_seconds": 0.15
+    },
+    "pact-provider-replay-coverage": {
+      "n": 30,
+      "p95_seconds": 0.54,
+      "max_seconds": 0.56
+    },
+    "pact-provider-version-proof-unit-test": {
+      "n": 30,
+      "p95_seconds": 10.7,
+      "max_seconds": 11.29
+    },
+    "pact-reconcile-decision-table": {
+      "n": 30,
+      "p95_seconds": 0.63,
+      "max_seconds": 0.73
+    },
+    "pact-twin-state-parity": {
+      "n": 30,
+      "p95_seconds": 10.1,
+      "max_seconds": 10.61
+    },
+    "pact-version-probe-fail-closed-unit-test": {
+      "n": 30,
+      "p95_seconds": 1.9,
+      "max_seconds": 2.21
+    },
+    "pact-version-tree-equivalence-unit-test": {
+      "n": 30,
+      "p95_seconds": 29.08,
+      "max_seconds": 31.07
+    },
+    "pacticipant-matches-module": {
+      "n": 30,
+      "p95_seconds": 0.2,
+      "max_seconds": 0.21
+    },
+    "pdp-flag-rollout-complete": {
+      "n": 30,
+      "p95_seconds": 39.54,
+      "max_seconds": 41.79
+    },
+    "pdp-flag-rollout-probe-self-test": {
+      "n": 30,
+      "p95_seconds": 0.67,
+      "max_seconds": 0.68
+    },
+    "pitest-threshold-single-source": {
+      "n": 30,
+      "p95_seconds": 0.7,
+      "max_seconds": 0.74
+    },
+    "podmonitor-namespace-coverage": {
+      "n": 30,
+      "p95_seconds": 8.11,
+      "max_seconds": 8.22
+    },
+    "pr-build-cloud-credentials": {
+      "n": 30,
+      "p95_seconds": 0.27,
+      "max_seconds": 0.32
+    },
+    "pr-component-span": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "pr-file-overlap": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "pr-shared-files": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "principal-name-trust": {
+      "n": 30,
+      "p95_seconds": 3.38,
+      "max_seconds": 3.82
+    },
+    "probe-lib-known-positive": {
+      "n": 30,
+      "p95_seconds": 1.9,
+      "max_seconds": 1.95
+    },
+    "probe-scrape-port-has-a-listener": {
+      "n": 30,
+      "p95_seconds": 1.48,
+      "max_seconds": 1.49
+    },
+    "product-ir-authoring-parity": {
+      "n": 30,
+      "p95_seconds": 0.27,
+      "max_seconds": 0.28
+    },
+    "product-ir-determinism": {
+      "n": 30,
+      "p95_seconds": 0.39,
+      "max_seconds": 0.39
+    },
+    "product-ir-formal-properties": {
+      "n": 30,
+      "p95_seconds": 0.49,
+      "max_seconds": 0.5
+    },
+    "product-ir-purity": {
+      "n": 30,
+      "p95_seconds": 1.12,
+      "max_seconds": 1.14
+    },
+    "product-ir-run-limits": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.48
+    },
+    "product-ir-version-lifecycle": {
+      "n": 30,
+      "p95_seconds": 0.27,
+      "max_seconds": 0.27
+    },
+    "product-revision-pinned": {
+      "n": 30,
+      "p95_seconds": 1.04,
+      "max_seconds": 1.07
+    },
+    "prompt-registry-integrity": {
+      "n": 30,
+      "p95_seconds": 0.5,
+      "max_seconds": 0.62
+    },
+    "promql-alert-unit-tests": {
+      "n": 30,
+      "p95_seconds": 118.75,
+      "max_seconds": 120.99
+    },
+    "provenance": {
+      "n": 30,
+      "p95_seconds": 47.69,
+      "max_seconds": 49.9
+    },
+    "provider-type-classpath": {
+      "n": 30,
+      "p95_seconds": 0.51,
+      "max_seconds": 0.52
+    },
+    "psd2-anonymous-grant-stays-behind-eidas-mtls": {
+      "n": 30,
+      "p95_seconds": 0.34,
+      "max_seconds": 0.44
+    },
+    "public-workload-ha": {
+      "n": 30,
+      "p95_seconds": 0.68,
+      "max_seconds": 0.7
+    },
+    "python-lint": {
+      "n": 30,
+      "p95_seconds": 3.93,
+      "max_seconds": 4.3
+    },
+    "quarkus-application-version-override-guard": {
+      "n": 30,
+      "p95_seconds": 1.99,
+      "max_seconds": 2.0
+    },
+    "quarkus-test-ports-ephemeral": {
+      "n": 30,
+      "p95_seconds": 0.83,
+      "max_seconds": 1.11
+    },
+    "quoted-sequence-name-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.35,
+      "max_seconds": 0.38
+    },
+    "raw-colour-literal-ratchet": {
+      "n": 30,
+      "p95_seconds": 0.42,
+      "max_seconds": 0.54
+    },
+    "raw-http-client-ratchet": {
+      "n": 30,
+      "p95_seconds": 1.07,
+      "max_seconds": 1.08
+    },
+    "readiness-attestation-format": {
+      "n": 30,
+      "p95_seconds": 0.46,
+      "max_seconds": 0.9
+    },
+    "readiness-collectors-agree": {
+      "n": 30,
+      "p95_seconds": 56.45,
+      "max_seconds": 58.62
+    },
+    "realm-devci-artifact-parity": {
+      "n": 30,
+      "p95_seconds": 0.36,
+      "max_seconds": 0.4
+    },
+    "realm-template-importable": {
+      "n": 30,
+      "p95_seconds": 0.33,
+      "max_seconds": 0.34
+    },
+    "record-deployment-version-resolver": {
+      "n": 30,
+      "p95_seconds": 0.93,
+      "max_seconds": 1.1
+    },
+    "regen-derived-inventory": {
+      "n": 30,
+      "p95_seconds": 0.23,
+      "max_seconds": 0.25
+    },
+    "rego-service-account-profile-scope": {
+      "n": 30,
+      "p95_seconds": 1.12,
+      "max_seconds": 1.58
+    },
+    "release-evidence-coverage": {
+      "n": 30,
+      "p95_seconds": 10.71,
+      "max_seconds": 10.74
+    },
+    "release-registration-consistency": {
+      "n": 30,
+      "p95_seconds": 0.24,
+      "max_seconds": 0.28
+    },
+    "release-scope-mismatch-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "release-support-period-derivation": {
+      "n": 30,
+      "p95_seconds": 0.25,
+      "max_seconds": 0.27
+    },
+    "remote-build-cache-write-scope": {
+      "n": 30,
+      "p95_seconds": 3.04,
+      "max_seconds": 3.08
+    },
+    "requirements-traceability": {
+      "n": 30,
+      "p95_seconds": 0.98,
+      "max_seconds": 1.01
+    },
+    "resilience-profile": {
+      "n": 30,
+      "p95_seconds": 1.25,
+      "max_seconds": 1.27
+    },
+    "resolve-tracking-issue-selftest": {
+      "n": 30,
+      "p95_seconds": 0.35,
+      "max_seconds": 0.36
+    },
+    "rest-client-timeouts": {
+      "n": 30,
+      "p95_seconds": 0.31,
+      "max_seconds": 0.32
+    },
+    "restclient-url-supplied": {
+      "n": 30,
+      "p95_seconds": 8.99,
+      "max_seconds": 9.02
+    },
+    "rolesallowed-realm-parity": {
+      "n": 30,
+      "p95_seconds": 2.06,
+      "max_seconds": 2.19
+    },
+    "route-exports": {
+      "n": 30,
+      "p95_seconds": 0.54,
+      "max_seconds": 0.59
+    },
+    "ruleset-bypass-actors": {
+      "n": 30,
+      "p95_seconds": 16.48,
+      "max_seconds": 18.19
+    },
+    "ruleset-context-parity": {
+      "n": 30,
+      "p95_seconds": 13.11,
+      "max_seconds": 13.34
+    },
+    "runtime-conformance-comparators": {
+      "n": 30,
+      "p95_seconds": 0.37,
+      "max_seconds": 0.39
+    },
+    "scheduled-trigger-emitted": {
+      "n": 30,
+      "p95_seconds": 5.36,
+      "max_seconds": 5.67
+    },
+    "scheduler-cron-syntax": {
+      "n": 30,
+      "p95_seconds": 1.41,
+      "max_seconds": 1.43
+    },
+    "scheduler-exercised-in-tests": {
+      "n": 30,
+      "p95_seconds": 1.72,
+      "max_seconds": 1.95
+    },
+    "scheduler-liveness-adoption": {
+      "n": 30,
+      "p95_seconds": 0.65,
+      "max_seconds": 0.7
+    },
+    "schema-compat-gate": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "security-checklist-append-helper": {
+      "n": 30,
+      "p95_seconds": 0.09,
+      "max_seconds": 0.09
+    },
+    "security-checklist-money-path": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "security-sensitive-paths-coverage": {
+      "n": 30,
+      "p95_seconds": 9.16,
+      "max_seconds": 11.83
+    },
+    "security-txt-policy-reachable": {
+      "n": 30,
+      "p95_seconds": 0.69,
+      "max_seconds": 0.79
+    },
+    "service-application-readiness": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "service-ci-explicit-jobs": {
+      "n": 30,
+      "p95_seconds": 11.46,
+      "max_seconds": 11.73
+    },
+    "service-ci-path-selection-scenarios": {
+      "n": 30,
+      "p95_seconds": 75.02,
+      "max_seconds": 76.0
+    },
+    "service-ci-select-modules": {
+      "n": 30,
+      "p95_seconds": 7.41,
+      "max_seconds": 7.46
+    },
+    "service-runbook-drift": {
+      "n": 30,
+      "p95_seconds": 12.53,
+      "max_seconds": 13.62
+    },
+    "shellcheck": {
+      "n": 30,
+      "p95_seconds": 37.55,
+      "max_seconds": 38.65
+    },
+    "single-replica-rollout-strategy": {
+      "n": 30,
+      "p95_seconds": 0.88,
+      "max_seconds": 0.88
+    },
+    "slo-dashboard-drift": {
+      "n": 30,
+      "p95_seconds": 0.43,
+      "max_seconds": 0.43
+    },
+    "slo-registry-consistency": {
+      "n": 30,
+      "p95_seconds": 0.67,
+      "max_seconds": 0.68
+    },
+    "source-service-convention": {
+      "n": 30,
+      "p95_seconds": 1.34,
+      "max_seconds": 1.34
+    },
+    "source-service-presence": {
+      "n": 30,
+      "p95_seconds": 0.76,
+      "max_seconds": 0.78
+    },
+    "spot-kill-retry-selftest": {
+      "n": 30,
+      "p95_seconds": 5.64,
+      "max_seconds": 5.71
+    },
+    "stale-comment-references": {
+      "n": 30,
+      "p95_seconds": 8.18,
+      "max_seconds": 10.26
+    },
+    "standing-critical-digest-guards": {
+      "n": 30,
+      "p95_seconds": 0.1,
+      "max_seconds": 0.1
+    },
+    "stateful-not-on-spot": {
+      "n": 30,
+      "p95_seconds": 1.23,
+      "max_seconds": 1.25
+    },
+    "supersede-deploy-prs-ancestry": {
+      "n": 30,
+      "p95_seconds": 5.69,
+      "max_seconds": 5.74
+    },
+    "synthetic-customer-identity": {
+      "n": 30,
+      "p95_seconds": 0.54,
+      "max_seconds": 0.56
+    },
+    "synthetic-outbox-taint-persistence": {
+      "n": 30,
+      "p95_seconds": 4.23,
+      "max_seconds": 4.24
+    },
+    "synthetic-taint-rest-client-boundaries": {
+      "n": 30,
+      "p95_seconds": 1.02,
+      "max_seconds": 1.06
+    },
+    "temporal-namespace-registration": {
+      "n": 30,
+      "p95_seconds": 1.11,
+      "max_seconds": 1.16
+    },
+    "temporal-worker-switch-naming": {
+      "n": 30,
+      "p95_seconds": 1.2,
+      "max_seconds": 1.27
+    },
+    "test-intelligence-ecosystem": {
+      "n": 30,
+      "p95_seconds": 22.06,
+      "max_seconds": 22.47
+    },
+    "test-layer-applicability": {
+      "n": 30,
+      "p95_seconds": 0.78,
+      "max_seconds": 0.8
+    },
+    "test-runblocking-unit-guard": {
+      "n": 30,
+      "p95_seconds": 0.49,
+      "max_seconds": 0.49
+    },
+    "test-script-reachability": {
+      "n": 30,
+      "p95_seconds": 1.07,
+      "max_seconds": 1.1
+    },
+    "threat-model-claims-resolve": {
+      "n": 30,
+      "p95_seconds": 14.28,
+      "max_seconds": 14.5
+    },
+    "threat-model-coverage": {
+      "n": 30,
+      "p95_seconds": 0.31,
+      "max_seconds": 0.34
+    },
+    "threat-model-test-evidence": {
+      "n": 30,
+      "p95_seconds": 16.84,
+      "max_seconds": 17.93
+    },
+    "threat-model-updated-on-trust-boundary-change": {
+      "n": 30,
+      "p95_seconds": 0.0,
+      "max_seconds": 0.0
+    },
+    "tofu-image-pull-through": {
+      "n": 30,
+      "p95_seconds": 0.2,
+      "max_seconds": 0.25
+    },
+    "trace-contract-evidence": {
+      "n": 30,
+      "p95_seconds": 1.05,
+      "max_seconds": 1.06
+    },
+    "treasury-parity-fixtures": {
+      "n": 30,
+      "p95_seconds": 0.62,
+      "max_seconds": 0.67
+    },
+    "untrusted-pg-extension": {
+      "n": 30,
+      "p95_seconds": 13.22,
+      "max_seconds": 13.46
+    },
+    "vex-overlay-coverage": {
+      "n": 30,
+      "p95_seconds": 0.47,
+      "max_seconds": 0.48
+    },
+    "vex-range-reasoning": {
+      "n": 30,
+      "p95_seconds": 0.6,
+      "max_seconds": 0.62
+    },
+    "vex-resolved-version-current": {
+      "n": 30,
+      "p95_seconds": 0.42,
+      "max_seconds": 0.48
+    },
+    "workflow-gh-token-declared": {
+      "n": 30,
+      "p95_seconds": 0.72,
+      "max_seconds": 0.8
+    },
+    "workflow-run-step-size": {
+      "n": 30,
+      "p95_seconds": 5.39,
+      "max_seconds": 6.13
+    },
+    "workflow-supply-chain": {
+      "n": 30,
+      "p95_seconds": 13.6,
+      "max_seconds": 13.76
+    },
+    "xml-factory-hardened": {
+      "n": 30,
+      "p95_seconds": 1.94,
+      "max_seconds": 2.06
+    },
+    "yamllint": {
+      "n": 30,
+      "p95_seconds": 17.76,
+      "max_seconds": 18.83
+    }
+  }
+}
