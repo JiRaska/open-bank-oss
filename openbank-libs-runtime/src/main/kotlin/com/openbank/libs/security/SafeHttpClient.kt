@@ -20,6 +20,7 @@ import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.SynchronousQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
@@ -108,16 +109,35 @@ class SafeHttpClient private constructor(
                 Duration.ofMillis(minOf(connectTimeout.toMillis(), remainingMs(deadline))),
             )
         try {
-            raw.soTimeout = boundedTimeoutMs(deadline)
-            val wire = Wire(pinned, head, request, deadline)
+            return exchangeBeforeDeadline(raw, target, Wire(pinned, head, request, deadline))
+        } finally {
+            // Every path — handshake failure, timeout, parse error — releases the raw socket too.
+            runCatching { raw.close() }
+        }
+    }
+
+    private fun exchangeBeforeDeadline(raw: Socket, target: EgressTarget, wire: Wire): EgressResponse {
+        // SO_TIMEOUT bounds reads, not a write to a peer that stops receiving. Closing the raw
+        // socket also releases a blocked TLS write, without a worker thread for each exchange.
+        val expiry = CALL_DEADLINES.schedule(
+            {
+                // An expired upload must not linger and hold up other calls' deadline tasks.
+                runCatching { raw.setSoLinger(false, 0) }
+                runCatching { raw.close() }
+            },
+            (wire.deadline - System.nanoTime()).coerceAtLeast(0),
+            TimeUnit.NANOSECONDS,
+        )
+        try {
+            raw.soTimeout = boundedTimeoutMs(wire.deadline)
             return if (target.scheme == "https") {
                 overTls(raw, target, wire)
             } else {
                 exchange(raw, raw.getOutputStream(), raw.getInputStream(), wire)
             }
         } finally {
-            // Every path — handshake failure, timeout, parse error — releases the raw socket too.
-            runCatching { raw.close() }
+            // A completed call must not retain its socket in the timer queue until its deadline.
+            expiry.cancel(false)
         }
     }
 
@@ -410,6 +430,11 @@ class SafeHttpClient private constructor(
             ThreadPoolExecutor(0, DNS_POOL_MAX, DNS_POOL_KEEPALIVE_S, TimeUnit.SECONDS, SynchronousQueue()) { r ->
                 Thread(r, "safe-http-dns").apply { isDaemon = true }
             }
+
+        /** One shared daemon closes expired sockets; cancelled calls are removed immediately. */
+        private val CALL_DEADLINES = ScheduledThreadPoolExecutor(1) { runnable ->
+            Thread(runnable, "safe-http-call-deadline").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true }
 
         /**
          * TEST-ONLY: a client whose trusted ROOTS are [trustAnchors] instead of the JVM's cacerts.
