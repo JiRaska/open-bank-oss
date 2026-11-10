@@ -19,7 +19,8 @@ that day:
   reconcile);
 - foreign currency converts at that day's rate; a missing rate, or rates from another day,
   **fails** the assembly, because skipping an account would understate a claim silently;
-- compensation is capped at the CZK equivalent of EUR 100 000;
+- compensation is capped at the CZK equivalent of EUR 100 000, except special-regime balances
+  of their owner (see `DII` below);
 - excluded depositors (§ 41b, with the reason) and synthetic depositors or accounts are dropped
   and **counted**, so the exclusion is evidenced rather than assumed;
 - an overdrawn account is not a deposit: it is dropped before aggregation and counted, so it
@@ -91,8 +92,39 @@ Closing a gap needs a provider-side read (or policy rule) in another service, wh
 scope for the sourcing change; each closure must shrink `GsftSnapshotAdapter.UNRESOLVED_GAPS`
 together with the source that closes it.
 
+## Special-regime accounts (`DII`)
+
+An account in the special regime (účet ve speciálním režimu, § 41f) is held by an owner for
+beneficiaries (podílníci). Verified against the annex (1.2.2, 1.2.5):
+
+- the account is in `DIA` under its owner; a beneficiary is never in `DIA`;
+- `DII` carries one record per beneficiary share: `D`, IDC, TYPE, ORDER_P, ACCOUNT, CURRENCY,
+  AMOUNT, AMOUNT_CZK, sorted by IDC, TYPE, ORDER_P, ACCOUNT; `DIW.N_SPECIAL` counts them and a
+  zero count means no `DII` file;
+- the cover limit does not apply to the owner's `PAYMENT`, so special-regime balances are added
+  uncapped on top of the owner's capped ordinary claim;
+- a person whose funds are only on special-regime accounts has `PAYMENT` 0.
+
+Shares are in hundredths; their CZK column is split from the owner's `DIA` CZK total by largest
+remainder, so `DII` never sums past `DIA`. A beneficiary with bad data is rejected alone, like an
+owner. A share on an account that is not in `DIA` (owner excluded, synthetic, overdrawn or
+rejected) fails the batch: reporting beneficiaries of an account GSFT does not see would be
+inconsistent, and how to treat them is not stated by the annex.
+
+**Unverified / unresolved — the batch FAILS rather than guess:**
+
+- the coefficient *k* (1.2.5.1), applied when a beneficiary holds funds through two or more
+  owners, is not computed;
+- whether a beneficiary who is also a depositor in their own right gets their `DII` shares merged
+  into one `DIC` record is not stated;
+- a beneficiary-only `DIC.T_CLAIM` is the sum of their `DII` shares in CZK — the annex says only
+  "sum of all accounts under I_IDC" (*unverified*).
+
+No owning service models special-regime accounts or their beneficiaries today, so nothing feeds
+`SpecialRegimeShare` yet; the format is ready for when one does.
+
 ## Not yet here
 
-Closing the data-sourcing gaps above, the institutional file (`DII`), ZIP/PGP
+Closing the data-sourcing gaps above, ZIP/PGP
 transport, four-eyes attestation and filing, the scheduled TEST dry run, and temporarily high
 balances are follow-ups on #15356.
