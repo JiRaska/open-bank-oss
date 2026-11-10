@@ -117,12 +117,13 @@ class SupervisorySubmissionService(
         // Claim BEFORE calling the transport: with a live adapter two concurrent calls would be a
         // double filing. Losing the claim means another caller is transmitting, or has finished.
         val claimedAt = clock.instant()
-        if (!repository.claimForSubmission(current.id, claimedAt)) {
+        val token = Ids.newId()
+        if (!repository.claimForSubmission(current.id, claimedAt, token)) {
             val now = get(id)
             if (now.state in SETTLED) return now
             throw inProgress(id)
         }
-        return transmitClaimed(current.claimed(claimedAt), actor)
+        return transmitClaimed(current.claimed(claimedAt, token), actor)
     }
 
     /**
@@ -152,18 +153,37 @@ class SupervisorySubmissionService(
         actor: String,
     ): SupervisorySubmission {
         val now = clock.instant()
+        val mine = requireNotNull(claimed.claimId) { "record() needs a claim" }
         val next = claimed.afterTransport(result.outcome, result.reference, now)
         val attempt = attempt(claimed, transport.name, result.outcome, result.reference, result.detail, actor, now)
+            .copy(claimId = mine)
         val moved = try {
-            repository.transition(SubmissionState.SUBMITTING, next, attempt)
+            repository.transition(SubmissionState.SUBMITTING, next, attempt, mine)
         } catch (e: Exception) {
             // One retry; if the store is down the claim stays SUBMITTING and lapses to
             // OUTCOME_UNKNOWN after the lease — never back to a resubmittable PACKAGED.
             log.warnf(e, "recording outcome %s for submission %s failed; retrying once", result.outcome, claimed.id)
-            repository.transition(SubmissionState.SUBMITTING, next, attempt)
+            repository.transition(SubmissionState.SUBMITTING, next, attempt, mine)
         }
-        // The claim lapsed while we transmitted: a late but real answer still beats "unknown".
-        if (!moved) repository.transition(SubmissionState.OUTCOME_UNKNOWN, next, attempt)
+        // OUR claim lapsed while we transmitted and nobody has resolved it yet: a late but real
+        // answer still beats "unknown". Fenced on our token, so it can never touch a newer claim.
+        if (moved || repository.transition(SubmissionState.OUTCOME_UNKNOWN, next, attempt, mine)) return get(claimed.id)
+
+        // A newer claimant or an operator owns the row now. Do NOT apply our result; record it,
+        // as UNKNOWN under our own claim id, so an operator can see a possible second delivery.
+        log.warnf(
+            "late transport result %s (ref %s) for submission %s from lapsed claim %s; not applied",
+            result.outcome,
+            result.reference,
+            claimed.id,
+            mine,
+        )
+        repository.appendAttempt(
+            attempt.copy(
+                outcome = TransportOutcome.UNKNOWN,
+                detail = "late result ${result.outcome} (ref ${result.reference}) from lapsed claim; not applied",
+            ),
+        )
         return get(claimed.id)
     }
 
@@ -178,10 +198,12 @@ class SupervisorySubmissionService(
             actor,
             now,
         )
+        val lapsedClaim = requireNotNull(current.claimId) { "a SUBMITTING row always carries its claim id" }
         repository.transition(
             SubmissionState.SUBMITTING,
             current.claimLapsed(),
-            attempt,
+            attempt.copy(claimId = lapsedClaim),
+            lapsedClaim,
             claimedBefore = now.minus(lease),
         )
         return get(current.id)
@@ -203,7 +225,14 @@ class SupervisorySubmissionService(
         val next = current.reconciled(command.sent, command.reference, now)
         val outcome = if (command.sent) TransportOutcome.SUBMITTED else TransportOutcome.FAILED
         val attempt = attempt(current, "operator-reconcile", outcome, command.reference, command.note, actor, now)
-        if (!repository.transition(SubmissionState.OUTCOME_UNKNOWN, next, attempt)) {
+        val lapsedClaim = requireNotNull(current.claimId) { "an OUTCOME_UNKNOWN row always carries its claim id" }
+        if (!repository.transition(
+                SubmissionState.OUTCOME_UNKNOWN,
+                next,
+                attempt.copy(claimId = lapsedClaim),
+                lapsedClaim,
+            )
+        ) {
             throw ResourceConflictException("submission $id changed while reconciling", "CONFLICT")
         }
         return get(id)

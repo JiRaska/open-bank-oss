@@ -92,7 +92,8 @@ class SupervisorySubmissionRecoveryIT {
         val id = packaged("2026-11-30", 1)
         // Simulate a holder that died mid-transmission: SUBMITTING with a claim an hour old.
         execute(
-            "update finrep_submission set state = 'SUBMITTING', claimed_at = now() - interval '1 hour' " +
+            "update finrep_submission set state = 'SUBMITTING', claim_id = gen_random_uuid(), " +
+                "claimed_at = now() - interval '1 hour' " +
                 "where id = '$id'::uuid",
         )
 
@@ -123,7 +124,10 @@ class SupervisorySubmissionRecoveryIT {
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `a fresh claim is still in progress`() {
         val id = packaged("2026-12-31", 1)
-        execute("update finrep_submission set state = 'SUBMITTING', claimed_at = now() where id = '$id'::uuid")
+        execute(
+            "update finrep_submission set state = 'SUBMITTING', claim_id = gen_random_uuid(), claimed_at = now() " +
+                "where id = '$id'::uuid",
+        )
 
         Given { this } When { post("$path/$id/submit") } Then { statusCode(409) }
         assertThat(transportCalls.get()).isZero()

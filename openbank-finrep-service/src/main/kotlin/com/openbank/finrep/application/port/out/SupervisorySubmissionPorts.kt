@@ -49,19 +49,24 @@ interface SupervisorySubmissionRepository {
      * Atomically moves the submission PACKAGED -> SUBMITTING. False when another caller already
      * holds the claim or the return is no longer PACKAGED. This is what prevents a double filing.
      */
-    suspend fun claimForSubmission(id: UUID, at: Instant): Boolean
+    suspend fun claimForSubmission(id: UUID, at: Instant, claimId: UUID): Boolean
 
     /**
-     * Conditional final transition, in ONE transaction: `UPDATE … WHERE id = ? AND state = [expected]`
-     * (and, when [claimedBefore] is set, `AND claimed_at < claimedBefore`). The attempt row is
-     * appended only when exactly one row moved; false means someone else already moved it.
+     * Conditional, FENCED transition, in ONE transaction:
+     * `UPDATE … WHERE id = ? AND state = [expected] AND claim_id = [claimId]` (and, when
+     * [claimedBefore] is set, `AND claimed_at < claimedBefore`). The attempt row is appended only
+     * when exactly one row moved; false means another claimant or an operator moved it first.
      */
     suspend fun transition(
         expected: SubmissionState,
         next: SupervisorySubmission,
         attempt: SubmissionAttempt,
+        claimId: UUID,
         claimedBefore: Instant? = null,
     ): Boolean
+
+    /** Appends an attempt without any state change (e.g. a lapsed holder's late, unapplied result). */
+    suspend fun appendAttempt(attempt: SubmissionAttempt)
 
     suspend fun attempts(submissionId: UUID): List<SubmissionAttempt>
 }

@@ -88,6 +88,9 @@ class SubmissionEntity : PanacheEntityBase {
 
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null
+
+    @Column(name = "claim_id")
+    var claimId: UUID? = null
 }
 
 @Entity
@@ -120,6 +123,9 @@ class SubmissionAttemptEntity : PanacheEntityBase {
 
     @Column(name = "attempted_at", nullable = false)
     var attemptedAt: Instant? = null
+
+    @Column(name = "claim_id")
+    var claimId: UUID? = null
 }
 
 @ApplicationScoped
@@ -162,11 +168,12 @@ class PanacheSupervisorySubmissionRepository(
         Panache.getSession().flatMap { it.merge(submission.toEntity()) }
     }.awaitSuspending().toDomain()
 
-    override suspend fun claimForSubmission(id: UUID, at: Instant): Boolean = Panache.withTransaction {
+    override suspend fun claimForSubmission(id: UUID, at: Instant, claimId: UUID): Boolean = Panache.withTransaction {
         submissions.update(
-            "state = 'SUBMITTING', claimedAt = ?2 where id = ?1 and state = 'PACKAGED'",
+            "state = 'SUBMITTING', claimedAt = ?2, claimId = ?3 where id = ?1 and state = 'PACKAGED'",
             id,
             at,
+            claimId,
         )
     }.awaitSuspending() == 1
 
@@ -174,33 +181,26 @@ class PanacheSupervisorySubmissionRepository(
         expected: SubmissionState,
         next: SupervisorySubmission,
         attempt: SubmissionAttempt,
+        claimId: UUID,
         claimedBefore: Instant?,
     ): Boolean = Panache.withTransaction {
-        val set = "state = ?1, submittedAt = ?2, transportReference = ?3, claimedAt = ?4 " +
-            "where id = ?5 and state = ?6"
-        val moved = if (claimedBefore == null) {
-            submissions.update(
-                set,
-                next.state.name,
-                next.submittedAt,
-                next.transportReference,
-                next.claimedAt,
-                next.id,
-                expected.name,
-            )
-        } else {
-            submissions.update(
-                "$set and claimedAt < ?7",
-                next.state.name,
-                next.submittedAt,
-                next.transportReference,
-                next.claimedAt,
-                next.id,
-                expected.name,
-                claimedBefore,
-            )
+        val params = mutableListOf<Any?>(
+            next.state.name,
+            next.submittedAt,
+            next.transportReference,
+            next.claimedAt,
+            next.claimId,
+            next.id,
+            expected.name,
+            claimId,
+        )
+        var query = "state = ?1, submittedAt = ?2, transportReference = ?3, claimedAt = ?4, claimId = ?5 " +
+            "where id = ?6 and state = ?7 and claimId = ?8"
+        if (claimedBefore != null) {
+            params += claimedBefore
+            query += " and claimedAt < ?9"
         }
-        moved.flatMap { rows ->
+        submissions.update(query, *params.toTypedArray()).flatMap { rows ->
             if (rows == 1) {
                 Panache.getSession().flatMap { it.merge(attempt.toEntity()) }.map { true }
             } else {
@@ -208,6 +208,12 @@ class PanacheSupervisorySubmissionRepository(
             }
         }
     }.awaitSuspending()
+
+    override suspend fun appendAttempt(attempt: SubmissionAttempt) {
+        Panache.withTransaction {
+            Panache.getSession().flatMap { it.merge(attempt.toEntity()) }
+        }.awaitSuspending()
+    }
 
     override suspend fun attempts(submissionId: UUID): List<SubmissionAttempt> = Panache.withSession {
         attemptRepository.find("submissionId = ?1 order by attemptNo", submissionId).list()
@@ -235,6 +241,7 @@ private fun SupervisorySubmission.toEntity() = SubmissionEntity().also {
     it.ackRecordedBy = acknowledgement?.recordedBy
     it.ackRecordedAt = acknowledgement?.recordedAt
     it.claimedAt = claimedAt
+    it.claimId = claimId
 }
 
 private fun SubmissionEntity.toDomain() = SupervisorySubmission(
@@ -251,6 +258,7 @@ private fun SubmissionEntity.toDomain() = SupervisorySubmission(
     submittedAt = submittedAt,
     transportReference = transportReference,
     claimedAt = claimedAt,
+    claimId = claimId,
     acknowledgement = ackReference?.let {
         SubmissionAcknowledgement(
             accepted = requireNotNull(ackAccepted),
@@ -272,6 +280,7 @@ private fun SubmissionAttempt.toEntity() = SubmissionAttemptEntity().also {
     it.detail = detail
     it.attemptedBy = attemptedBy
     it.attemptedAt = attemptedAt
+    it.claimId = claimId
 }
 
 private fun SubmissionAttemptEntity.toDomain() = SubmissionAttempt(
@@ -284,4 +293,5 @@ private fun SubmissionAttemptEntity.toDomain() = SubmissionAttempt(
     detail = detail,
     attemptedBy = attemptedBy,
     attemptedAt = requireNotNull(attemptedAt),
+    claimId = claimId,
 )

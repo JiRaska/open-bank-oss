@@ -53,6 +53,8 @@ data class SubmissionAttempt(
     val detail: String?,
     val attemptedBy: String,
     val attemptedAt: Instant,
+    /** The claim this attempt was made under; null for attempts not made under a claim. */
+    val claimId: UUID? = null,
 )
 
 /** The regulator's answer to a SUBMITTED return, recorded by an operator. */
@@ -81,6 +83,12 @@ data class SupervisorySubmission(
     val transportReference: String? = null,
     val acknowledgement: SubmissionAcknowledgement? = null,
     val claimedAt: Instant? = null,
+    /**
+     * Fencing token of the claim that last moved this return to SUBMITTING. Every claim-holder
+     * transition is conditional on it, so a holder whose lease lapsed can never overwrite the
+     * state of a newer claimant. Kept through OUTCOME_UNKNOWN; cleared once released or settled.
+     */
+    val claimId: UUID? = null,
 ) {
     fun packaged(
         frameworkVersion: String,
@@ -101,9 +109,9 @@ data class SupervisorySubmission(
     }
 
     /** The in-memory image of the claim the repository takes with a conditional UPDATE. */
-    fun claimed(at: Instant): SupervisorySubmission {
+    fun claimed(at: Instant, token: UUID): SupervisorySubmission {
         requireState(SubmissionState.PACKAGED, "submit")
-        return copy(state = SubmissionState.SUBMITTING, claimedAt = at)
+        return copy(state = SubmissionState.SUBMITTING, claimedAt = at, claimId = token)
     }
 
     /** True when a SUBMITTING claim is older than [lease]: its holder is presumed dead. */
@@ -120,16 +128,16 @@ data class SupervisorySubmission(
     fun reconciled(sent: Boolean, reference: String?, at: Instant): SupervisorySubmission {
         requireState(SubmissionState.OUTCOME_UNKNOWN, "reconcile")
         return if (sent) {
-            copy(state = SubmissionState.SUBMITTED, submittedAt = at, transportReference = reference)
+            copy(state = SubmissionState.SUBMITTED, submittedAt = at, transportReference = reference, claimId = null)
         } else {
-            copy(state = SubmissionState.PACKAGED)
+            copy(state = SubmissionState.PACKAGED, claimId = null)
         }
     }
 
     /** Applies a transport outcome to a claimed return. DRY_RUN and FAILED release it to PACKAGED. */
     fun afterTransport(outcome: TransportOutcome, reference: String?, at: Instant): SupervisorySubmission {
         requireState(SubmissionState.SUBMITTING, "record a transport outcome for")
-        val released = copy(claimedAt = null)
+        val released = copy(claimedAt = null, claimId = null)
         return when (outcome) {
             TransportOutcome.SUBMITTED -> released.copy(
                 state = SubmissionState.SUBMITTED,
@@ -141,7 +149,7 @@ data class SupervisorySubmission(
 
             TransportOutcome.DRY_RUN, TransportOutcome.FAILED -> released.copy(state = SubmissionState.PACKAGED)
 
-            TransportOutcome.UNKNOWN -> released.copy(state = SubmissionState.OUTCOME_UNKNOWN)
+            TransportOutcome.UNKNOWN -> released.copy(state = SubmissionState.OUTCOME_UNKNOWN, claimId = claimId)
         }
     }
 

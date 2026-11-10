@@ -24,6 +24,8 @@ CREATE TABLE finrep_submission (
     ack_recorded_at             TIMESTAMPTZ,
     -- Set while a request holds the PACKAGED -> SUBMITTING claim; drives the claim lease.
     claimed_at                  TIMESTAMPTZ,
+    -- Fencing token of the current/lapsed claim: every holder transition is conditional on it.
+    claim_id                    UUID,
     CONSTRAINT uq_finrep_submission_key UNIQUE (template_id, reference_period, revision)
 );
 
@@ -37,5 +39,6 @@ CREATE TABLE finrep_submission_attempt (
     detail              VARCHAR(2000),
     attempted_by        VARCHAR(255) NOT NULL,
     attempted_at        TIMESTAMPTZ  NOT NULL,
+    claim_id            UUID,
     CONSTRAINT uq_finrep_submission_attempt_no UNIQUE (submission_id, attempt_no)
 );
