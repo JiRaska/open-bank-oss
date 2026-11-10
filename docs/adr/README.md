@@ -150,7 +150,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0138](0138-configuration-driven-product-fee-rule-engine.md) | Configuration-driven product fee rule engine | Accepted | Partial | fees-billing,product-catalog,architecture | — |
 | [0139](0139-ml-decisioning-platform.md) | Real-time ML decisioning platform: feature store, model serving, champion/challenger governance | Accepted | Partial | ml,fraud,architecture | — |
 | [0140](0140-feature-store-topology.md) | Feature store topology and point-in-time correctness | Accepted | Partial | ml,kafka,fraud | — |
-| [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Proposed | Partial | ml,governance,supply-chain | — |
+| [0141](0141-model-registry-provenance.md) | Model registry and provenance for ML decisioning | Accepted | Partial | ml,governance,supply-chain | — |
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned | lending,ml,compliance | — |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial | fees-billing,ledger,architecture | — |
 | [0144](0144-gate-graduation-advisory-rules-carry-an-enforcement-deadline.md) | Gate graduation — advisory rules carry an enforcement deadline | Accepted | Shipped | governance,ci | — |
@@ -164,7 +164,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Accepted | N/A | architecture,governance | — |
 | [0153](0153-savings-goal-metadata.md) | Savings goal metadata on account-service | Accepted | Shipped | accounts,mobile-app,customer-edge | — |
 | [0154](0154-agent-pr-approval-policy.md) | Independent agent PR approval for non-sensitive changes | Deprecated | Shipped | ai-agents,ci,governance | — |
-| [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Proposed | Partial | authz,governance | — |
+| [0155](0155-four-eyes-enforcement-for-money-path-actions.md) | Four-eyes enforcement for money-path actions | Accepted | Partial | authz,governance | — |
 | [0156](0156-agent-charters-as-markdown-alongside-agents-yaml.md) | Agent charters as Markdown alongside agents.yaml | Accepted | Shipped | ai-agents,admin-ui,docs | — |
 | [0158](0158-account-opening-validates-against-product-catalog.md) | Account opening validates against product-catalog | Accepted | Shipped | accounts,product-catalog | — |
 | [0159](0159-cnpg-ha-money-path.md) | High-availability CNPG for money-path databases | Accepted | Shipped | database,resilience,kubernetes | — |
@@ -187,7 +187,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0176](0176-operator-initiated-customer-messaging.md) | Operator-initiated customer messaging | Accepted | Partial | notifications,admin-ui,governance | — |
 | [0177](0177-workload-identity-m2m-auth.md) | Workload-identity service-to-service auth | Proposed | Partial | authn,secrets,kubernetes | — |
 | [0178](0178-value-date-correct-balance-reconciliation-and-projection.md) | Value-date-correct balance reconciliation and projection | Accepted | Shipped | ledger,accounts,transactions | — |
-| [0179](0179-party-identity-merge.md) | Duplicate party identity merge | Proposed | Partial | kyc,accounts,ledger | — |
+| [0179](0179-party-identity-merge.md) | Duplicate party identity merge | Accepted | Partial | kyc,accounts,ledger | — |
 | [0180](0180-withholding-tax-statutory-filing-38d-vy-tov-n-owner-cadence-transport.md) | Withholding-tax statutory filing (§38d Vyúčtování) — owner, cadence, transport | Accepted | Partial | tax,regulatory-reporting,compliance | — |
 | [0181](0181-mcp-server-exposing-psd2-and-admin-read-apis-to-governed-ai-agents.md) | MCP server exposing PSD2 and admin read APIs to governed AI agents | Proposed | Partial | ai-agents,psd2-api,authz | — |
 | [0182](0182-ap2-agent-payment-mandate-verification-on-the-bank-side.md) | AP2 agent-payment mandate verification on the bank side | Proposed | Planned | payments,ai-agents,sca | — |
@@ -208,8 +208,8 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) | AGPL open-core boundary covers the whole agent plane, enumerated in rules.yaml | Accepted | Shipped | licensing,ai-agents,governance | — |
 | [0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) | Marketing consent as a first-class consent-service scope | Accepted | Partial | privacy-gdpr,notifications,compliance | — |
 | [0199](0199-customer-360-read-model-in-a-new-crm-service.md) | Customer 360 read model in a new crm-service | Superseded by [ADR-0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Planned | analytics,privacy-gdpr,architecture,admin-ui | — |
-| [0200](0200-campaign-journeys-as-temporal-workflows-with-consent-gated-delivery.md) | Campaign journeys as Temporal workflows with consent-gated delivery | Proposed | Partial | notifications,privacy-gdpr,compliance,mobile-app | — |
-| [0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) | Customer segmentation and next-best-action on the ML decisioning platform | Proposed | Partial | ml,analytics,compliance,product-catalog | — |
+| [0200](0200-campaign-journeys-as-temporal-workflows-with-consent-gated-delivery.md) | Campaign journeys as Temporal workflows with consent-gated delivery | Accepted | Partial | notifications,privacy-gdpr,compliance,mobile-app | — |
+| [0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) | Customer segmentation and next-best-action on the ML decisioning platform | Accepted | Partial | ml,analytics,compliance,product-catalog | — |
 | [0202](0202-agent-to-agent-collaboration-over-proposal-events-mcp-and-temporal.md) | Agent-to-agent collaboration over proposal events, MCP and Temporal | Proposed | Planned | ai-agents,authz,kafka,governance | — |
 | [0203](0203-business-plane-ai-agents.md) | Business-plane AI agents | Proposed | Planned | ai-agents,governance,fraud,compliance | — |
 | [0204](0204-gdpr-article-20-data-portability-scope-format-and-direct-transmission-decision.md) | GDPR Article 20 data portability — scope, format and direct-transmission decision | Accepted | Shipped | privacy-gdpr,compliance,psd2-api | — |
@@ -219,52 +219,52 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md) | Admin UI consolidation: a primitive layer, one status vocabulary, and an interactive flow explainer | Proposed | Planned | admin-ui,architecture,governance | — |
 | [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Accepted | Shipped | governance,architecture,ml,analytics | — |
 | [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Accepted | Shipped | analytics,architecture,privacy-gdpr,admin-ui | — |
-| [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Proposed | Partial | lending,architecture,resilience | — |
-| [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Proposed | Partial | lending,compliance,product-catalog | — |
-| [0213](0213-deterministic-credit-policy-decision-engine.md) | Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable | Proposed | Partial | lending,compliance,architecture | — |
+| [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Accepted | Partial | lending,architecture,resilience | — |
+| [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Accepted | Partial | lending,compliance,product-catalog | — |
+| [0213](0213-deterministic-credit-policy-decision-engine.md) | Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable | Accepted | Partial | lending,compliance,architecture | — |
 | [0214](0214-credit-lifecycle-audit-evidence.md) | Credit lifecycle audit evidence and reconstruction | Proposed | Planned | lending,audit,privacy-gdpr | — |
-| [0215](0215-loan-termination-early-exit-lifecycle.md) | Loan termination and early-exit lifecycle | Proposed | Partial | lending,compliance | — |
+| [0215](0215-loan-termination-early-exit-lifecycle.md) | Loan termination and early-exit lifecycle | Accepted | Partial | lending,compliance | — |
 | [0216](0216-ai-act-high-risk-credit-compliance.md) | EU AI Act high-risk compliance for credit AI systems | Proposed | Planned | lending,ml,compliance,ai-agents | — |
 | [0217](0217-credit-lifecycle-ai-agents.md) | AI agents in the credit lifecycle: MCP-exposed, policy-gated, human-deciding | Proposed | Planned | ai-agents,lending,compliance | — |
 | [0218](0218-credit-platform-slo-scalability-finops.md) | Credit platform SLOs, scalability and FinOps guardrails | Proposed | Planned | lending,observability,finops,resilience | — |
-| [0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) | Platform contact-policy gate: contact classes, durable counters, suppression | Proposed | Partial | privacy-gdpr,notifications,compliance | — |
-| [0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) | In-app engagement surfaces, gamification and pre-approved offers | Proposed | Partial | mobile-app,customer-edge,privacy-gdpr,lending | openbank-app |
+| [0219](0219-platform-contact-policy-gate-contact-classes-durable-counters-suppression.md) | Platform contact-policy gate: contact classes, durable counters, suppression | Accepted | Partial | privacy-gdpr,notifications,compliance | — |
+| [0220](0220-in-app-engagement-surfaces-gamification-and-pre-approved-offers.md) | In-app engagement surfaces, gamification and pre-approved offers | Accepted | Partial | mobile-app,customer-edge,privacy-gdpr,lending | openbank-app |
 | [0221](0221-campaign-studio-the-campaign-authoring-operator-experience.md) | Campaign Studio: the campaign authoring operator experience | Proposed | Planned | admin-ui,notifications,governance | — |
 | [0222](0222-offer-explanation-and-relationship-manager-agents.md) | Offer-explanation and relationship-manager agents | Proposed | Planned | ai-agents,privacy-gdpr,compliance | — |
 | [0223](0223-channel-agnostic-authz-hardening.md) | Channel-agnostic authorization hardening: sidecar-only enforcement, operator-read-any retirement, four-eyes rollout | Accepted | Partial | authz,governance,audit,libs | — |
 | [0224](0224-human-operator-mcp-obo-channel.md) | Human-operator MCP channel: on-behalf-of token exchange with bounded role subsets | Accepted | Partial | authn,authz,ai-agents | — |
 | [0225](0225-mcp-policy-filtered-tools-list.md) | Policy-filtered MCP tool discovery | Accepted | Shipped | authz,ai-agents,security-ops | — |
 | [0226](0226-cross-channel-audit-correlation.md) | Cross-channel audit correlation: one identity, one trail | Accepted | Partial | audit,authz,admin-ui | — |
-| [0227](0227-unified-approval-inbox.md) | Unified approval inbox: one disposition point for human and agent proposals | Proposed | Partial | governance,admin-ui,authz | — |
+| [0227](0227-unified-approval-inbox.md) | Unified approval inbox: one disposition point for human and agent proposals | Accepted | Partial | governance,admin-ui,authz | — |
 | [0228](0228-unified-entity-resolution-search.md) | Unified entity resolution and global search for backoffice | Proposed | Planned | admin-ui,architecture,privacy-gdpr | — |
 | [0229](0229-roles-single-source-persona-ia.md) | Roles single source of truth and persona-driven information architecture | Proposed | Planned | authz,admin-ui,governance | — |
-| [0230](0230-backoffice-hybrid-consoles.md) | Backoffice hybrid consoles for lending, fraud and SDD | Proposed | Partial | admin-ui,lending,fraud | — |
+| [0230](0230-backoffice-hybrid-consoles.md) | Backoffice hybrid consoles for lending, fraud and SDD | Accepted | Partial | admin-ui,lending,fraud | — |
 | [0231](0231-backoffice-identity-admin-no-mock.md) | Backoffice identity administration, no mock data in production UI, entity navigation standard | Proposed | Planned | admin-ui,governance,security-ops | — |
-| [0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md) | Delegated access: customer-to-party sharing with granular capabilities | Proposed | Partial | authz,accounts,sca,compliance | — |
+| [0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md) | Delegated access: customer-to-party sharing with granular capabilities | Accepted | Partial | authz,accounts,sca,compliance | — |
 | [0233](0233-agent-as-delegation-grantee-bounded-agentic-allowance.md) | Agent as delegation grantee: bounded agentic allowance | Proposed | Planned | ai-agents,authz,sca,payments | — |
 | [0234](0234-identity-aware-edge-gate-for-internal-tool-uis.md) | Identity-aware edge gate for internal tool UIs | Accepted | Partial | authn,networking,observability,admin-ui | — |
 | [0235](0235-continuous-ai-assurance.md) | Continuous AI assurance — adversarial gate, conformity-as-code, and beyond-phase-5 roadmap | Proposed | Planned | ai-agents,governance,compliance | — |
 | [0236](0236-deployed-main-drift-watch.md) | Deployed == main drift watch | Accepted | Shipped | gitops,observability,ci | — |
 | [0237](0237-scheduler-feed-liveness-heartbeat.md) | Scheduler and external-feed liveness heartbeat | Accepted | Shipped | observability,ci,governance | — |
 | [0238](0238-copilot-conversation-memory-two-tiers-explicit-only.md) | Copilot conversation memory: two tiers, explicit only | Proposed | Planned | ai-agents,privacy-gdpr,database | — |
-| [0239](0239-delivery-outcome-events-for-notification-requests.md) | Delivery-outcome events for notification requests | Proposed | Partial | notifications,kafka,api-contract,privacy-gdpr | — |
+| [0239](0239-delivery-outcome-events-for-notification-requests.md) | Delivery-outcome events for notification requests | Accepted | Partial | notifications,kafka,api-contract,privacy-gdpr | — |
 | [0240](0240-campaign-conversion-attribution-product-event.md) | Campaign conversion attribution: a product event correlated to the goal | Proposed | Planned | notifications,analytics,privacy-gdpr | — |
 | [0241](0241-alert-hygiene-zero-standing-critical-alerts.md) | Alert hygiene: zero standing critical alerts | Accepted | Partial | observability,governance,resilience | — |
 | [0242](0242-quarterly-dr-and-chaos-drill-with-measured-rto-rpo.md) | Quarterly DR and chaos drill with measured RTO/RPO | Proposed | Partial | resilience,governance,ci | — |
 | [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Accepted | Shipped | ci,testing,observability | — |
-| [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Partial | ai-agents,architecture,resilience,governance | — |
-| [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Proposed | Partial | analytics,kafka,privacy-gdpr,admin-ui | — |
+| [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Accepted | Partial | ai-agents,architecture,resilience,governance | — |
+| [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Accepted | Partial | analytics,kafka,privacy-gdpr,admin-ui | — |
 | [0246](0246-admin-ui-swarm-thread-view-over-temporal-case-history.md) | Admin-ui swarm thread view over Temporal case history | Proposed | Partial | ai-agents,admin-ui,observability,governance | — |
 | [0247](0247-fraud-hold-as-a-party-level-adverse-state.md) | Fraud hold as a party-level adverse state | Proposed | Planned | fraud,privacy-gdpr,kafka | — |
-| [0248](0248-statement-and-payment-confirmation-document-templates.md) | Statement and payment confirmation document templates | Proposed | Partial | documents,statements,psd2-api | — |
-| [0249](0249-dispositor-model-additional-cardholders-and-enforced-delegated-spending.md) | Dispositor model: additional cardholders and enforced delegated spending | Proposed | Partial | authz,cards,payments,sca | — |
+| [0248](0248-statement-and-payment-confirmation-document-templates.md) | Statement and payment confirmation document templates | Accepted | Partial | documents,statements,psd2-api | — |
+| [0249](0249-dispositor-model-additional-cardholders-and-enforced-delegated-spending.md) | Dispositor model: additional cardholders and enforced delegated spending | Accepted | Partial | authz,cards,payments,sca | — |
 | [0250](0250-decouple-the-main-push-service-build-from-the-pact-broker-runner-pool.md) | Decouple the main-push service build from the Pact Broker runner pool | Accepted | Partial | ci,finops,capacity,testing | — |
 | [0251](0251-independent-model-review-of-money-path-and-governance-prs.md) | Independent model review of money-path and governance PRs | Proposed | Planned | ci,governance,ai-agents,compliance | — |
 | [0252](0252-synthetic-customer-fleet.md) | Synthetic customer fleet and journey-based production assurance | Accepted | Partial | testing,observability,notifications,compliance | openbank-app |
 | [0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md) | Evidence of effect: a control must be able to show it carried work | Proposed | Partial | observability,testing,governance,architecture | — |
 | [0254](0254-ci-gate-estate-integrity.md) | CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage | Accepted | Shipped | ci,governance | — |
 | [0255](0255-ci-gate-observability.md) | CI/QG observability: a read-only health snapshot, an admin-ui panel, and a ClickHouse/Grafana historical trend | Accepted | Partial | ci,governance,observability | — |
-| [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Proposed | Partial | kyc,aml-sanctions,kafka,ai-agents | — |
+| [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Accepted | Partial | kyc,aml-sanctions,kafka,ai-agents | — |
 | [0257](0257-industry-neutral-product-catalog-kernel-and-standalone-distribution.md) | Industry-neutral product catalog kernel and standalone distribution | Accepted | Shipped | product-catalog,architecture,api-contract,database | — |
 | [0258](0258-trusted-json-schema-profile-for-industry-packs.md) | Trusted JSON Schema profile for industry packs | Accepted | Shipped | product-catalog,api-contract,security | — |
 | [0259](0259-ai-assisted-product-catalog-authoring-and-offer-intelligence.md) | AI-assisted product-catalog authoring and offer intelligence | Accepted | Shipped | product-catalog,ai-agents,governance,compliance | — |
@@ -291,7 +291,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0282](0282-lipa-loyalty-ecosystem-financial-health-rewards-personal-offerings.md) | Lípa: a financial-health loyalty ecosystem tying rewards, micro-segments, personal offerings and Customer 360 together | Proposed | Planned | product-catalog,analytics,fees-billing,mobile-app | openbank-app |
 | [0283](0283-card-platform-scheme-agnostic-capability-ports.md) | Card platform: scheme-agnostic capability ports and card-processing as a bounded context | Accepted | Partial | cards,architecture,payments,ai-agents | — |
 | [0284](0284-legal-entity-onboarding-representation-mandates-and-profile-switching-kyb.md) | Legal-entity onboarding, representation mandates and profile switching (KYB) | Accepted | Partial | onboarding,kyc,authz,mobile-app | openbank-app |
-| [0285](0285-communication-studio-governed-style-and-playbook-layer.md) | Communication Studio: governed style and playbook layer for bots and staff | Proposed | Partial | ai-agents,admin-ui,governance,notifications | — |
+| [0285](0285-communication-studio-governed-style-and-playbook-layer.md) | Communication Studio: governed style and playbook layer for bots and staff | Accepted | Partial | ai-agents,admin-ui,governance,notifications | — |
 | [0286](0286-admin-ui-reporting-read-path-gold-query-registry-grafana-embed.md) | Admin UI reporting read-path: governed query registry over ClickHouse gold with embedded Grafana | Accepted | Shipped | analytics,admin-ui,regulatory-reporting | — |
 | [0287](0287-balance-creation-posts-natural-key-idempotency.md) | Balance creation POSTs are idempotent on natural keys, not synthetic keys | Accepted | Shipped | resilience,payments | — |
 | [0288](0288-reality-checks-a-scheduled-lane-that-compares-the-repository-s-claims-with-the-running-system.md) | Reality checks: a scheduled lane that compares the repository's claims with the running system | Proposed | Planned | governance,ci,observability | — |
@@ -323,32 +323,32 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0316](0316-cloud-finops-dashboard-from-in-cluster-infracost-cost-explorer.md) | Cloud FinOps dashboard from in-cluster Infracost + Cost Explorer | Accepted | Partial | finops,observability,analytics | — |
 | [0317](0317-split-openbank-libs-domain-into-a-platform-core-and-per-bounded-context-libs-modules.md) | Split openbank-libs-domain into a platform core and per-bounded-context libs modules | Proposed | Partial | libs,architecture,ci | — |
 | [0318](0318-money-allocation-and-rounding-policy-registry.md) | Money allocation and rounding policy registry | Proposed | Partial | libs,interest,fx,fees-billing | — |
-| [0319](0319-generated-contract-bound-inter-service-rest-clients.md) | Generated, contract-bound inter-service REST clients | Proposed | Partial | api-contract,testing,libs,architecture | — |
+| [0319](0319-generated-contract-bound-inter-service-rest-clients.md) | Generated, contract-bound inter-service REST clients | Accepted | Partial | api-contract,testing,libs,architecture | — |
 | [0320](0320-openbank-libs-security-shared-egress-sender-constrained-tokens-and-data-protection-primitives.md) | openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives | Proposed | Partial | security,libs,authn,privacy-gdpr | — |
 | [0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md) | Shared resilience policy profiles for inter-service calls | Proposed | Partial | resilience,libs,testing,compliance | — |
 | [0322](0322-structured-decision-log-envelope-for-automated-decisions.md) | Structured decision-log envelope for automated decisions | Proposed | Partial | audit,ai-agents,authz,compliance | — |
 | [0323](0323-producer-side-hash-linked-audit-envelope-via-outbox.md) | Producer-side hash-linked audit envelope via outbox | Proposed | Partial | audit,libs,compliance,kafka | — |
 | [0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md) | Replace retired ingress-nginx with Gateway API on Envoy Gateway | Proposed | Planned | networking,kubernetes,security,gitops | — |
 | [0325](0325-cnpg-update-and-node-drain-resilience.md) | CNPG update and node-drain resilience | Accepted | Partial | database,resilience,kubernetes,capacity | — |
-| [0326](0326-kernel-owned-error-model.md) | Kernel-owned error model: stable error codes, one problem-details response shape, typed domain exceptions | Proposed | Partial | libs,api-contract,architecture,observability | — |
+| [0326](0326-kernel-owned-error-model.md) | Kernel-owned error model: stable error codes, one problem-details response shape, typed domain exceptions | Accepted | Partial | libs,api-contract,architecture,observability | — |
 | [0327](0327-kernel-owned-outbox-v2.md) | Kernel-owned outbox v2: shared repository, indexed claim, backoff, ordering, retention | Proposed | Planned | libs,kafka,database,resilience | — |
 | [0328](0328-upgrade-self-hosted-langfuse-from-the-unmaintained-v2-line-to-v4.md) | Upgrade self-hosted Langfuse from the unmaintained v2 line to v4 | Proposed | Planned | observability,ai-agents,security,privacy-gdpr | — |
-| [0329](0329-sent-outbox-rows-are-purged-fleet-wide-by-one-shared-libs-runtime-job.md) | SENT outbox rows are purged fleet-wide by one shared libs-runtime job | Proposed | Partial | libs,database,privacy-gdpr | — |
+| [0329](0329-sent-outbox-rows-are-purged-fleet-wide-by-one-shared-libs-runtime-job.md) | SENT outbox rows are purged fleet-wide by one shared libs-runtime job | Accepted | Partial | libs,database,privacy-gdpr | — |
 | [0330](0330-classify-a-required-idempotency-key-on-a-money-path-post-as-a-minor-api-change.md) | Classify a required Idempotency-Key on a money-path POST as a MINOR API change | Accepted | Shipped | api-contract,governance,ci | — |
-| [0331](0331-bank-owned-synthetic-customer-identity-a-customers-realm-service-account-bound-to-one-synthetic-party.md) | Bank-owned synthetic customer identity: a customers-realm service account bound to one SYNTHETIC party | Proposed | Partial | authn,customer-edge,testing,security | — |
+| [0331](0331-bank-owned-synthetic-customer-identity-a-customers-realm-service-account-bound-to-one-synthetic-party.md) | Bank-owned synthetic customer identity: a customers-realm service account bound to one SYNTHETIC party | Accepted | Partial | authn,customer-edge,testing,security | — |
 | [0332](0332-cnb-settlement-and-reserve-account-in-the-ledger-chart.md) | ČNB settlement and reserve account in the ledger chart | Proposed | Planned | ledger,payments,regulatory-reporting,accounting-close | — |
 | [0333](0333-governed-customer-communication-and-capacity-aware-bulk-delivery.md) | Governed customer communication and capacity-aware bulk delivery | Proposed | Partial | notifications,capacity,compliance | — |
 | [0334](0334-pension-fund-platform.md) | Pension fund platform: client lifecycle, fund and strategy management, jurisdiction packs | Proposed | Planned | product-catalog,onboarding,compliance,architecture | — |
-| [0335](0335-scoped-service-consumers-for-pension.md) | Scoped service consumers: a reserved SCA namespace and an ownership-verification projection for pension-service | Proposed | Partial | authz,sca,security,accounts | — |
+| [0335](0335-scoped-service-consumers-for-pension.md) | Scoped service consumers: a reserved SCA namespace and an ownership-verification projection for pension-service | Accepted | Partial | authz,sca,security,accounts | — |
 | [0336](0336-pension-regulatory-returns.md) | Pension regulatory returns on the statutory-filing lifecycle | Proposed | Planned | regulatory-reporting,compliance,tax | — |
 | [0337](0337-pension-company-books-as-a-separate-ledger-deployment-per-legal-entity.md) | Pension company books as a separate ledger deployment per legal entity | Proposed | Partial | ledger,accounting-close,regulatory-reporting,architecture | — |
 | [0338](0338-transformed-funds-and-complete-pension-platform.md) | Transformed funds and complete pension-platform operations | Accepted | Planned | architecture,accounting-close,resilience,onboarding | — |
 | [0339](0339-tax-residency-information-exchange-and-product-taxation-are-party-and-event-attributes-not-product-properties.md) | Tax residency, information exchange and product taxation are party and event attributes, not product properties | Proposed | Partial | tax,compliance,product-catalog,aml-sanctions | — |
 | [0340](0340-crs-fatca-information-exchange-reporting-is-a-tax-reporting-service-capability-and-the-sole-tin-consumer.md) | CRS/FATCA information-exchange reporting is a tax-reporting-service capability and the sole TIN consumer | Proposed | Planned | tax,regulatory-reporting,privacy-gdpr,compliance | — |
 | [0341](0341-pinned-product-revision-is-the-single-source-of-price-accounting-class-and-regulatory-class.md) | Pinned product revision is the single source of price, accounting class and regulatory class | Proposed | Planned | product-catalog,fees-billing,ledger,regulatory-reporting | — |
-| [0342](0342-product-services-are-day-close-participants-the-accounting-day-waits-for.md) | Product services are day-close participants the accounting day waits for | Proposed | Partial | accounting-close,ledger,interest | — |
+| [0342](0342-product-services-are-day-close-participants-the-accounting-day-waits-for.md) | Product services are day-close participants the accounting day waits for | Accepted | Partial | accounting-close,ledger,interest | — |
 | [0343](0343-merge-train-replaces-strict-up-to-date-on-main.md) | Merge train replaces strict up-to-date on main | Proposed | Partial | ci,governance,release-versioning | — |
-| [0344](0344-treasury-instrument-model-multi-leg-schedules-fixings-and-the-cash-flow-ledger.md) | Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain | Proposed | Partial | architecture,ledger,payments,accounting-close | — |
+| [0344](0344-treasury-instrument-model-multi-leg-schedules-fixings-and-the-cash-flow-ledger.md) | Treasury instrument model: multi-leg schedules, fixings, an overridable cash-flow ledger and the deal-to-payment-to-posting chain | Accepted | Partial | architecture,ledger,payments,accounting-close | — |
 | [0345](0345-catalog-packs-declare-revision-approval-policy-as-data-legacy-v1-vocabulary-is-frozen.md) | Catalog packs declare revision approval policy as data; legacy v1 vocabulary is frozen | Accepted | Partial | product-catalog,governance,api-contract | — |
 | [0346](0346-shared-library-delivery-and-quality-evidence.md) | Shared library delivery and quality evidence | Proposed | Partial | libs,architecture,testing,resilience | — |
 | [0347](0347-fraud-rule-thresholds-as-versioned-effective-dated-four-eyes-data.md) | Fraud rule thresholds as versioned effective-dated four-eyes data | Superseded by [ADR-0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Shipped | fraud,governance,audit | — |
@@ -356,22 +356,22 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0349](0349-complaint-intake-triage-with-a-typed-decision-model.md) | Complaint intake triage with a typed-decision model | Proposed | Planned | disputes,ml,compliance | — |
 | [0350](0350-sanctions-review-queue-ordering-with-a-typed-decision-model.md) | Sanctions review-queue ordering with a typed-decision model | Proposed | Planned | aml-sanctions,ml,compliance | — |
 | [0351](0351-transaction-categorisation-and-copilot-intent-routing-with-typed-decision-models.md) | Transaction categorisation and copilot intent routing with typed-decision models | Proposed | Planned | transactions,ai-agents,ml | — |
-| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Proposed | Partial | product-catalog,interest,fees-billing,libs | — |
+| [0352](0352-product-as-code-typed-ir-pure-interpreter-git-native-catalog.md) | Product as Code: typed IR, pure interpreter, git-native product catalog | Accepted | Partial | product-catalog,interest,fees-billing,libs | — |
 | [0353](0353-financial-crime-vocabulary-one-customer-risk-rating-one-aml-case-severity-shared-rail-screening-types.md) | Financial-crime vocabulary: one customer risk rating, one AML case severity, shared rail screening types | Accepted | Planned | aml-sanctions,kyc,fraud,libs | — |
 | [0354](0354-financial-crime-as-code-governed-packs-and-learning.md) | Financial Crime as Code: governed packs, pure evaluation and reviewed learning | Accepted | Planned | fraud,aml-sanctions,ai-agents,libs | — |
 | [0355](0355-payment-worker-deployment-versioning-and-immutable-replay-corpora.md) | Payment worker deployment versioning and immutable replay corpora | Accepted | Partial | payments,testing,architecture | — |
 | [0356](0356-five-million-client-capacity-qualification.md) | Five-million-client capacity qualification for Czech current accounts | Proposed | Partial | capacity,payments,resilience,testing | — |
-| [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Proposed | Partial | security-ops,networking,observability,gitops | — |
+| [0357](0357-edge-deception-layer-decoy-paths-on-the-shared-gateway.md) | Edge deception layer: decoy paths on the shared gateway, alerted from the access log | Accepted | Partial | security-ops,networking,observability,gitops | — |
 | [0358](0358-image-pins-live-on-a-bot-owned-deploy-branch-not-in-main.md) | Image pins live on a bot-owned deploy branch, not in main | Proposed | Planned | gitops,ci,supply-chain | — |
 | [0359](0359-visual-regression-lane-with-committed-container-rendered-baselines.md) | Visual regression lane with committed container-rendered baselines | Accepted | Partial | admin-ui,testing | — |
 | [0360](0360-fast-lane-gets-a-turn-whenever-a-strict-lane-reservation-ends.md) | Fast lane gets a turn whenever a strict-lane reservation ends | Proposed | Planned | ci,governance | — |
-| [0361](0361-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Proposed | Partial | security-ops,observability,infrastructure,gitops | — |
+| [0361](0361-deception-and-detection-validation-programme.md) | Deception and detection-validation programme: edge decoys, honeytokens, timed drills | Accepted | Partial | security-ops,observability,infrastructure,gitops | — |
 | [0362](0362-ci-cd-throughput-and-safety-no-downgrade-and-no-stale-as-enforced-invariants-waste-cut-by-measurement.md) | CI/CD throughput and safety: no-downgrade and no-stale as enforced invariants, waste cut by measurement | Proposed | Partial | ci,gitops,governance | — |
 | [0363](0363-remote-gradle-build-cache-for-hosted-ci-written-only-from-main.md) | Remote Gradle build cache for hosted CI, written only from main | Proposed | Partial | ci,supply-chain,capacity | — |
-| [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Proposed | Shipped | architecture,governance,gitops | — |
+| [0364](0364-canonical-business-domain-ownership-independent-of-deployment-isolation.md) | Canonical business domain ownership independent of deployment isolation | Accepted | Shipped | architecture,governance,gitops | — |
 | [0365](0365-pension-book-accounting-close.md) | Source-bound pension accounting and independent book close | Proposed | Partial | ledger,accounting-close | — |
 | [0366](0366-ci-fetches-external-tools-and-charts-through-a-pinned-lock-a-resolver-and-a-mirror-outside-github.md) | CI fetches external tools and charts through a pinned lock, a resolver and a mirror outside GitHub | Proposed | Planned | ci,supply-chain,resilience | — |
-| [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Proposed | Partial | regulatory-reporting,compliance,governance,ai-agents | — |
+| [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Accepted | Partial | regulatory-reporting,compliance,governance,ai-agents | — |
 | [0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md) | Deploy every Services CI service from its completed main-push run, not from the push | Proposed | Partial | ci,gitops,api-contract | — |
 
 ## By tag
