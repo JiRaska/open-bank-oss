@@ -678,8 +678,19 @@ jobs:
       # Missing or incorrect ids still fail the guard; retain the legacy secret fallback.
       GITOPS_APP_ID: ${{ vars.GITOPS_APP_ID || secrets.GITOPS_APP_ID }}
       RULESET_BYPASS_SNAPSHOT: ${{ needs.ruleset-evidence.outputs.snapshot }}
+      # run-gates.py traces every self-test it runs and fails one that reads a repo file its
+      # `selftest_inputs` does not declare (selftest_input_trace.py). `require`: an untraceable
+      # runner fails loudly instead of silently checking nothing.
+      OB_SELFTEST_TRACE: require
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install strace (self-test input tracing)
+        run: |
+          command -v strace >/dev/null 2>&1 || {
+            sudo apt-get update -q
+            sudo apt-get install -y -q strace
+          }
 
       # Node 26, for the same reason ui-build pins it: it is what openbank-admin-ui's
       # dependency tree is resolved against (Dockerfile: node:26-alpine). The gates shard
@@ -828,6 +839,16 @@ jobs:
           path: ${{ runner.temp }}/ob-artifacts
           key: ci-artifacts-${{ matrix.slug }}-${{ hashFiles('ci/artifacts.lock') }}
           restore-keys: ci-artifacts-${{ matrix.slug }}-
+
+      # Self-tests run under strace (OB_SELFTEST_TRACE), and the kernel refuses setuid elevation
+      # to a process with an unprivileged tracer, so `sudo` inside a traced self-test fails.
+      # promql-alert-unit-tests' self-test installs promtool with sudo; provision it here,
+      # untraced, so the self-test finds it present (its version check still runs traced).
+      - name: Provision promtool before traced self-tests
+        if: contains(matrix.groups, 'gitops')
+        env:
+          OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
+        run: bash .github/scripts/install-promtool.sh
 
       - name: Run gates
         env:

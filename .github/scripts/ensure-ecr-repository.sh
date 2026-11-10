@@ -92,7 +92,7 @@ validate_repo_name() {
   esac
   # ECR's own rule, minus the paths and separators the fleet does not use: lowercase
   # alphanumerics and hyphens, starting and ending alphanumeric, at most 256 characters.
-  if ! printf '%s' "$repo" | grep -qE '^openbank-[a-z0-9]([a-z0-9-]*[a-z0-9])?$'; then
+  if ! grep -qE '^openbank-[a-z0-9]([a-z0-9-]*[a-z0-9])?$' <<< "$repo"; then
     echo "ERROR: refusing to touch ECR repository '${repo}': not a valid fleet repository name." >&2
     echo "       Expected openbank-<lowercase alphanumerics and hyphens>, ending alphanumeric." >&2
     return 1

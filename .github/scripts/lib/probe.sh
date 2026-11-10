@@ -570,7 +570,7 @@ _probe_selftest() {
   cut="$(probe_utc_cutoff 24)"
   ran+=("probe_utc_cutoff: shape" "probe_utc_cutoff: 24h back" "probe_utc_cutoff: TZ-invariant")
   _check "probe_utc_cutoff returns a Z-suffixed UTC instant (got '$cut')" \
-    "$(printf '%s' "$cut" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && echo 1 || echo 0)"
+    "$(grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' <<< "$cut" && echo 1 || echo 0)"
   now_s="$(date -u +%s)"
   cut_s="$(probe_utc_epoch "$cut")"
   delta=$(( now_s - cut_s ))
@@ -632,16 +632,16 @@ _probe_selftest() {
     local zr
     zr="$(probe_zombie_runs owner/repo 24 2>/dev/null)"
     _check "probe_zombie_runs returns the wedged old run (known-positive)" \
-      "$(printf '%s' "$zr" | grep -q 'wedged-old' && echo 1 || echo 0)"
+      "$(grep -q 'wedged-old' <<< "$zr" && echo 1 || echo 0)"
     _check "probe_zombie_runs excludes a run newer than the cutoff" \
-      "$(printf '%s' "$zr" | grep -q 'fresh' && echo 0 || echo 1)"
+      "$(grep -q 'fresh' <<< "$zr" && echo 0 || echo 1)"
     # The false positive the probe was burned by: old, but a job is still running — slow and
     # healthy, and subtracting it would understate real load.
     _check "probe_zombie_runs excludes an old run with a job still in flight" \
-      "$(printf '%s' "$zr" | grep -q 'old-but-live' && echo 0 || echo 1)"
+      "$(grep -q 'old-but-live' <<< "$zr" && echo 0 || echo 1)"
 
     _check "probe_zombie_runs excludes an old run whose jobs list is empty (vacuous-all guard)" \
-      "$(printf '%s' "$zr" | grep -q 'old-no-jobs' && echo 0 || echo 1)"
+      "$(grep -q 'old-no-jobs' <<< "$zr" && echo 0 || echo 1)"
 
   else
     echo "  [note] probe_zombie_runs fixture cases need jq and were NOT run"
