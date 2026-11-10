@@ -114,6 +114,9 @@ data class GsftBatch(
     val droppedOverdrawnAccounts: Int = 0,
     val excludedDepositors: Map<ExclusionReason, Int> = emptyMap(),
     val cappedClaims: Int = 0,
+    val temporarilyHighClaims: Int = 0,
+    val temporarilyHighCompensationCzk: BigDecimal = BigDecimal.ZERO,
+    val refusedQualifyingCredits: Int = 0,
 )
 
 private class PersonRecords(val dic: List<String>, val dia: List<List<String>>, val dil: List<List<String>>)
@@ -182,17 +185,28 @@ object GsftBatchRenderer {
         if (dic.isNotEmpty()) files["DIC$suffix"] = encode(dic)
         if (dia.isNotEmpty()) files["DIA$suffix"] = encode(dia)
         if (dil.isNotEmpty()) files["DIL$suffix"] = encode(dil)
-        return GsftBatch(
-            files = files,
-            totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
-            rejected = rejected,
-            droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
-            droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
-            droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
-            excludedDepositors = assembly.excludedDepositors,
-            cappedClaims = assembly.cappedClaims,
-        )
+        return batch(assembly, files, totalPayment, rejected)
     }
+
+    /** Carries the assembly's exclusion and cover evidence into the batch. */
+    private fun batch(
+        assembly: InsuredClaimsAssembly,
+        files: Map<String, ByteArray>,
+        totalPayment: BigDecimal,
+        rejected: List<RejectedPerson>,
+    ): GsftBatch = GsftBatch(
+        files = files,
+        totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
+        rejected = rejected,
+        droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
+        droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
+        droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
+        excludedDepositors = assembly.excludedDepositors,
+        cappedClaims = assembly.cappedClaims,
+        temporarilyHighClaims = assembly.temporarilyHighClaims,
+        temporarilyHighCompensationCzk = assembly.temporarilyHighCompensationCzk,
+        refusedQualifyingCredits = assembly.refusedQualifyingCredits,
+    )
 
     private fun personRecords(
         claim: InsuredClaim,
