@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: communication-service
     app.kubernetes.io/part-of: communication
   annotations:
-    openbank.tech/policy-checksum: "44d46b03d221a106"
+    openbank.tech/policy-checksum: "de08943d241d3216"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -2011,6 +2011,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read

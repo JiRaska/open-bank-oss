@@ -104,6 +104,10 @@ BASELINE_UNCOVERED = {
     # which is the point at which the two copies of the model id could start disagreeing.
     "kyb-analyst": "deepseek-ai/DeepSeek-V3.2",
     "business-copilot": "deepseek-ai/DeepSeek-V3.2",
+    # 2026-11-09, ADR-0367 decision 6. `enabled: false` and proposal-only: no fetcher for the
+    # cited legal sources is wired yet, so nothing authenticates as this id. The application.yaml
+    # entry lands in the PR that flips `enabled`.
+    "regulatory-obligations-watcher": "deepseek-ai/DeepSeek-V3.2",
 }
 
 
