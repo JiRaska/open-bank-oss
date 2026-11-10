@@ -57,7 +57,7 @@ describe('SDLC guides', () => {
     fireEvent.click(screen.getByRole('button', { name: /Final check/ }))
     expect(screen.getByRole('region', { name: /What is happening now/ })).toHaveTextContent(/No shared carrier is needed/)
     fireEvent.click(screen.getByRole('button', { name: /Strict lane.*dispatcher changes/i }))
-    fireEvent.click(screen.getByRole('button', { name: /Route selection/ }))
+    fireEvent.click(within(screen.getByRole('list', { name: /Stations on the change journey/ })).getByRole('button', { name: /Route selection/ }))
     expect(screen.getByRole('region', { name: /What is happening now/ })).toHaveTextContent(/without generators/)
     expect(screen.getByRole('region', { name: /What is happening now/ })).toHaveTextContent(/judge checks ride alone/)
   })

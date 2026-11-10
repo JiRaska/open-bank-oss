@@ -52,9 +52,12 @@ class HistoricalPactTest(unittest.TestCase):
 
     def test_property_reaches_forked_test_jvm_only_on_targeted_path(self):
         gradle = (ROOT / "build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts").read_text()
+        broker_inputs = (ROOT / "build-logic/src/main/kotlin/com/openbank/buildlogic/BuildFactsInputs.kt").read_text()
         workflow = (ROOT / ".github/workflows/_service-ci.yml").read_text()
-        self.assertIn('"pact.filter.pacturl",', gradle)
-        self.assertIn('"pact.filter.consumers",', gradle)
+        self.assertIn('"pact.filter.pacturl",', broker_inputs)
+        self.assertIn('"pact.filter.consumers",', broker_inputs)
+        self.assertIn("import com.openbank.buildlogic.pactBrokerSystemProperties", gradle)
+        self.assertIn("pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }", gradle)
         self.assertIn('pact_url_arg=(-Dpact.filter.pacturl="${HISTORICAL_PACT_URL}" -Dpact.filter.consumers=openbank-admin-ui)', workflow)
         self.assertIn('"${pact_url_arg[@]}"', workflow)
         self.assertIn("inputs.historical_admin_ui_version == ''", workflow)
