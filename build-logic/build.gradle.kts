@@ -50,7 +50,7 @@ dependencies {
     compileOnly("io.quarkus:quarkus-gradle-model:$quarkusVersion")
     implementation("org.cyclonedx.bom:org.cyclonedx.bom.gradle.plugin:$cyclonedxVersion")
     // Public model-builder API; the existing Quarkus/CycloneDX runtime selects 3.9.16.
-    compileOnly("org.apache.maven:maven-model-builder:3.9.16")
+    compileOnly("org.apache.maven:maven-model-builder:3.10.0")
     implementation("org.jetbrains.kotlinx:kover-gradle-plugin:$koverVersion")
     // Static analysis (SAST gate), applied fleet-wide by the openbank.static-analysis
     // convention plugin. Only ktlint is a Gradle plugin here — detekt is invoked as a
@@ -111,4 +111,24 @@ configurations.all {
         force("io.netty:netty-transport-native-epoll:4.2.19.Final")
         force("io.netty:netty-transport-native-kqueue:4.2.19.Final")
     }
+}
+
+// Exercise cache keys with real Gradle tasks and an isolated local cache.
+dependencies {
+    testImplementation(gradleTestKit())
+    testImplementation(platform("org.junit:junit-bom:${versionsMap["junit"]}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+tasks.test {
+    useJUnitPlatform()
+    // TestKit's UnexpectedBuildFailure carries the nested fixture build output in its
+    // exception message. SHORT logging hides that cause on gate shards without reports.
+    testLogging {
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+    systemProperty("fixture.junit.classpath", configurations.testRuntimeClasspath.get().files
+        .filter { it.name.startsWith("junit-") || it.name.startsWith("opentest4j-") || it.name.startsWith("apiguardian-") }
+        .joinToString(File.pathSeparator))
+    systemProperty("fixture.testkit.dir", layout.buildDirectory.dir("testkit").get().asFile.absolutePath)
 }

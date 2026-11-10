@@ -130,3 +130,11 @@ Lawful basis for processing: **Legal obligation** (Art. 6(1)(c) GDPR) + **AML Di
 The `sanctions_checks` columns `aliases`, `identifiers`, `matches` and `checked_lists` remain JSONB with their existing defaults and NOT NULL constraints. The persistence entity keeps JSON text in Kotlin: SQL reads cast these columns to text, while writes cast the bound text to JSONB. The intermediate text cast on writes prevents a JSON document from being stored as a quoted JSON string. Database JSON validation remains in place; no payload-column type migration is required.
 
 This mapping lets list, check-by-id and pending reads retrieve populated arrays and objects without changing the response fields or screening decisions. A real-PostgreSQL regression covers existing JSONB rows, reactive insert and update/reload with changed payloads, nullable metadata, malformed-JSON rejection and missing-id404. Positive HTTP tests use a test identity and do not prove production JWT or policy enforcement.
+
+## List change publication state
+
+Every `sanctions_lists.list_type` requires a row in `sanctions_change_publication`, including disabled lists and lists with no entries or pending journal changes. The row holds the publication fingerprint, refresh generation and active-refresh fence used before importing or draining changes. A migration that introduces a list must supply its publication state as well.
+
+`V19__backfill_sanctions_publication_state.sql` initializes any missing list state with the table defaults. Existing fingerprints, generations and active-refresh flags are preserved by `ON CONFLICT (list_type) DO NOTHING`. Fresh-schema and V18-upgrade integration tests cover this invariant and replay with nondefault existing state.
+
+Retain these additive control rows when rolling back application code, together with pending journal and outbox evidence. Removing a row can discard a generation, active fence or fingerprint and prevent older application code from publishing safely. Apply state repairs through forward migrations rather than manual recovery SQL.

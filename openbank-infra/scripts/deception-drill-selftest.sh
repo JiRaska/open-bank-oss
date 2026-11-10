@@ -21,7 +21,12 @@ case "$*" in
     # A long-lived key sent with the drill role's session token is InvalidClientTokenId in real AWS.
     if [[ -n "${AWS_SESSION_TOKEN:-}" ]]; then echo "InvalidClientTokenId" >&2; exit 254; fi
     echo "arn:aws:iam::000000000000:user/service/stub" ;;
-  *get-metric-statistics*) echo "${STUB_METRIC:-None}" ;;
+  *get-metric-statistics*)
+    if [[ "${STUB_METRIC:-}" == DENIED ]]; then
+      echo "An error occurred (AccessDenied) when calling the GetMetricStatistics operation: User: arn:aws:sts::000000000000:assumed-role/stub is not authorized" >&2
+      exit 254
+    fi
+    echo "${STUB_METRIC:-None}" ;;
   *) echo "unexpected aws call: $*" >&2; exit 9 ;;
 esac
 STUB
@@ -41,10 +46,18 @@ rc=$(run 2.0 || true)
 if [[ "$rc" != 1 ]] || ! grep -q '^count  *FAIL' "$tmp/out"; then
   echo "SELFTEST FAIL: two matched events must exit 1 with a count FAIL row (rc=$rc)"; cat "$tmp/out"; exit 1
 fi
+rc=$(run DENIED || true)
+if [[ "$rc" != 1 ]] || ! grep -q '^metrics  *FAIL.*AccessDenied' "$tmp/out"; then
+  echo "SELFTEST FAIL: a denied metric read must exit 1 and name the error, not read as no signal (rc=$rc)"; cat "$tmp/out"; exit 1
+fi
+if grep -q 'arn:aws' "$tmp/out" "$tmp/verdict"; then
+  echo "SELFTEST FAIL: a metric read error leaked an ARN into public output"; cat "$tmp/out"; exit 1
+fi
+rc=$(run 2.0 || true)
 if ! grep -q '^run=' "$tmp/verdict" || grep -q 'watched key: called' "$tmp/verdict"; then
   echo "SELFTEST FAIL: the verdict file must hold the verdict and nothing printed before it"; cat "$tmp/verdict"; exit 1
 fi
 if grep -q 'arn:aws' "$tmp/out"; then
   echo "SELFTEST FAIL: the drill printed an ARN, and its output is posted to a public issue"; cat "$tmp/out"; exit 1
 fi
-echo "deception-drill selftest: OK — silence fails loudly (exit 1), a signal passes, a second event fails, no ARN printed, scope=aws never claims the ServiceAccount"
+echo "deception-drill selftest: OK — silence fails loudly (exit 1), a signal passes, a second event fails, a denied read is named, no ARN printed, scope=aws never claims the ServiceAccount"

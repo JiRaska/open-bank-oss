@@ -212,11 +212,21 @@ test('navigation smoke: every in-app sidebar click settles on its route', async 
 
     const sidebar = page.locator('nav.ob-sidebar-nav')
     const expectedMenuHrefs = uniqueDestinations.map(item => item.href).sort()
+    const areaTrigger = page.getByRole('button', { name: /Workspace area|Pracovní oblast/ })
+    const areaForHref = new Map<string, string>()
     const waitForCompleteSidebar = async () => {
-      await expect.poll(() => sidebar.locator('a[href]').evaluateAll(elements =>
-        [...new Set(elements.map(element => element.getAttribute('href')).filter((href): href is string => Boolean(href)))].sort(),
-      ), { timeout: 20_000, message: 'authenticated navigation must expose every source destination' })
-        .toEqual(expectedMenuHrefs)
+      await expect(areaTrigger).toBeVisible()
+      await areaTrigger.click()
+      const areaNames = await page.locator('#navigation-areas button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')!))
+      await page.keyboard.press('Escape')
+      const found = new Set<string>()
+      for (const name of areaNames) {
+        await areaTrigger.click()
+        await page.locator('#navigation-areas').getByRole('button', { name, exact: true }).click()
+        const hrefs = await sidebar.locator('a[href]').evaluateAll(elements => elements.map(element => element.getAttribute('href')!))
+        for (const href of hrefs) { found.add(href); if (!areaForHref.has(href)) areaForHref.set(href, name) }
+      }
+      expect([...found].sort(), 'every source destination must be discoverable across workspace areas').toEqual(expectedMenuHrefs)
     }
     await waitForCompleteSidebar()
 
@@ -229,6 +239,10 @@ test('navigation smoke: every in-app sidebar click settles on its route', async 
       persistEvidence()
       try {
         await test.step(`click ${href}`, async () => {
+          if (!(await sidebar.locator(`a[href="${href}"]`).count())) {
+            await areaTrigger.click()
+            await page.locator('#navigation-areas').getByRole('button', { name: areaForHref.get(href)!, exact: true }).click()
+          }
           const link = sidebar.locator(`a[href="${href}"]`).first()
           expect(await sidebar.locator(`a[href="${href}"]`).count(), `sidebar link ${href}`).toBeGreaterThan(0)
           const previousMainText = (await main.innerText()).trim()

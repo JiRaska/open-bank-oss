@@ -51,6 +51,12 @@ class AgentChatContractTest {
     }
 
     @Test
+    fun `tool-free chat documents an unavailable completion without changing its success shape`() {
+        val operation = openapi.substringAfter("  /agent/chat:").substringBefore("  /agent/models:")
+        assertThat(operation).contains("\"200\":", "\"503\":", "no partial explanation is returned")
+    }
+
+    @Test
     fun `the assistant endpoints are documented`() {
         assertThat(openapi)
             .contains("/agent/chat:")
@@ -108,5 +114,15 @@ class AgentChatContractTest {
             .contains("/api/v1/agent-merge-records/capabilities:")
             .contains("/api/v1/agent-merge-records/{prNumber}:")
             .contains("required: [approvedBy, approvedById, approvedAt, evidenceUrl]")
+    }
+
+    @Test
+    fun `tool restriction is additive and preserves ordinary chat defaults`() {
+        val request = openapi.substringAfter("    ChatRequest:").substringBefore("    ToolCallRecord:")
+        assertThat(request).contains("allowTools:", "default: true")
+        assertThat(openapi.substringAfter("    ChatResponse:").substringBefore("    ModelInfo:"))
+            .contains("toolsRestricted:")
+        assertThat(openapi.substringAfter("    ModelsResponse:").substringBefore("    CatalogReviewCapability:"))
+            .contains("toolFreeChat:")
     }
 }

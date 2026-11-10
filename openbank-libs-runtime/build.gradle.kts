@@ -25,6 +25,11 @@ dependencies {
     // Domain module — pure Kotlin/JVM; re-exported as api() so dependents on runtime
     // also see domain types without an explicit dependency.
     api(project(":openbank-libs-domain"))
+    // Serialization belongs at the runtime boundary. Preserve the existing
+    // runtime/umbrella consumer classpath after narrowing the domain dependency API.
+    api(libs.kotlin.reflect)
+    api(libs.jackson.module.kotlin)
+    api(libs.jackson.datatype.jsr310)
 
     // EXCEPTION: BearerTokenClientHeadersFactory implements microprofile-rest-client's
     // ClientHeadersFactory. Shipped transitively as api() — see openbank-libs build.gradle.kts
@@ -111,6 +116,11 @@ dependencies {
     // ever selects the s3 backend. A service that sets openbank.objectstore.backend=s3
     // must add libs.aws.sdk.s3 (or an equivalent) to its OWN build.gradle.kts.
     compileOnly(libs.aws.sdk.s3)
+    // Synthetic response tests need SDK types, not a network transport or a consumer runtime dependency.
+    testImplementation(libs.aws.sdk.s3) {
+        exclude(group = "software.amazon.awssdk", module = "apache-client")
+        exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
+    }
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

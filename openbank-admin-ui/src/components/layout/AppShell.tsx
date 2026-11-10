@@ -29,7 +29,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!mobileNavOpen) return
     const focusableInSidebar = () => Array.from(
-      document.querySelectorAll<HTMLElement>('#admin-sidebar a, #admin-sidebar button:not([disabled])'),
+      document.querySelectorAll<HTMLElement>('#admin-sidebar a, #admin-sidebar button:not([disabled]), #admin-sidebar input:not([disabled])'),
     )
     // The mobile drawer starts with visibility:hidden. Its open class is committed
     // in this render, but focusing in the same effect can run before the browser
@@ -92,7 +92,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       const opener = Array.from(document.querySelectorAll<HTMLElement>('button[aria-controls="admin-sidebar"]'))
         .find(element => element.checkVisibility())
       if (document.activeElement !== sidebar && document.activeElement !== opener) return
-      sidebar?.querySelector<HTMLElement>('a, button:not([disabled])')?.focus()
+      sidebar?.querySelector<HTMLElement>('a, button:not([disabled]), input:not([disabled])')?.focus()
     })
     return () => { cancelAnimationFrame(frame) }
   }, [mobileNavOpen, sessionStatus])

@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.7.0...customer-edge-v1.8.0) (2026-11-08)
+
+
+### Features
+
+* **admin-ui:** add visual Lion Quest course authoring for marketing ([#15227](https://github.com/JiRaska/open-bank-oss/issues/15227)) ([1274803](https://github.com/JiRaska/open-bank-oss/commit/127480353627a49e08d9108cdbc5259305ed32a5))
+
 ## [1.7.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.6.1...customer-edge-v1.7.0) (2026-11-06)
 
 

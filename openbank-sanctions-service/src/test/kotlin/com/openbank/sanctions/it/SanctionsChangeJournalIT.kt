@@ -37,6 +37,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
+import org.flywaydb.core.Flyway
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
@@ -102,6 +103,88 @@ class SanctionsChangeJournalIT {
         execute("DELETE FROM sanctions_outbox")
         execute("UPDATE sanctions_change_publication SET last_storm_fingerprint = NULL, refresh_active = FALSE")
     }
+
+    @Test
+    fun `every migrated list has its mandatory publication state`() {
+        val missing = onEventLoop {
+            pool.query(
+                "SELECT lists.list_type FROM sanctions_lists lists " +
+                    "LEFT JOIN sanctions_change_publication publication USING (list_type) " +
+                    "WHERE publication.list_type IS NULL ORDER BY lists.list_type",
+            ).execute().awaitSuspending().map { it.getString("list_type") }
+        }
+        assertThat(missing).isEmpty()
+    }
+
+    @Test
+    fun `Czech terrorism list with no journal drains without importing data`() {
+        val type = SanctionsListType.CZ_TERRORISTS
+        val outcome = onEventLoop { publisher.publishPending(listId(type), type) }
+        assertThat(outcome).isEqualTo(SanctionsPublicationOutcome.NO_CHANGES)
+        assertThat(journalCount()).isZero()
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
+    }
+
+    @Test
+    fun `publication state backfill upgrades V18 and preserves every existing fence on replay`() {
+        val schema = "publication_upgrade_" + UUID.randomUUID().toString().replace("-", "")
+        fun flyway(target: String): Flyway = Flyway.configure().dataSource(dataSource)
+            .schemas(schema, "public").defaultSchema(schema).locations("classpath:db/migration")
+            .target(target).load()
+        try {
+            flyway("18").migrate()
+            withSchema(schema) { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeUpdate(
+                        "UPDATE sanctions_change_publication SET refresh_generation = 17, " +
+                            "refresh_active = TRUE, last_storm_fingerprint = 'retained-fingerprint'",
+                    )
+                    val before = publicationStates(connection)
+                    assertThat(before).hasSize(7)
+                    assertThat(flyway("19").migrate().migrationsExecuted).isEqualTo(1)
+                    val after = publicationStates(connection)
+                    assertThat(after).containsAll(before).hasSize(8)
+                    assertThat(after).contains("CZ_TERRORISTS:0:false:<null>")
+                    statement.executeUpdate(
+                        "UPDATE sanctions_change_publication SET refresh_generation = 23, " +
+                            "refresh_active = TRUE, last_storm_fingerprint = 'retained-cz' " +
+                            "WHERE list_type = 'CZ_TERRORISTS'",
+                    )
+                    val retained = publicationStates(connection)
+                    val sql = requireNotNull(
+                        javaClass.getResource("/db/migration/V19__backfill_sanctions_publication_state.sql"),
+                    ).readText()
+                    statement.execute(sql)
+                    assertThat(publicationStates(connection)).isEqualTo(retained)
+                    assertThat(flyway("19").migrate().migrationsExecuted).isZero()
+                }
+            }
+        } finally {
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { it.execute("DROP SCHEMA IF EXISTS $schema CASCADE") }
+            }
+        }
+    }
+
+    private fun <T> withSchema(schema: String, block: (Connection) -> T): T = dataSource.connection.use { connection ->
+        val previousSchema = connection.schema
+        try {
+            connection.schema = schema
+            block(connection)
+        } finally {
+            connection.schema = previousSchema
+        }
+    }
+
+    private fun publicationStates(connection: Connection): List<String> =
+        connection.createStatement().use { statement ->
+            statement.executeQuery(
+                "SELECT list_type || ':' || refresh_generation || ':' || refresh_active || ':' || " +
+                    "COALESCE(last_storm_fingerprint, '<null>') FROM sanctions_change_publication ORDER BY list_type",
+            ).use { rows ->
+                buildList { while (rows.next()) add(rows.getString(1)) }
+            }
+        }
 
     @Test
     fun `independent writes retain changes and rollback retains neither content nor evidence`() {

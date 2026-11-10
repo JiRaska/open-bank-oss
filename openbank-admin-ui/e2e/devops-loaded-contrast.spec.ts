@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test } from '@playwright/test'
+import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator } from './helpers/auth'
 
 for (const theme of ['light', 'dark'] as const) {
@@ -26,6 +27,7 @@ for (const theme of ['light', 'dark'] as const) {
     }))
 
     await page.goto('/devops', { waitUntil: 'domcontentloaded' })
+    await waitForSettledShell(page)
     await expect(page.locator('#main-content')).toContainText('Merged Changes (proxy)')
     await expect(page.locator('#main-content')).toContainText('2.00 merged changes/day (proxy)')
     await expect(page.locator('#main-content')).not.toContainText('Overall DORA Performance')

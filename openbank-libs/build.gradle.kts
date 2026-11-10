@@ -2,10 +2,6 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import java.time.Instant
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
-
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.jandex)
@@ -43,68 +39,9 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 
-// Build-time stamping of openbank-build-info.properties. Values come from
-// libs.versions.toml so a Quarkus / Kotlin / Gradle bump in one place flows
-// straight through to the runtime info endpoint.
-//
-// Build time is taken from java.time.Instant so the build does not depend on a
-// `date` binary being present (the Docker Alpine base image has BusyBox `date`,
-// but pure JVM is portable). Git commit is read via `git rev-parse` when the
-// binary is available; in a Docker build context that strips .git we fall
-// back to "unknown" — passing the real commit through a build-arg is a
-// follow-up if reproducible attribution becomes a hard requirement.
-val gitCommitStamp: String = runCatching {
-    val proc = providers.exec {
-        commandLine("git", "rev-parse", "--short", "HEAD")
-        isIgnoreExitValue = true
-    }
-    val exit = proc.result.get().exitValue
-    if (exit == 0) proc.standardOutput.asText.get().trim().ifBlank { "unknown" } else "unknown"
-}.getOrDefault("unknown")
-
-// Read versions directly from libs.versions.toml instead of via the
-// `libs.versions.*` typed accessor — that accessor is generated at the root
-// composite level and is not visible inside openbank-libs when this project
-// is built standalone (Quarkus services include this build via includeBuild,
-// see ADR 0014).
-val libsVersionsToml: Map<String, String> = providers.fileContents(
-    layout.projectDirectory.file("gradle/libs.versions.toml"),
-).asText.get().lineSequence()
-    .takeWhile { !it.startsWith("[libraries]") }
-    .mapNotNull { line ->
-        Regex("""^(\w[\w.-]*)\s*=\s*"([^"]+)"\s*$""").find(line.trim())?.let {
-            it.groupValues[1] to it.groupValues[2]
-        }
-    }
-    .toMap()
-
-val kotlinFromCatalog = libsVersionsToml["kotlin"] ?: error("kotlin version missing in libs.versions.toml")
-val quarkusFromCatalog = libsVersionsToml["quarkus"] ?: error("quarkus version missing in libs.versions.toml")
-
-tasks.processResources {
-    inputs.property("kotlinVersion", kotlinFromCatalog)
-    inputs.property("quarkusVersion", quarkusFromCatalog)
-    // Stamp actual resource generation; an unchanged artifact keeps its original build time.
-    // The clock is output metadata, not a reason to rebuild every dependent test classpath.
-    inputs.property("gitCommit", gitCommitStamp)
-    filesMatching("openbank-build-info.properties") {
-        filter(
-            org.apache.tools.ant.filters.ReplaceTokens::class,
-            "tokens" to mapOf(
-                "kotlinVersion" to kotlinFromCatalog,
-                "quarkusVersion" to quarkusFromCatalog,
-                "quarkusLts" to "true",
-                "quarkusSupportUntil" to "2027-09-30",
-                "gradleVersion" to gradle.gradleVersion,
-                "buildTime" to DateTimeFormatter.ISO_INSTANT.format(
-                    Instant.now().truncatedTo(ChronoUnit.SECONDS),
-                ),
-                "gitCommit" to gitCommitStamp,
-                "libsVersion" to project.version.toString(),
-            ),
-        )
-    }
-}
+// openbank-build-info.properties is stamped by openbank-libs-domain, next to BuildInfo which
+// reads it: services that depend on domain/runtime directly (ADR-0122 Phase 2) never get this
+// umbrella JAR, so a resource stamped here reported every stack version as `unknown`.
 
 tasks.test {
     useJUnitPlatform()

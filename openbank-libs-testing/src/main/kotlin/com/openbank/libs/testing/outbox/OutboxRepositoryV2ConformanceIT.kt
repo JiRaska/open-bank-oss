@@ -72,6 +72,12 @@ abstract class OutboxRepositoryV2ConformanceIT {
      */
     protected abstract suspend fun findEntry(eventId: UUID): OutboxEntry?
 
+    /**
+     * Opt-in control of the repository's claim clock for the backoff case only. The callback
+     * fixes the clock at its argument; existing adopters retain their wall-clock path.
+     */
+    protected open val setClaimTime: ((Instant) -> Unit)? get() = null
+
     /** Reactive Panache needs a Vert.x duplicated context; the JUnit thread is not one. */
     protected fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -177,12 +183,24 @@ abstract class OutboxRepositoryV2ConformanceIT {
             .describedAs("2 s ± 20 %% after the failure")
             .isBetween(bounds.start, bounds.endInclusive)
 
+        // A database round trip may outlast the backoff. Opted-in adopters hold the claim
+        // clock before the deadline instead of assuming the test thread was scheduled promptly.
+        val controlledClaimTime = setClaimTime
+        controlledClaimTime?.invoke(failed.updatedAt)
+        val nextAttemptAt = requireNotNull(failed.nextAttemptAt)
         // Not yet due: the claim skips it, the backlog still counts it.
         val claimedEarly = onEventLoop { repository.claimProcessable(BATCH) }.filter { it.eventId == msg.eventId }
         assertThat(claimedEarly).isEmpty()
         assertThat(onEventLoop { repository.countProcessable() }).isGreaterThanOrEqualTo(1)
 
-        Thread.sleep(Duration.between(Instant.now(), failed.nextAttemptAt).toMillis().coerceAtLeast(0) + SLACK_MS)
+        if (controlledClaimTime != null) {
+            controlledClaimTime(nextAttemptAt.minusNanos(1_000))
+            val beforeBoundary = onEventLoop { repository.claimProcessable(BATCH) }.filter { it.eventId == msg.eventId }
+            assertThat(beforeBoundary).isEmpty()
+            controlledClaimTime(nextAttemptAt)
+        } else {
+            Thread.sleep(Duration.between(Instant.now(), nextAttemptAt).toMillis().coerceAtLeast(0) + SLACK_MS)
+        }
         val claimedDue = onEventLoop { repository.claimProcessable(BATCH) }.filter { it.eventId == msg.eventId }
         assertThat(claimedDue).describedAs("claimable once next_attempt_at has passed").hasSize(1)
     }

@@ -8,8 +8,10 @@ adr: ADR-0168
 
 ## Mission
 
-Static analyzer for fleet-wide silent-test-failure patterns in Kotlin test sources. On a weekly
-sweep plus reactively whenever a CI test-suite run reports a failure, this agent generalizes the
+Fleet test-evidence analyzer with an operator-triggered, bounded source pilot. Fleet evidence
+arrives through Admin UI Test Intelligence snapshots; the deployed source scan reads only a
+read-only snapshot of this service's own tests. No weekly fleet sweep cron is enabled.
+On a source scan, this agent generalizes the
 `check-test-runblocking-unit.sh` CI guard (an expression-body test function using
 `runBlocking`/`GlobalScope.launch`/`GlobalScope.async` without an explicit `: Unit` return
 type, which JUnit5 silently drops instead of running) beyond its one hardcoded builder — deliberately
@@ -76,6 +78,16 @@ find nothing.
   `GitHubProposalAdapter` stub, which returns a fabricated `pending-...` URL rather than refusing.
   That is the opposite of the `UnwiredProposalPort` pattern the fleet has since settled on and is
   tracked separately; nothing in this agent depends on it.
-- `repo-root` (`FLAKY_TEST_HUNTER_REPO_ROOT`) must point at a mounted, up-to-date checkout of `main`
-  for the `TestScanPort` checks to be meaningful — the deployment-side checkout-mount wiring is
-  tracked separately and not yet part of this PR's gitops manifest.
+- The deployed `repo-root` (`FLAKY_TEST_HUNTER_REPO_ROOT`) points at a sparse public-main snapshot
+  containing only `openbank-flaky-test-hunter/src/test/kotlin`. The init container logs its exact
+  revision and refuses startup if cloning fails or the test tree is empty. It has no repository
+  credentials or Kubernetes API token; the application mounts the snapshot read-only. Test source
+  is inspected as text and never built or executed. This snapshot is taken at pod startup, rather
+  than being a live checkout; a new deployment refreshes it. JUnit execution evidence is not
+  present in this source snapshot, so the scanner does not invent an executed-test count.
+- The bounded pilot enables the PR writer, preserving the packaged-charter and OPA checks before
+  every attempted PR. Only the existing mechanical own-test repair is eligible; other findings
+  retain their human disposition. The writer re-reads and validates current main before changing
+  a file. Reverting the activation, or setting the writer switch false through GitOps, stops it.
+  Neither activation nor a clean scan is proof of a real merged repair; phase advancement still
+  needs the independently checked ADR-0031 evidence.

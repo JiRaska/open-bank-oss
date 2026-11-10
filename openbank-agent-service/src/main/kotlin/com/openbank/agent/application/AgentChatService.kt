@@ -95,8 +95,19 @@ class AgentChatService {
         val detail: String? = null,
     )
 
-    suspend fun chat(history: List<ChatMessage>, modelId: String?, pageContext: String?): ChatOutcome =
-        run(ASSISTANT_IDENTITY, systemPrompt(pageContext), history, modelId, trigger = "chat")
+    suspend fun chat(
+        history: List<ChatMessage>,
+        modelId: String?,
+        pageContext: String?,
+        allowTools: Boolean = true,
+    ): ChatOutcome = run(
+        ASSISTANT_IDENTITY,
+        systemPrompt(pageContext),
+        history,
+        modelId,
+        trigger = "chat",
+        offeredToolNames = if (allowTools) null else emptySet(),
+    )
 
     /** Run one governed loop turn under [identity]'s charter. See the class doc for callers. */
     suspend fun run(
@@ -292,6 +303,9 @@ class AgentChatService {
         // D5: hash of the prompt as the run started (system + history) — provenance without raw content.
         val promptHash = AgentRunAuditor.promptHash(messages)
 
+        // Reasoning tokens share the provider's output budget with the visible explanation.
+        // Restrict the larger budget to an explicitly tool-free operator chat.
+        val toolFreeChat = identity.agentId == ASSISTANT_IDENTITY.agentId && offeredToolNames?.isEmpty() == true
         val record = mutableListOf<ToolCallRecord>()
         var lastModel = modelId ?: gateway.defaultModelId()
         var totalTokens = 0L
@@ -308,7 +322,7 @@ class AgentChatService {
                         model = lastModel,
                         messages = messages,
                         tools = if (offerTools) tools else emptyList(),
-                        maxTokens = MAX_OUTPUT_TOKENS,
+                        maxTokens = if (toolFreeChat) TOOL_FREE_OUTPUT_TOKENS else MAX_OUTPUT_TOKENS,
                     ),
                     sensitive = sensitive,
                     actorId = identity.agentId,
@@ -334,6 +348,28 @@ class AgentChatService {
             lastModel = response.modelId
             // D2: accumulate tokens across all turns in this run.
             totalTokens += response.usage.inputTokens + response.usage.outputTokens
+
+            val incompleteReason = when {
+                !toolFreeChat -> null
+                response.stopReason == StopReason.MAX_TOKENS -> "model_output_truncated"
+                response.content.isBlank() && response.toolInvocations.isEmpty() -> "model_output_empty"
+                else -> null
+            }
+            if (incompleteReason != null) {
+                rateLimiter.checkTokensPerRun(identity.agentId, totalTokens)
+                return LoopResult(
+                    outcome = ChatOutcome(
+                        reply = "The explanation could not be completed. Please try again later.",
+                        model = lastModel,
+                        toolCalls = record,
+                        unavailable = true,
+                    ),
+                    promptHash = promptHash,
+                    totalTokens = totalTokens,
+                    auditResult = AuditResult.FAILURE,
+                    detail = incompleteReason,
+                )
+            }
 
             if (response.stopReason != StopReason.TOOL_USE || response.toolInvocations.isEmpty()) {
                 // D2: post-run token check (append limit warning to reply if over budget).
@@ -485,6 +521,7 @@ class AgentChatService {
         // is 2+ completions, each carrying the prompt + tool schemas + (capped) results.
         const val MAX_TOOL_RESULT_CHARS = 3000
         const val MAX_OUTPUT_TOKENS = 512
+        const val TOOL_FREE_OUTPUT_TOKENS = 2048
         val ASSISTANT_IDENTITY = AgentIdentity(agentId = "ui-assistant", plane = "control")
     }
 }

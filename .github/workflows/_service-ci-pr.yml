@@ -48,8 +48,8 @@ jobs:
     name: ${{ inputs.service }} (build)
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
-      && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'openbank-mini'
-      || 'ubuntu-latest') }}
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'openbank-mini' || 'ubuntu-latest')
+      }}
     timeout-minutes: 45
     environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'gradle-cache-writer' || '' }}
@@ -110,7 +110,7 @@ jobs:
       continue-on-error: true
       timeout-minutes: 1
       run: bash -e "$SERVICE_CI_HELPERS/raise-aio-max-nr.sh"
-    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad
+    - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78
       with:
         distribution: temurin
         java-version: '21
@@ -119,8 +119,8 @@ jobs:
 
           '
     - name: Validate Gradle wrapper
-      uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
-    - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c
+    - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c
       with:
         cache-disabled: false
         cache-read-only: true
@@ -186,21 +186,9 @@ jobs:
         SERVICE_CI_JOB_STATUS: ${{ job.status }}
         SERVICE_CI_REPORT_OUTCOME: ${{ steps.coverage_report.outcome }}
     - name: Collect consumer pacts for hand-off to the contract job
-      run: 'set -euo pipefail
-
-        mkdir -p pact-handoff
-
-        shopt -s nullglob
-
-        files=(pacts/${{ inputs.service }}-*.json)
-
-        for f in "${files[@]}"; do cp "$f" pact-handoff/; done
-
-        echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
-
-        echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
-
-        '
+      env:
+        SERVICE: ${{ inputs.service }}
+      run: bash -e "$SERVICE_CI_HELPERS/consumer-pact-handoff.sh" collect
     - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
       with:
         name: consumer-pacts-${{ inputs.service }}

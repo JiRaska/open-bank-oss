@@ -9,6 +9,7 @@
 #
 # Inputs (env):  EVENT_NAME  github.event_name
 #                BASE_REF    github.base_ref (pull_request only)
+#                REQUESTED_SERVICE  optional one-module workflow_dispatch selection
 #                SELECT_OUT  directory to write results into
 #                GITHUB_OUTPUT  (push only) receives admin-ui-pact-changed=true
 # Outputs:       $SELECT_OUT/changed.txt  space-separated module list (unsorted, may be empty)
@@ -31,6 +32,17 @@ is_root_prose_path() {
   esac
 }
 
+# Preserve line boundaries without spawning grep once for every canonical module.
+# Unusual names keep the original ERE semantics rather than changing their interpretation.
+module_path_changed() {
+  local module="$1" files="$2"
+  if ! shopt -q nocasematch && [[ "$module" =~ ^openbank-[a-z0-9-]+$ ]]; then
+    [[ $'\n'"$files" == *$'\n'"$module/"* ]]
+  else
+    grep -qE "^${module}/" <<< "$files"
+  fi
+}
+
 select_modules() {
   # Canonical Gradle module list — DISCOVERED from the tree exactly like
   # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
@@ -42,6 +54,24 @@ select_modules() {
   # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
   # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
   ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
+  local requested_module valid_requested candidate_module
+  requested_module="${REQUESTED_SERVICE:-}"
+  if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$requested_module" ]; then
+    # A release-only push may not select this service, while deployment still needs its
+    # exact build + contract proof. Reuse the same CI jobs for one operator-requested
+    # module; never turn an invalid request into a full-fleet run or a Gradle argument.
+    valid_requested=false
+    for candidate_module in $ALL; do
+      if [ "$candidate_module" = "$requested_module" ]; then
+        valid_requested=true
+        break
+      fi
+    done
+    if [ "$valid_requested" != true ]; then
+      echo "::error::Scoped dispatch requires exactly one existing Gradle module." >&2
+      return 1
+    fi
+  fi
 
   # The sourced selector is exercised by positive and negative controls before it
   # can select a build matrix. Unknown paths still take the conservative fallback.
@@ -50,12 +80,16 @@ select_modules() {
   pact_build_modules_self_test
   python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
-  if [ "$EVENT_NAME" = "schedule" ] \
+  if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ -n "$requested_module" ]; then
+    CHANGED="$requested_module"
+    FILES=""
+    echo "Decision: explicit workflow_dispatch -> verify only $requested_module."
+  elif [ "$EVENT_NAME" = "schedule" ] \
      || [ "$EVENT_NAME" = "workflow_dispatch" ]; then
     echo "Event $EVENT_NAME -> build all modules (full-fleet)."
     CHANGED="$ALL"
   elif [ "$EVENT_NAME" = "push" ]; then
-    # Scope service and Pact changes; inert release/docs/infra changes build nothing.
+    # Scope service and Pact changes; release markers need fresh build/contract evidence.
     # Unknown build inputs fall back to the full fleet below. Full history makes
     # HEAD~1 available on main (squash-merged pushes are single commits).
     DIFF_BASE=HEAD~1
@@ -70,7 +104,13 @@ select_modules() {
     RELEVANT=""
     while IFS= read -r f; do
       [ -z "$f" ] && continue
-      if ! is_inert_service_path "$f"; then RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"; fi
+      # Auto deploy builds version-only releases; its exact-source Pact gate must
+      # have the matching main-push build, even when application code is unchanged.
+      if [[ "$f" == openbank-*/version.txt ]] && [[ " $ALL " == *" ${f%%/*} "* ]]; then
+        RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"
+      elif ! is_inert_service_path "$f"; then
+        RELEVANT="${RELEVANT}${RELEVANT:+$'\n'}${f}"
+      fi
     done <<< "$FILES"
     RELEVANT_COUNT=$(grep -c . <<< "$RELEVANT" || true)
     if [ "${RELEVANT_COUNT:-0}" -eq 0 ]; then
@@ -219,24 +259,26 @@ select_modules() {
     # explicitly (#376); this brings services-ci.yml's PR-path trigger in
     # line with it, plus openbank-libs-testing (auto-deploy correctly omits
     # it — it's test-only, never shipped in a runtime image).
-    # Release-bookkeeping paths are inert here for the SAME reason the push path
-    # above already treats them as inert (the `RELEVANT` filter): version.txt,
-    # CHANGELOG.md and the release-please manifest cannot alter any module's
-    # compile inputs or any pact. Without this the PR lane fanned out per-module
-    # on `^<module>/`, so every release-please PR built the service it bumps —
-    # 194 of them in the week of 2026-07-25, each a build of a two-line diff whose
-    # post-merge push is then skipped as inert anyway. It also makes the single
-    # aggregated Release PR (separate-pull-requests: false) build NOTHING rather
-    # than full-fleet, which is what makes the aggregation affordable.
-    # The version bump is not unchecked: check-app-version-override.sh holds the
-    # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
-    # package.json one, both unconditionally in the gate job.
+    # Release PRs keep their existing scope: bookkeeping does not change contracts.
+    # The main-push lane above builds version markers once they land, because auto
+    # deploy requires exact-source build/contract provenance for the released image.
     FILES_CODE=$(grep -vE '^openbank-libs/governance/|^openbank-libs/docs/[^/]+\.md$|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
     FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
     # Match the push selector: an exact raised-floor-only diff stays local.
     if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
       echo "Decision: shared domain build script changes only its raised coverage floor."
       FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+    fi
+    # gradle/verification-metadata.xml is checked by the `verification-metadata` shard jobs,
+    # which regenerate it for EVERY Gradle module (derive-verification-modules.py treats it as
+    # a shared input) with --refresh-dependencies and fail on a missing entry or a Gradle error
+    # (malformed XML). A module build adds nothing for this file alone: verification is
+    # `lenient` (gradle.properties), so a wrong checksum is a warning there, never a failure.
+    # all-green requires the shards' success whenever they were selected. PR path only: the
+    # main push keeps its full-fleet build. Any other global input still widens below.
+    if grep -Fxq 'gradle/verification-metadata.xml' <<< "$FILES_GLOBAL"; then
+      echo "Decision: gradle/verification-metadata.xml -> verification-metadata shards, not module builds."
+      FILES_GLOBAL=$(grep -vFx 'gradle/verification-metadata.xml' <<< "$FILES_GLOBAL" || true)
     fi
     if global_service_build_input_changed "$FILES_GLOBAL"; then
       echo "Decision: shared build input changed -> build all modules."
@@ -245,7 +287,7 @@ select_modules() {
       echo "Decision: per-module fan-out (no code-global change)."
       CHANGED=""
       for m in $ALL; do
-        if grep -qE "^${m}/" <<< "$FILES_CODE"; then
+        if module_path_changed "$m" "$FILES_CODE"; then
           CHANGED="$CHANGED $m"
         fi
       done
@@ -345,6 +387,8 @@ select_modules() {
       fi
       case "$f" in
         openbank-libs/governance/*|pacts/*.json) continue ;;
+        # Verified by the verification-metadata shards (see the global-input check above).
+        gradle/verification-metadata.xml) continue ;;
         # Same owned trees as the push path: readers are derived, never the full fleet.
         openbank-infra/*|openbank-contracts/*|docs/*|LICENSES/*) continue ;;
         openbank-*/*)
@@ -365,6 +409,29 @@ select_modules() {
 
 self_test() {
   local root repo out rc=0
+  # The common path must not call grep, and must match a whole module at a line start.
+  if ! (
+    grep() { return 99; }
+    module_path_changed openbank-a-service $'other/file\nopenbank-a-service/src/A.kt' &&
+      module_path_changed openbank-a-service 'openbank-a-service/src/A.kt' &&
+      ! module_path_changed openbank-a-service 'other/openbank-a-service/src/A.kt' &&
+      ! module_path_changed openbank-a-service 'openbank-a-service-other/src/A.kt' &&
+      ! module_path_changed openbank-a-service ''
+  ); then
+    echo 'SELF-TEST FAIL: canonical module matching changed or spawned grep'
+    return 1
+  fi
+  if ! module_path_changed 'openbank-a.service' 'openbank-aXservice/src/A.kt'; then
+    echo 'SELF-TEST FAIL: noncanonical module lost its existing ERE semantics'
+    return 1
+  fi
+  if ! (
+    shopt -s nocasematch
+    ! module_path_changed openbank-a-service 'OPENBANK-A-SERVICE/src/A.kt'
+  ); then
+    echo 'SELF-TEST FAIL: inherited nocasematch changed grep case semantics'
+    return 1
+  fi
   root=$(git rev-parse --show-toplevel)
   repo=$(mktemp -d)
   out=$(mktemp -d)
@@ -394,20 +461,43 @@ self_test() {
   : > "$repo/openbank-c-service/build.gradle.kts"
   # A test that reads every sibling module (fleet scanner) must ride along with any change.
   printf '%s\n' 'val r = File("..").listFiles()!!.filter { it.name.startsWith("openbank-") }' > "$repo/openbank-c-service/src/test/kotlin/Scan.kt"
+  mkdir -p "$repo/gradle"; : > "$repo/gradle/verification-metadata.xml"; : > "$repo/gradle/libs.versions.toml"
+  : > "$repo/.gitleaks.toml"; : > "$repo/.dockerignore"
   sg_do add -A && sg_do commit -q -m base &&
   sg_do remote add origin "$repo" && sg_do fetch -q origin main &&
   sg_do checkout -q -b pr || return 1
+  local base_sha; base_sha=$(sg rev-parse HEAD)
   echo a >> "$repo/openbank-a-service/src/A.kt"
   sg_do commit -q -am a || return 1
   expect() { # name want got
     if [ "$2" != "$3" ]; then echo "SELF-TEST FAIL: $1: want '$2' got '$3'"; rc=1; else echo "ok: $1 -> '$3'"; fi
   }
-  run() { # event; prints sorted module list
-    ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME="$1" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
+  run() { # event [requested-service]; prints sorted module list
+    ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME="$1" REQUESTED_SERVICE="${2:-}" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
         bash "$root/.github/scripts/service-ci-select-modules.sh" >"$out/log" 2>&1 ) || { echo "SELF-TEST FAIL: run $1 exited non-zero"; cat "$out/log"; rc=1; }
     tr ' ' '\n' < "$out/changed.txt" | grep -v '^$' | sort -u | tr '\n' ' ' || true
   }
-  expect schedule-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run schedule)"
+  reject_dispatch() {
+    if ( cd "$repo" && rm -f "$out/changed.txt" && "${gitenv[@]}" EVENT_NAME=workflow_dispatch \
+        REQUESTED_SERVICE="$2" BASE_REF=main SELECT_OUT="$out" GITHUB_OUTPUT="$out/gho" \
+        bash "$root/.github/scripts/service-ci-select-modules.sh" >"$out/log" 2>&1 ); then
+      echo "SELF-TEST FAIL: $1 accepted an invalid bounded selection"
+      rc=1
+    elif [ -e "$out/changed.txt" ]; then
+      echo "SELF-TEST FAIL: $1 emitted a build matrix after rejection"
+      rc=1
+    else
+      echo "ok: $1 rejected without a build matrix"
+    fi
+  }
+  expect schedule-builds-all-and-ignores-manual-selector "openbank-a-service openbank-b-service openbank-c-service " "$(run schedule openbank-b-service)"
+  expect default-dispatch-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run workflow_dispatch)"
+  expect bounded-dispatch-builds-only-requested-module "openbank-b-service " "$(run workflow_dispatch openbank-b-service)"
+  reject_dispatch unknown-module openbank-missing-service
+  reject_dispatch multiple-modules 'openbank-a-service openbank-b-service'
+  reject_dispatch path-traversal '../openbank-a-service'
+  reject_dispatch multiline $'openbank-a-service\nopenbank-b-service'
+  reject_dispatch shell-syntax 'openbank-a-service;true'
   expect pr-scopes-to-changed-module-plus-fleet-scanner "openbank-a-service openbank-c-service " "$(run pull_request)"
   # Negative control: a shared build input must widen to the full fleet, not stay scoped.
   echo x > "$repo/build.gradle.kts"
@@ -418,7 +508,43 @@ self_test() {
   echo d >> "$repo/docs/x.md"
   sg_do commit -q -am d || return 1
   expect push-inert-builds-nothing "" "$(run push)"
-  echo "SUBJECTS=4  # scenarios exercised"
+  # A release-only main push still needs its own published build/contract proof.
+  echo 1.1.0 > "$repo/openbank-a-service/version.txt"
+  sg_do add openbank-a-service/version.txt && sg_do commit -q -m release || return 1
+  expect push-release-builds-released-module-plus-scanner "openbank-a-service openbank-c-service " "$(run push)"
+  echo changelog > "$repo/openbank-b-service/CHANGELOG.md"
+  sg_do add openbank-b-service/CHANGELOG.md && sg_do commit -q -m changelog || return 1
+  expect push-changelog-builds-only-derived-reader "openbank-c-service " "$(run push)"
+  # Tool-only config: inert alone, never masking a module change beside it.
+  pr_from_base() { # branch; then edits; commits all tracked changes
+    sg_do checkout -q -b "$1" "$base_sha"
+  }
+  pr_from_base pr-gitleaks || return 1
+  echo x >> "$repo/.gitleaks.toml"; sg_do commit -q -am gl || return 1
+  expect pr-gitleaks-only-builds-nothing "" "$(run pull_request)"
+  echo b >> "$repo/openbank-a-service/src/A.kt"; sg_do commit -q -am glm || return 1
+  expect pr-gitleaks-plus-module-builds-that-module "openbank-a-service openbank-c-service " "$(run pull_request)"
+  # Negative control: .dockerignore is an image input and stays full-fleet.
+  pr_from_base pr-dockerignore || return 1
+  echo x >> "$repo/.dockerignore"; sg_do commit -q -am di || return 1
+  expect pr-dockerignore-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
+  # Verification metadata alone goes to the metadata shards, not the module builds...
+  pr_from_base pr-vmeta || return 1
+  echo x >> "$repo/gradle/verification-metadata.xml"; sg_do commit -q -am vm || return 1
+  expect pr-verification-metadata-only-builds-no-module "" "$(run pull_request)"
+  # ...but beside any other global input it still widens to the fleet.
+  echo x >> "$repo/gradle/libs.versions.toml"; sg_do commit -q -am vml || return 1
+  expect pr-verification-metadata-plus-catalog-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
+  # A JVM test that reads the inert file by literal path is still built.
+  sg_do checkout -q main || return 1
+  mkdir -p "$repo/openbank-b-service/src/test/kotlin"
+  printf '%s\n' 'val rules = File("../.gitleaks.toml").readText()' > "$repo/openbank-b-service/src/test/kotlin/R.kt"
+  sg_do add openbank-b-service/src/test/kotlin/R.kt && sg_do commit -q -m reader || return 1
+  sg_do fetch -q origin main && sg_do checkout -q -b pr-reader || return 1
+  echo y >> "$repo/.gitleaks.toml"; sg_do commit -q -am glr || return 1
+  expect pr-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run pull_request)"
+  expect push-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run push)"
+  echo "SUBJECTS=20  # scenarios exercised"
   return $rc
 }
 

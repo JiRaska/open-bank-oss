@@ -114,7 +114,7 @@ openbank:
       mode: ${CATALOG_IR_SIGNING_MODE:disabled}
       key-id: ${CATALOG_IR_SIGNING_KEY_ID:product-ir-publish}
       openbao:
-        address: ${CATALOG_IR_SIGNING_OPENBAO_ADDRESS:https://openbao.vault.svc:8200}
+        address: ${CATALOG_IR_SIGNING_OPENBAO_ADDRESS:https://openbao.vault.svc:8203}
         transit-mount: ${CATALOG_IR_SIGNING_OPENBAO_TRANSIT_MOUNT:transit}
         role: ${CATALOG_IR_SIGNING_OPENBAO_ROLE:product-catalog-ir-signing}
         sa-token-path: ${CATALOG_IR_SIGNING_OPENBAO_SA_TOKEN_PATH:/var/run/secrets/kubernetes.io/serviceaccount/token}

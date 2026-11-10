@@ -215,6 +215,7 @@ public abstract class com/openbank/libs/testing/outbox/OutboxRepositoryV2Conform
 	public final fun a failed row is scheduled with backoff, stays backlog, and becomes claimable when it is due ()V
 	protected abstract fun findEntry (Ljava/util/UUID;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
 	protected abstract fun getRepository ()Lcom/openbank/libs/persistence/outbox/OutboxRepositoryV2;
+	protected fun getSetClaimTime ()Lkotlin/jvm/functions/Function1;
 	protected final fun onEventLoop (Lkotlin/jvm/functions/Function1;)Ljava/lang/Object;
 	public final fun purgeSent removes only old SENT rows - PENDING, FAILED and DEAD survive ()V
 	protected abstract fun seed (Lcom/openbank/libs/persistence/outbox/OutboxMessage;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;

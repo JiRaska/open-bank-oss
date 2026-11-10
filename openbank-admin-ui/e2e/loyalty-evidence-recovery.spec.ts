@@ -38,7 +38,7 @@ test('rejects malformed loyalty evidence and recovers with verified customer dat
   })
 
   await page.goto('/loyalty')
-  await page.getByRole('button', { name: /Customer|Klient/ }).click()
+  await page.getByRole('navigation', { name: /Lípa sections|Sekce Lípy/ }).getByRole('button', { name: /^(Customer|Klient)$/, exact: true }).click()
   await page.getByLabel(/Search parties|Vyhledat stranu/).fill(PARTY_ID)
   const submit = page.getByRole('search').getByRole('button', { name: /Search|Vyhledat/ })
 

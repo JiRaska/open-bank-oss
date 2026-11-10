@@ -93,3 +93,40 @@
   }
   .mobileOpen { visibility: visible; transform: translateX(0); transition-delay: 0s; }
 }
+
+/* Quiet navigation: the active destination carries the only strong accent. */
+.sidebar { background: var(--surface); color: var(--text-secondary); border-right: 1px solid var(--border); box-shadow: none; max-width: 90vw; }
+.brand { padding: 20px 20px 16px; border-color: var(--border); }
+.brandMark { background: var(--accent-strong); box-shadow: none; border-radius: 8px; }
+.brandName { color: var(--text-primary); }
+.brandSubtitle { color: var(--text-secondary); }
+.nav { padding-top: 4px; scrollbar-width: thin; }
+.sectionLabel { color: var(--text-secondary); font-size: 11px; text-transform: none; letter-spacing: 0; padding-top: 20px; }
+.navItem { color: var(--text-secondary); font-weight: 500; }
+.navItem:hover { color: var(--text-primary); background: var(--surface-3); transform: none; }
+.navItem:focus-visible, .sidebar a:focus-visible, .sidebar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.navLabel { white-space: normal; overflow-wrap: anywhere; }
+.active, .active:hover { color: var(--accent-text); background: var(--accent-light); border-color: transparent; box-shadow: inset 2px 0 var(--accent); }
+.areaPicker { position: relative; padding: 14px 12px; }
+.areaTrigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text-primary); text-align: left; cursor: pointer; }
+.areaTrigger small { display: block; font-size: 10px; color: var(--text-secondary); margin-bottom: 4px; }
+.areaTrigger strong { font-size: 13px; font-weight: 600; }
+.areaList { position: absolute; top: calc(100% - 8px); left: 12px; right: 12px; z-index: 40; max-height: 55vh; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; box-shadow: var(--shadow-lg); }
+.areaList button { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text-primary); font-size: 12px; cursor: pointer; }
+.areaList button:hover, .areaList button[aria-pressed="true"] { background: var(--accent-light); color: var(--accent-text); }
+.areaList small { color: var(--text-secondary); }
+.hint { margin: 4px 10px; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.pinRow { display: flex; align-items: center; }
+.pinRow a { flex: 1; text-decoration: none; min-width: 0; }
+.unpin { flex: 0 0 24px; padding: 3px; background: none; border: 0; color: var(--text-secondary); cursor: pointer; }
+.unpin svg { width: 12px; height: 12px; }
+.allAreas { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding: 10px; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; cursor: pointer; }
+.preferences { padding: 10px 20px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-secondary); }
+.preferences button { display: flex; align-items: center; gap: 8px; padding: 5px 0; border: 0; background: transparent; color: inherit; cursor: pointer; }
+.preferences label { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.preferences input { width: 100%; min-width: 0; accent-color: var(--accent); }
+.compact .navItem { min-height: 30px; padding-block: 5px; font-size: 12px; }
+.compact .sectionLabel { padding-top: 12px; }
+.footer { background: var(--surface); border-color: var(--border); padding-block: 10px; }
+.footerVersion, .footerScope { color: var(--text-secondary); }
+@media (prefers-reduced-motion: reduce) { .sidebar, .navItem { transition: none; } }

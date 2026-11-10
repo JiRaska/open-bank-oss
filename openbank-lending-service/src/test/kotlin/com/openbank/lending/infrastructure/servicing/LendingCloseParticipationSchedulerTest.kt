@@ -42,7 +42,7 @@ import java.util.function.Supplier
  */
 class LendingCloseParticipationSchedulerTest {
 
-    // 2026-10-03T10:00Z is 12:00 in Prague: the lookback covers 2026-09-30 .. 2026-10-02.
+    // Prague reporting includes the whole immediately preceding calendar month.
     private val clock = Clock.fixed(Instant.parse("2026-10-03T10:00:00Z"), ZoneOffset.UTC)
     private val today = LocalDate.of(2026, 10, 3)
     private val runs = RecordingCloseJobRuns()
@@ -96,6 +96,19 @@ class LendingCloseParticipationSchedulerTest {
     private fun reportFor(day: LocalDate) = delivered.single { it.businessDate == day }
 
     @Test
+    fun `an observed missing job stays required in a new reporter with scheduling off`() {
+        val day = today.minusDays(1)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 0)
+        scheduler().reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        scheduler(provisioningEvery = "off").reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 1, journals = 0)
+        scheduler(provisioningEvery = "off").reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == day }.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
     fun `both interval jobs are due every day they are on`() {
         assertThat(scheduler().dueJobs())
             .containsExactlyInAnyOrder(LendingCloseJobs.ACCRUAL, LendingCloseJobs.PROVISIONING)
@@ -118,14 +131,14 @@ class LendingCloseParticipationSchedulerTest {
     }
 
     @Test
-    fun `a day whose provisioning has not run is not reported, so the ledger holds it`() {
+    fun `a day whose provisioning has not run explicitly refuses the close`() {
         val day = LocalDate.of(2026, 10, 2)
         ran(day, LendingCloseJobs.ACCRUAL, items = 4, journals = 3)
 
         val result = scheduler().reportDays(today).await().indefinitely()
 
-        assertThat(delivered.map { it.businessDate }).doesNotContain(day)
-        assertThat(result.attempted).isZero()
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(result.attempted).isPositive()
     }
 
     @Test
@@ -144,7 +157,9 @@ class LendingCloseParticipationSchedulerTest {
     fun `both jobs off is reported SKIPPED with the reason`() {
         scheduler(accrualEvery = "off", provisioningEvery = "off").reportDays(today).await().indefinitely()
 
-        assertThat(delivered).hasSize(3)
+        assertThat(
+            delivered,
+        ).hasSize(java.time.temporal.ChronoUnit.DAYS.between(today.withDayOfMonth(1).minusMonths(1), today).toInt())
         assertThat(delivered).allSatisfy {
             assertThat(it.outcome).isEqualTo(CloseOutcome.SKIPPED)
             assertThat(it.reason).contains("off")
@@ -240,8 +255,52 @@ class LendingCloseParticipationSchedulerTest {
 
         scheduler().reportDays(today).await().indefinitely()
 
-        assertThat(delivered.map { it.businessDate }).doesNotContain(day)
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
         assertThat(postingsAsked).contains(day)
+    }
+
+    @Test
+    fun `switching jobs off never hides pending failed or unattributed allowance work`() {
+        val day = today.minusDays(1)
+        for (state in listOf(AllowancePostings(1, 0, 0), AllowancePostings(0, 0, 1), AllowancePostings(0, 1, 0))) {
+            delivered.clear()
+            allowance = state
+            scheduler(accrualEvery = "off", provisioningEvery = "off").reportDays(today).await().indefinitely()
+            assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+            assertThat(reportFor(day).journalsPosted).isZero()
+        }
+    }
+
+    @Test
+    fun `unverified allowance history refuses completion despite a successful provisioning pass`() {
+        val day = today.minusDays(1)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        allowance = AllowancePostings(0, 0, 0, covered = false)
+        scheduler().reportDays(today).await().indefinitely()
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(day).reason).isEqualTo("ALLOWANCE_RECEIPTS_NOT_COVERED")
+        assertThat(reportFor(day).exercisedJobs).isEmpty()
+    }
+
+    @Test
+    fun `new pending allowance work revokes an earlier RAN without claiming journals`() {
+        val day = today.minusDays(1)
+        ran(day, LendingCloseJobs.ACCRUAL, items = 1, journals = 1)
+        ran(day, LendingCloseJobs.PROVISIONING, items = 4, journals = 0)
+        val poller = scheduler()
+        poller.reportDays(today).await().indefinitely()
+        val before = delivered.last { it.businessDate == day }
+        allowance = AllowancePostings(1, 0, 0)
+        poller.reportDays(today).await().indefinitely()
+        val refused = delivered.last { it.businessDate == day }
+        assertThat(before.outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(refused.sourceRunId).matches("[a-f0-9]{64}").isNotEqualTo(before.sourceRunId)
+        assertThat(refused.journalsPosted).isZero()
+        assertThat(refused.exercisedJobs).isEmpty()
+        poller.reportDays(today).await().indefinitely()
+        assertThat(delivered.count { it.businessDate == day }).isEqualTo(2)
     }
 
     @Test
@@ -280,7 +339,7 @@ class LendingCloseParticipationSchedulerTest {
 
         scheduler().reportDays(today).await().indefinitely()
 
-        assertThat(delivered.map { it.businessDate }).doesNotContain(day)
+        assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
     }
 
     @Test

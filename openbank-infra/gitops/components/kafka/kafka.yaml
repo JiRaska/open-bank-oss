@@ -68,7 +68,8 @@ spec:
     # this was pinned, so pinning it changed nothing on the running broker.
     # Bump metadataVersion only after the broker version is rolled and healthy —
     # a KRaft metadata version cannot be downgraded.
-    version: 4.2.0
+    # 4.2.2 (patch, same 4.2-IV1 metadata) needs operator >= 1.3; 1.2.x supports only 4.2.0/4.2.1.
+    version: 4.2.2
     metadataVersion: 4.2-IV1
     # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
@@ -200,6 +201,24 @@ spec:
         limits:
           cpu: 250m
           memory: 448Mi
+  # Transport CA lifetimes, stated rather than inherited (ADR-0172 D3). These are the
+  # Strimzi defaults, written out so the inventory row has a figure a reviewer can read
+  # and a change to it is a reviewed diff instead of an operator upgrade. Because the
+  # values equal what already applies, adding this block renews nothing and rolls no
+  # broker. Cluster CA signs broker/operator certs; clients CA signs every KafkaUser
+  # cert (ADR-0137 mTLS). A CA is renewed when it enters its renewal window, and the
+  # leaf certs it signed are re-issued in the same reconciliation, so a client cert
+  # lives at most validityDays.
+  clusterCa:
+    generateCertificateAuthority: true
+    validityDays: 365
+    renewalDays: 30
+    certificateExpirationPolicy: renew-certificate
+  clientsCa:
+    generateCertificateAuthority: true
+    validityDays: 365
+    renewalDays: 30
+    certificateExpirationPolicy: renew-certificate
 ---
 # Domain event topic for account-service. Declared explicitly (the broker does
 # not auto-create topics) so the topic operator manages it and the producer's

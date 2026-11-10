@@ -11,7 +11,7 @@ import { hasPermission, permissionForPath, PERMISSIONS, ROLES, type Permission }
 
 const root = resolve(__dirname, '..')
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
-const sidebar = read('components/layout/Sidebar.tsx')
+const sidebar = read('lib/navigation/catalog.ts')
 const riskResource = read('../../openbank-risk-engine/src/main/kotlin/com/openbank/risk/infrastructure/rest/RiskResource.kt')
 const curveResource = read('../../openbank-risk-engine/src/main/kotlin/com/openbank/risk/infrastructure/rest/CurveSetResource.kt')
 const backfillResource = read('../../openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/rest/LedgerBackfillResource.kt')

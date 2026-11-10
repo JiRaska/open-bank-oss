@@ -35,6 +35,7 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
+      actions: read   # test-intelligence-recently-published.py lists this workflow's runs/jobs
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       datasets: ${{ steps.source.outputs.datasets }}
@@ -57,6 +58,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           ROLLBACK_SNAPSHOT: ${{ inputs.rollback_snapshot }}
           SELECTED_DATASET: ${{ inputs.dataset }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ -n "$ROLLBACK_SNAPSHOT" ] && [ "$SELECTED_DATASET" = all ]; then
@@ -71,12 +73,36 @@ jobs:
             --workflow-conclusion "$WORKFLOW_RUN_CONCLUSION" \
             --workflow-sha "$WORKFLOW_RUN_SHA" --event-sha "$EVENT_SHA" \
             --dataset "$SELECTED_DATASET")"
-          echo "sha=$(jq -r '.sha' <<< "$selection")" >> "$GITHUB_OUTPUT"
-          echo "datasets=$(jq -c '.datasets' <<< "$selection")" >> "$GITHUB_OUTPUT"
+          sha="$(jq -r '.sha' <<< "$selection")"
+          datasets="$(jq -c '.datasets' <<< "$selection")"
+          # Collecting test-intelligence costs minutes and hundreds of GitHub API requests, and
+          # the publisher discards the result unless the source is STILL current main. A
+          # workflow_run for a commit main has already moved past cannot publish, so skip it here
+          # before any runner or API budget is spent. 2026-11-01..08: 766 workflow_run triggers
+          # for 364 main commits, and the resulting load ended 544 runs in secondary rate limits.
+          # Scheduled runs and dispatches keep running (they are the freshness backstop), and the
+          # publisher's own recheck stays, because main can still move during collection.
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            latest_main="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+            if [ "$latest_main" != "$sha" ]; then
+              echo "Source ${sha::8} is already superseded by main ${latest_main::8}; nothing to publish."
+              datasets='[]'
+            fi
+          fi
+          # test-intelligence costs ~220-260 GITHUB_TOKEN REST requests per collection; on every main
+          # CI completion that was ~1k/h of the shared 5000/h quota whose exhaustion fails required
+          # checks on unrelated PRs (#15483). A workflow_run collects it at most once per 55 min;
+          # cron and dispatch are not throttled. The probe fails open (collects) on any error.
+          if [ "$EVENT_NAME" = workflow_run ] && jq -e 'index("test-intelligence")' <<< "$datasets" >/dev/null \
+            && python3 .github/scripts/test-intelligence-recently-published.py "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"; then
+            datasets="$(jq -c 'map(select(. != "test-intelligence"))' <<< "$datasets")"
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "datasets=$datasets" >> "$GITHUB_OUTPUT"
 
   publish:
     needs: authorize-source
-    if: needs.authorize-source.result == 'success' && github.ref == 'refs/heads/main'
+    if: needs.authorize-source.result == 'success' && needs.authorize-source.outputs.datasets != '[]' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:

@@ -37,14 +37,24 @@ import java.util.Optional
 
 /**
  * ADR-0342 participant side for billing: the cycle is due only on the days its cron fires; a due day
- * is reported only once the sweep recorded its run AND no fee of the cycle is still pending in the
- * outbox; failed accounts, an aborted sweep and FAILED fees (a closed-day refusal included) make it
- * REFUSED, never RAN. The sweep files its evidence under the Prague accounting day it billed for.
+ * is RAN only once the sweep recorded its run AND no fee of the cycle is still pending.
+ * Missing work, pending fees, failed accounts, an aborted sweep and FAILED fees report REFUSED,
+ * revoking any earlier positive report. Evidence uses the Prague accounting day billed for.
  */
 class BillingCloseParticipationTest {
 
     private class Runs : CloseJobRunPort {
         val rows = linkedMapOf<Pair<LocalDate, String>, CloseJobRun>()
+        private val obligations = linkedMapOf<LocalDate, Set<String>>()
+        override fun requiredJobs(
+            from: LocalDate,
+            to: LocalDate,
+            scheduled: Map<LocalDate, Set<String>>,
+        ): Uni<Map<LocalDate, Set<String>>> {
+            scheduled.forEach { (day, jobs) -> obligations[day] = obligations[day].orEmpty() + jobs }
+            return Uni.createFrom().item(obligations.filterKeys { it in from..to })
+        }
+
         override fun record(run: CloseJobRun): Uni<Unit> {
             rows[run.businessDate to run.job] = run
             return Uni.createFrom().item(Unit)
@@ -59,7 +69,7 @@ class BillingCloseParticipationTest {
     private val postingsAsked = mutableListOf<String>()
     private val delivered = mutableListOf<CloseParticipationReport>()
 
-    // 2026-07-03T10:00Z: the lookback covers 2026-06-30 .. 2026-07-02; the cycle fires on 2026-07-01.
+    // 2026-07-03T10:00Z: monthly reporting covers 2026-06-01 .. 2026-07-02; cycles fire on each 1st.
     private val clock = Clock.fixed(Instant.parse("2026-07-03T10:00:00Z"), ZoneOffset.UTC)
     private val today = LocalDate.of(2026, 7, 3)
     private val cycleDay = LocalDate.of(2026, 7, 1)
@@ -68,7 +78,9 @@ class BillingCloseParticipationTest {
         evidence = object : BillingCloseEvidencePort, CloseJobRunPort by runs {
             override fun postingsFor(cycleId: String): Uni<CycleFeePostings> {
                 postingsAsked += cycleId
-                return Uni.createFrom().item(postings)
+                return Uni.createFrom().item(
+                    if (cycleId == "2026-07") postings else CycleFeePostings(0, 0, 0),
+                )
             }
         },
         sink = { participant, report ->
@@ -97,6 +109,18 @@ class BillingCloseParticipationTest {
     private fun reportFor(day: LocalDate) = delivered.single { it.businessDate == day }
 
     @Test
+    fun `an observed missing job stays required in a new reporter with scheduling off`() {
+        reporter().reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.REFUSED)
+        runs.record(CloseJobRun(cycleDay, BillingCloseJobs.CYCLE, 1, 0, 0, null, clock.instant()))
+            .await().indefinitely()
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+        assertThat(delivered.last { it.businessDate == cycleDay }.outcome).isEqualTo(CloseOutcome.RAN)
+    }
+
+    @Test
     fun `the cycle is due only on the day its cron fires, and never when the sweep is off`() {
         assertThat(reporter().isDue(cycleDay)).isTrue()
         assertThat(reporter().isDue(LocalDate.of(2026, 7, 2))).isFalse()
@@ -111,20 +135,128 @@ class BillingCloseParticipationTest {
     }
 
     @Test
-    fun `a due day whose cycle has not run is not reported, so the ledger holds it`() {
+    fun `a due day whose cycle has not run is REFUSED, so the ledger holds it`() {
         reporter().reportDays(today).await().indefinitely()
-        assertThat(delivered.map { it.businessDate }).doesNotContain(cycleDay)
+        assertThat(reportFor(cycleDay).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(cycleDay).reason).isEqualTo("BILLING_CYCLE_INCOMPLETE")
+        assertThat(reportFor(cycleDay).exercisedJobs).isEmpty()
+        assertThat(reportFor(LocalDate.of(2026, 6, 1)).outcome).isEqualTo(CloseOutcome.REFUSED)
     }
 
     @Test
-    fun `a cycle whose fees are still pending in the outbox is not reported yet`() {
+    fun `a cycle whose fees are still pending in the outbox is REFUSED`() {
         cycleRan()
         postings = CycleFeePostings(pending = 1, posted = 1, failed = 0)
 
         reporter().reportDays(today).await().indefinitely()
 
-        assertThat(delivered.map { it.businessDate }).doesNotContain(cycleDay)
-        assertThat(postingsAsked).containsExactly("2026-07")
+        assertThat(reportFor(cycleDay).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(cycleDay).reason).isEqualTo("BILLING_FEES_PENDING")
+        assertThat(reportFor(cycleDay).journalsPosted).isZero()
+        assertThat(reportFor(cycleDay).exercisedJobs).isEmpty()
+        assertThat(postingsAsked).containsOnly("2026-06", "2026-07")
+    }
+
+    @Test
+    fun `pending fees revoke an earlier RAN with a stable source receipt`() {
+        cycleRan(items = 2)
+        postings = CycleFeePostings(pending = 0, posted = 3, failed = 0)
+        val scheduler = reporter()
+        scheduler.reportDays(today).await().indefinitely()
+        val earlier = reportFor(cycleDay)
+        assertThat(earlier.outcome).isEqualTo(CloseOutcome.RAN)
+
+        postings = CycleFeePostings(pending = 1, posted = 3, failed = 0)
+        scheduler.reportDays(today).await().indefinitely()
+        val refused = delivered.last { it.businessDate == cycleDay }
+        assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(refused.reason).isEqualTo("BILLING_FEES_PENDING")
+        assertThat(refused.sourceRunId).isNotEqualTo(earlier.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(refused.journalsPosted).isZero()
+        assertThat(refused.itemsProcessed).isZero()
+        assertThat(refused.exercisedJobs).isEmpty()
+
+        val sent = delivered.count { it.businessDate == cycleDay }
+        scheduler.reportDays(today).await().indefinitely()
+        assertThat(delivered.count { it.businessDate == cycleDay }).isEqualTo(sent)
+        assertThat(delivered.last { it.businessDate == cycleDay }.sourceRunId).isEqualTo(refused.sourceRunId)
+    }
+
+    @Test
+    fun `disabling the sweep cannot hide pending fees on its run day or a later day`() {
+        cycleRan()
+        postings = CycleFeePostings(pending = 1, posted = 0, failed = 0)
+
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+
+        for (day in listOf(cycleDay, cycleDay.plusDays(1))) {
+            assertThat(reportFor(day).outcome).isEqualTo(CloseOutcome.REFUSED)
+            assertThat(reportFor(day).reason).isEqualTo("BILLING_FEES_PENDING")
+            assertThat(reportFor(day).journalsPosted).isZero()
+            assertThat(reportFor(day).exercisedJobs).isEmpty()
+        }
+    }
+
+    @Test
+    fun `disabling the sweep cannot hide failed fees on its run day or a later day`() {
+        cycleRan()
+        postings = CycleFeePostings(pending = 0, posted = 0, failed = 1)
+
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(cycleDay).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(cycleDay).reason).contains(BillingCloseJobs.REASON_FEES_NOT_POSTED)
+        assertThat(reportFor(cycleDay.plusDays(1)).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(cycleDay.plusDays(1)).reason).isEqualTo("BILLING_FEES_FAILED")
+    }
+
+    @Test
+    fun `a completed historical cycle remains RAN with the sweep disabled and other days SKIPPED`() {
+        cycleRan()
+        postings = CycleFeePostings(pending = 0, posted = 2, failed = 0)
+
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(cycleDay).outcome).isEqualTo(CloseOutcome.RAN)
+        assertThat(reportFor(cycleDay).journalsPosted).isEqualTo(2)
+        assertThat(reportFor(cycleDay.plusDays(1)).outcome).isEqualTo(CloseOutcome.SKIPPED)
+    }
+
+    @Test
+    fun `posted fees without a completed source cycle refuse completion even with the sweep disabled`() {
+        postings = CycleFeePostings(pending = 0, posted = 1, failed = 0)
+
+        reporter(enabled = false).reportDays(today).await().indefinitely()
+
+        assertThat(reportFor(cycleDay).outcome).isEqualTo(CloseOutcome.REFUSED)
+        assertThat(reportFor(cycleDay).reason).isEqualTo("BILLING_FEES_WITHOUT_COMPLETED_CYCLE")
+        assertThat(reportFor(cycleDay).exercisedJobs).isEmpty()
+    }
+
+    @Test
+    fun `a non cycle day gets a fresh stable skip receipt when its pending monthly fees complete`() {
+        cycleRan()
+        val scheduler = reporter(enabled = false)
+        scheduler.reportDays(today).await().indefinitely()
+        val day = cycleDay.plusDays(1)
+        val earlier = reportFor(day)
+        assertThat(earlier.outcome).isEqualTo(CloseOutcome.SKIPPED)
+
+        postings = CycleFeePostings(pending = 1, posted = 0, failed = 0)
+        scheduler.reportDays(today).await().indefinitely()
+        val refused = delivered.last { it.businessDate == day }
+        assertThat(refused.outcome).isEqualTo(CloseOutcome.REFUSED)
+
+        postings = CycleFeePostings(pending = 0, posted = 1, failed = 0)
+        scheduler.reportDays(today).await().indefinitely()
+        val skipped = delivered.last { it.businessDate == day }
+        assertThat(skipped.outcome).isEqualTo(CloseOutcome.SKIPPED)
+        assertThat(skipped.sourceRunId).isNotEqualTo(refused.sourceRunId).matches("[a-f0-9]{64}")
+        assertThat(skipped.sourceRunId).isNotEqualTo(earlier.sourceRunId)
+        assertThat(skipped.exercisedJobs).isEmpty()
+
+        scheduler.reportDays(today).await().indefinitely()
+        assertThat(delivered.count { it.businessDate == day }).isEqualTo(3)
     }
 
     @Test

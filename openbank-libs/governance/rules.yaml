@@ -279,6 +279,14 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-01-17"   # ADR-0342: enforce once billing and lending participants have landed through it
     ci_producer: ".github/scripts/check-close-participants.py"
+  ci_artifact_fetch_via_resolver:
+    detect: ["curl / wget / helm pull / helm repo add of github.com/*/releases/download, *.github.io or openpolicyagent.org/downloads under .github/, outside fetch-artifact.py"]
+    require:
+      - "external CI tools and charts are fetched through .github/scripts/fetch-artifact.py, sha256-verified against ci/artifacts.lock (#15216)"
+    gate: ci-artifact-fetch-via-resolver
+    enforced: advisory
+    target_enforce_date: "2027-02-08"   # #15216 rollout step 4: enforce once the remaining direct downloads are migrated
+    ci_producer: ".github/scripts/check-artifact-fetch-via-resolver.py"
   money_rounding_inline_construction:
     detect: ["RoundingMode.* / setScale(n, RoundingMode.*) inline in any openbank-*/src/main outside openbank-libs-*, in a money-path service"]
     require:
@@ -334,9 +342,9 @@ change_requirements:
     require:
       - "the cited test (or the tests declaring the row's verifies id) ran in the latest scheduled main run and every result is passed"
       - "a component with no envelope is unknown, never a verdict; an unreadable corpus is UNRESOLVED, not a failure"
+      - "a finding fails only if absent from .github/gates/baselines/threat-model-test-evidence.txt and in a threat-model row the PR adds or edits; the baseline only shrinks against the PR base (enforced)"
     gate: threat-model-test-evidence
-    enforced: advisory
-    target_enforce_date: "2027-01-31"   # ADR-0144: enforce after one full month of advisory output is triaged
+    enforced: enforce
     ci_producer: ".github/scripts/check-threat-model-test-evidence.py"
   resilience_profile_declaration:
     detect: ["@Timeout / @Retry / @CircuitBreaker / @Bulkhead in any openbank-*/src/main/*.kt outside openbank-libs-*"]
@@ -2719,7 +2727,8 @@ ci_runners:
       # Adds build slots beyond the 20-job hosted concurrency cap, which is what
       # PR CI queues on (2026-11-03: Services CI builds = 57 % of hosted minutes,
       # median queue 10 min). Only `_service-ci.yml` build routes here, only for
-      # services in the repo variable MINI_RUNNER_SERVICES, never for fork PRs.
+      # services in the repo variable MINI_RUNNER_SERVICES, and only on schedule /
+      # workflow_dispatch: PRs, train carriers and main pushes always build hosted.
       # Availability: a job routed here has no hosted fallback once queued, so the
       # variable is the kill switch — empty it when the Mac is down.
       routing_variable: MINI_RUNNER_SERVICES
@@ -4675,6 +4684,8 @@ security_sensitive_paths:
   openbank-ledger-service:
     auth_crypto_payment:
       - "src/main/kotlin/**/ApprovalResource.kt"
+      # ADR-0365: own-book posting, payload identity, startup binding and four-eyes controls.
+      - "src/main/kotlin/**/Pension*.kt"
       # ADR-0342 D2: binds each day-close participant report to one verified service-account
       # and records the operator `sub` on a waiver.
       - "src/main/kotlin/**/CloseParticipationResource.kt"

@@ -119,6 +119,13 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-11-08** — **Fraud hold enforced in SANDBOX (#4403).** The sandbox deployment sets
+  `OPENBANK_DOMESTIC_FRAUD_ENFORCEMENT_ENABLED` and `DOMESTIC_FRAUD_HOLD_RESOLUTION_CONSUMER_ENABLED`
+  together; application defaults stay `false`. New availability exposure, not a new trust boundary: while
+  fraud-service is unreachable every payment is held (synthetic verdict) and, absent an analyst decision,
+  rejected after 48 h — fail closed, never a pass. Watch `openbank_fraud_scoring_degraded{service="domestic"}`
+  and `FraudHoldScoringUnavailable`. New metric `openbank_domestic_fraud_hold_duration_seconds{outcome}`
+  (workflow time from HOLD to decision or timeout) carries no payment data. Rollback: both flags `false`.
 - **2026-11-06** — **Fraud holds get a release path (#4403, still default off).** New consumer
   `fraud-hold-resolution-in` reads `openbank.aml.events`; `aml.case.status_changed.v1` gains additive
   `transactionId` and `alertCode`. For a `FRAUD_REVIEW` case CLEARED signals RELEASE and BLOCKED signals
@@ -140,8 +147,14 @@ not change any existing request's outcome until explicitly flipped.
   that case is the one an analyst decides. Bounded by the decision itself needing the decision roles,
   and the payment id being server-generated. Tampering is bounded because a signal can only choose
   between the two outcomes of a waiting run, first answer wins, and sanctions screening has already
-  passed. Known limit: a run re-driven by the screening sweep
-  has a suffixed workflow id, so a decision misses it (`delivery="NOT_WAITING"`) and it fails closed.
+  passed. Routing (#15198 review fix): every run of a payment, including a screening re-drive, carries the
+  one workflow id `domestic-payment-<paymentId>` (explicit ALLOW_DUPLICATE reuse, FAIL on conflict), and
+  the decision is signalled to that id with no run id, so it reaches the current run and never a stale
+  one. The re-drive previously used a suffixed id, so an analyst CLEAR on a re-driven hold missed it and
+  the hold timed out into a false REJECT; it also started a parallel second run while the first was
+  still holding, which Temporal now refuses. `delivery="NOT_WAITING"` remains only for a decision
+  arriving after the hold ended; it is returned, counted and logged at WARN, and no hold is left
+  pending behind it.
 
 - **2026-10-30** — **Fraud enforcement restored as a workflow decision, default off (#4403, ADR-0084 §4.2).**
   New runs of `DomesticPaymentWorkflow` (behind the `fraud-enforcement` `Workflow.getVersion` marker;
@@ -845,3 +858,24 @@ cutover, revert caller URLs and policies before removing the listener.
 
 
 - **2026-11-04** — **The TLS listener no longer accepts a client certificate as a login (#12511).** `client-auth: required` also registers Quarkus's mTLS authentication mechanism, so any certificate the private CA signed became an authenticated `SecurityIdentity` with no bearer. `%prod` now restricts `/api/*` to `auth-mechanism: bearer` with `policy: authenticated` (GET `/api/v1/info` and `/api/v1/config` stay public metadata), so the certificate is transport authentication only and the OIDC bearer is the only identity a route or OPA sees, identically on both listeners. **STRIDE-S/E:** closes a spoofing / elevation path; callers are unaffected because every caller already sends its own bearer. Proven by `DomesticPaymentListenerAuthParityIT` (production listener shape, real HTTP) and gated by `mtls-bearer-only`. **Rollback:** revert the commit (re-opens the path).
+
+
+### Reserved fraud-review case identity (#15066)
+
+The AML create boundary reserves `aml-*-FRAUD_REVIEW` keys for the domestic-payment
+service's own authenticated service account. It checks the existing verified client identity
+before looking up or reserving an idempotent response; a staff role or another otherwise
+permitted payment/FX machine identity does not grant this namespace. The guard uses the
+same unmodified key that reaches Redis and the durable case store. It changes neither the
+rail's case key nor the fraud hold/decision workflow.
+
+The boundary is implemented in
+`openbank-aml-service/src/main/kotlin/com/openbank/aml/infrastructure/rest/AmlCaseResource.kt`.
+Regression scenarios in
+`openbank-aml-service/src/test/kotlin/com/openbank/aml/it/AmlCaseCreateIdempotencyFingerprintIT.kt`
+exercise real HTTP, PostgreSQL and Redis: refused creation without a row or idempotency marker,
+refused stored replay, and the domestic-payment caller's create/retry path. Ordinary-key
+fingerprint and retry scenarios remain in the same suite. Execution results belong to the
+exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
+This prevents new squatting through this boundary; it does not attest historical case ownership,
+perform remediation or enable fraud enforcement. Hold timeout remains fail closed.

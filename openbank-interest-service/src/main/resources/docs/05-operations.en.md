@@ -178,4 +178,19 @@ Before retry logging, completion-uncertain exceptions retain only their controll
 
 What is compared, bit-exactly and with no tolerance: the scale-6 daily accrual against the IR's accrual `Post`, and the currency-scale GROSS capitalisation against the IR's capitalisation `Post`. Withholding tax (ADR-0033) is not compared, because IR v1 has no construct for it. These are never compared and are counted as `rule_unmapped`: an accrual made at an account-specific operator override rather than the pinned rate, a TIERED IR with more than one band (the legacy path applies one rate to the whole balance), and a loyalty bonus. An account with no pin (an operator-managed rate) is counted as `no_ir`, outcome `NO_PIN`.
 
-Signature verification is set by `openbank.interest.product-shadow.verification.mode`: `disabled` (the default; nothing is compared, and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`, with an interest role that holds `verify` only) or `hmac` (dev and test only; a production launch refuses to boot with it). Every IR `Post` is checked for money conservation before it is compared. Metrics are the shared `openbank_product_shadow_*` series with `consumer="interest"`. The alerts are the shared `ProductShadowStalled`, `ProductShadowComparedNothing` and `ProductShadowDiverged`. The service may switch to the IR only after divergence has been zero across a full monthly cadence at both scales (ADR-0352 §9–§10).
+Signature verification is set by `openbank.interest.product-shadow.verification.mode`: `disabled` (the default; nothing is compared, and every IR-bearing input counts as `verification_disabled`), `openbao` (Transit `verify` on key `product-ir-publish`, with an interest role that holds `verify` only) or `hmac` (dev and test only; a production launch refuses to boot with it). In `openbao` mode the client logs in with kubernetes-auth role `interest-ir-verify` (ServiceAccount `interest/interest-service`) and reaches OpenBao's TLS listener `https://openbao.vault.svc:8203`, trusting only the private CA in the mounted `ca.crt` (`openbank.interest.product-shadow.verification.openbao.ca-file`). Provisioning: runbook 0027, *Product IR signing*. Every IR `Post` is checked for money conservation before it is compared. Metrics are the shared `openbank_product_shadow_*` series with `consumer="interest"`. The alerts are the shared `ProductShadowStalled`, `ProductShadowComparedNothing` and `ProductShadowDiverged`. The service may switch to the IR only after divergence has been zero across a full monthly cadence at both scales (ADR-0352 §9–§10).
+
+## Daily close source evidence
+
+Accrual and capitalization are separate due jobs. A missing completed receipt emits REFUSED,
+including when that revokes an earlier RAN. Empty sweeps do not claim an exercised money job.
+The reporter refreshes completed days from the earlier of the configured recovery boundary or
+the start of the previous calendar month. Retries of unchanged persisted work retain their source
+identity and do not move the ledger work watermark. A later changed receipt invalidates a frozen
+monthly proof; it cannot repair an already incomplete close. Keep the deployment hold and staged
+shadow observation until the full live month and source-scan performance have been reviewed.
+
+Persisted job ownership survives a cron change: setting capitalization to `off` cannot turn an existing refused run into SKIPPED. Its refusal continues to hold close; a completed retry retains its exercised-job evidence even while the cron remains off.
+
+
+Observed due-job obligations are now retained separately from actual run receipts. Disabling or moving a scheduler after a missing-work refusal cannot remove that obligation, including after restart. Only a real completed run or an attributable ledger waiver can resolve it. Observations do not fabricate completed jobs or reconstruct schedules that were never observed. Rollback retains both obligation and run tables.

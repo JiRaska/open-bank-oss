@@ -9,9 +9,15 @@ import java.io.IOException
 import java.io.InputStream
 import java.net.URI
 import java.net.http.HttpClient
+import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.KeyStore
+import java.security.cert.CertificateFactory
 import java.time.Duration
 import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 /**
  * Transport rules shared by [OpenBaoTransitFieldProtector] and [OpenBaoKubernetesLogin]
@@ -53,6 +59,15 @@ class OpenBaoTransport(
         return base.resolve(relative)
     }
 
+    /**
+     * Bound the complete exchange, including a body that stops after its headers.
+     * Cancellation targets the original JDK exchange so the blocked body reader and
+     * connection are released. No executor or additional timeout budget is introduced.
+     */
+    @Suppress("ThrowsCount") // Distinct timeout, interruption and original transport failures.
+    internal fun send(request: HttpRequest): HttpResponse<String> =
+        HttpExchangeDeadline.send(httpClient, request, boundedBody(), requestTimeout)
+
     companion object {
         const val DEFAULT_REQUEST_TIMEOUT_SECONDS = 10L
         const val DEFAULT_CONNECT_TIMEOUT_SECONDS = 5L
@@ -65,6 +80,25 @@ class OpenBaoTransport(
             .followRedirects(HttpClient.Redirect.NEVER)
             .apply { if (sslContext != null) sslContext(sslContext) }
             .build()
+
+        /**
+         * An [SSLContext] that trusts exactly the PEM certificate(s) in [caFile] — the private CA
+         * that issued OpenBao's TLS listener (ADR-0352). Deliberately NOT merged with the JVM's
+         * public roots: the only peer this context ever talks to is OpenBao, and a public CA has no
+         * business vouching for it. Fails at construction (boot) when the file is missing or holds
+         * no certificate, never at the first Transit call.
+         */
+        fun pemTrustSslContext(caFile: Path): SSLContext {
+            val factory = CertificateFactory.getInstance("X.509")
+            val certs = Files.newInputStream(caFile).use { factory.generateCertificates(it) }
+            require(certs.isNotEmpty()) { "OpenBao CA file holds no certificate" }
+            val trust = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+                load(null, null)
+                certs.forEachIndexed { i, cert -> setCertificateEntry("openbao-ca-$i", cert) }
+            }
+            val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(trust) }
+            return SSLContext.getInstance("TLS").apply { init(null, tmf.trustManagers, null) }
+        }
 
         /** A body handler that fails with [IOException] once more than [limit] bytes arrive. */
         fun boundedBody(limit: Int = MAX_RESPONSE_BYTES): HttpResponse.BodyHandler<String> =
