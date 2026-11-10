@@ -24,8 +24,8 @@
 .sceneLanes button[aria-pressed="true"] { border-color: #73d6ff; box-shadow: inset 3px 0 #73d6ff; background: #102f43f5; }
 .sceneLanes button:hover { background: #173e54; }
 .sceneLanes strong { font-size: clamp(11px, 1.55cqi, 16px); line-height: 1.2; }
-.sceneLanes span { color: #c1d4df; font-size: clamp(9px, 1.2cqi, 12px); line-height: 1.2; }
-.sceneLanes span:first-child { font-size: 9px; letter-spacing: .08em; }
+.sceneLanes span { color: #c1d4df; font-size: clamp(10px, 1.2cqi, 12px); line-height: 1.2; }
+.sceneLanes span:first-child { font-size: 10px; letter-spacing: .08em; }
 .trainBoard button:focus-visible, .trainBoard summary:focus-visible { outline: 3px solid #fff; outline-offset: -4px; }
 .trainPosition { transition: transform 1.8s cubic-bezier(.2,.8,.2,1); }
 .passenger { transform-box: fill-box; transform-origin: center bottom; animation: passenger-wave 3.2s ease-in-out infinite; }
