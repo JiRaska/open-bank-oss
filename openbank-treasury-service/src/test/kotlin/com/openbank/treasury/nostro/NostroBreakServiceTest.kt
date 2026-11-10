@@ -8,15 +8,22 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.treasury.application.port.`in`.NostroBreakSweep
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
+import com.openbank.treasury.application.port.out.NostroBreakNotFoundException
 import com.openbank.treasury.application.port.out.NostroBreakRepository
+import com.openbank.treasury.application.port.out.RecordedBreakResolution
+import com.openbank.treasury.application.usecase.NostroBreakResolutionService
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.BreakChanges
+import com.openbank.treasury.domain.model.BreakResolutionKind
+import com.openbank.treasury.domain.model.BreakSide
+import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroBreakAged
+import com.openbank.treasury.domain.model.ResolutionStep
 import com.openbank.treasury.domain.model.Side
 import com.openbank.treasury.infrastructure.iso20022.Camt053Parser
 import com.openbank.treasury.integration.FakeLedgerRead
@@ -46,7 +53,10 @@ class NostroBreakServiceTest {
 
         override suspend fun apply(changes: BreakChanges) {
             val changed = (changes.resolved + changes.reopened).associateBy { it.id }
-            rows.replaceAll { changed[it.id] ?: it }
+            // Compare-and-set on version, exactly like the SQL: a stale copy is skipped.
+            rows.replaceAll { r ->
+                changed[r.id]?.takeIf { it.version == r.version }?.copy(version = r.version + 1) ?: r
+            }
             rows += changes.opened
         }
 
@@ -54,6 +64,32 @@ class NostroBreakServiceTest {
             rows.filter { it.iban == iban && (includeResolved || it.open) }
 
         override suspend fun open() = rows.filter { it.open }
+
+        val history = mutableMapOf<String, RecordedBreakResolution>()
+
+        override suspend fun find(breakId: UUID) = rows.firstOrNull { it.id == breakId }
+
+        override suspend fun applyResolutionStep(
+            before: NostroBreak,
+            after: NostroBreak,
+            step: ResolutionStep,
+            actor: String,
+            reason: String?,
+            at: Instant,
+            commandKey: String,
+            fingerprint: String,
+        ): Boolean {
+            val i = rows.indexOfFirst { it.id == before.id && it.version == before.version }
+            if (i < 0 || commandKey in history) return false
+            rows[i] = after.copy(version = before.version + 1)
+            history[commandKey] = RecordedBreakResolution(before.id, fingerprint)
+            steps += step
+            return true
+        }
+
+        val steps = mutableListOf<ResolutionStep>()
+
+        override suspend fun recordedResolution(commandKey: String) = history[commandKey]
 
         override suspend fun markAlerted(
             breakId: UUID,
@@ -88,6 +124,9 @@ class NostroBreakServiceTest {
         mapper,
         clock,
     )
+
+    private fun resolutions() =
+        NostroBreakResolutionService(breakRepo, accounts, BreakAlertPolicy(3, BigDecimal("1000")), clock)
 
     private suspend fun upload() = reconciliation().upload(
         Camt053Parser.parse(NostroFixtures.xml()),
@@ -240,10 +279,141 @@ class NostroBreakServiceTest {
         assertThat(breakRepo.rows.map { it.firstSeenOn }).containsOnly(LocalDate.parse(pragueDay))
     }
 
+    // --- four-eyes manual resolution ---
+
+    private val anna = Actor("anna.approver", ActorType.HUMAN)
+    private val sara = Actor("sara.senior", ActorType.HUMAN)
+    private val why = "Investigated: synthetic demo item, no cash moved."
+
+    /** The proposal time the approver "read"; EPOCH when there is none (the domain refuses first). */
+    private fun read(id: UUID): Instant = breakRepo.rows.single { it.id == id }.proposedAt ?: Instant.EPOCH
+
+    private suspend fun statementBreak(): NostroBreak {
+        NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
+        upload()
+        service().sweep(today)
+        return breakRepo.rows.single { it.side == BreakSide.STATEMENT }
+    }
+
+    @Test
+    fun `a proposed break still counts as open and aged, once approved it leaves both counts and survives the sweep`() =
+        runBlocking<Unit> {
+            val brk = statementBreak()
+            today = LocalDate.parse("2026-09-30")
+            resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-1")
+            val whileProposed = service().sweep(today)
+            assertThat(whileProposed.open).isEqualTo(2)
+            assertThat(whileProposed.aged).isEqualTo(1)
+
+            val v = resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "a-1")
+
+            assertThat(v.brk.resolutionKind).isEqualTo(BreakResolutionKind.MANUAL)
+            assertThat(v.aged).isFalse()
+            val next = service().sweep(today.plusDays(1)) // re-reconciles the same statement
+            assertThat(next.aged).isZero()
+            assertThat(next.open).isEqualTo(1)
+            assertThat(breakRepo.steps).containsExactly(ResolutionStep.PROPOSED, ResolutionStep.APPROVED)
+        }
+
+    @Test
+    fun `a sweep computed before an approval committed does not overwrite the manual resolution`() = runBlocking<Unit> {
+        val brk = statementBreak()
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-1")
+        val staleRead = breakRepo.rows.single { it.id == brk.id } // what the sweep read
+        resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "a-1")
+
+        breakRepo.apply(BreakChanges(emptyList(), listOf(staleRead.matched(today)), emptyList()))
+
+        val stored = breakRepo.rows.single { it.id == brk.id }
+        assertThat(stored.resolutionKind).isEqualTo(BreakResolutionKind.MANUAL)
+        assertThat(stored.resolvedBy).isEqualTo("sara.senior")
+        assertThat(stored.proposedBy).isEqualTo("anna.approver")
+    }
+
+    @Test
+    fun `an approval naming a proposal that was rejected and replaced is a conflict`() = runBlocking<Unit> {
+        val brk = statementBreak()
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-1")
+        val seen = read(brk.id)
+        resolutions().rejectResolution(NostroFixtures.IBAN, brk.id, "Not explained yet, ask again.", sara, "r-1")
+        at = Instant.parse("2026-09-25T11:00:00Z")
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, "A different reason entirely.", anna, "p-2")
+        assertThatThrownBy {
+            runBlocking { resolutions().approveResolution(NostroFixtures.IBAN, brk.id, seen, sara, "a-1") }
+        }.isInstanceOf(IllegalStateException::class.java)
+        assertThat(breakRepo.rows.single { it.id == brk.id }.open).isTrue()
+    }
+
+    @Test
+    fun `the proposer approving is a four-eyes violation and changes nothing`() = runBlocking<Unit> {
+        val brk = statementBreak()
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-1")
+        assertThatThrownBy {
+            runBlocking { resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), anna, "a-1") }
+        }
+            .isInstanceOf(FourEyesViolationException::class.java)
+        assertThat(breakRepo.rows.single { it.id == brk.id }.open).isTrue()
+    }
+
+    @Test
+    fun `a replay under the same key answers the stored outcome, a reused key for another request is a 400`() =
+        runBlocking<Unit> {
+            val brk = statementBreak()
+            val first = resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "key-1")
+            val replay = resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "key-1")
+            assertThat(replay.brk).isEqualTo(first.brk)
+            assertThatThrownBy {
+                runBlocking {
+                    resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "key-1")
+                }
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("Idempotency-Key")
+        }
+
+    @Test
+    fun `approving without a proposal or twice is a conflict, a rejection clears the proposal`() = runBlocking<Unit> {
+        val brk = statementBreak()
+        assertThatThrownBy {
+            runBlocking { resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "a-0") }
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-1")
+        resolutions().rejectResolution(NostroFixtures.IBAN, brk.id, "Not explained yet, ask again.", sara, "r-1")
+        assertThat(breakRepo.rows.single { it.id == brk.id }.resolutionProposed).isFalse()
+        resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "p-2")
+        resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "a-1")
+        assertThatThrownBy {
+            runBlocking { resolutions().approveResolution(NostroFixtures.IBAN, brk.id, read(brk.id), sara, "a-2") }
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun `an unknown break, a break of another account, or an unconfigured account is a not-found`() =
+        runBlocking<Unit> {
+            val brk = statementBreak()
+            assertThatThrownBy {
+                runBlocking { resolutions().proposeResolution(NostroFixtures.IBAN, UUID.randomUUID(), why, anna, "k1") }
+            }.isInstanceOf(NostroBreakNotFoundException::class.java)
+            breakRepo.rows.replaceAll { if (it.id == brk.id) it.copy(iban = OTHER_IBAN) else it }
+            assertThatThrownBy {
+                runBlocking { resolutions().proposeResolution(NostroFixtures.IBAN, brk.id, why, anna, "k2") }
+            }
+                .isInstanceOf(NostroBreakNotFoundException::class.java)
+            assertThatThrownBy {
+                runBlocking { resolutions().proposeResolution("CZ0000000000000000000000", brk.id, why, anna, "k3") }
+            }
+                .isInstanceOf(NostroAccountNotFoundException::class.java)
+            assertThat(breakRepo.rows.single { it.id == brk.id }.resolutionProposed).isFalse()
+        }
+
     @Test
     fun `listing an unconfigured account is a not-found, a configured one lists oldest first`() = runBlocking<Unit> {
         assertThatThrownBy { runBlocking { service().breaks("CZ0000000000000000000000", false) } }
             .isInstanceOf(NostroAccountNotFoundException::class.java)
         assertThat(service().breaks("cz12 9999 0000 0000 0000 1001", false)).isEmpty()
+    }
+
+    private companion object {
+        const val OTHER_IBAN = "CZ6508000000192000145399"
     }
 }
