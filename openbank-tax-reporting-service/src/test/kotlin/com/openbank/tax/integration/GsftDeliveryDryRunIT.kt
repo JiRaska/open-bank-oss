@@ -241,7 +241,10 @@ class GsftDeliveryDryRunIT {
     private fun storedArchive(sha: String): ByteArray = jdbc { c ->
         c.prepareStatement("select archive from gsft_package where archive_sha256 = ?").use { s ->
             s.setString(1, sha)
-            s.executeQuery().use { rs -> check(rs.next()) { "no archive $sha" }; rs.getBytes(1) }
+            s.executeQuery().use { rs ->
+                check(rs.next()) { "no archive $sha" }
+                rs.getBytes(1)
+            }
         }
     }
 
@@ -254,7 +257,12 @@ class GsftDeliveryDryRunIT {
     }
 
     private fun count(sql: String): Int = jdbc { c ->
-        c.createStatement().use { s -> s.executeQuery(sql).use { rs -> rs.next(); rs.getInt(1) } }
+        c.createStatement().use { s ->
+            s.executeQuery(sql).use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
     }
 
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {
@@ -277,17 +285,24 @@ class GsftDeliveryDryRunIT {
     }
 
     private fun unzip(zip: ByteArray): Map<String, ByteArray> = linkedMapOf<String, ByteArray>().apply {
-        ZipInputStream(ByteArrayInputStream(zip)).use { z -> generateSequence { z.nextEntry }.forEach { put(it.name, z.readBytes()) } }
+        ZipInputStream(ByteArrayInputStream(zip)).use { z ->
+            generateSequence { z.nextEntry }.forEach { put(it.name, z.readBytes()) }
+        }
     }
 
-    private fun sha256(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {
+        "%02x".format(it)
+    }
 
     /**
      * A throwaway RSA key generated per JVM run. The profile and the test class load in different
      * classloaders, so the pair is shared through a per-process temp file, never a companion field.
      */
     object TestKey {
-        private val dir: Path = Path.of(System.getProperty("java.io.tmpdir"), "gsft-it-${ProcessHandle.current().pid()}")
+        private val dir: Path = Path.of(
+            System.getProperty("java.io.tmpdir"),
+            "gsft-it-${ProcessHandle.current().pid()}",
+        )
 
         @Synchronized
         fun publicArmored(): String {
@@ -359,17 +374,22 @@ class GsftDeliveryDryRunIT {
         private fun person(id: UUID, idc: String, type: EntitledPersonType = EntitledPersonType.NATURAL_PERSON) =
             DepositorIdentity(id, idc, type, "Osoba $idc", "Ulice 1", "Praha", "11000", "CZ", "cs")
 
-        private fun account(n: Int, currency: String, amount: String, holders: List<Holding>, special: Boolean = false) =
-            DepositAccount(
-                UUID.fromString("00000000-0000-0000-0001-%012d".format(n)),
-                "CZ65080000000000000000%02d".format(n),
-                currency,
-                BigDecimal(amount),
-                BigDecimal.ZERO,
-                holders,
-                synthetic = false,
-                specialRegime = special,
-            )
+        private fun account(
+            n: Int,
+            currency: String,
+            amount: String,
+            holders: List<Holding>,
+            special: Boolean = false,
+        ) = DepositAccount(
+            UUID.fromString("00000000-0000-0000-0001-%012d".format(n)),
+            "CZ65080000000000000000%02d".format(n),
+            currency,
+            BigDecimal(amount),
+            BigDecimal.ZERO,
+            holders,
+            synthetic = false,
+            specialRegime = special,
+        )
 
         fun complete(day: LocalDate): GsftSnapshot {
             val special = account(5, "CZK", "400000", listOf(Holding(owner, null)), special = true)
@@ -378,7 +398,12 @@ class GsftDeliveryDryRunIT {
                 depositors = listOf(single, jointA, jointB, rich, owner).map { Depositor(it, null, false, true) },
                 accounts = listOf(
                     account(1, "CZK", "150000", listOf(Holding(single, null))),
-                    account(2, "CZK", "200000", listOf(Holding(jointA, BigDecimal("0.5")), Holding(jointB, BigDecimal("0.5")))),
+                    account(
+                        2,
+                        "CZK",
+                        "200000",
+                        listOf(Holding(jointA, BigDecimal("0.5")), Holding(jointB, BigDecimal("0.5"))),
+                    ),
                     account(3, "EUR", "1000", listOf(Holding(jointA, null))),
                     account(4, "CZK", "3000000", listOf(Holding(rich, null))),
                     special,

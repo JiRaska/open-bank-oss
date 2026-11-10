@@ -101,7 +101,10 @@ class GsftReturnDataAdapter(
      * this return code across every relevant day (unverified — see the docs).
      */
     private suspend fun nextBatchNumber(catalogueId: String, code: String, entityId: String): Int =
-        returns.listReturns().count { it.catalogueId == catalogueId && it.returnCode == code && it.entityId == entityId } + 1
+        returns.listReturns().count {
+            it.catalogueId == catalogueId && it.returnCode == code && it.entityId == entityId
+        } +
+            1
 
     private fun figures(batch: GsftBatch, header: BatchHeader, createdAtEpoch: Long): Map<String, BigDecimal> {
         fun records(prefix: String): Int = batch.files.entries.firstOrNull { it.key.startsWith(prefix) }

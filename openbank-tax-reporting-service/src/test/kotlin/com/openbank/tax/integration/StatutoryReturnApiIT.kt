@@ -126,7 +126,9 @@ class StatutoryReturnApiIT {
         }
         Given {
             contentType("application/json")
-            body("""{"catalogueId":"cz-gsft","returnCode":"GSFT-DIW-TEST","entityId":"company","period":"2025-01-06"}""")
+            body(
+                """{"catalogueId":"cz-gsft","returnCode":"GSFT-DIW-TEST","entityId":"company","period":"2025-01-06"}""",
+            )
         } When { post("$path/assemble") } Then {
             statusCode(503)
             body("error", containsString("openbank.gsft.bank-code is not configured"))

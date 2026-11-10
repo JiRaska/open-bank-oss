@@ -12,11 +12,11 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.usecase.ReturnBreach
 import com.openbank.tax.application.usecase.StatutoryReturnNotFoundException
 import com.openbank.tax.application.usecase.StatutoryReturnService
-import com.openbank.tax.infrastructure.returns.gsft.GsftReturnDataAdapter
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
+import com.openbank.tax.infrastructure.returns.gsft.GsftReturnDataAdapter
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject

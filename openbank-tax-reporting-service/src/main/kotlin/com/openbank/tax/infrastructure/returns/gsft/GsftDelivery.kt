@@ -7,11 +7,13 @@ package com.openbank.tax.infrastructure.returns.gsft
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
 import com.openbank.tax.application.usecase.StatutoryReturnService
 import com.openbank.tax.domain.model.TaxConflictException
+import com.openbank.tax.domain.model.checkConflict
 import com.openbank.tax.domain.returns.ReturnStatus
 import com.openbank.tax.domain.returns.StatutoryReturn
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.io.ByteArrayInputStream
+import java.time.Clock
 import java.util.Optional
 import java.util.UUID
 import java.util.zip.ZipInputStream
@@ -32,11 +34,14 @@ class GsftDeliveryResult(val statutoryReturn: StatutoryReturn, val fileName: Str
 class GsftDelivery(
     private val service: StatutoryReturnService,
     private val packages: GsftPackageStore,
+    private val clock: Clock,
     @ConfigProperty(name = "openbank.gsft.pgp-public-key") private val publicKey: Optional<String>,
 ) {
     suspend fun deliver(id: UUID, reference: String, by: String): GsftDeliveryResult {
         val armored = publicKey.map { it.trim() }.filter { it.isNotEmpty() }.orElseThrow {
-            ReturnDataUnavailableException("openbank.gsft.pgp-public-key is not configured; no GSFT package can be encrypted")
+            ReturnDataUnavailableException(
+                "openbank.gsft.pgp-public-key is not configured; no GSFT package can be encrypted",
+            )
         }
         val current = service.get(id)
         if (current.catalogueId != GsftReturnDataAdapter.CATALOGUE_ID) {
@@ -48,7 +53,11 @@ class GsftDelivery(
             )
         }
         val stored = verifiedArchive(current)
-        val encrypted = GsftPackage.encrypt(stored.archive, stored.archiveName, GsftPackage.readPublicKey(armored))
+        val encrypted = GsftPackage.encrypt(
+            stored.archive,
+            stored.archiveName,
+            GsftPackage.readPublicKey(armored, clock.instant()),
+        )
         val submitted = service.submit(id, reference, by)
         return GsftDeliveryResult(submitted, "${stored.archiveName}.pgp", encrypted)
     }
@@ -57,18 +66,20 @@ class GsftDelivery(
     private suspend fun verifiedArchive(attested: StatutoryReturn): StoredGsftPackage {
         val archiveLines = attested.lines.filter { it.fields["kind"] == GsftReturnDataAdapter.KIND_ARCHIVE }
         val archiveLine = archiveLines.singleOrNull()
-            ?: throw TaxConflictException("${attested.returnCode}: expected one ARCHIVE line, found ${archiveLines.size}")
+            ?: throw TaxConflictException(
+                "${attested.returnCode}: expected one ARCHIVE line, found ${archiveLines.size}",
+            )
         val sha = archiveLine.fields.getValue("sha256").orEmpty()
         val stored = packages.get(sha)
             ?: throw TaxConflictException("${attested.returnCode}: the attested archive $sha is not stored")
-        if (sha256Hex(stored.archive) != sha || stored.archiveName != archiveLine.fields["name"]) {
-            throw TaxConflictException("${attested.returnCode}: the stored archive does not match the attestation")
+        checkConflict(sha256Hex(stored.archive) == sha && stored.archiveName == archiveLine.fields["name"]) {
+            "${attested.returnCode}: the stored archive does not match the attestation"
         }
         val expected = attested.lines.filter { it.fields["kind"] == GsftReturnDataAdapter.KIND_FILE }
             .associate { it.fields.getValue("name").orEmpty() to it.fields.getValue("sha256").orEmpty() }
         val actual = entries(stored.archive).mapValues { sha256Hex(it.value) }
-        if (actual != expected) {
-            throw TaxConflictException("${attested.returnCode}: the archive's files do not match the attested files")
+        checkConflict(actual == expected) {
+            "${attested.returnCode}: the archive's files do not match the attested files"
         }
         return stored
     }

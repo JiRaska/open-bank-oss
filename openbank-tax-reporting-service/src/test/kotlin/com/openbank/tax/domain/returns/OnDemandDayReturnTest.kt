@@ -46,7 +46,14 @@ class OnDemandDayReturnTest {
     @Test
     fun `calendar-day deadlines are unchanged`() {
         val monthly = ReturnDefinition(
-            "M", "m", ReturnScope.COMPANY, Periodicity.MONTH, 20, listOf("x"), emptyList(), "t",
+            "M",
+            "m",
+            ReturnScope.COMPANY,
+            Periodicity.MONTH,
+            20,
+            listOf("x"),
+            emptyList(),
+            "t",
         )
         assertThat(monthly.dueDate(ReportingPeriod(Periodicity.MONTH, day("2026-10-31")))).isEqualTo(day("2026-11-20"))
     }
