@@ -1,5 +1,24 @@
 # Changelog
 
+## [4.10.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.0...admin-ui-v4.10.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **admin-ui:** address sanctions-service by its in-cluster Service name ([#15509](https://github.com/JiRaska/open-bank-oss/issues/15509)) ([5755a73](https://github.com/JiRaska/open-bank-oss/commit/5755a736035191bb17aaa7b9db1da0d81fe95e4e))
+
+## [4.10.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.9.1...admin-ui-v4.10.0) (2026-11-10)
+
+
+### Features
+
+* **admin-ui:** regulatory obligations register sourced from law, with docs page and gate ([#15358](https://github.com/JiRaska/open-bank-oss/issues/15358)) ([f5ea955](https://github.com/JiRaska/open-bank-oss/commit/f5ea9552d1ab3bc1578f14fcfa114e96222b7917))
+
+
+### Bug Fixes
+
+* **admin-ui:** integrate train controls into a compact station ([#15451](https://github.com/JiRaska/open-bank-oss/issues/15451)) ([eb2b0ec](https://github.com/JiRaska/open-bank-oss/commit/eb2b0ecec104cdf18a1c2abca97ae5bc41d3729b))
+
 ## [4.9.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.9.0...admin-ui-v4.9.1) (2026-11-09)
 
 

@@ -17,6 +17,7 @@ import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepositor
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.domestic.application.workflow.domesticPaymentWorkflowId
 import com.openbank.domestic.domain.error.DomesticSchemeRules
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DomesticPayment
@@ -287,7 +288,7 @@ class DomesticPaymentService(
             DomesticPaymentWorkflow::class.java,
             WorkflowOptions.newBuilder()
                 .setTaskQueue(temporalTaskQueue)
-                .setWorkflowId("domestic-payment-$paymentId")
+                .setWorkflowId(domesticPaymentWorkflowId(paymentId))
                 .build(),
         )
         WorkflowClient.start(stub::process, paymentId)

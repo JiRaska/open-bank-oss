@@ -127,6 +127,7 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     fi
   fi
   historical_services='[]'
+  exact_ci_verified='[]'
   source_probe_map='{}'
   historical_source_map='{}'
   if [ "$source_failure" -eq 0 ] && [ "$use_explicit_sources" != true ]; then
@@ -135,7 +136,27 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
         --arg present "$present" '$old + {($svc): $present}')"
       case "$present" in
-        yes|equivalent:*) ;;
+        yes|equivalent:*)
+          # A Pact version at (or equivalent to) this SHA is not proof that Services CI
+          # built the service there: push CI is path-scoped, so a docs- or CI-only main
+          # commit carries the Pact version but never builds the service. Without this
+          # fallback every reconcile tick on such a commit refuses the service forever
+          # (2026-11-08..10: every scheduled run, 39 services stranded). Fall back to the
+          # historical resolver, which demands the same proof (ancestor of main, green
+          # build+contract, exact Pact version, tree-equivalent inputs) at an earlier SHA.
+          candidate_sha="$GITHUB_SHA"
+          [ "$present" = yes ] || candidate_sha="${present#equivalent:}"
+          if python3 .github/scripts/verify-successful-service-ci.py "$svc" "$candidate_sha" 2>/dev/null; then
+            exact_ci_verified="$(jq -cn --argjson old "$exact_ci_verified" --arg svc "$svc" \
+              '$old + [$svc]')"
+          else
+            echo "  ${svc}: no exact Services CI evidence at ${candidate_sha}; resolving an earlier equivalent source"
+            historical_services="$(jq -cn --argjson old "$historical_services" \
+              --arg svc "$svc" '$old + [$svc]')"
+            source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
+              '$old + {($svc): "no"}')"
+          fi
+          ;;
         no)
           historical_services="$(jq -cn --argjson old "$historical_services" \
             --arg svc "$svc" '$old + [$svc]')"
@@ -196,8 +217,12 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       else
         present="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$source_probe_map")"
         case "$present" in
-          yes) source_sha="$GITHUB_SHA" ;;
-          equivalent:*) source_sha="${present#equivalent:}" ;;
+          yes|equivalent:*)
+            if [ "$present" = yes ]; then source_sha="$GITHUB_SHA"; else source_sha="${present#equivalent:}"; fi
+            if jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$exact_ci_verified"; then
+              source_ci_verified=true
+            fi
+            ;;
           no)
             source_sha="$(jq -er --arg svc "$svc" '.[$svc].sha' <<< "$historical_source_map")"
             resolved="$(jq -c --arg svc "$svc" '.[$svc]' <<< "$historical_source_map")"

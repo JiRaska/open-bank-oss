@@ -477,6 +477,7 @@ class ThinCalleeTest(unittest.TestCase):
     BODIES['prepare-context-test-ordering.sh'] = ('build', 'Prepare optional context test ordering', 'a592149ff7072b1be28d542bbbb4ff2550d7e239846b38bf3bb14fcbb9b594cb', {'GH_TOKEN': '${{ github.token }}'})
     BODIES['package-context-deployment.sh'] = ('build', 'Package verified context deployment build', '1e6347bdc66a8cb96f6e440a68ce73ef2ccd693f2099646d9e675e9361ce8a55', {'ANALYTICS_SINK_TYPE': 'clickhouse', 'AGENT_SVID_NONCE_STORE': 'redis'})
     BODIES['check-test-intelligence-compat.sh'] = ('build', 'Check Test Intelligence compatibility evidence', '2ca2fa47888f38f3ee6f0092d0264cff200a3f2ef9a606f499d02ca3fd272e9c', {'SERVICE': '${{ inputs.service }}', 'EXPECTED_BRANCH': '${{ github.head_ref || github.ref_name }}'})
+    BODIES['install-gradle-distribution.sh'] = ('contract', 'Install pinned Gradle distribution', '3e72727d7089b248bb9626273d9edab7e4f09ea4842c28b8b7059a2319c07bef', {})
     BODIES['configure-gradle-cache-retention.sh'] = ('contract', 'Configure Gradle cache retention', 'e1723e664fca37880d92c9fa5d00abfc6b4c13aefe8fca1aa759c99eba58b49e', {})
     BODIES['probe-reposilite-mirror.sh'] = ('contract', 'Probe Reposilite in-cluster Maven mirror', '11a1849437afe770229d0aee273f835e1d7035efcbfdcd8d2c4561f78f7c9383', {})
     BODIES['stage-handed-off-pacts.sh'] = ('contract', 'Stage handed-off consumer pacts into pacts/', '09b69efe1750bb05cb4d8d2d647840a2c76c4f257dc74aaa3783e08da0aaf196', {'SERVICE': '${{ inputs.service }}'})

@@ -91,7 +91,7 @@ class S3ObjectStore(
 
     override suspend fun get(key: String): ByteArray = withContext(Dispatchers.IO) {
         val request = GetObjectRequest.builder().bucket(bucket).key(key).build()
-        client.getObject(request).readAllBytes()
+        client.getObject(request).use { response -> response.readAllBytes() }
     }
 
     @Suppress("SwallowedException") // NoSuchKeyException itself IS the "does not exist" signal

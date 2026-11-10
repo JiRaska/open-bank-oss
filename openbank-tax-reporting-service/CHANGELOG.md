@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.48.0...tax-reporting-service-v0.49.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** CEU daily overview filing on the statutory lifecycle ([#15308](https://github.com/JiRaska/open-bank-oss/issues/15308)) ([0829d98](https://github.com/JiRaska/open-bank-oss/commit/0829d98e12e6de53a5e1ca51d653e045875542a4))
+
+## [0.48.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.3...tax-reporting-service-v0.48.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** CEU register projection and ceu-daily return spec ([#15299](https://github.com/JiRaska/open-bank-oss/issues/15299)) ([26ed627](https://github.com/JiRaska/open-bank-oss/commit/26ed627882f322fd0bf1e67c9f397d3dfda5dc33))
+* **tax-reporting:** compute GSFT insured claims per depositor for a relevant day ([#15362](https://github.com/JiRaska/open-bank-oss/issues/15362)) ([ff22e43](https://github.com/JiRaska/open-bank-oss/commit/ff22e435c805f6e323421fc1ef52267f2968ca75))
+
 ## [0.47.3](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.2...tax-reporting-service-v0.47.3) (2026-11-09)
 
 

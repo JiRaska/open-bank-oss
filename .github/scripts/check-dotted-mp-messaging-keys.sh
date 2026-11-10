@@ -72,7 +72,7 @@ if [ "${1:-}" = "--self-test" ]; then
     out=$(bash "$0" "$root" --enforce 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — expected rc=$want, got rc=$rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
     fi
   }
@@ -107,7 +107,7 @@ if [ "${1:-}" = "--self-test" ]; then
   out=$(bash "$0" "$a" 2>&1); rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "::error::self-test: advisory mode should exit 0, got $rc" >&2; fails=$((fails+1))
-  elif ! printf '%s' "$out" | grep -qF "ADVISORY mode"; then
+  elif ! grep -qF "ADVISORY mode" <<< "$out"; then
     echo "::error::self-test: advisory mode did not say so: $out" >&2; fails=$((fails+1))
   fi
 

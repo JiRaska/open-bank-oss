@@ -58,6 +58,11 @@ def _new_seed(test_class, *init_args):
     _seed_git(root, 'config', 'user.email', 'test@example.com')
     _seed_git(root, 'config', 'user.name', 'test')
     _seed_git(root, 'config', 'commit.gpgsign', 'false')
+    # `git commit` spawns `git maintenance run --auto --detach`, which can outlive the commit and
+    # repack loose objects while setUp's copytree walks .git — shutil.Error: objects/<xx> vanished
+    # (3 of 96 parallel full-file runs). Copies inherit this config, so their fixture git is quiet too.
+    _seed_git(root, 'config', 'maintenance.auto', 'false')
+    _seed_git(root, 'config', 'gc.auto', '0')
     return root
 
 
@@ -369,6 +374,11 @@ class PublicationTest(unittest.TestCase):
 
 
 class FixtureSeedTests(unittest.TestCase):
+    def test_seed_spawns_no_background_maintenance(self):
+        seed = _new_seed(type(self), '-q', '-b', 'main')
+        self.assertEqual(_seed_git(seed, 'config', 'maintenance.auto'), 'false')
+        self.assertEqual(_seed_git(seed, 'config', 'gc.auto'), '0')
+
     def test_copies_do_not_share_objects_refs_index_or_worktree(self):
         seed = _new_seed(type(self), '-q', '-b', 'main')
         (seed / 'f').write_text('base\n')
@@ -438,7 +448,8 @@ class FixtureSeedTests(unittest.TestCase):
                 self.assertEqual(len(result.errors), 1)
                 self.assertFalse(ran)
                 self.assertEqual(Path.cwd(), previous)
-                self.assertTrue(paths)
+                # A setUp error before the injected failure leaves `paths` empty; name it.
+                self.assertTrue(paths, [error for _test, error in result.errors])
                 self.assertTrue(all(not path.exists() for path in paths))
 
 

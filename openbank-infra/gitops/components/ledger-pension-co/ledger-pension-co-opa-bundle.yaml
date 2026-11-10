@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger-pension-co
   annotations:
-    openbank.tech/policy-checksum: "bab3685abe0b8afd"
+    openbank.tech/policy-checksum: "6efe00afd0cc2ad7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1679,6 +1679,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read

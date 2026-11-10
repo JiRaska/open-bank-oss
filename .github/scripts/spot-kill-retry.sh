@@ -307,6 +307,63 @@ reclaimed_job_from_logs() {
   return 1
 }
 
+# ── THE GRADLE-DISTRIBUTION OUTAGE SIGNATURE ─────────────────────────────────────────────────
+# Services CI runs 42461736478 (2026-11-08) and 42570587622 / 42570652696 (2026-11-09): 36+
+# `(contract)` jobs went red in one minute because `./gradlew` could not download its own
+# distribution — `java.io.IOException: Server returned HTTP response code: 504 for URL:
+# https://services.gradle.org/distributions/...` or `Downloading from ... failed: timeout
+# (10000ms)`. The wrapper's `main` thread dies before Gradle starts, so NOTHING was built or
+# tested; and because auto-deploy waits for a green Services CI, every service's deploy skipped.
+#
+# The recogniser is EXHAUSTIVE over the job's error annotations, not a substring search: every
+# `##[error]` line in the log must be one of
+#   * the wrapper's own outage exception (5xx or timeout, for a services.gradle.org distribution),
+#   * ensure-gradle-distribution.py's "could not obtain ... (infrastructure, not a build failure)",
+#   * `Process completed with exit code N.`, and only inside a step segment that ALSO carries
+#     one of the two outage lines above;
+# and there must be at least one outage line. So a 404 (a wrong version — will not heal), an
+# integrity failure, a 504 from a Maven repository, a compile error or a red test anywhere in
+# the job makes it decline. Segments are delimited by the runner's `##[group]Run ` header.
+# The awk reads the log on stdin; exit 0 = outage only, 1 = anything else.
+wrapper_outage_log() {
+  awk '
+    { sub(/\r$/, "") }
+    /##\[group\]Run / { seg++ }
+    # Gradle reports a red build or test WITHOUT an annotation; any such line anywhere means
+    # something actually ran and failed, so the job is not a pure outage.
+    /BUILD FAILED|FAILURE: Build failed|tests completed, [0-9]+ failed|> .* FAILED$/ { bad = 1 }
+    index($0, "##[error]") == 0 { next }
+    /##\[error\]Exception in thread "main" java\.io\.IOException: Server returned HTTP response code: 5[0-9][0-9] for URL: https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9A-Za-z.-]+\.zip$/ { outage[seg] = 1; n++; next }
+    /##\[error\]Exception in thread "main" java\.io\.IOException: Downloading from https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9A-Za-z.-]+\.zip failed: timeout \([0-9]+ms\)$/ { outage[seg] = 1; n++; next }
+    /##\[error\]ensure-gradle-distribution: could not obtain https:\/\/services\.gradle\.org\/distributions\/gradle-[0-9A-Za-z.-]+\.zip after [0-9]+ attempts \(infrastructure, not a build failure\)$/ { outage[seg] = 1; n++; next }
+    /##\[error\]Process completed with exit code [0-9]+\.$/ { exits[seg] = 1; next }
+    { bad = 1 }
+    END {
+      if (bad || n == 0) exit 1
+      for (s in exits) if (!(s in outage)) exit 1
+      exit 0
+    }'
+}
+
+# 0 = every failed job of attempt 1 is either the `all-green` aggregator (which fails BECAUSE
+# the builds failed, and is re-run with them by `--failed`) or a job whose log is a pure
+# distribution outage, and at least one is the latter. One real failure anywhere, or one log
+# that cannot be read, declines — `rerun --failed` would re-run that job too, and a real test
+# failure must never be retried.
+wrapper_outage_run() {
+  local rows id name log n=0
+  rows="$(jobs_query '.jobs[] | select(.conclusion == "failure") | "\(.id)\t\(.name)"')" || return 1
+  [ -n "${rows}" ] || return 1
+  while IFS=$'\t' read -r id name; do
+    [ -n "${id}" ] || continue
+    [ "${name}" = "all-green" ] && continue
+    log="$(gh_ api "repos/${GITHUB_REPOSITORY}/actions/jobs/${id}/logs" 2>/dev/null)" || return 1
+    wrapper_outage_log <<< "${log}" || return 1
+    n=$(( n + 1 ))
+  done <<< "${rows}"
+  [ "${n}" -gt 0 ]
+}
+
 main() {
   : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}" "${RUN_EVENT:?}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
@@ -404,6 +461,16 @@ main() {
       [ "${rerun_rc}" -eq 0 ] || return 1
       echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — job ${reclaimed_id}'s own process took the SIGTERM and exited 143, so no step was marked cancelled (attempt 2 of max 2)."
       decide rerun-log-signature "job ${reclaimed_id} exited 143 after a runner shutdown signal — failed jobs re-run (attempt 2 of max 2)"
+      return 0
+    fi
+    if wrapper_outage_run; then
+      echo "Re-running ${RUN_URL:-${RUN_ID}}: every failed job died downloading the Gradle distribution before any build or test ran"
+      local rerun_rc=0
+      guarded_rerun --failed || rerun_rc=$?
+      [ "${rerun_rc}" -eq 10 ] && return 0
+      [ "${rerun_rc}" -eq 0 ] || return 1
+      echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — the Gradle distribution download failed (5xx/timeout) before anything was built (attempt 2 of max 2)."
+      decide rerun-gradle-dist-outage "every failed job died on a Gradle distribution 5xx/timeout before any test — failed jobs re-run (attempt 2 of max 2)"
       return 0
     fi
     echo "::notice title=spot-kill auto-retry::${RUN_URL:-${RUN_ID}} failed with no spot-kill signature (no job has a cancelled step and no failed step, and no failed job's log carries a shutdown signal with exit 143) — treating it as a real failure and NOT re-running."
@@ -576,6 +643,83 @@ FIX
   export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1" RUN_EVENT=push
   unset GITHUB_STEP_SUMMARY || true
 
+  # Gradle-distribution outage fixtures. The first two are verbatim excerpts (error lines, step
+  # headers and stack frames; env dumps dropped) of jobs 128680610511 (run 42461736478) and
+  # 129009228675 (run 42570587622). The rest are the same shape with ONE thing changed.
+  cat > "${tmp}/dist-outage.json" <<'FIX'
+{"jobs":[
+ {"id":128680610511,"name":"build (openbank-domestic-payment) / openbank-domestic-payment (contract)","conclusion":"failure","steps":[{"name":"Warm Gradle dependency cache (self-heal corrupted entries)","conclusion":"success"},{"name":"Discover provider Pact task","conclusion":"failure"}]},
+ {"id":129009228675,"name":"build (openbank-engagement-service) / openbank-engagement-service (contract)","conclusion":"failure","steps":[{"name":"Discover provider Pact task","conclusion":"failure"}]},
+ {"id":129012558683,"name":"all-green","conclusion":"failure","steps":[{"name":"Require every selected service build to pass","conclusion":"failure"}]},
+ {"id":129012558684,"name":"build (openbank-ledger-service) / openbank-ledger-service (contract)","conclusion":"success","steps":[]}]}
+FIX
+  cat > "${tmp}/log-dist-1108.json" <<'FIX'
+2026-11-08T08:48:51.9184809Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/warm-gradle-cache.sh"
+2026-11-08T08:49:02.5913614Z Downloading https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-08T08:49:02.5915419Z Attempt 1/1 failed. Reason: Downloading from https://services.gradle.org/distributions/gradle-9.8.2-bin.zip failed: timeout (10000ms)
+2026-11-08T08:49:02.5940480Z ##[error]Exception in thread "main" java.io.IOException: Downloading from https://services.gradle.org/distributions/gradle-9.8.2-bin.zip failed: timeout (10000ms)
+2026-11-08T08:49:02.5942906Z 	at org.gradle.wrapper.Download.download(SourceFile:1)
+2026-11-08T08:49:04.9081740Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/discover-provider-task.sh"
+2026-11-08T08:49:04.9119470Z ##[endgroup]
+2026-11-08T08:49:05.5421166Z ##[error]Exception in thread "main" java.io.IOException: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-08T08:49:05.5423733Z 	at org.gradle.wrapper.Download.download(SourceFile:1)
+2026-11-08T08:49:05.5428427Z 	at org.gradle.wrapper.GradleWrapperMain.main(SourceFile:2)
+2026-11-08T08:49:05.5505106Z ##[error]Process completed with exit code 1.
+FIX
+  cat > "${tmp}/log-dist-1109.json" <<'FIX'
+2026-11-09T06:11:54.1905418Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/warm-gradle-cache.sh"
+2026-11-09T06:11:54.9558201Z Downloading https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-09T06:11:54.9560220Z Attempt 1/1 failed. Reason: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-09T06:11:54.9583322Z ##[error]Exception in thread "main" java.io.IOException: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-09T06:12:03.6501010Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/discover-provider-task.sh"
+2026-11-09T06:12:03.6537102Z ##[endgroup]
+2026-11-09T06:12:04.2780533Z ##[error]Exception in thread "main" java.io.IOException: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip
+2026-11-09T06:12:04.2787895Z 	at org.gradle.wrapper.GradleWrapperMain.main(SourceFile:2)
+2026-11-09T06:12:04.2859194Z ##[error]Process completed with exit code 1.
+FIX
+  sed 's/$/\r/' "${tmp}/log-dist-1109.json" > "${tmp}/log-dist-crlf.json"
+  cat > "${tmp}/log-dist-ensure.json" <<'FIX'
+2026-11-10T06:00:00.0000000Z ##[group]Run python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py" --lock "$SERVICE_CI_HELPERS/artifacts.lock" --fetcher "$SERVICE_CI_HELPERS/fetch-artifact.py"
+2026-11-10T06:01:10.0000000Z UNVERIFIED (artifact unavailable): gradle-distribution
+2026-11-10T06:01:10.0000001Z ##[error]ensure-gradle-distribution: could not obtain https://services.gradle.org/distributions/gradle-9.8.2-bin.zip after 3 attempts (infrastructure, not a build failure)
+2026-11-10T06:01:10.0100000Z ##[error]Process completed with exit code 75.
+FIX
+  sed 's/response code: 504 for URL/response code: 404 for URL/' "${tmp}/log-dist-1109.json" > "${tmp}/log-dist-404.json"
+  cat > "${tmp}/log-maven-504.json" <<'FIX'
+2026-11-09T06:12:03.6501010Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/build-test.sh"
+2026-11-09T06:12:40.0000000Z > Could not GET 'https://repo.maven.apache.org/maven2/io/quarkus/quarkus-bom/3.0/quarkus-bom-3.0.pom'. Received status code 504 from server: Gateway Timeout
+2026-11-09T06:12:41.0000000Z ##[error]Process completed with exit code 1.
+FIX
+  { cat "${tmp}/log-dist-1108.json"
+    printf '%s\n' '2026-11-08T08:52:00.0000000Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/provider-pact-test.sh"' \
+      '2026-11-08T08:55:00.0000000Z provider verification: 1 interaction did not match' \
+      '2026-11-08T08:55:01.0000000Z ##[error]Process completed with exit code 1.'; } > "${tmp}/log-dist-then-test.json"
+  cat > "${tmp}/log-dist-integrity.json" <<'FIX'
+2026-11-10T06:00:00.0000000Z ##[group]Run python3 -I "$SERVICE_CI_HELPERS/ensure-gradle-distribution.py"
+2026-11-10T06:00:05.0000000Z ##[error]ensure-gradle-distribution: INTEGRITY FAILURE for gradle-distribution; not retrying
+2026-11-10T06:00:05.0100000Z ##[error]Process completed with exit code 65.
+FIX
+  printf '%s\n' '2026-11-09T06:12:03.0Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/build-test.sh"' \
+    '2026-11-09T06:20:00.0Z 1 test failed' '2026-11-09T06:20:01.0Z ##[error]Process completed with exit code 1.' \
+    > "${tmp}/log-plain-failure.json"
+  # The outage text quoted mid-line (a script echo / grep in a step header) carries no
+  # `##[error]` annotation of its own at the anchored position, so the exit stays unexplained.
+  printf '%s\n' '2026-11-09T06:12:03.0Z ##[group]Run echo "Exception in thread \"main\" java.io.IOException: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip"' \
+    '2026-11-09T06:12:04.0Z ##[error]Process completed with exit code 1.' > "${tmp}/log-dist-echoed.json"
+  printf '%s\n' '2026-11-09T06:30:00.0Z ##[group]Run python3 .github/scripts/all-green.py' \
+    '2026-11-09T06:30:01.0Z ##[error]Process completed with exit code 1.' > "${tmp}/log-allgreen.json"
+  # An action step (`uses:`) fails with an annotation and no "Process completed" line.
+  { cat "${tmp}/log-dist-1109.json"
+    printf '%s\n' '2026-11-09T06:12:05.0Z ##[group]Run actions/download-artifact@v8' \
+      '2026-11-09T06:12:06.0Z ##[error]Unable to download artifact(s): Artifact not found'; } > "${tmp}/log-dist-plus-other.json"
+  printf '%s\n' '2026-11-09T06:12:03.0Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/build-test.sh"' \
+    '2026-11-09T06:12:04.0Z step ended without an annotation' > "${tmp}/log-no-error.json"
+  # One step whose first ./gradlew died on the download and whose second ran tests and failed.
+  printf '%s\n' '2026-11-09T06:12:03.0Z ##[group]Run bash -e "$SERVICE_CI_HELPERS/build-test.sh"' \
+    '2026-11-09T06:12:04.0Z ##[error]Exception in thread "main" java.io.IOException: Server returned HTTP response code: 504 for URL: https://services.gradle.org/distributions/gradle-9.8.2-bin.zip' \
+    '2026-11-09T06:20:00.0Z 143 tests completed, 1 failed' '2026-11-09T06:20:00.1Z FAILURE: Build failed with an exception.' \
+    '2026-11-09T06:20:01.0Z ##[error]Process completed with exit code 1.' > "${tmp}/log-dist-same-step-red.json"
+
   local pass=0 fail=0 subjects=0
   # Job-log fixtures for the #9787 recogniser. Written as one line each: the stub returns its
   # scripted output verbatim, and only the presence of the two phrases is being tested.
@@ -670,6 +814,40 @@ FIX
   # An unreadable log leaves the pre-#9787 behaviour: declined, exit 0, nothing escalated.
   case_ "an unreadable job log declines rather than escalating" failure 0 0 \
     "0|@sigterm-kill" "0|@sigterm-kill" "1|HTTP 404: Not Found"
+
+  # ── the GRADLE-DISTRIBUTION OUTAGE signature, in both directions ───────────────────────────
+  # Classifier alone, on REAL log excerpts (job logs of runs 42461736478 and 42570587622).
+  log_case() { # log_case <name> <want 0|1> <fixture>
+    subjects=$(( subjects + 1 ))
+    local rc=0
+    wrapper_outage_log < "${tmp}/$3.json" || rc=$?
+    if [ "${rc}" -eq "$2" ]; then echo "PASS  $1 (classifier=${rc})"; pass=$(( pass + 1 ))
+    else echo "FAIL  $1: classifier=${rc} (want $2)"; fail=$(( fail + 1 )); fi
+  }
+  log_case "real 11-08 log: warm-up timeout + discover 504 IS an outage"        0 log-dist-1108
+  log_case "real 11-09 log: warm-up 504 + discover 504 IS an outage"            0 log-dist-1109
+  log_case "ensure-gradle-distribution giving up after its retries IS an outage" 0 log-dist-ensure
+  log_case "CRLF line endings do not defeat the classifier"                     0 log-dist-crlf
+  log_case "a 404 (wrong version, will not heal) is NOT an outage"              1 log-dist-404
+  log_case "a 504 from a Maven repository is NOT a wrapper outage"              1 log-maven-504
+  log_case "outage in warm-up but a red TEST step is NOT an outage"             1 log-dist-then-test
+  log_case "an integrity failure is NOT an outage"                              1 log-dist-integrity
+  log_case "an ordinary failing build log is NOT an outage"                     1 log-plain-failure
+  log_case "the outage text inside a quoted script line is NOT an outage"       1 log-dist-echoed
+  log_case "outage plus any OTHER error annotation is NOT an outage"            1 log-dist-plus-other
+  log_case "a failed job whose log carries no error at all is NOT an outage"    1 log-no-error
+  log_case "outage then a red Gradle build in the SAME step is NOT an outage"   1 log-dist-same-step-red
+  # Whole decision. Calls: structural jq -> (#9787) failed ids + one log each -> failed id/name
+  # -> one log per non-aggregator job -> rerun.
+  case_ "a run whose failed jobs all died on the distribution download IS re-run" failure 0 1 \
+    "0|@dist-outage" "0|@dist-outage" "0|@raw:log-dist-1108" "0|@raw:log-dist-1109" "0|@raw:log-allgreen" \
+    "0|@dist-outage" "0|@raw:log-dist-1108" "0|@raw:log-dist-1109" "0|ok"
+  case_ "one real failure among outage jobs is NOT re-run" failure 0 0 \
+    "0|@dist-outage" "0|@dist-outage" "0|@raw:log-dist-1108" "0|@raw:log-dist-then-test" "0|@raw:log-allgreen" \
+    "0|@dist-outage" "0|@raw:log-dist-1108" "0|@raw:log-dist-then-test"
+  case_ "an unreadable log among outage jobs is NOT re-run" failure 0 0 \
+    "0|@dist-outage" "0|@dist-outage" "0|@raw:log-dist-1108" "0|@raw:log-dist-1109" "0|@raw:log-allgreen" \
+    "0|@dist-outage" "0|@raw:log-dist-1108" "1|HTTP 404: Not Found"
 
   # ── the re-run call's own error classes ────────────────────────────────────────────────────
   case_ "rerun 502 then success"           cancelled 0 2 "0|@reclaim" "1|failed to rerun: HTTP 502: Server Error" "0|ok"
