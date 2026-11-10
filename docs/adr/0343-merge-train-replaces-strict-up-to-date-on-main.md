@@ -1,8 +1,7 @@
 ---
 date: 2026-10-18
-decision-status: proposed
-delivery-status: partial
-followup: "open-bank-oss — ADR-0343 phase 1: ruleset flip + MERGE_TRAIN_SHADOW=false; shadow mode runs today"
+decision-status: accepted
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

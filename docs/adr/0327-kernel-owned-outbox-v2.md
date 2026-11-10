@@ -232,6 +232,34 @@ plan is the same statement against the same DDL shape, which is what D2's single
 guarantees. The before/after throughput numbers are recorded in `openbank-libs-benchmarks` when
 that module lands (parallel PR); the plan gate does not wait for it.
 
+### Scope: the outbox is not a second durable-execution engine, and "v2" is a migration label
+
+Added 2026-11-10 in answer to "we already have Temporal — do we need this, and is it well named?"
+
+- **Different guarantees, not overlapping ones.** The outbox makes *one* thing atomic: a domain
+  state change and the event announcing it commit in the same Postgres transaction, so neither
+  can exist without the other. Temporal (ADR-0101) makes *a sequence of steps* durable across
+  crashes and retries, but its history lives in Temporal's own store — an activity that commits a
+  row and then publishes to Kafka still has a crash window between the two. ADR-0101 and ADR-0120
+  already decided the split: Temporal orchestrates *when* an activity runs, the outbox inside the
+  activity guarantees the event is published exactly once. Measured on `origin/main` @ `5755a73603`:
+  44 modules own an outbox dispatcher, 19 use Temporal, 9 use both (case-coordinator,
+  domestic-payment, fx, kyb, lending, sepa-payment, settlement, statement, transaction) — where they meet, the outbox row is written in the
+  same DB transaction as the state change the activity commits (transaction-service's
+  `PaymentActivities`, #4238, is the reference). The 35 outbox-only
+  modules have no workflow at all; routing their single-step "commit then announce" through a
+  Temporal workflow would add a cluster dependency to every write and still need the outbox for
+  atomicity. So this ADR does not compete with Temporal and Temporal cannot replace it.
+- **"Durable" stays Temporal's word.** In `openbank-libs*` "durable" names Temporal execution
+  (ADR-0101) and durable evidence stores; the outbox KDoc uses it only for "durable end state".
+  Nothing in this ADR should be described as durable execution.
+- **"v2" means "the kernel-owned repository", and it is temporary.** The `V2` suffix on
+  `OutboxRepositoryV2` / `PanacheOutboxEntityV2` / `V<n>__outbox_v2.sql` marks the coexistence
+  window of the migration plan below — it is not an event-schema or API version (ADR-0048), and
+  must not be read as one. When Phase 4 empties the baselines, the v1 shapes are deleted and the
+  `V2` types are renamed back to `OutboxRepository` / `PanacheOutboxEntity` in the same PR; the
+  Flyway file names stay (applied migrations are immutable).
+
 ### Migration plan
 
 | Phase | Scope | Gate state | Approvals |
