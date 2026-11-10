@@ -10,9 +10,14 @@ import com.openbank.ledger.application.port.`in`.GetFiscalYearTrialBalanceQuery
 import com.openbank.ledger.application.port.`in`.GetYearCloseQuery
 import com.openbank.ledger.application.port.`in`.VerifyYearCloseQuery
 import com.openbank.ledger.application.port.`in`.YearCloseUseCase
+import com.openbank.ledger.application.port.`in`.AllocateYearEndResultCommand
+import com.openbank.ledger.application.port.`in`.PreviewYearEndResultQuery
+import com.openbank.ledger.application.port.`in`.YearEndResultAllocationResult
+import com.openbank.ledger.application.port.`in`.YearEndResultAllocationUseCase
 import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.YearCloseRecord
 import com.openbank.ledger.domain.model.YearCloseVerification
+import com.openbank.ledger.domain.model.YearEndResultAllocationPlan
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity
@@ -53,6 +58,10 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
     // the bearer JsonWebToken, whereas SecurityIdentity survives the coroutine dispatch.
     @Inject
     lateinit var identity: SecurityIdentity
+
+    // Field injection keeps the constructor stable for the tests that build this resource by hand.
+    @Inject
+    lateinit var resultAllocation: YearEndResultAllocationUseCase
 
     @GET
     @Path("/trial-balance")
@@ -109,6 +118,31 @@ class YearCloseResource(private val yearCloseUseCase: YearCloseUseCase) {
     suspend fun attest(@PathParam("fiscalYear") fiscalYear: Int): Response {
         val record = yearCloseUseCase.attest(AttestYearCloseCommand(fiscalYear, attestedBy = actingPrincipal()))
         return Response.ok(record.toResponse()).build()
+    }
+
+    @GET
+    @Path("/{fiscalYear}/result-allocation")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#fiscalYear")
+    @Operation(summary = "Preview the year-end result allocation (P&L to retained earnings) — read-only")
+    suspend fun previewResultAllocation(@PathParam("fiscalYear") fiscalYear: Int): Response {
+        val plan = resultAllocation.preview(PreviewYearEndResultQuery(fiscalYear))
+        return Response.ok(plan.toResponse(posted = false, journalId = null)).build()
+    }
+
+    /**
+     * Posts the year-end result allocation closing journal (ADR-0096 D3). The maker step of the
+     * year close, so it shares `ledger.close.draft`; the checker reviews it through the attestation,
+     * whose fresh-hash re-verification covers the closing journal.
+     */
+    @POST
+    @Path("/{fiscalYear}/result-allocation")
+    @RolesAllowed(Roles.OPERATOR)
+    @Authorize(action = "ledger.close.draft", resource = "#fiscalYear")
+    @Operation(summary = "Allocate the fiscal year's result to retained earnings (closing journal, before attestation)")
+    suspend fun allocateResult(@PathParam("fiscalYear") fiscalYear: Int): Response {
+        val result = resultAllocation.allocate(AllocateYearEndResultCommand(fiscalYear, requestedBy = actingPrincipal()))
+        return Response.ok(result.toResponse()).build()
     }
 
     /**
@@ -224,3 +258,23 @@ private fun YearCloseRecord.toResponse() = YearCloseRecordResponse(
     attestedBy = attestedBy,
     attestedAt = attestedAt?.toString(),
 )
+
+data class ResultAllocationLegResponse(val glAccountCode: String, val side: String, val amount: BigDecimal)
+
+data class YearEndResultAllocationResponse(
+    val fiscalYear: Int,
+    val netResult: BigDecimal,
+    val legs: List<ResultAllocationLegResponse>,
+    val posted: Boolean,
+    val journalId: UUID?,
+)
+
+private fun YearEndResultAllocationPlan.toResponse(posted: Boolean, journalId: UUID?) = YearEndResultAllocationResponse(
+    fiscalYear = fiscalYear,
+    netResult = netResult,
+    legs = legs.map { ResultAllocationLegResponse(it.glAccountCode, it.side.name, it.amount) },
+    posted = posted,
+    journalId = journalId,
+)
+
+private fun YearEndResultAllocationResult.toResponse() = plan.toResponse(posted, journalId)

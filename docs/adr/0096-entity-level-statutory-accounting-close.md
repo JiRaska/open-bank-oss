@@ -114,6 +114,16 @@ about nothing. It needs the actual form definitions supplied before it can be bu
 Decision point 3 (EoY result allocation and opening-balance roll) builds on the existing fiscal-year
 attestation (ADR-0078 D5 / #868) and is a separate increment.
 
+**Increment 2 — D3 result allocation (CZK). Shipped.** `POST /api/v1/ledger/close/{fiscalYear}/result-allocation`
+(maker, `ledger.close.draft`) posts the closing journal dated 31 December that zeroes the year's
+income and expense accounts into Retained Earnings `6020`, through the ordinary posting path, before
+attestation — the attestation's fresh-hash re-verify is the checker step over it. Carry-relative and
+idempotent (`year-end-result:{year}:{plan digest}`): a re-run posts nothing, a late posting is
+allocated as a residual only. A non-CZK income/expense balance is refused (409) rather than translated
+at a rate nobody decided. Still open in D3: the opening-balance roll, the foreign-currency result, and
+an attest-time gate that refuses a year whose P&L does not net to zero. Delivery check:
+`YearEndResultAllocationIT` (Postgres) and `YearEndResultAllocationPlanTest`.
+
 ## Alternatives considered
 
 - **Outsource the GL-close engine to a vendor** — buy the close orchestration rather than build it. Rejected — the ledger already owns double-entry truth, and outsourcing the close would fork the source of truth; only the statement *forms* mapping is left open to a vendor template later.
