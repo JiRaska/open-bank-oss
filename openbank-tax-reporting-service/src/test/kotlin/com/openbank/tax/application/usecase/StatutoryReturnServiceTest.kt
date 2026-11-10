@@ -15,6 +15,7 @@ import com.openbank.tax.application.port.out.StatutoryReturnMetricsPort
 import com.openbank.tax.application.port.out.StatutoryReturnRepository
 import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.model.TaxValidationException
+import com.openbank.tax.domain.returns.DeadlineBasis
 import com.openbank.tax.domain.returns.Periodicity
 import com.openbank.tax.domain.returns.ReportingPeriod
 import com.openbank.tax.domain.returns.ReturnCatalogue
@@ -185,6 +186,37 @@ class StatutoryReturnServiceTest {
             "M-FUND/fund-b/2026-07/NOT_ASSEMBLED",
             "Q-CO/company/2026-Q2/NOT_ASSEMBLED",
         )
+    }
+
+    @Test
+    fun `an on-demand return is never expected, so no un-named day is NOT_ASSEMBLED`(): Unit = runBlocking {
+        val onDemand = ReturnDefinition(
+            code = "D-EVENT",
+            name = "on demand",
+            scope = ReturnScope.COMPANY,
+            periodicity = Periodicity.DAY,
+            deadlineDaysAfterPeriodEnd = 3,
+            datapoints = listOf("units"),
+            rules = emptyList(),
+            legalBasis = "test",
+            deadlineBasis = DeadlineBasis.WORKING_DAYS,
+            onDemand = true,
+        )
+        val svc = StatutoryReturnService(
+            catalogues = object : ReturnCatalogueSource {
+                override fun catalogues() = listOf(ReturnCatalogue("ev", 1, "XX", false, listOf(onDemand)))
+            },
+            data = data,
+            repository = repo,
+            entities = ReportingEntities("company", emptyList(), LocalDate.of(2026, 6, 30)),
+            accountingClock = AccountingClock.bank(clock),
+            clock = clock,
+        )
+        assertThat(svc.breaches()).isEmpty()
+        // A stored revision of a named day still breaches once its working-day deadline passes.
+        svc.assemble("ev", "D-EVENT", "company", "2026-08-14", "maker")
+        assertThat(svc.breaches().map { "${it.period}/${it.dueDate}/${it.kind}" })
+            .containsExactly("2026-08-14/2026-08-19/NOT_SUBMITTED")
     }
 
     @Test

@@ -35,6 +35,9 @@ class GsftDelivery(
     @ConfigProperty(name = "openbank.gsft.pgp-public-key") private val publicKey: Optional<String>,
 ) {
     suspend fun deliver(id: UUID, reference: String, by: String): GsftDeliveryResult {
+        val armored = publicKey.map { it.trim() }.filter { it.isNotEmpty() }.orElseThrow {
+            ReturnDataUnavailableException("openbank.gsft.pgp-public-key is not configured; no GSFT package can be encrypted")
+        }
         val current = service.get(id)
         if (current.catalogueId != GsftReturnDataAdapter.CATALOGUE_ID) {
             throw TaxConflictException("${current.returnCode} is not a GSFT return")
@@ -43,9 +46,6 @@ class GsftDelivery(
             throw TaxConflictException(
                 "${current.returnCode} ${current.period.label} is not APPROVED (status=${current.status})",
             )
-        }
-        val armored = publicKey.map { it.trim() }.filter { it.isNotEmpty() }.orElseThrow {
-            ReturnDataUnavailableException("openbank.gsft.pgp-public-key is not configured; no GSFT package can be encrypted")
         }
         val stored = verifiedArchive(current)
         val encrypted = GsftPackage.encrypt(stored.archive, stored.archiveName, GsftPackage.readPublicKey(armored))

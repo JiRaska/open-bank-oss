@@ -116,5 +116,20 @@ class StatutoryReturnApiIT {
             statusCode(503)
             body("error", containsString("treasury is not configured as a source"))
         }
+        // #15356: this boot has no GSFT key or bank code — it started anyway, and both refuse by name.
+        Given {
+            contentType("application/json")
+            body("""{"reference":"GSFT-1"}""")
+        } When { post("$path/$absentId/gsft-delivery") } Then {
+            statusCode(503)
+            body("error", containsString("openbank.gsft.pgp-public-key is not configured"))
+        }
+        Given {
+            contentType("application/json")
+            body("""{"catalogueId":"cz-gsft","returnCode":"GSFT-DIW-TEST","entityId":"company","period":"2025-01-06"}""")
+        } When { post("$path/assemble") } Then {
+            statusCode(503)
+            body("error", containsString("openbank.gsft.bank-code is not configured"))
+        }
     }
 }
