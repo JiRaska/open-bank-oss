@@ -114,7 +114,7 @@ jobs:
     # builds on the owner's Mac mini pool `openbank-mini` (ephemeral Linux arm64 runners,
     # rules.yaml: ci_runners.static_hosts.mac_mini) to add slots beyond the hosted
     # concurrency cap. Only for `schedule` and `workflow_dispatch`, where nobody waits: on
-    # 2026-11-04 the pool's ~4 slots queued PR and merge-train carrier builds 19 min p50 /
+    # 2026-11-04 the pool's ~4 slots queued PR and train-carrier builds 19 min p50 /
     # 82 min p90 (140 jobs), with no hosted fallback once queued. PRs (incl. carriers) and
     # main pushes, which gate merges and deploys, always build hosted. The pool is capacity
     # only (rules.yaml: owner_managed_accelerator); the recipe is identical on both pools.

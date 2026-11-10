@@ -2728,7 +2728,7 @@ ci_runners:
       # PR CI queues on (2026-11-03: Services CI builds = 57 % of hosted minutes,
       # median queue 10 min). Only `_service-ci.yml` build routes here, only for
       # services in the repo variable MINI_RUNNER_SERVICES, and only on schedule /
-      # workflow_dispatch: PRs, merge-train carriers and main pushes always build hosted.
+      # workflow_dispatch: PRs, train carriers and main pushes always build hosted.
       # Availability: a job routed here has no hosted fallback once queued, so the
       # variable is the kill switch — empty it when the Mac is down.
       routing_variable: MINI_RUNNER_SERVICES
