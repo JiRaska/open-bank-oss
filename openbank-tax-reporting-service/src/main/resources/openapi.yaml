@@ -617,7 +617,7 @@ components:
         code: { type: string }
         name: { type: string }
         scope: { type: string, enum: [COMPANY, FUND] }
-        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR, WORKING_DAY, DAY] }
+        periodicity: { type: string, description: 'MONTH, QUARTER, YEAR, WORKING_DAY or DAY (an open set: a catalogue may add periodicities)' }
         deadlineDaysAfterPeriodEnd: { type: integer }
         legalBasis: { type: string }
         datapoints: { type: array, items: { type: string } }
@@ -653,7 +653,7 @@ components:
         catalogueVersion: { type: integer }
         returnCode: { type: string }
         entityId: { type: string }
-        periodicity: { type: string, enum: [MONTH, QUARTER, YEAR, WORKING_DAY, DAY] }
+        periodicity: { type: string, description: 'MONTH, QUARTER, YEAR, WORKING_DAY or DAY (an open set: a catalogue may add periodicities)' }
         period: { type: string }
         revision: { type: integer }
         status: { type: string, enum: [ASSEMBLED, APPROVED, SUBMITTED, ACKNOWLEDGED, REJECTED] }
