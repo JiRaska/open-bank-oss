@@ -79,6 +79,7 @@ private const val FIRST_PAYOUT = "00001"
 private const val SORT_KEY_FIELDS = 4
 private const val DIC_SORT_FIELDS = 3
 private const val MONEY_SCALE = 2
+private const val SHARE_SCALE = 12
 
 /** DIC.TYPE. */
 enum class EntitledPersonType(val code: String) {
@@ -147,7 +148,11 @@ private class ClaimRecords(
     val people: RenderedPeople,
 )
 
-private class SpecialRecords(val dic: List<List<String>>, val dii: MutableList<List<String>>)
+private class SpecialRecords(
+    val dic: List<List<String>>,
+    val dii: MutableList<List<String>>,
+    val rejected: List<RejectedPerson>,
+)
 
 object GsftBatchRenderer {
 
@@ -213,7 +218,7 @@ object GsftBatchRenderer {
                 ),
             ),
             totalPaymentCzk = totalPayment.setScale(2, RoundingMode.HALF_UP),
-            rejected = rejected,
+            rejected = rejected + dii.rejected,
             droppedSyntheticDepositors = assembly.droppedSyntheticDepositors,
             droppedSyntheticAccounts = assembly.droppedSyntheticAccounts,
             droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
@@ -337,6 +342,9 @@ object GsftBatchRenderer {
                 "beneficiary ${share.beneficiary.partyId} is also a depositor; merging DII into DIC is unresolved"
             }
             requireValid(share.amount.signum() >= 0) { "DII share of ${share.accountId} is negative" }
+            requireValid(share.amount.stripTrailingZeros().scale() <= MONEY_SCALE) {
+                "DII share of ${share.accountId} is finer than hundredths"
+            }
         }
         shares.groupBy { it.accountId }.forEach { (accountId, of) ->
             val sum = of.fold(BigDecimal.ZERO) { s, x -> s.add(x.amount) }
@@ -354,10 +362,15 @@ object GsftBatchRenderer {
         depositorIds: Set<UUID>,
         reported: Set<UUID>,
     ): SpecialRecords {
-        if (shares.isEmpty()) return SpecialRecords(emptyList(), mutableListOf())
+        if (shares.isEmpty()) return SpecialRecords(emptyList(), mutableListOf(), emptyList())
         validateShares(byAccount, shares, depositorIds, reported)
+        val czk = shares.groupBy { it.accountId }.flatMap { (accountId, of) ->
+            of.zip(GsftShareSplit.shareCzk(byAccount.getValue(accountId), of, rates))
+        }.toMap()
         val rows = mutableListOf<List<String>>()
-        val dic = shares.groupBy { it.beneficiary.partyId }.map { (_, of) ->
+        val dic = mutableListOf<List<String>>()
+        val rejected = mutableListOf<RejectedPerson>()
+        shares.groupBy { it.beneficiary.partyId }.forEach { (_, of) ->
             val owners = of.map { s -> byAccount.getValue(s.accountId).holders.map { it.partyId }.toSet() }.toSet()
             requireValid(owners.size == 1) {
                 "beneficiary ${of.first().beneficiary.partyId} holds funds through several owners; " +
@@ -365,36 +378,36 @@ object GsftBatchRenderer {
             }
             val id = of.first().beneficiary
             requireValid(of.all { it.beneficiary == id }) { "beneficiary ${id.partyId} has two identities" }
-            val claim = of.fold(BigDecimal.ZERO) { s, x ->
-                s.add(
-                    rates.toCzk(
-                        x.amount,
-                        byAccount.getValue(x.accountId).currency,
-                    ).setScale(MONEY_SCALE, RoundingMode.HALF_UP),
-                )
+            // Like an owner, one beneficiary's bad data rejects that beneficiary only.
+            try {
+                val mine = of.map { s ->
+                    val account = byAccount.getValue(s.accountId)
+                    listOf(
+                        "D",
+                        GsftFields.nonBlank(GsftFields.text(id.idc, IDC_MAX, "IDC"), "IDC"),
+                        id.type.code,
+                        order,
+                        GsftFields.iban(account.iban),
+                        account.currency,
+                        GsftFields.amount(s.amount),
+                        GsftFields.amount(czk.getValue(s)),
+                    )
+                }
+                val claim = of.fold(BigDecimal.ZERO.setScale(MONEY_SCALE)) { sum, x -> sum.add(czk.getValue(x)) }
+                val record = dicRecord(InsuredClaim(id.partyId, claim, BigDecimal.ZERO, emptyList()), id, order)
+                (listOf(record) + mine).flatten().forEach { field ->
+                    requireValid(field.none { it < ' ' }) { "a DII field contains a control character" }
+                    requireValid(CP1250.newEncoder().canEncode(field)) { "a DII field cannot be encoded in CP-1250" }
+                }
+                rows += mine
+                dic += record
+            } catch (e: TaxValidationException) {
+                rejected += RejectedPerson(id.partyId, e.message ?: "invalid DII record")
             }
-            of.forEach { s ->
-                val account = byAccount.getValue(s.accountId)
-                rows += listOf(
-                    "D",
-                    id.idc,
-                    id.type.code,
-                    order,
-                    GsftFields.iban(account.iban),
-                    account.currency,
-                    GsftFields.amount(s.amount),
-                    GsftFields.amount(rates.toCzk(s.amount, account.currency)),
-                )
-            }
-            dicRecord(InsuredClaim(id.partyId, claim, BigDecimal.ZERO, emptyList()), id, order)
-        }
-        (dic + rows).flatten().forEach { field ->
-            requireValid(field.none { it < ' ' }) { "a DII field contains a control character" }
-            requireValid(CP1250.newEncoder().canEncode(field)) { "a DII field cannot be encoded in CP-1250" }
         }
         val keys = rows.map { it.drop(1).take(SORT_KEY_FIELDS) }
         requireValid(keys.toSet().size == keys.size) { "a beneficiary is listed twice on one special account" }
-        return SpecialRecords(dic, rows)
+        return SpecialRecords(dic, rows, rejected)
     }
 
     private fun diwRecord(
@@ -451,6 +464,39 @@ object GsftBatchRenderer {
             error("unreachable")
         }
         return ByteArray(buffer.remaining()).also { buffer.get(it) }
+    }
+}
+
+/** DII CZK amounts, reconciled with the owner's DIA row. */
+internal object GsftShareSplit {
+    /**
+     * CZK of each share, split from the account's DIA CZK total in haléře by largest remainder (the
+     * unallocated rest of the account is the last part), so DII AMOUNT_CZK never sums past DIA.
+     */
+    fun shareCzk(account: DepositAccount, of: List<SpecialRegimeShare>, rates: FxRates): List<BigDecimal> {
+        val total = account.total()
+        val rest = total.subtract(of.fold(BigDecimal.ZERO) { s, x -> s.add(x.amount) })
+        val parts = of.map { it.amount } + rest
+        if (total.signum() == 0) return of.map { BigDecimal.ZERO.setScale(MONEY_SCALE) }
+        return weightedSplit(account.totalCzk(rates), parts, total).dropLast(1)
+    }
+
+    /** [amount] split in haléře in proportion parts/whole, largest remainder, ties to list order. */
+    private fun weightedSplit(amount: BigDecimal, parts: List<BigDecimal>, whole: BigDecimal): List<BigDecimal> {
+        val minor = amount.setScale(MONEY_SCALE, RoundingMode.UNNECESSARY).unscaledValue()
+        val exact = parts.map { BigDecimal(minor).multiply(it).divide(whole, SHARE_SCALE, RoundingMode.HALF_EVEN) }
+        val floors = exact.map { it.setScale(0, RoundingMode.FLOOR).toBigIntegerExact() }
+        var leftover = minor.subtract(floors.fold(java.math.BigInteger.ZERO, java.math.BigInteger::add)).toInt()
+        val result = floors.toMutableList()
+        val order = parts.indices.sortedWith(
+            compareByDescending<Int> { exact[it].subtract(BigDecimal(floors[it])) }.thenBy { it },
+        )
+        for (i in order) {
+            if (leftover <= 0) break
+            result[i] = result[i].add(java.math.BigInteger.ONE)
+            leftover--
+        }
+        return result.map { BigDecimal(it, MONEY_SCALE) }
     }
 }
 

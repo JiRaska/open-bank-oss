@@ -19,7 +19,8 @@ that day:
   reconcile);
 - foreign currency converts at that day's rate; a missing rate, or rates from another day,
   **fails** the assembly, because skipping an account would understate a claim silently;
-- compensation is capped at the CZK equivalent of EUR 100 000;
+- compensation is capped at the CZK equivalent of EUR 100 000, except special-regime balances
+  of their owner (see `DII` below);
 - excluded depositors (§ 41b, with the reason) and synthetic depositors or accounts are dropped
   and **counted**, so the exclusion is evidenced rather than assumed;
 - an overdrawn account is not a deposit: it is dropped before aggregation and counted, so it
@@ -57,6 +58,12 @@ beneficiaries (podílníci). Verified against the annex (1.2.2, 1.2.5):
 - the cover limit does not apply to the owner's `PAYMENT`, so special-regime balances are added
   uncapped on top of the owner's capped ordinary claim;
 - a person whose funds are only on special-regime accounts has `PAYMENT` 0.
+
+Shares are in hundredths; their CZK column is split from the owner's `DIA` CZK total by largest
+remainder, so `DII` never sums past `DIA`. A beneficiary with bad data is rejected alone, like an
+owner. A share on an account that is not in `DIA` (owner excluded, synthetic, overdrawn or
+rejected) fails the batch: reporting beneficiaries of an account GSFT does not see would be
+inconsistent, and how to treat them is not stated by the annex.
 
 **Unverified / unresolved — the batch FAILS rather than guess:**
 

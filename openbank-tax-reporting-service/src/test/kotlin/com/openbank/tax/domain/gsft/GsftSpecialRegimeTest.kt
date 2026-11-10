@@ -167,4 +167,55 @@ class GsftSpecialRegimeTest {
             GsftBatchRenderer.render(assembly, listOf(account), listOf(badOwner), rates, header, listOf(share))
         }.isInstanceOf(TaxValidationException::class.java).hasMessageContaining("not in DIA")
     }
+
+    @Test
+    fun `DII CZK shares reconcile with the owner's DIA CZK total`() {
+        val odd = FxRates(day, mapOf("EUR" to BigDecimal("25.013")))
+        val account = special("CZ0100000000000000000009", "10.00", firm, currency = "EUR")
+        val shares = listOf("3.33", "3.33", "3.34").mapIndexed { i, a ->
+            val id = UUID(0L, 100L + i)
+            SpecialRegimeShare(
+                identity(id, "900000000$i", EntitledPersonType.NATURAL_PERSON),
+                account.accountId,
+                BigDecimal(a),
+            )
+        }
+        val assembly = InsuredClaims.assemble(day, listOf(Depositor(firm, null, false)), listOf(account), odd)
+        val batch = GsftBatchRenderer.render(
+            assembly,
+            listOf(account),
+            listOf(identity(firm, "00000000")),
+            odd,
+            header,
+            shares,
+        )
+        val dia = lines(batch, "DIA").single().split(",").last()
+        val dii = lines(batch, "DII").map { it.split(",").last().toLong() }
+        assertThat(dia).isEqualTo("000000000025013")
+        assertThat(dii.sum()).isEqualTo(25013L)
+    }
+
+    @Test
+    fun `a share finer than hundredths fails the batch`() {
+        val account = special("CZ0100000000000000000009", "10", firm)
+        val share = SpecialRegimeShare(identity(ben, "8001010009"), account.accountId, BigDecimal("4.505"))
+        assertThatThrownBy { render(listOf(account), listOf(firm), listOf(share)) }
+            .isInstanceOf(TaxValidationException::class.java).hasMessageContaining("hundredths")
+    }
+
+    @Test
+    fun `a beneficiary with a blank name is rejected alone`() {
+        val account = special("CZ0100000000000000000009", "10", firm)
+        val good = SpecialRegimeShare(identity(ben, "8001010009"), account.accountId, BigDecimal("1"))
+        val bad =
+            SpecialRegimeShare(
+                identity(UUID(0L, 7L), "8001010010").copy(name = " "),
+                account.accountId,
+                BigDecimal("1"),
+            )
+        val batch = render(listOf(account), listOf(firm), listOf(good, bad))
+        assertThat(batch.rejected.map { it.partyId }).containsExactly(UUID(0L, 7L))
+        assertThat(lines(batch, "DII").map { it.split(",")[1] }).containsExactly("8001010009")
+        assertThat(lines(batch, "DIW").single().split(",")[6]).isEqualTo("000000001")
+    }
 }
