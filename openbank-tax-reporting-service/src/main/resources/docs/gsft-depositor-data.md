@@ -45,8 +45,24 @@ listed in `GsftBatch.rejected` with the reason, for correction and a follow-up t
 `T_PAYMENT` counts only persons actually rendered. Only batch-level errors (bank code, batch
 number, rate day) fail the render.
 
+## Transport (`GsftPackage`)
+
+Annex 1.1.6, verified: the batch is compressed with ZIP into **one** file, the batch files added
+without paths, and the archive is encrypted with asymmetric **PGP** (another method of at least
+equal strength only by agreement with GSFT).
+
+- the ZIP is deterministic (decree file order DIW, DIC, DIA, DIL, DII; entry time fixed at the ZIP
+  epoch), so its SHA-256 can be attested before encryption;
+- PGP is binary OpenPGP, AES-256 with an integrity packet, to the first encryption key of GSFT's
+  ASCII-armoured public key ring;
+- the key comes from configuration (`openbank.gsft.pgp-public-key`, `Optional`) and is never
+  committed; tests generate a throwaway key per run.
+
+**Unverified:** the archive name (`GSFT<bank code><branch>.<batch>.zip` here), the symmetric
+cipher and binary-vs-armoured output are not stated by the annex — confirm with GSFT before the
+first live delivery.
+
 ## Not yet here
 
-Data sourcing from the account register and balances, the institutional file (`DII`), ZIP/PGP
-transport, four-eyes attestation and filing, the scheduled TEST dry run, and temporarily high
+Data sourcing from the account register and balances, the institutional file (`DII`), four-eyes attestation and filing, the scheduled TEST dry run, and temporarily high
 balances are follow-ups on #15356.
