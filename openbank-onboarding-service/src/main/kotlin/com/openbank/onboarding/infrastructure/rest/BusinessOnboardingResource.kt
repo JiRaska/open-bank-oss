@@ -4,6 +4,7 @@
 
 package com.openbank.onboarding.infrastructure.rest
 
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.onboarding.application.port.out.BusinessOnboardingRepository
 import com.openbank.onboarding.domain.model.BusinessFunnelStage
@@ -46,6 +47,7 @@ class BusinessOnboardingResource {
     @GET
     @Path("/cases")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.business.case.list")
     suspend fun listCases(
         @QueryParam("page") @DefaultValue("0") page: Int,
         @QueryParam("size") @DefaultValue("20") size: Int,
@@ -79,6 +81,7 @@ class BusinessOnboardingResource {
     @GET
     @Path("/cases/{caseId}")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.business.case.read")
     suspend fun getCase(@PathParam("caseId") caseId: UUID): Response = repository.findByCaseId(caseId)
         ?.let { Response.ok(it).build() }
         ?: Response.status(Response.Status.NOT_FOUND)
@@ -97,6 +100,7 @@ class BusinessOnboardingResource {
     @GET
     @Path("/funnel")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN, Roles.KYC, Roles.COMPLIANCE)
+    @Authorize(action = "onboarding.business.funnel.read")
     suspend fun funnel(): Response {
         val counts = BusinessFunnelStage.entries.associate { it.name to repository.countByStage(it) }
         return Response.ok(mapOf("total" to repository.countAll(), "stages" to counts)).build()
