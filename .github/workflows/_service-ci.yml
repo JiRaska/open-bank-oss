@@ -678,6 +678,9 @@ jobs:
           cache-disabled: true
           gradle-home-cache-strict-match: false
 
+      - name: Install pinned Gradle distribution
+        run: bash -e "$SERVICE_CI_HELPERS/install-gradle-distribution.sh"
+
       # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
       #
       # setup-gradle refuses to touch a Gradle User Home that already exists ("Gradle User
