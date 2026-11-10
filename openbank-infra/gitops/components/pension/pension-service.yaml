@@ -52,7 +52,7 @@ spec:
         - name: pension-service
           # First build lands via auto-deploy on the merge that adds openbank-pension-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-728fa44f@sha256:622b85988005704eb79c707e621e7b265e1d1d9bca32c1abeddd35a8c45b0d71
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-service:sandbox-e8e3b10a@sha256:6e92cf01195e33ac891aa3469dc510a0a95f6ae5a390261181fc5ad2613be129
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8171 and management 8090 — both read off the service's own application.yaml
