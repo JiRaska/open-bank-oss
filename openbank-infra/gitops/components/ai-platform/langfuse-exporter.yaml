@@ -55,23 +55,36 @@ data:
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
     UNATTRIBUTED = "unattributed"
+    ROW_LIMIT = 1000
 
 
-    def build_query(agent_dimension, now):
-        """Today and yesterday (UTC), per day, per model and agent dimension."""
-        start = (now - dt.timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        return {
-            "view": "observations",
-            "metrics": [
-                {"measure": "totalTokens", "aggregation": "sum"},
-                {"measure": "totalCost", "aggregation": "sum"},
-            ],
-            "dimensions": [{"field": "providedModelName"}, {"field": agent_dimension}],
-            "filters": [],
-            "timeDimension": {"granularity": "day"},
-            "fromTimestamp": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "toTimestamp": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        }
+    def build_queries(agent_dimension, now):
+        """-> [(day, query)] for yesterday and today (UTC), per model and agent dimension.
+
+        One query per day instead of `timeDimension`: Langfuse 4.x answers 400 to a time-series
+        query over a high-cardinality dimension such as userId ("cannot be used with
+        timeDimension"), and requires `config.row_limit` plus a desc `orderBy` on a measure for
+        it at all. Measured against langfuse-web 4.50.0, 2026-11-10.
+        """
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday = today - dt.timedelta(days=1)
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        out = []
+        for start, end in ((yesterday, today), (today, now)):
+            out.append((start.strftime("%Y-%m-%d"), {
+                "view": "observations",
+                "metrics": [
+                    {"measure": "totalTokens", "aggregation": "sum"},
+                    {"measure": "totalCost", "aggregation": "sum"},
+                ],
+                "dimensions": [{"field": "providedModelName"}, {"field": agent_dimension}],
+                "filters": [],
+                "orderBy": [{"field": "sum_totalTokens", "direction": "desc"}],
+                "config": {"row_limit": ROW_LIMIT},
+                "fromTimestamp": start.strftime(fmt),
+                "toTimestamp": end.strftime(fmt),
+            }))
+        return out
 
 
     def _num(value):
@@ -82,15 +95,18 @@ data:
         return number if number == number and number >= 0 else 0.0
 
 
-    def parse_rows(payload, agent_dimension):
+    def parse_rows(payload, agent_dimension, day, out=None):
         """-> {(agent, model, day): (tokens, cost)}. Rows without a model are skipped."""
-        out = {}
-        for row in payload.get("data", []):
+        out = {} if out is None else out
+        rows = payload.get("data", [])
+        if len(rows) >= ROW_LIMIT:
+            # A truncated result would under-count silently; fail the poll instead.
+            raise ValueError(f"metrics result hit row_limit {ROW_LIMIT}")
+        for row in rows:
             model = row.get("providedModelName")
             if not model:
                 continue
             agent = row.get(agent_dimension) or UNATTRIBUTED
-            day = str(row.get("time_dimension", ""))[:10]
             key = (str(agent), str(model), day)
             tokens, cost = out.get(key, (0.0, 0.0))
             out[key] = (tokens + _num(row.get("sum_totalTokens")), cost + _num(row.get("sum_totalCost")))
@@ -185,10 +201,13 @@ data:
     def poll_once(state, fetcher, agent_dimension, now=None):
         now = now or dt.datetime.now(dt.timezone.utc)
         try:
-            payload = fetcher(build_query(agent_dimension, now))
-            if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-                raise ValueError("unexpected metrics payload shape")
-            state.apply(parse_rows(payload, agent_dimension), now.timestamp())
+            rows = {}
+            for day, query in build_queries(agent_dimension, now):
+                payload = fetcher(query)
+                if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                    raise ValueError("unexpected metrics payload shape")
+                parse_rows(payload, agent_dimension, day, rows)
+            state.apply(rows, now.timestamp())
         except Exception as exc:  # noqa: BLE001 - any failure is "Langfuse unavailable"
             print(f"langfuse-exporter: poll failed: {type(exc).__name__}: {exc}", flush=True)
             state.fail()
@@ -250,6 +269,10 @@ spec:
       app.kubernetes.io/name: langfuse-exporter
   template:
     metadata:
+      annotations:
+        # The script is a ConfigMap mounted as a volume; a changed script does not restart the
+        # pod on its own. Bump this (sha256 prefix of langfuse_exporter.py) with every script edit.
+        openbank.tech/script-checksum: "85ff3bdb93731eed"
       labels:
         app.kubernetes.io/name: langfuse-exporter
         app.kubernetes.io/part-of: ai-platform
