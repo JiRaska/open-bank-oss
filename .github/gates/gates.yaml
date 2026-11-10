@@ -90,6 +90,19 @@ gates:
     run: |
       python3 .github/scripts/check-capacity-profile.py --root .
 
+  - id: gh-call-counter-passthrough
+    name: "gh call counter shim is transparent and logs no values (#15483)"
+    group: lint
+    mode: enforced
+    rationale: "The counting gh shim sits first on PATH in CI gates, Services CI changes, CodeQL and the merge-train build. A shim that altered arguments, output or exit code, or that died on an unwritable log, would break every job it measures; one that logged field values would publish them in step summaries. Its self-test proves each of those is caught."
+    review_after: "2027-05-10"
+    budget_seconds: 30
+    # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter).
+    min_subjects: 8
+    selftest_exempt: "is-a-test-suite - the run: IS the shim's own --self-test, which fails when the passthrough is sabotaged"
+    run: |
+      bash .github/scripts/gh-call-counter.sh --self-test
+
   - id: verification-metadata-additive-check
     name: "Dependabot metadata refresh accepts only additive verification metadata (#15355)"
     group: supplychain
