@@ -8,8 +8,6 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
@@ -29,12 +27,9 @@ import java.util.concurrent.TimeUnit
  * refused on the generic posting API, and allocation and attestation serialise on the year-close row.
  */
 @QuarkusTest
-@QuarkusTestResource(value = PostgresTestResource::class, restrictToAnnotatedClass = true)
-@TestProfile(YearEndResultAllocationConcurrencyIT.IsolatedPersistenceProfile::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class YearEndResultAllocationConcurrencyIT {
-
-    class IsolatedPersistenceProfile : QuarkusTestProfile
 
     @Inject lateinit var dataSource: AgroalDataSource
 
@@ -45,7 +40,9 @@ class YearEndResultAllocationConcurrencyIT {
         val body = journal(ATOMIC_YEAR, "12", "year-end-result:$ATOMIC_YEAR:forged:0")
         given().contentType("application/json").body(body).`when`().post("/api/v1/journals").then().statusCode(400)
         assertThat(
-            count("SELECT count(*) FROM ledger_idempotency WHERE idempotency_key LIKE 'year-end-result:%'"),
+            count(
+                "SELECT count(*) FROM ledger_idempotency WHERE idempotency_key LIKE 'year-end-result:$ATOMIC_YEAR:%'",
+            ),
         ).isZero()
     }
 
@@ -229,9 +226,9 @@ class YearEndResultAllocationConcurrencyIT {
     }
 
     private companion object {
-        const val ATOMIC_YEAR = 2018
-        const val RACE_YEAR = 2016
-        const val ATTEST_YEAR = 2015
+        const val ATOMIC_YEAR = 2008
+        const val RACE_YEAR = 2007
+        const val ATTEST_YEAR = 2006
         const val CASH = "a0000000-0000-0000-0000-000000000001"
         const val INCOME = "a0000000-0000-0000-0000-000000004100"
     }

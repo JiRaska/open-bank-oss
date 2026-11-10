@@ -7,8 +7,6 @@ package com.openbank.ledger.integration
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.junit.QuarkusTestProfile
-import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.restassured.path.json.JsonPath
@@ -26,12 +24,9 @@ import java.util.UUID
  * posting is allocated as a residual only, and the allocated year can then be drafted and attested.
  */
 @QuarkusTest
-@QuarkusTestResource(value = PostgresTestResource::class, restrictToAnnotatedClass = true)
-@TestProfile(YearEndResultAllocationIT.IsolatedPersistenceProfile::class)
+@QuarkusTestResource(PostgresTestResource::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class YearEndResultAllocationIT {
-
-    class IsolatedPersistenceProfile : QuarkusTestProfile
 
     @Test
     @Order(1)
@@ -170,7 +165,7 @@ class YearEndResultAllocationIT {
     }
 
     private companion object {
-        const val YEAR = 2019
+        const val YEAR = 2009
         const val CASH = "a0000000-0000-0000-0000-000000000001"
         const val INCOME = "a0000000-0000-0000-0000-000000004100"
         const val EXPENSE = "a0000000-0000-0000-0000-000000005100"
