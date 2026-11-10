@@ -30,6 +30,74 @@ that day:
 - claims paid at the cover limit are counted (`cappedClaims`), and every exclusion count is
   carried into the rendered batch alongside the files.
 
+## Temporarily high balances (`TemporarilyHighBalances`)
+
+Zákon č. 21/1992 Sb. (consolidated text in force from 11 Jan 2026), transposing Directive
+2014/49/EU art. 6(2):
+
+- **§ 41e odst. 3** — a *natural person* who documents the conditions of § 41ea and applies
+  under § 41eb odst. 1 receives increased compensation (*zvýšená náhrada*) for the documented
+  part of the claim, up to the amount by which the claim exceeds the § 41e odst. 2 limit and at
+  most the equivalent of **EUR 100 000**, converted at the ČNB rate of the relevant day.
+- **§ 41ea odst. 1** — the relevant day must fall **within 3 months** of crediting, i.e. the
+  moment the amount first came to the depositor's disposal, of a payment of one of the
+  categories a)–j): sale of residential real estate; settlement of community property on
+  divorce; insurance benefit for injury, illness, disability or death; inheritance; one-off
+  pension settlement; severance; insurance benefit for harm from a crime; damages or surrender
+  of unjust enrichment from a crime; compensation for custody, sentence or protective measure;
+  monetary assistance to a crime victim. Each has prescribed evidence.
+- **§ 41ea odst. 2–3** — the period does not run while the depositor may not dispose of the
+  amount (incapacity, notarial or attorney escrow).
+- **§ 41eb** — the depositor applies to GSFT on its form within 2 months of the relevant day;
+  GSFT decides and pays within 4 months; the bank cooperates on GSFT's request.
+- **§ 41e odst. 6** — no increased compensation for § 41f deposits, except notarial, attorney or
+  real-estate-agent escrow.
+
+The increase is therefore **claim-based**: the 3-day delivery carries standard compensation
+only, and the annex of vyhláška č. 71/2011 Sb. has no field for it in DIC or DIA. The assembly
+takes optional `QualifyingCredit`s (party, account, amount, crediting day, event category,
+evidence reference, and `appliedOn`, the day the depositor applied to GSFT or null) and records the result on
+`InsuredClaim.increasedCompensationCzk` and on `temporarilyHighClaims`,
+`temporarilyHighCompensationCzk` and `refusedQualifyingCredits` (carried into `GsftBatch`).
+It never changes `compensationCzk`, `T_PAYMENT` or any rendered file.
+
+Each credit's `amount` is the whole payment to the account. It is converted to CZK and
+apportioned to the filing holder by account share, with the same split as the balance. Per
+(holder, account), the credited part is bounded by that holder's share of the account balance on
+the relevant day, so a credit since spent is not paid out of older savings. The party total is
+then capped by (balance − standard limit) and by the EUR 100 000 equivalent.
+
+A credit is refused and counted in `refusedQualifyingCredits` — never paid, and never failing the
+assembly — when:
+
+- the depositor did not apply, or applied after relevant day + 2 months (§ 41eb odst. 1);
+- the depositor is not flagged as a natural person (`Depositor.naturalPerson`, default false);
+- the account is synthetic, overdrawn, or not a live account of that depositor;
+- the relevant day is outside the window (crediting day .. crediting day + 3 months, inclusive);
+- the same holder files the same payment twice — same account, crediting day, amount and
+  evidence reference;
+- nothing of it remains attributable after the bounds above.
+
+`refusedQualifyingCredits` therefore counts every supplied credit that contributes nothing. With
+no credits the result is unchanged.
+
+**Unresolved**
+
+- The end of the 3-month window is computed as `creditedOn.plusMonths(3)`, inclusive; this
+  reading of "ve lhůtě 3 měsíců ode dne připsání" is not confirmed against GSFT practice.
+- The attribution rule is unverified: bounding a credit by the holder's balance share on that
+  account (rather than tracing the credited money) is a conservative reading of "tu část
+  pohledávky z vkladu, u které doložila splnění podmínek" (§ 41e odst. 3), not confirmed by GSFT.
+- The 2-month deadline is checked against `appliedOn` supplied by the caller; GSFT, not the bank,
+  receives the application, so the bank only learns that date on GSFT's request.
+- The suspension of § 41ea odst. 2–3 is not computed: the caller must supply as `creditedOn`
+  the day the depositor could first dispose of the amount.
+- § 41e odst. 6 (no increase for § 41f deposits other than escrow) is not enforced here,
+  because this assembly has no § 41f classification; such credits must not be supplied.
+- Whether the evidence suffices is GSFT's decision (§ 41eb odst. 2); the evidence reference is
+  carried, not judged.
+- What the bank must hand over on GSFT's request (§ 41eb odst. 3) has no prescribed format.
+
 ## Batch renderer (`GsftBatchRenderer.render`)
 
 Renders the assembly into the decree's files: `DIW` (header with counts, `T_PAYMENT` and the
@@ -80,5 +148,4 @@ No owning service models special-regime accounts or their beneficiaries today, s
 ## Not yet here
 
 Data sourcing from the account register and balances, ZIP/PGP
-transport, four-eyes attestation and filing, the scheduled TEST dry run, and temporarily high
-balances are follow-ups on #15356.
+transport, four-eyes attestation and filing, and the scheduled TEST dry run are follow-ups on #15356.

@@ -135,6 +135,9 @@ data class GsftBatch(
     val droppedOverdrawnAccounts: Int = 0,
     val excludedDepositors: Map<ExclusionReason, Int> = emptyMap(),
     val cappedClaims: Int = 0,
+    val temporarilyHighClaims: Int = 0,
+    val temporarilyHighCompensationCzk: BigDecimal = BigDecimal.ZERO,
+    val refusedQualifyingCredits: Int = 0,
 )
 
 private class PersonRecords(val dic: List<String>, val dia: List<List<String>>, val dil: List<List<String>>)
@@ -224,6 +227,9 @@ object GsftBatchRenderer {
             droppedOverdrawnAccounts = assembly.droppedOverdrawnAccounts,
             excludedDepositors = assembly.excludedDepositors,
             cappedClaims = assembly.cappedClaims,
+            temporarilyHighClaims = assembly.temporarilyHighClaims,
+            temporarilyHighCompensationCzk = assembly.temporarilyHighCompensationCzk,
+            refusedQualifyingCredits = assembly.refusedQualifyingCredits,
         )
     }
 
