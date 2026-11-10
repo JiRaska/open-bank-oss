@@ -119,7 +119,13 @@ jobs:
           fi
           python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
           "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
-          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          # REST quota exhaustion falls back to GraphQL (fetch-open-prs.py). The guard keeps the old
+          # listing for a base that predates the script; drop it once main has carried it a while.
+          if [ -f .github/scripts/fetch-open-prs.py ]; then
+            python3 .github/scripts/fetch-open-prs.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/agent-prs.json"
+          else
+            gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          fi
           "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
       - if: steps.admit.outputs.proceed == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
