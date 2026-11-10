@@ -98,7 +98,7 @@ describe('GET /api/finops/ai-costs without data', () => {
     const body = await (await GET()).json()
 
     expect(body.available).toBe(true)
-    expect(body.agents).toHaveLength(5)
+    expect(body.agents).toHaveLength(6)
     expect(body.agents.every((agent: { costLast24hUsd: number }) => agent.costLast24hUsd === 2.5)).toBe(true)
     expect(body.agents.every((agent: { costLast7dUsd: number | null }) => agent.costLast7dUsd === null)).toBe(true)
     expect(body.totalCostLast7dUsd).toBeNull()
@@ -128,8 +128,8 @@ describe('GET /api/finops/ai-costs without data', () => {
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
 
-    expect(body.agents).toHaveLength(5)
-    expect(body.totalCostLast7dUsd).toBe(12.5)
+    expect(body.agents).toHaveLength(6)
+    expect(body.totalCostLast7dUsd).toBe(15)
     expect(body.agents.every((agent: { tokensLast24h: number | null; costLast24hUsd: number | null; burnRate: string | null }) =>
       agent.tokensLast24h === null && agent.costLast24hUsd === null && agent.burnRate === null)).toBe(true)
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
@@ -144,7 +144,7 @@ describe('GET /api/finops/ai-costs without data', () => {
     const { GET } = await import('@/app/api/finops/ai-costs/route')
     const body = await (await GET()).json()
 
-    expect(body.totalCostLast7dUsd).toBe(12.5)
+    expect(body.totalCostLast7dUsd).toBe(15)
     expect(body.agents.every((agent: { costLast24hUsd: number | null; burnRate: string | null }) =>
       agent.costLast24hUsd === null && agent.burnRate === null)).toBe(true)
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
@@ -196,10 +196,23 @@ describe('GET /api/finops/ai-costs without data', () => {
     const body = await (await GET()).json()
 
     expect(body.available).toBe(true)
-    expect(body.agents).toHaveLength(4)
+    expect(body.agents).toHaveLength(5)
     expect(body.agents.every((agent: { costLast7dUsd: number }) => agent.costLast7dUsd === 2.5)).toBe(true)
     expect(body.totalCostLast7dUsd).toBeNull()
     expect(body.coverage.lastSuccessfulLoad).toBeNull()
   })
 
+  it('reports available when only the unattributed bucket carries spend', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const query = decodeURIComponent(String(url))
+      if (query.includes('langfuse_up')) return promResult('1')
+      return query.includes('agent_id="unattributed"') ? promResult('0.02') : emptyResult
+    }))
+    const { GET } = await import('@/app/api/finops/ai-costs/route')
+    const body = await (await GET()).json()
+
+    expect(body.available).toBe(true)
+    expect(body.agents.map((agent: { agentId: string }) => agent.agentId)).toEqual(['unattributed'])
+    expect(body.totalCostLast7dUsd).toBeNull()
+  })
 })

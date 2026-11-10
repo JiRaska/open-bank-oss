@@ -112,7 +112,11 @@ export async function GET() {
   }
 
   // Live path: query Langfuse bridge metrics
-  const agentIds = ['copilot', 'holmes-rca', 'finops-agent', 'fleet-monitor', 'code-review']
+  // 'unattributed' is the exporter's bucket for LLM calls that carry no Langfuse userId. Today
+  // that is every call through LiteLLM (no caller sets `user`), so without it a working bridge
+  // with real spend renders as "not deployed". It stays a first-class row, never folded into an
+  // agent, so attribution can be measured as it is added.
+  const agentIds = ['copilot', 'holmes-rca', 'finops-agent', 'fleet-monitor', 'code-review', 'unattributed']
   const completeMeasurements: boolean[] = []
   const agentResults = await Promise.all(agentIds.map(async (agentId): Promise<AgentCostEntry | null> => {
     const [tokens24h, cost24h, cost7d, cost30d] = await Promise.all([
