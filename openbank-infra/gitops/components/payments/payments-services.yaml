@@ -1243,7 +1243,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-9a5db8f7@sha256:dde203167ca7ba44083552319fbe200f1823bc3764dbf8d9434f389b1d887861
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-bb30693b@sha256:a8d191ab279a561c2c7c59fe510923c901456e8d958a1ead7ea967d6ac788dfd
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1582,7 +1582,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-2e500af2@sha256:1afe49bc86ab2a992464cf81a94116ad29b317819f2c7a67be3b83204188f26d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-bb30693b@sha256:2e416a4d8383820567a8e8be404717c965b571bf48ceef6104cb184083040bbb
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1913,7 +1913,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-45b874d6@sha256:1fd4d559e598bb3579976eaf6ec2a677cfcf0693b77d555632278aa8392b656b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-bb30693b@sha256:0a653ce4ec53eec6f7a685edac67806bf60c43f946d4d781ed88b291d3b3a86f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2228,7 +2228,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-2e500af2@sha256:0a0d7c24827292c42e85cc82d067dfa1330b2e1dd33845d5373be1ac80f3dc51
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-bb30693b@sha256:37a1547aa56f87882f9a1467d6f95c1d6d79f83a8ed9c29711dbdb5fbd326588
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2795,7 +2795,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-45b874d6@sha256:c5c605b8ee6fa5aaad77c7b62aeae0e978ad0dfaae0174bad1323fa5ad6bfa18
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-bb30693b@sha256:9be13d050b5feaa7881b6a0de39f7e335fb2def65ad59f5d7107504cc02de4f4
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3142,7 +3142,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-2e500af2@sha256:3bfc9c61fc626318a4df277741a5792649629402f7a2daeed331ec49042b29b8
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-bb30693b@sha256:7b56071e0decb781f51526bd985228533272be55a5f58e06408dca68a3f6f000
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3261,7 +3261,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-722359e2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-bb30693b@sha256:14378182499bfd33f05a05eee2cc1a4185489590cc9e1fe92865aa40fe7a2445
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3589,7 +3589,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-45b874d6@sha256:5d46370ffee9882df065927984586a45673b66b452742f18362b8472498f5814
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-bb30693b@sha256:144634115369187393a959fb138981e17d97b581f2e8a1549e168092eb3ae037
 
           imagePullPolicy: IfNotPresent
           ports:
