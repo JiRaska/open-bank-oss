@@ -175,7 +175,7 @@ class StatutoryReturnService(
         catalogues.catalogues().flatMap { catalogue ->
             // A working-day feed with no start of its own is not live yet: nothing is overdue.
             val catalogueStart = entities.startFor(catalogue) ?: return@flatMap emptyList()
-            catalogue.returns.flatMap { definition ->
+            catalogue.returns.filterNot { it.onDemand }.flatMap { definition ->
                 expectedPeriods(definition, catalogueStart, today).flatMap { period ->
                     entities.forScope(definition.scope)
                         .filter { entityId -> Key(catalogue.id, definition.code, entityId, period) !in existing }
