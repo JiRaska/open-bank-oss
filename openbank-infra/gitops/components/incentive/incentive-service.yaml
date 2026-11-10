@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: incentive-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-incentive-service:sandbox-9e2a55ce@sha256:4cd433287c8606bccf334d1ff10557aad830d393231a18445b871d0bfcf356e5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-incentive-service:sandbox-34f5e12f@sha256:60b709d31a3dde529520d3d8640bf1f1158e8e9163fe8e05c4f52e3d2e2ae9f6
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

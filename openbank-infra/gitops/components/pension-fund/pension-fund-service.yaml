@@ -47,7 +47,7 @@ spec:
         - name: pension-fund-service
           # Placeholder pin (fleet-attestation-placeholders.txt): no image is built until the merge
           # that adds openbank-pension-fund-service to ALL_SERVICES; auto-deploy rewrites it.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-c88d910e@sha256:ebccfb54a5fce659f31ff87162876ef1cd6936d7cea4eae8d0066ef156d14290
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pension-fund-service:sandbox-34f5e12f@sha256:f8ac4c07bd9c31ca3f313c3e1307381f21b0532335bd29c2e66829a00bd3ad7e
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8162 and management 8090 — both read off the service's own application.yaml
