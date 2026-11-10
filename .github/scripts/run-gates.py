@@ -612,6 +612,13 @@ def _selftest_trace_file(gate, is_pr: bool):
     # produce warnings: the PR that introduces an undeclared read is where it is caught.
     if mode not in ("1", "true", "require") or not gate.get("selftest_inputs") or not is_pr:
         return None, ""
+    # A self-test that drives Gradle (a daemon plus forked JVMs) does not finish under `strace -f`
+    # within the shard timeout: test-provenance-cache's ran >10 min traced and the shard was
+    # cancelled at 15 min, twice. Such a gate opts out with `selftest_trace: false` and a reason;
+    # its declaration is then reviewed by hand. The skip is printed, never silent.
+    if gate.get("selftest_trace") is False:
+        return None, (f"[run-gates] {gate['id']}: self-test NOT traced (selftest_trace: false); "
+                      f"undeclared inputs are not checked for this gate.\n")
     ok, why = sit.strace_usable()
     if not ok:
         return None, (f"[run-gates] {sit.TRACE_ENV}={mode} but the self-test cannot be traced: "
@@ -1857,6 +1864,29 @@ def self_test():
             if not want_refused and rc != 0:
                 bad.append(f"load() rejected a valid selftest_inputs ({body!r})")
         man.write_text(SELF_TEST_MANIFEST)   # restore for anything after this block
+
+        # selftest_trace: false opts a gate out of tracing (Gradle under strace outran the shard
+        # timeout); without it the same gate must still be traced, or the opt-out is the default.
+        saved_mode = os.environ.get(sit.TRACE_ENV)
+        saved_usable = sit.strace_usable
+        try:
+            os.environ[sit.TRACE_ENV] = "require"
+            sit.strace_usable = lambda: (True, "")
+            g = {"id": "t", "selftest_inputs": ["x"]}
+            traced, _ = _selftest_trace_file(g, True)
+            optout, note = _selftest_trace_file({**g, "selftest_trace": False}, True)
+            if not traced:
+                bad.append("a gate without selftest_trace: false was not traced on a PR")
+            else:
+                os.unlink(traced)
+            if optout or "NOT traced" not in note:
+                bad.append("selftest_trace: false was traced, or skipped without saying so")
+        finally:
+            sit.strace_usable = saved_usable
+            if saved_mode is None:
+                os.environ.pop(sit.TRACE_ENV, None)
+            else:
+                os.environ[sit.TRACE_ENV] = saved_mode
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

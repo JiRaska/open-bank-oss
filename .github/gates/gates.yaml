@@ -7924,6 +7924,9 @@ gates:
     selftest: |
       python3 .github/scripts/check-test-provenance-cache.py --self-test
       ./gradlew -p build-logic test --build-cache --console=plain --max-workers=2
+    # Gradle under `strace -f` outran the 15-min shard timeout (traced >10 min); inputs below are
+    # declared by hand and cover the whole build-logic + wrapper surface the self-test reads.
+    selftest_trace: false
     selftest_inputs:
       - build-logic/
       - openbank-libs/gradle/libs.versions.toml
