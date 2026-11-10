@@ -117,12 +117,19 @@ object GsftPackage {
      * The key to encrypt to, from ONE ASCII-armoured public key block (as GSFT publishes it): an
      * encryption-capable key that is not revoked, not expired at [now] and, where its self-signature
      * carries key flags, flagged for encryption. A subkey is preferred over the primary, the newest
-     * over older ones. Anything else — no such key, a parse failure — is a [TaxValidationException].
+     * over older ones. A key ring whose PRIMARY key is revoked or expired is rejected as a whole:
+     * its subkeys are bound by that primary, so they are no longer valid either. Anything else — no
+     * such key, a parse failure — is a [TaxValidationException].
      */
     fun readPublicKey(armored: String, now: Instant = Instant.now()): PGPPublicKey {
         val rings = parseRings(armored)
-        val keys = rings.keyRings.asSequence().flatMap { it.publicKeys.asSequence() }.toList()
-        requireValid(keys.isNotEmpty()) { "the configured GSFT public key block holds no key" }
+        requireValid(rings.keyRings.asSequence().any { it.publicKeys.hasNext() }) {
+            "the configured GSFT public key block holds no key"
+        }
+        val keys = rings.keyRings.asSequence()
+            .filter { live(it.publicKey, now) }
+            .flatMap { it.publicKeys.asSequence() }
+            .toList()
         return keys.filter { usable(it, now) }
             .sortedWith(compareBy<PGPPublicKey> { it.isMasterKey }.thenByDescending { it.creationTime })
             .firstOrNull()
@@ -143,10 +150,15 @@ object GsftPackage {
         TaxValidationException("the configured GSFT public key is not a readable key block: ${cause.message}")
             .apply { initCause(cause) }
 
-    private fun usable(key: PGPPublicKey, now: Instant): Boolean {
-        if (!key.isEncryptionKey || key.hasRevocation()) return false
+    /** Not revoked and not expired at [now]. */
+    private fun live(key: PGPPublicKey, now: Instant): Boolean {
+        if (key.hasRevocation()) return false
         val validSeconds = key.validSeconds
-        if (validSeconds > 0 && !key.creationTime.toInstant().plusSeconds(validSeconds).isAfter(now)) return false
+        return validSeconds <= 0 || key.creationTime.toInstant().plusSeconds(validSeconds).isAfter(now)
+    }
+
+    private fun usable(key: PGPPublicKey, now: Instant): Boolean {
+        if (!key.isEncryptionKey || !live(key, now)) return false
         val flags = key.signatures.asSequence().mapNotNull { it.hashedSubPackets?.keyFlags }.filter { it != 0 }.toList()
         return flags.isEmpty() || flags.any { it and ENCRYPT_FLAGS != 0 }
     }
