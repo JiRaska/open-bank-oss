@@ -9,6 +9,7 @@ import com.openbank.tax.application.port.out.GsftDataGap
 import com.openbank.tax.application.port.out.GsftSnapshot
 import com.openbank.tax.application.port.out.GsftSnapshotPort
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
+import com.openbank.tax.domain.ceu.RegisterFact
 import com.openbank.tax.domain.gsft.DepositAccount
 import com.openbank.tax.domain.gsft.Depositor
 import com.openbank.tax.domain.gsft.Holding
@@ -25,8 +26,9 @@ import java.time.LocalDate
  *  - the deposit roster from account-service's `GET /api/v1/accounts/active` (cursor-walked to the
  *    end, the same client and rego grant as CRS/FATCA), keeping only deposit account types;
  *  - principal from balance-service's `GET /api/v1/balances/{accountId}/{currency}?asOf=D`;
- *  - the ADR-0252 synthetic taint from this service's own CEÚ party classification, as known now
- *    (a taint is never downgraded, so the latest knowledge is the safe one).
+ *  - the ADR-0252 synthetic taint from this service's own CEÚ register, as known now: a SYNTHETIC
+ *    holder party OR a tainted account opening (a taint is never downgraded, so the latest
+ *    knowledge is the safe one).
  *
  * Everything else has no verified source for this caller and is reported in
  * [GsftSnapshot.gaps] instead of being filled in: no identity is fabricated, accrued interest is
@@ -42,18 +44,27 @@ class GsftSnapshotAdapter(
 
     override suspend fun snapshot(relevantDay: LocalDate): GsftSnapshot {
         val roster = walkRoster().filter { isDeposit(it) }
-        val synthetic = register.syntheticParties(clock.instant())
+        val knownAt = clock.instant()
+        val synthetic = register.syntheticParties(knownAt)
+        // CEÚ's account-level taint: an opening event that was itself tainted (CeuRegister.fold). Read up
+        // to TODAY, not D: the roster is the current one, so an account opened after D is in it too.
+        val syntheticAccounts = register.factsUpTo(LocalDate.ofInstant(knownAt, clock.zone), knownAt)
+            .filter { it is RegisterFact.AccountOpened && it.synthetic }
+            .map { it.accountId }
+            .toSet()
         val accounts = roster.map { account ->
             DepositAccount(
                 accountId = account.id,
                 iban = account.accountNumber,
                 currency = account.currencyCode,
-                principal = sources.bookedBalance(account.id, account.currencyCode, relevantDay),
+                // A 404 FAILS here (unlike CRS/FATCA's zero); asOf may be the current balance
+                // (GsftDataGap.BALANCE_AS_OF_UNVERIFIED).
+                principal = sources.bookedBalanceStrict(account.id, account.currencyCode, relevantDay),
                 // UNSOURCED (GsftDataGap.ACCRUED_INTEREST): understates every claim by the interest.
                 accruedInterest = BigDecimal.ZERO,
                 // UNSOURCED (GsftDataGap.JOINT_HOLDERS): account-service knows one party per account.
                 holders = listOf(Holding(account.partyId, null)),
-                synthetic = account.partyId in synthetic,
+                synthetic = account.partyId in synthetic || account.id in syntheticAccounts,
             )
         }
         val depositors = roster.map { it.partyId }.distinct().map { partyId ->

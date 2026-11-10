@@ -60,8 +60,8 @@ Sourced:
 |---|---|
 | Account roster | account-service `GET /api/v1/accounts/active` (cursor-walked to the end). Only `accountType` CURRENT, SAVINGS and TERM_DEPOSIT are deposits; NOSTRO and GL_* are dropped; any other or missing type fails the snapshot. |
 | IBAN, currency, holder party | the same roster row (`accountNumber`, `currencyCode`, `partyId`) |
-| Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; 404 reads as zero, any other failure fails the snapshot) |
-| Synthetic taint (ADR-0252) | this service's own CEÚ party classification (`CeuRegisterRepository.syntheticParties`), as known at snapshot time. An account is synthetic when its holder is. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
+| Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; ANY failure, including 404, fails the snapshot — unlike CRS/FATCA, a missing row is never read as zero) |
+| Synthetic taint (ADR-0252) | this service's own CEÚ register, as known at snapshot time: an account is synthetic when its holder party is classified SYNTHETIC (`syntheticParties`) or its opening event was tainted (`factsUpTo`, `AccountOpened.synthetic`), the same rule as the CEÚ fold. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
 
 Unresolved gaps (each a `GsftDataGap`):
 
@@ -78,6 +78,10 @@ Unresolved gaps (each a `GsftDataGap`):
   person; nothing is fabricated from the holder name.
 - **EXCLUSION_CATEGORY — unresolved.** No read exposes the § 41b exclusion category. `exclusion` is
   null meaning "not known", and the gap is flagged.
+- **BALANCE_AS_OF_UNVERIFIED — unresolved.** balance-service computes `asOf` as the current
+  booked balance minus projected movements after D; when its projection holds no later events
+  (projection disabled or not yet populated) it silently answers the CURRENT balance, and nothing on
+  the wire distinguishes the two. The principal is therefore not proven to be D's.
 - **FX_RATES — unresolved.** fx-service serves ČNB fixings for a day through
   `GET /api/v1/fx/rates/{base}/{quote}/history?source=CNB&from=&to=` (the latest-only
   `GET /api/v1/fx/cnb/rates/{base}` cannot answer for day D), but its policy admits no rule for this

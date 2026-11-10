@@ -63,6 +63,12 @@ enum class GsftDataGap {
     /** No § 41b exclusion-category read exists: every depositor reads as eligible. */
     EXCLUSION_CATEGORY,
 
+    /**
+     * balance-service rewinds the current balance by projected movements after D; with no projection
+     * events it silently answers the CURRENT balance, indistinguishable on the wire.
+     */
+    BALANCE_AS_OF_UNVERIFIED,
+
     /** No ČNB-fixing-for-a-day read is admitted for this caller. */
     FX_RATES,
 }
