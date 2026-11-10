@@ -22,6 +22,7 @@ describe('sidebar navigation accessibility', () => {
   it.each([
     ['/iaops/flaky-test-hunter', 'Flaky Tests'],
     ['/temporal/flow', 'Workflow Flow'],
+    ['/loyalty/game', 'Lion Quest — game management'],
   ])('marks only the deepest matching route current for %s', (pathname, currentLabel) => {
     usePathname.mockReturnValue(pathname)
 

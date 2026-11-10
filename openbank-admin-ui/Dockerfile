@@ -109,6 +109,7 @@ RUN set -e; \
     cp -R /repo/openbank-libs/governance /governance-src/openbank-libs/governance; \
     test -s /governance-src/openbank-libs/governance/rules.yaml; \
     test -s /governance-src/openbank-libs/governance/card-capabilities.yaml; \
+    test -s /governance-src/openbank-libs/governance/regulatory-obligations.yaml; \
     cp -R /repo/openbank-libs/governance/prompts/. /governance-bundle/prompts/ 2>/dev/null || true; \
     echo "── governance bundle: $(ls /governance-bundle/adr | wc -l) ADR(s), $(ls /governance-bundle/threat-models | wc -l) threat model(s), $(ls /governance-bundle/agents | wc -l) agent charter(s), $(find /governance-bundle/prompts -name '*.md' | wc -l) prompt(s) ──"; \
     find /governance-bundle -name '*.md' | sort
@@ -252,6 +253,11 @@ ENV NEXT_PUBLIC_BUILD_VERSION=$BUILD_VERSION \
 COPY --from=deps /app/node_modules ./node_modules
 COPY openbank-admin-ui/ ./
 COPY .github/gates/gates.yaml /.github/gates/gates.yaml
+# The SDLC guide derives a bounded configuration snapshot inside the image build.
+COPY .github/workflows/merge-train.yml .github/workflows/auto-deploy.yml /.github/workflows/
+COPY openbank-infra/gitops/components/ledger/ledger-service.yaml /openbank-infra/gitops/components/ledger/ledger-service.yaml
+COPY openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml /openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml
+COPY openbank-infra/gitops/apps/ledger.yaml /openbank-infra/gitops/apps/ledger.yaml
 # platform-versions.json is PARSED by `npm run build` (prebuild) from the infra sources of truth, staged
 # at their repo-relative paths, so the UI can never show a hand-typed Kubernetes/EKS/Loki/Postgres version.
 COPY --from=platform-versions-collector /pv-src/ /
@@ -321,6 +327,11 @@ COPY --from=build /app/public ./public
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/gate-catalog.json ./gate-catalog.json
+# Baked by prebuild:image from openbank-libs/governance/*.yaml; read at runtime from cwd (/app)
+# by src/lib/cards/capabilities.ts and src/lib/regulatory/obligations.ts. Without these the
+# /cards and /regulatory pages render an empty register in the image only.
+COPY --from=build /app/card-capabilities.json ./card-capabilities.json
+COPY --from=build /app/regulatory-obligations.json ./regulatory-obligations.json
 # OpenTelemetry preload. Both files sit at the package root rather than inside the standalone
 # bundle because Next.js only emits application code there; a --require preload is invisible to
 # its file tracing. See otel-bootstrap.cjs for why the SDK cannot be started from

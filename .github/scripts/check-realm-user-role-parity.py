@@ -44,6 +44,14 @@
 #                   applied; anything relying on it degrades to whatever else the caller has.
 #   undeclared-user a live user no template describes. It works today and a cold-started realm
 #                   loses it — the same disaster-recovery landmine the sibling names.
+#                   In a SELF-REGISTRATION realm (customers) this is the product working, and the
+#                   report carries only a COUNT, never the usernames. A published list of
+#                   "users the template does not declare" reads as a to-do list for anyone
+#                   reconciling the report to zero, and deleting a customer identity is a one-way
+#                   door: its id is the join key for passkeys and party links, so it can only be
+#                   restored from a database backup, never recreated. The names are also personal
+#                   data that do not belong in a ConfigMap. The remedy for an undeclared user is
+#                   always to DECLARE it (or leave it); this report never asks for a deletion.
 #
 # Keycloak's own built-ins are excluded by name; they are server-managed, appear in no template,
 # and a detector that always fires is a detector nobody reads.
@@ -168,6 +176,13 @@ def load_live(spec: str) -> tuple:
     return realm, users
 
 
+REMEDIATION = (
+    "Fix drift by changing the realm TEMPLATE or by adding/removing ROLE MAPPINGS. Never delete "
+    "a user to make this report clean: a Keycloak user id is a join key (passkeys, party links) "
+    "and a deleted user can only be restored from a database backup."
+)
+
+
 def compare(realm: str, declared: dict, live: dict, open_registration: bool = False) -> tuple:
     """Return (findings, report-fragment) for one realm. Pure — the whole point of the split."""
     builtins = keycloak_builtins(realm)
@@ -253,8 +268,11 @@ def compare(realm: str, declared: dict, live: dict, open_registration: bool = Fa
         "status": "checked",
         "overGranted": over,
         "underGranted": under,
-        "undeclaredUsers": sorted(undeclared),
+        # Self-registration realm: count only (see the undeclared-user note in the header).
+        "undeclaredUsers": [] if open_registration else sorted(undeclared),
+        "undeclaredUserCount": len(undeclared),
         "undeclaredUsersReported": not open_registration,
+        "remediation": REMEDIATION,
         "uncheckedPrincipals": sorted(unchecked),
         "privilegedServiceAccountDrift": privileged,
     }
@@ -341,7 +359,11 @@ def self_test() -> int:
     # 5b. the same user in a SELF-REGISTRATION realm is the product working, not drift
     f, r = compare("openbank-customers", {}, {"someone@x": {"ROLE_CUSTOMER"}}, open_registration=True)
     check("self-registered user must not be a finding", f == [])
-    check("…but is still counted", r["undeclaredUsers"] == ["someone@x"])
+    check("…but is still counted", r["undeclaredUserCount"] == 1)
+    check("…and its username is never published", r["undeclaredUsers"] == []
+          and "someone@x" not in json.dumps(r))
+    check("every realm report says deletion is never the remedy",
+          "Never delete" in r["remediation"])
 
     # 5c. a declared service account missing from a snapshot that never captured any is UNCHECKED,
     #     not a defect — a detector must not invent findings out of its own blind spot

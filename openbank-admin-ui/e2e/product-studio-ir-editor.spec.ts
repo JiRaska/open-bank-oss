@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { expect, test } from '@playwright/test'
+import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator } from './helpers/auth'
 
 // ADR-0352 phase 5b: the Studio IR editor lints through the catalog and saves the DRAFT only.
@@ -48,12 +49,15 @@ test('Studio IR editor: server lint gates the DRAFT save, and nothing publishes 
   })
 
   await page.goto('/product-studio')
+  await waitForSettledShell(page)
   await page.locator('#studio-offering').selectOption(OFFERING.id)
   const editor = page.getByTestId('product-ir-editor')
   await expect(editor).toBeVisible()
   const save = editor.getByRole('button', { name: /Uložit IR do draftu|Save IR to draft/ })
   const lint = editor.getByRole('button', { name: /Zkontrolovat IR|Lint IR/ })
   const doc = editor.getByRole('textbox', { name: /IR dokument|IR document/ })
+
+  await expect(doc).toHaveValue(/"productCode"\s*:\s*"SAV"/)
 
   // Negative first: an IR the server refuses shows its problems and cannot be saved.
   await doc.fill(JSON.stringify({ ...IR, bogus: true }))
@@ -96,6 +100,7 @@ test('an IR save does not silently discard unsaved Expert edits', async ({ page 
   })
 
   await page.goto('/product-studio')
+  await waitForSettledShell(page)
   await page.locator('#studio-offering').selectOption(OFFERING.id)
   await page.getByText(/Expert režim|Expert mode/).click()
   const expert = page.locator('details textarea').first()

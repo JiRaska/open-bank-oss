@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 const root = resolve(__dirname, '..')
 const page = readFileSync(resolve(root, 'app/lending/compliance-packs/page.tsx'), 'utf8')
 const roles = readFileSync(resolve(root, 'lib/auth/roles.ts'), 'utf8')
-const sidebar = readFileSync(resolve(root, 'components/layout/Sidebar.tsx'), 'utf8')
+const sidebar = readFileSync(resolve(root, 'lib/navigation/catalog.ts'), 'utf8')
 
 describe('lending compliance-pack UI permissions mirror service roles', () => {
   it('keeps active-pack reads available to the service-authorized lending roles', () => {

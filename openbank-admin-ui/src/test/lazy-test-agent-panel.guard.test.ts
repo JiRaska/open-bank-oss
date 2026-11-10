@@ -19,7 +19,8 @@ describe('lazy Test Intelligence agent panel', () => {
 
   it('keeps the evidence page on the deferred seam', () => {
     expect(page).toContain("import { LazyTestAgentPanel } from '@/components/testing/LazyTestAgentPanel'")
-    expect(page).toContain('{report && <LazyTestAgentPanel />}')
+    expect(page).toContain('<LazyTestAgentPanel /></>}')
+    expect(page).toContain('attention={(openComponent, openRuns) =>')
     expect(page).not.toContain("from '@/components/testing/TestAgentPanel'")
   })
 })

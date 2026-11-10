@@ -12,7 +12,7 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { hasPermission } from '@/lib/auth/roles'
 import {
-  ArrowRight, Bot, CircleAlert, Coins, FileText, Gift, Landmark, Leaf, Scale, Search, ShieldCheck, Sparkles,
+  ArrowRight, Bot, CircleAlert, Coins, FileText, Gamepad2, Gift, Landmark, Leaf, Scale, Search, ShieldCheck, Sparkles,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -118,7 +118,6 @@ export default function LoyaltyPage() {
           <div>
             <span className={styles.eyebrow}>{t('Marketing · věrnostní program', 'Marketing · loyalty programme')}</span>
             <h1><Leaf aria-hidden="true" /> {t('Lípa', 'Lípa')}</h1>
-            {hasPermission(session?.user?.roles ?? [], 'game:view') && <Link href="/loyalty/game">{t('Lví stezka — správa kol', 'Lion Quest — chapters')}</Link>}
             <p>{t('Zdravé finance. Dlouhodobý vztah.', 'Healthy finances. Lasting relationships.')}</p>
             <span>{t('Interní pracoviště pro přehled odměn, podporu klientů a přípravu změn programu.', 'Your internal workspace for rewards, customer support and programme change planning.')}</span>
           </div>
@@ -135,6 +134,13 @@ export default function LoyaltyPage() {
               {tabLabel[id]}
             </button>
           ))}
+          {hasPermission(session?.user?.roles ?? [], 'game:view') && (
+            <Link href="/loyalty/game" className={styles.primaryButton}>
+              <Gamepad2 aria-hidden="true" size={18} />
+              {t('Lví stezka — správa hry', 'Lion Quest — game management')}
+              <ArrowRight aria-hidden="true" size={16} />
+            </Link>
+          )}
         </nav>
 
         {tab === 'overview' && (

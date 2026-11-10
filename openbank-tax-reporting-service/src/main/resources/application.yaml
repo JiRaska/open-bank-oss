@@ -140,6 +140,47 @@ mp:
         topic: openbank.interest.accrual.event
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0367 / #15292: the CEÚ register projection (CeuRegisterEventConsumer). Same consumer
+      # group as above (quarkus.application.name), same DLQ shape; the topic CRs and ACLs are in
+      # openbank-infra/gitops/components/{kafka,tax-reporting}/. auto.offset.reset stays `latest`:
+      # the register's starting state is an explicit initial full load, never a topic replay whose
+      # completeness depends on retention.
+      ceu-account-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-account-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.accounts.account.created
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-delegation-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-delegation-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.delegation.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      ceu-party-events-in:
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.tax-reporting.ceu-party-events-in
+          key:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
+        connector: smallrye-kafka
+        topic: openbank.party.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 opa:
   url: "${OPA_URL:http://localhost:8181}"
@@ -152,6 +193,12 @@ authz:
 openbank:
   api:
     version: "1"
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (build-time property).
+  # Without it no PolicyDecisionPoint bean exists, AuthorizeInterceptor fails closed and every
+  # @Authorize endpoint answers 503 "policy decision point not configured".
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
@@ -218,3 +265,9 @@ openbank:
       # is not an option.
       treasury-service:
         tls-configuration-name: internal-authority
+  openbank:
+    statutory-returns:
+      # ADR-0336: the first period the pension company reports for, declared by the owner. Deadline
+      # obligations are derived from here; returns before it are not expected. Deployed profile only:
+      # tests choose their own (StatutoryReturnDeadlineUnconfiguredIT relies on it being unset).
+      reporting-start: 2025-01-01

@@ -226,7 +226,7 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
   const ingressSrc = readFileSync(
     '../openbank-infra/gitops/components/admin-ui/tools-gate.yaml', 'utf8',
   )
-  const sidebarSrc = readFileSync('src/components/layout/Sidebar.tsx', 'utf8')
+  const sidebarSrc = readFileSync('src/lib/navigation/catalog.ts', 'utf8')
 
   // Every ?tool= the Ingress asks about must exist in the route's allow-list.
   // Case-INSENSITIVE character class on purpose. With `[a-z0-9-]+` a typo'd

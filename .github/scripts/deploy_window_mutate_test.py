@@ -202,6 +202,7 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
             event = root / "event.json"
             event.write_text('{}')
             pr = pull()
+            pr["base"]["sha"] = "c" * 40  # historical REST base, live main stays BASE
             # Admin UI follows main's producer/contract checks; this fixture proves wiring,
             # not GitOps image ancestry. The service verifier has separate failure cases.
             pr["head"]["ref"] = "chore/admin-ui-deploy-example"
@@ -238,6 +239,16 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         self.assertTrue(any(args[1:3] == (str(mutator.SCRIPTS / "deploy-window.py"), "verify")
                             for args, _ in source_calls))
 
+    def test_creation_base_can_differ_from_unchanged_live_main(self):
+        # REST keeps the PR creation base; live-main reads and source verification
+        # independently prove that the selected current main has not moved.
+        pr = pull()
+        pr["base"]["sha"] = "c" * 40
+        error, calls, _ = self.execute(first=pr)
+        self.assertIsNone(error)
+        self.assertEqual(sum(args[:2] == ("api", "graphql") for args in calls), 1)
+        self.assertEqual(sum(args[-1].endswith("/git/ref/heads/main") for args in calls), 2)
+
     def test_clean_and_pending_statuses_only_arm(self):
         # Neither a green PR nor a pending one gives the flusher authority to merge.
         for status in ("clean", "blocked", "unstable", "unknown"):
@@ -269,7 +280,7 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
         self.assert_refused(main=[BASE, "c" * 40])
 
     def test_changed_head_base_identity_or_repository_refused(self):
-        for field, value in (("head", "c" * 40), ("base", "c" * 40), ("node_id", "PR_other")):
+        for field, value in (("head", "c" * 40), ("base", "invalid"), ("node_id", "PR_other")):
             with self.subTest(field=field):
                 pr = pull()
                 if field == "node_id":
@@ -277,6 +288,12 @@ if sys.argv[1] == 'rev-parse': print(os.environ['SELECTED_MAIN'])
                 else:
                     pr[field]["sha"] = value
                 self.assert_refused(latest=pr)
+        pr = pull()
+        pr["base"]["ref"] = "other"
+        self.assert_refused(latest=pr)
+        pr = pull()
+        pr["base"]["repo"]["full_name"] = "fork/open-bank"
+        self.assert_refused(latest=pr)
         pr = pull()
         pr["head"]["repo"]["full_name"] = "fork/open-bank"
         self.assert_refused(latest=pr)

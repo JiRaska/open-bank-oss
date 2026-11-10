@@ -4,6 +4,7 @@
 
 'use client'
 
+import { useViewFilters } from '@/lib/navigation/viewFilters'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeftRight, Search, SearchX, RefreshCw, Filter, X } from 'lucide-react'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
@@ -82,6 +83,21 @@ export default function TransactionsPage() {
   const [dateTo, setDateTo]               = useState('')
   const [amountMin, setAmountMin]         = useState('')
   const [amountMax, setAmountMax]         = useState('')
+
+  useViewFilters({
+    accountId: [accountId, setAccountId],
+    iban: [iban, setIban],
+    bban: [bban, setBban],
+    referenceNumber: [referenceNumber, setReferenceNumber],
+    endToEndId: [endToEndId, setEndToEndId],
+    counterparty: [counterparty, setCounterparty],
+    status: [status, setStatus],
+    type: [type, setType],
+    dateFrom: [dateFrom, setDateFrom],
+    dateTo: [dateTo, setDateTo],
+    amountMin: [amountMin, setAmountMin],
+    amountMax: [amountMax, setAmountMax],
+  })
 
   const hasFilters = [iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].some(Boolean)
   // Kept from this branch (the empty states read it), minus `channel`: #9410 removed that filter

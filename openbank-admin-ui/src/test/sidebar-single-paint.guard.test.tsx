@@ -22,7 +22,7 @@ const { usePathname, useSessionState, useInitialRolesState } = vi.hoisted(() => 
 
 vi.mock('next/navigation', () => ({ usePathname }))
 vi.mock('next-auth/react', () => ({ useSession: () => useSessionState() }))
-vi.mock('@/components/auth/InitialRolesContext', () => ({ useInitialRoles: () => useInitialRolesState() }))
+vi.mock('@/components/auth/InitialRolesContext', () => ({ useInitialRoles: () => useInitialRolesState(), useInitialOperatorId: () => 'single-paint-operator' }))
 vi.mock('@/lib/i18n/LanguageContext', () => ({
   useLanguage: () => ({ language: 'en', t: (_cs: string, en: string) => en }),
 }))
@@ -45,7 +45,7 @@ describe('sidebar single-paint nav', () => {
   it('keeps the same nav when the client session resolves with identical roles', () => {
     usePathname.mockReturnValue('/system/tests')
     useInitialRolesState.mockReturnValue(['ROLE_OPERATOR'])
-    useSessionState.mockReturnValue({ data: { user: { roles: ['ROLE_OPERATOR'] } }, status: 'authenticated' })
+    useSessionState.mockReturnValue({ data: { user: { id: 'single-paint-operator', roles: ['ROLE_OPERATOR'] } }, status: 'authenticated' })
 
     const { container } = render(<Sidebar />)
     const nav = container.querySelector('nav')

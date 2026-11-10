@@ -9,9 +9,11 @@ describe('system code quality accessibility', () => {
     const source = read()
     expect(source).toContain('type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading}')
     expect(source).toContain('<RefreshCw size={13} aria-hidden="true"')
-    expect(source).toContain('role="group" aria-label={t(\'Přepínač pohledů kvality kódu\', \'Code quality view\')}')
-    expect(source).toContain('type="button"\n            aria-pressed={tab === tabDef.id}')
-    expect(source).toContain('<span aria-hidden="true">{tabDef.icon}</span>')
+    expect(source).toContain("t('Podrobný pohled na důkazy', 'Detailed evidence view')")
+    expect(source).toContain('<select className="form-select" value={tab}')
+    const workspace = fs.readFileSync(path.join(process.cwd(), 'src/components/testing/workspace/TestIntelligenceWorkspace.tsx'), 'utf8')
+    expect(workspace).toContain("aria-current={selection.section === section ? 'page' : undefined}")
+    expect(workspace).toContain('type="button"')
   })
 
   it('does not encode synthetic journey coverage by colour alone', () => {

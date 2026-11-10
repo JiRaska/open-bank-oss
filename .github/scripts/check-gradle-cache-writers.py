@@ -81,6 +81,10 @@ SETUP_JAVA = "actions/setup-java"
 # OS+architecture on Linux-X64, which today is fleet-lint. Everything else restores.
 # ---------------------------------------------------------------------------
 DECLARED: dict[str, tuple[str, str]] = {
+    "communication-image-only.yml::build-push": (
+        "read-only",
+        "Manual communication evidence build restores existing dependencies without adding a cache writer.",
+    ),
     "fleet-lint.yml::fleet-lint": (
         "conditional",
         "THE designated Linux-X64 writer. Runs `testClasses detekt ktlintCheck` fleet-wide "
@@ -176,6 +180,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Consumer; restores fleet-lint's home. Builds one service's quarkusBuild to smoke "
         "the ONNX serving path inside the shipped image (#3354), on a schedule rather than "
         "per-push, so it neither needs nor should store a per-run entry.",
+    ),
+    "pension-accounting-e2e.yml::e2e": (
+        "read-only",
+        "Path-scoped packaged accounting proof restores fleet-lint's Gradle home to build "
+        "ledger and pension-fund fast jars; it never introduces another cache writer.",
     ),
     "pitest.yml::pitest": (
         "read-only",

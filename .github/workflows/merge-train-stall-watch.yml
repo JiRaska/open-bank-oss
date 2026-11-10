@@ -1,0 +1,50 @@
+# -----------------------------------------------------------------------------
+# Merge-train THROUGHPUT stall watch.
+#
+# The train can run on schedule and merge nothing for hours: on 2026-11-09 a red main (twice)
+# and one checklist refusal shared by every strict PR each held the queue until a human noticed.
+# The deadman only proves runs happen; merge-train's STUCK issue only covers PRs told of a
+# conflict or refusal. This keeps ONE issue (label merge-train-stall) naming the systemic cause.
+# Decision logic and its self-test live in .github/scripts/merge-train-stall-watch.py.
+#
+# Triggered by the train's own completed runs, not a cron (crons were ~3% delivered here).
+# Exit 1 from the script means the watch COULD NOT LOOK — never read it as "no stall".
+# -----------------------------------------------------------------------------
+name: Merge train stall watch
+
+on:
+  workflow_run:
+    workflows: ["Merge train"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merge-train-stall-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    permissions:
+      contents: read
+      actions: read
+      issues: write  # creates/updates/closes the one stall issue
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Self-test the watch
+        run: python3 .github/scripts/merge-train-stall-watch.py --self-test
+
+      - name: Evaluate and keep the stall issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The triggering run's settle log when it succeeded; otherwise the newest successful one.
+          TRAIN_RUN_ID: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.id || '' }}
+        run: python3 .github/scripts/merge-train-stall-watch.py --write

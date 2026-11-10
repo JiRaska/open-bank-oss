@@ -211,7 +211,7 @@ jobs:
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -219,9 +219,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           # This job is always GitHub-hosted now — the Actions cache is network-internal
           # and free there, and there is no in-cluster remote build cache to fall back on
@@ -357,14 +357,9 @@ jobs:
       # never reached this step — never "this service has no consumer pacts", which is instead
       # expressed by an empty `pact-count` in the manifest (see the download step).
       - name: Collect consumer pacts for hand-off to the contract job
-        run: |
-          set -euo pipefail
-          mkdir -p pact-handoff
-          shopt -s nullglob
-          files=(pacts/${{ inputs.service }}-*.json)
-          for f in "${files[@]}"; do cp "$f" pact-handoff/; done
-          echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
-          echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: bash -e "$SERVICE_CI_HELPERS/consumer-pact-handoff.sh" collect
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -504,6 +499,7 @@ jobs:
       contents: read
       id-token: write
     env:
+      EXPECTED_CONSUMER_SOURCE: ${{ inputs.ref || github.sha }}
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
       # in-cluster ARC runner reaches it over cluster DNS.
       PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
@@ -650,7 +646,7 @@ jobs:
           ECR_LOGIN_OUTCOME: ${{ steps.ecr_login.outcome }}
         run: bash -e "$SERVICE_CI_HELPERS/prewarm-images.sh"
 
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         with:
           distribution: temurin
           java-version: |
@@ -668,9 +664,9 @@ jobs:
           AWS_DEFAULT_REGION: eu-north-1
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        uses: gradle/actions/wrapper-validation@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
 
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
         with:
           # Self-hosted: disable the GitHub Actions cache for Gradle home (FinOps — see the
           # original single-job file's history for the NAT-cost analysis) and rely on the
@@ -714,6 +710,8 @@ jobs:
           path: pact-handoff
 
       - name: Stage handed-off consumer pacts into pacts/
+        env:
+          SERVICE: ${{ inputs.service }}
         run: bash -e "$SERVICE_CI_HELPERS/stage-handed-off-pacts.sh"
 
       # Publish this service's CONSUMER pacts to the broker (ADR-0092). Reads the files staged

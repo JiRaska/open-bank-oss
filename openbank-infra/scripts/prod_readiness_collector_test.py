@@ -26,6 +26,11 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import io
+import json
+from contextlib import redirect_stdout, redirect_stderr
+from datetime import datetime, timezone
+from unittest.mock import patch
 import sys
 import tempfile
 import unittest
@@ -200,6 +205,47 @@ class CollectorScorerTest(unittest.TestCase):
         })
         self.assertEqual(payload["services"][0]["gate"], "NO-GO")
         self.assertEqual(payload["services"][0]["scores"]["C1"], 2)
+
+    def test_cli_batch_reuses_workload_reads_but_next_run_has_fresh_facts_and_provenance(self):
+        import gitops_facts
+
+        self.write_rules(("openbank-widget-service",))
+        self.governance()
+        self.kt("infrastructure/Metrics.kt", "import io.micrometer.core.instrument.MeterRegistry\n")
+        out = self.root / "snapshot.json"
+        workload = self.comp / "widget-service.yaml"
+        instants = [datetime(2026, 1, 15, 12, 0, second, tzinfo=timezone.utc) for second in (0, 1)]
+        with patch.object(self.mod, "datetime") as clock:
+            clock.now.side_effect = instants
+            for index, (namespace, score) in enumerate((("payments", 2), ("widgets", 1))):
+                self.deploy(ns=namespace)
+                source = ("a" if index == 0 else "b") * 40  # fixture identities, not build evidence
+                argv = ["collector", "widget", "widget", "--today", "2026-01-15",
+                        "--source-sha", source, "--json", str(out)]
+                with patch.object(sys, "argv", argv), redirect_stdout(io.StringIO()), \
+                        redirect_stderr(io.StringIO()), patch.object(gitops_facts, "read", wraps=gitops_facts.read) as reads:
+                    self.mod.main()
+                self.assertEqual(sum(call.args[0] == workload for call in reads.call_args_list), 1,
+                                 "one immutable batch must read each workload once")
+                payload = json.loads(out.read_text())
+                self.assertEqual(payload["source_sha"], source)
+                self.assertEqual(payload["collected_at"], instants[index].isoformat().replace("+00:00", "Z"))
+                self.assertEqual(payload["scope"]["service_count"], 2)
+                self.assertEqual([row["scores"]["C8"] for row in payload["services"]], [score, score])
+
+    def test_cli_failure_does_not_leave_a_frozen_tree_for_later_callers(self):
+        import gitops_facts
+
+        self.deploy(ns="payments")
+        def fail_after_read(*_args):
+            self.assertEqual(gitops_facts.service_namespace("widget", self.mod.GITOPS), "payments")
+            raise RuntimeError("fixture scoring failure")
+        with patch.object(sys, "argv", ["collector", "widget"]), \
+                patch.object(self.mod, "collect", side_effect=fail_after_read):
+            with self.assertRaisesRegex(RuntimeError, "fixture scoring failure"):
+                self.mod.main()
+        self.deploy(ns="widgets")
+        self.assertEqual(gitops_facts.service_namespace("widget", self.mod.GITOPS), "widgets")
 
     def test_a_money_path_service_needs_three_on_the_critical_cells(self):
         """The stricter gate is what the six leniently-scored services were missing."""

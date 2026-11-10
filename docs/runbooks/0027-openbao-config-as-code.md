@@ -41,7 +41,7 @@ VAULT_TOKEN="$(bao print token)" tofu init
 VAULT_TOKEN="$(bao print token)" tofu apply
 ```
 
-Revoke the bootstrap token afterwards if it was a one-off root token.
+Do not revoke the root token: it is the fallback when the SSO break-glass role is unusable.
 
 ## Every later change
 
@@ -105,6 +105,85 @@ running the old binary until someone deletes it. That deletion is the controlled
 `gitops/apps/openbao.yaml`. Without that stanza the server exits at startup with
 `unknown wrapper: awskms` and stays sealed. The plugin binary is downloaded once into
 `/openbao/data/plugins` on the PVC. Every later start reuses that copy.
+
+## Product IR signing (ADR-0352)
+
+Product-catalog signs an IR-bearing revision's canonical hash with the OpenBao Transit key
+`product-ir-publish`; billing and interest verify it. This stack owns the key and the access to
+it (`product-ir-signing.tf`):
+
+| Object | Kind | Grant |
+|---|---|---|
+| `transit/keys/product-ir-publish` | Transit key, `ed25519` | not exportable, no plaintext backup, deletion disallowed |
+| `product-ir-sign` | policy | `update` on `transit/sign/product-ir-publish` only |
+| `product-ir-verify` | policy | `update` on `transit/verify/product-ir-publish` only |
+| `product-catalog-ir-signing` | kubernetes-auth role | SA `accounts/product-catalog` → `product-ir-sign`, 10 min |
+| `billing-ir-verify` | kubernetes-auth role | SA `billing/billing-service` → `product-ir-verify`, 10 min |
+| `interest-ir-verify` | kubernetes-auth role | SA `interest/interest-service` → `product-ir-verify`, 10 min |
+
+No workload can create, rotate, export or delete the key. A consumer cannot sign.
+
+**Transport.** The services' OpenBao client refuses `http://`, so they talk to the second,
+TLS-only listener on **8203** (`gitops/apps/openbao.yaml`). Its certificate is
+`gitops/components/openbao/openbao-tls.yaml`, issued by the fleet's private ClusterIssuer
+`openbank-ca`. Each service trusts only that CA for this leg
+(`*_OPENBAO_CA_FILE` → a mounted `ca.crt`). Listener 8200 stays plaintext and unchanged for ESO
+and the rotation jobs. The StatefulSet is `OnDelete`: the new listener exists only after the
+controlled pod restart (see *Upgrading the server*). Confirm the certificate is issued first:
+`kubectl -n vault get certificate openbao-tls` must be `Ready=True`. Otherwise the restarted pod
+waits in `ContainerCreating` for the Secret.
+
+**The `transit` mount is not in the stack.** It may already exist, and a mount managed here would
+be destroyed with the stack. Enable it idempotently before the plan:
+`bao secrets enable -path=transit transit` (an "already in use" answer is fine).
+
+**First apply is bootstrap-class.** The change widens `openbao-config-admin.hcl` with these named
+paths (two policies, the key and its config, three kubernetes-auth roles). The admin token cannot
+widen itself, so apply this one with the privileged identity, as in *Bootstrap*. Later changes to
+these objects go through the normal SSO flow.
+
+**Verify by effect** (privileged or admin token):
+
+```sh
+bao write -field=signature transit/sign/product-ir-publish input="$(printf probe | base64)"  # vault:v1:...
+bao write -field=valid transit/verify/product-ir-publish input="$(printf probe | base64)" signature=<above>  # true
+bao token capabilities "$(bao token create -policy=product-ir-verify -ttl=2m -field=token)" transit/sign/product-ir-publish  # deny
+bao token capabilities transit/sign/product-ir-publish   # as openbao-config-admin: deny
+curl --cacert <openbank-ca ca.crt> --resolve openbao.vault.svc:8203:127.0.0.1 https://openbao.vault.svc:8203/v1/sys/health  # via port-forward 8203
+```
+
+**Turning signing on is a separate change.** This provisioning leaves every mode at `disabled`.
+Then set `CATALOG_IR_SIGNING_MODE=openbao` first and the consumers'
+`*_PRODUCT_SHADOW_VERIFICATION_MODE=openbao` after, each in its own PR.
+
+## Break-glass and root-token rotation
+
+**Break-glass through SSO.** The `openbao-breakglass` OIDC role is root-equivalent and is
+the first thing to reach for when a bootstrap-class change is needed:
+
+```sh
+bao login -method=oidc role=openbao-breakglass     # MFA required; 15-minute token
+VAULT_TOKEN="$(bao print token)" tofu apply
+```
+
+It is bound to one Keycloak subject and requires `acr=mfa` on both sides.
+
+**Root-token rotation.** OpenBao 2.5.3+ disables the unauthenticated generate-root endpoints
+by default, so generating a root token from the recovery key takes these steps (the in-cluster port-forward
+tunnels through the API server, so the key never crosses the pod network in cleartext):
+
+1. A gitops PR sets `disable_unauthed_generate_root_endpoints = false` on the 8200 listener;
+   restart `openbao-0` after it syncs.
+2. Generate a root token with the recovery key from the break-glass secret
+   (`bao operator generate-root -init`, then `-nonce=<nonce> -` with the key on STDIN, never as
+   an argument or environment variable, then `-decode`). Store the token in the break-glass
+   secret; do not revoke it.
+3. Before closing the window: `bao login -method=oidc role=openbao-breakglass` and a policy read
+   must succeed, so the SSO path is proven while a fallback still exists.
+4. A second PR sets the option back to `true`; restart again, then check that
+   `GET /v1/sys/generate-root/attempt` is refused (an unknown option would be ignored silently).
+
+A script must never revoke the root token. Revoke only the short-lived tokens it minted itself.
 
 ## What this does NOT cover
 

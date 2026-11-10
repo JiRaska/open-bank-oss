@@ -397,7 +397,10 @@ test('role deletion explains impact and recovers from a failed request before re
     return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(roles) })
   })
 
-  await page.goto('/delegations')
+  await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/delegation-role-presets' && response.request().method() === 'GET'),
+    page.goto('/delegations'),
+  ])
   await expect(page.getByRole('heading', { name: ROLE_PRESET.name, exact: true })).toBeVisible()
   const deleteTrigger = page.getByRole('button', { name: `Smazat ${ROLE_PRESET.name}` })
   await deleteTrigger.click()

@@ -27,6 +27,24 @@ quote API, removes the old implementation stub and executes the unchanged consum
 the actual current library. This checks linkage in addition to snapshot drift. ABI checks do not
 establish REST, event, serialization or behavioral compatibility; those need their own contracts.
 
+## Repository conformance time
+
+`OutboxRepositoryV2ConformanceIT` checks the persisted retry schedule, including status,
+attempt count, jitter bounds, backlog and claim eligibility. Database calls can outlast a
+short retry delay, so a test must control claim time to distinguish before-deadline rejection
+from a row that has legitimately become due.
+
+The optional protected `setClaimTime` callback fixes the repository's claim clock at the
+requested instant for the backoff case. Its default is `null`: existing adopters require no
+override and retain their wall-clock behavior. An opted-in adopter checks rejection immediately
+before the stored deadline and claimability at that deadline without changing the retry policy.
+
+AML enables its alternative clock only in the repository-conformance test profile and restores
+real time after each case. Its additional integration regression lets real time pass beyond the
+maximum first-retry delay while holding claim time before the deadline, then advances claim time
+past it. The checks exercise the real repository and database; they do not replace the eligibility
+predicate with a mock. Keep clock control confined to the test profile when adopting the callback.
+
 ## XML output construction and isolation
 
 ISO builders create output DOMs through `SecureXml.newDocument()`. A private, lazily initialized,

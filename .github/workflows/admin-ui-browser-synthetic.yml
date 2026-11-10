@@ -15,6 +15,7 @@ on:
       - 'openbank-admin-ui/scripts/admin-login-synthetic.mjs'
       - 'openbank-admin-ui/scripts/admin-operator-journey.mjs'
       - '.github/workflows/admin-ui-browser-synthetic.yml'
+      - '.github/scripts/bounded-retry.sh'
       # The security-excellence probe below must run when its page changes, not just
       # when the probe script does.
       - 'openbank-admin-ui/src/app/security/**'
@@ -39,8 +40,10 @@ jobs:
           cache-dependency-path: openbank-admin-ui/package-lock.json
       - working-directory: openbank-admin-ui
         run: npm ci --no-audit --no-fund
+      # Bounded: p99 69 s, max 146 s across 278 installs. A slow apt mirror otherwise eats the
+      # whole job budget and the run ends "cancelled" with the browser check never attempted.
       - working-directory: openbank-admin-ui
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        run: ../.github/scripts/bounded-retry.sh 200 2 npx playwright install --with-deps ${{ matrix.browser }}
       - id: synthetic
         working-directory: openbank-admin-ui
         env:
@@ -86,8 +89,10 @@ jobs:
           cache-dependency-path: openbank-admin-ui/package-lock.json
       - working-directory: openbank-admin-ui
         run: npm ci --no-audit --no-fund
+      # Bounded: p99 69 s, max 146 s across 278 installs. A slow apt mirror otherwise eats the
+      # whole job budget and the run ends "cancelled" with the browser check never attempted.
       - working-directory: openbank-admin-ui
-        run: npx playwright install --with-deps chromium
+        run: ../.github/scripts/bounded-retry.sh 200 2 npx playwright install --with-deps chromium
       - id: synthetic
         working-directory: openbank-admin-ui
         env:
@@ -135,8 +140,10 @@ jobs:
           cache-dependency-path: openbank-admin-ui/package-lock.json
       - working-directory: openbank-admin-ui
         run: npm ci --no-audit --no-fund
+      # Bounded: p99 69 s, max 146 s across 278 installs. A slow apt mirror otherwise eats the
+      # whole job budget and the run ends "cancelled" with the browser check never attempted.
       - working-directory: openbank-admin-ui
-        run: npx playwright install --with-deps ${{ matrix.browser }}
+        run: ../.github/scripts/bounded-retry.sh 200 2 npx playwright install --with-deps ${{ matrix.browser }}
       - id: synthetic
         working-directory: openbank-admin-ui
         env:

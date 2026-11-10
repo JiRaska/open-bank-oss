@@ -26,6 +26,16 @@ class RecordingCloseEvidence : TreasuryCloseEvidencePort {
     /** When true, [markStarted] fails: the marker could not be written. */
     var markerDown = false
 
+    private val obligations = linkedMapOf<LocalDate, Set<String>>()
+    override fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>> {
+        scheduled.forEach { (day, jobs) -> obligations[day] = obligations[day].orEmpty() + jobs }
+        return Uni.createFrom().item(obligations.filterKeys { it in from..to })
+    }
+
     override fun markStarted(businessDate: LocalDate, job: String, at: Instant): Uni<Unit> {
         if (markerDown) return Uni.createFrom().failure(IllegalStateException("db down"))
         inFlight[businessDate to job] = at

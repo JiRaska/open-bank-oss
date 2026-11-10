@@ -36,6 +36,7 @@ import {
 } from 'lucide-react'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { GateCatalogExplorer } from '@/components/devops/GateCatalogExplorer'
+import { SdlcGuideNav } from '@/components/devops/SdlcGuideNav'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import styles from './page.module.css'
 
@@ -119,7 +120,7 @@ const STAGES: Stage[] = [
     systemCs: 'Testy, ktlint, detekt, coverage ratchet, kontrakty, manifesty, Gitleaks, CodeQL a Trivy.',
     systemEn: 'Tests, ktlint, detekt, coverage ratchet, contracts, manifests, Gitleaks, CodeQL, and Trivy.',
     proofCs: 'Zelené a auditovatelné kontroly', proofEn: 'Green, auditable checks',
-    href: '/security', linkCs: 'Zobrazit bezpečnostní důkazy', linkEn: 'View security evidence', accent: '#2dd4bf', icon: ShieldCheck,
+    href: '/devops/sdlc/ci', linkCs: 'Nastoupit do vláčků CI', linkEn: 'Board the CI trains', accent: '#2dd4bf', icon: ShieldCheck,
     actions: {
       developer: { cs: 'Opravuji příčinu selhání, neobcházím gate a nesnižuji coverage.', en: 'I fix the cause of a failure, never bypass a gate, and never lower coverage.' },
       devops: { cs: 'Udržuji fail-closed brány, izolované runnery a čitelnou stopu každého verdiktu.', en: 'I maintain fail-closed gates, isolated runners, and a readable trail for every verdict.' },
@@ -164,7 +165,7 @@ const STAGES: Stage[] = [
     systemCs: 'GitOps PR → kontrola manifestu → ArgoCD sync → Kyverno ověření podpisu a SBOM attestace.',
     systemEn: 'GitOps PR → manifest checks → ArgoCD sync → Kyverno signature and SBOM-attestation verification.',
     proofCs: 'GitOps stav s konkrétním SHA tagem', proofEn: 'GitOps state with a specific SHA tag',
-    href: '/infrastructure/topology', linkCs: 'Zobrazit topologii', linkEn: 'View topology', accent: '#818cf8', icon: Rocket,
+    href: '/devops/sdlc/cd', linkCs: 'Jak skutečně nasazujeme', linkEn: 'How we actually deploy', accent: '#818cf8', icon: Rocket,
     actions: {
       developer: { cs: 'Sleduji, že moje verze prošla až do cílového prostředí.', en: 'I follow my version all the way into the target environment.' },
       devops: { cs: 'Propaguji SHA tag, sleduji sync a při problému vracím deklarovaný stav.', en: 'I promote a SHA tag, observe sync, and restore declared state when needed.' },
@@ -403,6 +404,8 @@ export default function SdlcPage() {
         )}
         icon={<Sparkles aria-hidden="true" size={20} />}
       />
+
+      <SdlcGuideNav current="overview" />
 
       <section className={styles.hero} aria-labelledby="journey-title">
         <div className={styles.heroGlow} aria-hidden="true" />

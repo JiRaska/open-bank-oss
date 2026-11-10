@@ -94,4 +94,22 @@ class GameAccessTest {
         assertThrows<IllegalArgumentException> { GameCatalog(0, listOf(first, next.copy(order = 0))) }
         assertThrows<IllegalArgumentException> { GameCatalog(-1, listOf(first)) }
     }
+
+    @Test
+    fun `marketing edits drafts without changing publishing state or any live content`() {
+        val before = GameCatalog(5, listOf(first, next))
+        before.copy(levels = listOf(first, next.copy(titleCs = "Nový scénář"))).requireDraftEditOf(before)
+        assertThrows<IllegalArgumentException> {
+            before.copy(levels = listOf(first.copy(titleCs = "Změna živého kola"), next)).requireDraftEditOf(before)
+        }
+        assertThrows<IllegalArgumentException> {
+            before.copy(levels = listOf(first, next.copy(state = GameLevelState.LIVE))).requireDraftEditOf(before)
+        }
+        assertThrows<IllegalArgumentException> {
+            before.copy(levels = listOf(next)).requireDraftEditOf(before)
+        }
+        assertThrows<com.openbank.engagement.domain.model.game.GameCatalogConflict> {
+            before.copy(revision = 4).requireDraftEditOf(before)
+        }
+    }
 }

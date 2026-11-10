@@ -64,6 +64,10 @@
 !.github/gates/
 .github/gates/*
 !.github/gates/gates.yaml
+!.github/workflows/
+.github/workflows/*
+!.github/workflows/merge-train.yml
+!.github/workflows/auto-deploy.yml
 .gitignore
 .gitattributes
 .dockerignore
@@ -128,6 +132,7 @@ docs/bcp/*
 # 0 bom.json files gracefully. SBOM injection must be done by pre-staging
 # the files to a flat directory before the docker build (tracked separately).
 *.png
+!openbank-admin-ui/public/brand/sdlc/train-passengers.png
 *.jpg
 *.jpeg
 *.gif

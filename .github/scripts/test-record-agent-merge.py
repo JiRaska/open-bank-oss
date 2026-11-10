@@ -3,9 +3,13 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Exercise the agent-merge recorder without credentials or a reachable backend."""
 import http.server
+import ast
+import contextlib
+import io
 import importlib.util
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -423,6 +427,172 @@ class MainTest(unittest.TestCase):
         self.assertIn('is empty', result.stderr)
 
 
+class ReadOnlyTest(unittest.TestCase):
+    """Real HTTP reads, with independent tripwires against creating a missing row."""
+
+    def observe(self, flags, capability=None, row_status=200, bad_row=False,
+                bad_json=False, actor='JiRaska', merged=True, proof_error=False,
+                policy=False, env_overrides=None):
+        calls = []
+        canonical = pull(number=7, branch='agent/read-proof', merged=merged, state='closed',
+                         head={'ref': 'agent/read-proof', 'sha': 'a' * 40},
+                         base={'ref': 'main', 'repo': {'full_name': 'JiRaska/open-bank-oss'}})
+        proof = {'mergedByType': 'GITHUB_APP', 'mergedById': 12, 'headSha': 'a' * 40,
+                 'mergeCommitSha': 'b' * 40,
+                 'policyAuthorization': {'kind': 'POLICY_PR_AUTO_MERGE', 'scope': 'PR',
+                                         'approvedBy': 'JiRaska', 'approvedById': 1,
+                                         'policyCommitSha': 'c' * 40, 'policyBlobSha': 'd' * 40}}
+        row = {'agentId': 'external-coding-agent', 'prNumber': 7,
+               'prUrl': 'https://github.com/JiRaska/open-bank-oss/pull/7',
+               'headBranch': 'agent/read-proof', 'mergedBy': 'JiRaska',
+               'mergedByType': 'HUMAN', 'mergedAt': canonical['merged_at'],
+               'title': 'unlogged-row-marker'}
+        if policy:
+            canonical['merged_by'] = {'login': recorder.BOT, 'type': 'Bot'}
+            row.update(proof, mergedBy=recorder.BOT)
+        if bad_row:
+            row['mergedBy'] = 'different-executor'
+        capability = capability if capability is not None else {
+            'evidenceSchemaVersion': 2, 'policyPrAuthorization': True}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                calls.append(('GET', self.path, self.headers.get('Authorization')))
+                is_capability = self.path.endswith('/capabilities')
+                self.send_response(200 if is_capability else row_status)
+                self.end_headers()
+                value = capability if is_capability else row
+                malformed = bad_json is True or (bad_json == 'row' and not is_capability)
+                self.wfile.write(b'not-json' if malformed else json.dumps(value).encode())
+
+            def do_POST(self):
+                calls.append(('POST', self.path, None))
+                self.send_response(500)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        github = mock.Mock()
+        github.get.side_effect = lambda path: ({
+            'full_name': 'JiRaska/open-bank-oss',
+            'owner': {'login': 'JiRaska', 'type': 'User', 'id': 1}}
+            if path == '/repos/JiRaska/open-bank-oss' else canonical)
+        env = {'GITHUB_REPOSITORY': 'JiRaska/open-bank-oss', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+               'GITHUB_REF': 'refs/heads/main', 'GITHUB_RUN_ATTEMPT': '1',
+               'GITHUB_ACTOR': actor, 'GITHUB_TRIGGERING_ACTOR': 'JiRaska', 'GITHUB_ACTOR_ID': '1',
+               'AGENT_SERVICE_URL': f'http://127.0.0.1:{server.server_port}',
+               'AGENT_MERGE_RECORDER_TOKEN': 'unlogged-token-marker'}
+        env.update(env_overrides or {})
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with mock.patch.dict(os.environ, env, clear=True), \
+                 mock.patch.object(recorder, 'GitHub', return_value=github), \
+                 mock.patch.object(recorder, 'load_agent_accounts', return_value=AGENT_ACCOUNTS), \
+                 mock.patch.object(recorder, 'load_agent_ids', return_value=AGENT_IDS), \
+                 mock.patch.object(recorder, 'app_authorization', return_value=proof,
+                                   side_effect=ValueError('unlogged-proof-marker') if proof_error else None), \
+                 mock.patch.object(recorder, 'post_record', side_effect=AssertionError('write attempted')) as post, \
+                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                result = recorder.main(flags)
+                post.assert_not_called()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+        self.assertFalse(any(method != 'GET' for method, _, _ in calls), calls)
+        for marker in ('unlogged-token-marker', 'unlogged-row-marker', 'unlogged-proof-marker',
+                       env['AGENT_SERVICE_URL']):
+            self.assertNotIn(marker, out.getvalue() + err.getvalue())
+        return result, calls, github, out.getvalue() + err.getvalue()
+
+    def test_capabilities_only_gets_strict_runtime_flags(self):
+        result, calls, github, output = self.observe(['--read-capabilities'])
+        self.assertEqual(result, 0)
+        self.assertEqual([path for _, path, _ in calls], ['/api/v1/agent-merge-records/capabilities'])
+        self.assertEqual(calls[0][2], 'Bearer unlogged-token-marker')
+        github.get.assert_called_once_with('/repos/JiRaska/open-bank-oss')
+        self.assertEqual(output, 'record-agent-merge: read-only verification passed\n')
+
+    def test_capability_values_fail_closed_without_writes(self):
+        invalid = [[], {}, {'evidenceSchemaVersion': True, 'policyPrAuthorization': True},
+                   {'evidenceSchemaVersion': 2.0, 'policyPrAuthorization': True},
+                   {'evidenceSchemaVersion': '2', 'policyPrAuthorization': True},
+                   {'evidenceSchemaVersion': 1, 'policyPrAuthorization': True},
+                   {'evidenceSchemaVersion': 2},
+                   {'evidenceSchemaVersion': 2, 'policyPrAuthorization': False},
+                   {'evidenceSchemaVersion': 2, 'policyPrAuthorization': 1}]
+        for value in invalid:
+            with self.subTest(capability=value):
+                result, calls, _, _ = self.observe(['--read-capabilities'], capability=value)
+                self.assertEqual(result, 1)
+                self.assertEqual(len(calls), 1)
+
+    def test_existing_row_is_freshly_proved_and_independently_read(self):
+        result, calls, github, _ = self.observe(['--pr', '7', '--read-existing'])
+        self.assertEqual(result, 0)
+        self.assertIn(mock.call('/repos/JiRaska/open-bank-oss/pulls/7'), github.get.call_args_list)
+        self.assertEqual([path for _, path, _ in calls], [
+            '/api/v1/agent-merge-records/capabilities', '/api/v1/agent-merge-records/7'])
+
+    def test_policy_row_uses_existing_evidence_comparator(self):
+        result, _, _, _ = self.observe(['--pr', '7', '--read-existing'], policy=True)
+        self.assertEqual(result, 0)
+        result, _, _, _ = self.observe(['--pr', '7', '--read-existing'], policy=True, bad_row=True)
+        self.assertEqual(result, 1)
+
+    def test_missing_malformed_or_mismatched_row_never_repairs_it(self):
+        for options in ({'row_status': 404}, {'bad_row': True}, {'bad_json': True}, {'bad_json': 'row'}):
+            with self.subTest(options=options):
+                result, _, _, output = self.observe(['--pr', '7', '--read-existing'], **options)
+                self.assertEqual(result, 1)
+                self.assertEqual(output, 'record-agent-merge: read-only verification failed\n')
+
+    def test_owner_guard_or_canonical_proof_failure_precedes_backend_read(self):
+        for options in ({'actor': 'not-owner'}, {'merged': False},
+                        {'policy': True, 'proof_error': True},
+                        {'env_overrides': {'GITHUB_EVENT_NAME': 'pull_request'}},
+                        {'env_overrides': {'GITHUB_REF': 'refs/heads/topic'}},
+                        {'env_overrides': {'GITHUB_RUN_ATTEMPT': '2'}},
+                        {'env_overrides': {'GITHUB_TRIGGERING_ACTOR': 'not-owner'}},
+                        {'env_overrides': {'GITHUB_ACTOR_ID': '2'}}):
+            with self.subTest(options=options):
+                result, calls, _, _ = self.observe(['--pr', '7', '--read-existing'], **options)
+                self.assertEqual(result, 1)
+                self.assertEqual(calls, [])
+
+    def test_capabilities_owner_guard_and_row_capability_guard_are_not_bypassed(self):
+        result, calls, _, _ = self.observe(['--read-capabilities'], actor='not-owner')
+        self.assertEqual((result, calls), (1, []))
+        result, calls, _, _ = self.observe(['--pr', '7', '--read-existing'],
+                                         capability={'evidenceSchemaVersion': 2,
+                                                     'policyPrAuthorization': False})
+        self.assertEqual(result, 1)
+        self.assertEqual([path for _, path, _ in calls], ['/api/v1/agent-merge-records/capabilities'])
+
+    def test_invalid_read_arguments_cannot_fall_through_to_record(self):
+        for flags in (['--read-existing'], ['--read-existing', '--pr', '7', '--verify-record'],
+                      ['--read-capabilities', '--pr', '7'],
+                      ['--read-capabilities', '--event', 'unread-event.json']):
+            with self.subTest(flags=flags):
+                result, calls, _, _ = self.observe(flags)
+                self.assertEqual(result, 1)
+                self.assertEqual(calls, [])
+
+    def test_read_and_dry_run_operations_are_mutually_exclusive(self):
+        with mock.patch.object(recorder, 'post_record') as post, \
+             contextlib.redirect_stderr(io.StringIO()):
+            for flags in (['--read-capabilities', '--dry-run'],
+                          ['--read-existing', '--read-capabilities']):
+                with self.subTest(flags=flags), self.assertRaises(SystemExit) as error:
+                    recorder.main(flags)
+                self.assertEqual(error.exception.code, 2)
+            post.assert_not_called()
+
+
 class WorkflowWiringTest(unittest.TestCase):
     def test_workflow_is_thin_and_pins_actions_by_sha(self):
         workflow = yaml.safe_load(
@@ -459,6 +629,9 @@ class WorkflowWiringTest(unittest.TestCase):
         self.assertIn("github.run_attempt == 1", record['if'])
         self.assertIn("github.ref == 'refs/heads/main'", record['if'])
         self.assertIn('prs', events['workflow_dispatch']['inputs'])
+        self.assertEqual(events['workflow_dispatch']['inputs']['operation']['default'], 'record')
+        self.assertEqual(events['workflow_dispatch']['inputs']['operation']['options'],
+                         ['record', 'capabilities', 'verify-existing'])
         cleanup = record['steps'][-1]
         self.assertEqual(cleanup['if'], 'always()')
         self.assertIn('rm -f -- "$TOKEN_FILE"', cleanup['run'])
@@ -469,7 +642,7 @@ class WorkflowWiringTest(unittest.TestCase):
             self.assertIn('secrets.' + key, record['env'][key])
             self.assertNotIn(key, env)
             for name, job in workflow['jobs'].items():
-                if name != 'record':
+                if name not in ('record', 'observe'):
                     self.assertNotIn('secrets.' + key, yaml.safe_dump(job))
         # No static bearer JWT anywhere in the workflow: the realm's 300-second
         # accessTokenLifespan would kill it minutes after provisioning.
@@ -488,6 +661,153 @@ class WorkflowWiringTest(unittest.TestCase):
         self.assertNotIn('close-issue', workflow['jobs'])
         self.assertNotIn('gh issue close', yaml.safe_dump(workflow['jobs']))
         self.assertIn('backfilled and its merge record verified', failure_script)
+        self.assertEqual(raise_issue['if'], "${{ failure() && (inputs.operation || 'record') == 'record' }}")
+
+    def test_actual_workflow_shell_routes_reads_without_write_commands(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/record-agent-merge.yml').read_text())
+        worker = yaml.safe_load((Path(__file__).parents[1] / 'workflows/_read-agent-merge.yml').read_text())
+        record_script = next(step['run'] for step in workflow['jobs']['record']['steps']
+                             if '--verify-record' in step.get('run', ''))
+        read_script = next(step['run'] for step in worker['jobs']['observe']['steps']
+                           if '--read-capabilities' in step.get('run', ''))
+        with tempfile.TemporaryDirectory() as folder:
+            stub = Path(folder) / 'python3'
+            stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$CALLS"\nexit "${TEST_EXIT:-0}"\n')
+            stub.chmod(0o755)
+            for operation, prs, expected in [('capabilities', '', '--read-capabilities'),
+                                              ('verify-existing', '7,8', '--read-existing'),
+                                              ('record', '7', '--verify-record')]:
+                for exit_code in (0, 1):
+                    with self.subTest(operation=operation, exit_code=exit_code):
+                        calls = Path(folder) / 'calls'
+                        calls.write_text('')
+                        env = dict(os.environ, PATH=folder + os.pathsep + os.environ['PATH'],
+                                   GITHUB_EVENT_NAME='workflow_dispatch', OPERATION=operation,
+                                   BACKFILL_PRS=prs, READ_PRS=prs, TOKEN_FILE='test-header', CALLS=str(calls),
+                                   TEST_EXIT=str(exit_code))
+                        script = record_script if operation == 'record' else read_script
+                        result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True)
+                        self.assertEqual(result.returncode, exit_code, result.stderr)
+                        commands = calls.read_text().splitlines()
+                        self.assertTrue(commands)
+                        self.assertTrue(all(expected in command for command in commands))
+                        if operation != 'record':
+                            self.assertNotIn('--verify-record', calls.read_text())
+                        self.assertEqual(len(commands), 2 if operation == 'verify-existing' and not exit_code else 1)
+
+
+class NativeReadRoutingTest(unittest.TestCase):
+    def setUp(self):
+        folder = Path(__file__).parents[1] / 'workflows'
+        self.caller = yaml.safe_load((folder / 'record-agent-merge.yml').read_text())
+        self.worker = yaml.safe_load((folder / '_read-agent-merge.yml').read_text())
+
+    @staticmethod
+    def allowed(expression, context):
+        # Evaluate only this guard's literals/boolean comparisons, not arbitrary Python.
+        text = expression.removeprefix('${{').removesuffix('}}').strip()
+        text = re.sub(r'\b(?:github|inputs)\.[A-Za-z_][A-Za-z_.]*',
+                      lambda match: repr(context.get(match.group(), '')), text)
+        text = text.replace('&&', ' and ').replace('||', ' or ')
+        text = re.sub(r'\btrue\b', 'True', text)
+        text = re.sub(r'\bfalse\b', 'False', text)
+        text = ' '.join(text.split())
+        tree = ast.parse(text, mode='eval')
+        permitted = (ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.Compare,
+                     ast.Eq, ast.NotEq, ast.Constant)
+        if any(not isinstance(node, permitted) for node in ast.walk(tree)):
+            raise AssertionError('unexpected guard syntax')
+        return bool(eval(compile(tree, '<workflow guard>', 'eval'), {'__builtins__': {}}, {}))
+
+    def context(self, **overrides):
+        context = {'github.repository': 'JiRaska/open-bank-oss',
+                   'github.repository_owner': 'JiRaska', 'github.actor': 'JiRaska',
+                   'github.triggering_actor': 'JiRaska', 'github.run_attempt': 1,
+                   'github.event_name': 'workflow_dispatch', 'github.ref': 'refs/heads/main',
+                   'github.workflow_ref': 'JiRaska/open-bank-oss/.github/workflows/record-agent-merge.yml@refs/heads/main',
+                   'inputs.operation': 'capabilities', 'github.event.pull_request.merged': False}
+        context.update(overrides)
+        return context
+
+    def test_native_secrets_are_the_only_worker_transport_channel(self):
+        call = self.caller['jobs']['observe']
+        self.assertEqual(call['uses'], './.github/workflows/_read-agent-merge.yml')
+        self.assertNotIn('runs-on', call)
+        self.assertNotIn('steps', call)
+        self.assertEqual(set(call['with']), {'operation', 'prs'})
+        self.assertEqual(call['secrets'], {
+            'agent_service_url': '${{ vars.AGENT_SERVICE_URL }}',
+            'recorder_issuer': '${{ vars.AGENT_MERGE_RECORDER_ISSUER }}',
+            'recorder_client_id': '${{ secrets.AGENT_MERGE_RECORDER_CLIENT_ID }}',
+            'recorder_client_secret': '${{ secrets.AGENT_MERGE_RECORDER_CLIENT_SECRET }}'})
+        events = self.worker.get('on', self.worker.get(True))
+        self.assertEqual(set(events), {'workflow_call'})
+        self.assertEqual(set(events['workflow_call']['secrets']), set(call['secrets']))
+        self.assertTrue(all(value['required'] for value in events['workflow_call']['secrets'].values()))
+        self.assertEqual(self.worker['permissions'], self.caller['permissions'])
+        self.assertNotIn('concurrency', self.worker)  # cannot cancel its caller's run group
+        self.assertEqual(set(self.worker['jobs']), {'observe'})
+        job = self.worker['jobs']['observe']
+        for name, secret in [('AGENT_SERVICE_URL', 'agent_service_url'),
+                             ('AGENT_MERGE_RECORDER_ISSUER', 'recorder_issuer'),
+                             ('AGENT_MERGE_RECORDER_CLIENT_ID', 'recorder_client_id'),
+                             ('AGENT_MERGE_RECORDER_CLIENT_SECRET', 'recorder_client_secret')]:
+            self.assertEqual(job['env'][name], '${{ secrets.' + secret + ' }}')
+        checkout = job['steps'][0]
+        self.assertEqual(checkout['with']['repository'], 'JiRaska/open-bank-oss')
+        self.assertEqual(checkout['with']['ref'], 'main')
+        self.assertFalse(checkout['with']['persist-credentials'])
+        self.assertRegex(checkout['uses'], r'^actions/checkout@[0-9a-f]{40}$')
+        scripts = '\n'.join(step.get('run', '') for step in job['steps'])
+        self.assertNotIn('--verify-record', scripts)
+        self.assertNotIn('gh issue', scripts)
+        self.assertIn('grant_type=client_credentials', scripts)  # expected OAuth POST only
+        self.assertEqual(job['steps'][-1]['if'], 'always()')
+
+    def test_actual_invocation_guards_reject_foreign_callers_and_write_fallthrough(self):
+        guard = self.worker['jobs']['observe']['if']
+        self.assertTrue(self.allowed(guard, self.context()))
+        invalid = {'github.repository': 'other/open-bank-oss',
+                   'github.workflow_ref': 'JiRaska/open-bank-oss/.github/workflows/other.yml@refs/heads/main',
+                   'github.event_name': 'pull_request_target', 'github.ref': 'refs/heads/topic',
+                   'github.actor': 'other', 'github.triggering_actor': 'other', 'github.run_attempt': 2}
+        for name, value in invalid.items():
+            with self.subTest(context=name):
+                self.assertFalse(self.allowed(guard, self.context(**{name: value})))
+        for operation in ['capabilities', 'verify-existing']:
+            context = self.context(**{'inputs.operation': operation})
+            self.assertTrue(self.allowed(self.caller['jobs']['observe']['if'], context))
+            self.assertFalse(self.allowed(self.caller['jobs']['record']['if'], context))
+            self.assertFalse(self.allowed(self.caller['jobs']['raise-issue']['if'].replace('failure()', 'true'), context))
+        context = self.context(**{'inputs.operation': 'record'})
+        self.assertTrue(self.allowed(self.caller['jobs']['record']['if'], context))
+        self.assertFalse(self.allowed(self.caller['jobs']['observe']['if'], context))
+
+    def test_worker_clears_runner_proposal_override(self):
+        inherited = {'AGENT_MERGE_PROPOSAL_ID': '11111111-1111-4111-8111-111111111111'}
+        worker_env = self.worker['jobs']['observe']['env']
+        if 'AGENT_MERGE_PROPOSAL_ID' in worker_env:
+            inherited['AGENT_MERGE_PROPOSAL_ID'] = worker_env['AGENT_MERGE_PROPOSAL_ID']
+        with mock.patch.dict(os.environ, inherited):
+            self.assertEqual(recorder.extract_proposal_id({
+                'body': 'Proposal-Id: 22222222-2222-4222-8222-222222222222'}),
+                '22222222-2222-4222-8222-222222222222')
+        self.assertEqual(worker_env.get('AGENT_MERGE_PROPOSAL_ID'), '')
+
+    def test_worker_request_validation_fails_before_auth_for_non_read_inputs(self):
+        step = self.worker['jobs']['observe']['steps'][1]
+        self.assertEqual(step['name'], 'Validate bounded read request')
+        for operation, prs, valid in [('capabilities', '', True), ('verify-existing', '7,8', True),
+                                      ('record', '7', False), ('capabilities', '7', False),
+                                      ('verify-existing', '', False), ('verify-existing', '7,0', False),
+                                      ('verify-existing', ','.join(['7'] * 101), False)]:
+            with self.subTest(operation=operation, prs=prs):
+                env = dict(os.environ, OPERATION=operation, READ_PRS=prs, AGENT_SERVICE_URL='test-url',
+                           AGENT_MERGE_RECORDER_ISSUER='test-issuer', AGENT_MERGE_RECORDER_CLIENT_ID='test-client',
+                           AGENT_MERGE_RECORDER_CLIENT_SECRET='test-secret')
+                result = subprocess.run(['bash', '-c', step['run']], env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                self.assertEqual(result.stdout, '')
 
 
 
