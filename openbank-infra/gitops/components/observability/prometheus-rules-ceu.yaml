@@ -1,0 +1,37 @@
+# CEÚ daily change overview alerts (ADR-0367, #15292).
+#
+# openbank_ceu_overview_unfiled_past_cutoff is published by tax-reporting-service's
+# CeuDailyOverviewScheduler on every tick, and REGISTERED only on its first completed tick, so a
+# cold pod publishes no series rather than a 0 that reads as "filed". Re-derived at t=0 on a cold
+# pod: absent, so nothing below can fire from boot. "The job never ran" is the fleet-wide
+# WorkflowLivenessStale on workflow="ceu-daily-overview"; a deployment that has not declared
+# openbank.ceu.reporting-start reads openbank_workflow_unconfigured=1 and is excluded there.
+#
+# Runbook: docs/runbooks/ceu-alerts.md.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-ceu-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.ceu
+      interval: 1m
+      rules:
+        # 1 from the 11:00 Prague cutoff while today's overview is not SUBMITTED or ACKNOWLEDGED.
+        # ČNB's deadline is 12:00 on the working day, so this leaves under an hour to act.
+        - alert: CeuDailyOverviewNotFiled
+          expr: max(openbank_ceu_overview_unfiled_past_cutoff) > 0
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Today's CEÚ change overview is not filed with ČNB"
+            description: >-
+              The CEÚ daily change overview (CEUSIFE10) for today's working day is not SUBMITTED
+              or ACKNOWLEDGED, and ČNB's 12:00 deadline is less than an hour away. Approve it
+              (four-eyes), deliver it through SDAT and record the submission reference.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/ceu-alerts.md#ceudailyoverviewnotfiled"
