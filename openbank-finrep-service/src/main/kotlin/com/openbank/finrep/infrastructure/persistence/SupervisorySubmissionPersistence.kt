@@ -121,22 +121,25 @@ class SubmissionAttemptEntity : PanacheEntityBase {
 @ApplicationScoped
 class SubmissionAttemptPanacheRepository : PanacheRepositoryBase<SubmissionAttemptEntity, UUID>
 
+@ApplicationScoped
+class SubmissionPanacheRepository : PanacheRepositoryBase<SubmissionEntity, UUID>
+
 /**
  * Both ids are application-assigned, so every write is a `merge` (upsert), never `persist` —
  * `persist` on an assigned id is INSERT-only and fails every state transition (CLAUDE.md, #1521).
  */
 @ApplicationScoped
 class PanacheSupervisorySubmissionRepository(
+    private val submissions: SubmissionPanacheRepository,
     private val attemptRepository: SubmissionAttemptPanacheRepository,
-) : SupervisorySubmissionRepository,
-    PanacheRepositoryBase<SubmissionEntity, UUID> {
+) : SupervisorySubmissionRepository {
 
     override suspend fun findById(id: UUID): SupervisorySubmission? =
-        Panache.withSession { findById(id) }.awaitSuspending()?.toDomain()
+        Panache.withSession { submissions.findById(id) }.awaitSuspending()?.toDomain()
 
     override suspend fun findByKey(key: SubmissionKey): SupervisorySubmission? =
         Panache.withSession {
-            find(
+            submissions.find(
                 "templateId = ?1 and referencePeriod = ?2 and revision = ?3",
                 key.templateId,
                 key.referencePeriod,
@@ -147,9 +150,9 @@ class PanacheSupervisorySubmissionRepository(
     override suspend fun list(templateId: String?): List<SupervisorySubmission> =
         Panache.withSession {
             if (templateId == null) {
-                find("order by referencePeriod desc, templateId, revision desc").list()
+                submissions.find("order by referencePeriod desc, templateId, revision desc").list()
             } else {
-                find("templateId = ?1 order by referencePeriod desc, revision desc", templateId).list()
+                submissions.find("templateId = ?1 order by referencePeriod desc, revision desc", templateId).list()
             }
         }.awaitSuspending().map { it.toDomain() }
 

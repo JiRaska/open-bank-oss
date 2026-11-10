@@ -69,6 +69,8 @@ class SupervisorySubmissionService(
         )
     }
 
+    // Any adapter failure must become a recorded FAILED attempt, never an unrecorded 500.
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun submit(id: UUID, actor: String): SupervisorySubmission {
         val current = get(id)
         when (current.state) {
