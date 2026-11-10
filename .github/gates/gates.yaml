@@ -7507,6 +7507,7 @@ gates:
       - ".github/scripts/test-infracost-scope.py"
       - ".github/scripts/agent-admission.py"
       - ".github/scripts/test-agent-admission.py"
+      - ".github/scripts/fetch-open-prs.py"
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/scripts/shard-verification-modules.py"
@@ -7517,6 +7518,7 @@ gates:
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
+      python3 .github/scripts/fetch-open-prs.py --self-test
       python3 .github/scripts/test-await-admin-ui-source-validation.py
       python3 .github/scripts/shard-verification-modules.py --self-test
     run: python3 .github/scripts/check-workflow-supply-chain.py
