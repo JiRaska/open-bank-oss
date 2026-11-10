@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "2baacfc13d90b45f"
+    openbank.tech/policy-checksum: "4a32873f15d48ee8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1363,6 +1363,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read

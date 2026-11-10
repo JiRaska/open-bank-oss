@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pricing-service
     app.kubernetes.io/part-of: pricing
   annotations:
-    openbank.tech/policy-checksum: "fb9c64787814ea00"
+    openbank.tech/policy-checksum: "93151787c04b02f8"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1321,6 +1321,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read

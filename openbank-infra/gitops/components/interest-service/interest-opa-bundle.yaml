@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "1f9f8bac2d8fa03f"
+    openbank.tech/policy-checksum: "e2f663052b8ff4e7"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1328,6 +1328,22 @@ data:
         - '*.write'
         - secrets.read.raw
     - id: card-scheme-bulletin-agent
+      tools:
+        allow:
+        - tier: read
+          resources:
+          - read.governance
+        - tier: write_proposal
+          resources:
+          - draft.ticket
+        deny:
+        - tier: write
+          resources:
+          - '*'
+        - tier: execute
+          resources:
+          - '*'
+    - id: regulatory-obligations-watcher
       tools:
         allow:
         - tier: read

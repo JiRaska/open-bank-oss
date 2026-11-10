@@ -99,7 +99,7 @@ Cabin contents are clipped to x=59..242, y=522..600 and the original coach frame
 redrawn above them through an inverse mask. Seats, smaller passenger sprites and subtle
 glazing establish depth behind the brass frame. The idea and PR-check stages use a
 proposal and an inspected ticket in the same opening; passengers appear at boarding.
-The masthead, coaches and tender all use the current two-leaf mark.
+The coaches and tender use the current two-leaf mark.
 
 ## Masaryk-inspired station and concurrent tracks
 
@@ -112,6 +112,13 @@ The three near running surfaces are at image y=634, 798 and 971. Every train use
 local wheel-contact baseline of y=680; the coach is shifted down 6.3px and locomotive 1.4px
 before scaling. The entire train translates only horizontally, so playback cannot lift the
 wheels off the rail. Contact shadows stay on that baseline.
+
+The interactive guide crops the SVG viewport to `0 420 1536 604`, keeping all three trains
+and running surfaces in their original coordinates. It does not resize or regenerate the
+background asset. Native lane buttons sit on the track signs; phases, playback and a short
+explanation share the same panel. The panel width is bounded by viewport height. On narrow
+containers the lane buttons move above the tracks and retain touch-sized targets without
+a horizontal image scroller. Longer explanations expand on request.
 
 Each lane has independent illustrative progress and a different playback cadence. Selecting
 a lane changes the detail without resetting its progress. Pause and reduced motion apply to
