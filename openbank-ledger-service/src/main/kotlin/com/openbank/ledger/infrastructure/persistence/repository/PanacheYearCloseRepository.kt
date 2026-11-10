@@ -54,9 +54,8 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
 
     override suspend fun saveAttested(record: YearCloseRecord, outbox: OutboxMessage): YearCloseRecord =
         // A CONDITIONAL flip, not read-then-write: the row must still be DRAFT with the reviewed
-        // hash, no result allocation may be PENDING, and the attestor may not be any allocator
-        // (ADR-0096 D3). Allocation locks this same row FOR UPDATE before it records a PENDING
-        // attribution, so the two serialise and a check made earlier in the use case cannot go
+        // hash, the attestor may not be any allocator, and no closing journal may be unattributed
+        // (ADR-0096 D3). Allocation holds FOR UPDATE on this same row for its whole transaction, so the two serialise and a check made earlier in the use case cannot go
         // stale in between (TOCTOU). The flip and its outbox row commit together (ADR-0003/0050).
         Panache.withTransaction {
             Panache.getSession().flatMap { s ->
@@ -66,13 +65,14 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
                     .setParameter("now", Instant.now(clock).atOffset(java.time.ZoneOffset.UTC))
                     .setParameter("y", record.fiscalYear)
                     .setParameter("hash", record.contentHash)
+                    .setParameter("prefix", "year-end-result:${record.fiscalYear}:%")
                     .executeUpdate()
             }.flatMap { updated ->
                 if (updated != 1) {
                     Uni.createFrom().failure(
                         YearCloseConflictException(
                             "Year close ${record.fiscalYear} changed while attesting (no longer DRAFT with the " +
-                                "reviewed hash, an allocation is pending, or the attestor allocated) — re-read and retry",
+                                "reviewed hash, the attestor allocated, or a closing journal is unattributed) — re-read and retry",
                         ),
                     )
                 } else {
@@ -114,10 +114,15 @@ class PanacheYearCloseRepository(private val clock: Clock, private val outboxRep
     )
 
     private companion object {
+        // Refuses, atomically with the flip: a changed row or hash, an attestor who allocated, and any
+        // closing journal with no attribution. Allocation holds FOR UPDATE on this row for its whole
+        // transaction, so this UPDATE waits for it and then sees its journal and attribution together.
         const val CONDITIONAL_ATTEST_SQL =
             "UPDATE ledger_year_close SET status = 'ATTESTED', attested_by = :by, attested_at = :at, " +
                 "updated_at = :now WHERE fiscal_year = :y AND status = 'DRAFT' AND content_hash = :hash " +
-                "AND NOT EXISTS (SELECT 1 FROM ledger_year_close_allocation a WHERE a.fiscal_year = :y " +
-                "AND (a.status = 'PENDING' OR (a.status = 'POSTED' AND a.allocated_by = :by)))"
+                "AND NOT EXISTS (SELECT 1 FROM ledger_year_close_allocation a " +
+                "WHERE a.fiscal_year = :y AND a.allocated_by = :by) " +
+                "AND NOT EXISTS (SELECT 1 FROM ledger_idempotency i WHERE " +
+                PanacheYearEndAllocationRepository.UNATTRIBUTED_CONDITION + ")"
     }
 }

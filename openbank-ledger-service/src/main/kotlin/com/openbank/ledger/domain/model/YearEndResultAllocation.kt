@@ -44,6 +44,8 @@ data class YearEndResultAllocationPlan(
     }
 
     companion object {
+        /** Reserved idempotency-key prefix; the generic posting API refuses it. */
+        const val KEY_PREFIX = "year-end-result:"
         const val RESULT_CURRENCY = "CZK"
         private const val DIGEST_HEX_CHARS = 16
 
@@ -91,14 +93,3 @@ data class YearEndResultAllocationPlan(
         }
     }
 }
-
-enum class YearEndAllocationStatus { PENDING, POSTED, ABANDONED }
-
-/** One attributed allocation attempt (ADR-0096 D3); the four-eyes record the journal cannot carry. */
-data class YearEndAllocationRecord(
-    val idempotencyKey: String,
-    val fiscalYear: Int,
-    val status: YearEndAllocationStatus,
-    val allocatedBy: String,
-    val journalId: java.util.UUID?,
-)

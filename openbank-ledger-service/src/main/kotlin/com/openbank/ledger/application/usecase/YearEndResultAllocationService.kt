@@ -26,7 +26,6 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Year
 import java.util.UUID
-import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Year-end result allocation (ADR-0096 D3, first half): posts the closing journal that zeroes the
@@ -44,10 +43,9 @@ import kotlin.coroutines.cancellation.CancellationException
  * inside that year, so a re-run sees an empty plan and posts nothing, and a late posting leaves a
  * residual that a re-run allocates. The key is the plan digest plus the first unused ordinal (see
  * [nextKey]); a replayed key is refused, and the post-condition re-plans and requires empty.
- * Attribution (`ledger_year_close_allocation`, V42) is written PENDING before the journal and
- * completed after it; every allocator is kept and attestation refuses all of them, any PENDING
- * row and any unattributed closing journal. A crash between the steps is recovered by key on the
- * next run ([recoverPending]).
+ * The journal and its attribution (`ledger_year_close_allocation`, V42) are written in ONE
+ * transaction under `SELECT … FOR UPDATE` on the year-close row, which attestation also locks; every
+ * allocator is kept and attestation refuses all of them and any unattributed closing journal.
  *
  * Out of scope, and refused rather than approximated: a non-CZK income/expense balance (see
  * [YearEndResultAllocationPlan.plan]) and the opening-balance roll into the next year.
@@ -73,31 +71,31 @@ class YearEndResultAllocationService(
             )
         }
         requireDraft(fiscalYear)
-        reconcileAttribution(fiscalYear)
-        val plan = plan(fiscalYear)
-        if (plan.isEmpty) {
+        // ONE transaction, under the year-close row lock that attestation also takes: the closing
+        // journal and its attribution commit together or not at all.
+        val (plan, entry) = allocations.inYearCloseLock(fiscalYear) { isDraft ->
+            if (!isDraft) {
+                throw YearCloseConflictException(
+                    "Year close $fiscalYear is no longer DRAFT — the result must be allocated before attestation",
+                )
+            }
+            requireAttributed(fiscalYear)
+            val plan = plan(fiscalYear)
+            if (plan.isEmpty) return@inYearCloseLock plan to null
+            val idempotencyKey = nextKey(fiscalYear, plan)
+            val entry = postClosingJournal(command, plan, idempotencyKey)
+            allocations.record(fiscalYear, idempotencyKey, command.requestedBy, entry.id, clock.instant())
+            requireNothingLeft(fiscalYear, entry.id)
+            plan to entry
+        }
+        if (entry == null) {
             log.infof("Year-end result allocation %d: nothing to allocate", fiscalYear)
             return YearEndResultAllocationResult(plan, posted = false, journalId = null)
         }
-
-        val idempotencyKey = nextKey(fiscalYear, plan)
-        // Attribution FIRST, committed before any money moves, under a lock on the year-close row
-        // that attestation also takes. The journal posting owns its own transaction (locks, replay
-        // recovery), so the two cannot share one; a crash after this line is recovered by key.
-        if (!allocations.insertPending(fiscalYear, idempotencyKey, command.requestedBy, clock.instant())) {
-            throw YearCloseConflictException(
-                "Result allocation $fiscalYear could not start: the year close is no longer DRAFT or another " +
-                    "allocation is in progress",
-            )
-        }
-        val entry = postClosingJournal(command, plan, idempotencyKey)
-        allocations.markPosted(idempotencyKey, entry.id, clock.instant())
-        requireNothingLeft(fiscalYear, entry.id)
         log.infof(
-            "Year-end result allocation %d posted as %s under key %s: net result %s over %d leg(s), requested by %s",
+            "Year-end result allocation %d posted as %s: net result %s over %d leg(s), requested by %s",
             fiscalYear,
             entry.id,
-            idempotencyKey,
             plan.netResult.toPlainString(),
             plan.legs.size,
             command.requestedBy,
@@ -111,29 +109,18 @@ class YearEndResultAllocationService(
         idempotencyKey: String,
     ): com.openbank.ledger.domain.model.JournalEntry {
         val yearEnd = Year.of(command.fiscalYear).let { it.atDay(it.length()) }
-        val outcome = try {
-            ledger.postJournalWithOutcome(
-                PostJournalCommand(
-                    idempotencyKey = idempotencyKey,
-                    transactionId = UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()),
-                    entryDate = yearEnd,
-                    valueDate = yearEnd,
-                    description = "Year-end result allocation ${command.fiscalYear} to retained earnings " +
-                        "(requested by ${command.requestedBy})",
-                    lines = closingLines(plan),
-                    postedBy = SYSTEM_USER,
-                ),
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            // The ledger refused (locks, validation): nothing was booked, so the attempt is closed.
-            // Had it booked and only the answer been lost, recovery by key will find the journal.
-            if (journalRepository.findByIdempotencyKey(idempotencyKey) == null) {
-                allocations.markAbandoned(idempotencyKey, clock.instant())
-            }
-            throw e
-        }
+        val outcome = ledger.postJournalWithOutcome(
+            PostJournalCommand(
+                idempotencyKey = idempotencyKey,
+                transactionId = UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()),
+                entryDate = yearEnd,
+                valueDate = yearEnd,
+                description = "Year-end result allocation ${command.fiscalYear} to retained earnings " +
+                    "(requested by ${command.requestedBy})",
+                lines = closingLines(plan),
+                postedBy = SYSTEM_USER,
+            ),
+        )
         // A replay means this fresh, attributed key already had a journal — not ours to report.
         return outcome.takeUnless { it.replayed }?.entry ?: replayed(command.fiscalYear, idempotencyKey)
     }
@@ -142,21 +129,8 @@ class YearEndResultAllocationService(
         "Result allocation $fiscalYear key $key was already posted — re-read the preview",
     )
 
-    /**
-     * Deterministic crash recovery, then attribution, on EVERY run (an empty plan included): a
-     * PENDING attempt is POSTED if its key booked a journal, else ABANDONED; afterwards every
-     * `year-end-result:{year}:*` journal must have a POSTED attribution, or the run is refused.
-     */
-    private suspend fun reconcileAttribution(fiscalYear: Int) {
-        allocations.findPending(fiscalYear)?.let { pending ->
-            val journal = journalRepository.findByIdempotencyKey(pending.idempotencyKey)
-            if (journal != null) {
-                allocations.markPosted(pending.idempotencyKey, journal.id, clock.instant())
-            } else {
-                allocations.markAbandoned(pending.idempotencyKey, clock.instant())
-            }
-            log.warnf("Recovered PENDING allocation %s (journal %s)", pending.idempotencyKey, journal?.id)
-        }
+    /** Every closing journal of the year must be attributed — checked on every run, empty plan included. */
+    private suspend fun requireAttributed(fiscalYear: Int) {
         val unattributed = allocations.unattributedJournalKeys(fiscalYear)
         if (unattributed.isNotEmpty()) {
             throw YearCloseConflictException(
@@ -213,9 +187,9 @@ class YearEndResultAllocationService(
      * still race for the same one, and the loser is refused as a replay.
      */
     private suspend fun nextKey(fiscalYear: Int, plan: YearEndResultAllocationPlan): String {
-        val prefix = "year-end-result:$fiscalYear:${plan.digest()}"
+        val prefix = "${YearEndResultAllocationPlan.KEY_PREFIX}$fiscalYear:${plan.digest()}"
         var n = 0
-        while (journalRepository.findByIdempotencyKey("$prefix:$n") != null || allocations.exists("$prefix:$n")) n++
+        while (journalRepository.findByIdempotencyKey("$prefix:$n") != null) n++
         return "$prefix:$n"
     }
 

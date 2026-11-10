@@ -91,8 +91,10 @@ class YearCloseServiceTest {
             AccountingClock.bank(clock),
             allocations,
         )
-        coEvery { allocations.findPending(any()) } returns null
         coEvery { allocations.unattributedJournalKeys(any()) } returns emptyList()
+        coEvery { allocations.inYearCloseLock<Any?>(any(), any()) } coAnswers {
+            secondArg<suspend (Boolean) -> Any?>().invoke(true)
+        }
         coEvery { allocations.allocators(any()) } returns emptySet()
         coEvery { yearCloseRepository.saveDraft(any()) } answers { firstArg() }
         coEvery { yearCloseRepository.saveAttested(any(), any()) } answers { firstArg() }
@@ -332,24 +334,13 @@ class YearCloseServiceTest {
             }
 
         @Test
-        fun `a PENDING allocation or an unattributed closing journal blocks attestation`(): Unit = runBlocking {
+        fun `an unattributed closing journal blocks attestation`(): Unit = runBlocking {
             stubPeriodLines(2025, balancedLines())
             coEvery { yearCloseRepository.findByFiscalYear(2025) } returns draftFor(balancedLines())
             coEvery { allocations.unattributedJournalKeys(2025) } returns listOf("year-end-result:2025:abc:0")
             assertThatThrownBy {
                 runBlocking { service.attest(AttestYearCloseCommand(2025, attestedBy = "checker-sub")) }
             }.isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("no allocator attribution")
-            coEvery { allocations.findPending(2025) } returns
-                com.openbank.ledger.domain.model.YearEndAllocationRecord(
-                    "year-end-result:2025:abc:1",
-                    2025,
-                    com.openbank.ledger.domain.model.YearEndAllocationStatus.PENDING,
-                    "maker-x",
-                    null,
-                )
-            assertThatThrownBy {
-                runBlocking { service.attest(AttestYearCloseCommand(2025, attestedBy = "checker-sub")) }
-            }.isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("PENDING")
             coVerify(exactly = 0) { yearCloseRepository.saveAttested(any(), any()) }
             Unit
         }

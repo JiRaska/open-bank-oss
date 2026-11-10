@@ -15,14 +15,12 @@ import com.openbank.ledger.domain.model.FiscalYearTrialBalance
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.JournalEntry
-import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.ledger.domain.model.YearCloseRecord
-import com.openbank.ledger.domain.model.YearEndAllocationRecord
-import com.openbank.ledger.domain.model.YearEndAllocationStatus
 import com.openbank.libs.domain.calendar.AccountingClock
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -71,6 +69,7 @@ class YearEndResultAllocationServiceTest {
     private val entryId: UUID = UUID.randomUUID()
     private val entry = mockk<JournalEntry> { every { id } returns entryId }
     private val command = AllocateYearEndResultCommand(2025, "maker")
+    private var lockedAsDraft = true
 
     @BeforeEach
     fun setup() {
@@ -79,10 +78,10 @@ class YearEndResultAllocationServiceTest {
         coEvery { glAccounts.findByCode(any()) } answers {
             mockk<GlAccount> { every { id } returns UUID.nameUUIDFromBytes(firstArg<String>().toByteArray()) }
         }
-        coEvery { allocations.findPending(2025) } returns null
         coEvery { allocations.unattributedJournalKeys(2025) } returns emptyList()
-        coEvery { allocations.exists(any()) } returns false
-        coEvery { allocations.insertPending(any(), any(), any(), any()) } returns true
+        coEvery { allocations.inYearCloseLock<Any?>(2025, any()) } coAnswers {
+            secondArg<suspend (Boolean) -> Any?>().invoke(lockedAsDraft)
+        }
         coEvery { ledger.postJournalWithOutcome(any()) } returns PostJournalOutcome(entry, false)
     }
 
@@ -91,14 +90,24 @@ class YearEndResultAllocationServiceTest {
     }
 
     @Test
-    fun `attribution is written PENDING before the journal and completed after it`() = runBlocking<Unit> {
+    fun `the journal and its attribution are written inside the year-close lock`() = runBlocking<Unit> {
         plans(listOf(income), emptyList())
         assertThat(service.allocate(command).posted).isTrue()
-        io.mockk.coVerifyOrder {
-            allocations.insertPending(2025, match { it.startsWith("year-end-result:2025:") }, "maker", any())
-            ledger.postJournalWithOutcome(any())
-            allocations.markPosted(any(), entryId, any())
+        coVerifyOrder {
+            allocations.inYearCloseLock<Any?>(2025, any())
+            ledger.postJournalWithOutcome(match { it.idempotencyKey.startsWith("year-end-result:2025:") })
+            allocations.record(2025, match { it.startsWith("year-end-result:2025:") }, "maker", entryId, any())
         }
+    }
+
+    @Test
+    fun `a year that stopped being DRAFT under the lock is refused before posting`() {
+        plans(listOf(income))
+        lockedAsDraft = false
+        assertThatThrownBy {
+            runBlocking { service.allocate(command) }
+        }.isInstanceOf(YearCloseConflictException::class.java)
+        coVerify(exactly = 0) { ledger.postJournalWithOutcome(any()) }
     }
 
     @Test
@@ -107,21 +116,11 @@ class YearEndResultAllocationServiceTest {
         coEvery { ledger.postJournalWithOutcome(any()) } returns PostJournalOutcome(entry, true)
         assertThatThrownBy { runBlocking { service.allocate(command) } }
             .isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("already posted")
-        coVerify(exactly = 0) { allocations.markPosted(any(), any(), any()) }
+        coVerify(exactly = 0) { allocations.record(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `a ledger refusal abandons the attempt`() {
-        plans(listOf(income))
-        coEvery { ledger.postJournalWithOutcome(any()) } throws LedgerConflictException("day closed")
-        assertThatThrownBy {
-            runBlocking { service.allocate(command) }
-        }.isInstanceOf(LedgerConflictException::class.java)
-        coVerify { allocations.markAbandoned(any(), any()) }
-    }
-
-    @Test
-    fun `a residual remaining after the post is a conflict`() {
+    fun `a residual remaining after the post is a conflict, rolling the transaction back`() {
         plans(listOf(income), listOf(income))
         assertThatThrownBy { runBlocking { service.allocate(command) } }
             .isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("remain")
@@ -130,32 +129,10 @@ class YearEndResultAllocationServiceTest {
     @Test
     fun `a used key moves to the next ordinal`() = runBlocking<Unit> {
         plans(listOf(income), emptyList())
-        coEvery { allocations.exists(match { it.endsWith(":0") }) } returns true
+        coEvery { journals.findByIdempotencyKey(match { it.endsWith(":0") }) } returns entry
         service.allocate(command)
         coVerify { ledger.postJournalWithOutcome(match { it.idempotencyKey.endsWith(":1") }) }
     }
-
-    @Test
-    fun `a PENDING attempt whose journal exists is recovered as POSTED, one without as ABANDONED`() =
-        runBlocking<Unit> {
-            plans(emptyList(), emptyList())
-            val pending =
-                YearEndAllocationRecord(
-                    "year-end-result:2025:x:0",
-                    2025,
-                    YearEndAllocationStatus.PENDING,
-                    "maker",
-                    null,
-                )
-            coEvery { allocations.findPending(2025) } returns pending
-            coEvery { journals.findByIdempotencyKey("year-end-result:2025:x:0") } returns entry
-            service.allocate(command)
-            coVerify { allocations.markPosted("year-end-result:2025:x:0", entryId, any()) }
-
-            coEvery { journals.findByIdempotencyKey("year-end-result:2025:x:0") } returns null
-            service.allocate(command)
-            coVerify { allocations.markAbandoned("year-end-result:2025:x:0", any()) }
-        }
 
     @Test
     fun `an unattributed closing journal blocks even an empty-plan re-run`() {
@@ -163,16 +140,6 @@ class YearEndResultAllocationServiceTest {
         coEvery { allocations.unattributedJournalKeys(2025) } returns listOf("year-end-result:2025:y:0")
         assertThatThrownBy { runBlocking { service.allocate(command) } }
             .isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("no allocator attribution")
-    }
-
-    @Test
-    fun `a refused PENDING insert stops before any posting`() {
-        plans(listOf(income))
-        coEvery { allocations.insertPending(any(), any(), any(), any()) } returns false
-        assertThatThrownBy {
-            runBlocking { service.allocate(command) }
-        }.isInstanceOf(YearCloseConflictException::class.java)
-        coVerify(exactly = 0) { ledger.postJournalWithOutcome(any()) }
     }
 
     @Test

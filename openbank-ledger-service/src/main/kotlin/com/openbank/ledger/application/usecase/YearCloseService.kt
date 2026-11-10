@@ -80,19 +80,18 @@ class YearCloseService(
         return yearCloseRepository.saveDraft(draft)
     }
 
-    override suspend fun attest(command: AttestYearCloseCommand): YearCloseRecord {
+    // ADR-0096 D3: the whole attestation runs under the same `SELECT … FOR UPDATE` on the year-close
+    // row that the result allocation holds for its whole transaction, and EVERY read below is made
+    // after that lock. Measured by YearEndResultAllocationConcurrencyIT: with only a conditional
+    // UPDATE, Postgres (READ COMMITTED) re-checks just the row's own columns after waiting, not the
+    // NOT EXISTS subqueries, so an attest that waited on an allocation still succeeded over it.
+    override suspend fun attest(command: AttestYearCloseCommand): YearCloseRecord =
+        allocations.inYearCloseLock(command.fiscalYear) { attestLocked(command) }
+
+    private suspend fun attestLocked(command: AttestYearCloseCommand): YearCloseRecord {
         val record = yearCloseRepository.findByFiscalYear(command.fiscalYear)
             ?: throw YearCloseNotFoundException("No year close for fiscal year ${command.fiscalYear}")
-        if (record.status != YearCloseStatus.DRAFT) {
-            throw YearCloseConflictException(
-                "Year close ${command.fiscalYear} is not DRAFT (status=${record.status})",
-            )
-        }
-        if (command.fiscalYear >= accountingClock.today().year) {
-            throw YearCloseConflictException(
-                "Fiscal year ${command.fiscalYear} has not ended yet — cannot attest an open year",
-            )
-        }
+        requireAttestable(record, command, allocationChecks = false)
 
         // Re-verify the anchor against a FRESH computation (fail-closed): if anything was posted
         // into the closed year since the draft, the hash drifts and attestation must stop.
@@ -107,7 +106,7 @@ class YearCloseService(
         }
 
         requireFourEyes(record, command)
-        requireAllocationsAttributed(command)
+        requireAttestable(record, command, allocationChecks = true)
 
         val attested = record.attest(attestedBy = command.attestedBy, attestedAt = Instant.now(clock))
         val outbox = OutboxMessage(
@@ -193,23 +192,30 @@ class YearCloseService(
 
     /**
      * ADR-0096 D3 four-eyes over the result allocation. Its closing journal is posted by the system
-     * poster, so attribution lives only in `ledger_year_close_allocation`. Fail closed when an
-     * allocation is still PENDING (a crash mid-allocation, recovered by re-running the allocation),
-     * when any `year-end-result:{year}:*` journal has no POSTED attribution, or when the attestor
+     * poster, so attribution lives only in `ledger_year_close_allocation`. Fail closed when any `year-end-result:{year}:*` journal has no POSTED attribution, or when the attestor
      * is ANY of the year's allocators. The repository's conditional flip re-checks the same facts
      * atomically, so this is the readable refusal and that is the guarantee.
      */
-    private suspend fun requireAllocationsAttributed(command: AttestYearCloseCommand) {
+    private suspend fun requireAttestable(
+        record: YearCloseRecord,
+        command: AttestYearCloseCommand,
+        allocationChecks: Boolean,
+    ) {
         val year = command.fiscalYear
-        val pending = allocations.findPending(year)
-        val unattributed = allocations.unattributedJournalKeys(year)
-        val problem = when {
-            pending != null ->
-                "a result allocation is PENDING (${pending.idempotencyKey}) — re-run the allocation to reconcile it"
-            unattributed.isNotEmpty() -> "closing journal(s) $unattributed have no allocator attribution"
-            command.attestedBy in allocations.allocators(year) ->
-                "Four-eyes: the attestor ${command.attestedBy} allocated the result"
-            else -> null
+        val problem = if (!allocationChecks) {
+            when {
+                record.status != YearCloseStatus.DRAFT -> "it is not DRAFT (status=${record.status})"
+                year >= accountingClock.today().year -> "fiscal year $year has not ended yet — an open year"
+                else -> null
+            }
+        } else {
+            val unattributed = allocations.unattributedJournalKeys(year)
+            when {
+                unattributed.isNotEmpty() -> "closing journal(s) $unattributed have no allocator attribution"
+                command.attestedBy in allocations.allocators(year) ->
+                    "Four-eyes: the attestor ${command.attestedBy} allocated the result"
+                else -> null
+            }
         }
         if (problem != null) throw YearCloseConflictException("Year close $year cannot be attested: $problem")
     }
