@@ -112,31 +112,7 @@ class SupervisorySubmissionApiIT {
             body("""{"accepted":true,"reference":"ACK-1"}""")
         } When { post("$path/$id/acknowledgement") } Then { statusCode(422) }
 
-        jdbc { conn ->
-            conn.prepareStatement(
-                "select s.state, s.package_hash, a.outcome, a.attempted_by from finrep_submission s " +
-                    "join finrep_submission_attempt a on a.submission_id = s.id where s.id = ?::uuid",
-            ).use { st ->
-                st.setString(1, id)
-                st.executeQuery().use { rs ->
-                    assertThat(rs.next()).isTrue()
-                    assertThat(rs.getString(1)).isEqualTo("PACKAGED")
-                    assertThat(rs.getString(2)).hasSize(64)
-                    assertThat(rs.getString(3)).isEqualTo("DRY_RUN")
-                    assertThat(rs.getString(4)).isEqualTo("operator")
-                    assertThat(rs.next()).isFalse()
-                }
-            }
-            conn.prepareStatement(
-                "select count(*) from finrep_submission where template_id = 'F01.01' and reference_period = ?",
-            ).use { st ->
-                st.setObject(1, LocalDate.parse("2026-06-30"))
-                st.executeQuery().use { rs ->
-                    rs.next()
-                    assertThat(rs.getInt(1)).isEqualTo(1)
-                }
-            }
-        }
+        assertDryRunRowsPersisted(id)
     }
 
     @Test
@@ -162,6 +138,34 @@ class SupervisorySubmissionApiIT {
             statusCode(400)
         }
         Given { this } When { get("$path/00000000-0000-0000-0000-000000000099") } Then { statusCode(404) }
+    }
+
+    private fun assertDryRunRowsPersisted(id: String) {
+        jdbc { conn ->
+            conn.prepareStatement(
+                "select s.state, s.package_hash, a.outcome, a.attempted_by from finrep_submission s " +
+                    "join finrep_submission_attempt a on a.submission_id = s.id where s.id = ?::uuid",
+            ).use { st ->
+                st.setString(1, id)
+                st.executeQuery().use { rs ->
+                    assertThat(rs.next()).isTrue()
+                    assertThat(rs.getString(1)).isEqualTo("PACKAGED")
+                    assertThat(rs.getString(2)).hasSize(64)
+                    assertThat(rs.getString(3)).isEqualTo("DRY_RUN")
+                    assertThat(rs.getString(4)).isEqualTo("operator")
+                    assertThat(rs.next()).isFalse()
+                }
+            }
+            conn.prepareStatement(
+                "select count(*) from finrep_submission where template_id = 'F01.01' and reference_period = ?",
+            ).use { st ->
+                st.setObject(1, LocalDate.parse("2026-06-30"))
+                st.executeQuery().use { rs ->
+                    rs.next()
+                    assertThat(rs.getInt(1)).isEqualTo(1)
+                }
+            }
+        }
     }
 
     private fun jdbc(block: (java.sql.Connection) -> Unit) {
