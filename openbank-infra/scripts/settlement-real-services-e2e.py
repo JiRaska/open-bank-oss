@@ -480,7 +480,7 @@ def main() -> None:
     for database in service_names:
         sql("proof", f"CREATE DATABASE {database}")
 
-    redis, redis_port = docker("redis", "valkey/valkey:8-alpine", 6379)
+    redis, redis_port = docker("redis", "valkey/valkey:9.1.3-alpine", 6379)
     keycloak, keycloak_port = docker(
         "keycloak",
         "quay.io/keycloak/keycloak:26.6.3",

@@ -10,6 +10,13 @@ import java.time.LocalDate
 
 /** Evidence that a scheduled job ran for an accounting day (ADR-0342 D1). */
 interface CloseJobRunPort {
+    /** Persist observed obligations separately from actual runs; return all historical owners in the range. */
+    fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>>
+
     /** Upsert on `(businessDate, job)`: a re-run for the same day replaces the counts. */
     fun record(run: CloseJobRun): Uni<Unit>
 

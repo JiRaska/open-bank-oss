@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.0...agent-service-v1.33.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **agent-service:** complete tool-free explanations before returning success ([#15339](https://github.com/JiRaska/open-bank-oss/issues/15339)) ([6e1f61e](https://github.com/JiRaska/open-bank-oss/commit/6e1f61eb3a43febdec0fda6106022d6102eeab8f))
+
 ## [1.33.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.32.1...agent-service-v1.33.0) (2026-11-08)
 
 

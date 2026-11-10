@@ -171,8 +171,8 @@ The latest published NAV of a fund is older than the cutoff: the NAV of business
 12:00 UTC on the next business day (Tue-Sat: yesterday's; Sunday and Monday: Friday's). Orders of the
 fund cannot settle until a NAV is published.
 
-1. `GET /api/v1/funds/{fundId}/navs`: is a NAV for the day `CALCULATED` and waiting for its checker?
-   Then it is an approval problem: a second operator publishes it (`POST /api/v1/navs/{navId}/approve`)
+1. `GET /api/v2/funds/{fundId}/navs`: is a NAV for the day `CALCULATED` and waiting for its checker?
+   Then it is an approval problem: a second operator publishes it (`POST /api/v2/navs/{navId}/approve`)
    or rejects it. The maker cannot.
 2. Nothing calculated: the calculation failed or was never run. Check the price feed
    (`PensionFundPriceFeedFailing`, the "Market-price lookups by outcome" panel); positions can be
@@ -186,7 +186,7 @@ A corrected NAV superseded a published one and re-priced every transaction settl
 "Correction re-pricing volume" panel shows how many). A NAV error affects participants who traded at
 the wrong price.
 
-1. Find the correction: `GET /api/v1/funds/{fundId}/navs` (the new record carries `correctsNavId`).
+1. Find the correction: `GET /api/v2/funds/{fundId}/navs` (the new record carries `correctsNavId`).
 2. Record the cause and the size of the error; decide with compliance whether participants and the
    supervisor must be informed. The re-priced transactions carry `correctedFromNavId`.
 
@@ -202,7 +202,7 @@ after they were placed; one pending this long means no NAV has been published si
 alert for the same fund) or the publication failed to settle it.
 
 1. Check the fund's latest NAV and its publication time against the order's `placedAt`
-   (`GET /api/v1/contracts/{contractId}/orders`).
+   (`GET /api/v2/contracts/{contractId}/orders`).
 2. If NAVs were published after the order and it is still PENDING, treat it as a defect: capture the
    order and NAV ids and open an issue; do not settle by hand.
 
@@ -210,7 +210,7 @@ alert for the same fund) or the publication failed to settle it.
 
 A strategy change has waited more than 5 days for approval. The participant notice period runs from
 approval, so the earliest effective date slips by every day it waits. Approve or reject it from a
-second operator (`POST /api/v1/strategy-changes/{id}/approve` or `/reject`).
+second operator (`POST /api/v2/strategy-changes/{id}/approve` or `/reject`).
 
 ### PensionFundPriceFeedFailing
 

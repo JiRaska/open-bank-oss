@@ -11,6 +11,13 @@ import java.time.LocalDate
 
 /** Evidence that a scheduled lending job ran for an accounting day (ADR-0342 D1). */
 interface CloseJobRunPort {
+    /** Persist observed obligations separately from actual runs; return all historical owners in the range. */
+    fun requiredJobs(
+        from: LocalDate,
+        to: LocalDate,
+        scheduled: Map<LocalDate, Set<String>>,
+    ): Uni<Map<LocalDate, Set<String>>>
+
     /**
      * Marks a pass for `(businessDate, job)` as IN FLIGHT before it does any work. While the marker
      * stands the day is not reported, so a pass still running near midnight cannot be overtaken by a
@@ -52,7 +59,7 @@ data class InFlightRun(val businessDate: LocalDate, val job: String, val started
  * @property posted rows the outbox delivered to the ledger (SENT)
  * @property dead rows the outbox gave up on (DEAD): the journal was never booked
  */
-data class AllowancePostings(val pending: Int, val posted: Int, val dead: Int)
+data class AllowancePostings(val pending: Int, val posted: Int, val dead: Int, val covered: Boolean = true)
 
 /** Read side of [AllowancePostings]. */
 fun interface AllowancePostingsPort {

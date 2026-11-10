@@ -62,6 +62,8 @@ data class ReportParticipationCommand(
     val itemsProcessed: Int,
     val reason: String?,
     val callerPrincipal: String?,
+    val exercisedJobs: Set<String> = emptySet(),
+    val sourceRunId: String? = null,
 )
 
 /** An operator waiving a missing participant for one day (ADR-0342 D3). */

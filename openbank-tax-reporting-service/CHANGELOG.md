@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.47.3](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.2...tax-reporting-service-v0.47.3) (2026-11-09)
+
+
+### Bug Fixes
+
+* **tax-reporting:** bind the OPA policy decision point so @Authorize routes answer ([#15344](https://github.com/JiRaska/open-bank-oss/issues/15344)) ([c419dd1](https://github.com/JiRaska/open-bank-oss/commit/c419dd1a98dcc72d5509d227379df410bf17d824))
+
+## [0.47.2](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.1...tax-reporting-service-v0.47.2) (2026-11-09)
+
+
+### Bug Fixes
+
+* **pension:** migrate retained fund clients to pension-fund v2 ([#15300](https://github.com/JiRaska/open-bank-oss/issues/15300)) ([db1dfdc](https://github.com/JiRaska/open-bank-oss/commit/db1dfdc1ba8cb1c5c5a08845eb3702c6f59c198d))
+
 ## [0.47.1](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.47.0...tax-reporting-service-v0.47.1) (2026-11-06)
 
 

@@ -24,11 +24,12 @@ contact data.
 
 ## Trust boundaries
 
-1. Fund administrators call `/api/v1/funds`, `/navs`, `/strategies` and `/strategy-changes` with
+1. Fund administrators call `/api/v2/funds`, `/navs`, `/strategies` and `/strategy-changes` (v1
+   retained as deprecated aliases until the sunset) with
    their OWN bearer token. RBAC per method (`@RolesAllowed`, ROLE_OPERATOR / ROLE_ADMIN to write,
    plus ROLE_AUDITOR / ROLE_API to read), then OPA (`pension_fund_rest_ext.rego`: writes for real
    staff only, every `service-account-` excluded), then the domain (four-eyes).
-2. `/api/v1/contracts/{contractId}/*` is the unit-register surface pension-service calls through
+2. `/api/v2/contracts/{contractId}/*` (deprecated v1 alias retained) is the unit-register surface pension-service calls through
    its FundAdministrationPort (ADR-0334 §1). Only real staff and pension-service's own client
    (`service-account-openbank-pension`) may read holdings or place orders. The read action is
    `pension-fund.holding.inspect`, deliberately not a `.read`/`.list` verb: base rest.rego's
@@ -49,7 +50,7 @@ contact data.
 4. Market prices enter through `MarketPricePort`. The shipped adapter (`StubMarketPriceAdapter`)
    knows no prices, so every position must be priced in the request by the calculating
    administrator; an unpriced position is refused, never valued at an invented number.
-5. `/api/v1/reporting/funds/{fundId}/period-figures` (#12425) is the period-end read model
+5. `/api/v2/reporting/funds/{fundId}/period-figures` (#12425; deprecated v1 alias retained) is the period-end read model
    tax-reporting-service assembles the ČNB returns from. Aggregate only — sums and counts, no
    contract id. `pension-fund.reporting.inspect` is admitted for real staff and for
    tax-reporting-service's OWN client (`service-account-openbank-tax-reporting`, ROLE_API) alone,
@@ -149,7 +150,7 @@ closed rather than the pod).
 
 Create v2 requires an explicit published revision; amendment can omit or repeat the existing pin. The 27 retained v1 operations declare the same role/action, actor and four-eyes boundaries directly, rather than relying on resource inheritance. Their existing idempotency behavior is preserved; nine v2 writes additionally require durable response replay as described below. Reflection parity (`PensionFundVersionAuthorizationParityTest`) and real HTTP/OIDC/OPA/four-eyes regressions (`PensionFundHoldingEnforcedAuthzIT`, `PensionFundApiIT`) cover this boundary. The owner approved only the exception excluding the two old manual-fee definition writes, not their live retirement. Other v1 operations retain deprecation headers and at least 180 days of configured sunset before an approved rollout.
 
-The first source phase moves the Admin UI to v2 while pension-service and tax-reporting retain their v1 clients and contracts over the five unchanged operations. Their explicit migration, both tracked Pact contracts and related mTLS/reporting fixtures remain pending together in the preserved second phase under #13173; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; these controls take effect only on rollout. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
+Known callers are migrated explicitly; external writers remain an inventory gap. The v2 provider must be available across active backends before callers switch. The proposed certificate/network/pod-template changes can have same-image GitOps effects independently of image promotion; these controls take effect only on rollout. Rollback preserves revision pins and numeric precision and does not re-enable arbitrary fees for pinned funds.
 
 ### Durable v2 write replay
 
@@ -184,3 +185,34 @@ Accepted; revisit if creation volume grows.
 audit personal data and have no TTL. Retention owner: the pension-fund-service owner. Review date:
 2027-02-05 (decide expiry or pseudonymised snapshots, keeping a window long enough that deleting a
 receipt cannot re-enable a duplicate write).
+
+### ADR-0365 — segregated NAV fee accounting and close evidence
+
+NAV publication and its source intent commit together. The shared outbox claim/backoff protocol
+and source idempotency prevent a lost acknowledgement or a second worker from duplicating a fee.
+Fund and company receipts are independent; a partial delivery, disabled delivery or a historical
+NAV without an intent cannot report complete. An immutable fund-to-company binding prevents
+configuration changes from transferring an old receipt to another book. Pending calculated NAVs
+and corrections remain visible blockers. Stable source receipt hashes survive polling and restarts.
+Business intents live separately from the disposable transport outbox; the ordinary SENT purge
+retains intents, receipts, completion and source identity. Destination polling is independent and
+refreshes recent closed days as well as the oldest pending days, so a new refusal can invalidate
+monthly proof without a new journal. Cancellation still stops the job and destination failures
+remain failures after healthy books refresh.
+
+The client verifies book/source/population in the acknowledgement and refuses redirects. Production
+accounting requires the named mTLS configuration and its own OIDC client token. A fee is an expense
+and payable in the fund and a receivable and income in the company; it creates no cash settlement.
+A negative correction requires its completed original in the same destination and population.
+
+Each book owns reconciliation and close. Cash, custody, units, payments and the company's own
+operations require source references and a complete independently approved source balance; the
+NAV fee producer cannot certify these other facts. Only verified interactive issuer subjects may
+make/check this reconciliation, with distinct immutable subjects required. The bank rejects this
+purpose, and bank machine identities are vetoed on both pension book policies.
+
+Residual risks: the chart and source references require professional review; a reference is an
+attributable attestation, not automatic validation of an external document. Historical opening and
+cutover evidence and a due-calendar adapter remain prerequisites for existing funds. Retain source
+intents/receipts with financial history; the service owner must approve retention before go-live.
+Delivery remains disabled by default and deployment/enforcement require a complete live month.

@@ -1028,10 +1028,22 @@ jobs:
           fi
 
       - name: Install Trivy
+        id: install-trivy
+        continue-on-error: true
         if: steps.build_admission.outputs.proceed == 'true'
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
+
+      - name: Retry checksum-verified Trivy release installation
+        if: steps.build_admission.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIVY_SETUP_OUTCOME: ${{ steps.install-trivy.outcome }}
+        run: |
+          if [ "$TRIVY_SETUP_OUTCOME" = failure ]; then
+            bash .github/scripts/install-trivy-release-fallback.sh
+          fi
 
       - name: Stage Test Intelligence deployment history
         if: steps.build_admission.outputs.proceed == 'true'
