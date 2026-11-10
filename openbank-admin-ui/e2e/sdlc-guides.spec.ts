@@ -14,7 +14,15 @@ test('CI passengers board, ride and arrive; the shorter lane has its own explana
   const train = page.getByRole('region', { name: /Více kolejí|Several tracks/ })
   await expect(train).toBeVisible()
   const scene = train.getByRole('img', { name: /Lví vláček|Lion change train/ })
-  await train.getByRole('button', { name: /^Pozastavit$|^Pause$/ }).click()
+  // The shared browser configuration requests reduced motion. Wait for the
+  // hydrated paused state instead of racing the server-rendered Pause control.
+  const play = train.getByRole('button', { name: /^Přehrát cestu$|^Play journey$/ })
+  await expect(play).toHaveAttribute('aria-pressed', 'false')
+  await play.click()
+  const pause = train.getByRole('button', { name: /^Pozastavit$|^Pause$/ })
+  await expect(pause).toHaveAttribute('aria-pressed', 'true')
+  await pause.click()
+  await expect(play).toHaveAttribute('aria-pressed', 'false')
   await expect(scene).toHaveAccessibleDescription(/tří souběžných kolejí|three concurrent tracks/)
   await expect(scene.locator('[data-lane]')).toHaveCount(3)
   await expect(scene).toHaveAccessibleDescription(/čeká na ověření|awaits verification/)
