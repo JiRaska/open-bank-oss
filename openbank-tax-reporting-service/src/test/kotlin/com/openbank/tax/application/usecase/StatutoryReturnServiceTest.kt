@@ -220,6 +220,31 @@ class StatutoryReturnServiceTest {
     }
 
     @Test
+    fun `the onStored hook runs only after the return validated and was stored`(): Unit = runBlocking {
+        val seen = mutableListOf<UUID>()
+        val hooked = object : ReturnDataPort {
+            var units = BigDecimal("-1")
+            override val available = true
+            override suspend fun fetch(
+                catalogue: ReturnCatalogue,
+                definition: ReturnDefinition,
+                entityId: String,
+                period: ReportingPeriod,
+            ) = ReturnAssemblyData(mapOf("units" to units), onStored = {
+                assertThat(repo.rows).containsKey(it.id)
+                seen += it.id
+            })
+        }
+        val svc = service(d = hooked)
+        assertThatThrownBy { runBlocking { svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker") } }
+            .isInstanceOf(com.openbank.tax.domain.returns.ReturnValidationException::class.java)
+        assertThat(seen).isEmpty()
+        hooked.units = BigDecimal("5")
+        val stored = svc.assemble("test-cat", "M-FUND", "fund-a", "2026-07", "maker")
+        assertThat(seen).containsExactly(stored.id)
+    }
+
+    @Test
     fun `a return with no filing obligation is never a breach, stored and overdue or not`(): Unit = runBlocking {
         val dryRun = ReturnDefinition(
             code = "D-TEST",

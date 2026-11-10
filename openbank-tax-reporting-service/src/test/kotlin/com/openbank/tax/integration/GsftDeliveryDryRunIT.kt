@@ -15,16 +15,22 @@ import com.openbank.tax.domain.gsft.EntitledPersonType
 import com.openbank.tax.domain.gsft.FxRates
 import com.openbank.tax.domain.gsft.Holding
 import com.openbank.tax.domain.gsft.SpecialRegimeShare
+import com.openbank.tax.infrastructure.returns.gsft.GsftPackageStore
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.bouncycastle.bcpg.ArmoredOutputStream
 import org.bouncycastle.bcpg.HashAlgorithmTags
@@ -69,6 +75,8 @@ import java.time.format.DateTimeFormatter
 import java.util.Base64
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
@@ -253,6 +261,36 @@ class GsftDeliveryDryRunIT {
         // TEST and LIVE share the bank's batch sequence: the TEST batch was 00001.
         val diw = String(unzip(storedArchive(sha)).getValue("DIW$BANK.00002"), CP1250)
         assertThat(diw).endsWith(",000000327500000,1,KEEN\r\n")
+    }
+
+    @Inject
+    lateinit var store: GsftPackageStore
+
+    @Test
+    @Order(6)
+    fun `store writes are idempotent under concurrency and the batch counter is atomic`() {
+        val bytes = "concurrent archive ${UUID.randomUUID()}".toByteArray()
+        val at = Instant.parse("2026-11-10T10:00:00Z")
+        val writers = (1..4).map { onVertx { store.put("GSFT-race.zip", bytes, at) } }
+        assertThat(writers.map { it.get(20, TimeUnit.SECONDS) }.toSet()).containsExactly(sha256(bytes))
+        // A later identical put is a no-op, not a primary-key violation.
+        assertThat(onVertx { store.put("GSFT-race.zip", bytes, at) }.get(20, TimeUnit.SECONDS)).isEqualTo(sha256(bytes))
+        assertThat(count("select count(*) from gsft_package where archive_name = 'GSFT-race.zip'")).isEqualTo(1)
+
+        // A second delivery for the same return hands back the FIRST stored artefact.
+        val first = storedDelivery(id)
+        val again = onVertx { store.putDelivery(UUID.fromString(id), "other.pgp", byteArrayOf(1), at) }
+            .get(20, TimeUnit.SECONDS)
+        assertThat(again.encrypted).isEqualTo(first)
+        assertThat(again.fileName).isEqualTo("GSFT$BANK.00001.zip.pgp")
+
+        // TEST (00001) and LIVE (00002) took the first two numbers of this bank; concurrent draws are distinct.
+        val numbers = (1..5).map { onVertx { store.nextBatchNumber(BANK) } }.map { it.get(20, TimeUnit.SECONDS) }
+        assertThat(numbers.sorted()).containsExactly(3, 4, 5, 6, 7)
+    }
+
+    private fun <T> onVertx(block: suspend () -> T): CompletableFuture<T> = CompletableFuture.supplyAsync {
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
     }
 
     private fun assemble(code: String, day: LocalDate) = post(
