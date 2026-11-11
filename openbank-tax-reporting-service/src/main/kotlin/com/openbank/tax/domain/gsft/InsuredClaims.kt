@@ -34,9 +34,10 @@ import java.util.UUID
  *     evidenced in the delivery rather than assumed. A synthetic customer reaching this list
  *     would be a fictitious person entitled to compensation.
  *
- * WHAT IT DOES NOT DECIDE (yet)
- *   Temporarily high balances (a separate, higher-cover category) need the triggering events and
- *   are not modelled here; such balances are covered only up to the standard limit until they are.
+ * TEMPORARILY HIGH BALANCES
+ *   The increased compensation of § 41e odst. 3 / § 41ea is claim-based and computed separately
+ *   ([TemporarilyHighBalances]); it is evidenced on the assembly and never folded into
+ *   [InsuredClaim.compensationCzk].
  */
 
 /** Statutory cover per depositor, in EUR. */
@@ -57,7 +58,13 @@ enum class ExclusionReason {
     OTHER_STATUTORY,
 }
 
-data class Depositor(val partyId: UUID, val exclusion: ExclusionReason?, val synthetic: Boolean)
+/** [naturalPerson] gates the increased cover of § 41e odst. 3; unknown is treated as false. */
+data class Depositor(
+    val partyId: UUID,
+    val exclusion: ExclusionReason?,
+    val synthetic: Boolean,
+    val naturalPerson: Boolean = false,
+)
 
 /** One holder's share of an account. [share] is a fraction in (0, 1]; null means "split equally". */
 data class Holding(val partyId: UUID, val share: BigDecimal?)
@@ -150,6 +157,8 @@ data class InsuredClaim(
     val eligibleBalanceCzk: BigDecimal,
     val compensationCzk: BigDecimal,
     val accountIds: List<UUID>,
+    /** Increased compensation for temporarily high balances (§ 41e odst. 3); not rendered. */
+    val increasedCompensationCzk: BigDecimal = BigDecimal.ZERO,
 )
 
 data class InsuredClaimsAssembly(
@@ -162,6 +171,12 @@ data class InsuredClaimsAssembly(
     val excludedDepositors: Map<ExclusionReason, Int>,
     /** Claims whose eligible balance exceeds the cover limit and are paid at the limit. */
     val cappedClaims: Int = 0,
+    /** Claims carrying increased compensation for a temporarily high balance (§ 41e odst. 3). */
+    val temporarilyHighClaims: Int = 0,
+    /** Sum of that increased compensation, CZK; claim-based, not in the delivered files. */
+    val temporarilyHighCompensationCzk: BigDecimal = BigDecimal.ZERO,
+    /** Qualifying credits refused (no application, not a natural person, outside the window, ...). */
+    val refusedQualifyingCredits: Int = 0,
 )
 
 object InsuredClaims {
@@ -171,6 +186,7 @@ object InsuredClaims {
         depositors: Collection<Depositor>,
         accounts: Collection<DepositAccount>,
         rates: FxRates,
+        qualifyingCredits: Collection<QualifyingCredit> = emptyList(),
     ): InsuredClaimsAssembly {
         requireValid(rates.day == relevantDay) { "FX rates are for ${rates.day}, the relevant day is $relevantDay" }
         val byId = depositors.associateBy { it.partyId }
@@ -187,6 +203,7 @@ object InsuredClaims {
         val liveAccounts = accounts.filterNot { it.synthetic || it in overdrawn }
         val eligible = depositors.filter { !it.synthetic && it.exclusion == null }
 
+        var refused = 0
         val claims = eligible.mapNotNull { depositor ->
             val held = liveAccounts.filter { a -> a.holders.any { it.partyId == depositor.partyId } }
             if (held.isEmpty()) return@mapNotNull null
@@ -201,13 +218,29 @@ object InsuredClaims {
             // account, so those balances are added uncapped on top of the capped ordinary claim.
             val compensation = shareSum(ordinary).max(BigDecimal.ZERO).min(coverLimitCzk).add(shareSum(special))
             InsuredClaim(depositor.partyId, balance, compensation, held.map { it.accountId }.sorted())
-        }.sortedBy { it.partyId }
+        }.sortedBy { it.partyId }.let { base ->
+            if (qualifyingCredits.isEmpty()) return@let base
+            val extra = TemporarilyHighBalances.compute(
+                relevantDay,
+                qualifyingCredits,
+                base,
+                byId,
+                accounts.associateBy { it.accountId },
+                rates,
+                coverLimitCzk,
+            )
+            refused = extra.refusedCredits
+            base.map { c -> extra.byParty[c.partyId]?.let { c.copy(increasedCompensationCzk = it) } ?: c }
+        }
 
         return InsuredClaimsAssembly(
             relevantDay = relevantDay,
             coverLimitCzk = coverLimitCzk,
             claims = claims,
             cappedClaims = claims.count { it.compensationCzk < it.eligibleBalanceCzk },
+            temporarilyHighClaims = claims.count { it.increasedCompensationCzk.signum() > 0 },
+            temporarilyHighCompensationCzk = claims.fold(BigDecimal.ZERO) { s, c -> s.add(c.increasedCompensationCzk) },
+            refusedQualifyingCredits = refused,
             droppedSyntheticDepositors = depositors.count { it.synthetic },
             droppedSyntheticAccounts = accounts.count { it.synthetic },
             droppedOverdrawnAccounts = overdrawn.size,
