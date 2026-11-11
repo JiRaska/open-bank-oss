@@ -49,6 +49,27 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
     fi
     exit 0
   fi
+  if [ "${2:-}" = "--verify-services" ]; then
+    # Batch form: same per-service rules as the single form below, one call per gate run.
+    echo "--verify-services" >> "$SERVICE_CI_BATCH_LOG"
+    if [ -z "${GH_TOKEN:-}" ] || { [ "${SERVICE_CI_MODE:-success}" != "success" ] && [ "${SERVICE_CI_MODE}" != "fail-one" ]; }; then
+      echo "::error::exact-main Services CI evidence is unavailable" >&2
+      exit 1
+    fi
+    proven='{}'
+    for svc in $(jq -r 'keys[]' <<< "${3:?}"); do
+      sha="$(jq -r --arg svc "$svc" '.[$svc]' <<< "$3")"
+      echo ".github/scripts/verify-successful-service-ci.py $svc $sha" >> "$SERVICE_CI_LOG"
+      # fail-one: exactly this service has no exact Services CI proof; its peers do.
+      if [ "${SERVICE_CI_MODE}" = "fail-one" ] && [ "$svc" = "${SERVICE_CI_FAIL_SERVICE:-}" ]; then continue; fi
+      if [ -n "${SERVICE_CI_FAIL_SHA:-}" ] && [ "$sha" = "$SERVICE_CI_FAIL_SHA" ]; then continue; fi
+      if [ -n "${SERVICE_CI_EXPECTED_SOURCE:-}" ] && [ "$sha" != "$SERVICE_CI_EXPECTED_SOURCE" ]; then continue; fi
+      proven="$(jq -cn --argjson old "$proven" --arg svc "$svc" --arg sha "$sha" \
+        '$old + {($svc): {sha: $sha, run_id: "fixture-run", attempt: 1}}')"
+    done
+    printf '%s\n' "$proven"
+    exit 0
+  fi
   echo "$*" >> "$SERVICE_CI_LOG"
   if [ -z "${GH_TOKEN:-}" ]; then
     echo "::error::GitHub token is unavailable" >&2
@@ -163,7 +184,7 @@ export GITHUB_REF=refs/heads/main
 export INPUT_CODEPLOY=false INPUT_CODEPLOY_PACT_VERSIONS='{}'
 export PACT_BROKER_URL=http://broker.invalid PACT_BROKER_USERNAME=fixture PACT_BROKER_PASSWORD=fixture
 export GITHUB_OUTPUT="$tmp/output" GITHUB_STEP_SUMMARY="$tmp/summary"
-export SERVICE_CI_LOG="$tmp/service-ci-log" SERVICE_CI_MODE=success
+export SERVICE_CI_LOG="$tmp/service-ci-log" SERVICE_CI_BATCH_LOG="$tmp/service-ci-batch-log" SERVICE_CI_MODE=success
 
 if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/log" 2>&1; then
   echo "FAIL: source-less reconcile gate unexpectedly succeeded" >&2
@@ -522,6 +543,32 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     exit 1
   fi
   echo "PASS: no exact and no historical Services CI evidence still fails closed"
+
+  # Exact Services CI proof for a whole batch costs ONE verifier call, not one per
+  # service: the per-service form re-listed every job of the run (~45 s each) and a
+  # 12-service reconcile ran out its 10-minute job timeout before deploying anything.
+  (
+    batch_services='["openbank-a-service","openbank-b-service","openbank-c-service"]'
+    IMAGE_TAGS="$(jq -cn --arg t "$BUILD_IMAGE_TAG" \
+      '{"openbank-a-service":$t,"openbank-b-service":$t,"openbank-c-service":$t}')"
+    IMAGE_DIGESTS="$(jq -cn '{"openbank-a-service":("sha256:"+("a"*64)),
+      "openbank-b-service":("sha256:"+("b"*64)),"openbank-c-service":("sha256:"+("c"*64))}')"
+    export IMAGE_TAGS IMAGE_DIGESTS
+    : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+    : > "$SERVICE_CI_BATCH_LOG"
+    if ! SERVICES="$batch_services" BROKER_MODE=verified SERVICE_CI_FAIL_SHA="" \
+       SERVICE_CI_EXPECTED_SOURCE="" RESOLVER_MODE=failure PACT_CLI_MODE=success \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/batch-exact-log" 2>&1 || \
+       [ "$(wc -l < "$SERVICE_CI_BATCH_LOG" | tr -d ' ')" != 1 ] || \
+       [ "$(grep -c -- 'verify-successful-service-ci.py openbank-' "$SERVICE_CI_LOG")" != 3 ] || \
+       grep -q -- '--resolve-reconcile-sources' "$SERVICE_CI_LOG" || \
+       ! grep -q '^deployable=\["openbank-a-service","openbank-b-service","openbank-c-service"\]$' "$GITHUB_OUTPUT"; then
+      echo "FAIL: exact Services CI proof for a batch was not a single verifier call" >&2
+      cat "$GITHUB_OUTPUT" "$SERVICE_CI_BATCH_LOG" "$SERVICE_CI_LOG" "$tmp/batch-exact-log" >&2
+      exit 1
+    fi
+  )
+  echo "PASS: exact Services CI proof for three services is one batch verifier call"
 )
 echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA over a mismatched latest-main version"
 

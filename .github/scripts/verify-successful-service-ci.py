@@ -240,6 +240,80 @@ def verify_successful_service_ci(
     )
 
 
+def verify_successful_services_ci(
+    candidates: dict[str, str], repository: str, token: str, api_url: str
+) -> dict[str, dict[str, str | int]]:
+    """Batch form of verify_successful_service_ci: same proof, one jobs fetch per run.
+
+    `candidates` maps each service to the SHA its Pact version is (equivalent to). The
+    per-service form re-lists every job of the run for every service; at 20 jobs a page
+    that is ~45 s per service, so a 12-service reconcile spent its whole 10-minute job
+    budget here and was cancelled before deploying anything. The verdict per service is
+    unchanged: a completed successful main run at exactly that SHA whose attempt has
+    all-green plus this service's build and contract jobs, each exactly once and green.
+    Services that no run proves are simply absent from the result.
+    """
+    if not isinstance(candidates, dict) or not candidates:
+        raise VerificationError("invalid candidate map")
+    for service, sha in candidates.items():
+        if not isinstance(service, str) or not re.fullmatch(r"openbank-[a-z0-9-]+", service):
+            raise VerificationError("invalid service name")
+        if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise VerificationError("invalid source SHA")
+    if not re.fullmatch(r"[^/]+/[^/]+", repository):
+        raise VerificationError("invalid repository")
+    if not token:
+        raise VerificationError("GitHub token is unavailable")
+
+    base = api_url.rstrip("/") + "/"
+    by_sha: dict[str, set[str]] = {}
+    for service, sha in candidates.items():
+        by_sha.setdefault(sha, set()).add(service)
+    proven: dict[str, dict[str, str | int]] = {}
+    for sha in sorted(by_sha):
+        pending = set(by_sha[sha])
+        query = urlencode({"branch": "main", "head_sha": sha, "per_page": 100})
+        runs_url = urljoin(
+            base, f"repos/{repository}/actions/workflows/services-ci.yml/runs?{query}"
+        )
+        for run in _json_pages(runs_url, token):
+            if not pending:
+                break
+            if not (
+                run.get("head_sha") == sha
+                and run.get("head_branch") == "main"
+                and run.get("event") in {"push", "workflow_dispatch"}
+                and run.get("status") == "completed"
+                and run.get("conclusion") == "success"
+                and isinstance(run.get("id"), int)
+                and isinstance(run.get("run_attempt"), int)
+                and run.get("run_attempt", 0) > 0
+            ):
+                continue
+            run_id = run["id"]
+            attempt = run["run_attempt"]
+            jobs_query = urlencode({"per_page": JOBS_PER_PAGE})
+            jobs_url = urljoin(
+                base,
+                f"repos/{repository}/actions/runs/{run_id}/attempts/{attempt}/jobs?{jobs_query}",
+            )
+            observed: dict[str, list[str | None]] = {}
+            for job in _json_pages(jobs_url, token):
+                name = job.get("name")
+                if isinstance(name, str):
+                    observed.setdefault(name, []).append(job.get("conclusion"))
+            if observed.get("all-green") != ["success"]:
+                continue
+            for service in sorted(pending):
+                if all(
+                    observed.get(f"build ({service}) / {service} ({phase})") == ["success"]
+                    for phase in ("build", "contract")
+                ):
+                    proven[service] = {"sha": sha, "run_id": str(run_id), "attempt": attempt}
+                    pending.discard(service)
+    return proven
+
+
 def _jobs_prove_services(
     run: dict,
     services: set[str],
@@ -832,6 +906,20 @@ def main() -> int:
             return 1
         print(json.dumps({"resolved": resolved, "unresolved": unresolved}, sort_keys=True))
         return 0
+    if len(sys.argv) == 3 and sys.argv[1] == "--verify-services":
+        try:
+            candidates = json.loads(sys.argv[2])
+            proven = verify_successful_services_ci(
+                candidates,
+                os.environ.get("GITHUB_REPOSITORY", ""),
+                os.environ.get("GH_TOKEN", ""),
+                os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+            )
+        except (json.JSONDecodeError, VerificationError) as exc:
+            print(f"::error::exact Services CI verification failed: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(proven, sort_keys=True))
+        return 0
     if len(sys.argv) == 4 and sys.argv[1] == "--resolve-reconcile-sources":
         try:
             services = json.loads(sys.argv[2])
@@ -869,7 +957,8 @@ def main() -> int:
         print(
             "usage: verify-successful-service-ci.py <service> <sha> | "
             "--resolve-reconcile-source <service> <current-main-sha> | "
-            "--resolve-reconcile-sources <services-json> <current-main-sha>",
+            "--resolve-reconcile-sources <services-json> <current-main-sha> | "
+            "--verify-services <service-to-sha-json>",
             file=sys.stderr,
         )
         return 2

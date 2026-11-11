@@ -25,7 +25,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: context-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-2e500af2@sha256:46cd34c5f0998f2d05b5e2c6de1f1173be73685c56fa81f081b3793f6d45ca1b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-context-service:sandbox-27e19a17@sha256:f9e905a9b307edb6832e5f87bc63ba9bcaccca3b6c7fa7d648f22745e82bf205
           imagePullPolicy: IfNotPresent
           ports:
             - { name: http, containerPort: 8149 }
@@ -120,10 +120,3 @@ spec:
     - { name: http, port: 8149, targetPort: http }
     - { name: https, port: 8443, targetPort: https }
     - { name: management, port: 8085, targetPort: management }
----
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata: { name: context-service, namespace: context }
-spec:
-  selector: { matchLabels: { app.kubernetes.io/name: context-service } }
-  podMetricsEndpoints: [{ port: management, path: /q/metrics, interval: 30s }]

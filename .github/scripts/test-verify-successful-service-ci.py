@@ -359,6 +359,77 @@ class VerifySuccessfulServiceCiTest(unittest.TestCase):
             )
 
 
+class VerifySuccessfulServicesCiBatchTest(unittest.TestCase):
+    """The batch form proves exactly what the single form proves, in one jobs fetch."""
+
+    OTHER = "openbank-ledger-service"
+
+    def batch(self, candidates, jobs):
+        requested: list[str] = []
+        responses = {
+            f"/repos/{REPOSITORY}/actions/workflows/services-ci.yml/runs": {
+                "workflow_runs": [run_fixture()]
+            },
+            f"/repos/{REPOSITORY}/actions/runs/{RUN_ID}/attempts/{ATTEMPT}/jobs": {"jobs": jobs},
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            requested.append(request.full_url)
+            path = request.full_url.split("?", 1)[0].replace("https://api.github.test", "")
+            value = responses.get(path)
+            if value is None:
+                raise AssertionError(f"unexpected API request: {request.full_url}")
+            return FixtureResponse(value)
+
+        with patch.object(MODULE, "urlopen", fake_urlopen):
+            result = MODULE.verify_successful_services_ci(
+                candidates, REPOSITORY, "fixture-token", "https://api.github.test"
+            )
+        return result, requested
+
+    def jobs_for(self, *services, contract="success", all_green="success"):
+        jobs = [{"name": "all-green", "conclusion": all_green}]
+        for service in services:
+            jobs.append({"name": f"build ({service}) / {service} (build)", "conclusion": "success"})
+            jobs.append(
+                {"name": f"build ({service}) / {service} (contract)", "conclusion": contract}
+            )
+        return jobs
+
+    def test_two_services_on_one_sha_cost_one_runs_and_one_jobs_request(self):
+        result, requested = self.batch(
+            {SERVICE: SHA, self.OTHER: SHA}, self.jobs_for(SERVICE, self.OTHER)
+        )
+        self.assertEqual(set(result), {SERVICE, self.OTHER})
+        self.assertEqual(result[SERVICE], {"sha": SHA, "run_id": str(RUN_ID), "attempt": ATTEMPT})
+        self.assertEqual(len(requested), 2)
+
+    def test_unproven_service_is_absent_not_raised(self):
+        result, _ = self.batch({SERVICE: SHA, self.OTHER: SHA}, self.jobs_for(SERVICE))
+        self.assertEqual(set(result), {SERVICE})
+
+    def test_red_contract_or_all_green_proves_nothing(self):
+        result, _ = self.batch({SERVICE: SHA}, self.jobs_for(SERVICE, contract="failure"))
+        self.assertEqual(result, {})
+        result, _ = self.batch({SERVICE: SHA}, self.jobs_for(SERVICE, all_green="failure"))
+        self.assertEqual(result, {})
+
+    def test_duplicate_job_name_proves_nothing(self):
+        jobs = self.jobs_for(SERVICE) + [
+            {"name": f"build ({SERVICE}) / {SERVICE} (contract)", "conclusion": "success"}
+        ]
+        result, _ = self.batch({SERVICE: SHA}, jobs)
+        self.assertEqual(result, {})
+
+    def test_invalid_input_is_refused(self):
+        for candidates in ({}, {"not-a-service": SHA}, {SERVICE: "abc"}):
+            with self.assertRaises(MODULE.VerificationError):
+                MODULE.verify_successful_services_ci(
+                    candidates, REPOSITORY, "fixture-token", "https://api.github.test"
+                )
+
+
 class ResolveReconcileSourceTest(unittest.TestCase):
     TIP = "f" * 40
     OLDER = "a" * 40
