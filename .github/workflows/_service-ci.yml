@@ -791,6 +791,11 @@ jobs:
             # configuration, before any provider task/JVM can publish a result.
             scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
             cat > "$scope_guard" <<'GRADLE'
+          // Init scripts also apply to included builds (build-logic), whose root project has no
+          // service subproject; checking there failed every scoped replay before any test ran.
+          if (gradle.parent != null) {
+              return
+          }
           gradle.projectsEvaluated {
               def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
               def task = provider.tasks.named("providerPactTest").get()
