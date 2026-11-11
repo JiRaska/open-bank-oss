@@ -333,18 +333,7 @@ class BusinessPaymentApprovals(
         if (originalKey != null && (rail != PaymentRail.DOMESTIC || digest == null)) {
             return invalidRelease(entity, approvalId, "invalid original submission digest")
         }
-        val body = objectMapper.writeValueAsString(railRequest)
-        val resp = if (digest == null) {
-            upstream.post(railUrl(rail), entity.toString(), body, approvalId.toString())
-        } else {
-            upstream.post(
-                railUrl(rail),
-                entity.toString(),
-                body,
-                approvalId.toString(),
-                mapOf(ORIGINAL_KEY_DIGEST_HEADER to digest),
-            )
-        }
+        val resp = dispatchRelease(rail, entity, approvalId, railRequest, digest)
         val respBody = (resp.entity as? String).orEmpty()
         val ok = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL
         val ref = read(respBody)?.path("id")?.textOrNull()
@@ -377,6 +366,27 @@ class BusinessPaymentApprovals(
             "paymentId" to ref,
             "error" to error,
         )
+    }
+
+    private fun dispatchRelease(
+        rail: PaymentRail,
+        entity: UUID,
+        approvalId: UUID,
+        railRequest: JsonNode,
+        digest: String?,
+    ): Response {
+        val body = objectMapper.writeValueAsString(railRequest)
+        return if (digest == null) {
+            upstream.post(railUrl(rail), entity.toString(), body, approvalId.toString())
+        } else {
+            upstream.post(
+                railUrl(rail),
+                entity.toString(),
+                body,
+                approvalId.toString(),
+                mapOf(ORIGINAL_KEY_DIGEST_HEADER to digest),
+            )
+        }
     }
 
     private fun invalidRelease(entity: UUID, approvalId: UUID, error: String): Map<String, String> {
