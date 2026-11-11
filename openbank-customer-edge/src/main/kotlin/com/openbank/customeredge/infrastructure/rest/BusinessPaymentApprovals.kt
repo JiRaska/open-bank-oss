@@ -266,18 +266,18 @@ class BusinessPaymentApprovals(
         return if (reply.ok) read(reply.body) else null
     }
 
-    private fun frozenPayload(p: HeldPayment): JsonNode =
-        objectMapper.createObjectNode().apply {
-            put("rail", p.rail.name)
-            p.amount?.let { put("amount", it) }
-            p.currency?.let { put("currency", it) }
-            if (p.rail != PaymentRail.SDD_MANDATE) p.creditor?.let { put("creditorIban", it) }
-            p.extras.forEach { (k, v) -> v?.let { put(k, it) } }
-            p.creditorName?.let { put("creditorName", it) }
-            p.reference?.let { put("reference", it) }
-            put("debtorAccountId", p.debtorAccountId)
-            set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
-        }
+    private fun frozenPayload(p: HeldPayment): JsonNode = objectMapper.createObjectNode().apply {
+        put("rail", p.rail.name)
+        p.amount?.let { put("amount", it) }
+        p.currency?.let { put("currency", it) }
+        if (p.rail != PaymentRail.SDD_MANDATE) p.creditor?.let { put("creditorIban", it) }
+        p.extras.forEach { (k, v) -> v?.let { put(k, it) } }
+        p.creditorName?.let { put("creditorName", it) }
+        p.reference?.let { put("reference", it) }
+        put("debtorAccountId", p.debtorAccountId)
+        set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
+    }
+
     private fun createBody(
         human: UUID,
         challenge: UUID,
@@ -308,11 +308,10 @@ class BusinessPaymentApprovals(
         }
     }
 
-    private fun conflict(code: String, message: String): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(mapOf("code" to code, "message" to message))
-            .type(MediaType.APPLICATION_JSON)
-            .build()
+    private fun conflict(code: String, message: String): Response = Response.status(Response.Status.CONFLICT)
+        .entity(mapOf("code" to code, "message" to message))
+        .type(MediaType.APPLICATION_JSON)
+        .build()
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
     fun release(entity: UUID, approvalId: UUID): Map<String, Any?> {

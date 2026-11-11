@@ -6236,10 +6236,9 @@ class CustomerEdgeResource(
             return domesticSubmissionDigest(scope)
         }
 
-        private fun domesticSubmissionDigest(material: String): String =
-            HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8)),
-            )
+        private fun domesticSubmissionDigest(material: String): String = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8)),
+        )
 
         private fun normalizeDomesticPriority(priority: String?): String =
             priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"

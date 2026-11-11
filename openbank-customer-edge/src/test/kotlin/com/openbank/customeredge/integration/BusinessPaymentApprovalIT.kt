@@ -170,11 +170,11 @@ class BusinessPaymentApprovalIT {
         val releaseEvidence = AtomicReference("""{"approvalId":"$APPROVAL","status":"PENDING"}""")
         BusinessApprovalStubs.stub("POST", route) { body ->
             val lookup = readJson(body)
-            if (lookup.path("submissionKeyDigest").asText() == digest &&
-                lookup.path("submissionCorrelation").asText() == correlation &&
-                lookup.path("debtorAccountId").asText() == ACCOUNT &&
+            val sameSubmission = lookup.path("submissionKeyDigest").asText() == digest &&
+                lookup.path("submissionCorrelation").asText() == correlation
+            val sameAuthority = lookup.path("debtorAccountId").asText() == ACCOUNT &&
                 lookup.path("initiatorPartyId").asText() == INITIATOR
-            ) {
+            if (sameSubmission && sameAuthority) {
                 200 to releaseEvidence.get()
             } else {
                 404 to """{"code":"NOT_FOUND"}"""
