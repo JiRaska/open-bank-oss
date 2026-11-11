@@ -1,0 +1,580 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CI quality dashboard (openbank-app CI), fed by the CI metrics gateway
+# (apps/ci-metrics-gateway.yaml). Source: openbank-app docs/observability/ci-quality-dashboard.json.
+# Datasource is the same `${datasource}` template variable (type prometheus) as the sibling
+# dashboards, resolving to the provisioned `prometheus` datasource.
+# Adjusted for pushed samples: CI series are written once per run (no scrape), so timeseries
+# panels draw points, not lines, and the default range is 7d.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-ci-quality
+  namespace: observability
+  labels:
+    grafana_dashboard: '1'
+    app.kubernetes.io/part-of: observability
+data:
+  openbank-ci-quality.json: |
+    {
+      "uid": "openbank-app-ci-quality",
+      "title": "OpenBank — CI quality",
+      "tags": [
+        "ci",
+        "openbank",
+        "openbank-app"
+      ],
+      "schemaVersion": 39,
+      "version": 1,
+      "time": {
+        "from": "now-7d",
+        "to": "now"
+      },
+      "refresh": "",
+      "timezone": "utc",
+      "description": "Test estate health exported by scripts/ci-quality-metrics.py (OTLP -> Prometheus naming).",
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "query": "prometheus",
+            "label": "Prometheus",
+            "current": {}
+          },
+          {
+            "name": "event",
+            "type": "custom",
+            "label": "Event",
+            "query": "push,pull_request,schedule",
+            "multi": true,
+            "includeAll": true,
+            "allValue": ".*",
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            },
+            "options": []
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Test pass rate",
+          "description": "passed / executed per suite (latest sample).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "min": 0,
+              "max": 1,
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_passed{event=~\"$event\"}) / (sum by (suite) (ci_tests_executed{event=~\"$event\"}) > 0)",
+              "legendFormat": "{{suite}}"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Executed vs discovered (silent-skip detector)",
+          "description": "A gap between discovered and executed means tests exist but did not run. Alert when the gap grows.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_discovered{event=~\"$event\"})",
+              "legendFormat": "discovered {{suite}}"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_executed{event=~\"$event\"})",
+              "legendFormat": "executed {{suite}}"
+            },
+            {
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_discovered{event=~\"$event\"}) - sum by (suite) (ci_tests_executed{event=~\"$event\"})",
+              "legendFormat": "gap {{suite}}"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "type": "stat",
+          "title": "Flaky tests",
+          "description": "Flaky tests in the 30-day evidence window (nightly aggregate).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 6,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max(last_over_time(ci_flaky_tests[$__range]))",
+              "legendFormat": "flaky"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "Failed / skipped tests",
+          "description": "Tests failed and skipped per suite.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 8,
+            "w": 18,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_failed{event=~\"$event\"})",
+              "legendFormat": "failed {{suite}}"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (suite) (ci_tests_skipped{event=~\"$event\"})",
+              "legendFormat": "skipped {{suite}}"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Job duration trend",
+          "description": "Wall-clock per CI job.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "max by (ci_job) (ci_job_duration_seconds{event=~\"$event\"})",
+              "legendFormat": "{{ci_job}}"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Gate outcomes",
+          "description": "1 = success, 0 = anything else, per gate/job.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 16,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "min": 0,
+              "max": 1,
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "min by (ci_job) (ci_gate_outcome{event=~\"$event\"})",
+              "legendFormat": "{{ci_job}}"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "type": "stat",
+          "title": "PR wall-clock p50 / p90",
+          "description": "Run wall-clock of pull_request runs over the selected range (30-day retention target: 30 min).",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 24,
+            "w": 24,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "noValue": "N/A"
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "quantile_over_time(0.5, ci_run_wallclock_seconds{event=\"pull_request\",conclusion=~\"success|failure\"}[$__range])",
+              "legendFormat": "p50"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "quantile_over_time(0.9, ci_run_wallclock_seconds{event=\"pull_request\",conclusion=~\"success|failure\"}[$__range])",
+              "legendFormat": "p90"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "Benchmark median (nightly)",
+          "description": "Median per benchmark metric; a step change is a performance regression.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ms",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_benchmark_median_milliseconds",
+              "legendFormat": "{{metric}}"
+            }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Benchmark noise p95 / points",
+          "description": "Noise above the median's margin makes the benchmark untrustworthy.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 32,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_benchmark_noise_p95",
+              "legendFormat": "noise {{metric}}"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_benchmark_points",
+              "legendFormat": "points {{metric}}"
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "type": "timeseries",
+          "title": "Fuzz executions and crashes",
+          "description": "Any crash is a finding; zero executions means the fuzzer did not run.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 40,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_fuzz_executions",
+              "legendFormat": "executions {{target}}"
+            },
+            {
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_fuzz_crashes",
+              "legendFormat": "crashes {{target}}"
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Journey outcomes",
+          "description": "1 = pass, 0 = fail per flow and platform.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 40,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_journey_outcome",
+              "legendFormat": "{{flow}} {{platform}}"
+            }
+          ]
+        },
+        {
+          "id": 12,
+          "type": "timeseries",
+          "title": "Journey duration",
+          "description": "Wall-clock per journey.",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 48,
+            "w": 12,
+            "h": 8
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "noValue": "N/A",
+              "custom": {
+                "drawStyle": "points",
+                "showPoints": "always",
+                "pointSize": 7
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "ci_journey_duration_seconds",
+              "legendFormat": "{{flow}} {{platform}}"
+            }
+          ]
+        }
+      ]
+    }
