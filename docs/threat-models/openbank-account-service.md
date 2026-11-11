@@ -1129,7 +1129,7 @@ placed a freeze: `OPERATOR` or `PARTY_STANDING`. A party that is `ACTIVE` again 
 
 | Threat | Vector | Mitigation |
 |---|---|---|
-| **E**oP | A suspended or AML-blocked party keeps paying because nothing told its accounts | The party status event freezes the accounts; `standing.mayDebit` is false on the lookup the rails use. Proven through the real consumer and a real database in `PartyStandingPropagationIT` |
+| **E**oP | A suspended or AML-blocked party keeps paying because nothing told its accounts | The party status event freezes the accounts; `standing.mayDebit` is false on the lookup the rails use. Covered by a real-database integration test through the real consumer, added with this change; it is not cited by name here until it has a result on `main` |
 | **E**oP | A party event lifts a freeze an operator or a control placed | Only `freeze_origin = PARTY_STANDING` is lifted. A row frozen before V34 has no origin and is treated as an operator freeze. An operator freezing a party-frozen account takes the freeze over |
 | **T**ampering | A forged or replayed `ACTIVE` party event unfreezes accounts | The topic is written by party-service only (broker ACL). It can lift only party freezes, never an operator freeze. See the residual risk on ordering below |
 | **I**nfo disclosure | The standing reason tells the customer they are under AML review | The reason is `ACCOUNT_FROZEN` for every freeze; the origin is not exposed. No customer notification is sent for a party-standing freeze |
