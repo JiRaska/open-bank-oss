@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: account-service
     app.kubernetes.io/part-of: accounts
   annotations:
-    openbank.tech/policy-checksum: "b4f3765afd5e3344"
+    openbank.tech/policy-checksum: "46bdb7f79e3acbf2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1008,6 +1008,13 @@ data:
     	not input.principal.service_account == null
     	machine_named("service-account-openbank-tax-reporting")
     	input.action == "account.list"
+    }
+
+    allowed_reasons contains "service-gsft-deposit-roster" if {
+    	input.principal.type == "HUMAN"
+    	not input.principal.service_account == null
+    	machine_named("service-account-openbank-tax-reporting")
+    	input.action == "account.gsft.roster"
     }
 
     # ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
