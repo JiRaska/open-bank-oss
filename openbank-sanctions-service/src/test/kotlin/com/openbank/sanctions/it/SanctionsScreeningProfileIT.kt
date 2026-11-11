@@ -146,7 +146,7 @@ class SanctionsScreeningProfileIT {
             body("matches", hasSize<Any>(1))
             body("matches[0].matchKind", equalTo("JURISDICTION"))
             body("matches[0].listType", equalTo("EU_CONSOLIDATED"))
-            body("matches[0].matchedId", equalTo("country:$EMBARGOED"))
+            body("matches[0].matchedId", equalTo("country:$EMBARGOED:SYNTHETIC_TEST:EMBARGO:v1"))
         }
     }
 

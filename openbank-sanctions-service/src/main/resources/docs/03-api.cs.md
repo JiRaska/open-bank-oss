@@ -113,7 +113,9 @@ U prověření s profilem nese každá shoda `matchKind` (`SANCTIONS`, `TERRORIS
 jurisdikcí, je shodou bez ohledu na jméno: záznam `EMBARGO` dává `HIT`, záznam `HIGH_RISK`
 `POTENTIAL_HIT` se skóre 0,65, které volající se sdílenou politikou prověřování pošlou k ručnímu
 přezkumu. `programs` u shody nesou opatření s verzí dat a vydání, ze kterého řádek pochází
-(například `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`). Tato data **nemají automatický
+(například `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`). `matchedId` je `country:<kód>:<vydání>:<opatření>:v<verze>`. Rozhodnutí analytika
+(`WHITELISTED`) shodu jurisdikce nikdy nepokrývá: může vyřadit shody jména téhož prověření a
+stav pak určuje sama shoda jurisdikce. Tato data **nemají automatický
 zdroj** — co je načteno, viz `04-data` — a země, která v nich není, se nikdy neshoduje. BIC se
 neporovnává s entitami na listinách, protože importované zdroje identifikátory bank neobsahují.
 

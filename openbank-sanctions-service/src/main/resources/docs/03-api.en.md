@@ -146,6 +146,9 @@ jurisdiction reference data matches whatever the name is: an `EMBARGO` entry yie
 `HIGH_RISK` entry `POTENTIAL_HIT` scored 0.65, which callers applying the shared screening policy
 route to manual review. The match's `programs` carry the measure with the data version and the
 publication the row comes from (for example `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`).
+`matchedId` is `country:<code>:<source list>:<measure>:v<version>`. An analyst's clearance
+(`WHITELISTED`) never covers a jurisdiction match: it can clear the name matches of the same
+check, and the status is then the one the jurisdiction match alone gives.
 This data has **no automated feed** — see `04-data` for what is loaded — and a country that is
 not in it never matches. The BIC is not matched against listed entities, because the imported
 sources carry no bank identifiers.

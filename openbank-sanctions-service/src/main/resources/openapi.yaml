@@ -967,7 +967,8 @@ components:
           enum: [SANCTIONS, TERRORIST, PEP, JURISDICTION]
           description: >-
             What the match means, set only on checks screened with a `profile`. A JURISDICTION
-            match names the listed country in `matchedName`, `country:<code>` in `matchedId` and
+            match names the listed country in `matchedName`,
+            `country:<code>:<source list>:<measure>:v<version>` in `matchedId` and
             the measure and reference-data version in `programs`.
 
     SanctionsList:

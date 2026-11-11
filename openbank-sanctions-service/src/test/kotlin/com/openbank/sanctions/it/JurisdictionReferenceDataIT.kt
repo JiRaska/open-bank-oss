@@ -81,7 +81,7 @@ class JurisdictionReferenceDataIT {
             body("overallScore", equalTo(0.65f))
             body("matches", hasSize<Any>(1))
             body("matches[0].matchKind", equalTo("JURISDICTION"))
-            body("matches[0].matchedId", equalTo("country:$LISTED"))
+            body("matches[0].matchedId", equalTo("country:$LISTED:$EU_LIST:HIGH_RISK:v1"))
             body("matches[0].programs", hasItem("HIGH_RISK:v1"))
             body("matches[0].programs", hasItem(EU_LIST))
         }
@@ -102,7 +102,7 @@ class JurisdictionReferenceDataIT {
             statusCode(201)
             body("status", equalTo("POTENTIAL_HIT"))
             body("matches[0].matchKind", equalTo("JURISDICTION"))
-            body("matches[0].matchedId", equalTo("country:$LISTED"))
+            body("matches[0].matchedId", equalTo("country:$LISTED:$EU_LIST:HIGH_RISK:v1"))
         }
     }
 

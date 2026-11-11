@@ -72,7 +72,8 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
      * Match the counterparty's country, and the country embedded in its bank's BIC, against the
      * jurisdiction reference data. A listed country matches whatever the name is: an embargo is a
      * HIT, a high-risk listing a POTENTIAL_HIT scored at the review floor so the shared
-     * `ScreeningPolicy` routes it to review instead of blocking it.
+     * `ScreeningPolicy` routes it to review instead of blocking it. An analyst's clearance never
+     * covers such a match — see `SanctionsService.screen`.
      */
     suspend fun screenJurisdictions(
         country: String?,
@@ -90,7 +91,9 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
                     JurisdictionMeasure.HIGH_RISK -> POTENTIAL_HIT_THRESHOLD
                 },
                 matchedName = row.countryCode,
-                matchedId = "country:${row.countryCode}",
+                // The whole identity of the row, so stored evidence says which publication,
+                // measure and version matched, not just which country.
+                matchedId = "country:${row.countryCode}:${row.sourceList}:${row.measure.name}:v${row.version}",
                 listEntryDate = null,
                 programs = listOf("${row.measure.name}:v${row.version}", row.sourceList),
                 matchKind = MatchKind.JURISDICTION,

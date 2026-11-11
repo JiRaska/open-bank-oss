@@ -135,19 +135,31 @@ class SanctionsService(
         val status = outcome.status
         val matches = outcome.matches
         val checkedAt = Instant.now(clock)
-        val clearance = if (status == SanctionsCheckStatus.CLEAR || matches.isEmpty()) {
+        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
+        // A jurisdiction match is a fact about the country, with no identity to be mistaken
+        // about, so no clearance ever covers it: the name matches may be cleared, and the status
+        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
+        val (jurisdiction, clearable) = matches.filterNot { it.matchKind == MatchKind.PEP }
+            .partition { it.matchKind == MatchKind.JURISDICTION }
+        val nameClearance = if (status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
             null
         } else {
-            findCoveringClearance(cmd, matches.filterNot { it.matchKind == MatchKind.PEP }, checkedAt)
+            findCoveringClearance(cmd, clearable, checkedAt)
         }
+        val clearance = nameClearance.takeIf { jurisdiction.isEmpty() }
+        val namesCleared = nameClearance != null && clearance == null
         val check = SanctionsCheck(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
             entityType = cmd.entityType, name = cmd.name, aliases = cmd.aliases.filterNotNull(),
             dateOfBirth = cmd.dateOfBirth, nationality = cmd.nationality,
             identifiers = cmd.identifiers,
-            status = if (clearance == null) status else SanctionsCheckStatus.WHITELISTED,
+            status = when {
+                clearance != null -> SanctionsCheckStatus.WHITELISTED
+                namesCleared -> profiles.statusOf(jurisdiction)
+                else -> status
+            },
             matches = matches,
-            overallScore = outcome.overallScore,
+            overallScore = if (namesCleared) jurisdiction.maxOf { it.matchScore } else outcome.overallScore,
             checkedLists = targetLists,
             reviewedBy = clearance?.reviewedBy,
             reviewNote = clearance?.reviewNote,

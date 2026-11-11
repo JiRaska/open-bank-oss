@@ -187,6 +187,13 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   threshold (0.85) as its floor for every caller, so `POTENTIAL_HIT` was unreachable from a name
   and a near-miss spelling of a listed person screened CLEAR. `profile=CUSTOMER` now searches
   down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
+  **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
+  identity on the check, and a jurisdiction match was identified by list and country only — so
+  a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country
+  after a superseding `EMBARGO`. A clearance dismisses a name false positive; a jurisdiction
+  match is a fact about the country. No clearance covers one now: name matches on the check may
+  be cleared, the status is then the jurisdiction match's own, never `WHITELISTED`
+  (`JurisdictionClearanceIT`), and `matchedId` carries source list, measure and version.
   **Residual:** `profile=PAYMENT` and profile-less screens keep the 0.85 floor on purpose —
   the payment admission chain has no held state to park a review in (#15724) — so a near-miss
   spelling still clears a payment. A country listed only by a FATF statement and not by the EU
