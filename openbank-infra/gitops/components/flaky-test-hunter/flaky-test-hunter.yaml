@@ -70,7 +70,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-728fa44f@sha256:48434832705666ae44675ece8486660fa121d4c0af63fb85e557a065f62cc244
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-e8e3b10a@sha256:e2eb936bf3cac3ac09e8a7ca9d5b72fd9b1fc9959ea779d88c5be1733793bd21
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -117,6 +117,14 @@ spec:
                   optional: true
             - name: LLM_GATEWAY_URL
               value: http://litellm.ai-platform.svc:4000
+            # Resolves flaky-test-hunter.model.api-key in LlmGatewayProducer. The agent's
+            # own budgeted virtual key never grants gateway administration or GitHub access.
+            - name: FLAKY_TEST_HUNTER_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: flaky-test-hunter-model
+                  key: FLAKY_TEST_HUNTER_MODEL_API_KEY
+                  optional: true
             - name: TEMPORAL_NAMESPACE
               value: openbank-flakytest
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
