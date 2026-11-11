@@ -147,8 +147,8 @@ export function parseProxyUrl(url: string): { service: string; path: string } | 
 
 /** `/api/svc/<key>` is a Kubernetes workload name; the module is `openbank-<key>[-service]`. */
 export function resolveSpecFile(repoRoot: string, service: string): string | null {
-  for (const module of [`openbank-${service}`, `openbank-${service}-service`]) {
-    const file = path.join(repoRoot, module, 'src/main/resources/openapi.yaml')
+  for (const moduleDir of [`openbank-${service}`, `openbank-${service}-service`]) {
+    const file = path.join(repoRoot, moduleDir, 'src/main/resources/openapi.yaml')
     if (existsSync(file)) return file
   }
   return null
