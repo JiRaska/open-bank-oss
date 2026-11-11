@@ -255,6 +255,23 @@ jobs:
         # module) fail this step. Without it they were enforced nowhere. text-summary only: the
         # html/json reporters cost time and nothing here reads them.
 
+      # ADR-0370 U5: mutation testing on the decision-module files this PR changed. Coverage says
+      # a line ran; a surviving mutant says no test would notice if it were wrong. ADVISORY while
+      # the floor (stryker.config.mjs thresholds.break) rests on one measured module; the floor
+      # itself is ratcheted by gate admin-ui-mutation-ratchet. Skips in seconds when no file in
+      # scope changed, which is most PRs.
+      - name: Mutation testing (changed decision modules)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MUTATION_FILES="$(gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --name-only)"
+          export MUTATION_FILES
+          bash scripts/mutation-changed.sh
+
       - name: Build
         run: npm run build
         env:

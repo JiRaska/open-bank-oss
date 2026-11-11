@@ -7589,6 +7589,22 @@ gates:
     run: |
       python3 .github/scripts/check-admin-ui-module-coverage-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
 
+  - id: admin-ui-mutation-ratchet
+    name: "Admin UI mutation floor and scope only go up (ADR-0370 U5, enforced)"
+    group: supplychain
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: "Stryker enforces thresholds.break but cannot see a PR lowering it or dropping a decision module from the mutate scope; either needs a mutation-floor-lowered trailer naming an issue."
+    review_after: "2027-05-31"
+    min_subjects: 10  # 17 modules + the break floor on 2026-11-11
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-admin-ui-mutation-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-mutation-ratchet.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-mutation-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
+
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
     group: supplychain
