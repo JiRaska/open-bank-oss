@@ -1,0 +1,118 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0370 U8 — the Admin UI e2e suite on Firefox and WebKit, nightly.
+#
+# Every PR runs the suite on Chromium only (ci.yml, ui-build), so a page that relies on a
+# Chromium-only API passes CI and breaks for an operator on Safari or Firefox. This runs the
+# same mocked suite on both other engines against the same production build and, when a test
+# fails, opens or refreshes one tracking issue naming the failing tests. It never gates a PR.
+#
+# GitHub delivers scheduled runs unreliably on this repository, so it is also dispatchable,
+# and it runs when this file or the Playwright config changes on main.
+name: Admin UI engines nightly
+
+on:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/admin-ui-engines-nightly.yml'
+      - 'openbank-admin-ui/playwright.config.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-ui-engines-nightly
+  cancel-in-progress: false
+
+jobs:
+  engines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
+      - name: Install Firefox and WebKit
+        run: npx playwright install --with-deps firefox webkit
+
+      - name: E2E on Firefox and WebKit
+        id: engines
+        continue-on-error: true
+        run: npm run test:e2e -- --project firefox --project webkit
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          OPENBANK_E2E_ENGINES: "all"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-engines/playwright.xml"
+
+      - name: Retain the Playwright report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-ui-engines-${{ github.run_id }}
+          path: |
+            openbank-admin-ui/playwright-report/
+            openbank-admin-ui/build/test-results/e2e-engines/
+          retention-days: 14
+
+      - name: Open or refresh the tracking issue
+        if: steps.engines.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Admin UI e2e fails on Firefox/WebKit (ADR-0370 U8)"
+          body="${RUNNER_TEMP}/engines-issue.md"
+          python3 - "$body" <<'EOF'
+          import os, sys, xml.etree.ElementTree as ET  # our own Playwright JUnit, same job
+          path = "build/test-results/e2e-engines/playwright.xml"
+          failed = []
+          if os.path.isfile(path):
+              for case in ET.parse(path).getroot().iter("testcase"):
+                  if case.find("failure") is not None or case.find("error") is not None:
+                      failed.append(f"- `{case.get('classname')} › {case.get('name')}`")
+          lines = [
+              f"The nightly Firefox/WebKit run failed: {os.environ['RUN_URL']}",
+              "",
+              f"{len(failed)} failing test(s) (the JUnit test name carries the engine):" if failed
+              else "No JUnit was written: the run failed before or outside the tests. See the run log.",
+              *failed[:100],
+              "",
+              "Chromium is what every PR runs, so each line is either an engine-specific defect in the",
+              "page or a test that only holds on Chromium. Refreshed on each failing nightly run.",
+          ]
+          open(sys.argv[1], "w").write("\n".join(lines) + "\n")
+          EOF
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$body" --label bug --label triage
+          fi
