@@ -144,17 +144,11 @@ object OutboxDispatch {
         claimObserver: ((Duration) -> Unit)? = null,
         publish: suspend (entry: OutboxEntry) -> Unit,
     ): OutboxDispatchResult {
-        val claimStart = System.nanoTime()
-        var fencedClaims = emptyMap<UUID, OutboxClaim>()
-        val claimed = runCatching {
-            if (repository is ClaimFencedOutboxRepositoryV2) {
-                val claims = repository.claimWithTokens(batchSize)
-                fencedClaims = claims.associateBy { it.entry.eventId }
-                claims.map { it.entry }
-            } else {
-                repository.claimProcessable(batchSize)
-            }
+        if (repository is ClaimFencedOutboxRepositoryV2) {
+            return dispatchFencedOnce(repository, batchSize, claimObserver, publish)
         }
+        val claimStart = System.nanoTime()
+        val claimed = runCatching { repository.claimProcessable(batchSize) }
             .onFailure { ex ->
                 if (ex is CancellationException) throw ex
                 log.log(System.Logger.Level.WARNING, "outbox.claimProcessable failed", ex)
@@ -163,10 +157,30 @@ object OutboxDispatch {
         claimObserver?.invoke(Duration.ofNanos(System.nanoTime() - claimStart))
 
         return if (repository is OutboxRepositoryV2) {
-            dispatchConcurrently(repository, claimed, fencedClaims, publish)
+            dispatchConcurrently(repository, claimed, emptyMap(), publish)
         } else {
             dispatchSequentially(repository, claimed, publish)
         }
+    }
+
+    private suspend fun dispatchFencedOnce(
+        repository: ClaimFencedOutboxRepositoryV2,
+        batchSize: Int,
+        claimObserver: ((Duration) -> Unit)?,
+        publish: suspend (entry: OutboxEntry) -> Unit,
+    ): OutboxDispatchResult {
+        val claimStart = System.nanoTime()
+        val claims = runCatching { repository.claimWithTokens(batchSize) }
+            .onFailure { ex ->
+                if (ex is CancellationException) throw ex
+                log.log(System.Logger.Level.WARNING, "outbox.claimWithTokens failed", ex)
+            }
+            .getOrNull() ?: return OutboxDispatchResult()
+        claimObserver?.invoke(Duration.ofNanos(System.nanoTime() - claimStart))
+
+        val entries = claims.map { it.entry }
+        val claimsByEventId = claims.associateBy { it.entry.eventId }
+        return dispatchConcurrently(repository, entries, claimsByEventId, publish)
     }
 
     /**
