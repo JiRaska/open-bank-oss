@@ -111,6 +111,7 @@ class BusinessSigningOpenApiTest {
     fun `wrong identity and foreign resources are documented refusals`() {
         val mutating = listOf(
             "/api/v1/entities/{entityId}/approval-requests" to "post",
+            "/api/v1/entities/{entityId}/approval-requests/submissions/claim" to "post",
             "/api/v1/entities/{entityId}/approval-requests/{approvalId}/signatures" to "post",
             "/api/v1/entities/{entityId}/approval-requests/{approvalId}/rejection" to "post",
             "/api/v1/entities/{entityId}/signing-policy" to "put",
@@ -129,6 +130,6 @@ class BusinessSigningOpenApiTest {
     }
 
     private companion object {
-        const val EXPECTED_OPERATIONS = 16
+        const val EXPECTED_OPERATIONS = 18
     }
 }
