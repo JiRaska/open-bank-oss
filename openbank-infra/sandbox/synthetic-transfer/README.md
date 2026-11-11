@@ -18,9 +18,11 @@ The `journey-synthetic-transfer-fixture` Secret supplies these values.
 - `FIXTURE_SOURCE_ACCOUNT` and `FIXTURE_TARGET_ACCOUNT` for the pinned accounts.
 - `FIXTURE_SOURCE_BOOKED_CZK` and `FIXTURE_TARGET_BOOKED_CZK` for their expected opening balances.
 
-The Keycloak template declares the verifier with its service account disabled. Before an approved
-sandbox run, the fixture owner provisions the dedicated customer identity and enables the dedicated
-verifier in the sandbox issuer with its own credential delivered through the fixture Secret.
+The Keycloak template declares the verifier and its service account disabled. Its only realm role
+assignment is `ROLE_API`. The realm renderer expects `SYNTHETIC_TRANSFER_VERIFIER_CLIENT_SECRET`
+for the verifier credential. Before an approved sandbox run, the fixture owner provisions the
+dedicated customer identity and enables the dedicated verifier in the sandbox issuer with its own
+credential delivered through the fixture Secret.
 
 The Edge provides the Europe/Prague booking date through the authenticated fixture endpoint.
 The outbound and return legs each have one server-derived key per booking date. New outbound
