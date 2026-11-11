@@ -136,3 +136,10 @@ data class SuspiciousTransactionReport(
         )
     }
 }
+
+/**
+ * The only thing `openbank.aml.events` ever says about a report: that the report with this id is
+ * now in this state (ADR-0371 §7). No party, case, movement, narrative, reference or actor — every
+ * field added here is a field another service can read.
+ */
+data class AmlReportStateChangedEvent(val reportId: UUID, val state: ReportState, val occurredAt: Instant)

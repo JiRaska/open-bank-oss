@@ -6,6 +6,7 @@ package com.openbank.aml.application.report
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.out.SuspiciousTransactionReportRepository
+import com.openbank.aml.domain.report.AmlReportStateChangedEvent
 import com.openbank.aml.domain.report.ReportState
 import com.openbank.aml.domain.report.ReportedMovement
 import com.openbank.aml.domain.report.SuspiciousTransactionReport
@@ -95,9 +96,7 @@ class SuspiciousTransactionReportService(
         eventId = UUID.randomUUID(),
         aggregateId = report.id,
         eventType = EVENT_STATE_CHANGED,
-        payload = objectMapper.writeValueAsString(
-            mapOf("reportId" to report.id.toString(), "state" to report.state.name, "occurredAt" to report.updatedAt.toString()),
-        ),
+        payload = objectMapper.writeValueAsString(AmlReportStateChangedEvent(report.id, report.state, report.updatedAt)),
     )
 
     companion object {
