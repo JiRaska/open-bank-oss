@@ -8,6 +8,7 @@ import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
 import com.openbank.finrep.application.port.inbound.TrialBalanceEvidence
 import com.openbank.finrep.domain.model.FinrepTemplate
+import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
@@ -43,6 +44,7 @@ import java.time.LocalDate
 class FinrepResource(private val finrepUseCase: FinrepUseCase, private val clock: Clock) {
 
     @GET
+    @Authorize(action = "finrep.template.inspect")
     @Path("/templates/{templateId}")
     suspend fun getTemplate(
         @PathParam("templateId") templateId: String,
