@@ -114,6 +114,9 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             "PACT_BROKER_PASSWORD": "",
             "BRANCH": "harness-branch",
         }
+        self.run_shell(self.helper_stage_run, trusted, env)
+        staged = dict(line.split("=", 1) for line in Path(env["GITHUB_ENV"]).read_text().splitlines())
+        env["SERVICE_CI_HELPERS"] = staged["SERVICE_CI_HELPERS"]
         return trusted, runner_temp, historical, calls, env
 
     def run_shell(self, body, cwd, env, *, expect=0):
@@ -126,9 +129,6 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         return result
 
     def run_workflow_helper_sequence(self, root, runner_temp, historical, env):
-        self.run_shell(self.helper_stage_run, root / "trusted", env)
-        staged = dict(line.split("=", 1) for line in Path(env["GITHUB_ENV"]).read_text().splitlines())
-        env["SERVICE_CI_HELPERS"] = staged["SERVICE_CI_HELPERS"]
         stage_body = self.stage_run
         warmup_body = self.warmup_run.replace("${{ inputs.service }}", SERVICE).replace(
             "/tmp/gradle-warmup.log", "$RUNNER_TEMP/gradle-warmup.log"
@@ -204,9 +204,8 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertEqual((root / "github-output").read_text(), "available=true\n")
             self.assertEqual(len(calls.read_text().splitlines()), 1)
 
-            provider_run = self.provider_run.replace("${{ inputs.service }}", SERVICE)
             env["PACT_PROVIDER_VERSION"] = "fixture-provider-version"
-            self.run_shell(provider_run, historical, env)
+            self.run_shell(self.provider_run, historical, env)
             invocations = calls.read_text().splitlines()
             self.assertEqual(len(invocations), 2)
             provider_call = invocations[-1]
@@ -234,7 +233,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.run_workflow_helper_sequence(root, root / "runner-temp", historical, env)
             env["PACT_PROVIDER_VERSION"] = "fixture-provider-version"
             env["PACT_CONSUMER"] = "openbank-agent-service"
-            self.run_shell(self.provider_run.replace("${{ inputs.service }}", SERVICE), historical, env)
+            self.run_shell(self.provider_run, historical, env)
             call = calls.read_text().splitlines()[-1]
             self.assertIn("-Dpactbroker.enablePending=true", call)
             self.assertIn("-Dpact.filter.consumers=openbank-agent-service", call)
@@ -271,7 +270,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                     f'<testsuite><testcase name="Pact between openbank-sepa-payment (sha) and {TRANSACTION}'
                     ' - previous interaction"/></testsuite>'
                 )
-                self.run_shell(self.provider_run.replace("${{ inputs.service }}", TRANSACTION), historical, env,
+                self.run_shell(self.provider_run, historical, env,
                                expect=expected)
                 self.assertFalse((reports / "prior.xml").exists())
                 self.assertIn("-Dpactbroker.enablePending=false", calls.read_text())
@@ -287,7 +286,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _, _, historical, calls, env = self.make_workspaces(tmp)
             env.update(SERVICE=TRANSACTION, PACT_CONSUMER="openbank-sepa-payment")
-            result = self.run_shell(self.provider_run.replace("${{ inputs.service }}", TRANSACTION), historical,
+            result = self.run_shell(self.provider_run, historical,
                                     env, expect=1)
             self.assertIn("requires the reviewed consumer-scope fixture overlay", result.stdout)
             self.assertFalse(calls.exists())
@@ -296,7 +295,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             _, _, historical, calls, env = self.make_workspaces(tmp)
             env["PACT_CONSUMER"] = "openbank-agent-service,openbank-sdd-service"
-            self.run_shell(self.provider_run.replace("${{ inputs.service }}", SERVICE), historical, env, expect=1)
+            self.run_shell(self.provider_run, historical, env, expect=1)
             self.assertFalse(calls.exists())
 
     def test_missing_fixture_bundle_refuses_unsafe_provider_paths_without_writes(self):
