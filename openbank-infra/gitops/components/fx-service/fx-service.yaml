@@ -95,6 +95,13 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # The sanctions screen of a conversion screens the names the bank holds for the party,
+            # read from party-service (#15723). Declared in this env so that
+            # gen-network-policies.py derives the party-namespace ingress edge for fx; without it
+            # the rest-client would dial its localhost dev default inside this pod and every
+            # conversion would be held as un-screenable.
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
             # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
             # aml-authority, client certificate fx-internal-tls mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL

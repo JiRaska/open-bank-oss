@@ -123,6 +123,13 @@ spec:
             # Entity party + representation mandates (ADR-0284 D3).
             - name: PARTY_SERVICE_URL
               value: http://party-service.party.svc:8111
+            # Sanctions / PEP screening of the entity and its related parties (#15723). Reachability
+            # only: the call is made solely while openbank.kyb.screening.enabled is true, and that
+            # switch stays at its application default (off) here. Declared in this env so that
+            # gen-network-policies.py derives the sanctions-namespace ingress edge for kyb; without
+            # it the rest-client would dial its localhost dev default inside this pod.
+            - name: SANCTIONS_SERVICE_URL
+              value: http://sanctions-service.sanctions.svc:8123
             # Business framework agreement + its SCA signature ceremony (business-contract spec).
             # Declared here, not only in application.yaml, so gen-network-policies.py derives the
             # documents-namespace ingress edge for kyb.
