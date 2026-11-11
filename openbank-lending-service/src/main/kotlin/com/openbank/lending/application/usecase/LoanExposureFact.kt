@@ -9,10 +9,10 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanInstallment
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.money.Money
 import io.smallrye.mutiny.Uni
 import java.time.Instant
-import java.util.UUID
 
 internal const val LOAN_EXPOSURE_FACT_EVENT = "loan.exposure_fact"
 
@@ -33,7 +33,7 @@ internal fun LoanEventEmitter.emitExposureFact(
     knownSynthetic: Boolean = false,
 ): Uni<Unit> {
     val loanId = loan.id.value
-    val eventId = UUID.randomUUID()
+    val eventId = Ids.newId()
     val body = linkedMapOf<String, Any>(
         "eventType" to LOAN_EXPOSURE_FACT_EVENT,
         "eventVersion" to 1,
