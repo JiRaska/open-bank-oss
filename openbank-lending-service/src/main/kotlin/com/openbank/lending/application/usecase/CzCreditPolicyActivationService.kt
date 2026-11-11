@@ -26,12 +26,14 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
 
+enum class CzCreditPolicyStatus { PROPOSED, EXECUTED, REJECTED }
+
 data class CzCreditPolicyView(
     val id: UUID,
     val revision: Int,
     val effectiveFrom: LocalDate,
     val contentHash: String,
-    val state: ProposalState,
+    val state: CzCreditPolicyStatus,
     val proposedBy: String,
     val proposedAt: OffsetDateTime,
     val decidedBy: String?,
@@ -111,7 +113,7 @@ class CzCreditPolicyActivationService(
         revision = revision,
         effectiveFrom = effectiveFrom,
         contentHash = contentHash,
-        state = state,
+        state = CzCreditPolicyStatus.valueOf(state.name),
         proposedBy = proposedBy,
         proposedAt = proposedAt,
         decidedBy = decidedBy,

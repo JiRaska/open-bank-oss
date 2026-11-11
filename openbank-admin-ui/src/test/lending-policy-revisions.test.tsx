@@ -63,6 +63,26 @@ describe('Czech credit policy revisions', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /version 3 from/i })).not.toBeInTheDocument())
   })
 
+  it('reuses the same write key after an ambiguous response', async () => {
+    const keys: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) => {
+      if (init.method !== 'POST') return json([])
+      keys.push(new Headers(init.headers).get('Idempotency-Key') ?? '')
+      if (keys.length === 1) throw new Error('synthetic timeout')
+      return json(proposal, 201)
+    }))
+    view()
+    fireEvent.change(screen.getByLabelText(/policy JSON for a new version/i), { target: { value: proposal.policyJson } })
+    const save = screen.getByRole('button', { name: /save proposal/i })
+    fireEvent.click(save)
+    await screen.findByRole('alert')
+    fireEvent.click(save)
+    await screen.findByRole('status')
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).toBeTruthy()
+    expect(keys[1]).toEqual(keys[0])
+  })
+
   it('does not load the queue for a compliance reader without the credit risk role', () => {
     session.roles = ['ROLE_COMPLIANCE']
     const fetcher = vi.fn()

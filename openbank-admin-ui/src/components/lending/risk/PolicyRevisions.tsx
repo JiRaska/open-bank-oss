@@ -3,23 +3,18 @@
 'use client'
 
 import { useEffect, useId, useState } from 'react'
-import { z } from 'zod'
 import { ROLES } from '@/lib/auth/roles'
 import { useAuth } from '@/lib/auth/useAuth'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useIdempotencyKey } from '@/lib/mutations/singleFlight'
 import { svcUrl } from '@/lib/services/bff'
+import { czPolicyRevisionListSchema, czPolicyRevisionSchema, type CzPolicyRevision } from './contracts'
 
 const url = svcUrl('lending-service', '/api/v1/lending/risk/policy/proposals')
-const revision = z.object({
-  id: z.uuid(), revision: z.number().int(), effectiveFrom: z.iso.date(), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
-  state: z.enum(['PROPOSED', 'EXECUTED', 'REJECTED']), proposedBy: z.string(), policyJson: z.string(),
-})
-type Revision = z.infer<typeof revision>
-
-async function fetchPending(signal?: AbortSignal): Promise<Revision[] | null> {
+async function fetchPending(signal?: AbortSignal) {
   try {
     const response = await fetch(url, { cache: 'no-store', signal })
-    return response.ok ? z.array(revision).parse(await response.json()) : null
+    return response.ok ? czPolicyRevisionListSchema.parse(await response.json()) : null
   } catch {
     return null
   }
@@ -32,9 +27,10 @@ export function PolicyRevisions() {
 
 function RevisionQueue({ actor }: { actor: string }) {
   const { t } = useLanguage()
+  const replay = useIdempotencyKey()
   const editorId = useId()
   const reasonId = useId()
-  const [pending, setPending] = useState<Revision[] | null | undefined>(undefined)
+  const [pending, setPending] = useState<CzPolicyRevision[] | null | undefined>(undefined)
   const [editor, setEditor] = useState('')
   const [selected, setSelected] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -49,12 +45,14 @@ function RevisionQueue({ actor }: { actor: string }) {
     return () => controller.abort()
   }, [])
 
-  async function submit(path: string, body: string, onSuccess: (saved: Revision) => void) {
+  async function submit(path: string, body: string, onSuccess: (saved: CzPolicyRevision) => void) {
     setBusy(true)
     setFeedback(null)
     try {
       const response = await fetch(path, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': replay.forPayload({ path, body }) },
+        body,
       })
       if (response.status === 422) {
         setFeedback({ error: true, text: t('Rozhodnout musí jiný pracovník.', 'A different staff member must decide.') })
@@ -63,7 +61,8 @@ function RevisionQueue({ actor }: { actor: string }) {
       } else if (!response.ok) {
         setFeedback({ error: true, text: t(`Zápis se nezdařil (${response.status}).`, `Write failed (${response.status}).`) })
       } else {
-        onSuccess(revision.parse(await response.json()))
+        onSuccess(czPolicyRevisionSchema.parse(await response.json()))
+        replay.clear()
       }
       setPending(await fetchPending())
     } catch {
@@ -86,7 +85,7 @@ function RevisionQueue({ actor }: { actor: string }) {
     })
   }
 
-  function decide(proposal: Revision, approve: boolean) {
+  function decide(proposal: CzPolicyRevision, approve: boolean) {
     const decision = JSON.stringify({ approve, reason: reason.trim() || null })
     void submit(`${url}/${proposal.id}/decide`, decision, saved => {
       setSelected(null)

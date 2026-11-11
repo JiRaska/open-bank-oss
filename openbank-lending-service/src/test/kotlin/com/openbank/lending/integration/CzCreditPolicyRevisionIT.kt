@@ -48,12 +48,18 @@ class CzCreditPolicyRevisionIT {
         ],
     )
     fun `a proposal is immutable and a maker cannot approve it`() {
-        given().contentType(ContentType.JSON).body(bundle(903, adverseBureauCheck = false))
+        given().contentType(ContentType.JSON).body(bundle(903)).post(PROPOSALS).then().statusCode(400)
+        given().contentType(ContentType.JSON).header("Idempotency-Key", "invalid-evidence")
+            .body(bundle(903, adverseBureauCheck = false))
             .post(PROPOSALS).then().statusCode(400)
         val id = propose(901)
-        assertThat(propose(901)).isEqualTo(id)
+        val replay = proposalRequest(901).post(PROPOSALS).then().statusCode(201)
+            .header("X-Idempotency-Replayed", "true").extract().jsonPath()
+        assertThat(replay.getString("id")).isEqualTo(id)
+        proposalRequest(902, key = "policy-proposal-901").post(PROPOSALS).then().statusCode(409)
         propose(902)
-        given().contentType(ContentType.JSON).body("{}").post("$PROPOSALS/$id/decide").then().statusCode(400)
+        given().contentType(ContentType.JSON).header("Idempotency-Key", "missing-decision").body("{}")
+            .post("$PROPOSALS/$id/decide").then().statusCode(400)
         decide(id, approve = true, expectedStatus = 422)
         assertThat(activeAsOf(EFFECTIVE_DAY).getBoolean("codeSeeded")).isTrue()
     }
@@ -77,6 +83,8 @@ class CzCreditPolicyRevisionIT {
         val computedHash = Hex.lower(MessageDigest.getInstance("SHA-256").digest(exactJson.toByteArray(Charsets.UTF_8)))
         assertThat(originalHash).isEqualTo(computedHash)
         val decided = decide(id, approve = true, expectedStatus = 200)
+        decisionRequest(id, approve = true).post("$PROPOSALS/$id/decide").then().statusCode(200)
+            .header("X-Idempotency-Replayed", "true")
         assertThat(decided.getString("policyJson")).isEqualTo(exactJson)
         assertThat(decided.getString("state")).isEqualTo("EXECUTED")
         assertThat(decided.getString("proposedBy")).isEqualTo("policy-maker-subject")
@@ -109,12 +117,18 @@ class CzCreditPolicyRevisionIT {
         given().contentType(ContentType.JSON).body(bundle(903)).post(PROPOSALS).then().statusCode(403)
     }
 
-    private fun propose(version: Int): String = given().contentType(ContentType.JSON).body(bundle(version))
+    private fun propose(version: Int): String = proposalRequest(version)
         .post(PROPOSALS).then().statusCode(201).extract().path("id")
 
-    private fun decide(id: String, approve: Boolean, expectedStatus: Int) = given().contentType(ContentType.JSON)
-        .body(mapOf("approve" to approve, "reason" to "Synthetic policy test"))
+    private fun proposalRequest(version: Int, key: String = "policy-proposal-$version") = given()
+        .contentType(ContentType.JSON).header("Idempotency-Key", key).body(bundle(version))
+
+    private fun decide(id: String, approve: Boolean, expectedStatus: Int) = decisionRequest(id, approve)
         .post("$PROPOSALS/$id/decide").then().statusCode(expectedStatus).extract().jsonPath()
+
+    private fun decisionRequest(id: String, approve: Boolean) = given().contentType(ContentType.JSON)
+        .header("Idempotency-Key", "$id-$approve")
+        .body(mapOf("approve" to approve, "reason" to "Synthetic policy test"))
 
     private fun activeAsOf(day: LocalDate) = given().queryParam("asOf", day.toString()).get(POLICY)
         .then().statusCode(200).extract().jsonPath()

@@ -106,6 +106,8 @@ checks during evaluation.
 
 A second staff member reviews the stored content and hash before posting an explicit decision to
 `/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day.
+Both POSTs require `Idempotency-Key`. Repeat the same key and request after an interrupted response.
+A completed request can be replayed by the same staff subject for five minutes.
 The engine records the selected table versions with the application decision. Other jurisdictions
 and products use their starter policies. Preserve the revision ledger during a service rollback.
 Once an approved version is in effect, coordinate any rollback with Credit Risk because reverting

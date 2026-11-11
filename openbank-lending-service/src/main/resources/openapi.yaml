@@ -574,6 +574,8 @@ paths:
       tags: [Lending]
       operationId: proposeCzCreditPolicy
       summary: Propose an immutable Czech consumer credit policy revision
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -589,12 +591,15 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The idempotency key conflicts with a prior or in-flight request
   /api/v1/lending/risk/policy/proposals/{id}/decide:
     post:
       tags: [Lending]
       operationId: decideCzCreditPolicy
       summary: Approve or reject an exact policy revision as a different staff actor
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: id
           in: path
           required: true
