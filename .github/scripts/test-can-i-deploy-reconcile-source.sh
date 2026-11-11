@@ -17,15 +17,22 @@ export REAL_PYTHON="$real_python"
 cat > "$tmp/bin/python3" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
-  if [ "${2:-}" = "--resolve-reconcile-sources" ]; then
+  if [ "${2:-}" = "--resolve-reconcile-sources-partial" ]; then
     echo "$*" >> "$SERVICE_CI_LOG"
-    if [ -z "${GH_TOKEN:-}" ] || [ "${RESOLVER_MODE:-failure}" != "success" ] || \
-       [ -z "${RESOLVER_SHA:-}" ]; then
-      echo "::error::no successful historical Services CI source" >&2
+    # RESOLVER_MODE: success = every service resolves except RESOLVER_UNRESOLVED;
+    # failure = no run proves any service; error = the resolver itself failed.
+    if [ -z "${GH_TOKEN:-}" ] || [ "${RESOLVER_MODE:-failure}" = "error" ]; then
+      echo "::error::reconcile source refused: resolver API failure" >&2
       exit 1
     fi
     resolved='{}'
+    unresolved='[]'
     for svc in $(jq -r '.[]' <<< "${3:?}"); do
+      if [ "${RESOLVER_MODE:-failure}" != "success" ] || [ -z "${RESOLVER_SHA:-}" ] || \
+         jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "${RESOLVER_UNRESOLVED:-[]}"; then
+        unresolved="$(jq -cn --argjson old "$unresolved" --arg svc "$svc" '$old + [$svc]')"
+        continue
+      fi
       exact="$(EVENT_NAME=push PACT_WAIT_PER_SERVICE_SECONDS=0 \
         bash .github/scripts/probe-pact-version.sh "$svc" "$RESOLVER_SHA")"
       if [ "$exact" != "yes" ]; then
@@ -36,7 +43,7 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
         --arg sha "$RESOLVER_SHA" \
         '$old + {($svc): {sha: $sha, run_id: "fixture-run", attempt: 2}}')"
     done
-    printf '%s\n' "$resolved"
+    jq -cn --argjson r "$resolved" --argjson u "$unresolved" '{resolved: $r, unresolved: $u}'
     exit 0
   fi
   if [ "${2:-}" = "--verify-services" ]; then
@@ -180,7 +187,7 @@ if ! grep -q '^gate_ran=true$' "$GITHUB_OUTPUT" || ! grep -q '^deployable=\[\]$'
   cat "$GITHUB_OUTPUT" >&2
   exit 1
 fi
-if ! grep -q 'no verified historical Services CI source' "$tmp/log"; then
+if ! grep -q 'historical Services CI source resolver failed' "$tmp/log"; then
   echo "FAIL: missing historical source was not identified in the gate output" >&2
   cat "$tmp/log" >&2
   exit 1
@@ -434,7 +441,7 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     exit 1
   fi
   if ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
-     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--resolve-reconcile-sources-partial [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: positive gate did not carry the exact equivalent Pact/CI SHA through" >&2
     cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/positive-log" >&2
@@ -490,7 +497,7 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
   if ! BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" SERVICE_CI_EXPECTED_SOURCE="" \
      RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA" PACT_CLI_MODE=success \
      bash .github/scripts/can-i-deploy-gate.sh >"$tmp/tip-without-ci-log" 2>&1 || \
-     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--resolve-reconcile-sources-partial [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
      ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: Pact at current SHA without exact Services CI did not fall back to the historical source" >&2
@@ -540,6 +547,41 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     fi
   )
   echo "PASS: exact Services CI proof for three services is one batch verifier call"
+
+  # A service no Services CI run proves is refused ON ITS OWN. Before, one such member
+  # (a module that has never published a Pact) refused the whole reconcile batch, every
+  # tick, and stranded the services that were fully proven alongside it.
+  (
+    pair='["openbank-demo-service","openbank-b-service"]'
+    IMAGE_TAGS="$(jq -cn --arg t "$BUILD_IMAGE_TAG" '{"openbank-demo-service":$t,"openbank-b-service":$t}')"
+    IMAGE_DIGESTS="$(jq -cn '{"openbank-demo-service":("sha256:"+("a"*64)),"openbank-b-service":("sha256:"+("b"*64))}')"
+    export IMAGE_TAGS IMAGE_DIGESTS
+    : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+    if SERVICES="$pair" BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" \
+       SERVICE_CI_EXPECTED_SOURCE="" RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA" \
+       RESOLVER_UNRESOLVED='["openbank-b-service"]' PACT_CLI_MODE=success \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/partial-log" 2>&1; then
+      echo "FAIL: a refused member must keep the gate visibly unsuccessful" >&2
+      cat "$tmp/partial-log" >&2; exit 1
+    fi
+    if ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -q 'reconcile source refused for openbank-b-service' "$tmp/partial-log" || \
+       ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
+       grep -q -- '--pacticipant openbank-b-service' "$PACT_CLI_LOG"; then
+      echo "FAIL: an unproven member starved its proven peer, or reached a Pact verdict" >&2
+      cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/partial-log" >&2; exit 1
+    fi
+    # The resolver itself failing (API, pagination, deadline) still refuses the batch.
+    : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"; : > "$SERVICE_CI_LOG"
+    if SERVICES="$pair" BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" \
+       SERVICE_CI_EXPECTED_SOURCE="" RESOLVER_MODE=error PACT_CLI_MODE=success \
+       bash .github/scripts/can-i-deploy-gate.sh >"$tmp/partial-error-log" 2>&1 || \
+       ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || grep -q '^can-i-deploy ' "$PACT_CLI_LOG"; then
+      echo "FAIL: a resolver failure did not refuse the whole batch before any Pact verdict" >&2
+      cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$tmp/partial-error-log" >&2; exit 1
+    fi
+  )
+  echo "PASS: an unproven member is refused alone; a resolver failure still refuses the batch"
 )
 echo "PASS: mid-history source recovery selects exact successful CI/Pact SHA over a mismatched latest-main version"
 

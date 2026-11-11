@@ -78,7 +78,7 @@ source_not_evaluated=0
 
 refuse_reconcile_source() {
   local svc="$1"
-  local why="Broker has no Pacticipant and no verified Pact source"
+  local why="${2:-Broker has no Pacticipant and no verified Pact source}"
   echo "::error::reconcile source refused for ${svc}: ${why}"
   reconcile_source_blocked=1
   reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
@@ -187,13 +187,32 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     done
   fi
   if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
-    historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
-      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
-      echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
+    # Partial: a service no Services CI run proves is refused on its own, like a known
+    # absent Pacticipant, so it cannot strand the rest of the batch. One such service
+    # (a module that has never published a Pact, ADR-0092) sat in every reconcile batch
+    # and refused all twelve, tick after tick. API failures still refuse the whole batch.
+    historical_partial="$(python3 .github/scripts/verify-successful-service-ci.py \
+      --resolve-reconcile-sources-partial "$historical_services" "$GITHUB_SHA")" || {
+      echo "::error::reconcile source refused: the historical Services CI source resolver failed"
       source_failure=1
     }
     if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
-      type == "object" and (keys | sort) == ($services | sort) and
+      type == "object" and (.resolved | type == "object") and (.unresolved | type == "array")
+      and (((.resolved | keys) + .unresolved) | sort) == ($services | sort)
+      and ((.resolved | keys) - .unresolved) == (.resolved | keys)
+    ' >/dev/null <<< "$historical_partial"; then
+      echo "::error::reconcile source refused: historical source resolver returned incomplete or malformed evidence"
+      source_failure=1
+    fi
+    if [ "$source_failure" -eq 0 ]; then
+      historical_source_map="$(jq -c '.resolved' <<< "$historical_partial")"
+      for svc in $(jq -r '.unresolved[]' <<< "$historical_partial"); do
+        refuse_reconcile_source "$svc" \
+          "no successful main Services CI build+contract with an exact Pact version and tree-equivalent inputs"
+      done
+    fi
+    if [ "$source_failure" -eq 0 ] && ! jq -e '
+      type == "object" and
       all(.[]; type == "object" and
         (.sha | type == "string" and test("^[0-9a-f]{40}$")) and
         (.run_id | type == "string" and length > 0) and

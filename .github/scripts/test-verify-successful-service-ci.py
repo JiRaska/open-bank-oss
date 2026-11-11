@@ -1041,6 +1041,57 @@ class ResolveReconcileSourceTest(unittest.TestCase):
         self.assertGreaterEqual(equivalent.call_count, 1)
 
 
+    def test_partial_returns_proven_services_and_omits_unproven_ones(self):
+        run = self.run_record(38, self.OLDER, "2026-10-17T12:00:00Z")
+        unproven = "openbank-docs-truth-agent"
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            path = urlsplit(request.full_url).path
+            if path.endswith("/services-ci.yml/runs"):
+                return FixtureResponse({"workflow_runs": [run]})
+            if path.endswith("/runs/38/attempts/1/jobs"):
+                return FixtureResponse(job_fixture())
+            raise AssertionError(f"unexpected API request: {request.full_url}")
+
+        with (
+            patch.object(MODULE, "urlopen", fake_urlopen),
+            patch.object(MODULE, "_expected_verification_jobs", return_value=set()),
+            patch.object(MODULE, "_is_ancestor", return_value=True),
+            patch.object(MODULE, "_tree_equivalent", return_value=True),
+            patch.object(
+                MODULE, "_exact_pact_exists", side_effect=lambda service, *_a, **_k: service == SERVICE
+            ),
+        ):
+            resolved = MODULE.resolve_reconcile_service_sources(
+                [SERVICE, unproven],
+                self.TIP,
+                REPOSITORY,
+                "fixture-token",
+                "https://api.github.test",
+                allow_partial=True,
+            )
+        self.assertEqual(set(resolved), {SERVICE})
+        self.assertEqual(resolved[SERVICE]["sha"], self.OLDER)
+
+    def test_partial_still_refuses_on_api_failure(self):
+        def fail_urlopen(_request, timeout):
+            del timeout
+            raise URLError("unavailable")
+
+        with (
+            patch.object(MODULE, "urlopen", fail_urlopen),
+            self.assertRaises(MODULE.VerificationError),
+        ):
+            MODULE.resolve_reconcile_service_sources(
+                [SERVICE],
+                self.TIP,
+                REPOSITORY,
+                "fixture-token",
+                "https://api.github.test",
+                allow_partial=True,
+            )
+
     def test_resolver_api_failure_is_a_refusal(self):
         def fail_urlopen(_request, timeout):
             del timeout
