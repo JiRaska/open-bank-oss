@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tax-reporting-service
     app.kubernetes.io/part-of: tax-reporting
   annotations:
-    openbank.tech/policy-checksum: "9dfdf47477b0a1ae"
+    openbank.tech/policy-checksum: "30473e826d6c518a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -876,6 +876,8 @@ data:
     #   tax.statutory-return.approve   — POST /{id}/approve          (checker; attests the content hash)
     #   tax.statutory-return.submit    — POST /{id}/submitted        (records the regulator reference)
     #   tax.statutory-return.acknowledge — POST /{id}/acknowledgement (records the regulator's ack/reject)
+    #   tax.statutory-return.deliver   — POST /{id}/gsft-delivery     (GSFT, #15356: verifies the attested
+    #                                     package, PGP-encrypts it and records the submission)
     #
     # The verbs are deliberately NOT `read`/`list`: base `operator-read-any` and `compliance-read-any`
     # match on those suffixes for ANY HUMAN-typed principal, which includes the shared
@@ -901,6 +903,7 @@ data:
     		"tax.statutory-return.approve",
     		"tax.statutory-return.submit",
     		"tax.statutory-return.acknowledge",
+    		"tax.statutory-return.deliver",
     	}
     }
 

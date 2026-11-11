@@ -4713,6 +4713,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/ledger/application/usecase/FxRevaluationService.kt"
       - "src/main/kotlin/com/openbank/ledger/domain/model/ClosedPeriod.kt"
       - "src/main/kotlin/com/openbank/ledger/domain/model/YearClose.kt"
+      - "src/main/kotlin/com/openbank/ledger/domain/model/YearEndResultAllocation.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/client/FxServiceClient.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/AccountingDayResource.kt"
       - "src/main/kotlin/com/openbank/ledger/infrastructure/rest/ClosedPeriodResource.kt"

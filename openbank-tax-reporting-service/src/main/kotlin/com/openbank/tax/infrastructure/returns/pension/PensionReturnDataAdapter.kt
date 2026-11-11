@@ -318,8 +318,8 @@ class PensionReturnDataAdapter(
             Periodicity.QUARTER -> YearMonth.from(period.endDate).minusMonths(2).atDay(1)
             Periodicity.YEAR -> LocalDate.of(period.endDate.year, 1, 1)
             // No pension return is a working-day feed; a catalogue that declared one is a defect.
-            Periodicity.WORKING_DAY -> throw ReturnDataUnavailableException(
-                "pension returns have no working-day period",
+            Periodicity.WORKING_DAY, Periodicity.DAY -> throw ReturnDataUnavailableException(
+                "pension returns have no ${period.periodicity} period",
             )
         }
     }

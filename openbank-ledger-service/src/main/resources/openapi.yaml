@@ -21,7 +21,7 @@ info:
   # contra) that migration V35 maps for the posting-rule matrix classes.
   # 1.29.0 -> 1.30.0: additive raw journal snapshot reads and optional unverified caller-origin evidence.
   # 1.30.0 -> 1.31.0: additive immutable close evidence, monthly readiness and explicit participant mode.
-  version: 1.32.0
+  version: 1.33.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -838,6 +838,61 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/ledger/close/{fiscalYear}/result-allocation:
+    get:
+      tags: [YearClose]
+      summary: Preview the year-end result allocation (read-only)
+      description: >
+        The closing legs that would zero the fiscal year's income and expense accounts into
+        retained earnings (6020), computed from the year's current trial balance. Empty legs mean
+        the result is already allocated. 409 when a non-CZK income/expense balance blocks it.
+      operationId: previewYearEndResultAllocation
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Allocation plan (posted is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearEndResultAllocationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    post:
+      tags: [YearClose]
+      summary: Allocate the fiscal year's result to retained earnings (ADR-0096 D3)
+      description: >
+        Posts the closing journal dated the last day of the fiscal year through the ordinary
+        posting path (day, period and fiscal-year locks apply). Carry-relative and idempotent: a
+        re-run over an unchanged ledger posts nothing (posted=false); a later posting into the
+        year leaves a residual that a re-run allocates. Refused (409) for a year that has not
+        ended, an ATTESTED year close, or non-CZK income/expense balances. A DRAFT year close
+        computed before the allocation must be refreshed before attestation.
+      operationId: allocateYearEndResult
+      parameters:
+        - $ref: '#/components/parameters/FiscalYearPath'
+      responses:
+        '200':
+          description: Allocation outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/YearEndResultAllocationResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
 
@@ -2359,6 +2414,31 @@ components:
           items:
             $ref: '#/components/schemas/TrialBalanceSectionResponse'
 
+    YearEndResultAllocationResponse:
+      type: object
+      required: [fiscalYear, netResult, legs, posted]
+      properties:
+        fiscalYear:
+          type: integer
+        netResult:
+          type: number
+          description: Debit minus credit over income and expense; negative is a profit, positive a loss.
+        legs:
+          type: array
+          items:
+            type: object
+            required: [glAccountCode, side, amount]
+            properties:
+              glAccountCode:
+                type: string
+              side:
+                type: string
+                enum: [DEBIT, CREDIT]
+              amount:
+                type: number
+        posted:
+          type: boolean
+        journalId: {type: [string, 'null'], format: uuid}
     YearCloseRecordResponse:
       type: object
       properties:

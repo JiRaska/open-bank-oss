@@ -219,5 +219,69 @@ spec:
         self.assertEqual(missing, [], f"declared money-path but no module directory: {missing}")
 
 
+class ManagementScrapeConsolidationTest(unittest.TestCase):
+    """Regression corpus for the three redundant service-level management scrapes."""
+
+    @staticmethod
+    def matching_management_scrapes(workload, monitors):
+        namespace = workload["metadata"]["namespace"]
+        template = workload["spec"]["template"]
+        labels = template["metadata"]["labels"]
+        ports = {port.get("name") for container in template["spec"]["containers"]
+                 for port in container.get("ports", [])}
+        matches = []
+        for monitor in monitors:
+            spec = monitor["spec"]
+            scope = spec.get("namespaceSelector", {})
+            selected = scope.get("any") or namespace in scope.get("matchNames", [])
+            if not scope.get("any") and not scope.get("matchNames"):
+                selected = namespace == monitor["metadata"]["namespace"]
+            if not selected:
+                continue
+            selector = spec["selector"]
+            if any(key not in {"matchLabels", "matchExpressions"} for key in selector):
+                raise AssertionError("Unqualified selector shape in regression corpus")
+            if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
+                continue
+            expressions = selector.get("matchExpressions", [])
+            if any(expression["operator"] != "Exists" for expression in expressions):
+                raise AssertionError("Unqualified selector operator in regression corpus")
+            if any(expression["key"] not in labels for expression in expressions):
+                continue
+            for endpoint in spec["podMetricsEndpoints"]:
+                if (endpoint.get("port") in ports and endpoint.get("port") == "management"
+                        and endpoint.get("path", "/metrics") == "/q/metrics"
+                        and endpoint.get("scheme", "http") == "http"):
+                    matches.append((monitor["metadata"]["namespace"], monitor["metadata"]["name"]))
+        return matches
+
+    def test_consolidated_service_templates_keep_one_canonical_management_scrape(self):
+        from copy import deepcopy
+        import yaml
+
+        components = HERE.parents[1] / "openbank-infra" / "gitops" / "components"
+        fleet = yaml.safe_load((components / "observability" / "podmonitor-openbank-services.yaml").read_text())
+        canonical = [("observability", "openbank-services")]
+        # These are the three reproduced regressions, not a registry of fleet modules.
+        for namespace in ("communication", "context", "referral"):
+            with self.subTest(namespace=namespace):
+                documents = list(yaml.safe_load_all(
+                    (components / namespace / f"{namespace}-service.yaml").read_text()
+                ))
+                workload, = [doc for doc in documents if doc and doc.get("kind") == "Deployment"]
+                monitors = [fleet] + [doc for doc in documents if doc and doc.get("kind") == "PodMonitor"]
+                self.assertEqual(self.matching_management_scrapes(workload, monitors), canonical)
+
+                duplicate = deepcopy(fleet)
+                duplicate["metadata"]["name"] = "duplicate-fixture"
+                self.assertEqual(len(self.matching_management_scrapes(workload, [fleet, duplicate])), 2)
+                other_pod = deepcopy(duplicate)
+                other_pod["spec"]["selector"] = {"matchLabels": {"app.kubernetes.io/name": "another-pod"}}
+                self.assertEqual(self.matching_management_scrapes(workload, [fleet, other_pod]), canonical)
+                other_path = deepcopy(duplicate)
+                other_path["spec"]["podMetricsEndpoints"][0]["path"] = "/another/metrics"
+                self.assertEqual(self.matching_management_scrapes(workload, [fleet, other_path]), canonical)
+
+
 if __name__ == "__main__":
     unittest.main()
