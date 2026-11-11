@@ -27,12 +27,10 @@ dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-finance"))
     implementation(project(":openbank-libs-fincrime"))
-    // The golden runner, ProductArb and the money-conservation assertion live in libs-testing
-    // (ADR-0352 §5); `obp test` runs the same runner the CI gate runs.
-    implementation(project(":openbank-libs-testing"))
     // `obp sign` uses the publish path's own HmacIrSigner and RevisionIdentity, under an offline test key.
     implementation(project(":openbank-libs-runtime"))
 
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
