@@ -29,9 +29,10 @@ object NostroPactSeed {
      * SETTLED posting for an MM_PLACEMENT deal produces (`Postings.kt`).
      */
     fun seedCzkNostroLine(dataSource: DataSource) = inOneTransaction(dataSource) { c ->
-        journal(c, CZK_JOURNAL_ID, CZK_TRANSACTION_ID, "MM placement settlement")
-        line(c, CZK_NOSTRO_LINE_ID, CZK_JOURNAL_ID, NOSTRO_CZK_GL_ID, "C", CZK_AMOUNT, "CZK", CZK_AMOUNT, 1)
-        line(c, CZK_PLACEMENT_LINE_ID, CZK_JOURNAL_ID, PLACEMENT_CZK_GL_ID, "D", CZK_AMOUNT, "CZK", CZK_AMOUNT, 2)
+        if (journal(c, CZK_JOURNAL_ID, CZK_TRANSACTION_ID, "MM placement settlement")) {
+            line(c, CZK_NOSTRO_LINE_ID, CZK_JOURNAL_ID, NOSTRO_CZK_GL_ID, "C", CZK_AMOUNT, "CZK", CZK_AMOUNT, 1)
+            line(c, CZK_PLACEMENT_LINE_ID, CZK_JOURNAL_ID, PLACEMENT_CZK_GL_ID, "D", CZK_AMOUNT, "CZK", CZK_AMOUNT, 2)
+        }
     }
 
     /**
@@ -40,9 +41,20 @@ object NostroPactSeed {
      * read that summed `base_amount` instead of `amount` would answer 251,000 and fail the pact.
      */
     fun seedEurNostroLine(dataSource: DataSource) = inOneTransaction(dataSource) { c ->
-        journal(c, EUR_JOURNAL_ID, EUR_TRANSACTION_ID, "EUR MM maturity")
-        line(c, EUR_NOSTRO_LINE_ID, EUR_JOURNAL_ID, NOSTRO_EUR_GL_ID, "D", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 1)
-        line(c, EUR_PLACEMENT_LINE_ID, EUR_JOURNAL_ID, PLACEMENT_EUR_GL_ID, "C", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 2)
+        if (journal(c, EUR_JOURNAL_ID, EUR_TRANSACTION_ID, "EUR MM maturity")) {
+            line(c, EUR_NOSTRO_LINE_ID, EUR_JOURNAL_ID, NOSTRO_EUR_GL_ID, "D", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 1)
+            line(
+                c,
+                EUR_PLACEMENT_LINE_ID,
+                EUR_JOURNAL_ID,
+                PLACEMENT_EUR_GL_ID,
+                "C",
+                EUR_AMOUNT,
+                "EUR",
+                EUR_BASE_AMOUNT,
+                2,
+            )
+        }
     }
 
     // The journal row and both legs commit together: the database checks a posted journal's
@@ -50,7 +62,12 @@ object NostroPactSeed {
     private fun inOneTransaction(dataSource: DataSource, seed: (Connection) -> Unit) =
         dataSource.connection.use { connection -> connection.journalTransaction(block = seed) }
 
-    private fun journal(c: Connection, id: UUID, transactionId: UUID, description: String) {
+    /**
+     * True when the journal row was inserted now. Its lines are written only then: a line cannot
+     * join a journal an earlier transaction posted (ADR-0372), and a BEFORE trigger fires before
+     * `on conflict do nothing` is resolved, so replaying the line inserts would be refused.
+     */
+    private fun journal(c: Connection, id: UUID, transactionId: UUID, description: String): Boolean =
         c.prepareStatement(
             """insert into journal_entries (id, transaction_id, entry_date, value_date, description, status, created_by)
                values (?, ?, ?, ?, ?, 'POSTED', ?)
@@ -62,9 +79,8 @@ object NostroPactSeed {
             s.setObject(4, java.sql.Date.valueOf(STATEMENT_DATE))
             s.setString(5, description)
             s.setObject(6, SYSTEM_ACTOR_ID)
-            s.executeUpdate()
+            s.executeUpdate() == 1
         }
-    }
 
     @Suppress("LongParameterList")
     private fun line(

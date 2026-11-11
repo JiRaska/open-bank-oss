@@ -70,9 +70,12 @@ object FinrepFrozenMonthPactSeed {
         c.autoCommit = false
         try {
             if (resetFixture) resetOwnedEvidence(c)
-            journal(c, reportingMonth.withDayOfMonth(15))
-            line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
-            line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
+            // Lines only together with their journal: a line cannot join a journal an earlier
+            // transaction posted (ADR-0372), and BEFORE triggers fire before ON CONFLICT is resolved.
+            if (journal(c, reportingMonth.withDayOfMonth(15)) == 1) {
+                line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
+                line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
+            }
             if (yearToDate) {
                 seedPriorMonths(c, reportingMonth)
             }

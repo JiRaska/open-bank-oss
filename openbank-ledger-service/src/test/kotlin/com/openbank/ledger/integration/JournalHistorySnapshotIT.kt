@@ -202,8 +202,10 @@ class JournalHistorySnapshotIT {
                     it.executeUpdate()
                 }
             }.isInstanceOf(SQLException::class.java)
+            // Lines and journal together: a posted journal stripped of its lines cannot commit,
+            // declared repair or not (ADR-0372). The line delete fires the invalidation first.
             c.journalTransaction(HISTORY_FIXTURE_REPAIR) {
-                c.prepareStatement("delete from journal_lines where journal_id = ?").use {
+                c.prepareStatement(ERASE_LINES_AND_JOURNAL).use {
                     it.setObject(1, source)
                     it.executeUpdate()
                 }
@@ -386,8 +388,7 @@ class JournalHistorySnapshotIT {
 
     @Test
     fun `concurrent source line deletion cannot leave an erased copy`() {
-        // Both legs: a posted journal left with one leg cannot commit, declared repair or not (ADR-0372).
-        concurrentErase(false, "delete from journal_lines where journal_id=?")
+        concurrentErase(false, ERASE_LINES_AND_JOURNAL)
     }
 
     @Test
@@ -501,7 +502,7 @@ class JournalHistorySnapshotIT {
             c.prepareStatement(mutation).use {
                 it.queryTimeout = 20
                 it.setObject(1, source)
-                assertThat(it.executeUpdate()).isEqualTo(if (mutation.contains("journal_lines")) 2 else 1)
+                assertThat(it.executeUpdate()).isEqualTo(if (mutation.startsWith("update journal_lines")) 2 else 1)
             }
             if (rollback) c.rollback() else c.commit()
         }
@@ -660,6 +661,11 @@ class JournalHistorySnapshotIT {
 }
 
 private const val HISTORY_FIXTURE_REPAIR = "JournalHistorySnapshotIT source mutation fixture"
+
+// One statement, one affected journal row: the lines go first, then the journal they belonged to.
+private const val ERASE_LINES_AND_JOURNAL =
+    "with gone as (delete from journal_lines where journal_id = ? returning journal_id) " +
+        "delete from journal_entries where id in (select journal_id from gone)"
 
 /**
  * ADR-0372: a posted journal row and its lines are append-only, so every source mutation in this
