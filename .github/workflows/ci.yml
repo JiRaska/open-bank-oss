@@ -334,6 +334,24 @@ jobs:
           OPENBANK_E2E_QUARANTINE: "only"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-quarantine/playwright.xml"
 
+      # ADR-0370 U6: per-route client-JS and LCP budgets (e2e/route-performance-budget.json),
+      # measured in the browser on the production build already served above. ADVISORY until ten
+      # consecutive runs show the numbers are stable (the ADR-0359 graduation rule).
+      - name: Route performance measurement (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: npx playwright test --workers 1
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          OPENBANK_E2E_PERF: "only"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-perf/playwright.xml"
+
       # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
       # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
       - name: E2E flake report
