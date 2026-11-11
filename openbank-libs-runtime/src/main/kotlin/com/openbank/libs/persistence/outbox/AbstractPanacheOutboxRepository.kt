@@ -4,6 +4,7 @@
 
 package com.openbank.libs.persistence.outbox
 
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -237,7 +238,7 @@ abstract class AbstractClaimFencedOutboxRepository<E : PanacheClaimFencedOutboxE
 
     override suspend fun claimWithTokens(limit: Int, staleAfter: Duration): List<OutboxClaim> {
         require(!staleAfter.isNegative && !staleAfter.isZero) { "Outbox reclaim timeout must be positive" }
-        val token = UUID.randomUUID()
+        val token = Ids.randomId()
         val now = Instant.now(clock)
         return inTransaction { s ->
             s.createNativeQuery(OutboxClaimFenceSql.claim(shape), entityClass)
