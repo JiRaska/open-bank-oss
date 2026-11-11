@@ -27,7 +27,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -116,7 +115,7 @@ class LedgerOutboxDispatchFailureIT {
             failingPublisher,
             dispatchEnabled = true,
             metrics = mockk(relaxed = true),
-            dispatchPollInterval = Duration.ofSeconds(5),
+            pollInterval = "5s",
         )
 
         val msg = OutboxMessage(

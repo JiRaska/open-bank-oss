@@ -26,6 +26,8 @@ internal object ScheduleSwitch {
 
     fun isOff(triggerProperty: String, config: Config = ConfigProvider.getConfig()): Boolean =
         config.getOptionalValue(triggerProperty, String::class.java)
-            .map { it.trim().lowercase() in OFF_VALUES }
+            .map(::isOffValue)
             .orElse(false)
+
+    fun isOffValue(value: String): Boolean = value.trim().lowercase() in OFF_VALUES
 }

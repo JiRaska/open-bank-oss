@@ -27,6 +27,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.apache.kafka.clients.consumer.ConsumerConfig
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.KafkaConsumer
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.serialization.StringDeserializer
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -109,14 +110,17 @@ class LedgerFencedOutboxKafkaIT {
     private fun receiveScheduledBatch(expected: Set<String>): List<ConsumerRecord<String, String>> = KafkaConsumer(
         mapOf(
             ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG to bootstrapServers,
-            ConsumerConfig.GROUP_ID_CONFIG to "ledger-outbox-it-${UUID.randomUUID()}",
-            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG to "earliest",
             ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG to false,
         ),
         StringDeserializer(),
         StringDeserializer(),
     ).use { consumer ->
-        consumer.subscribe(listOf(TOPIC))
+        // Wait for the fresh broker's topic metadata before allowing the first scheduled send.
+        val partitions = consumer.partitionsFor(TOPIC, Duration.ofSeconds(40))
+        assertThat(partitions).describedAs("ledger outbox topic partitions").isNotEmpty()
+        val assigned = partitions.map { TopicPartition(it.topic(), it.partition()) }
+        consumer.assign(assigned)
+        consumer.seekToBeginning(assigned)
         scheduler.resume()
         val records = mutableListOf<ConsumerRecord<String, String>>()
         val deadline = System.nanoTime() + Duration.ofSeconds(40).toNanos()

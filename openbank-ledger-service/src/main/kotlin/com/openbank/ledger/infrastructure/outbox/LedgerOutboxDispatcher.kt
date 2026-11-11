@@ -5,12 +5,14 @@ package com.openbank.ledger.infrastructure.outbox
 
 import com.openbank.ledger.infrastructure.messaging.KafkaLedgerOutboxEventPublisher
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
+import com.openbank.ledger.infrastructure.schedule.ScheduleSwitch
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxDispatch
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxRepository
+import io.quarkus.runtime.configuration.DurationConverter
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -38,8 +40,15 @@ class LedgerOutboxDispatcher(
     private val dispatchEnabled: Boolean,
     metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.outbox.poll-interval", defaultValue = "5s")
-    override val dispatchPollInterval: Duration,
+    pollInterval: String,
 ) : AbstractOutboxDispatcher(metrics) {
+
+    // The pension ledger supplies `off` to the same property the scheduler reads.
+    override val dispatchPollInterval: Duration = if (ScheduleSwitch.isOffValue(pollInterval)) {
+        super.dispatchPollInterval
+    } else {
+        DurationConverter.parseDuration(pollInterval)
+    }
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
