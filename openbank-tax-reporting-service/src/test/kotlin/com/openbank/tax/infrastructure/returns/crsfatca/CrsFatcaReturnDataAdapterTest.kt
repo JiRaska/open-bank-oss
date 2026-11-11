@@ -104,6 +104,9 @@ class CrsFatcaReturnDataAdapterTest {
 
         override suspend fun bookedBalance(accountId: UUID, currency: String, asOf: LocalDate) =
             balances[accountId] ?: BigDecimal.ZERO
+
+        override suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate) =
+            error("CRS/FATCA must not use the strict read")
     }
 
     private val incomeCredits = mockk<IncomeCreditService>()

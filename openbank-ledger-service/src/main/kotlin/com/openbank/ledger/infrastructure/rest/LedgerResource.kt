@@ -25,6 +25,7 @@ import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.LedgerScope
 import com.openbank.ledger.domain.model.SubLedgerBalance
 import com.openbank.ledger.domain.model.TrialBalance
+import com.openbank.ledger.domain.model.YearEndResultAllocationPlan
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -203,6 +204,12 @@ class LedgerResource(
         requestContext: ContainerRequestContext,
     ): Response {
         requireNotNull(request) { "a request body is required" }
+        // ADR-0096 D3: this prefix is reserved for the year-end closing journal, whose attribution
+        // is written only by the allocation's own transaction. A generic post under it would be an
+        // unattributed closing journal that blocks the year's attestation.
+        require(!request.idempotencyKey.startsWith(YearEndResultAllocationPlan.KEY_PREFIX)) {
+            "idempotency keys starting with '${YearEndResultAllocationPlan.KEY_PREFIX}' are reserved"
+        }
         val command = PostJournalCommand(
             idempotencyKey = request.idempotencyKey,
             transactionId = request.transactionId,

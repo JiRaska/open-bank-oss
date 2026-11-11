@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.util.concurrent.CompletableFuture
 
 class OpaSidecarPolicyDecisionPointTest {
     private val httpClient: HttpClient = mockk()
@@ -62,8 +63,8 @@ class OpaSidecarPolicyDecisionPointTest {
     @Test
     fun `request body wraps query in input envelope`(): Unit = runBlocking {
         val captured = slot<HttpRequest>()
-        every { httpClient.send(capture(captured), any<HttpResponse.BodyHandler<String>>()) } returns
-            stubHttpResponse(200, """{"result":true}""")
+        every { httpClient.sendAsync(capture(captured), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.completedFuture(stubHttpResponse(200, """{"result":true}"""))
         pdp.allow(sampleQuery)
         // Bodyless inspection — confirm the URI path is the ADR-0034 query namespace.
         assertThat(captured.captured.uri().toString()).endsWith("/v1/data/openbank/rest/allow")
@@ -142,8 +143,8 @@ class OpaSidecarPolicyDecisionPointTest {
     }
 
     private fun stubResponse(status: Int, body: String) {
-        every { httpClient.send(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns
-            stubHttpResponse(status, body)
+        every { httpClient.sendAsync(any<HttpRequest>(), any<HttpResponse.BodyHandler<String>>()) } returns
+            CompletableFuture.completedFuture(stubHttpResponse(status, body))
     }
 
     @Suppress("UNCHECKED_CAST")

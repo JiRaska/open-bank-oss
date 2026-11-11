@@ -269,6 +269,17 @@ select_modules() {
       echo "Decision: shared domain build script changes only its raised coverage floor."
       FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
     fi
+    # gradle/verification-metadata.xml is checked by the `verification-metadata` shard jobs,
+    # which regenerate it for EVERY Gradle module (derive-verification-modules.py treats it as
+    # a shared input) with --refresh-dependencies and fail on a missing entry or a Gradle error
+    # (malformed XML). A module build adds nothing for this file alone: verification is
+    # `lenient` (gradle.properties), so a wrong checksum is a warning there, never a failure.
+    # all-green requires the shards' success whenever they were selected. PR path only: the
+    # main push keeps its full-fleet build. Any other global input still widens below.
+    if grep -Fxq 'gradle/verification-metadata.xml' <<< "$FILES_GLOBAL"; then
+      echo "Decision: gradle/verification-metadata.xml -> verification-metadata shards, not module builds."
+      FILES_GLOBAL=$(grep -vFx 'gradle/verification-metadata.xml' <<< "$FILES_GLOBAL" || true)
+    fi
     if global_service_build_input_changed "$FILES_GLOBAL"; then
       echo "Decision: shared build input changed -> build all modules."
       CHANGED="$ALL"
@@ -376,6 +387,8 @@ select_modules() {
       fi
       case "$f" in
         openbank-libs/governance/*|pacts/*.json) continue ;;
+        # Verified by the verification-metadata shards (see the global-input check above).
+        gradle/verification-metadata.xml) continue ;;
         # Same owned trees as the push path: readers are derived, never the full fleet.
         openbank-infra/*|openbank-contracts/*|docs/*|LICENSES/*) continue ;;
         openbank-*/*)
@@ -448,9 +461,12 @@ self_test() {
   : > "$repo/openbank-c-service/build.gradle.kts"
   # A test that reads every sibling module (fleet scanner) must ride along with any change.
   printf '%s\n' 'val r = File("..").listFiles()!!.filter { it.name.startsWith("openbank-") }' > "$repo/openbank-c-service/src/test/kotlin/Scan.kt"
+  mkdir -p "$repo/gradle"; : > "$repo/gradle/verification-metadata.xml"; : > "$repo/gradle/libs.versions.toml"
+  : > "$repo/.gitleaks.toml"; : > "$repo/.dockerignore"
   sg_do add -A && sg_do commit -q -m base &&
   sg_do remote add origin "$repo" && sg_do fetch -q origin main &&
   sg_do checkout -q -b pr || return 1
+  local base_sha; base_sha=$(sg rev-parse HEAD)
   echo a >> "$repo/openbank-a-service/src/A.kt"
   sg_do commit -q -am a || return 1
   expect() { # name want got
@@ -499,7 +515,36 @@ self_test() {
   echo changelog > "$repo/openbank-b-service/CHANGELOG.md"
   sg_do add openbank-b-service/CHANGELOG.md && sg_do commit -q -m changelog || return 1
   expect push-changelog-builds-only-derived-reader "openbank-c-service " "$(run push)"
-  echo "SUBJECTS=13  # scenarios exercised"
+  # Tool-only config: inert alone, never masking a module change beside it.
+  pr_from_base() { # branch; then edits; commits all tracked changes
+    sg_do checkout -q -b "$1" "$base_sha"
+  }
+  pr_from_base pr-gitleaks || return 1
+  echo x >> "$repo/.gitleaks.toml"; sg_do commit -q -am gl || return 1
+  expect pr-gitleaks-only-builds-nothing "" "$(run pull_request)"
+  echo b >> "$repo/openbank-a-service/src/A.kt"; sg_do commit -q -am glm || return 1
+  expect pr-gitleaks-plus-module-builds-that-module "openbank-a-service openbank-c-service " "$(run pull_request)"
+  # Negative control: .dockerignore is an image input and stays full-fleet.
+  pr_from_base pr-dockerignore || return 1
+  echo x >> "$repo/.dockerignore"; sg_do commit -q -am di || return 1
+  expect pr-dockerignore-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
+  # Verification metadata alone goes to the metadata shards, not the module builds...
+  pr_from_base pr-vmeta || return 1
+  echo x >> "$repo/gradle/verification-metadata.xml"; sg_do commit -q -am vm || return 1
+  expect pr-verification-metadata-only-builds-no-module "" "$(run pull_request)"
+  # ...but beside any other global input it still widens to the fleet.
+  echo x >> "$repo/gradle/libs.versions.toml"; sg_do commit -q -am vml || return 1
+  expect pr-verification-metadata-plus-catalog-builds-all "openbank-a-service openbank-b-service openbank-c-service " "$(run pull_request)"
+  # A JVM test that reads the inert file by literal path is still built.
+  sg_do checkout -q main || return 1
+  mkdir -p "$repo/openbank-b-service/src/test/kotlin"
+  printf '%s\n' 'val rules = File("../.gitleaks.toml").readText()' > "$repo/openbank-b-service/src/test/kotlin/R.kt"
+  sg_do add openbank-b-service/src/test/kotlin/R.kt && sg_do commit -q -m reader || return 1
+  sg_do fetch -q origin main && sg_do checkout -q -b pr-reader || return 1
+  echo y >> "$repo/.gitleaks.toml"; sg_do commit -q -am glr || return 1
+  expect pr-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run pull_request)"
+  expect push-gitleaks-builds-its-literal-path-reader "openbank-b-service " "$(run push)"
+  echo "SUBJECTS=20  # scenarios exercised"
   return $rc
 }
 

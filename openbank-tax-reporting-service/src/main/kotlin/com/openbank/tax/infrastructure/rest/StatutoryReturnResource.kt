@@ -12,9 +12,11 @@ import com.openbank.tax.application.port.out.ReturnWireRendererPort
 import com.openbank.tax.application.usecase.ReturnBreach
 import com.openbank.tax.application.usecase.StatutoryReturnNotFoundException
 import com.openbank.tax.application.usecase.StatutoryReturnService
+import com.openbank.tax.domain.model.TaxConflictException
 import com.openbank.tax.domain.returns.ReturnCatalogue
 import com.openbank.tax.domain.returns.ReturnValidationException
 import com.openbank.tax.domain.returns.StatutoryReturn
+import com.openbank.tax.infrastructure.returns.gsft.GsftReturnDataAdapter
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -140,8 +142,17 @@ class StatutoryReturnResource(
     @Operation(
         summary = "Record the regulator submission reference (APPROVED → SUBMITTED; refused if content ≠ attestation)",
     )
-    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response =
-        Response.ok(service.submit(parseId(id), request.reference, actingPrincipal()).toResponse()).build()
+    suspend fun submitted(@PathParam("id") id: String, request: RecordSubmissionRequest): Response {
+        val returnId = parseId(id)
+        val actor = actingPrincipal()
+        // A GSFT batch is filed only through its delivery route, which verifies the stored package
+        // against the attested hashes and encrypts it; recording a reference here would file a
+        // return whose package nobody checked.
+        if (service.get(returnId).catalogueId == GsftReturnDataAdapter.CATALOGUE_ID) {
+            throw TaxConflictException("A GSFT return is submitted through POST /{id}/gsft-delivery, not /submitted")
+        }
+        return Response.ok(service.submit(returnId, request.reference, actor).toResponse()).build()
+    }
 
     @POST
     @Path("/{id}/acknowledgement")
@@ -221,6 +232,9 @@ data class ReturnDefinitionResponse(
     val deadlineDaysAfterPeriodEnd: Int,
     val legalBasis: String,
     val datapoints: List<String>,
+    val deadlineBasis: String,
+    val onDemand: Boolean,
+    val filingObligation: Boolean,
 )
 
 data class ReturnCatalogueResponse(
@@ -240,7 +254,7 @@ data class ReturnBreachResponse(
     val kind: String,
 )
 
-private fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
+internal fun StatutoryReturn.toResponse() = StatutoryReturnResponse(
     id = id,
     catalogueId = catalogueId,
     catalogueVersion = catalogueVersion,
@@ -280,6 +294,9 @@ private fun ReturnCatalogue.toResponse() = ReturnCatalogueResponse(
             it.deadlineDaysAfterPeriodEnd,
             it.legalBasis,
             it.datapoints,
+            it.deadlineBasis.name,
+            it.onDemand,
+            it.filingObligation,
         )
     },
 )
