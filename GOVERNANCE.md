@@ -32,8 +32,10 @@ would only make `main` unmergeable without an administrator bypass.
    `rules.yaml` as a gate.
 3. The threat model (`docs/threat-models/<service>.md`) for money-path changes is required by
    ADR-0030 and checked by a diff gate; it is meant to be written before the PR is opened.
-4. The money-path-only gates in `.github/gates/gates.yaml` and the runtime four-eyes gate on
-   money-path verbs are further independent controls, separate from GitHub review.
+4. The money-path-only gates in `.github/gates/gates.yaml` are further independent controls,
+   separate from GitHub review. The runtime four-eyes control on money-path verbs is built but
+   **not enforcing** in any deployed service today (tracked in #15748), so it does not
+   compensate for the missing review.
 
 This is explicitly a stop-gap tied to a capacity limit, not a policy decision. It expires when a
 second account holds write access (see the revisit trigger in `rules.yaml`).
