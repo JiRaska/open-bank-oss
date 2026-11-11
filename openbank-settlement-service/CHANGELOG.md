@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.13.0...settlement-service-v0.13.1) (2026-11-11)
+
+
+### Security
+
+* **settlement:** drop baked-in datasource password fallback ([#15607](https://github.com/JiRaska/open-bank-oss/issues/15607)) ([5ffeb83](https://github.com/JiRaska/open-bank-oss/commit/5ffeb834ba819ac060beb33ff5e15ed1eb3680c7))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.12.2...settlement-service-v0.13.0) (2026-10-16)
 
 
