@@ -88,13 +88,13 @@ class BusinessPaymentApprovalIT {
         post("/customer/v1/sepa-payments")
     }
 
-    private fun postDomestic(key: String) = Given {
+    private fun postDomestic(key: String, currency: String = "CZK") = Given {
         contentType("application/json")
         header("X-Acting-For", COMPANY)
         header("X-SCA-Challenge-Id", SCA)
         header("Idempotency-Key", key)
         body(
-            """{"debtorAccountId":"$ACCOUNT","amount":"80000.00","currency":"CZK",
+            """{"debtorAccountId":"$ACCOUNT","amount":"80000.00","currency":"$currency",
                 "creditorAccountNumber":"123456789/0100","creditorName":"Fixture"}""",
         )
     } When {
@@ -220,6 +220,30 @@ class BusinessPaymentApprovalIT {
         assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
         assertThat(claimRequest.header("Idempotency-Key")).isNull()
         assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `held policy uses normalized CZK and stores the frozen instruction as received`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL","required":2}""")
+
+        val currency = " czK "
+        val key = "fixture-currency-key"
+        postDomestic(key, currency) Then { statusCode(202) }
+
+        val evaluate = readJson(BusinessApprovalStubs.requests("POST", EVALUATE).single().body)
+        assertThat(evaluate.path("currency").asText()).isEqualTo("CZK")
+        val create = BusinessApprovalStubs.requests("POST", CREATE).single()
+        val request = readJson(create.body)
+        assertDomesticClaimMatchesCreate(key, create, request)
+        val payload = request.path("payload")
+        assertThat(payload.path("currency").asText()).isEqualTo(currency)
+        assertThat(payload.path("railRequest").path("currency").asText()).isEqualTo(currency)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 
     @Test

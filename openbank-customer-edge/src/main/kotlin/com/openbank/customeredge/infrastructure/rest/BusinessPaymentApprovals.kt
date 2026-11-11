@@ -168,7 +168,8 @@ class BusinessPaymentApprovals(
             "DIRECT" -> null
             "HELD" -> {
                 if (!enforce) return conflict(DOMESTIC_HELD_POLICY_CHANGED, "The payment must stay in approval")
-                val required = evaluate(entity, payment)?.path("required")?.asInt(0) ?: 0
+                val policyPayment = payment.copy(currency = payment.currency?.trim()?.uppercase())
+                val required = evaluate(entity, policyPayment)?.path("required")?.asInt(0) ?: 0
                 when {
                     required < 1 -> unavailable("signing policy could not be evaluated")
                     required == 1 -> conflict(DOMESTIC_HELD_POLICY_CHANGED, "The payment must stay in approval")
