@@ -27,7 +27,9 @@ class SuspiciousTransactionReportTest {
 
     @Test
     fun `the drafter cannot approve their own report`() {
-        assertThatThrownBy { draft().approve("alice", t0.plusSeconds(60)) }.isInstanceOf(MakerCheckerViolation::class.java)
+        assertThatThrownBy {
+            draft().approve("alice", t0.plusSeconds(60))
+        }.isInstanceOf(MakerCheckerViolation::class.java)
     }
 
     @Test
@@ -58,7 +60,9 @@ class SuspiciousTransactionReportTest {
         val approved = draft().approve("bob", t0.plusSeconds(60))
         assertThatThrownBy { approved.recordFiling("REF-1", t0, "carol", t0.plusSeconds(900), outcome) }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { approved.recordFiling("REF-1", t0.plusSeconds(1000), "carol", t0.plusSeconds(900), outcome) }
+        assertThatThrownBy {
+            approved.recordFiling("REF-1", t0.plusSeconds(1000), "carol", t0.plusSeconds(900), outcome)
+        }
             .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { approved.recordFiling(" ", t0.plusSeconds(600), "carol", t0.plusSeconds(900), outcome) }
             .isInstanceOf(IllegalArgumentException::class.java)
@@ -74,14 +78,26 @@ class SuspiciousTransactionReportTest {
 
         val filed = draft().approve("bob", t0.plusSeconds(60))
             .recordFiling("REF-1", t0.plusSeconds(600), "carol", t0.plusSeconds(900), outcome)
-        assertThatThrownBy { filed.withdraw("bob", t0.plusSeconds(1000), outcome) }.isInstanceOf(ReportStateViolation::class.java)
-        assertThatThrownBy { filed.approve("dave", t0.plusSeconds(1000)) }.isInstanceOf(ReportStateViolation::class.java)
+        assertThatThrownBy {
+            filed.withdraw("bob", t0.plusSeconds(1000), outcome)
+        }.isInstanceOf(ReportStateViolation::class.java)
+        assertThatThrownBy {
+            filed.approve("dave", t0.plusSeconds(1000))
+        }.isInstanceOf(ReportStateViolation::class.java)
     }
 
     @Test
     fun `a report rests on at least one case`() {
         assertThatThrownBy {
-            SuspiciousTransactionReport.draft(UUID.randomUUID(), UUID.randomUUID(), "n", emptyList(), emptyList(), "alice", t0)
+            SuspiciousTransactionReport.draft(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                "n",
+                emptyList(),
+                emptyList(),
+                "alice",
+                t0,
+            )
         }.isInstanceOf(IllegalArgumentException::class.java)
     }
 }

@@ -15,7 +15,12 @@ enum class ReportState { DRAFT, APPROVED, FILED, WITHDRAWN }
 data class ReportedMovement(val journalEntryId: UUID, val accountId: UUID, val currency: String)
 
 /** A structured outcome: a code of one pinned revision of the outcome vocabulary (ADR-0371 §10). */
-data class OutcomeLabel(val vocabularyId: String, val vocabularyRevision: Int, val vocabularyHash: String, val code: String)
+data class OutcomeLabel(
+    val vocabularyId: String,
+    val vocabularyRevision: Int,
+    val vocabularyHash: String,
+    val code: String,
+)
 
 /** Raised when a report transition is not allowed from its current state. */
 class ReportStateViolation(message: String) : IllegalStateException(message)
@@ -62,7 +67,9 @@ data class SuspiciousTransactionReport(
         require(narrative.isNotBlank() && narrative.length <= MAX_NARRATIVE) { "narrative is required and bounded" }
         require(caseIds.isNotEmpty() && caseIds.size <= MAX_LINKS) { "a report rests on at least one case" }
         require(caseIds.distinct().size == caseIds.size) { "a case is linked once" }
-        require(movements.size <= MAX_LINKS && movements.distinct().size == movements.size) { "movements are linked once" }
+        require(movements.size <= MAX_LINKS && movements.distinct().size == movements.size) {
+            "movements are linked once"
+        }
     }
 
     fun approve(approver: String, at: Instant): SuspiciousTransactionReport {
@@ -85,7 +92,9 @@ data class SuspiciousTransactionReport(
     ): SuspiciousTransactionReport {
         requireState(ReportState.APPROVED)
         if (officer.isBlank()) throw MakerCheckerViolation("a filing is recorded by a named officer")
-        require(reference.isNotBlank() && reference.length <= MAX_REFERENCE) { "filing reference is required and bounded" }
+        require(reference.isNotBlank() && reference.length <= MAX_REFERENCE) {
+            "filing reference is required and bounded"
+        }
         require(!filedAt.isAfter(recordedAt)) { "a filing cannot be recorded before it happened" }
         require(!filedAt.isBefore(checkNotNull(approvedAt))) { "a report cannot be filed before it was approved" }
         return copy(
@@ -104,7 +113,13 @@ data class SuspiciousTransactionReport(
             throw ReportStateViolation("report $id is $state and cannot be withdrawn")
         }
         if (by.isBlank()) throw MakerCheckerViolation("a withdrawal is made by a named officer")
-        return copy(state = ReportState.WITHDRAWN, withdrawnBy = by, withdrawnAt = at, outcome = outcome, updatedAt = at)
+        return copy(
+            state = ReportState.WITHDRAWN,
+            withdrawnBy = by,
+            withdrawnAt = at,
+            outcome = outcome,
+            updatedAt = at,
+        )
     }
 
     private fun requireState(required: ReportState) {

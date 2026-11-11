@@ -54,15 +54,23 @@ class MonitoringDispositionService(
         require(note == null || note.length <= MAX_NOTE) { "note is too long" }
         val now = clock.instant()
         val case = cases.getCase(caseId)
-        if (!case.isPackMonitoringCase) {
-            throw DispositionConflictException("case $caseId was not opened by transaction monitoring")
+        val refusal = when {
+            !case.isPackMonitoringCase -> "case $caseId was not opened by transaction monitoring"
+            !case.canTransitionTo(target(disposition)) ->
+                "case $caseId is ${case.status} and cannot be dispositioned ${disposition.name}"
+            else -> null
         }
-        if (!case.canTransitionTo(target(disposition))) {
-            throw DispositionConflictException("case $caseId is ${case.status} and cannot be dispositioned ${disposition.name}")
-        }
+        if (refusal != null) throw DispositionConflictException(refusal)
         val proposal: DispositionProposal = Proposal(
             id = UUID.randomUUID().toString(),
-            action = DispositionRequest(caseId, disposition, outcomes.label(outcomeCode, now), note?.trim()?.ifBlank { null }),
+            action = DispositionRequest(
+                caseId,
+                disposition,
+                outcomes.label(outcomeCode, now),
+                note?.trim()?.ifBlank {
+                    null
+                },
+            ),
             proposedBy = proposer,
             proposedAt = now,
         )

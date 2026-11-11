@@ -35,7 +35,9 @@ class DecisionOutcomesTest {
     @Test
     fun `an unknown, blank or out-of-validity code is refused, never defaulted`() {
         listOf("FALSE_POSITIVE", "confirmed_suspicion", "", null, "not a code").forEach { code ->
-            assertThatThrownBy { outcomes.label(code, at) }.describedAs("$code").isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy {
+                outcomes.label(code, at)
+            }.describedAs("$code").isInstanceOf(IllegalArgumentException::class.java)
         }
         assertThatThrownBy { outcomes.label("CONFIRMED_SUSPICION", Instant.parse("2025-12-31T23:59:59Z")) }
             .describedAs("before the vocabulary took effect").isInstanceOf(IllegalArgumentException::class.java)

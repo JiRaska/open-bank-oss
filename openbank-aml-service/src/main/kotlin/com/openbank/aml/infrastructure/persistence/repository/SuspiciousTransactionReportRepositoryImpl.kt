@@ -23,7 +23,8 @@ import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
-class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRepositoryImpl) : SuspiciousTransactionReportRepository {
+class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRepositoryImpl) :
+    SuspiciousTransactionReportRepository {
 
     override suspend fun insert(report: SuspiciousTransactionReport, event: OutboxMessage) {
         Panache.withTransaction {
@@ -96,11 +97,13 @@ class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRep
                 """
                 UPDATE aml_str
                    SET state = :state,
-                       approved_by = nullif(:approvedBy, ''), approved_at = cast(nullif(:approvedAt, '') as timestamptz),
+                       approved_by = nullif(:approvedBy, ''),
+                       approved_at = cast(nullif(:approvedAt, '') as timestamptz),
                        filing_reference = nullif(:reference, ''), filed_at = cast(nullif(:filedAt, '') as timestamptz),
                        filing_recorded_by = nullif(:recordedBy, ''),
                        filing_recorded_at = cast(nullif(:recordedAt, '') as timestamptz),
-                       withdrawn_by = nullif(:withdrawnBy, ''), withdrawn_at = cast(nullif(:withdrawnAt, '') as timestamptz),
+                       withdrawn_by = nullif(:withdrawnBy, ''),
+                       withdrawn_at = cast(nullif(:withdrawnAt, '') as timestamptz),
                        outcome_vocabulary = nullif(:vocabulary, ''),
                        outcome_revision = cast(nullif(:revision, '') as integer),
                        outcome_hash = nullif(:hash, ''), outcome_code = nullif(:code, ''),
@@ -176,7 +179,12 @@ class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRep
     private suspend fun hydrate(row: Array<Any?>): SuspiciousTransactionReport {
         val id = row[ID] as UUID
         val cases = Panache.withSession {
-            select("SELECT case_id, report_id FROM aml_str_case WHERE report_id = :id ORDER BY case_id", mapOf("id" to id))
+            select(
+                "SELECT case_id, report_id FROM aml_str_case WHERE report_id = :id ORDER BY case_id",
+                mapOf(
+                    "id" to id,
+                ),
+            )
         }.awaitSuspending().map { it[0] as UUID }
         val movements = Panache.withSession {
             select(

@@ -74,15 +74,20 @@ class AmlReportResource(private val reports: SuspiciousTransactionReportService)
     @RolesAllowed("ROLE_COMPLIANCE")
     @Authorize(action = "amlReport.inspect", resource = "#reportId")
     @Operation(summary = "Get a suspicious-transaction report")
-    suspend fun get(@PathParam("reportId") reportId: UUID): Response = Response.ok(reports.get(reportId).toResponse()).build()
+    suspend fun get(@PathParam("reportId") reportId: UUID): Response =
+        Response.ok(reports.get(reportId).toResponse()).build()
 
     @GET
     @RolesAllowed("ROLE_COMPLIANCE")
     @Authorize(action = "amlReport.inspect")
     @Operation(summary = "List suspicious-transaction reports")
-    suspend fun list(@QueryParam("state") state: String?, @QueryParam("limit") @DefaultValue("50") limit: Int): Response {
+    suspend fun list(
+        @QueryParam("state") state: String?,
+        @QueryParam("limit") @DefaultValue("50") limit: Int,
+    ): Response {
         val filter = state?.let { wanted ->
-            ReportState.entries.firstOrNull { it.name == wanted } ?: throw IllegalArgumentException("unknown report state")
+            ReportState.entries.firstOrNull { it.name == wanted }
+                ?: throw IllegalArgumentException("unknown report state")
         }
         return Response.ok(reports.list(filter, limit).map { it.toResponse() }).build()
     }
@@ -100,10 +105,17 @@ class AmlReportResource(private val reports: SuspiciousTransactionReportService)
     @RolesAllowed("ROLE_COMPLIANCE")
     @Authorize(action = "amlReport.file", resource = "#reportId")
     @Operation(summary = "Record that an approved report was filed outside this system")
-    suspend fun recordFiling(@PathParam("reportId") reportId: UUID, request: RecordFilingRequest?): Response = Response.ok(
-        reports.recordFiling(reportId, request?.filingReference, request?.filedAt, request?.outcomeCode, identity.principal.name)
-            .toResponse(),
-    ).build()
+    suspend fun recordFiling(@PathParam("reportId") reportId: UUID, request: RecordFilingRequest?): Response =
+        Response.ok(
+            reports.recordFiling(
+                reportId,
+                request?.filingReference,
+                request?.filedAt,
+                request?.outcomeCode,
+                identity.principal.name,
+            )
+                .toResponse(),
+        ).build()
 
     @POST
     @Path("/{reportId}/withdrawal")

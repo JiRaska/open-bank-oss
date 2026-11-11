@@ -11,7 +11,12 @@ import java.util.UUID
 enum class CaseDisposition { CLEAR, REPORT }
 
 /** What a second, different person is asked to approve for one monitoring case. */
-data class DispositionRequest(val caseId: UUID, val disposition: CaseDisposition, val outcome: OutcomeLabel, val note: String?)
+data class DispositionRequest(
+    val caseId: UUID,
+    val disposition: CaseDisposition,
+    val outcome: OutcomeLabel,
+    val note: String?,
+)
 
 /** The fleet maker-checker proposal (`libs/governance`) carrying a [DispositionRequest]. */
 typealias DispositionProposal = Proposal<DispositionRequest>

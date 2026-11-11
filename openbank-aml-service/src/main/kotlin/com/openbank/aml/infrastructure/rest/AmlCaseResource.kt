@@ -6,8 +6,8 @@ package com.openbank.aml.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
-import com.openbank.aml.application.usecase.AmlCaseNotFoundException
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
+import com.openbank.aml.application.usecase.AmlCaseNotFoundException
 import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType

@@ -76,7 +76,12 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
         val stored = case(MONITORING_CASE)
         assertThat(stored.getString("status")).isEqualTo("OPEN")
         assertThat(stored.getString("decided_by")).isNull()
-        assertThat(rows("SELECT state FROM aml_case_disposition_proposal WHERE case_id = $1", MONITORING_CASE).single().getString("state"))
+        assertThat(
+            rows(
+                "SELECT state FROM aml_case_disposition_proposal WHERE case_id = $1",
+                MONITORING_CASE,
+            ).single().getString("state"),
+        )
             .isEqualTo("PROPOSED")
     }
 
@@ -88,7 +93,9 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
         given().get("/api/v1/aml/cases/$ONBOARDING_CASE").then().statusCode(200)
         val listed = given().queryParam("partyId", PARTY.toString()).get("/api/v1/aml/cases").then().statusCode(200)
             .extract().jsonPath().getList<String>("id")
-        assertThat(listed).contains(ONBOARDING_CASE.toString(), RAIL_CASE.toString()).doesNotContain(MONITORING_CASE.toString())
+        assertThat(
+            listed,
+        ).contains(ONBOARDING_CASE.toString(), RAIL_CASE.toString()).doesNotContain(MONITORING_CASE.toString())
         // Control: the rail's TRANSACTION_MONITORING case is still the operator's to read and decide alone.
         given().get("/api/v1/aml/cases/$RAIL_CASE").then().statusCode(200)
         given().contentType(ContentType.JSON).body(mapOf("targetStatus" to "CLEARED", "decisionReason" to "released"))
@@ -124,7 +131,7 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
         assertThat(stored.getString("decided_by")).isEqualTo("bob")
         assertThat(stored.getString("decision_reason")).contains("FALSE_POSITIVE_EXPLAINED_ACTIVITY", "alice")
         val label = rows(
-            "SELECT outcome_code, outcome_revision, outcome_hash, decided_by FROM aml_case_disposition_proposal WHERE case_id = $1",
+            "SELECT outcome_code, outcome_hash, decided_by FROM aml_case_disposition_proposal WHERE case_id = $1",
             MONITORING_CASE,
         ).single()
         assertThat(label.getString("outcome_code")).isEqualTo("FALSE_POSITIVE_EXPLAINED_ACTIVITY")

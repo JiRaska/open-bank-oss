@@ -43,7 +43,15 @@ class SuspiciousTransactionReportService(
         movements: List<ReportedMovement>,
         drafter: String,
     ): SuspiciousTransactionReport {
-        val report = SuspiciousTransactionReport.draft(UUID.randomUUID(), partyId, narrative, caseIds, movements, drafter, clock.instant())
+        val report = SuspiciousTransactionReport.draft(
+            UUID.randomUUID(),
+            partyId,
+            narrative,
+            caseIds,
+            movements,
+            drafter,
+            clock.instant(),
+        )
         // A report may only rest on this party's own monitoring cases and counted movements.
         require(reports.countMonitoringCases(partyId, report.caseIds) == report.caseIds.size.toLong()) {
             "every linked case must be a transaction-monitoring case of the reported party"
@@ -55,7 +63,8 @@ class SuspiciousTransactionReportService(
         return report
     }
 
-    suspend fun get(reportId: UUID): SuspiciousTransactionReport = reports.find(reportId) ?: throw ReportNotFoundException(reportId)
+    suspend fun get(reportId: UUID): SuspiciousTransactionReport =
+        reports.find(reportId) ?: throw ReportNotFoundException(reportId)
 
     suspend fun list(state: ReportState?, limit: Int): List<SuspiciousTransactionReport> =
         reports.list(state, limit.coerceIn(1, MAX_PAGE))
@@ -76,7 +85,10 @@ class SuspiciousTransactionReportService(
         requireNotNull(filedAt) { "filedAt is required" }
         val current = get(reportId)
         val now = clock.instant()
-        return save(current.recordFiling(reference, filedAt, officer, now, outcomes.label(outcomeCode, now)), current.state)
+        return save(
+            current.recordFiling(reference, filedAt, officer, now, outcomes.label(outcomeCode, now)),
+            current.state,
+        )
     }
 
     suspend fun withdraw(reportId: UUID, outcomeCode: String?, officer: String): SuspiciousTransactionReport {
@@ -96,7 +108,9 @@ class SuspiciousTransactionReportService(
         eventId = UUID.randomUUID(),
         aggregateId = report.id,
         eventType = EVENT_STATE_CHANGED,
-        payload = objectMapper.writeValueAsString(AmlReportStateChangedEvent(report.id, report.state, report.updatedAt)),
+        payload = objectMapper.writeValueAsString(
+            AmlReportStateChangedEvent(report.id, report.state, report.updatedAt),
+        ),
     )
 
     companion object {

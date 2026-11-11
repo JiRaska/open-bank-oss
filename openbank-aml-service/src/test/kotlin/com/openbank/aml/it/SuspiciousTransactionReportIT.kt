@@ -31,19 +31,26 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
 
-    private fun reportId(): String = rows("SELECT report_id FROM aml_str WHERE party_id = $1", PARTY).single().getUUID("report_id").toString()
+    private fun reportId(): String =
+        rows("SELECT report_id FROM aml_str WHERE party_id = $1", PARTY).single().getUUID("report_id").toString()
 
-    private fun state(): String = rows("SELECT state FROM aml_str WHERE party_id = $1", PARTY).single().getString("state")
+    private fun state(): String =
+        rows("SELECT state FROM aml_str WHERE party_id = $1", PARTY).single().getString("state")
 
     private fun draftBody(party: UUID, case: UUID) = mapOf(
         "partyId" to party.toString(),
         "narrative" to "Synthetic narrative for the test.",
         "caseIds" to listOf(case.toString()),
-        "movements" to listOf(mapOf("journalEntryId" to JOURNAL.toString(), "accountId" to ACCOUNT.toString(), "currency" to "CZK")),
+        "movements" to
+            listOf(
+                mapOf("journalEntryId" to JOURNAL.toString(), "accountId" to ACCOUNT.toString(), "currency" to "CZK"),
+            ),
     )
 
     private fun file(reference: String?, outcomeCode: String) = given().contentType(ContentType.JSON)
-        .body(mapOf("filingReference" to reference, "filedAt" to Instant.now().toString(), "outcomeCode" to outcomeCode))
+        .body(
+            mapOf("filingReference" to reference, "filedAt" to Instant.now().toString(), "outcomeCode" to outcomeCode),
+        )
         .post("/api/v1/aml/reports/${reportId()}/filing")
 
     @Test
@@ -106,7 +113,11 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
             )
         }.hasMessageContaining("ck_aml_str_filed")
         assertThatThrownBy {
-            rows("UPDATE aml_str SET state = 'APPROVED', approved_by = drafted_by, approved_at = now() WHERE party_id = $1", PARTY)
+            rows(
+                "UPDATE aml_str SET state = 'APPROVED', approved_by = drafted_by, approved_at = now() " +
+                    "WHERE party_id = $1",
+                PARTY,
+            )
         }.hasMessageContaining("ck_aml_str_four_eyes")
         assertThat(state()).isEqualTo("DRAFT")
     }
@@ -148,7 +159,10 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
             .body("filingReference", equalTo("REF-SYNTHETIC-1"))
             .body("filingRecordedBy", equalTo("bob"))
             .body("outcome.code", equalTo("CONFIRMED_SUSPICION"))
-        val stored = rows("SELECT approved_by, drafted_by, filed_at, filing_recorded_at FROM aml_str WHERE party_id = $1", PARTY).single()
+        val stored = rows(
+            "SELECT approved_by, drafted_by, filed_at, filing_recorded_at FROM aml_str WHERE party_id = $1",
+            PARTY,
+        ).single()
         assertThat(stored.getString("approved_by")).isEqualTo("bob")
         assertThat(stored.getString("drafted_by")).isEqualTo("alice")
         assertThat(stored.getOffsetDateTime("filed_at")).isNotNull()
@@ -167,7 +181,9 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
         ).map { ObjectMapper().readTree(it.getString("payload")) }
         assertThat(events.map { it["state"].asText() }).containsExactly("DRAFT", "APPROVED", "FILED")
         assertThat(events).allSatisfy { event ->
-            assertThat(event.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder("reportId", "state", "occurredAt")
+            assertThat(
+                event.fieldNames().asSequence().toSet(),
+            ).containsExactlyInAnyOrder("reportId", "state", "occurredAt")
             assertThat(event["reportId"].asText()).isEqualTo(reportId())
         }
     }

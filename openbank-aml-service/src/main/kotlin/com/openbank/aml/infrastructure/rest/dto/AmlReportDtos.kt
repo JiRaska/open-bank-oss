@@ -10,7 +10,12 @@ import com.openbank.aml.domain.report.SuspiciousTransactionReport
 import java.time.Instant
 import java.util.UUID
 
-data class OutcomeResponse(val vocabularyId: String, val vocabularyRevision: Int, val vocabularyHash: String, val code: String)
+data class OutcomeResponse(
+    val vocabularyId: String,
+    val vocabularyRevision: Int,
+    val vocabularyHash: String,
+    val code: String,
+)
 
 fun OutcomeLabel.toResponse() = OutcomeResponse(vocabularyId, vocabularyRevision, vocabularyHash, code)
 

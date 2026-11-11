@@ -53,7 +53,13 @@ class AmlMonitoringDispositionResource(private val dispositions: MonitoringDispo
         requireNotNull(request) { "request body is required" }
         val disposition = CaseDisposition.entries.firstOrNull { it.name == request.disposition }
             ?: throw IllegalArgumentException("disposition must be one of ${CaseDisposition.entries.map { it.name }}")
-        val proposal = dispositions.propose(caseId, disposition, request.outcomeCode, request.note, identity.principal.name)
+        val proposal = dispositions.propose(
+            caseId,
+            disposition,
+            request.outcomeCode,
+            request.note,
+            identity.principal.name,
+        )
         return Response.created(URI.create("/api/v1/aml/monitoring/disposition-proposals/${proposal.id}"))
             .entity(proposal.toResponse())
             .build()
@@ -66,7 +72,9 @@ class AmlMonitoringDispositionResource(private val dispositions: MonitoringDispo
     @Operation(summary = "Approve or reject a disposition proposal as a second, different person")
     suspend fun decide(@PathParam("proposalId") proposalId: UUID, request: DecideDispositionRequest?): Response {
         val approve = requireNotNull(request?.approve) { "approve is required" }
-        return Response.ok(dispositions.decide(proposalId, approve, request?.reason, identity.principal.name).toResponse()).build()
+        return Response.ok(
+            dispositions.decide(proposalId, approve, request?.reason, identity.principal.name).toResponse(),
+        ).build()
     }
 
     @GET

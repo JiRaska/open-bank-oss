@@ -23,11 +23,20 @@ class DecisionOutcomes(private val vocabulary: FincrimeVocabulary) {
 
     fun label(code: String?, at: Instant): OutcomeLabel {
         require(!code.isNullOrBlank()) { "outcomeCode is required" }
-        val parsed = runCatching { VocabularyCode(code) }.getOrElse { throw IllegalArgumentException("unknown outcome code") }
+        val parsed = runCatching {
+            VocabularyCode(code)
+        }.getOrElse { throw IllegalArgumentException("unknown outcome code") }
         val reference = vocabulary.reference
         return when (vocabulary.resolve(reference, parsed, at)) {
-            is VocabularyResolution.Resolved -> OutcomeLabel(reference.id, reference.revision, reference.contentHash, code)
-            else -> throw IllegalArgumentException("unknown outcome code '$code' in ${reference.id} revision ${reference.revision}")
+            is VocabularyResolution.Resolved -> OutcomeLabel(
+                reference.id,
+                reference.revision,
+                reference.contentHash,
+                code,
+            )
+            else -> throw IllegalArgumentException(
+                "unknown outcome code '$code' in ${reference.id} revision ${reference.revision}",
+            )
         }
     }
 }

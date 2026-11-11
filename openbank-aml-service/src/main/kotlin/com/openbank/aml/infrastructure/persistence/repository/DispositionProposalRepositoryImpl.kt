@@ -58,32 +58,39 @@ class DispositionProposalRepositoryImpl : DispositionProposalRepository {
         select("$SELECT WHERE state = 'PROPOSED' ORDER BY proposed_at LIMIT :limit", mapOf("limit" to limit))
     }.awaitSuspending().map(::toProposal)
 
-    override suspend fun transition(proposal: DispositionProposal, from: ProposalState): Boolean = Panache.withTransaction {
-        mutate(
-            """
+    override suspend fun transition(proposal: DispositionProposal, from: ProposalState): Boolean =
+        Panache.withTransaction {
+            mutate(
+                """
             UPDATE aml_case_disposition_proposal
-               SET state = :state, decided_by = nullif(:decidedBy, ''), decided_at = cast(nullif(:decidedAt, '') as timestamptz),
+               SET state = :state, decided_by = nullif(:decidedBy, ''),
+                   decided_at = cast(nullif(:decidedAt, '') as timestamptz),
                    decision_reason = nullif(:reason, ''), executed_at = cast(nullif(:executedAt, '') as timestamptz)
              WHERE proposal_id = :id AND state = :from
             """,
-            mapOf(
-                "state" to proposal.state.name,
-                "decidedBy" to (proposal.decidedBy ?: ""),
-                "decidedAt" to (proposal.decidedAt?.toString() ?: ""),
-                "reason" to (proposal.decisionReason ?: ""),
-                "executedAt" to (proposal.executedAt?.toString() ?: ""),
-                "id" to UUID.fromString(proposal.id),
-                "from" to from.name,
-            ),
-        )
-    }.awaitSuspending() == 1
+                mapOf(
+                    "state" to proposal.state.name,
+                    "decidedBy" to (proposal.decidedBy ?: ""),
+                    "decidedAt" to (proposal.decidedAt?.toString() ?: ""),
+                    "reason" to (proposal.decisionReason ?: ""),
+                    "executedAt" to (proposal.executedAt?.toString() ?: ""),
+                    "id" to UUID.fromString(proposal.id),
+                    "from" to from.name,
+                ),
+            )
+        }.awaitSuspending() == 1
 
     private fun toProposal(row: Array<Any?>): DispositionProposal = Proposal(
         id = (row[ID] as UUID).toString(),
         action = DispositionRequest(
             caseId = row[CASE] as UUID,
             disposition = CaseDisposition.valueOf(row[DISPOSITION] as String),
-            outcome = OutcomeLabel(row[VOCABULARY] as String, (row[REVISION] as Number).toInt(), row[HASH] as String, row[CODE] as String),
+            outcome = OutcomeLabel(
+                row[VOCABULARY] as String,
+                (row[REVISION] as Number).toInt(),
+                row[HASH] as String,
+                row[CODE] as String,
+            ),
             note = row[NOTE] as? String,
         ),
         proposedBy = row[PROPOSED_BY] as String,
