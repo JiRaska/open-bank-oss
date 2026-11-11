@@ -2,7 +2,8 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # CI quality dashboard (openbank-app CI), fed by the CI metrics gateway
-# (apps/ci-metrics-gateway.yaml). Source: openbank-app docs/observability/ci-quality-dashboard.json.
+# (apps/ci-metrics-gateway.yaml). Source: openbank-app docs/observability/ci-quality-dashboard.json
+# (stale-ref-ok: lives in the openbank-app repo, not this tree).
 # Datasource is the same `${datasource}` template variable (type prometheus) as the sibling
 # dashboards, resolving to the provisioned `prometheus` datasource.
 # Adjusted for pushed samples: CI series are written once per run (no scrape), so timeseries

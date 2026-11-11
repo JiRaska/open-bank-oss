@@ -100,6 +100,8 @@ spec:
             team: platform
             service: openbank-app-ci
           annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
             summary: "Nightly gate failed: {{ $labels.ci_job }}"
             description: "Nightly job {{ $labels.ci_job }} ({{ $labels.workflow }}) on {{ $labels.repo }} concluded with failure."
         - alert: CiFuzzCrashFound
@@ -116,6 +118,8 @@ spec:
             team: platform
             service: openbank-app-ci
           annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
             summary: "Nightly fuzz found {{ $value }} crash(es) in {{ $labels.target }}"
             description: "ci_fuzz_crashes > 0 for target {{ $labels.target }} on {{ $labels.repo }}."
         - alert: CiJourneyFailed
@@ -132,6 +136,8 @@ spec:
             team: platform
             service: openbank-app-ci
           annotations:
+            # Nightly app workflows (schedule, once per day); no `for:`, so one true evaluation fires.
+            subject_period: 24h
             summary: "Nightly journey failed: {{ $labels.flow }} ({{ $labels.platform }})"
             description: "Journey {{ $labels.flow }} on {{ $labels.platform }} failed in the nightly run for {{ $labels.repo }}."
     - name: openbank.ci-quality.cardinality

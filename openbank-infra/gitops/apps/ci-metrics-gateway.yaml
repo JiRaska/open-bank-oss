@@ -4,7 +4,7 @@
 # CI quality metrics — authenticated OTLP/HTTP ingest gateway.
 # Threat model: docs/threat-models/ci-metrics-ingest.md
 #
-# GitHub Actions in JiRaska/openbank-app (scripts/ci-quality-metrics.py) push OTLP/HTTP
+# GitHub Actions in JiRaska/openbank-app (its scripts/ci-quality-metrics.py; stale-ref-ok: lives in the app repo) push OTLP/HTTP
 # JSON gauges (`ci.tests.*`, `ci.gate.outcome`, `ci.job.duration`, `ci.run.wallclock`,
 # `ci.flaky.tests`, and later `ci.benchmark.*`, `ci.fuzz.*`, `ci.journey.*`) here. They are
 # remote-written into the sandbox Prometheus (enableRemoteWriteReceiver: true) and shown on the
