@@ -25,9 +25,8 @@ import java.util.UUID
  * So the columns live here, and a service adopts them in its own Phase 2/3 PR: its migration adds
  * the columns (`openbank-libs-runtime/src/main/resources/db/outbox-v2-template.sql`), its entity
  * switches `: PanacheOutboxEntity()` to `: PanacheOutboxEntityV2()` and deletes its own `claimedAt`,
- * and its repository collapses onto [AbstractPanacheOutboxRepository]. Until then the v1 base and
- * this one coexist, and [AbstractPanacheOutboxRepository] works with either — every column it
- * touches it touches through native SQL, never through a mapped property.
+ * and its repository uses [AbstractPanacheOutboxRepository]. The v1 and V2 entity bases coexist
+ * while services migrate. The V2 repository's native claim requires the complete entity mapping.
  */
 @MappedSuperclass
 open class PanacheOutboxEntityV2 : PanacheOutboxEntity() {
