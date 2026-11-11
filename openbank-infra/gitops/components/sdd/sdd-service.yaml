@@ -44,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: sdd-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-e8e3b10a@sha256:3bfad9a1d98de0ae466fbe6328d330f168f6fec0bcdbe1f6ad0f152f7c94875b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sdd-service:sandbox-27e19a17@sha256:9e2b930c5b28d3beea8b55f53bba7c562bee7bf3eec3f17ef552132147fd9981
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

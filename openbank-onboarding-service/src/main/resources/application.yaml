@@ -182,7 +182,23 @@ mp:
         topic: openbank.kyb.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+authz:
+  # ADR-0034 Phase 5 lands ADVISORY: every endpoint carries @Authorize and the deployed pod runs
+  # the OPA sidecar, but enforcement stays with @RolesAllowed until the decision log is clean.
+  # gitops sets AUTHZ_ENFORCE=false explicitly; the flip is a later, separate change.
+  enforce: "${AUTHZ_ENFORCE:false}"
+
 openbank:
+  authz:
+    # libs-runtime OpaPolicyDecisionPointProducer (BUILD-time switch). Without this bean every
+    # @Authorize call takes the interceptor's `no PolicyDecisionPoint bean` branch, the sidecar is
+    # never asked, and the advisory log can never show a would-DENY.
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -224,3 +240,11 @@ openbank:
       enabled: false
     scheduler:
       enabled: false
+  authz:
+    enforce: false
+  openbank:
+    authz:
+      # Tests run no OPA sidecar; do not spend 500 ms per advisory call. Policy is covered by
+      # onboarding_rest_ext_test.rego.
+      opa-pdp-producer:
+        enabled: false
