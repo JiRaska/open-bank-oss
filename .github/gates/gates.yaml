@@ -1113,7 +1113,7 @@ gates:
   # long-lived credential with no expiry anywhere in the system that serves it. The
   # weekly credential-inventory lane lists them; this gate stops the list from growing:
   # a NEW ExternalSecret manifest referencing a static path must carry
-  # `openbank.io/rotation-deadline: YYYY-MM-DD` (future, valid date). Dynamic
+  # `open-bank.tech/rotation-deadline: YYYY-MM-DD` (future, valid date). Dynamic
   # `database/creds/…` references are exempt by construction. Diff-scoped, PR-only.
   - id: credential-deadline-ratchet
     name: "new static ExternalSecret must declare a rotation deadline (ADR-0279 #18, enforced)"

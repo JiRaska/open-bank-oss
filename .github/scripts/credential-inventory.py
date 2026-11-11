@@ -14,7 +14,7 @@ list from growing silently.
 CONVENTION INTRODUCED (and enforced on NEW manifests only):
   * an ExternalSecret whose remoteRef points at a STATIC kv path (not `database/creds/…`
     or another dynamic mount) must carry metadata annotation
-    `openbank.io/rotation-deadline: YYYY-MM-DD` — the date by which the credential is
+    `open-bank.tech/rotation-deadline: YYYY-MM-DD` — the date by which the credential is
     rotated or the reference migrates to a dynamic mount;
   * dynamic references may annotate `openbank.io/rotation: dynamic` for the reader's
     benefit, but the path prefix already proves it, so it is not required.
@@ -49,7 +49,7 @@ except ImportError:  # pragma: no cover - the gate runner installs PyYAML
 
 GITOPS = Path("openbank-infra/gitops")
 DYNAMIC_KEY = re.compile(r"database/creds/|(^|/)creds/[a-z0-9-]+-db-vault-role")
-DEADLINE = "openbank.io/rotation-deadline"
+DEADLINE = "open-bank.tech/rotation-deadline"
 DYNAMIC_ANN = "openbank.io/rotation"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -350,7 +350,7 @@ def inventory(root: Path, today: dt.date) -> tuple[str, int]:
         dl = c.deadline or "— **UNDECLARED**"
         lines.append(f"| `{c.name}` | {c.namespace} | {', '.join(f'`{k}`' for k in c.keys)} | {dl} |")
     lines += ["", "_Maintained by credential-inventory.yml (ADR-0279 #18). Do not edit by hand. "
-              "New static ExternalSecrets must carry `openbank.io/rotation-deadline` — enforced "
+              "New static ExternalSecrets must carry `open-bank.tech/rotation-deadline` — enforced "
               "by the `credential-deadline-ratchet` gate._"]
     print(f"credential-inventory: {len(creds)} ExternalSecrets, {len(statics)} static, "
           f"{len(operator_managed)} operator-managed, {len(dynamic)} dynamic, "
