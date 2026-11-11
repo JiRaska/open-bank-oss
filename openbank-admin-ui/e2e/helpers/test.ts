@@ -10,7 +10,7 @@
 // Set OPENBANK_CONTRACT_RECORD=<file> to append violations to that file as JSON lines instead
 // of failing — the only supported way to (re)generate the baseline.
 
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type BrowserContext, type Page, type Route } from '@playwright/test'
@@ -22,6 +22,9 @@ const E2E_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const REPO_ROOT = path.resolve(E2E_DIR, '../..')
 const BASELINE_FILE = path.join(E2E_DIR, 'contract-baseline.json')
 const CAPTURE_FILE = process.env.OPENBANK_CONTRACT_CAPTURE
+// The capture lands under build/, which a fresh CI checkout does not have yet; an append that
+// throws inside a route handler aborts the request and fails the test that made it.
+if (CAPTURE_FILE) mkdirSync(path.dirname(CAPTURE_FILE), { recursive: true })
 
 const contract = new OpenApiContract(REPO_ROOT)
 const baseline = new Set<string>(JSON.parse(readFileSync(BASELINE_FILE, 'utf8')).violations as string[])
