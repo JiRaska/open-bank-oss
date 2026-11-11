@@ -25,25 +25,28 @@ def check(package: Path) -> int:
     tables = {fact["templateId"] for fact in facts}
     with ZipFile(package) as outer, ZipFile(io.BytesIO(outer.read(TAXONOMY_PACKAGES[1]))) as taxonomy:
         for table in sorted(tables):
-            check_table(taxonomy, table, [fact for fact in facts if fact["templateId"] == table])
+            file_stem = (table[0] + "_" + table[1:]).lower()
+            check_table(taxonomy, "finrep", file_stem, [fact for fact in facts if fact["templateId"] == table])
     return len(facts)
 
 
-def check_table(taxonomy: ZipFile, table: str, facts: list[dict]) -> None:
-    file_stem = (table[0] + "_" + table[1:]).lower()
-    suffix = f"/finrep/4.2/tab/{file_stem}/{file_stem}.json"
+def check_table(taxonomy: ZipFile, family: str, file_stem: str, facts: list[dict]) -> None:
+    suffix = f"/{family}/4.2/tab/{file_stem}/{file_stem}.json"
     members = [name for name in taxonomy.namelist() if name.endswith(suffix)]
     if len(members) != 1:
-        raise ValueError(f"Expected one official definition for {table}.")
-    template = json.loads(taxonomy.read(members[0]))["tableTemplates"][file_stem.upper().replace(".", "-")]
+        raise ValueError(f"Expected one official definition for {file_stem}.")
+    templates = json.loads(taxonomy.read(members[0]))["tableTemplates"]
+    if len(templates) != 1:
+        raise ValueError(f"Expected one table template for {file_stem}.")
+    template = next(iter(templates.values()))
     groups = template["columns"]["datapoint"]["propertyGroups"]
     for fact in facts:
-        expected = f"{{{file_stem.upper()},{fact['rowRef']},{fact['colRef']}}}"
+        expected = f"{{{file_stem},{fact['rowRef']},{fact['colRef']}}}"
         datapoint = "dp" + str(fact["datapointId"])
         metadata = groups.get(datapoint, {}).get("eba:documentation", {})
-        cell = "".join(metadata.get("cellcode", "").split())
+        cell = "".join(metadata.get("cellcode", "").split()).lower()
         if cell != expected or metadata.get("type") != "m":
-            raise ValueError(f"{table} {fact['rowRef']}/{fact['colRef']} is not monetary {datapoint}.")
+            raise ValueError(f"{file_stem} {fact['rowRef']}/{fact['colRef']} is not monetary {datapoint}.")
 
 
 def main() -> int:

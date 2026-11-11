@@ -3,7 +3,6 @@
 """Reconcile the 36 ledger-supported FINREP facts in a report package to frozen template responses."""
 
 import argparse
-import csv
 import hashlib
 import io
 import json
@@ -14,18 +13,7 @@ from zipfile import BadZipFile, ZipFile
 
 from check_finrep_datapoints import FIXTURE
 from validate_xbrl_csv_structure import check_report
-
-
-def csv_rows(archive: ZipFile, member: str) -> list[dict[str, str]]:
-    with archive.open(member) as source, io.TextIOWrapper(source, encoding="utf-8-sig", newline="") as stream:
-        return list(csv.DictReader(stream))
-
-
-def unique(rows: list[dict], key: str) -> dict:
-    indexed = {row[key]: row for row in rows}
-    if len(indexed) != len(rows):
-        raise ValueError(f"Duplicate {key} in the report evidence.")
-    return indexed
+from xbrl_csv_package import csv_rows, unique
 
 
 def load_sources(previews: list[Path]) -> tuple[dict, list[dict], dict]:

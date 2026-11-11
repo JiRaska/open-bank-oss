@@ -3,31 +3,20 @@
 """Render the currently supported FINREP9 facts to a deterministic offline draft package."""
 
 import argparse
-import csv
 import hashlib
-import io
 import json
-import os
 import re
 import sys
-import tempfile
 from datetime import date
 from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
-from zipfile import ZipFile, ZipInfo
 
 from reconcile_finrep_facts import load_sources, supported_values
-from validate_xbrl_csv_structure import ENTRYPOINTS, check_report
+from xbrl_csv_package import publish_report, report_package
 
 
 ENTITY = re.compile(r"rs:[A-Z0-9]{20}\.(CON|IND)")
 MAX_DECIMAL_DIGITS = 64
-
-
-def csv_text(rows: list) -> str:
-    stream = io.StringIO(newline="")
-    csv.writer(stream, lineterminator="\n").writerows(rows)
-    return stream.getvalue()
 
 
 def facts_for_render(templates: dict, supported: list[dict], period: str) -> dict[str, dict[str, Decimal]]:
@@ -58,37 +47,9 @@ def render(previews: list[Path], entity: str, output: Path) -> dict:
     if date.fromisoformat(period).isoformat() != period:
         raise ValueError("The frozen source needs an ISO reference date.")
     values = facts_for_render(templates, supported, period)
-    decimals = max(0, max(-amount.as_tuple().exponent for table in values.values() for amount in table.values()))
-    parameters = [
-        ("name", "value"), ("entityID", entity), ("refPeriod", period), ("decimalsInteger", 0),
-        ("baseCurrency", "iso4217:CZK"), ("decimalsMonetary", decimals),
-        ("decimalsPercentage", 4), ("decimalsDecimal", 2),
-    ]
-    members = {
-        "META-INF/reportPackage.json": json.dumps({"documentInfo": {"documentType": "https://xbrl.org/report-package/2023"}}),
-        "reports/report.json": json.dumps({"documentInfo": {
-            "documentType": "https://xbrl.org/2021/xbrl-csv", "extends": [ENTRYPOINTS["FINREP9"]],
-        }}),
-        "reports/parameters.csv": csv_text(parameters),
-    }
-    indicators = [("templateID", "reported")]
-    for template, facts in sorted(values.items()):
-        table = f"{template[0]}_{template[1:]}"
-        indicators.append((table, "true"))
-        rows = [("datapoint", "factValue")] + [(dp, format(amount, "f")) for dp, amount in sorted(facts.items())]
-        members[f"reports/{table.lower()}.csv"] = csv_text(rows)
-    members["reports/FilingIndicators.csv"] = csv_text(indicators)
-    archive = io.BytesIO()
-    with ZipFile(archive, "w") as package:
-        for name, content in sorted(members.items()):
-            package.writestr(ZipInfo(f"openbank-finrep-supported/{name}"), content)
-    data = archive.getvalue()
-    check_report(io.BytesIO(data), "FINREP9")
-    with tempfile.TemporaryDirectory(prefix=".finrep-", dir=output.parent) as directory:
-        staged = Path(directory) / "report.zip"
-        staged.write_bytes(data)
-        staged.chmod(0o600)
-        os.link(staged, output)
+    tables = {f"{template[0]}_{template[1:]}": facts for template, facts in values.items()}
+    data = report_package("FINREP9", "openbank-finrep-supported", entity, period, tables)
+    publish_report(data, output)
     return {
         "result": "SUPPORTED_FACTS_DRAFT_WRITTEN", "period": period, "facts": len(supported),
         "reportSha256": hashlib.sha256(data).hexdigest(), "sourceSha256ByTemplate": source_hashes,
