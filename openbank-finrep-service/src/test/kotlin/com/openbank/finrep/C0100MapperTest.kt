@@ -13,7 +13,7 @@ import java.time.LocalDate
 
 class C0100MapperTest {
 
-    private val knownRows = setOf("r010", "r015", "r020", "r030", "r130", "r160", "r300", "r530", "r750")
+    private val knownRows = setOf("r010", "r015", "r020", "r030", "r130", "r160", "r200", "r300", "r530", "r750")
 
     @Test
     fun `C 01_00 reports every own-funds row as an explicit flagged zero when the ledger has no capital accounts`() {
@@ -63,20 +63,23 @@ class C0100MapperTest {
 
         val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))
 
-        assertThat(template.hasDataGaps).isFalse()
-        template.cells.forEach { cell ->
-            assertThat(cell.isDataGap).isFalse()
-            assertThat(cell.gapReason).isNull()
+        assertThat(template.hasDataGaps).isTrue()
+        val gaps = template.cells.filter { it.isDataGap }.associateBy { it.rowRef }
+        assertThat(gaps.keys).containsExactlyInAnyOrder("r160", "r300")
+        assertThat(gaps.getValue("r160").label).isEqualTo("Profit or loss attributable to owners of the parent")
+        assertThat(gaps.getValue("r300").label).isEqualTo("(-) Goodwill")
+        assertThat(gaps.values).allSatisfy { cell ->
+            assertThat(cell.value).isEqualByComparingTo(BigDecimal.ZERO)
+            assertThat(cell.gapReason).isNotBlank()
         }
-        assertThat(template.cells.associate { it.rowRef to it.value }).containsExactlyInAnyOrderEntriesOf(
+        assertThat(template.cells.filterNot { it.isDataGap }.associate { it.rowRef to it.value }).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 "r010" to BigDecimal("16250000"),
                 "r015" to BigDecimal("14250000"),
                 "r020" to BigDecimal("13250000"),
                 "r030" to BigDecimal("12000000"),
                 "r130" to BigDecimal("500000"),
-                "r160" to BigDecimal("1000000"),
-                "r300" to BigDecimal("250000"),
+                "r200" to BigDecimal("1000000"),
                 "r530" to BigDecimal("1000000"),
                 "r750" to BigDecimal("2000000"),
             ),
@@ -96,6 +99,21 @@ class C0100MapperTest {
             assertThat(cell.value).isEqualByComparingTo(BigDecimal.ZERO)
             assertThat(cell.isDataGap).isTrue()
         }
+    }
+
+    @Test
+    fun `C 01_00 flags unconverted foreign capital rather than returning it as CZK`() {
+        val lines = listOf(
+            TrialBalanceLineDto("6000", "EQUITY", BigDecimal("-1000"), "CZK"),
+            TrialBalanceLineDto("6010", "EQUITY", BigDecimal("-200"), "EUR"),
+        )
+
+        val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))
+
+        val ownFunds = template.cells.single { it.rowRef == "r010" }
+        assertThat(ownFunds.isDataGap).isTrue()
+        assertThat(ownFunds.value).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(ownFunds.gapReason).contains("in CZK")
     }
 
     @Test

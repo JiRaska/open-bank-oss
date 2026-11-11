@@ -224,7 +224,9 @@ class TemplateWireFormatTest {
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>
-        assertThat(cells).hasSize(9)
+        assertThat(cells).hasSize(10)
+        assertThat(cells.single { it["rowRef"] == "r200" }["label"]).isEqualTo("Other reserves")
+        assertThat(cells.single { it["rowRef"] == "r300" }["isDataGap"]).isEqualTo(true)
         assertThat(cells.first().keys)
             .containsExactlyInAnyOrder("rowRef", "colRef", "label", "value", "currency", "isDataGap", "gapReason")
         assertThat(cells.first()["rowRef"]).isEqualTo("r010")

@@ -23,6 +23,14 @@ F02.00 follows a separate, calendar-year-to-date flow source: `GET /api/v1/ledge
 
 Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
 
+## COREP own-funds preview
+
+In the EBA 4.2 C 01.00 template, row r0200 carries other reserves from GL 6030. The aggregate
+regulatory deductions in GL 6040 affect the CET1 preview subtotal. The r0300 goodwill cell and the
+r0160 profit or loss attributable to owners of the parent cell require separate prudential source
+amounts. Both remain flagged data gaps. Capital amounts require CZK evidence before the preview
+can state a value. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
+
 ## GL classification
 
 Every GL account with a balance must be in the `FinrepCoverage` allowlist; an unlisted code makes the return report `UNCLASSIFIED_GL_ACCOUNT` instead of silently dropping the amount. The treasury and money-market chart (ADR-0315) is classified as follows:
