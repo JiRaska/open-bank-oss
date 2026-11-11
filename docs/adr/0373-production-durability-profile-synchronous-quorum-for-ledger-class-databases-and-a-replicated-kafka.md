@@ -89,6 +89,11 @@ change carries the measured delta against current cluster spend.
 - More pods on a spot-first cluster (ADR-0027): simultaneous reclaim of two ledger instances
   or two brokers stops writes. Placement across zones and capacity types is part of delivery.
 - Still one region. A regional loss is outside this ADR and stays with ADR-0186.
+- Three brokers are not three controllers. Step 1 found that the operator documentation lists
+  scaling a controller node pool as unsupported, so the brokers are added as a broker-only
+  pool and cluster metadata keeps a single controller until a controller migration is
+  decided separately. Read from the current documentation, not verified for the pinned
+  operator version. Until then a controller loss still stops the cluster.
 
 **Neutral**
 - Planned gate `durability-class-declared`: every CNPG cluster declares a class, a
