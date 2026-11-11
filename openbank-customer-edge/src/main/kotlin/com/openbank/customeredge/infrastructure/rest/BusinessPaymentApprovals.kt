@@ -101,6 +101,8 @@ class BusinessPaymentApprovals(
     private val enforce: Boolean,
 ) {
 
+    private val domesticJson = EdgeJson.decimalReader(objectMapper)
+
     @ConfigProperty(name = "openbank.edge.domestic-payment-service-url")
     lateinit var domesticPaymentServiceUrl: String
 
@@ -279,7 +281,12 @@ class BusinessPaymentApprovals(
         p.creditorName?.let { put("creditorName", it) }
         p.reference?.let { put("reference", it) }
         put("debtorAccountId", p.debtorAccountId)
-        set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
+        val railRequest = if (p.rail == PaymentRail.DOMESTIC) {
+            domesticJson.readTree(p.railRequest)
+        } else {
+            objectMapper.readTree(p.railRequest)
+        }
+        set<JsonNode>("railRequest", railRequest)
     }
 
     private fun createBody(
@@ -324,7 +331,7 @@ class BusinessPaymentApprovals(
             // 409: somebody else holds the claim — the payment is being (or was) released by them.
             return mapOf("status" to "RELEASE_NOT_CLAIMED", "upstreamStatus" to claim.status)
         }
-        val node = read(claim.body)
+        val node = read(claim.body, domestic = domestic)
         val payload = node?.path("payload")
         val rail = payload?.path("rail")?.asText()?.let { runCatching { PaymentRail.valueOf(it) }.getOrNull() }
         val railRequest = payload?.path("railRequest")?.takeIf { it.isObject }
@@ -334,7 +341,7 @@ class BusinessPaymentApprovals(
         if (domestic != (rail == PaymentRail.DOMESTIC)) {
             return invalidRelease(entity, approvalId, "frozen rail does not match the release route")
         }
-        val originalKey = node?.get("originalSubmissionKeyDigest")
+        val originalKey = node.get("originalSubmissionKeyDigest")
         val digest = originalKey?.textOrNull()?.takeIf(ORIGINAL_KEY_DIGEST_PATTERN::matches)
         if (originalKey != null && (rail != PaymentRail.DOMESTIC || digest == null)) {
             return invalidRelease(entity, approvalId, "invalid original submission digest")
@@ -454,8 +461,9 @@ class BusinessPaymentApprovals(
         PaymentRail.SDD_MANDATE -> "$sddServiceUrl/api/v1/sdd/mandates"
     }
 
-    private fun read(body: String): JsonNode? = runCatching { objectMapper.readTree(body) }.getOrNull()
-        ?.takeIf { it.isObject }
+    private fun read(body: String, domestic: Boolean = false): JsonNode? = runCatching {
+        if (domestic) domesticJson.readTree(body) else objectMapper.readTree(body)
+    }.getOrNull()?.takeIf { it.isObject }
 
     private fun unavailable(message: String) =
         refusal(Response.Status.SERVICE_UNAVAILABLE, "APPROVAL_UNAVAILABLE", message)

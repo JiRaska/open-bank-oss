@@ -2959,7 +2959,9 @@ class CustomerEdgeResource(
         // The amount is read BEFORE the debit guard, not just before the SCA gate: the delegation
         // ceiling is per-transaction, so an authorization asked without the amount is a different
         // (and weaker) question than the one this route has to ask.
-        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
+        val amount = runCatching {
+            extractAmountField(EdgeJson.decimalReader(objectMapper).readTree(body))
+        }.getOrNull() ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
         // Refuse an unsupported rail before debit authority, a delegated spend reservation, or SCA
         // consumes a one-use challenge. The domestic service enforces the same rule for direct callers.
@@ -6190,11 +6192,12 @@ class CustomerEdgeResource(
         private const val SWIFT_REF_MAX_LEN = 16
 
         /** Amount may arrive as JSON number or string; normalise to its decimal text form. */
-        internal fun extractAmountField(mapper: ObjectMapper, json: String): String? = runCatching {
-            (mapper.readTree(json) as? ObjectNode)?.get("amount")
-                ?.let { if (it.isTextual) it.asText() else it.decimalValue().toPlainString() }
-                ?.takeIf { it.isNotBlank() }
-        }.getOrNull()
+        internal fun extractAmountField(mapper: ObjectMapper, json: String): String? =
+            runCatching { extractAmountField(mapper.readTree(json)) }.getOrNull()
+
+        private fun extractAmountField(body: JsonNode?): String? = (body as? ObjectNode)?.get("amount")
+            ?.let { if (it.isTextual) it.asText() else it.decimalValue().toPlainString() }
+            ?.takeIf { it.isNotBlank() }
 
         /** Pull a single textual, non-blank field from a JSON object body. Package-visible for tests. */
         internal fun extractTextField(mapper: ObjectMapper, json: String, field: String): String? = runCatching {
@@ -6293,7 +6296,7 @@ class CustomerEdgeResource(
             creditorBankCode: String,
             customerSubmissionScope: String? = null,
         ): String? = runCatching {
-            val app = mapper.readTree(appBody) as? ObjectNode ?: return null
+            val app = EdgeJson.decimalReader(mapper).readTree(appBody) as? ObjectNode ?: return null
             fun txt(f: String) = app.get(f)?.takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
             val amountRaw = app.get("amount")?.let { if (it.isTextual) it.asText() else it.toString() } ?: return null
             val amount = java.math.BigDecimal(amountRaw)

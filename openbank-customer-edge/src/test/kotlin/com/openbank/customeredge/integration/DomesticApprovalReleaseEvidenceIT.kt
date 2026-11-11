@@ -94,7 +94,9 @@ class DomesticApprovalReleaseEvidenceIT {
     @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
     fun `a typed pre-dispatch rejection is reported as a definitive failure`(status: Int, code: String) {
         stubLastSignature()
-        BusinessApprovalStubs.stub("POST", APPROVAL_RELEASE, status = status, body = """{"code":"$code","detail":"fixture"}""")
+        BusinessApprovalStubs.stub(
+            "POST", APPROVAL_RELEASE, status = status, body = """{"code":"$code","detail":"fixture"}""",
+        )
         BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
         sign() Then {
             statusCode(200)

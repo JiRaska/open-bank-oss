@@ -4,6 +4,7 @@
 
 package com.openbank.customeredge.integration
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
@@ -95,13 +96,13 @@ class BusinessPaymentApprovalIT {
         post("/customer/v1/sepa-payments")
     }
 
-    private fun postDomestic(key: String, currency: String = "CZK") = Given {
+    private fun postDomestic(key: String, currency: String = "CZK", amountJson: String = "\"80000.00\"") = Given {
         contentType("application/json")
         header("X-Acting-For", COMPANY)
         header("X-SCA-Challenge-Id", SCA)
         header("Idempotency-Key", key)
         body(
-            """{"debtorAccountId":"$ACCOUNT","amount":"80000.00","currency":"$currency",
+            """{"debtorAccountId":"$ACCOUNT","amount":$amountJson,"currency":"$currency",
                 "creditorAccountNumber":"$DOMESTIC_BBAN","creditorName":"Fixture"}""",
         )
     } When {
@@ -207,6 +208,32 @@ class BusinessPaymentApprovalIT {
         assertThat(BusinessApprovalStubs.requests("POST", CREATE)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `domestic claim and approval freeze the same exact amount for text and numeric input`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL"}""")
+        val amount = "99999999999999.99"
+
+        postDomestic("decimal-text", amountJson = "\"$amount\"") Then { statusCode(202) }
+        postDomestic("decimal-number", amountJson = amount) Then { statusCode(202) }
+
+        val exactJson = json.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        val claims = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION)
+        val approvals = BusinessApprovalStubs.requests("POST", CREATE)
+        val requests = claims + approvals
+        assertThat(requests).hasSize(4).allSatisfy { request ->
+            val payload = exactJson.readTree(request.body).path("payload")
+            assertThat(payload.path("amount").textValue()).isEqualTo(amount)
+            val railAmount = payload.path("railRequest").path("amount")
+            assertThat(railAmount.isNumber).isTrue()
+            assertThat(railAmount.decimalValue()).isEqualByComparingTo(amount)
+        }
     }
 
     private fun assertDomesticClaimMatchesCreate(

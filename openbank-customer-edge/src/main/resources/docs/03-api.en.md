@@ -229,5 +229,6 @@ read from the persisted rail instruction for the same debit authority, approval 
 This confirms receipt of the instruction by the rail. Settlement is a separate payment status.
 
 For a new company instruction, the key durably binds its debit authority, frozen payload, and
-dispatch mode before SCA. A different payload or authority, or a policy that no longer permits the
+dispatch mode before SCA. The exact decimal amount is retained from JSON input through approval
+and dispatch. A different payload or authority, or a policy that no longer permits the
 bound mode, produces `409`. Use the lookup endpoints after a timeout.

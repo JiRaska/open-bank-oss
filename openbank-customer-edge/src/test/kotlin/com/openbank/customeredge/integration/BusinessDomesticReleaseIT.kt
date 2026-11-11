@@ -64,7 +64,7 @@ class BusinessDomesticReleaseIT {
 
     @Test
     fun `domestic release sends original key digest outside the frozen rail body`() {
-        val frozen = """{"debtorAccountId":"$ACCOUNT","amount":400,"currency":"CZK"}"""
+        val frozen = """{"debtorAccountId":"$ACCOUNT","amount":99999999999999.99,"currency":"CZK"}"""
         BusinessApprovalStubs.stub(
             "POST",
             DOMESTIC_CLAIM,

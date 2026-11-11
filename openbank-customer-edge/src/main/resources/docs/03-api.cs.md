@@ -223,5 +223,6 @@ podle stejného oprávnění k účtu, ID schválení a původního klíče. Sta
 platební službou. Vypořádání má vlastní stav platby.
 
 U nového firemního příkazu se před SCA trvale uloží vazba klíče na oprávnění k účtu,
-obsah příkazu a způsob zpracování. Změněný obsah, jiné oprávnění nebo pravidlo podpisů,
+obsah příkazu a způsob zpracování. Přesná desetinná částka ze vstupního JSON se zachová až do
+schválení a odeslání. Změněný obsah, jiné oprávnění nebo pravidlo podpisů,
 které už původní způsob nepovoluje, vede k odpovědi `409`. Po timeoutu použijte dohledání.
