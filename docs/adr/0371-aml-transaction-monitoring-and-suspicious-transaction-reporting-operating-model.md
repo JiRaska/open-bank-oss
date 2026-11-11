@@ -100,6 +100,25 @@ suspicious-transaction report.
    hold requested by a report reuses the hold and release contract of ADR-0247 and ships
    after it; it is not part of slices 1 to 3.
 
+10. **Every decision leaves a label.** Closing a monitoring case or a report records a
+    structured outcome from a versioned vocabulary (confirmed, false positive and why,
+    insufficient information). The fraud model has no outcome field today and therefore
+    nothing to learn from; this point exists so AML does not repeat that. Labels feed pack
+    replay and the ADR-0354 reviewed-learning loop.
+
+11. **AI assists the analyst and never decides.** No financial-crime service calls a model
+    directly. Assistance runs in the agent plane, where the policy gate, audit attribution,
+    injection guard and kill switch already live, under a charter with read-only tools and
+    proposal-only output. In scope, in this order: ordering the alert queue and explaining
+    why a scenario fired; drafting the case narrative from the evidence the case already
+    holds; drafting the report text for the officer who approves it; proposing scenario and
+    threshold changes as pack diffs that go through ADR-0354 approval. A draft is marked as
+    machine-written and is not evidence. Report and monitoring-case content is confidential
+    under point 7, so these uses run only on a model endpoint inside the platform boundary;
+    with only an external endpoint available they stay off. Each use needs its charter,
+    registered prompt, recorded evals and an OPA grant for the AML case class, which does not
+    exist today; none is enabled by this ADR.
+
 Delivery slices: (1) consumers and counters, (2) pack evaluation in SHADOW with cases behind
 a flag, (3) four-eyes decisions and the report aggregate with the return spec, (4) ACTIVE.
 
@@ -169,6 +188,6 @@ is denied.
 
 ## References
 
-- ADR-0032, ADR-0118, ADR-0247, ADR-0268, ADR-0304, ADR-0353, ADR-0354, ADR-0367, ADR-0374
+- ADR-0031, ADR-0032, ADR-0118, ADR-0148, ADR-0203, ADR-0247, ADR-0268, ADR-0304, ADR-0353, ADR-0354, ADR-0367, ADR-0374
 - Issues #13775, #1035
 - `docs/compliance/regulatory-obligations.md`, entry `fau-suspicious-transaction`

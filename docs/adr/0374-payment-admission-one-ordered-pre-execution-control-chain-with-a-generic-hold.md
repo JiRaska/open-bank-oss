@@ -94,6 +94,22 @@ irrevocable step, and give every rail the same hold.
     that would exceed it returns UNAVAILABLE and the payment is rejected to the customer in
     time rather than held past the scheme deadline.
 
+11. **Shared code lives in the libraries, once.** Measured: four rails carry identical
+    sanctions clients and fraud score clients, five carry a best-effort case opener, and the
+    sanctions adapter has drifted (one rail reports first failure and meters it, three do
+    not). The chain module absorbs the adapter and its fail-closed mapping, the synchronous
+    fraud scoring adapter and metrics, the transactional case opener and the hold resolution
+    consumer. Inter-service clients are generated from the provider contract (ADR-0319),
+    sanctions and party included. Name normalisation uses the one library key. Left per
+    rail because the differences are real: status enums, reactive adapters on the instant
+    rail, and limit counters with different owners.
+12. **AI prepares held payments for the reviewer and never releases one.** A read-only agent
+    in the agent plane orders the held queue, gathers the customer's payee history and the
+    evidence each step recorded, and explains a sanctions near-match. Sanctions queue
+    ordering follows ADR-0350 and fraud triage ADR-0203. Release and reject stay four-eyes
+    human decisions; an agent proposal is not an approval and does not count as one of the
+    two.
+
 Delivery order, each a separately approved release: (A) chain types, HELD and release on
 domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 (D) remaining rails; (E) AML destination risk; (F) fraud enforcement per rail.
@@ -161,4 +177,4 @@ one case; a release resumes execution exactly once; a reject returns funds; expi
 
 ## References
 
-- ADR-0032, ADR-0084, ADR-0171, ADR-0184, ADR-0247, ADR-0341, ADR-0354, ADR-0371
+- ADR-0032, ADR-0084, ADR-0171, ADR-0184, ADR-0203, ADR-0247, ADR-0319, ADR-0341, ADR-0350, ADR-0354, ADR-0371
