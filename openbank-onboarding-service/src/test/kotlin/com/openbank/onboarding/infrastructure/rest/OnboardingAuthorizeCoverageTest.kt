@@ -44,6 +44,7 @@ class OnboardingAuthorizeCoverageTest {
             assertThat(m.getAnnotation(Authorize::class.java))
                 .describedAs("${m.declaringClass.simpleName}.${m.name} must carry @Authorize")
                 .isNotNull()
+            assertThat(m.getAnnotation(Authorize::class.java).resource).isEmpty()
         }
     }
 
@@ -51,7 +52,14 @@ class OnboardingAuthorizeCoverageTest {
     fun `every @Authorize action is granted by onboarding_rest_ext rego`() {
         val rego = File("../openbank-infra/gitops/components/onboarding/onboarding_rest_ext.rego").readText()
         val actions = endpoints.map { it.getAnnotation(Authorize::class.java).action }.toSet()
-        assertThat(actions).hasSize(6)
+        assertThat(actions).containsExactlyInAnyOrder(
+            "onboarding.records.inspect",
+            "onboarding.record.inspect",
+            "onboarding.funnel.inspect",
+            "onboarding.business.cases.inspect",
+            "onboarding.business.case.inspect",
+            "onboarding.business.funnel.inspect",
+        )
         actions.forEach { action ->
             assertThat(rego).describedAs("rego must grant $action").contains("\"$action\"")
         }

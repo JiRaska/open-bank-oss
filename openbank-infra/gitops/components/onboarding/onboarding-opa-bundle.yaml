@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: onboarding-service
     app.kubernetes.io/part-of: onboarding
   annotations:
-    openbank.tech/policy-checksum: "939bfdfcec385326"
+    openbank.tech/policy-checksum: "4162feba0a965815"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -828,21 +828,19 @@ data:
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
     #
     # Actions gated (OnboardingResource, BusinessOnboardingResource) — every one a READ:
-    #   onboarding.record.list          — GET /api/v1/onboarding/records (PII: legalName, email)
-    #   onboarding.record.read          — GET /api/v1/onboarding/records/{partyId}
-    #   onboarding.funnel.read          — GET /api/v1/onboarding/funnel (aggregate counts)
-    #   onboarding.business.case.list   — GET /api/v1/onboarding/business/cases
-    #   onboarding.business.case.read   — GET /api/v1/onboarding/business/cases/{caseId}
-    #   onboarding.business.funnel.read — GET /api/v1/onboarding/business/funnel
+    #   onboarding.records.inspect       — GET /api/v1/onboarding/records (PII: legalName, email)
+    #   onboarding.record.inspect        — GET /api/v1/onboarding/records/{partyId}
+    #   onboarding.funnel.inspect        — GET /api/v1/onboarding/funnel (aggregate counts)
+    #   onboarding.business.cases.inspect — GET /api/v1/onboarding/business/cases
+    #   onboarding.business.case.inspect — GET /api/v1/onboarding/business/cases/{caseId}
+    #   onboarding.business.funnel.inspect — GET /api/v1/onboarding/business/funnel
     #
-    # The grant mirrors the JWT gate the resources already carry (@RolesAllowed VIEWER, OPERATOR,
-    # ADMIN, KYC, COMPLIANCE) so the advisory decision log measures the sidecar against the gate that
-    # is enforcing today: any would-DENY it shows is a real disagreement, not a policy written
-    # narrower than the code. Machines are excluded outright — the only caller is the admin-UI BFF
-    # relaying a staff user's token, and no backend service reads this projection.
-    #
-    # Enumerated, not an `onboarding.` prefix: a later write endpoint must earn its own rule rather
-    # than inherit a read grant.
+    # The admin-UI BFF relays a staff user's token. The roles match the current JWT gate,
+    # with a verified human principal required for the advisory allow.
+    # Inspection actions have their own names so the shared read/list grants do not admit
+    # machines carrying operator roles. The resource annotations also omit a tenant target
+    # so the shared tenant-scoped grant cannot apply.
+    # A later endpoint needs its own explicit grant.
     #
     # Do NOT gate on input.principal.type == "SERVICE": AuthorizeInterceptor never emits it
     # (rules.yaml: authz_policy, issue #266).
@@ -857,12 +855,12 @@ data:
     	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action in {
-    		"onboarding.record.list",
-    		"onboarding.record.read",
-    		"onboarding.funnel.read",
-    		"onboarding.business.case.list",
-    		"onboarding.business.case.read",
-    		"onboarding.business.funnel.read",
+    		"onboarding.records.inspect",
+    		"onboarding.record.inspect",
+    		"onboarding.funnel.inspect",
+    		"onboarding.business.cases.inspect",
+    		"onboarding.business.case.inspect",
+    		"onboarding.business.funnel.inspect",
     	}
     }
   agents.rego: |

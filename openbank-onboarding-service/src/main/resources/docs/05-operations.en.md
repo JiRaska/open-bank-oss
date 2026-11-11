@@ -118,3 +118,7 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Advisory authorization (ADR-0034 Phase 5)
 
 Every endpoint carries `@Authorize`, and the deployed pod runs an OPA sidecar reached through `opa.url`, `opa.path` and `opa.timeout-ms` (default 500 ms). Enforcement stays advisory: `authz.enforce` defaults to `false`, so `@RolesAllowed` still decides the response and a would-deny decision is only logged. `openbank.authz.opa-pdp-producer.enabled` is a build-time switch that supplies the policy decision point client; it is off in the test profile, where policy is covered by the rego tests instead. Flipping enforcement is a separate, later change.
+
+Onboarding inspection actions require a verified human staff principal in the advisory policy. Each action
+is scoped to an individual endpoint and carries no tenant target. This keeps the shared read and tenant
+grants from allowing service accounts that carry staff roles.
