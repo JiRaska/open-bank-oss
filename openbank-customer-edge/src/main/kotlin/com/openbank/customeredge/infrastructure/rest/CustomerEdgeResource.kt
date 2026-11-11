@@ -3123,23 +3123,8 @@ class CustomerEdgeResource(
         val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
         val customer = customer()
         val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
-        val input = objectMapper.createObjectNode()
-            .put("debtorAccountId", debtor.toString())
-            .put("customerSubmissionScope", scope)
-        val upstreamResult = upstream.post(
-            "$domesticPaymentServiceUrl/api/v1/domestic-payments/submissions/lookup",
-            customer.partyId.toString(),
-            input.toString(),
-            key,
-        )
-        if (upstreamResult.status != 200) return domesticSubmissionResult()
-        val result = runCatching { objectMapper.readTree(upstreamResult.entity?.toString()) }.getOrNull()
-        if (result?.path("outcome")?.asText() != "FOUND") return domesticSubmissionResult()
-        val paymentId = runCatching { UUID.fromString(result.path("paymentId").asText()) }.getOrNull()
-            ?: return domesticSubmissionResult()
-        val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains)
-            ?: return domesticSubmissionResult()
-        return domesticSubmissionResult(paymentId, status)
+        val receipt = lookupDomesticRailSubmission(customer.partyId, debtor, scope, key)
+        return domesticSubmissionResult(receipt?.paymentId, receipt?.status)
     }
 
     @POST
@@ -3156,19 +3141,60 @@ class CustomerEdgeResource(
         val customer = customer()
         val entity = customer.actingFor ?: return domesticSubmissionResult()
         val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
-        val receipt = businessApprovals.lookupDomesticSubmission(
-            entity,
-            customer.human,
-            debtor,
-            domesticApprovalSubmission(scope, key),
-        ) ?: return domesticSubmissionResult()
+        val submission = domesticApprovalSubmission(scope, key)
+        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, debtor, submission)
+            ?: return domesticSubmissionResult()
+        val paymentId = receipt.paymentId ?: if (receipt.status == "RELEASED") {
+            lookupDomesticRailSubmission(
+                customer.partyId,
+                debtor,
+                scope,
+                receipt.approvalId.toString(),
+                submission.keyDigest,
+            )
+                ?.paymentId
+        } else {
+            null
+        }
         val result = mutableMapOf(
             "outcome" to "FOUND",
             "approvalId" to receipt.approvalId.toString(),
-            "approvalStatus" to receipt.status,
+            "approvalStatus" to if (receipt.status == "RELEASED" && paymentId == null) "APPROVED" else receipt.status,
         )
-        receipt.paymentId?.let { result["paymentId"] = it.toString() }
+        paymentId?.let { result["paymentId"] = it.toString() }
         return Response.ok(result).header("Cache-Control", "no-store").build()
+    }
+
+    private fun lookupDomesticRailSubmission(
+        partyId: UUID,
+        debtorAccountId: UUID,
+        scope: String,
+        railKey: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticRailSubmission? {
+        val input = objectMapper.createObjectNode().apply {
+            put("debtorAccountId", debtorAccountId.toString())
+            put("customerSubmissionScope", scope)
+            originalSubmissionKeyDigest?.let { put("originalSubmissionKeyDigest", it) }
+        }
+        val response = upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/submissions/lookup",
+            partyId.toString(),
+            input.toString(),
+            railKey,
+        )
+        if (response.status != 200) return null
+        val result = runCatching { objectMapper.readTree(response.entity?.toString()) }.getOrNull() ?: return null
+        if (result.path("outcome").asText() != "FOUND") return null
+        if (originalSubmissionKeyDigest != null &&
+            result.path("originalSubmissionKeyDigest").asText() != originalSubmissionKeyDigest
+        ) {
+            // Older providers can answer FOUND using only the key and scope. Require persisted digest evidence.
+            return null
+        }
+        val paymentId = canonicalPaymentId(result.path("paymentId").asText(null)) ?: return null
+        val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains) ?: return null
+        return DomesticRailSubmission(paymentId, status)
     }
 
     private fun domesticLookupScope(customer: CustomerIdentity, debtor: UUID, amount: String?): String? {
@@ -6825,3 +6851,5 @@ internal data class DelegatedPaymentDecision(
 
 /** Original debit account, with an optional amount to disambiguate overlapping delegated grants. */
 data class DomesticSubmissionLookup(val debtorAccountId: UUID?, val amount: String? = null)
+
+private data class DomesticRailSubmission(val paymentId: UUID, val status: String)

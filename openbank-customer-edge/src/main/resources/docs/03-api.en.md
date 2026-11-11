@@ -223,8 +223,10 @@ new payment from this result. This lookup consumes no SCA and sends no payment.
 
 For a company payment held for co-signature, send `POST /customer/v1/domestic-payments/submissions/approval-lookup`
 with the same key, debit account, business profile and original amount. The lookup returns the
-original approval ID and current status when the receipt exists. A release claim alone supplies
-no payment ID. The result includes a rail ID only after Delegation records the release result.
+original approval ID and current status when the receipt exists. A domestic approval stays
+`APPROVED` while the rail result is uncertain. `RELEASED` includes a recorded payment ID or one
+read from the persisted rail instruction for the same debit authority, approval ID and original key.
+This confirms receipt of the instruction by the rail. Settlement is a separate payment status.
 
 For a new company instruction, the key durably binds its debit authority, frozen payload, and
 dispatch mode before SCA. A different payload or authority, or a policy that no longer permits the

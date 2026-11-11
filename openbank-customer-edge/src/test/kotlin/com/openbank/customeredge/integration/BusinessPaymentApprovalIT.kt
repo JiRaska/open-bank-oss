@@ -192,7 +192,7 @@ class BusinessPaymentApprovalIT {
         releaseEvidence.set("""{"approvalId":"$APPROVAL","status":"RELEASED"}""")
         val claim = lookupDomesticApproval(key) Then {
             statusCode(200)
-            body("approvalStatus", equalTo("RELEASED"))
+            body("approvalStatus", equalTo("APPROVED"))
         }
         assertThat(claim.extract().jsonPath().getMap<String, String>("")).doesNotContainKey("paymentId")
         val paymentId = "00000000-0000-4000-8000-0000000000f9"

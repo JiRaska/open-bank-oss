@@ -52,6 +52,10 @@ data class HeldPayment(
 
 internal data class DomesticApprovalReceipt(val approvalId: UUID, val status: String, val paymentId: UUID?)
 
+internal fun canonicalPaymentId(raw: String?): UUID? = raw?.let { value ->
+    runCatching { UUID.fromString(value) }.getOrNull()?.takeIf { it.toString().equals(value, ignoreCase = true) }
+}
+
 internal data class DomesticApprovalSubmission(val keyDigest: String, val correlation: String)
 
 /**
@@ -248,8 +252,7 @@ class BusinessPaymentApprovals(
         val id = receipt.path("approvalId").textOrNull()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return null
         val status = receipt.path("status").textOrNull()?.takeIf(DOMESTIC_APPROVAL_STATUSES::contains) ?: return null
-        val paymentId = receipt.path("releaseRef").textOrNull()?.takeIf { status == "RELEASED" }
-            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        val paymentId = canonicalPaymentId(receipt.path("releaseRef").textOrNull()).takeIf { status == "RELEASED" }
         return DomesticApprovalReceipt(id, status, paymentId)
     }
 
@@ -314,8 +317,8 @@ class BusinessPaymentApprovals(
         .type(MediaType.APPLICATION_JSON)
         .build()
 
-    /** Release after the last signature. Returns the release outcome for the sign response. */
-    fun release(entity: UUID, approvalId: UUID, domestic: Boolean): Map<String, Any?> {
+    /** Release after the last signature. An ambiguous domestic dispatch has no sign response outcome. */
+    fun release(entity: UUID, approvalId: UUID, domestic: Boolean): Map<String, Any?>? {
         val claim = signing.releaseClaim(entity, approvalId, domestic)
         if (!claim.ok) {
             // 409: somebody else holds the claim — the payment is being (or was) released by them.
@@ -337,13 +340,30 @@ class BusinessPaymentApprovals(
             return invalidRelease(entity, approvalId, "invalid original submission digest")
         }
         val resp = dispatchRelease(rail, entity, approvalId, railRequest, digest)
-        val respBody = (resp.entity as? String).orEmpty()
-        val ok = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL
-        val ref = read(respBody)?.path("id")?.textOrNull()
-        val error = if (ok) null else "rail answered ${resp.status}: ${respBody.take(ERROR_MAX_CHARS)}"
+        return recordReleaseOutcome(entity, approvalId, rail, resp, modeBound = digest != null)
+    }
+
+    private fun recordReleaseOutcome(
+        entity: UUID,
+        approvalId: UUID,
+        rail: PaymentRail,
+        response: Response,
+        modeBound: Boolean,
+    ): Map<String, Any?>? {
+        val body = (response.entity as? String).orEmpty()
+        val result = read(body)
+        val ok = response.statusInfo.family == Response.Status.Family.SUCCESSFUL
+        val ref = result?.path("id")?.textOrNull().takeIf { !modeBound || ok }
+        val refusal = if (modeBound) definiteDomesticRefusal(response.status, result) else null
+        val accepted = response.status == Response.Status.CREATED.statusCode && canonicalPaymentId(ref) != null
+        if (modeBound && refusal == null && !accepted) {
+            // No rail evidence. Preserve the winning claim and let the original-key lookup reconcile it.
+            return null
+        }
+        val error = if (ok) null else "rail answered ${response.status}: ${refusal ?: body.take(ERROR_MAX_CHARS)}"
         report(entity, approvalId, ok, ref, error)
         val operation = operationOf(rail)
-        val details = mapOf("railStatus" to resp.status.toString(), "paymentId" to ref)
+        val details = mapOf("railStatus" to response.status.toString(), "paymentId" to ref)
         if (ok) {
             audit.emit(
                 eventType = "CUSTOMER_PAYMENT_RELEASED",
@@ -365,10 +385,25 @@ class BusinessPaymentApprovals(
         }
         return linkedMapOf(
             "status" to if (ok) "RELEASED" else "RELEASE_FAILED",
-            "railStatus" to resp.status,
+            "railStatus" to response.status,
             "paymentId" to ref,
             "error" to error,
         )
+    }
+
+    private fun definiteDomesticRefusal(status: Int, result: JsonNode?): String? {
+        val code = result?.path("code")?.textOrNull() ?: return null
+        val amountViolation = result.path("violations").any { it.path("field").asText() == "amount" }
+        val amountValidation = code == "VALIDATION_ERROR" && amountViolation
+        // These typed validation and authorization errors are produced before binding a rail key.
+        return when (status) {
+            Response.Status.BAD_REQUEST.statusCode ->
+                code.takeIf { it in DOMESTIC_PRE_DISPATCH_VALIDATION || amountValidation }
+
+            Response.Status.FORBIDDEN.statusCode -> code.takeIf { it == "FORBIDDEN" }
+
+            else -> null
+        }
     }
 
     private fun dispatchRelease(
@@ -441,6 +476,13 @@ class BusinessPaymentApprovals(
             "EXPIRED",
             "RELEASED",
             "RELEASE_FAILED",
+        )
+
+        val DOMESTIC_PRE_DISPATCH_VALIDATION = setOf(
+            "AMOUNT_SCALE_EXCEEDED",
+            "CURRENCY_NOT_ALLOWED",
+            "CURRENCY_UNSUPPORTED",
+            "AMOUNT_NOT_POSITIVE",
         )
 
         const val SUBMISSION_CORRELATION_REUSED = "SUBMISSION_CORRELATION_REUSED"

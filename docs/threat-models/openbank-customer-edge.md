@@ -348,8 +348,13 @@ The approval policy uses the canonical IBAN of the resolved destination. The ini
 still validates the original signed destination representation, including a NearbyPay mask.
 
 Lookup verifies the current authority and sends both digests to the named approval endpoint. A
-receipt exposes only the approval ID, lifecycle status and a recorded rail ID. Lookup cannot
-release the approval or consume SCA. A dispatch claim alone cannot prove that a payment exists.
+receipt exposes only the approval ID, lifecycle status and a proven rail ID. After an ambiguous
+mode-bound rail response, Edge retains the one-shot claim and leaves the result unreported.
+Customer reads keep the approval `APPROVED` until release evidence exists. Original-key lookup
+accepts a recorded rail ID or a rail instruction that matches the approval ID as its transport key,
+the verified debit account and authority, and the stored original-key digest. The rail must echo the
+matched digest. A missing or unqualified result leaves the approval unchanged. Lookup does not
+create or release an instruction, consume SCA, or record a release result.
 
 Activate the new Edge writer after the Delegation migrations and routes are available, and drain
 old company domestic writers before accepting bound commands. Older commands without original-key

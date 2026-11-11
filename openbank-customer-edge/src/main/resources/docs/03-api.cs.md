@@ -217,8 +217,10 @@ a nevytváří platební příkaz.
 
 U firemní platby čekající na další podpis použijte `POST /customer/v1/domestic-payments/submissions/approval-lookup`
 se stejným klíčem, účtem, firemním profilem a původní částkou. Dohledání vrátí ID schválení a jeho
-aktuální stav, pokud existuje uložený záznam. Samotný příznak uvolnění ID platby nedokládá.
-Výsledek ho obsahuje až po uložení odpovědi platební služby.
+aktuální stav, pokud existuje uložený záznam. Dokud výsledek odeslání nelze doložit, schválení
+zůstává `APPROVED`. Stav `RELEASED` obsahuje uložené ID platby nebo ID dohledané u platební služby
+podle stejného oprávnění k účtu, ID schválení a původního klíče. Stav potvrzuje přijetí příkazu
+platební službou. Vypořádání má vlastní stav platby.
 
 U nového firemního příkazu se před SCA trvale uloží vazba klíče na oprávnění k účtu,
 obsah příkazu a způsob zpracování. Změněný obsah, jiné oprávnění nebo pravidlo podpisů,

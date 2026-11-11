@@ -59,6 +59,31 @@ class BusinessApprovalOpenApiTest {
     }
 
     @Test
+    fun `domestic recovery uses existing mobile approval and release states`() {
+        val lookup = paths.path("/domestic-payments/submissions/approval-lookup").path("post")
+        assertThat(lookup.path("operationId").asText()).isEqualTo("lookupDomesticPaymentApproval")
+        val found = schemas.path("DomesticApprovalSubmission").path("oneOf")[1]
+        assertThat(found.path("properties").path("approvalStatus").path("enum").map { it.asText() })
+            .containsExactly(
+                "AWAITING_INITIATOR",
+                "PENDING",
+                "APPROVED",
+                "REJECTED",
+                "EXPIRED",
+                "RELEASED",
+                "RELEASE_FAILED",
+            )
+        assertThat(
+            found.path("required").map {
+                it.asText()
+            },
+        ).containsExactly("outcome", "approvalId", "approvalStatus")
+        assertThat(found.path("properties").path("paymentId").path("format").asText()).isEqualTo("uuid")
+        val approval = schemas.path("BusinessApprovalRequest")
+        assertThat(approval.path("required").map { it.asText() }).doesNotContain("release")
+    }
+
+    @Test
     fun `the four payment rails document the 202 hold and the fail-closed 503`() {
         listOf("/domestic-payments", "/sepa-payments", "/sepa-instant", "/swift").forEach { p ->
             val responses = paths.path(p).path("post").path("responses")

@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.93.0
+  version: 1.93.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3819,8 +3819,10 @@ paths:
       description: >-
         Use the original Idempotency-Key, debit account, amount and verified business profile.
         This read creates no payment or approval and consumes no SCA. FOUND identifies the
-        original approval and its current lifecycle. A payment identifier is present only when
-        the released rail reference has been recorded. An unproven attempt returns UNKNOWN.
+        original approval and its current lifecycle. RELEASED includes a payment identifier
+        from a recorded release result or a persisted rail instruction matching the same debit
+        authority, approval ID and original submission digest. A claimed domestic release with
+        an unproven rail result remains APPROVED. An unproven original approval returns UNKNOWN.
       operationId: lookupDomesticPaymentApproval
       security:
         - customerOidc: [payments:read]
@@ -5989,7 +5991,9 @@ paths:
         its payload hash (and amount/currency/creditor for a payment). The signer is always the
         human; the initiator of a payment cannot co-sign; nobody signs twice. On the last
         signature of a PAYMENT the edge releases it to the rail once (single-use claim,
-        Idempotency-Key = approval id) and returns the outcome in `release`.
+        Idempotency-Key = approval id) and returns an established outcome in `release`.
+        For a mode-bound domestic approval, an ambiguous rail result leaves the request APPROVED
+        and omits `release`. The original submission lookup can confirm a persisted instruction.
       operationId: signBusinessApproval
       security:
         - customerOidc: [profile:read]
@@ -6011,7 +6015,7 @@ paths:
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Signed; `release` present when this signature released a payment
+          description: Signed; `release` present when the release outcome is established
           content:
             application/json:
               schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
@@ -7763,8 +7767,9 @@ components:
         status:
           type: string
           description: >-
-            Owned by delegation-service (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
-            RELEASED, RELEASE_FAILED); passed through, not an edge enum.
+            Delegation lifecycle (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
+            RELEASED, RELEASE_FAILED). A claimed domestic release remains APPROVED in customer
+            detail and list responses until the recorded release result contains a valid rail identifier.
         payload: {type: object, additionalProperties: true, description: The frozen item being signed.}
         payloadSha256: {type: string}
         required: {type: integer}
