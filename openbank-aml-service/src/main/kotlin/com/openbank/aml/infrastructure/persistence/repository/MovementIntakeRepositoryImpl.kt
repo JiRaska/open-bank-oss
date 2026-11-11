@@ -6,8 +6,6 @@ package com.openbank.aml.infrastructure.persistence.repository
 
 import com.openbank.aml.application.port.out.AttributionBacklog
 import com.openbank.aml.application.port.out.MovementAttribution
-import com.openbank.aml.application.port.out.MovementCountQuery
-import com.openbank.aml.application.port.out.MovementCounterReader
 import com.openbank.aml.application.port.out.MovementIntakeRepository
 import com.openbank.aml.domain.monitoring.BookedMovement
 import com.openbank.aml.domain.monitoring.MovementDirection
@@ -28,9 +26,7 @@ import java.util.UUID
  * are no entities for these tables, so there is no implicit column naming to get wrong.
  */
 @ApplicationScoped
-class MovementIntakeRepositoryImpl :
-    MovementIntakeRepository,
-    MovementCounterReader {
+class MovementIntakeRepositoryImpl : MovementIntakeRepository {
 
     override suspend fun recordMovement(movement: BookedMovement, recordedAt: Instant): Boolean =
         Panache.withTransaction {
@@ -96,8 +92,8 @@ class MovementIntakeRepositoryImpl :
             transactionId = row[UNCOUNTED_TRANSACTION] as UUID,
             bookedAt = instant(row[UNCOUNTED_BOOKED_AT]),
             recordedAt = instant(row[UNCOUNTED_RECORDED_AT]),
-            knownPartyId = nullable(row, UNCOUNTED_PARTY) as UUID?,
-            originRail = nullable(row, UNCOUNTED_RAIL) as String?,
+            knownPartyId = nullable(row, UNCOUNTED_PARTY) as? UUID,
+            originRail = nullable(row, UNCOUNTED_RAIL) as? String,
         )
     }
 
@@ -163,32 +159,6 @@ class MovementIntakeRepositoryImpl :
     }.awaitSuspending().let { row ->
         AttributionBacklog((row[0] as Number).toLong(), nullable(row, 1)?.let { instant(it) })
     }
-
-    // The optional filters are spliced as fixed SQL fragments, never as values: every value is bound.
-    override suspend fun countMovements(query: MovementCountQuery): Long = Panache.withSession {
-        Panache.getSession().chain { session ->
-            val selection = session.createNativeQuery(
-                """
-                SELECT coalesce(sum(movement_count), 0) FROM aml_movement_counter
-                 WHERE party_id = :partyId AND currency = :currency AND band_code = :bandCode
-                   AND scheme_revision = :schemeRevision
-                   AND bucket_start >= :fromInclusive AND bucket_start < :toExclusive
-                """.trimIndent() +
-                    (if (query.direction != null) " AND direction = :direction" else "") +
-                    (if (query.rail != null) " AND rail = :rail" else ""),
-                Number::class.java,
-            )
-                .setParameter("partyId", query.partyId)
-                .setParameter("currency", query.currency)
-                .setParameter("bandCode", query.bandCode)
-                .setParameter("schemeRevision", query.schemeRevision)
-                .setParameter("fromInclusive", utc(query.fromInclusive))
-                .setParameter("toExclusive", utc(query.toExclusive))
-            query.direction?.let { selection.setParameter("direction", it.name) }
-            query.rail?.let { selection.setParameter("rail", it) }
-            selection.singleResult
-        }
-    }.awaitSuspending().toLong()
 
     private fun increment(attribution: MovementAttribution, band: String): Uni<Int> = mutate(
         """

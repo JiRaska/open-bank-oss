@@ -139,21 +139,39 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.aml.ledger-events-in
+          # Park the original String payload byte for byte; without this the dead-letter
+          # producer JSON-encodes it and a replay would deliver a quoted string.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.ledger.journal.posted
-        group.id: openbank-aml-service
-        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # NESTED, like the dead-letter topic: a dotted leaf (`group.id:`, `value.deserializer:`) is
+        # registered quoted and the connector never reads it (#686).
+        group:
+          id: openbank-aml-service
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # The originating domain event names the rail of a transaction; the ledger event does not.
       transaction-events-in:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.aml.transaction-events-in
+          # Park the original String payload byte for byte; without this the dead-letter
+          # producer JSON-encodes it and a replay would deliver a quoted string.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.transactions.transaction.initiated
-        group.id: openbank-aml-service
-        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
-        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # NESTED, like the dead-letter topic: a dotted leaf (`group.id:`, `value.deserializer:`) is
+        # registered quoted and the connector never reads it (#686).
+        group:
+          id: openbank-aml-service
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%prod":
   quarkus:
     http:
