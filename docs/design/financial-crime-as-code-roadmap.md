@@ -216,6 +216,22 @@ DecisionRecord integration, SHADOW epochs/rollback/replica consistency, real HTT
 and concurrency proof, and the full fincrime-pack-conformance gate remain open. No production
 caller, registry, activation path, threshold writer or payment enforcement is added.
 
+## K0 signed shadow evidence
+
+The synthetic AML and fraud count packs now use the same interpreter to produce a canonical
+replay digest. It binds the baseline and candidate revisions, both evaluation results and the
+input digest for every replay case. An incomplete case contributes evidence without counting as
+an evaluated pair.
+
+A publisher signature binds the exact replay, the independent review and the SHADOW epoch.
+The verifier takes a trusted public key and a current domain reviewer check from its caller. It
+rejects stale replay, altered epoch fields, unauthorized reviewers and zero evaluated pairs.
+The resulting immutable pin carries its epoch and pack identity on every evaluation, including
+when a feature is missing. The tests use ephemeral Ed25519 keys and exercise both vocabularies.
+
+The library slice leaves durable approval, publisher custody, epoch compare-and-set, replica
+routing, DecisionRecord persistence and the deployment conformance gate open under #13775.
+
 ## Evidence required before claiming completion
 
 - Pin source/schema/pack/model/prompt/input versions, approvals and activation epoch on

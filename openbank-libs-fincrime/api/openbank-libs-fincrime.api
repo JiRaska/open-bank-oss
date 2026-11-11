@@ -507,6 +507,75 @@ public final class com/openbank/libs/fincrime/pack/CountRule {
 	public fun toString ()Ljava/lang/String;
 }
 
+public final class com/openbank/libs/fincrime/pack/CountShadowEpoch {
+	public fun <init> (JLjava/time/Instant;Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/time/Instant;Ljava/util/UUID;Ljava/time/Instant;Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;)V
+	public final fun component1 ()J
+	public final fun component2 ()Ljava/time/Instant;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Ljava/util/UUID;
+	public final fun component5 ()Ljava/util/UUID;
+	public final fun component6 ()Ljava/time/Instant;
+	public final fun component7 ()Ljava/util/UUID;
+	public final fun component8 ()Ljava/time/Instant;
+	public final fun component9 ()Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;
+	public final fun copy (JLjava/time/Instant;Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/time/Instant;Ljava/util/UUID;Ljava/time/Instant;Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;)Lcom/openbank/libs/fincrime/pack/CountShadowEpoch;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountShadowEpoch;JLjava/time/Instant;Ljava/lang/String;Ljava/util/UUID;Ljava/util/UUID;Ljava/time/Instant;Ljava/util/UUID;Ljava/time/Instant;Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountShadowEpoch;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getApprovedAt ()Ljava/time/Instant;
+	public final fun getApprovedBy ()Ljava/util/UUID;
+	public final fun getEffectiveAt ()Ljava/time/Instant;
+	public final fun getNumber ()J
+	public final fun getProposalId ()Ljava/util/UUID;
+	public final fun getProposedAt ()Ljava/time/Instant;
+	public final fun getProposedBy ()Ljava/util/UUID;
+	public final fun getReplay ()Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;
+	public final fun getSignerKeyId ()Ljava/lang/String;
+	public fun hashCode ()I
+	public final fun signingInput ()[B
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountShadowEvaluation {
+	public fun <init> (JLcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountEvaluation;)V
+	public final fun component1 ()J
+	public final fun component2 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public final fun copy (JLcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountEvaluation;)Lcom/openbank/libs/fincrime/pack/CountShadowEvaluation;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountShadowEvaluation;JLcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;Lcom/openbank/libs/fincrime/pack/CountEvaluation;ILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountShadowEvaluation;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEpoch ()J
+	public final fun getPack ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun getReplayDigest ()Ljava/lang/String;
+	public final fun getResult ()Lcom/openbank/libs/fincrime/pack/CountEvaluation;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountShadowReplay {
+	public static final field INSTANCE Lcom/openbank/libs/fincrime/pack/CountShadowReplay;
+	public final fun evidence (Lcom/openbank/libs/fincrime/pack/CompiledCountPack;Lcom/openbank/libs/fincrime/pack/CompiledCountPack;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;
+}
+
+public final class com/openbank/libs/fincrime/pack/CountShadowReplayEvidence {
+	public fun <init> (Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;II)V
+	public final fun component1 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component2 ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun component3 ()Ljava/lang/String;
+	public final fun component4 ()I
+	public final fun component5 ()I
+	public final fun copy (Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;II)Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;
+	public static synthetic fun copy$default (Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;Lcom/openbank/libs/fincrime/pack/PackRef;Lcom/openbank/libs/fincrime/pack/PackRef;Ljava/lang/String;IIILjava/lang/Object;)Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getBaseline ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun getCandidate ()Lcom/openbank/libs/fincrime/pack/PackRef;
+	public final fun getChangedCases ()I
+	public final fun getDigest ()Ljava/lang/String;
+	public final fun getEvaluatedCases ()I
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
+}
+
 public final class com/openbank/libs/fincrime/pack/PackDomain : java/lang/Enum {
 	public static final field AML Lcom/openbank/libs/fincrime/pack/PackDomain;
 	public static final field FRAUD Lcom/openbank/libs/fincrime/pack/PackDomain;
@@ -528,6 +597,15 @@ public final class com/openbank/libs/fincrime/pack/PackRef {
 	public final fun getRevision ()I
 	public fun hashCode ()I
 	public fun toString ()Ljava/lang/String;
+}
+
+public final class com/openbank/libs/fincrime/pack/PinnedCountShadowEpoch {
+	public static final field Companion Lcom/openbank/libs/fincrime/pack/PinnedCountShadowEpoch$Companion;
+	public final fun evaluate (Ljava/time/Instant;Ljava/util/List;)Lcom/openbank/libs/fincrime/pack/CountShadowEvaluation;
+}
+
+public final class com/openbank/libs/fincrime/pack/PinnedCountShadowEpoch$Companion {
+	public final fun verify (Lcom/openbank/libs/fincrime/pack/CountShadowEpoch;[BLcom/openbank/libs/fincrime/pack/CompiledCountPack;Lcom/openbank/libs/fincrime/pack/CountShadowReplayEvidence;Ljava/util/Map;Ljava/time/Instant;Lkotlin/jvm/functions/Function2;)Lcom/openbank/libs/fincrime/pack/PinnedCountShadowEpoch;
 }
 
 public final class com/openbank/libs/fincrime/vocabulary/FincrimeVocabulary {
