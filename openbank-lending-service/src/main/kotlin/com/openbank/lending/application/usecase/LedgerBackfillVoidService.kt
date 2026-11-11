@@ -325,7 +325,16 @@ class LedgerBackfillVoidService(
                 "loan ${loan.id.value} is ${current.status}; only an ACTIVE synthetic loan is voided"
             }
             loans.update(current.copy(status = LoanStatus.UNWOUND))
-                .call { _ -> events.emit(evidence(current, executor)) }
+                .call { unwound ->
+                    events.emit(evidence(current, executor)).call { _ ->
+                        events.emitExposureFact(
+                            unwound,
+                            LoanExposureChange.Ended,
+                            clock.instant(),
+                            knownSynthetic = true,
+                        )
+                    }
+                }
                 .map { }
         }
     }
