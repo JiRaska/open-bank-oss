@@ -879,3 +879,13 @@ fingerprint and retry scenarios remain in the same suite. Execution results belo
 exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
 This prevents new squatting through this boundary; it does not attest historical case ownership,
 perform remediation or enable fraud enforcement. Hold timeout remains fail closed.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

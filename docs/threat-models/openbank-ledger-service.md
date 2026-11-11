@@ -878,3 +878,13 @@ zero-journal run after close. Frozen reports are never replaced by later success
 receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
 receipt and preserve the proof. Producers must refresh the current and immediately prior month,
 including closed days, and explicitly revoke completion while source work is pending.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.
