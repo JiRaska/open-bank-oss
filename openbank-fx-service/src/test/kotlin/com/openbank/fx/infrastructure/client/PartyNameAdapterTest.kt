@@ -35,6 +35,18 @@ class PartyNameAdapterTest {
         assertThat(name()).isEqualTo("Jana Nováková")
     }
 
+    /**
+     * A listed trading name behind a clean legal name must reach the screen. Handing out the legal
+     * name alone lets the listed name pass unscreened.
+     */
+    @Test
+    fun `a party with a legal and a trading name has BOTH handed to the screen`() {
+        every { client.getParty(any()) } returns
+            Uni.createFrom().item(PartyNameView(legalName = "Clean Legal s.r.o.", tradingName = "Listed Trading"))
+
+        assertThat(listOf(name()).flatMap { it.split('|') }).contains("Listed Trading")
+    }
+
     @Test
     fun `the trading name is used only when the party carries no legal name`() {
         every { client.getParty(any()) } returns
