@@ -65,7 +65,20 @@ interface SupervisorySubmissionRepository {
         claimedBefore: Instant? = null,
     ): Boolean
 
-    /** Appends an attempt without any state change (e.g. a lapsed holder's late, unapplied result). */
+    /**
+     * Conditional acknowledgement, in ONE transaction: `UPDATE … WHERE id = ? AND state = 'SUBMITTED'`
+     * sets [next]'s state and acknowledgement, and the evidence [attempt] is appended only when
+     * exactly one row moved. False means a concurrent acknowledgement settled it first.
+     */
+    suspend fun acknowledge(next: SupervisorySubmission, attempt: SubmissionAttempt): Boolean
+
+    /**
+     * Appends an attempt without any state change (e.g. a lapsed holder's late, unapplied result).
+     * Every attempt write — here, in [transition] and in [acknowledge] — ignores the caller's
+     * `attemptNo` and assigns `coalesce(max(attempt_no), 0) + 1` inside its own transaction, under a
+     * `FOR UPDATE` lock on the submission row, so concurrent writers can never collide on
+     * `uq_finrep_submission_attempt_no` and lose evidence.
+     */
     suspend fun appendAttempt(attempt: SubmissionAttempt)
 
     suspend fun attempts(submissionId: UUID): List<SubmissionAttempt>

@@ -157,9 +157,28 @@ class SupervisorySubmissionService(
     ): SupervisorySubmission {
         require(command.reference.isNotBlank()) { "acknowledgement reference is required" }
         val current = get(id)
-        val ack =
-            SubmissionAcknowledgement(command.accepted, command.reference, command.message, actor, clock.instant())
-        return repository.save(current.acknowledged(ack))
+        val now = clock.instant()
+        val ack = SubmissionAcknowledgement(command.accepted, command.reference, command.message, actor, now)
+        // Domain check first (422 for a return that is not SUBMITTED), then a CONDITIONAL write: two
+        // concurrent acknowledgements both read SUBMITTED, and only one may settle it — the loser
+        // gets 409 instead of silently overwriting the winner's verdict.
+        val next = current.acknowledged(ack)
+        val attempt = transmitter.attempt(
+            current,
+            "supervisor-acknowledgement",
+            if (command.accepted) TransportOutcome.SUBMITTED else TransportOutcome.REJECTED,
+            command.reference,
+            command.message,
+            actor,
+            now,
+        ).copy(claimId = current.claimId)
+        if (!repository.acknowledge(next, attempt)) {
+            throw ResourceConflictException(
+                "submission $id was acknowledged concurrently; re-read it before recording another acknowledgement",
+                "CONFLICT",
+            )
+        }
+        return get(id)
     }
 
     override suspend fun get(id: UUID): SupervisorySubmission =

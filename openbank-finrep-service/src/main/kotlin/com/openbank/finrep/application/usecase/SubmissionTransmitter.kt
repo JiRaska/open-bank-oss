@@ -127,7 +127,8 @@ class SubmissionTransmitter(
         return reload(current.id)
     }
 
-    suspend fun attempt(
+    /** `attemptNo` is a placeholder: the repository assigns it under the row lock on write. */
+    fun attempt(
         submission: SupervisorySubmission,
         transportName: String,
         outcome: TransportOutcome,
@@ -138,7 +139,7 @@ class SubmissionTransmitter(
     ) = SubmissionAttempt(
         id = Ids.newId(),
         submissionId = submission.id,
-        attemptNo = repository.attempts(submission.id).size + 1,
+        attemptNo = 0,
         transport = transportName,
         outcome = outcome,
         transportReference = reference,

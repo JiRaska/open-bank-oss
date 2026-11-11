@@ -406,6 +406,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: A concurrent acknowledgement settled the submission first; nothing was recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
         '404':
           description: Unknown submission id
           content:

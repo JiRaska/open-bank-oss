@@ -5,7 +5,9 @@
 package com.openbank.finrep.integration
 
 import com.openbank.finrep.application.port.inbound.GetXbrlCsvPreflightQuery
+import com.openbank.finrep.application.port.out.SupervisorySubmissionRepository
 import com.openbank.finrep.application.port.out.TransportResult
+import com.openbank.finrep.application.usecase.SubmissionTransmitter
 import com.openbank.finrep.application.usecase.XbrlCsvPreflightService
 import com.openbank.finrep.domain.model.TransportOutcome
 import com.openbank.finrep.domain.model.XbrlCsvPreflight
@@ -17,11 +19,19 @@ import io.mockk.mockk
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.smallrye.mutiny.coroutines.asUni
+import io.vertx.core.Vertx
+import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
@@ -32,6 +42,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 
 /**
  * A live regulator adapter called twice is a double filing. Two parallel submits of one PACKAGED
@@ -44,6 +55,12 @@ import java.util.concurrent.atomic.AtomicInteger
 class SupervisorySubmissionConcurrencyIT {
     private val path = "/api/v1/finrep/submissions"
     private val transportCalls = AtomicInteger()
+
+    @Inject
+    lateinit var repository: SupervisorySubmissionRepository
+
+    @Inject
+    lateinit var transmitter: SubmissionTransmitter
 
     @BeforeEach
     fun mocks() {
@@ -106,6 +123,93 @@ class SupervisorySubmissionConcurrencyIT {
         assertThat(
             count("select count(*) from finrep_submission where template_id = 'F01.03' and revision = 7"),
         ).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `two parallel acknowledgements settle once - the loser gets 409, not a silent overwrite`() {
+        val id = submitted("F01.04")
+        val bodies = listOf(
+            """{"accepted":true,"reference":"ACK-A"}""",
+            """{"accepted":false,"reference":"ACK-B","message":"rejected"}""",
+        )
+        val next = AtomicInteger()
+        val statuses = parallel(2) {
+            RestAssured.given().contentType("application/json").body(bodies[next.getAndIncrement()])
+                .post("$path/$id/acknowledgement").statusCode
+        }
+
+        assertThat(statuses).containsExactlyInAnyOrder(200, 409)
+        assertThat(
+            count(
+                "select count(*) from finrep_submission_attempt where submission_id = '$id'::uuid " +
+                    "and transport = 'supervisor-acknowledgement'",
+            ),
+        ).isEqualTo(1)
+        // The settled state and the single evidence row describe the SAME acknowledgement.
+        assertThat(
+            count(
+                "select count(*) from finrep_submission s join finrep_submission_attempt a " +
+                    "on a.submission_id = s.id and a.transport = 'supervisor-acknowledgement' " +
+                    "where s.id = '$id'::uuid and a.transport_reference = s.ack_reference " +
+                    "and s.state in ('ACKNOWLEDGED', 'REJECTED')",
+            ),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `concurrent attempt writes are numbered under the row lock and none is lost`() {
+        val id = submitted("F01.05")
+        val submission = requireNotNull(onVertx { repository.findById(java.util.UUID.fromString(id)) })
+        val writers = 8
+        parallel(writers) {
+            onVertx {
+                repository.appendAttempt(
+                    transmitter.attempt(
+                        submission,
+                        "late-result-test",
+                        TransportOutcome.UNKNOWN,
+                        null,
+                        "late result",
+                        "operator",
+                        java.time.Instant.now(),
+                    ),
+                )
+            }
+            0
+        }
+
+        assertThat(count("select count(*) from finrep_submission_attempt where submission_id = '$id'::uuid"))
+            .isEqualTo(writers + 1)
+        assertThat(
+            count(
+                "select count(distinct attempt_no) from finrep_submission_attempt " +
+                    "where submission_id = '$id'::uuid and attempt_no between 1 and ${writers + 1}",
+            ),
+        ).isEqualTo(writers + 1)
+    }
+
+    private fun submitted(templateId: String): String {
+        val id: String = Given {
+            contentType("application/json")
+            body("""{"templateId":"$templateId","referencePeriod":"2026-09-30","revision":1}""")
+        } When { post(path) } Then { statusCode(201) } Extract { path("id") }
+        Given { this } When { post("$path/$id/package") } Then { statusCode(200) }
+        Given { this } When { post("$path/$id/submit") } Then { statusCode(200) }
+        return id
+    }
+
+    /** Runs a suspend repository call on a Vert.x context, as a real request would. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun <T> onVertx(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
+        val context = Vertx.currentContext()
+        val dispatcher = object : CoroutineDispatcher() {
+            override fun dispatch(context2: CoroutineContext, block: Runnable) {
+                context.runOnContext { block.run() }
+            }
+        }
+        CoroutineScope(dispatcher).async { block() }.asUni()
     }
 
     private fun parallel(n: Int, call: () -> Int): List<Int> {

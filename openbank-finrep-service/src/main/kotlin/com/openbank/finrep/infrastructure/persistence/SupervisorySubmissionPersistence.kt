@@ -21,6 +21,7 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.LockMode
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -214,18 +215,52 @@ class PanacheSupervisorySubmissionRepository(
         }
         moved.flatMap { rows ->
             if (rows == 1) {
-                Panache.getSession().flatMap { it.merge(attempt.toEntity()) }.map { true }
+                insertAttempt(attempt).map { true }
             } else {
                 Uni.createFrom().item(false)
             }
         }
     }.awaitSuspending()
 
-    override suspend fun appendAttempt(attempt: SubmissionAttempt) {
+    override suspend fun acknowledge(next: SupervisorySubmission, attempt: SubmissionAttempt): Boolean =
         Panache.withTransaction {
-            Panache.getSession().flatMap { it.merge(attempt.toEntity()) }
+            val ack = requireNotNull(next.acknowledgement) { "acknowledge() needs an acknowledgement" }
+            submissions.update(
+                "state = ?1, ackAccepted = ?2, ackReference = ?3, ackMessage = ?4, ackRecordedBy = ?5, " +
+                    "ackRecordedAt = ?6 where id = ?7 and state = 'SUBMITTED'",
+                next.state.name,
+                ack.accepted,
+                ack.reference,
+                ack.message,
+                ack.recordedBy,
+                ack.recordedAt,
+                next.id,
+            ).flatMap { rows ->
+                if (rows == 1) insertAttempt(attempt).map { true } else Uni.createFrom().item(false)
+            }
         }.awaitSuspending()
+
+    override suspend fun appendAttempt(attempt: SubmissionAttempt) {
+        Panache.withTransaction { insertAttempt(attempt) }.awaitSuspending()
     }
+
+    /**
+     * Must run inside a transaction. Locks the submission row (`FOR UPDATE`), then numbers the
+     * attempt from the table itself, so the number is decided by whoever holds the lock — never by
+     * a count read outside the transaction that a concurrent writer can invalidate.
+     */
+    private fun insertAttempt(attempt: SubmissionAttempt): Uni<SubmissionAttemptEntity> =
+        Panache.getSession().flatMap { session ->
+            session.find(SubmissionEntity::class.java, attempt.submissionId, LockMode.PESSIMISTIC_WRITE)
+                .flatMap {
+                    session.createSelectionQuery(
+                        "select coalesce(max(a.attemptNo), 0) + 1 from SubmissionAttemptEntity a " +
+                            "where a.submissionId = :id",
+                        Int::class.javaObjectType,
+                    ).setParameter("id", attempt.submissionId).singleResult
+                }
+                .flatMap { next -> session.merge(attempt.copy(attemptNo = next).toEntity()) }
+        }
 
     override suspend fun attempts(submissionId: UUID): List<SubmissionAttempt> = Panache.withSession {
         attemptRepository.find("submissionId = ?1 order by attemptNo", submissionId).list()
