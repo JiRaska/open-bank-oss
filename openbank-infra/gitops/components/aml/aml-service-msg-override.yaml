@@ -28,5 +28,3 @@ data:
   override.properties: |
     config_ordinal=500
     mp.messaging.incoming.party-events-in.group.id=openbank-aml-service
-    mp.messaging.incoming.ledger-events-in.group.id=openbank-aml-service
-    mp.messaging.incoming.transaction-events-in.group.id=openbank-aml-service

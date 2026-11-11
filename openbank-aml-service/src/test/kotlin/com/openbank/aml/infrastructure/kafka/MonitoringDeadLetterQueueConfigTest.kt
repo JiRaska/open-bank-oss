@@ -25,5 +25,14 @@ class MonitoringDeadLetterQueueConfigTest {
         assertThat(config.getValue("$prefix.failure-strategy")).isEqualTo("dead-letter-queue")
         assertThat(config.getValue("$prefix.dead-letter-queue.topic")).isEqualTo("openbank.dlq.aml.$channel")
         assertThat(config.propertyNames).doesNotContain("""$prefix."dead-letter-queue.topic"""")
+        // Without it the dead-letter producer JSON-encodes the String payload (measured: a parked
+        // record came back wrapped in quotes), so a replay would not deliver what was consumed.
+        assertThat(config.getValue("$prefix.dead-letter-queue.value.serializer")).endsWith("StringSerializer")
+        assertThat(config.getValue("$prefix.value.deserializer")).endsWith("StringDeserializer")
+        assertThat(config.getValue("$prefix.key.deserializer")).endsWith("StringDeserializer")
+        assertThat(config.getValue("$prefix.group.id")).isEqualTo("openbank-aml-service")
+        assertThat(config.propertyNames.filter { it.startsWith(prefix) && it.contains('"') })
+            .describedAs("no dotted leaf key on this channel: the connector cannot read one")
+            .isEmpty()
     }
 }
