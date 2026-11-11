@@ -1088,6 +1088,99 @@ class BusinessOnboardingServiceTest {
         assertThat(screeningPort.requests.map { it.name }).contains("Tichý Společník")
     }
 
+    // --- findings need an explicit operator disposition ------------------------------------------
+
+    /** Chair + ordinary member signed; the rule wants chair + vice. Fully signed, in review for the office. */
+    private suspend fun fullySignedOfficeShortfall(): UUID {
+        coEvery { registry.lookup(ico, null) } returns
+            extract(
+                RepresentationRule(
+                    RepresentationMode.JOINT_N,
+                    2,
+                    "předseda spolu s místopředsedou",
+                    requiredRoles = listOf("predseda", "mistopredseda"),
+                ),
+                listOf("Jana Chairová", "Viktor Vice", "Milan Member"),
+                roles = listOf("předseda představenstva", "místopředseda představenstva", "člen představenstva"),
+            )
+        coEvery { parties.createEntityParty(any()) } returns entityParty
+        val started = service.start(StartCaseCommand(IdentifierScheme.CZ_ICO, "45274649", initiator))
+        coEvery { parties.initiatorIdentity(any()) } returns InitiatorIdentity("Jana Chairová", null, verified = true)
+        service.matchInitiator(MatchInitiatorCommand(started.id, initiator, 0, "Jana Chairová", null))
+        val invited = service.inviteCosigners(InviteCosignersCommand(started.id, initiator, listOf(1, 2)))
+        invited.signers.filter { !it.isInitiator }.forEach {
+            service.claimInvitation(ClaimInvitationCommand(it.invitationToken!!, UUID.randomUUID()))
+        }
+        val member = service.get(started.id).signers.first { it.fullName == "Milan Member" }.partyId!!
+        val ceremony = readyToSign(started.id, initiator)
+        signs(started.id, initiator, ceremony)
+        assertThat(signs(started.id, member, ceremony).status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        return started.id
+    }
+
+    private val json = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().findAndRegisterModules()
+
+    @Test
+    fun `resolving a review cannot approve a hit that the same call discovered`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val id = fullySignedOfficeShortfall()
+        // Since the screening, the register reports a new owner — and that person is on a list.
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "VLASTNIK Karel")
+
+        // The operator means to settle the OFFICE question. No operator has seen the hit.
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 2, "operator-anna")) } }
+            .isInstanceOf(RuntimeException::class.java)
+        val after = service.get(id)
+        assertThat(after.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+        assertThat(after.screening!!.sanctionsHits.map { it.name }).containsExactly("Karel Vlastník")
+    }
+
+    @Test
+    fun `the operator view names an open finding whichever branch set the review reason`(): Unit = runBlocking {
+        screeningOn()
+        coEvery { parties.grantMandate(any()) } returns Unit
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        // The office shortfall sets the reason; the hit must not be lost behind it.
+        val case = service.get(fullySignedOfficeShortfall())
+        assertThat(case.reviewReason).contains("offices")
+
+        val operatorView = json.writeValueAsString(CaseResponse.from(case, null))
+        assertThat(operatorView).contains("\"openFindings\":1")
+        val applicantView = json.writeValueAsString(CaseResponse.from(case, initiator))
+        assertThat(applicantView).doesNotContain("openFindings", "VLASTNIK", "POTENTIAL_HIT")
+    }
+
+    @Test
+    fun `a hit does not disappear when its subject leaves the case`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        service.answerQuestionnaire(AnswerQuestionnaireCommand(id, initiator, questionnaire()))
+        service.makeDeclarations(MakeDeclarationsCommand(id, initiator, cleanDeclarations(id)))
+        assertThat(service.get(id).screening!!.sanctionsHits).hasSize(1)
+
+        // The listed owner is taken off the register and off the declarations.
+        uboOwners.clear()
+        val ceremony = readyToSign(id, initiator)
+        val signed = signs(id, initiator, ceremony)
+
+        assertThat(signed.status).describedAs("removing the person must not approve the case")
+            .isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(signed.screening!!.sanctionsHits.map { it.name }).containsExactly("Karel Vlastník")
+        assertThat(mandates).isEmpty()
+    }
+
     private fun owner(name: String, corporate: Boolean) = BeneficialOwner(
         fullName = name,
         dateOfBirth = null,
