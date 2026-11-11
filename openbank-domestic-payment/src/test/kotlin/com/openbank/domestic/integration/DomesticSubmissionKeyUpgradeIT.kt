@@ -9,9 +9,10 @@ import com.openbank.domestic.application.usecase.DomesticPaymentRequestFingerpri
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
-import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
@@ -31,11 +32,7 @@ import javax.sql.DataSource
 
 /** The running rail starts with a populated V20 database and applies V21 through its usual Flyway startup. */
 @QuarkusTest
-@QuarkusTestResource(value = DomesticSubmissionKeyUpgradeIT.PopulatedV20::class, restrictToAnnotatedClass = true)
-@QuarkusTestResource(
-    value = DomesticPaymentOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class,
-    restrictToAnnotatedClass = true,
-)
+@TestProfile(DomesticSubmissionKeyUpgradeIT.UpgradeProfile::class)
 class DomesticSubmissionKeyUpgradeIT {
     @Inject
     lateinit var dataSource: DataSource
@@ -74,6 +71,17 @@ class DomesticSubmissionKeyUpgradeIT {
                 assertThat(it.getString("status")).isEqualTo("RECEIVED")
             }
         dataSource.connection.use(::assertHistoricalWrite)
+    }
+
+    class UpgradeProfile : QuarkusTestProfile {
+        override fun disableGlobalTestResources() = true
+
+        override fun testResources() = listOf(
+            QuarkusTestProfile.TestResourceEntry(PopulatedV20::class.java),
+            QuarkusTestProfile.TestResourceEntry(
+                DomesticPaymentOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class.java,
+            ),
+        )
     }
 
     class PopulatedV20 : QuarkusTestResourceLifecycleManager {
