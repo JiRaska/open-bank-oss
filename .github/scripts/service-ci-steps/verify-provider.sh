@@ -23,6 +23,10 @@ if [ -n "${PACT_CONSUMER:-}" ]; then
     # Set selectors on the actual Test task, including for historical P.
     # pact.filter.consumers does not scope ordinary JUnit 5 broker loading.
     cat > "$scope_guard" <<'GRADLE'
+// Gradle also runs init scripts in included builds such as build-logic.
+if (gradle.parent != null) {
+    return
+}
 gradle.projectsEvaluated {
     def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
     def task = provider.tasks.named("providerPactTest").get()
@@ -58,6 +62,9 @@ GRADLE
   else
     # Keep existing non-transaction consumers on their current verification path.
     cat > "$scope_guard" <<'GRADLE'
+if (gradle.parent != null) {
+    return
+}
 gradle.projectsEvaluated {
     def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
     def task = provider.tasks.named("providerPactTest").get()

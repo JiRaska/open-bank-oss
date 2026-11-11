@@ -241,6 +241,8 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertIn(f"--init-script {guard}", call)
             guard_source = guard.read_text()
             self.assertIn("gradle.projectsEvaluated", guard_source)
+            # The guard must skip included builds (build-logic), or project(":<svc>") throws there.
+            self.assertLess(guard_source.index("if (gradle.parent != null)"), guard_source.index("gradle.projectsEvaluated"))
             self.assertIn('provider.tasks.named("providerPactTest").get()', guard_source)
             self.assertIn('task.systemProperties["pact.filter.consumers"]', guard_source)
             self.assertIn('System.getenv("PACT_CONSUMER")', guard_source)
@@ -276,6 +278,8 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
                 self.assertIn("-Dpactbroker.enablePending=false", calls.read_text())
                 self.assertNotIn("-Dpact.filter.consumers=", calls.read_text())
                 init_script = (runner_temp / "pact-consumer-scope.init.gradle").read_text()
+                self.assertLess(init_script.index("if (gradle.parent != null)"),
+                                init_script.index("gradle.projectsEvaluated"))
                 self.assertIn('task.filter.setIncludePatterns("com.openbank.transaction.contract.', init_script)
                 self.assertIn('"pactbroker.consumers": consumer', init_script)
                 self.assertIn('"pactbroker.consumerversionselectors.rawjson"', init_script)

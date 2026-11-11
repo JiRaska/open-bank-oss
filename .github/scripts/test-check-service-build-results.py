@@ -486,7 +486,7 @@ class ThinCalleeTest(unittest.TestCase):
 
     BODIES['verify-provider.sh'] = (
         'contract', 'Provider verification (:${{ inputs.service }}:providerPactTest)',
-        'dcd4c59a9d81138951b30fab8817fd013f026e1240e423454cb31e7107346975',
+        'd708676358224c364de491746b60b56c25a35bb743c31fcdc874ce87c8dba89e',
         {
             'BRANCH': '${{ github.head_ref || github.ref_name }}',
             'PACT_CONSUMER': '${{ inputs.consumer }}',
