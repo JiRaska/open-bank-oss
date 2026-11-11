@@ -5,6 +5,7 @@
 package com.openbank.party.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.MutinyEmitter
@@ -27,7 +28,7 @@ class PartyPiiRevealAudit(
     private val clock: Clock,
 ) {
     suspend fun record(partyId: UUID, actorId: String, reason: PartyPiiRevealReason) {
-        val eventId = UUID.randomUUID().toString()
+        val eventId = Ids.newId().toString()
         val event = PartyPiiRevealed(eventId, partyId, actorId, reason, clock.instant().toString())
         val payload = mapper.writeValueAsString(event)
         val headers = RecordHeaders()
