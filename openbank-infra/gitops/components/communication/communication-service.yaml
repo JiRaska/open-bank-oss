@@ -40,7 +40,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: communication-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-e73a9f51@sha256:572eb87b3b119f4eae7e9f06a92d5254926ddb3c80beedde27b86300857f05aa
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-communication-service:sandbox-e8e3b10a@sha256:caefd6bf81ec07d81ba3ab2d2924a8e4d4996438091bc5b3429e5f99f749863c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
