@@ -22,6 +22,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.jwt.JsonWebToken
+import org.hibernate.exception.ConstraintViolationException
 import java.util.UUID
 
 @Path("/api/v1/lending/risk/policy/proposals")
@@ -69,12 +70,17 @@ class CzCreditPolicyResource(
 
     private fun response(status: Int, error: String) = Response.status(status).entity(mapOf("error" to error)).build()
 
-    private fun activeRevisionConflict(error: Throwable): Boolean = generateSequence(error) { it.cause }
-        .filterIsInstance<PgException>()
-        .any { it.sqlState == "23505" && it.constraint in ACTIVE_UNIQUES }
+    private fun activeRevisionConflict(error: Throwable): Boolean = generateSequence(error) { it.cause }.any {
+        when (it) {
+            is ConstraintViolationException -> it.sqlState == UNIQUE_VIOLATION && it.constraintName in ACTIVE_UNIQUES
+            is PgException -> it.sqlState == UNIQUE_VIOLATION && it.constraint in ACTIVE_UNIQUES
+            else -> false
+        }
+    }
 
     private companion object {
         const val MAKER_CHECKER_STATUS = 422
+        const val UNIQUE_VIOLATION = "23505"
         val ACTIVE_UNIQUES = setOf("uq_cz_policy_active_revision", "uq_cz_policy_active_day")
     }
 }
