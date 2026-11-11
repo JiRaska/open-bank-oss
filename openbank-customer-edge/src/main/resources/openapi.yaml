@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.91.0
+  version: 1.93.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3691,6 +3691,12 @@ paths:
         The delegate still authenticates as themselves: SCA is unchanged and a grant is not a
         substitute for it. Every refusal — not yours, no grant, expired, over the ceiling — returns
         the identical 403, so this route is not an oracle for other parties' accounts or grants.
+
+
+        For company payments the original key binds the verified debit authority, frozen instruction
+        and signing route before SCA. Reuse with a different instruction or authority returns 409.
+        If current policy no longer permits the original route, the request is refused without
+        switching routes. Use the read-only submission lookups after an ambiguous response.
       operationId: createDomesticPayment
       security:
         - customerOidc: [payments:initiate]
@@ -3733,7 +3739,9 @@ paths:
         '201':
           description: Payment instruction created
         '400':
-          description: Malformed request or CURRENCY_NOT_ALLOWED when currency is not CZK; rejected before spend reservation or SCA
+          description: >-
+            Malformed request, missing or invalid company submission key, or CURRENCY_NOT_ALLOWED
+            when currency is not CZK. Rejected before spend reservation or SCA.
         '403':
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant
@@ -3743,10 +3751,117 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+            Company submissions require an owner debit or an attributable payment grant.
+        '409':
+          description: >-
+            The original submission key already binds a different instruction or debit authority
+            (SUBMISSION_CORRELATION_REUSED), or current policy conflicts with its stored mode
+            (DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED or DOMESTIC_HELD_POLICY_CHANGED).
         '503':
           description: >-
-            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
-            payment is refused rather than sent with a single signature.
+            Company signing policy or durable submission mode could not be established. Dispatch is refused.
+
+  /domestic-payments/submissions/lookup:
+    post:
+      tags: [Payments]
+      summary: Reconcile an ambiguous domestic payment submission
+      description: >-
+        Send the original Idempotency-Key and debit account after an ambiguous create response.
+        This is a read and consumes no SCA challenge. FOUND returns the identifier and current state
+        of the persisted instruction for the same customer and debit authority. UNKNOWN includes
+        uncommitted, missing and unscoped legacy submissions, revoked or unmatched authority,
+        upstream unavailability, and company requests keyed by a separate co-signature approval.
+        UNKNOWN makes no claim about whether money moved. Keep the pending warning in that case.
+      operationId: lookupDomesticPaymentSubmission
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[ -~]+$'}
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Use the same verified business context as the original submission.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount:
+                  type: string
+                  description: Original CZK amount, useful when more than one delegation covers the account.
+      responses:
+        '200':
+          description: Current durable state, or UNKNOWN
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentSubmission'
+        '400':
+          description: Malformed lookup or missing Idempotency-Key
+        '403':
+          description: Caller lacks customer access or may not act for the requested business
+
+  /domestic-payments/submissions/approval-lookup:
+    post:
+      tags: [Payments]
+      summary: Recover a domestic business payment approval after an ambiguous response
+      description: >-
+        Use the original Idempotency-Key, debit account, amount and verified business profile.
+        This read creates no payment or approval and consumes no SCA. FOUND identifies the
+        original approval and its current lifecycle. RELEASED includes a payment identifier
+        from a recorded release result or a persisted rail instruction matching the same debit
+        authority, approval ID and original submission digest. A claimed domestic release with
+        an unproven rail result remains APPROVED. An unproven original approval returns UNKNOWN.
+      operationId: lookupDomesticPaymentApproval
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[ -~]+$'}
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Use the same verified business context as the original submission.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount:
+                  type: string
+                  description: Original CZK amount when delegations overlap.
+      responses:
+        '200':
+          description: Current durable approval state, or UNKNOWN
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticApprovalSubmission'
+        '400':
+          description: Malformed lookup or missing Idempotency-Key
+        '403':
+          description: Caller lacks customer access or may not act for the requested business
 
   /domestic-payments/{paymentId}:
     get:
@@ -5876,7 +5991,9 @@ paths:
         its payload hash (and amount/currency/creditor for a payment). The signer is always the
         human; the initiator of a payment cannot co-sign; nobody signs twice. On the last
         signature of a PAYMENT the edge releases it to the rail once (single-use claim,
-        Idempotency-Key = approval id) and returns the outcome in `release`.
+        Idempotency-Key = approval id) and returns an established outcome in `release`.
+        For a mode-bound domestic approval, an ambiguous rail result leaves the request APPROVED
+        and omits `release`. The original submission lookup can confirm a persisted instruction.
       operationId: signBusinessApproval
       security:
         - customerOidc: [profile:read]
@@ -5898,7 +6015,7 @@ paths:
         - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
       responses:
         '200':
-          description: Signed; `release` present when this signature released a payment
+          description: Signed; `release` present when the release outcome is established
           content:
             application/json:
               schema: {$ref: '#/components/schemas/BusinessApprovalRequest'}
@@ -7010,6 +7127,44 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    DomesticPaymentSubmission:
+      oneOf:
+        - type: object
+          required: [outcome]
+          properties:
+            outcome: {type: string, enum: [UNKNOWN]}
+          additionalProperties: false
+        - type: object
+          required: [outcome, paymentId, status]
+          properties:
+            outcome: {type: string, enum: [FOUND]}
+            paymentId: {type: string, format: uuid}
+            status:
+              type: string
+              enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+          additionalProperties: false
+
+    DomesticApprovalSubmission:
+      oneOf:
+        - type: object
+          required: [outcome]
+          properties:
+            outcome: {type: string, enum: [UNKNOWN]}
+          additionalProperties: false
+        - type: object
+          required: [outcome, approvalId, approvalStatus]
+          properties:
+            outcome: {type: string, enum: [FOUND]}
+            approvalId: {type: string, format: uuid}
+            approvalStatus:
+              type: string
+              enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]
+            paymentId:
+              type: string
+              format: uuid
+              description: Persisted domestic rail identifier for a released approval, when available.
+          additionalProperties: false
+
     GameRequirement:
       type: object
       required: [kind]
@@ -7612,8 +7767,9 @@ components:
         status:
           type: string
           description: >-
-            Owned by delegation-service (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
-            RELEASED, RELEASE_FAILED); passed through, not an edge enum.
+            Delegation lifecycle (AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED,
+            RELEASED, RELEASE_FAILED). A claimed domestic release remains APPROVED in customer
+            detail and list responses until the recorded release result contains a valid rail identifier.
         payload: {type: object, additionalProperties: true, description: The frozen item being signed.}
         payloadSha256: {type: string}
         required: {type: integer}

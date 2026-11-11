@@ -4,8 +4,10 @@
 
 package com.openbank.customeredge.integration
 
+import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -14,11 +16,13 @@ import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.atomic.AtomicReference
 
 private const val INITIATOR = "11111111-1111-4111-8111-111111111111"
 private const val COSIGNER = "22222222-2222-4222-8222-222222222222"
@@ -29,10 +33,14 @@ private const val APPROVAL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 private const val SCA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 private const val SHA = "abababababababababababababababababababababababababababababababab"
 private const val CREDITOR = "DE89370400440532013000"
+private const val DOMESTIC_BBAN = "123456789/0100"
+private const val DOMESTIC_IBAN = "CZ1801000000000123456789"
 private const val ENTITY = "/api/v1/entities/$COMPANY"
 private const val EVALUATE = "$ENTITY/signing/evaluate"
 private const val CREATE = "$ENTITY/approval-requests"
+private const val CLAIM_SUBMISSION = "$CREATE/submissions/claim"
 private const val DETAIL = "$ENTITY/approval-requests/$APPROVAL"
+private const val DOMESTIC_RAIL = "/api/v1/domestic-payments"
 private const val SEPA_RAIL = "/api/v1/sepa-payments"
 private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 
@@ -53,6 +61,9 @@ private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 class BusinessPaymentApprovalIT {
 
     private val json = ObjectMapper()
+
+    @Inject
+    lateinit var paymentSessions: PaymentSessionStore
 
     @BeforeEach
     fun stubs() {
@@ -85,6 +96,28 @@ class BusinessPaymentApprovalIT {
         post("/customer/v1/sepa-payments")
     }
 
+    private fun postDomestic(key: String, currency: String = "CZK", amountJson: String = "\"80000.00\"") = Given {
+        contentType("application/json")
+        header("X-Acting-For", COMPANY)
+        header("X-SCA-Challenge-Id", SCA)
+        header("Idempotency-Key", key)
+        body(
+            """{"debtorAccountId":"$ACCOUNT","amount":$amountJson,"currency":"$currency",
+                "creditorAccountNumber":"$DOMESTIC_BBAN","creditorName":"Fixture"}""",
+        )
+    } When {
+        post("/customer/v1/domestic-payments")
+    }
+
+    private fun lookupDomesticApproval(key: String) = Given {
+        contentType("application/json")
+        header("X-Acting-For", COMPANY)
+        header("Idempotency-Key", key)
+        body("""{"debtorAccountId":"$ACCOUNT","amount":"80000.00"}""")
+    } When {
+        post("/customer/v1/domestic-payments/submissions/approval-lookup")
+    }
+
     private fun detailBody(status: String = "PENDING", signatures: String = """[{"partyId":"$INITIATOR"}]""") = """
         {"id":"$APPROVAL","entityPartyId":"$COMPANY","kind":"PAYMENT","status":"$status","required":2,
          "payloadSha256":"$SHA","initiatorPartyId":"$INITIATOR","eligibleSignerIds":["$INITIATOR","$COSIGNER"],
@@ -113,6 +146,252 @@ class BusinessPaymentApprovalIT {
     private fun readJson(body: String): JsonNode = json.readTree(body)
 
     // ── hold ───────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `original domestic key recovers a held approval after the response is lost`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 503, body = """{"error":"fixture lost response"}""")
+
+        val key = "fixture-original-payment-key"
+        postDomestic(key) Then { statusCode(503) }
+        val create = BusinessApprovalStubs.requests("POST", CREATE).single()
+        val request = readJson(create.body)
+        val digest = request.path("submissionKeyDigest").asText()
+        val correlation = request.path("submissionCorrelation").asText()
+        assertDomesticClaimMatchesCreate(key, create, request)
+
+        val route = "$CREATE/submissions/lookup"
+        val releaseEvidence = AtomicReference("""{"approvalId":"$APPROVAL","status":"PENDING"}""")
+        BusinessApprovalStubs.stub("POST", route) { body ->
+            val lookup = readJson(body)
+            val sameSubmission = lookup.path("submissionKeyDigest").asText() == digest &&
+                lookup.path("submissionCorrelation").asText() == correlation
+            val sameAuthority = lookup.path("debtorAccountId").asText() == ACCOUNT &&
+                lookup.path("initiatorPartyId").asText() == INITIATOR
+            if (sameSubmission && sameAuthority) {
+                200 to releaseEvidence.get()
+            } else {
+                404 to """{"code":"NOT_FOUND"}"""
+            }
+        }
+        lookupDomesticApproval("a-different-key") Then {
+            statusCode(200)
+            body("outcome", equalTo("UNKNOWN"))
+        }
+        lookupDomesticApproval(key) Then {
+            statusCode(200)
+            header("Cache-Control", equalTo("no-store"))
+            body("outcome", equalTo("FOUND"))
+            body("approvalId", equalTo(APPROVAL))
+            body("approvalStatus", equalTo("PENDING"))
+        }
+
+        releaseEvidence.set("""{"approvalId":"$APPROVAL","status":"RELEASED"}""")
+        val claim = lookupDomesticApproval(key) Then {
+            statusCode(200)
+            body("approvalStatus", equalTo("APPROVED"))
+        }
+        assertThat(claim.extract().jsonPath().getMap<String, String>("")).doesNotContainKey("paymentId")
+        val paymentId = "00000000-0000-4000-8000-0000000000f9"
+        releaseEvidence.set("""{"approvalId":"$APPROVAL","status":"RELEASED","releaseRef":"$paymentId"}""")
+        lookupDomesticApproval(key) Then {
+            statusCode(200)
+            body("paymentId", equalTo(paymentId))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", route).map { it.body }).allSatisfy {
+            assertThat(it).doesNotContain(key)
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", CREATE)).hasSize(1)
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).hasSize(1)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `domestic claim and approval freeze the same exact amount for text and numeric input`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL"}""")
+        val amount = "99999999999999.99"
+
+        postDomestic("decimal-text", amountJson = "\"$amount\"") Then { statusCode(202) }
+        postDomestic("decimal-number", amountJson = amount) Then { statusCode(202) }
+
+        val exactJson = json.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        val claims = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION)
+        val approvals = BusinessApprovalStubs.requests("POST", CREATE)
+        val requests = claims + approvals
+        assertThat(requests).hasSize(4).allSatisfy { request ->
+            val payload = exactJson.readTree(request.body).path("payload")
+            assertThat(payload.path("amount").textValue()).isEqualTo(amount)
+            val railAmount = payload.path("railRequest").path("amount")
+            assertThat(railAmount.isNumber).isTrue()
+            assertThat(railAmount.decimalValue()).isEqualByComparingTo(amount)
+        }
+    }
+
+    private fun assertDomesticClaimMatchesCreate(
+        key: String,
+        create: BusinessApprovalStubs.Request,
+        request: JsonNode,
+    ) {
+        val claimRequest = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single()
+        val claimBody = readJson(claimRequest.body)
+        val digest = request.path("submissionKeyDigest").asText()
+        val correlation = request.path("submissionCorrelation").asText()
+        assertThat(digest).matches("[0-9a-f]{64}").isNotEqualTo(correlation)
+        assertThat(correlation).matches("[0-9a-f]{64}")
+        assertThat(claimBody.path("submissionKeyDigest").asText()).isEqualTo(digest)
+        assertThat(claimBody.path("submissionCorrelation").asText()).isEqualTo(correlation)
+        assertThat(claimBody.path("payload")).isEqualTo(request.path("payload"))
+        assertThat(request.path("payload").path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
+        assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
+        assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
+        assertThat(claimRequest.header("Idempotency-Key")).isNotEqualTo(key)
+        assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `held policy uses normalized CZK and stores the frozen instruction as received`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL","required":2}""")
+
+        val currency = " czK "
+        val key = "fixture-currency-key"
+        postDomestic(key, currency) Then { statusCode(202) }
+
+        val evaluate = readJson(BusinessApprovalStubs.requests("POST", EVALUATE).single().body)
+        assertThat(evaluate.path("currency").asText()).isEqualTo("CZK")
+        assertThat(evaluate.path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
+        val consume = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
+        assertThat(consume.path("creditor").asText()).isEqualTo(DOMESTIC_BBAN)
+        val create = BusinessApprovalStubs.requests("POST", CREATE).single()
+        val request = readJson(create.body)
+        assertDomesticClaimMatchesCreate(key, create, request)
+        val payload = request.path("payload")
+        assertThat(payload.path("currency").asText()).isEqualTo(currency)
+        assertThat(payload.path("railRequest").path("currency").asText()).isEqualTo(currency)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `session payment binds SCA to the mask and approval to the resolved destination`() {
+        val creditorAccount = "abababab-abab-4bab-8bab-abababababab"
+        val mask = PaymentSessionStore.maskIban(DOMESTIC_IBAN)
+        val token = paymentSessions.create(creditorAccount, COSIGNER, "Fixture", null, mask)
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/accounts/$creditorAccount",
+            body = """{"id":"$creditorAccount","partyId":"$COSIGNER","accountNumber":"$DOMESTIC_IBAN"}""",
+        )
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL","required":2}""")
+
+        Given {
+            contentType("application/json")
+            header("X-Acting-For", COMPANY)
+            header("X-SCA-Challenge-Id", SCA)
+            header("Idempotency-Key", "fixture-masked-payee-key")
+            body(
+                """{"debtorAccountId":"$ACCOUNT","amount":"80000.00",
+                    "paymentSessionToken":"$token","creditorName":"Fixture"}""",
+            )
+        } When {
+            post("/customer/v1/domestic-payments")
+        } Then {
+            statusCode(202)
+            body("approvalId", equalTo(APPROVAL))
+        }
+
+        val consume = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
+        assertThat(consume.path("creditor").asText()).isEqualTo(mask)
+        val claim = readJson(BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single().body)
+        assertThat(claim.path("payload").path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a changed instruction under the original key returns a conflict before SCA or dispatch`() {
+        BusinessApprovalStubs.stub(
+            "POST",
+            CLAIM_SUBMISSION,
+            status = 409,
+            body = """{"code":"SUBMISSION_CORRELATION_REUSED"}""",
+        )
+
+        postDomestic("fixture-conflict-key") Then {
+            statusCode(409)
+            body("code", equalTo("SUBMISSION_CORRELATION_REUSED"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a held command cannot go direct when policy relaxes between claim and SCA`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":1}""")
+
+        postDomestic("fixture-held-key") Then {
+            statusCode(409)
+            body("code", equalTo("DOMESTIC_HELD_POLICY_CHANGED"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a direct command cannot dispatch once approval policy tightens`() {
+        BusinessApprovalStubs.stub(
+            "POST",
+            CLAIM_SUBMISSION,
+            status = 409,
+            body = """{"code":"DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"}""",
+        )
+
+        postDomestic("fixture-direct-key") Then {
+            statusCode(409)
+            body("code", equalTo("DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a missing durable mode is unavailable before SCA or dispatch`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{}""")
+
+        postDomestic("fixture-unavailable-key") Then {
+            statusCode(503)
+            body("code", equalTo("APPROVAL_UNAVAILABLE"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    private fun assertNoDomesticDispatch() {
+        assertThat(BusinessApprovalStubs.requests("POST", CREATE)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
 
     @Test
     @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
@@ -211,6 +490,7 @@ class BusinessPaymentApprovalIT {
         assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
         assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-OpenBank-Original-Submission-Key-Digest")).isNull()
         assertThat(readJson(rail.body).path("creditorIban").asText()).isEqualTo(CREDITOR)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)
         assertThat(result.path("ok").asBoolean()).isTrue()

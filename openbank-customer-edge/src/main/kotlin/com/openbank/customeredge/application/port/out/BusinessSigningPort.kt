@@ -38,6 +38,10 @@ interface BusinessSigningPort {
 
     fun createApproval(entity: UUID, body: String): SigningReply
 
+    fun claimDomesticSubmission(entity: UUID, body: String): SigningReply
+
+    fun lookupDomesticApproval(entity: UUID, body: String): SigningReply
+
     fun approvals(entity: UUID, status: String?, signer: UUID?): SigningReply
 
     fun approval(entity: UUID, approvalId: UUID): SigningReply
@@ -46,7 +50,7 @@ interface BusinessSigningPort {
 
     fun reject(entity: UUID, approvalId: UUID, signer: UUID, reason: String?): SigningReply
 
-    fun releaseClaim(entity: UUID, approvalId: UUID): SigningReply
+    fun releaseClaim(entity: UUID, approvalId: UUID, domestic: Boolean): SigningReply
 
     fun releaseResult(entity: UUID, approvalId: UUID, body: String): SigningReply
 

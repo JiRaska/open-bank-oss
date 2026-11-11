@@ -15,6 +15,7 @@ import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.account.CzechDomesticIban
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
@@ -40,10 +41,12 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.jwt.JsonWebToken
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import java.util.HexFormat
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -189,8 +192,8 @@ class CustomerEdgeResource(
     lateinit var scaServiceUrl: String
 
     /**
-     * Multi-signature hold for payments under `X-Acting-For` (#10281). Field-injected and optional:
-     * a resource built by hand in a test has none and takes the single-signature path unchanged.
+     * Multi-signature hold for payments under `X-Acting-For` (#10281) and durable company
+     * domestic submission routing (#12317).
      */
     @Inject
     lateinit var businessApprovals: BusinessPaymentApprovals
@@ -2730,13 +2733,22 @@ class CustomerEdgeResource(
     internal fun fetchDelegatedPaymentDecision(
         accountId: UUID,
         partyId: UUID,
-        amount: String,
-        currency: String,
+        amount: String? = null,
+        currency: String? = null,
     ): DelegatedPaymentDecision? {
-        val url = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/payment-authorization" +
-            "?partyId=$partyId&amount=${URLEncoder.encode(amount, StandardCharsets.UTF_8)}" +
-            "&currency=${URLEncoder.encode(currency, StandardCharsets.UTF_8)}"
-        val resp = upstream.get(url, partyId.toString())
+        val query = buildMap {
+            put("partyId", partyId.toString())
+            if (amount != null) {
+                put("amount", amount)
+                put("currency", requireNotNull(currency))
+            }
+        }
+        val resp = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts/$accountId/delegation/payment-authorization",
+            query,
+            partyId.toString(),
+        )
         if (resp.status != 200) return null
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
             ?: return null
@@ -2947,7 +2959,9 @@ class CustomerEdgeResource(
         // The amount is read BEFORE the debit guard, not just before the SCA gate: the delegation
         // ceiling is per-transaction, so an authorization asked without the amount is a different
         // (and weaker) question than the one this route has to ask.
-        val amount = extractAmountField(objectMapper, body) ?: return badRequest("Missing amount")
+        val amount = runCatching {
+            extractAmountField(EdgeJson.decimalReader(objectMapper).readTree(body))
+        }.getOrNull() ?: return badRequest("Missing amount")
         val currency = extractTextField(objectMapper, body, "currency") ?: "CZK"
         // Refuse an unsupported rail before debit authority, a delegated spend reservation, or SCA
         // consumes a one-use challenge. The domestic service enforces the same rule for direct callers.
@@ -3012,6 +3026,11 @@ class CustomerEdgeResource(
         }
         val (creditorAcctNo, creditorBank) = resolveCreditorBban(creditorRaw)
             ?: return badRequest("Malformed creditor account (expected number/bankcode or Czech IBAN)")
+        val submissionScope = if (debit.onBehalfOf == null || debit.delegationId != null) {
+            domesticSubmissionScope(customer, debtor, debit.delegationId)
+        } else {
+            null // A legacy bank mandate has no stable grant identity to bind.
+        }
         val enriched = buildDomesticRequest(
             objectMapper,
             body,
@@ -3021,23 +3040,32 @@ class CustomerEdgeResource(
             debtorName,
             creditorAcctNo,
             creditorBank,
+            customerSubmissionScope = submissionScope,
         ) ?: return badRequest("Malformed or incomplete payment body")
         if (customer.actingFor != null) {
-            holdForApproval(
+            val key = domesticSubmissionKey(idempotencyKey)
+                ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+            val scope = submissionScope ?: return forbidden("Company payment requires a stable debit authority")
+            // Signing policy compares the actual destination. SCA still checks the original signed representation.
+            val creditorIban = CzechDomesticIban.fromAccountNumber(creditorAcctNo, creditorBank)
+                ?: return badRequest("Malformed creditor account")
+            businessApprovals.routeDomestic(
                 customer,
                 HeldPayment(
                     PaymentRail.DOMESTIC,
                     amount,
                     currency,
-                    creditorForSca,
+                    creditorIban,
                     extractTextField(objectMapper, body, "creditorName"),
                     extractTextField(objectMapper, body, "reference"),
                     debtor.toString(),
                     enriched,
                 ),
                 scaChallengeId,
-                "payments.domestic",
-            )?.let { return it }
+                domesticApprovalSubmission(scope, key),
+            ) {
+                scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")
+            }?.let { return it }
         }
         // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
         // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
@@ -3078,6 +3106,114 @@ class CustomerEdgeResource(
         }
         auditPayment(resp, customer, "payments.domestic", amount, currency, creditorRaw, scaChallengeId, debit)
         return resp
+    }
+
+    /**
+     * Recover the original instruction after an ambiguous HTTP response. This path consumes no
+     * SCA challenge, creates no instruction, and makes no inference from a missing receipt.
+     */
+    @POST
+    @Path("/domestic-payments/submissions/lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupDomesticPaymentSubmission(
+        body: DomesticSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val key = domesticSubmissionKey(idempotencyKey)
+            ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
+        val customer = customer()
+        val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
+        val receipt = lookupDomesticRailSubmission(customer.partyId, debtor, scope, key)
+        return domesticSubmissionResult(receipt?.paymentId, receipt?.status)
+    }
+
+    @POST
+    @Path("/domestic-payments/submissions/approval-lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupDomesticPaymentApproval(
+        body: DomesticSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val key = domesticSubmissionKey(idempotencyKey)
+            ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
+        val customer = customer()
+        val entity = customer.actingFor ?: return domesticSubmissionResult()
+        val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
+        val submission = domesticApprovalSubmission(scope, key)
+        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, debtor, submission)
+            ?: return domesticSubmissionResult()
+        val paymentId = receipt.paymentId ?: if (receipt.status == "RELEASED") {
+            lookupDomesticRailSubmission(
+                customer.partyId,
+                debtor,
+                scope,
+                receipt.approvalId.toString(),
+                submission.keyDigest,
+            )
+                ?.paymentId
+        } else {
+            null
+        }
+        val result = mutableMapOf(
+            "outcome" to "FOUND",
+            "approvalId" to receipt.approvalId.toString(),
+            "approvalStatus" to if (receipt.status == "RELEASED" && paymentId == null) "APPROVED" else receipt.status,
+        )
+        paymentId?.let { result["paymentId"] = it.toString() }
+        return Response.ok(result).header("Cache-Control", "no-store").build()
+    }
+
+    private fun lookupDomesticRailSubmission(
+        partyId: UUID,
+        debtorAccountId: UUID,
+        scope: String,
+        railKey: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticRailSubmission? {
+        val input = objectMapper.createObjectNode().apply {
+            put("debtorAccountId", debtorAccountId.toString())
+            put("customerSubmissionScope", scope)
+            originalSubmissionKeyDigest?.let { put("originalSubmissionKeyDigest", it) }
+        }
+        val response = upstream.post(
+            "$domesticPaymentServiceUrl/api/v1/domestic-payments/submissions/lookup",
+            partyId.toString(),
+            input.toString(),
+            railKey,
+        )
+        if (response.status != 200) return null
+        val result = runCatching { objectMapper.readTree(response.entity?.toString()) }.getOrNull() ?: return null
+        if (result.path("outcome").asText() != "FOUND") return null
+        if (originalSubmissionKeyDigest != null &&
+            result.path("originalSubmissionKeyDigest").asText() != originalSubmissionKeyDigest
+        ) {
+            // Older providers can answer FOUND using only the key and scope. Require persisted digest evidence.
+            return null
+        }
+        val paymentId = canonicalPaymentId(result.path("paymentId").asText(null)) ?: return null
+        val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains) ?: return null
+        return DomesticRailSubmission(paymentId, status)
+    }
+
+    private fun domesticLookupScope(customer: CustomerIdentity, debtor: UUID, amount: String?): String? {
+        if (ownsAccount(debtor, customer.partyId)) return domesticSubmissionScope(customer, debtor, null)
+        // The original amount lets the account service select the same grant when several overlap.
+        val grant = fetchDelegatedPaymentDecision(debtor, customer.partyId, amount, "CZK")
+            ?.takeIf { it.authorized && it.grantorPartyId != null }?.delegationId ?: return null
+        return domesticSubmissionScope(customer, debtor, grant)
+    }
+
+    private fun domesticSubmissionResult(paymentId: UUID? = null, status: String? = null): Response {
+        val body = if (paymentId == null) {
+            mapOf("outcome" to "UNKNOWN")
+        } else {
+            mapOf("outcome" to "FOUND", "paymentId" to paymentId.toString(), "status" to checkNotNull(status))
+        }
+        return Response.ok(body).header("Cache-Control", "no-store").build()
     }
 
     /**
@@ -5879,6 +6015,16 @@ class CustomerEdgeResource(
         private const val MIN_PROMO_CODE_LENGTH = 8
         private const val MAX_PROMO_CODE_LENGTH = 128
         private const val MAX_IDEMPOTENCY_KEY_LENGTH = 255
+        private const val DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH = 128
+        private val DOMESTIC_PAYMENT_STATUSES = setOf(
+            "RECEIVED",
+            "VALIDATED",
+            "SENT_TO_CLEARING",
+            "SETTLED",
+            "REJECTED",
+            "RETURNED",
+            "CANCELLED",
+        )
 
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
@@ -6046,11 +6192,12 @@ class CustomerEdgeResource(
         private const val SWIFT_REF_MAX_LEN = 16
 
         /** Amount may arrive as JSON number or string; normalise to its decimal text form. */
-        internal fun extractAmountField(mapper: ObjectMapper, json: String): String? = runCatching {
-            (mapper.readTree(json) as? ObjectNode)?.get("amount")
-                ?.let { if (it.isTextual) it.asText() else it.decimalValue().toPlainString() }
-                ?.takeIf { it.isNotBlank() }
-        }.getOrNull()
+        internal fun extractAmountField(mapper: ObjectMapper, json: String): String? =
+            runCatching { extractAmountField(mapper.readTree(json)) }.getOrNull()
+
+        private fun extractAmountField(body: JsonNode?): String? = (body as? ObjectNode)?.get("amount")
+            ?.let { if (it.isTextual) it.asText() else it.decimalValue().toPlainString() }
+            ?.takeIf { it.isNotBlank() }
 
         /** Pull a single textual, non-blank field from a JSON object body. Package-visible for tests. */
         internal fun extractTextField(mapper: ObjectMapper, json: String, field: String): String? = runCatching {
@@ -6101,6 +6248,34 @@ class CustomerEdgeResource(
             return account to bank
         }
 
+        private fun domesticSubmissionKey(key: String?): String? = key?.takeIf {
+            it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
+        }
+
+        private fun domesticApprovalSubmission(scope: String, key: String): DomesticApprovalSubmission =
+            DomesticApprovalSubmission(
+                keyDigest = domesticSubmissionDigest("openbank-domestic-approval-key-v1|$key"),
+                correlation = domesticSubmissionDigest("openbank-domestic-approval-v1|$scope|$key"),
+            )
+
+        private fun domesticSubmissionScope(customer: CustomerIdentity, account: UUID, grant: String?): String {
+            val scope = listOf(
+                "openbank-domestic-submission-v1",
+                customer.human,
+                customer.partyId,
+                account,
+                grant.orEmpty(),
+            ).joinToString("|")
+            return domesticSubmissionDigest(scope)
+        }
+
+        private fun domesticSubmissionDigest(material: String): String = HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8)),
+        )
+
+        private fun normalizeDomesticPriority(priority: String?): String =
+            priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
+
         /**
          * Build the full CreateDomesticPaymentRequest the upstream needs from the app's lightweight body
          * plus the edge-resolved debtor/creditor parts. Amount is emitted as a JSON number; the optional
@@ -6119,8 +6294,9 @@ class CustomerEdgeResource(
             debtorName: String,
             creditorAccountNumber: String,
             creditorBankCode: String,
+            customerSubmissionScope: String? = null,
         ): String? = runCatching {
-            val app = mapper.readTree(appBody) as? ObjectNode ?: return null
+            val app = EdgeJson.decimalReader(mapper).readTree(appBody) as? ObjectNode ?: return null
             fun txt(f: String) = app.get(f)?.takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
             val amountRaw = app.get("amount")?.let { if (it.isTextual) it.asText() else it.toString() } ?: return null
             val amount = java.math.BigDecimal(amountRaw)
@@ -6133,6 +6309,7 @@ class CustomerEdgeResource(
             out.put("debtorName", debtorName)
             out.put("creditorAccountNumber", creditorAccountNumber)
             out.put("creditorBankCode", creditorBankCode)
+            customerSubmissionScope?.let { out.put("customerSubmissionScope", it) }
             out.put("creditorName", creditorName)
             out.put("amount", amount)
             out.put("currency", currency)
@@ -6140,9 +6317,7 @@ class CustomerEdgeResource(
             txt("specificSymbol")?.let { out.put("specificSymbol", it) }
             txt("constantSymbol")?.let { out.put("constantSymbol", it) }
             txt("reference")?.let { out.put("messageForPayee", it) }
-            val priority = txt("priority")?.uppercase()
-                ?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
-            out.put("priority", priority)
+            out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)
         }.getOrNull()
 
@@ -6676,3 +6851,8 @@ internal data class DelegatedPaymentDecision(
     val delegationId: String?,
     val grantorPartyId: UUID?,
 )
+
+/** Original debit account, with an optional amount to disambiguate overlapping delegated grants. */
+data class DomesticSubmissionLookup(val debtorAccountId: UUID?, val amount: String? = null)
+
+private data class DomesticRailSubmission(val paymentId: UUID, val status: String)

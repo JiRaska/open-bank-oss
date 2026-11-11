@@ -99,6 +99,10 @@ class BusinessApprovalStubs : QuarkusTestResourceLifecycleManager {
             routes["$method $path"] = { status to body }
         }
 
+        fun stub(method: String, path: String, handler: (String) -> Pair<Int, String>) {
+            routes["$method $path"] = handler
+        }
+
         fun requests(method: String, path: String): List<Request> =
             synchronized(requests) { requests.filter { it.method == method && it.path == path } }
 

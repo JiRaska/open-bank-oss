@@ -203,3 +203,26 @@ otázky i kód volby mají 1–64 ASCII písmen, číslic, podtržítek, teček 
 hodnota volby musí být řetězec. Volný text, pole a číselné odpovědi se odmítnou
 místo předání ke skórování. Edge sestaví odchozí tělo z přijatých polí a zachová
 pořadí zadaných odpovědí.
+
+## Dohledání domácí platby po timeoutu
+
+Zavolejte `POST /customer/v1/domestic-payments/submissions/lookup` s původní hlavičkou
+`Idempotency-Key` a tělem JSON s `debtorAccountId`. U firemní platby zachovejte původní
+kontext `X-Acting-For`. Pokud se na delegovaný účet vztahuje více pověření, přidejte
+původní částku v CZK jako `amount`.
+
+`FOUND` obsahuje trvalé `paymentId` a aktuální `status`. Při `UNKNOWN` ponechte
+upozornění na neověřený stav a nezadávejte novou platbu. Dohledání nespotřebovává SCA
+a nevytváří platební příkaz.
+
+U firemní platby čekající na další podpis použijte `POST /customer/v1/domestic-payments/submissions/approval-lookup`
+se stejným klíčem, účtem, firemním profilem a původní částkou. Dohledání vrátí ID schválení a jeho
+aktuální stav, pokud existuje uložený záznam. Dokud výsledek odeslání nelze doložit, schválení
+zůstává `APPROVED`. Stav `RELEASED` obsahuje uložené ID platby nebo ID dohledané u platební služby
+podle stejného oprávnění k účtu, ID schválení a původního klíče. Stav potvrzuje přijetí příkazu
+platební službou. Vypořádání má vlastní stav platby.
+
+U nového firemního příkazu se před SCA trvale uloží vazba klíče na oprávnění k účtu,
+obsah příkazu a způsob zpracování. Přesná desetinná částka ze vstupního JSON se zachová až do
+schválení a odeslání. Změněný obsah, jiné oprávnění nebo pravidlo podpisů,
+které už původní způsob nepovoluje, vede k odpovědi `409`. Po timeoutu použijte dohledání.

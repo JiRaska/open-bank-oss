@@ -335,3 +335,33 @@ failure, set the flag back to false; retain stored drafts for reconciliation and
 The edge reaches audit-service on its required-mTLS 8443 listener. A dedicated `customer-edge-upstream-client-tls` Certificate has client-auth usage and is mounted read-only. The JDK upstream client obtains the named Quarkus `upstream` TLS context, verifies the private-CA server chain and retains normal hostname verification. It rejects trust-all configuration. The client certificate is transport identity; the request still carries the edge client-credentials bearer, and `audit.customerRead` remains restricted to `service-account-openbank-edge`.
 
 The named TLS bucket reloads certificate material hourly. A matching `CertificateUpdatedEvent` invalidates the captured JDK client context and gracefully shuts down the previous client; unrelated bucket events are ignored. Application shutdown also closes the transport. Real HTTPS tests require a client certificate, preserve the bearer token and verify that renewal cannot keep using a previously valid client identity when the new context lacks one.
+
+
+## Business domestic approval recovery
+
+Before SCA or dispatch, Edge binds a new company domestic key to the same human, company, debit
+account, active grant, and frozen payload in Delegation. The claim stores a key digest and a
+separate domain-separated authority correlation. The raw key stays in the client header and the
+existing direct rail header. A missing or unreadable claim stops dispatch. A held command cannot
+fall through to direct dispatch when current signing policy relaxes or enforcement is disabled.
+The approval policy uses the canonical IBAN of the resolved destination. The initiator's SCA
+still validates the original signed destination representation, including a NearbyPay mask.
+
+Lookup verifies the current authority and sends both digests to the named approval endpoint. A
+receipt exposes only the approval ID, lifecycle status and a proven rail ID. After an ambiguous
+mode-bound rail response, Edge retains the one-shot claim and leaves the result unreported.
+Customer reads keep the approval `APPROVED` until release evidence exists. Original-key lookup
+accepts a recorded rail ID or a rail instruction that matches the approval ID as its transport key,
+the verified debit account and authority, and the stored original-key digest. The rail must echo the
+matched digest. A missing or unqualified result leaves the approval unchanged. Lookup does not
+create or release an instruction, consume SCA, or record a release result.
+
+Activate the new Edge writer after the Delegation migrations and routes are available, and drain
+old company domestic writers before accepting bound commands. Older commands without original-key
+evidence have no backfilled approval receipt. Clients keep the pending warning if both lookups
+return `UNKNOWN`.
+
+For a mode-bound domestic release, Edge uses the dedicated Delegation claim and forwards the
+original key digest to the dedicated rail writer. The rail's uniqueness constraint covers
+historical direct keys. The frozen body and approval-ID idempotency key are preserved. Activate
+this writer after the release-capable Delegation and rail endpoints are available.
