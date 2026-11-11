@@ -11,8 +11,8 @@ import com.openbank.aml.domain.report.ReportState
 import com.openbank.aml.domain.report.ReportedMovement
 import com.openbank.aml.domain.report.SuspiciousTransactionReport
 import com.openbank.libs.domain.error.ResourceConflictException
-import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.error.ResourceNotFoundException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock

@@ -94,6 +94,8 @@ class AmlReportResource(private val reports: SuspiciousTransactionReportService)
 
     @POST
     @Path("/{reportId}/approval")
+    // No request body: without this the class-level JSON @Consumes answers 415 to a bare POST.
+    @Consumes(MediaType.WILDCARD)
     @RolesAllowed("ROLE_COMPLIANCE")
     @Authorize(action = "amlReport.approve", resource = "#reportId")
     @Operation(summary = "Approve a drafted report as a second, different person")
