@@ -503,7 +503,7 @@ class KybResource {
         requireNotNull(identifier) { "path parameter 'identifier' is required" }
         val signers = requireNotNull(request?.confirmedSigners) { "confirmedSigners is required" }
         val hash = requireNotNull(request.ruleTextHash) { "ruleTextHash is required" }
-        val mode = request.confirmedMode?.let(RepresentationMode::valueOf)
+        val mode = request.confirmedMode?.let { RepresentationMode.valueOf(it.name) }
         if (mode != null && !ServiceAccountIdentity.isHumanStaff(identity)) {
             throw ForbiddenException("confirmed representation mode requires an authenticated staff reviewer")
         }

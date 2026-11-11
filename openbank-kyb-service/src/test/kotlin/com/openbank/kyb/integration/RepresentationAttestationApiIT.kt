@@ -67,6 +67,16 @@ class RepresentationAttestationApiIT {
         }
 
         assertThat(hash).hasSize(64)
+
+        useJwt("operator-anna", "openbank-admin-ui", "ROLE_OPERATOR")
+        Given {
+            contentType("application/json")
+            body("""{"confirmedSigners":2,"confirmedMode":"UNKNOWN","ruleTextHash":"$hash"}""")
+        } When {
+            post("/api/v1/kyb/representation/CZ_ICO/$fresh")
+        } Then {
+            statusCode(400)
+        }
     }
 
     @Test

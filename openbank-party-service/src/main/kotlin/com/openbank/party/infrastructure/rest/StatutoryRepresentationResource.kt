@@ -8,7 +8,6 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.security.Roles
 import com.openbank.party.application.usecase.StatutoryRepresentationService
-import com.openbank.party.domain.model.StatutoryRepresentationEvidence
 import com.openbank.party.domain.model.StatutoryRepresentationRule
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -36,10 +35,10 @@ class StatutoryRepresentationResource(
     @Authorize(action = "party.statutory-representation.publish")
     suspend fun publish(
         @PathParam("id") id: UUID,
-        request: StatutoryRepresentationEvidence?,
+        request: PublishStatutoryRepresentationRequest?,
     ): StatutoryRepresentationRule {
         requireCaller("service-account-openbank-kyb")
-        return service.publish(id, requireNotNull(request) { "representation evidence is required" })
+        return service.publish(id, requireNotNull(request) { "representation evidence is required" }.toDomain())
     }
 
     @GET

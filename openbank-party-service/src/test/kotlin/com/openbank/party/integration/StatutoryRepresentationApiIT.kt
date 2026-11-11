@@ -5,6 +5,7 @@
 package com.openbank.party.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.libs.audit.decision.InputDigest
 import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.party.application.port.`in`.GrantMandateCommand
@@ -89,6 +90,32 @@ class StatutoryRepresentationApiIT {
                 .body("principalPartyId", equalTo(company.toString()))
                 .body("evidence.attestationId", equalTo(evidence.attestationId.toString()))
                 .body("evidence.requiredSignatures", equalTo(2))
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-kyb", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "fixture-kyb-subject"),
+            Claim(key = "azp", value = "openbank-kyb"),
+            Claim(key = "preferred_username", value = "service-account-openbank-kyb"),
+        ],
+    )
+    fun `null collection elements are refused before statutory evidence is written`() {
+        val valid = mapper.valueToTree<ObjectNode>(evidence())
+        val invalid = listOf(
+            valid.deepCopy().apply { putArray("requiredOffices").addNull() },
+            valid.deepCopy().apply { putArray("representatives").addNull() },
+            valid.deepCopy().apply {
+                val representative = path("representatives").path(0) as ObjectNode
+                representative.putArray("officeSlots").addNull()
+            },
+        )
+        val route = "/api/v1/parties/${UUID.randomUUID()}/statutory-representation"
+        invalid.forEach { request ->
+            given().contentType("application/json").body(mapper.writeValueAsString(request))
+                .put(route).then().statusCode(400)
         }
     }
 

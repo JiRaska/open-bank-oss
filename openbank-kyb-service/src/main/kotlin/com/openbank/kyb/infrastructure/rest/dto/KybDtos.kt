@@ -81,8 +81,11 @@ data class AttestRepresentationRequest(
      */
     val ruleTextHash: String?,
     val note: String? = null,
-    val confirmedMode: String? = null,
+    val confirmedMode: ConfirmedRepresentationMode? = null,
 )
+
+/** Only determinate registry modes are eligible for explicit human confirmation. */
+enum class ConfirmedRepresentationMode { SOLE, JOINT_N, JOINT_ALL }
 
 data class AttestationResponse(
     val id: UUID,
@@ -98,7 +101,7 @@ data class AttestationResponse(
     val attestedAt: Instant,
     val supersededAt: Instant?,
     val note: String?,
-    val confirmedMode: String? = null,
+    val confirmedMode: ConfirmedRepresentationMode? = null,
 ) {
     companion object {
         fun from(a: RepresentationAttestation) = AttestationResponse(
@@ -115,7 +118,7 @@ data class AttestationResponse(
             attestedAt = a.attestedAt,
             supersededAt = a.supersededAt,
             note = a.note,
-            confirmedMode = a.confirmedMode?.name,
+            confirmedMode = a.confirmedMode?.let { ConfirmedRepresentationMode.valueOf(it.name) },
         )
     }
 }
