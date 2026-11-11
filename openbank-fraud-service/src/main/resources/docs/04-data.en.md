@@ -23,3 +23,14 @@ The consumer group id, offset reset and dead-letter topic for fraud-service chan
 ## Test profile: outbox channel disabled
 
 Under the `%test` profile the `fraud-outbox-out` outgoing channel is disabled next to the already-disabled `transaction-signal` consumer and `dispatch-enabled=false`, so integration tests boot without a broker. Production and dev configuration are unchanged: the dispatcher and channel stay enabled there.
+
+### Count-pack SHADOW epoch evidence
+
+The SHADOW ledger stores the signed envelope, proposal ID, artifact lineage and effective
+time in immutable rows. A locked head advances one epoch at a time. Competing proposals
+cannot both advance it, and repeating the exact signed envelope replays its original record.
+A rollback appends a new independently signed epoch referencing the earlier artifact.
+
+Readers choose the epoch effective at the evaluation time and reverify its signed envelope
+before obtaining a request pin. The ledger is separate from the live threshold-set table.
+The V11 rollback leaves evidence rows in place and stops the shadow reader.

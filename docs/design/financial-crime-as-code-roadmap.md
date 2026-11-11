@@ -234,6 +234,12 @@ routing, DecisionRecord persistence and the deployment conformance gate open und
 
 The existing DecisionRecord codec has a versioned shadow outcome. It records evaluated and
 incomplete results with the exact artifact hash, epoch, approved evidence hash and result hash.
+
+The next local slice stores fraud SHADOW publisher envelopes behind a monotonic PostgreSQL
+head. It locks the head while appending, preserves previous rows and replays identical
+publication requests. A rollback is another signed epoch. The same ledger contract accepts
+AML and fraud snapshots in the synthetic proof. The service-backed AML ledger, durable
+approval source and decision audit ingress are separate delivery work.
 The count-pack pin encodes this outcome through the shared codec with a canonical input digest.
 The transport rollout must teach the audit reader the new outcome before publishing it from a
 service outbox. Existing decision classes retain their wire shape.

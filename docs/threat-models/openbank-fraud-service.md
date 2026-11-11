@@ -377,3 +377,10 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 - **2026-11-04** — **Null rule entry in a threshold proposal answers 400 (#14783).** `POST /api/v1/fraud/thresholds/proposals` (inbound REST, `FraudThresholdResource`) now rejects a rule whose currency map is JSON `null` with 400 via `requireNotNull`, instead of a 500 from a Kotlin null dereference. Input validation only: no new endpoint, role, data flow or trust boundary; authorization (`ROLE_RISK`/`ROLE_COMPLIANCE`, four-eyes decide) is unchanged. **STRIDE:** D (malformed input no longer produces an unhandled server error; nothing is persisted). Rollback: revert the commit; no data or config change.
+
+### Count-pack SHADOW epoch ledger
+
+Publishers submit signed exact replay evidence with independent approval. The ledger records the
+bounded envelope and artifact lineage under an immutable PostgreSQL history and a serialized
+head. Readers verify their selected envelope again and pin it for one evaluation. A rollback is a
+new approved signed epoch. The live threshold rules read their existing table.
