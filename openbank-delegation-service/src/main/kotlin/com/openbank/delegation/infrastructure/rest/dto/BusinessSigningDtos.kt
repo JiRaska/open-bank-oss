@@ -4,6 +4,7 @@
 
 package com.openbank.delegation.infrastructure.rest.dto
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.openbank.delegation.application.usecase.PendingForHuman
 import com.openbank.delegation.application.usecase.SigningPayloadCodec
@@ -210,7 +211,12 @@ data class ReleaseResultBody(
     val claimToken: UUID? = null,
 )
 
-data class ReleaseClaimResponse(val claimToken: UUID, val payload: Any?)
+data class ReleaseClaimResponse(
+    val claimToken: UUID,
+    val payload: Any?,
+    @get:JsonInclude(JsonInclude.Include.NON_NULL)
+    val originalSubmissionKeyDigest: String?,
+)
 
 data class SignatureResponse(val partyId: UUID, val scaChallengeId: UUID, val at: Instant)
 

@@ -211,6 +211,25 @@ class BusinessSigningRepositoryImpl(
                 }
             }
 
+    override suspend fun findDomesticReleaseKeyDigest(entityPartyId: UUID, approvalId: UUID): String? =
+        Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery(
+                    """
+                    SELECT receipt.submission_key_digest
+                    FROM approval_submission_receipts receipt
+                    JOIN approval_requests approval ON approval.id = receipt.approval_request_id
+                    WHERE approval.id = :approvalId AND approval.entity_party_id = :entityId
+                      AND receipt.submission_key_digest IS NOT NULL
+                    """.trimIndent(),
+                    String::class.java,
+                )
+                    .setParameter("approvalId", approvalId)
+                    .setParameter("entityId", entityPartyId)
+                    .singleResultOrNull
+            }
+        }.awaitSuspending()
+
     private fun persistRequest(session: Mutiny.Session, request: ApprovalRequest, events: List<DomainEvent>) =
         session.persist(request.toEntity())
             .chain { _ -> persistSignatures(session, request, emptySet()) }

@@ -164,5 +164,7 @@ interface BusinessSigningRepository {
      */
     suspend fun claimRelease(entityPartyId: UUID, id: UUID, claimToken: UUID, now: Instant): Boolean
 
+    suspend fun findDomesticReleaseKeyDigest(entityPartyId: UUID, approvalId: UUID): String?
+
     suspend fun findExpirable(now: Instant, limit: Int): List<ApprovalRequest>
 }

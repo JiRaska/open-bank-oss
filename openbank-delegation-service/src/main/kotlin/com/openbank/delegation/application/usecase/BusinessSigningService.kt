@@ -105,7 +105,7 @@ data class DomesticSubmissionClaimCommand(
     val enforceApprovalPolicy: Boolean,
 )
 
-data class ReleaseClaim(val claimToken: UUID, val payload: String)
+data class ReleaseClaim(val claimToken: UUID, val payload: String, val originalSubmissionKeyDigest: String?)
 
 data class PendingForHuman(val entities: List<PendingEntity>, val items: List<ApprovalRequest>)
 
@@ -568,11 +568,14 @@ class BusinessSigningService(
      * a signer removed from the register since signing no longer counts, and a round that drops
      * below N is refused rather than executed.
      */
-    suspend fun claimRelease(entityPartyId: UUID, id: UUID): ReleaseClaim {
+    suspend fun claimRelease(entityPartyId: UUID, id: UUID, domesticRoute: Boolean): ReleaseClaim {
         val now = clock.instant()
         val request = get(entityPartyId, id)
         if (!request.kind.releasable) {
             throw refused(CONFLICT, "NOT_RELEASABLE", "only a held instruction is released")
+        }
+        if (domesticRoute && codec.parseObject(request.payload)["rail"] != "DOMESTIC") {
+            throw refused(CONFLICT, "WRONG_RELEASE_ROUTE", "this approval does not use the domestic rail")
         }
         when {
             request.status == ApprovalStatus.RELEASED || request.status == ApprovalStatus.RELEASE_FAILED ->
@@ -592,11 +595,16 @@ class BusinessSigningService(
                 "a signer no longer holds an active mandate; the round is incomplete",
             )
         }
+        // Read the immutable link before taking the one-shot claim so a read failure leaves it retryable.
+        val originalKeyDigest = repository.findDomesticReleaseKeyDigest(entityPartyId, id)
+        if (originalKeyDigest != null && !domesticRoute) {
+            throw refused(FORBIDDEN, "RELEASE_CALLER_NOT_ALLOWED", "caller does not support bound domestic release")
+        }
         val token = Ids.randomId()
         if (!repository.claimRelease(entityPartyId, id, token, now)) {
             throw refused(CONFLICT, "ALREADY_CLAIMED", "approval request $id was already released")
         }
-        return ReleaseClaim(token, request.payload)
+        return ReleaseClaim(token, request.payload, originalKeyDigest)
     }
 
     suspend fun recordReleaseResult(

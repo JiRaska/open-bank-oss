@@ -52,6 +52,9 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
+import org.eclipse.microprofile.openapi.annotations.media.Content
+import org.eclipse.microprofile.openapi.annotations.media.Schema
+import org.eclipse.microprofile.openapi.annotations.parameters.RequestBody
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.time.Duration
 import java.util.UUID
@@ -72,6 +75,7 @@ class BusinessSigningResource(
     private val service: BusinessSigningService,
     private val codec: SigningPayloadCodec,
     private val identity: SecurityIdentity,
+    private val requestJson: BusinessSigningRequestJson,
 ) {
 
     @POST
@@ -187,8 +191,20 @@ class BusinessSigningResource(
         summary = "Hold a payment, standing order or SDD mandate for co-signature (the initiator's consumed SCA " +
             "is the first signature)",
     )
-    suspend fun createPayment(@PathParam("entityId") entityId: UUID, body: CreatePaymentApprovalRequest?): Response {
-        requireNotNull(body) { "request body is required" }
+    suspend fun createPayment(
+        @PathParam("entityId") entityId: UUID,
+        @RequestBody(
+            required = true,
+            content = [
+                Content(
+                    mediaType = MediaType.APPLICATION_JSON,
+                    schema = Schema(implementation = CreatePaymentApprovalRequest::class),
+                ),
+            ],
+        )
+        request: String?,
+    ): Response {
+        val body = requestJson.readApproval(request)
         if (body.submissionCorrelation != null || body.submissionKeyDigest != null) requireVerifiedEdge()
         val kind = heldKind(body.kind)
         val initiator = requireNotNull(body.initiatorSignature) { "initiatorSignature is required" }
@@ -248,10 +264,19 @@ class BusinessSigningResource(
     @Operation(summary = "Bind the routing mode of a domestic submission before authentication or dispatch")
     suspend fun claimDomesticSubmission(
         @PathParam("entityId") entityId: UUID,
-        body: DomesticSubmissionClaimBody?,
+        @RequestBody(
+            required = true,
+            content = [
+                Content(
+                    mediaType = MediaType.APPLICATION_JSON,
+                    schema = Schema(implementation = DomesticSubmissionClaimBody::class),
+                ),
+            ],
+        )
+        request: String?,
     ): Response {
         requireVerifiedEdge()
-        requireNotNull(body) { "request body is required" }
+        val body = requestJson.readClaim(request)
         val payload = requireNotNull(body.payload) { "payload is required" }
         require(payload["rail"] == "DOMESTIC") { "payload.rail must be DOMESTIC" }
         val railRequest = requireNotNull(payload["railRequest"] as? Map<*, *>) {
@@ -399,12 +424,29 @@ class BusinessSigningResource(
     @Path("/approval-requests/{approvalId}/release-claim")
     @Authorize(action = "delegation.signing.approval.claim", resource = "#entityId")
     @Operation(summary = "Single-use claim of an APPROVED payment: the token and frozen payload, once; 409 after")
-    suspend fun claim(
+    suspend fun claim(@PathParam("entityId") entityId: UUID, @PathParam("approvalId") approvalId: UUID): Response =
+        claimResponse(entityId, approvalId, domesticRoute = false)
+
+    @POST
+    @Path("/approval-requests/{approvalId}/domestic-release-claim")
+    @Authorize(action = "delegation.signing.approval.claim", resource = "#entityId")
+    @Operation(summary = "Single-use release claim for a domestic payment")
+    suspend fun claimDomestic(
         @PathParam("entityId") entityId: UUID,
         @PathParam("approvalId") approvalId: UUID,
-    ): ReleaseClaimResponse {
-        val claim = service.claimRelease(entityId, approvalId)
-        return ReleaseClaimResponse(claim.claimToken, codec.parseObject(claim.payload))
+    ): Response {
+        requireVerifiedEdge()
+        return claimResponse(entityId, approvalId, domesticRoute = true)
+    }
+
+    private suspend fun claimResponse(entityId: UUID, approvalId: UUID, domesticRoute: Boolean): Response {
+        val claim = service.claimRelease(entityId, approvalId, domesticRoute)
+        val body = ReleaseClaimResponse(
+            claim.claimToken,
+            codec.parseObject(claim.payload),
+            claim.originalSubmissionKeyDigest,
+        )
+        return Response.ok(body).header("Cache-Control", "no-store").build()
     }
 
     @POST

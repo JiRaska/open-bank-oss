@@ -186,6 +186,43 @@ class DomesticSubmissionModeIT {
     }
 
     @Test
+    fun `bound domestic release carries only the original key digest beside the frozen payload`() {
+        register.joint(submission.entity, 2, submission.human, bob)
+        assertMode(claim(submission), "HELD")
+        val original = create(submission).then().statusCode(HTTP_CREATED).extract().jsonPath()
+        val id = UUID.fromString(original.getString("id"))
+        val signature = sca.approval(bob, id, original.getString("payloadSha256"))
+        post(submission.entity, "/$id/signatures", mapOf("partyId" to bob, "scaChallengeId" to signature))
+            .then().statusCode(HTTP_OK)
+
+        val legacyCaller = post(submission.entity, "/$id/release-claim", emptyMap())
+        assertThat(legacyCaller.statusCode).isEqualTo(HTTP_FORBIDDEN)
+        assertThat(lookup(submission).jsonPath().getString("status")).isEqualTo("APPROVED")
+
+        val release = claimRelease(id)
+            .then().statusCode(HTTP_OK).extract().response()
+        assertThat(release.header("Cache-Control")).isEqualTo("no-store")
+        val result = release.jsonPath()
+        assertThat(result.getString("originalSubmissionKeyDigest")).isEqualTo(submission.digest)
+        assertThat(result.getMap<String, Any>("payload")).isEqualTo(original.getMap<String, Any>("payload"))
+        assertThat(release.body.asString()).doesNotContain(submission.correlation)
+        assertThat(lookup(submission).body.asString()).doesNotContain(submission.digest)
+        assertThat(claimRelease(id).statusCode).isEqualTo(HTTP_CONFLICT)
+    }
+
+    @Test
+    fun `exact decimal claim matches the stored numeric rail amount`() {
+        register.joint(submission.entity, 2, submission.human, bob)
+        val amount = "99999999999999.99"
+        val exact = submission.copy(amount = amount)
+        assertMode(claim(exact), "HELD")
+        val stored = create(exact).then().statusCode(HTTP_CREATED).extract().asString()
+        assertThat(stored).contains("\"amount\":$amount", "\"amount\":\"$amount\"")
+        val wrongAmount = exact.payload(railAmount = "99999999999999.98")
+        assertThat(claim(exact, payload = wrongAmount).statusCode).isEqualTo(HTTP_BAD_REQUEST)
+    }
+
+    @Test
     fun `policy and dispatch must use the same debit account and amount`() {
         register.joint(submission.entity, 2, submission.human, bob)
         val wrongAccount = submission.payload(railAccount = UUID.randomUUID())
@@ -291,6 +328,8 @@ class DomesticSubmissionModeIT {
 
     private fun post(entity: UUID, path: String, body: Map<String, Any>) = RestAssured.given()
         .contentType(ContentType.JSON).body(body).post("/api/v1/entities/$entity/approval-requests$path")
+
+    private fun claimRelease(id: UUID) = post(submission.entity, "/$id/domestic-release-claim", emptyMap())
 
     private fun approvals(): List<String> = RestAssured.given()
         .get("/api/v1/entities/${submission.entity}/approval-requests").then().statusCode(HTTP_OK)

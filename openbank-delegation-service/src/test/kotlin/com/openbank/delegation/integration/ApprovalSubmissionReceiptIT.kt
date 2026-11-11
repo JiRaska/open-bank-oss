@@ -173,6 +173,7 @@ class ApprovalSubmissionReceiptIT {
         sign(id, bob, sca.approval(bob, id, created.getString("payloadSha256"))).then().statusCode(HTTP_OK)
         assertThat(lookupSubmission(correlation).jsonPath().getString("status")).isEqualTo("APPROVED")
         val claim = claim(id).then().statusCode(HTTP_OK).extract().jsonPath()
+        assertThat(claim.getMap<String, Any>("$")).containsOnlyKeys("claimToken", "payload")
         val inFlight = lookupSubmission(correlation).jsonPath()
         assertThat(inFlight.getString("status")).isEqualTo("RELEASED")
         assertThat(inFlight.getString("releaseRef")).isNull()

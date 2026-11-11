@@ -51,3 +51,8 @@ Flyway V34 adds the immutable mode binding and links new receipts to a HELD bind
 records the first claim time. Claim age supplies no outcome evidence. Any archival or deletion
 requires an explicit retention process that preserves protection against key reuse. Application
 rollback retains the binding and receipt evidence.
+
+A mode-bound domestic release uses the dedicated `domestic-release-claim` route from verified
+Customer Edge. The claim includes its original key digest. The dedicated
+rail writer uses it to enforce uniqueness against direct payments with the same original key.
+The frozen payload and co-signature hash stay identical. Legacy releases omit the digest.
