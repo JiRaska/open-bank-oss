@@ -131,5 +131,6 @@ Vyhrazená zákaznická trasa ověřuje syntetický požadavek a token servisní
 `openbank-synthetic-transfer`. Nastavte `openbank.synthetic-transfer.party-id`,
 `openbank.synthetic-transfer.source-account-id` a `openbank.synthetic-transfer.target-account-id`
 pro izolovanou sandboxovou sadu. Subjekt musí být ve službě Party aktivní s klasifikací SYNTHETIC
-a vlastnit oba účty. Trasa přijímá aktuální datum v UTC a směr převodu. Vyhrazená trasa Transaction
-vyžaduje ověřený Edge a stejný syntetický původ.
+a vlastnit oba účty. `GET /customer/v1/synthetic/transfers` vrací ověřené sadě aktuální datum
+účtování v zóně Europe/Prague. POST na stejné cestě přijímá toto datum a směr převodu. Vyhrazená
+trasa Transaction vyžaduje ověřený Edge a stejný syntetický původ.

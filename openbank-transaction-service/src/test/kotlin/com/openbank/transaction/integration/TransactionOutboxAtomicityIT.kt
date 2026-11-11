@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.transaction.it.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -18,7 +19,6 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -151,30 +151,37 @@ class TransactionOutboxAtomicityIT {
         val party = UUID.randomUUID()
         val source = UUID.randomUUID()
         val target = UUID.randomUUID()
-        val date = LocalDate.now(ZoneOffset.UTC)
+        val date = LocalDate.now(AccountingClock.BANK_ZONE)
         val body = """
             {"partyId":"$party","sourceAccountId":"$source","targetAccountId":"$target",
-             "runDate":"$date","direction":"OUTBOUND"}
+             "runDate":"$date","direction":"RETURN"}
         """.trimIndent()
 
-        assertThat(submitCanaryTransfer(body, tainted = false).statusCode).isEqualTo(403)
-        val accepted = submitCanaryTransfer(body, tainted = true)
+        val key = "synthetic-transfer:$party:$date:RETURN"
+        assertThat(submitCanaryTransfer(body, tainted = false, key = key).statusCode).isEqualTo(403)
+        assertThat(submitCanaryTransfer(body, tainted = true, key = null).statusCode).isEqualTo(400)
+        val otherLegKey = "synthetic-transfer:$party:$date:OUTBOUND"
+        assertThat(submitCanaryTransfer(body, tainted = true, key = otherLegKey).statusCode).isEqualTo(400)
+        val accepted = submitCanaryTransfer(body, tainted = true, key = key)
         assertThat(accepted.statusCode).isEqualTo(201)
         val id = UUID.fromString(accepted.jsonPath().getString("id"))
         assertThat(accepted.jsonPath().getString("amount")).isEqualTo("0.01")
         assertThat(accepted.jsonPath().getString("currencyCode")).isEqualTo("CZK")
-        assertThat(accepted.jsonPath().getString("sourceAccountId")).isEqualTo(source.toString())
-        assertThat(accepted.jsonPath().getString("targetAccountId")).isEqualTo(target.toString())
-        val replay = submitCanaryTransfer(body, tainted = true)
+        assertThat(accepted.jsonPath().getString("sourceAccountId")).isEqualTo(target.toString())
+        assertThat(accepted.jsonPath().getString("targetAccountId")).isEqualTo(source.toString())
+        val replay = submitCanaryTransfer(body, tainted = true, key = key)
         assertThat(replay.statusCode).isEqualTo(201)
         assertThat(replay.jsonPath().getString("id")).isEqualTo(id.toString())
         assertThat(awaitCompletionEvent(id).values).allMatch { it.transactionSynthetic && it.outboxSynthetic }
     }
 
-    private fun submitCanaryTransfer(payload: String, tainted: Boolean): Response = RestAssured.given()
+    private fun submitCanaryTransfer(payload: String, tainted: Boolean, key: String?): Response = RestAssured.given()
         .contentType("application/json")
         .body(payload)
-        .apply { if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) }
+        .apply {
+            if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
+            if (key != null) header("Idempotency-Key", key)
+        }
         .post("/api/v1/transactions/synthetic-transfer")
 
     /**

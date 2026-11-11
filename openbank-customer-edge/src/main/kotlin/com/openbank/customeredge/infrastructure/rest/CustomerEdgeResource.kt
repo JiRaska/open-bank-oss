@@ -16,7 +16,9 @@ import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.web.SyntheticTaintContext
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
 import jakarta.annotation.security.PermitAll
@@ -103,6 +105,11 @@ class CustomerEdgeResource(
 
     @Inject
     lateinit var syntheticTransferFixture: SyntheticTransferFixture
+
+    @Inject
+    lateinit var syntheticTransferTaint: SyntheticTaintContext
+
+    private val syntheticTransferCalendar = AccountingClock.bank(clock)
 
     @Inject
     lateinit var keycloakAdmin: KeycloakAdminClient
@@ -3552,17 +3559,24 @@ class CustomerEdgeResource(
         return resp
     }
 
+    @GET
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    fun syntheticTransferBankDate(): Response {
+        requireSyntheticTransferFixture()
+        return Response.ok(mapOf("runDate" to syntheticTransferCalendar.today().toString()))
+            .header("Cache-Control", "no-store")
+            .build()
+    }
+
     @POST
     @Path("/synthetic/transfers")
     @Authorize(action = "customer.transfers.initiate")
     @Blocking
     fun createSyntheticTransfer(request: SyntheticTransferRun?): Response {
-        val fixture = syntheticTransferFixture.accounts()
-        if (fixture == null || !isSyntheticTransferCaller(fixture.partyId)) {
-            throw ForbiddenException("Synthetic transfer requires its verified fixture identity")
-        }
+        val fixture = requireSyntheticTransferFixture()
         requireNotNull(request) { "Synthetic transfer run is required" }
-        require(request.runDate == LocalDate.now(clock)) { "Synthetic transfer run date must be today" }
+        require(request.runDate == syntheticTransferCalendar.today()) { "Synthetic transfer run date must be today" }
         if (!isSyntheticTransferParty(fixture.partyId) ||
             !isSyntheticTransferAccount(fixture.sourceAccountId, fixture.partyId) ||
             !isSyntheticTransferAccount(fixture.targetAccountId, fixture.partyId)
@@ -3583,12 +3597,21 @@ class CustomerEdgeResource(
             "/api/v1/transactions/synthetic-transfer",
             party,
             objectMapper.writeValueAsString(body),
+            idempotencyKey = request.direction.idempotencyKey(fixture.partyId, request.runDate),
         )
+    }
+
+    private fun requireSyntheticTransferFixture(): SyntheticTransferAccounts {
+        val fixture = syntheticTransferFixture.accounts()
+        if (fixture == null || !isSyntheticTransferCaller(fixture.partyId)) {
+            throw ForbiddenException("Synthetic transfer requires its verified fixture identity")
+        }
+        return fixture
     }
 
     private fun isSyntheticTransferCaller(partyId: UUID): Boolean {
         val client = ServiceAccountIdentity.verifiedClientId(jwt)
-        if (!currentRequestIsSynthetic() || client != "openbank-synthetic-transfer") {
+        if (!syntheticTransferTaint.tainted || client != "openbank-synthetic-transfer") {
             return false
         }
         return jwt.getClaim<String>("party_id") == partyId.toString() &&

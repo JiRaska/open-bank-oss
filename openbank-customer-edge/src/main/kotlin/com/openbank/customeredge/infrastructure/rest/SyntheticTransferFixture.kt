@@ -4,6 +4,7 @@
 
 package com.openbank.customeredge.infrastructure.rest
 
+import com.openbank.libs.synthetic.SyntheticTransferDirection
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.LocalDate
@@ -30,5 +31,3 @@ class SyntheticTransferFixture(
 data class SyntheticTransferAccounts(val partyId: UUID, val sourceAccountId: UUID, val targetAccountId: UUID)
 
 data class SyntheticTransferRun(val runDate: LocalDate, val direction: SyntheticTransferDirection)
-
-enum class SyntheticTransferDirection { OUTBOUND, RETURN }

@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.infrastructure.rest
 
+import com.openbank.libs.synthetic.SyntheticTransferDirection
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -22,7 +23,7 @@ data class InitiateSyntheticTransferRequest(
             targetAccountId to sourceAccountId
         }
         return InitiateTransactionRequest(
-            idempotencyKey = "synthetic-transfer:$partyId:$runDate:${direction.name}",
+            idempotencyKey = direction.idempotencyKey(partyId, runDate),
             type = "TRANSFER",
             sourceAccountId = source,
             targetAccountId = target,
@@ -35,5 +36,3 @@ data class InitiateSyntheticTransferRequest(
         )
     }
 }
-
-enum class SyntheticTransferDirection { OUTBOUND, RETURN }

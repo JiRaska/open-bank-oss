@@ -18,6 +18,8 @@ import uuid
 SOURCE = "00000000-0000-4000-8000-000000000012"
 TARGET = "00000000-0000-4000-8000-000000000013"
 JOURNEY = Path(__file__).with_name("journey.js").resolve()
+# 2026-07-15T22:02Z falls on July 16 in the Prague booking calendar.
+BANK_DAY = "2026-07-16"
 
 
 class FixtureHandler(BaseHTTPRequestHandler):
@@ -43,6 +45,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
         self.server.submits += 1
         request = json.loads(body)
         self.server.assert_only_fixture_fields = set(request) == {"runDate", "direction"}
+        if request.get("runDate") != self.server.bank_day:
+            self.reply(400, {})
+            return
         direction = request["direction"]
         row = self.server.rows.get(direction)
         if row is None:
@@ -81,6 +86,9 @@ class FixtureHandler(BaseHTTPRequestHandler):
             })
         elif not self.customer_call():
             self.reply(403, {})
+        elif path == "/customer/v1/synthetic/transfers":
+            date = "2026-07-17" if self.server.cross_midnight and "OUTBOUND" in self.server.rows else self.server.bank_day
+            self.reply(200, {"runDate": date})
         elif path == "/customer/v1/transactions":
             self.reply(200, {"data": list(self.server.rows.values())})
         elif path.startswith("/customer/v1/balances/"):
@@ -105,6 +113,8 @@ class ScheduledTransferTest(unittest.TestCase):
     def setUp(self):
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler)
         self.server.ambiguous = True
+        self.server.bank_day = BANK_DAY
+        self.server.cross_midnight = False
         self.server.synthetic_proof = True
         self.server.rows = {}
         self.server.journal_ids = {}
@@ -139,6 +149,7 @@ class ScheduledTransferTest(unittest.TestCase):
         self.assertEqual(self.server.submits, 3)
         self.assertTrue(self.server.assert_only_fixture_fields)
         self.assertEqual(len(self.server.journal_ids), 2)
+        self.assertEqual({row["valueDate"] for row in self.server.rows.values()}, {BANK_DAY})
         self.assertEqual(self.server.balances, {SOURCE: 100, TARGET: 0})
 
         replay = self.run_journey()
@@ -152,3 +163,14 @@ class ScheduledTransferTest(unittest.TestCase):
         self.assertNotEqual(run.returncode, 0)
         self.assertIn("fixture ledger proof differs", run.stderr)
         self.assertEqual(set(self.server.rows), {"OUTBOUND"})
+
+    def test_bank_midnight_after_forward_reports_incomplete_compensation(self):
+        self.server.ambiguous = False
+        self.server.cross_midnight = True
+        run = self.run_journey()
+        self.assertNotEqual(run.returncode, 0)
+        self.assertIn("fixture bank date changed before submission", run.stderr)
+        outbound = self.server.rows["OUTBOUND"]["id"]
+        self.assertIn(f"fixture compensation unproven for bank date {BANK_DAY}, outbound {outbound}", run.stderr)
+        self.assertEqual(set(self.server.rows), {"OUTBOUND"})
+        self.assertEqual(self.server.submits, 1)

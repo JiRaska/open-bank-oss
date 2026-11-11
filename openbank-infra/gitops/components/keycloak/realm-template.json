@@ -1719,6 +1719,27 @@
       "secret": "__SYNTHETIC_LEDGER_SEED_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-synthetic-transfer-verifier",
+      "name": "OpenBank Synthetic Journey: Transfer ledger evidence",
+      "description": "Disabled by default. Dedicated reader for scoped synthetic transfer journal evidence.",
+      "enabled": false,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "roles"
+      ],
+      "optionalClientScopes": []
+    },
+    {
       "clientId": "agent-merge-recorder-ci",
       "name": "OpenBank Agent Merge Recorder CI",
       "description": "CI-only client_credentials identity for POST /api/v1/agent-merge-records. Its service account carries ROLE_MERGE_RECORDER only, never ROLE_ADMIN (ADR-0031 phase 3, #13172).",
@@ -1906,6 +1927,7 @@
     }
   ],
   "scopeMappings": [
+    { "client": "openbank-synthetic-transfer-verifier", "roles": ["ROLE_API"] },
     { "client": "admin-cli", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-admin-ui", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
     { "client": "openbank-mcp-service", "roles": ["ROLE_ADMIN", "ROLE_MERGE_RECORDER", "ROLE_OPERATOR", "ROLE_VIEWER", "ROLE_MARKETING", "ROLE_API", "ROLE_PENSION_LEGAL_COUNSEL", "ROLE_PENSION_PRODUCT_OWNER", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_COMPLIANCE", "ROLE_AUDITOR", "ROLE_DPO", "ROLE_SUPERVISOR", "ROLE_PAYMENTS", "ROLE_CREDIT_RISK", "ROLE_LENDING_OFFICER", "ROLE_COMMS_EDITOR", "ROLE_COMMS_APPROVER", "PENSION_LEGAL_APPROVER", "PENSION_PRODUCT_OWNER", "ROLE_RISK", "ROLE_FINANCE", "ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_DEMO", "ROLE_TREASURY_BACK_OFFICE", "ROLE_TREASURY_REFERENCE_EDITOR"] },
@@ -2355,6 +2377,14 @@
       "username": "service-account-openbank-synthetic-ledger-seed",
       "enabled": true,
       "serviceAccountClientId": "openbank-synthetic-ledger-seed",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-synthetic-transfer-verifier",
+      "enabled": false,
+      "serviceAccountClientId": "openbank-synthetic-transfer-verifier",
       "realmRoles": [
         "ROLE_API"
       ]

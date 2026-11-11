@@ -106,5 +106,8 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 
 `POST /api/v1/transactions/synthetic-transfer` requires the verified `openbank-edge` workload
 and the request filter's synthetic decision. It derives a fixed CZK 0.01 transfer and the
-own-account exemption from the fixture request. The party, current UTC date and direction
-form the daily idempotency key. The durable origin controls the synthetic ledger route.
+own-account exemption from the fixture request. The party, current Europe/Prague booking date
+and direction form the daily idempotency key. The Edge sends that key as `Idempotency-Key`
+and Transaction rejects any mismatch. A new outbound booking closes 305 seconds before bank
+midnight, allowing the 300-second canary deadline plus a 5-second HTTP call. Same-day
+returns can still book in that window. The durable origin controls the synthetic ledger route.

@@ -8,10 +8,12 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.authz.ServiceAccountIdentity
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.security.Roles
 import com.openbank.libs.spend.SpendCategory
+import com.openbank.libs.synthetic.SyntheticTransferDirection
 import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import com.openbank.libs.web.SyntheticTaintContext
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
@@ -37,6 +39,7 @@ import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -190,6 +193,7 @@ class TransactionResource(
     @Operation(summary = "Initiate the customer-edge synthetic own-account transfer")
     suspend fun initiateSyntheticTransfer(
         request: InitiateSyntheticTransferRequest?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context securityContext: SecurityContext,
         @Context requestContext: ContainerRequestContext,
     ): Response {
@@ -199,15 +203,25 @@ class TransactionResource(
             throw ForbiddenException("Synthetic transfer requires the verified customer edge")
         }
         requireNotNull(request) { "Synthetic transfer run is required" }
-        require(request.runDate == LocalDate.now(clock)) { "Synthetic transfer run date must be today" }
+        require(request.runDate == AccountingClock.bank(clock).today()) { "Synthetic transfer run date must be today" }
         require(request.sourceAccountId != request.targetAccountId) { "Synthetic transfer accounts must differ" }
-        return initiate(request.toInitiation(), securityContext, synthetic = true)
+        val initiation = request.toInitiation()
+        require(idempotencyKey == initiation.idempotencyKey) {
+            "Idempotency-Key must match the synthetic transfer party, bank date and direction"
+        }
+        return initiate(
+            initiation,
+            securityContext,
+            synthetic = true,
+            syntheticTransferDirection = request.direction,
+        )
     }
 
     private suspend fun initiate(
         request: InitiateTransactionRequest,
         securityContext: SecurityContext,
         synthetic: Boolean,
+        syntheticTransferDirection: SyntheticTransferDirection? = null,
     ): Response {
         val initiatedBy = runCatching { UUID.fromString(securityContext.userPrincipal?.name) }
             .getOrDefault(UUID.fromString("00000000-0000-0000-0000-000000000000"))
@@ -229,6 +243,7 @@ class TransactionResource(
             rail = parseEnumParam<PaymentRail>("rail", request.rail),
             instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
             synthetic = synthetic,
+            syntheticTransferDirection = syntheticTransferDirection,
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))

@@ -18,11 +18,18 @@ The `journey-synthetic-transfer-fixture` Secret supplies these values.
 - `FIXTURE_SOURCE_ACCOUNT` and `FIXTURE_TARGET_ACCOUNT` for the pinned accounts.
 - `FIXTURE_SOURCE_BOOKED_CZK` and `FIXTURE_TARGET_BOOKED_CZK` for their expected opening balances.
 
-The outbound and return legs each have one server-derived key per UTC date. The journey observes
+The Keycloak template declares the verifier with its service account disabled. Before an approved
+sandbox run, the fixture owner provisions the dedicated customer identity and enables the dedicated
+verifier in the sandbox issuer with its own credential delivered through the fixture Secret.
+
+The Edge provides the Europe/Prague booking date through the authenticated fixture endpoint.
+The outbound and return legs each have one server-derived key per booking date. New outbound
+bookings close 305 seconds before bank midnight. The journey observes
 both customer histories and one scoped posted synthetic journal per leg. It checks the intermediate
 balance deltas before the return and checks that both balances reach baseline. A same-day rerun
-uses the visible legs and the same daily keys. Unexpected prior balances or ambiguous evidence
-fail the run.
+uses the visible legs and the same daily keys. If the bank date changes or the return cannot be
+proven, the run fails and identifies the earlier bank date and the outbound transaction when known.
+Unexpected prior balances or ambiguous evidence fail the run.
 
 Render with `kubectl kustomize openbank-infra/sandbox/synthetic-transfer`. Run the local
 loopback fixture with `python3 -m unittest discover -s openbank-infra/sandbox/synthetic-transfer`.

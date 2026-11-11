@@ -143,5 +143,7 @@ The dedicated customer route verifies the synthetic request and the `openbank-sy
 service-account token. Set `openbank.synthetic-transfer.party-id`,
 `openbank.synthetic-transfer.source-account-id` and `openbank.synthetic-transfer.target-account-id`
 only for its isolated sandbox fixture. The party must be active and classified SYNTHETIC in
-Party, and it must own both accounts. The route takes the current UTC run date and a direction.
-The dedicated Transaction route requires the authenticated edge and the same synthetic origin.
+Party, and it must own both accounts. `GET /customer/v1/synthetic/transfers` returns the current
+Europe/Prague booking date for the authenticated fixture. Submit that date and the direction via
+POST on the same path. The dedicated Transaction route requires the authenticated edge and the
+same synthetic origin.

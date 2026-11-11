@@ -105,5 +105,8 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 `POST /api/v1/transactions/synthetic-transfer` vyžaduje ověřenou službu `openbank-edge` a
 potvrzení syntetického původu filtrem požadavků. Z podkladů testovací sady vytvoří převod
-0,01 CZK s výjimkou pro vlastní účty. Subjekt, aktuální datum UTC a směr tvoří denní
-idempotentní klíč. Uložený původ určuje syntetickou trasu do ledgeru.
+0,01 CZK s výjimkou pro vlastní účty. Subjekt, aktuální datum účtování v zóně Europe/Prague a směr
+tvoří denní idempotentní klíč. Edge ho posílá v hlavičce `Idempotency-Key` a služba Transaction
+odmítne jinou hodnotu. Nový odchozí převod se uzavírá 305 sekund před bankovní půlnocí.
+Limit pokrývá 300 sekund běhu canary a 5 sekund pro HTTP požadavek. Návrat v témže bankovním dni
+lze zaúčtovat i v tomto okně. Uložený původ určuje syntetickou trasu do ledgeru.

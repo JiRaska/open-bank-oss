@@ -12,6 +12,7 @@ export const options = {
   thresholds: { checks: ['rate==1.0'] },
 };
 
+const isoDate = /^\d{4}-\d{2}-\d{2}$/;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const steps = [
   'fixture balances and history are consistent',
@@ -85,9 +86,8 @@ function fixture() {
   const sourceBooked = minor(setting('FIXTURE_SOURCE_BOOKED_CZK'));
   const targetBooked = minor(setting('FIXTURE_TARGET_BOOKED_CZK'));
   need(sourceBooked > 0 && targetBooked >= 0, 'fixture has insufficient starting funds');
-  return {
+  const f = {
     source, target, sourceBooked, targetBooked,
-    runDate: new Date().toISOString().slice(0, 10),
     customerBase: endpoint('CUSTOMER_BASE'),
     ledgerBase: endpoint('LEDGER_BASE'),
     customerToken: token(endpoint('CUSTOMER_TOKEN_URL'), 'openbank-synthetic-transfer',
@@ -95,6 +95,16 @@ function fixture() {
     ledgerToken: token(endpoint('LEDGER_TOKEN_URL'), 'openbank-synthetic-transfer-verifier',
       setting('LEDGER_CLIENT_SECRET')),
   };
+  return { ...f, runDate: bankDate(f) };
+}
+
+function bankDate(f) {
+  const response = http.get(`${f.customerBase}/customer/v1/synthetic/transfers`,
+    params('fixture-bank-date', f.customerToken, true));
+  need(response.status === 200, 'fixture bank date unavailable');
+  const runDate = response.json('runDate');
+  need(typeof runDate === 'string' && isoDate.test(runDate), 'invalid fixture bank date');
+  return runDate;
 }
 
 function history(f, account) {
@@ -135,6 +145,7 @@ function waitBalance(f, sourceDelta, targetDelta) {
 }
 
 function submit(f, direction) {
+  need(bankDate(f) === f.runDate, 'fixture bank date changed before submission');
   const url = `${f.customerBase}/customer/v1/synthetic/transfers`;
   const payload = JSON.stringify({ runDate: f.runDate, direction });
   let response = http.post(url, payload, params('fixture-submit', f.customerToken, true));
@@ -169,16 +180,26 @@ function proof(f, id, from, to) {
 
 export default function () {
   let completed = 0;
+  let f;
+  let outboundId;
+  let forwardMayExist = false;
   try {
-    const f = fixture();
+    f = fixture();
     const rows = history(f, f.source);
     const outbound = leg(rows, f, f.source, f.target);
+    if (outbound) {
+      forwardMayExist = true;
+      outboundId = outbound.id;
+    }
     const returning = leg(rows, f, f.target, f.source);
     need(outbound || !returning, 'fixture return exists without outbound history');
     if (!outbound) waitBalance(f, 0, 0);
     verify(steps[completed++]);
 
-    const outboundId = outbound ? outbound.id : submit(f, 'OUTBOUND');
+    if (!outboundId) {
+      forwardMayExist = true;
+      outboundId = submit(f, 'OUTBOUND');
+    }
     const firstJournal = proof(f, outboundId, f.source, f.target);
     verify(steps[completed++]);
 
@@ -191,6 +212,9 @@ export default function () {
     verify(steps[completed++]);
   } catch (failure) {
     console.error(failure instanceof FixtureFailure ? failure.message : 'fixture response could not be processed');
+    if (f && forwardMayExist && completed < 3) {
+      console.error(`fixture compensation unproven for bank date ${f.runDate}, outbound ${outboundId || 'unknown'}`);
+    }
     for (const step of steps.slice(completed)) check(null, { [step]: () => false });
   }
 }

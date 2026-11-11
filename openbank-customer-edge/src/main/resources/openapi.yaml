@@ -4349,6 +4349,29 @@ paths:
           description: Source or target account does not belong to caller
 
   /synthetic/transfers:
+    get:
+      tags: [Transfers]
+      operationId: syntheticTransferBankDate
+      summary: Read the current bank date for the pinned synthetic transfer fixture
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: true
+          schema: {type: string, const: 'true'}
+      responses:
+        '200':
+          description: Current Europe/Prague booking date from the bank calendar
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [runDate]
+                properties:
+                  runDate: {type: string, format: date}
+        '403':
+          description: Verified synthetic fixture identity or taint is absent
     post:
       tags: [Transfers]
       operationId: createSyntheticTransfer
@@ -4372,7 +4395,7 @@ paths:
               type: object
               required: [runDate, direction]
               properties:
-                runDate: {type: string, format: date, description: Current UTC date}
+                runDate: {type: string, format: date, description: Current Europe/Prague booking date}
                 direction: {type: string, enum: [OUTBOUND, RETURN]}
       responses:
         '201':
@@ -4381,6 +4404,8 @@ paths:
           description: Invalid direction or run date
         '403':
           description: Verified synthetic identity, fixture ownership or taint is absent
+        '422':
+          description: The bank date changed or the outbound booking window closed
         '502':
           description: Upstream service unavailable
 

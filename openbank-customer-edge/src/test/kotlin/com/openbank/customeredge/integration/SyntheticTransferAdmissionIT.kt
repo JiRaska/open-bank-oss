@@ -5,6 +5,7 @@
 package com.openbank.customeredge.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.synthetic.SyntheticTaint
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -16,7 +17,6 @@ import io.restassured.RestAssured.given
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
-import java.time.ZoneOffset
 
 @QuarkusTest
 @QuarkusTestResource(value = SyntheticTransferAdmissionIT.FixtureResource::class, restrictToAnnotatedClass = true)
@@ -64,6 +64,12 @@ class SyntheticTransferAdmissionIT {
         }
         BusinessApprovalStubs.stub("POST", TX_PATH, 201, """{"id":"$TRANSACTION_ID"}""")
 
+        val calendar = given().header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE).get(EDGE_PATH)
+        assertThat(calendar.statusCode).isEqualTo(200)
+        assertThat(calendar.getHeader("Cache-Control")).contains("no-store")
+        assertThat(calendar.jsonPath().getString("runDate"))
+            .isEqualTo(LocalDate.now(AccountingClock.BANK_ZONE).toString())
+        assertThat(given().get(EDGE_PATH).statusCode).isEqualTo(403)
         assertThat(submit(tainted = true)).isEqualTo(201)
         assertThat(submit(tainted = false)).isEqualTo(403)
         assertThat(submit(tainted = true, actingFor = PARTY_ID)).isEqualTo(403)
@@ -84,6 +90,8 @@ class SyntheticTransferAdmissionIT {
         assertThat(body.path("sourceAccountId").asText()).isEqualTo(SOURCE_ID)
         assertThat(body.path("targetAccountId").asText()).isEqualTo(TARGET_ID)
         assertThat(body.path("direction").asText()).isEqualTo("OUTBOUND")
+        assertThat(forwarded.header("Idempotency-Key"))
+            .isEqualTo("synthetic-transfer:$PARTY_ID:${body.path("runDate").asText()}:OUTBOUND")
         assertThat(BusinessApprovalStubs.requests("POST", "/api/v1/transactions")).isEmpty()
     }
 
@@ -91,10 +99,10 @@ class SyntheticTransferAdmissionIT {
         """{"id":"$PARTY_ID","classification":"$classification","status":"ACTIVE"}"""
 
     private fun submit(tainted: Boolean, actingFor: String? = null): Int = given().contentType("application/json")
-        .body("""{"runDate":"${LocalDate.now(ZoneOffset.UTC)}","direction":"OUTBOUND"}""")
+        .body("""{"runDate":"${LocalDate.now(AccountingClock.BANK_ZONE)}","direction":"OUTBOUND"}""")
         .apply { if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) }
         .apply { if (actingFor != null) header("X-Acting-For", actingFor) }
-        .post("/customer/v1/synthetic/transfers").statusCode
+        .post(EDGE_PATH).statusCode
 
     private companion object {
         const val CANARY_PRINCIPAL = "service-account-openbank-synthetic-transfer"
@@ -103,6 +111,7 @@ class SyntheticTransferAdmissionIT {
         const val TARGET_ID = "00000000-0000-4000-8000-000000000013"
         const val TRANSACTION_ID = "00000000-0000-4000-8000-000000000014"
         const val PARTY_PATH = "/api/v1/parties/$PARTY_ID"
+        const val EDGE_PATH = "/customer/v1/synthetic/transfers"
         const val TX_PATH = "/api/v1/transactions/synthetic-transfer"
     }
 }

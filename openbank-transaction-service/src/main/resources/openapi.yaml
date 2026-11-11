@@ -104,8 +104,13 @@ paths:
       summary: Initiate the customer-edge synthetic own-account transfer
       description: >-
         Requires the verified customer-edge workload and a trusted synthetic origin. The service
-        derives the transfer direction, a fixed CZK 0.01 amount and a stable daily idempotency key.
+        derives the transfer direction and a fixed CZK 0.01 amount. The required Idempotency-Key
+        must match the verified fixture party, bank date and direction.
       parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128}
         - name: x-openbank-synthetic
           in: header
           required: true
@@ -121,7 +126,7 @@ paths:
                 partyId: {type: string, format: uuid}
                 sourceAccountId: {type: string, format: uuid}
                 targetAccountId: {type: string, format: uuid}
-                runDate: {type: string, format: date, description: Current UTC date}
+                runDate: {type: string, format: date, description: Current Europe/Prague booking date}
                 direction: {type: string, enum: [OUTBOUND, RETURN]}
       responses:
         '201':
@@ -131,11 +136,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/TransactionResponse'
         '400':
-          description: Invalid direction, accounts or run date
+          description: Invalid direction, accounts, run date or missing or mismatched Idempotency-Key
         '403':
           description: Trusted synthetic origin or verified customer-edge workload is absent
         '409':
-          description: Idempotency key belongs to a different origin
+          description: Idempotency key belongs to a different origin or bank date
+        '422':
+          description: The bank date changed or the outbound booking window closed
 
   /api/v1/transactions/search:
     get:
