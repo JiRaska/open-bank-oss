@@ -281,7 +281,7 @@ paths:
               can prove redaction, watermark and view-count enforcement.
 
             All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
         '409': { $ref: '#/components/responses/IdempotencyConflict' }
         '422': { description: Eligibility gate, the grantor does not own the resource (ADR-0232 D5, threat model T1) }
         '503': { description: Grantor authority could not be verified; retry is safe because SCA was not consumed }
@@ -310,7 +310,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationPreviewResponse' }
         '400': { description: Unsupported or inconsistent constraints, including non-null exposure (EXPOSURE_UNSUPPORTED) }
-        '403': { description: The authenticated party is not the grantor, or the actor has no active authority for it }
+        '403': { description: The authenticated party is not the grantor, or the actor lacks verified sole signing authority }
         '422': { description: Eligibility gate, or resource ownership could not be established }
         '503': { description: Grantor authority could not be verified; the draft was not authorized or cached }
   /api/v1/delegations/recertifications/grantor/{partyId}:
