@@ -279,7 +279,10 @@ class BusinessPaymentApprovalIT {
             header("X-Acting-For", COMPANY)
             header("X-SCA-Challenge-Id", SCA)
             header("Idempotency-Key", "fixture-masked-payee-key")
-            body("""{"debtorAccountId":"$ACCOUNT","amount":"80000.00","paymentSessionToken":"$token","creditorName":"Fixture"}""")
+            body(
+                """{"debtorAccountId":"$ACCOUNT","amount":"80000.00",
+                    "paymentSessionToken":"$token","creditorName":"Fixture"}""",
+            )
         } When {
             post("/customer/v1/domestic-payments")
         } Then {
