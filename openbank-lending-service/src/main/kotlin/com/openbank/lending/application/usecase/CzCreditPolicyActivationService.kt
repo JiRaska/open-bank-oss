@@ -120,65 +120,68 @@ class CzCreditPolicyActivationService(
         policyJson = payload,
     )
 
-    private fun validateBundle(bundle: PolicyBundle) {
-        val tables = bundle.tables
-        val kinds = tables.map { it.kind }
-        require(kinds.toSet() == PolicyTableKind.entries.toSet() && kinds.size == PolicyTableKind.entries.size) {
-            "Exactly one table of each policy kind is required"
-        }
-        val first = tables.first()
-        require(first.version >= FIRST_STORED_REVISION) { "Versions 1 and 2 are reserved for the starter policy" }
-        val consistent = tables.all {
-            it.version == first.version &&
-                it.effectiveFrom == first.effectiveFrom &&
-                it.effectiveTo == null &&
-                it.name.isNotBlank()
-        }
-        require(consistent) { "Policy tables must share one version and effective date" }
-        val rules = tables.flatMap { it.rules }
-        require(rules.map { it.id }.distinct().size == rules.size && rules.all { RULE_ID.matches(it.id) }) {
-            "Policy rule IDs must be unique and use letters, digits, periods, underscores or hyphens"
-        }
-        require(tables.all { it.rules.isNotEmpty() }) { "Every policy table requires rules" }
-        require(tables.all { table -> table.rules.all { validRule(table.kind, it) } }) {
-            "A policy rule has invalid operands or price band"
-        }
-        requireRiskEvidence(bundle)
-    }
-
-    private fun requireRiskEvidence(bundle: PolicyBundle) {
-        val byKind = bundle.tables.associateBy { it.kind }
-        val adverseBureau = byKind.getValue(PolicyTableKind.EXCLUSION).rules.any {
-            it.attribute == PolicyAttribute.CUSTOMER_TYPE &&
-                it.operator == PolicyOperator.EQ &&
-                it.values == setOf("ADVERSE_BUREAU")
-        }
-        require(adverseBureau) { "A Czech revision must retain the adverse bureau exclusion" }
-        val limits = byKind.getValue(PolicyTableKind.AFFORDABILITY).rules
-            .filter { it.operator == PolicyOperator.LTE }.map { it.attribute }.toSet()
-        require(limits.containsAll(setOf(PolicyAttribute.DSTI, PolicyAttribute.DTI))) {
-            "A Czech revision must define both DSTI and DTI limits"
-        }
-    }
-
-    private fun validRule(kind: PolicyTableKind, rule: PolicyRule): Boolean {
-        val validOperands = when (rule.operator) {
-            PolicyOperator.IN, PolicyOperator.NOT_IN -> rule.threshold == null && rule.values.isNotEmpty()
-            PolicyOperator.EQ, PolicyOperator.NEQ ->
-                (rule.threshold != null && rule.values.isEmpty()) || (rule.threshold == null && rule.values.size == 1)
-            else -> rule.threshold != null && rule.values.isEmpty()
-        }
-        val validBand = if (kind == PolicyTableKind.PRICING_BAND) {
-            rule.band?.let(PRICE_BAND::matches) == true
-        } else {
-            rule.band == null
-        }
-        return validOperands && validBand
-    }
-
     companion object {
         const val FIRST_STORED_REVISION = 3
-        private val RULE_ID = Regex("[A-Za-z0-9_.-]{1,80}")
-        private val PRICE_BAND = Regex("[A-Za-z0-9_.-]{1,32}")
     }
+}
+
+private val RULE_ID = Regex("[A-Za-z0-9_.-]{1,80}")
+private val PRICE_BAND = Regex("[A-Za-z0-9_.-]{1,32}")
+
+private fun validateBundle(bundle: PolicyBundle) {
+    val tables = bundle.tables
+    val kinds = tables.map { it.kind }
+    require(kinds.toSet() == PolicyTableKind.entries.toSet() && kinds.size == PolicyTableKind.entries.size) {
+        "Exactly one table of each policy kind is required"
+    }
+    val first = tables.first()
+    require(first.version >= CzCreditPolicyActivationService.FIRST_STORED_REVISION) {
+        "Versions 1 and 2 are reserved for the starter policy"
+    }
+    val consistent = tables.all {
+        it.version == first.version &&
+            it.effectiveFrom == first.effectiveFrom &&
+            it.effectiveTo == null &&
+            it.name.isNotBlank()
+    }
+    require(consistent) { "Policy tables must share one version and effective date" }
+    val rules = tables.flatMap { it.rules }
+    require(rules.map { it.id }.distinct().size == rules.size && rules.all { RULE_ID.matches(it.id) }) {
+        "Policy rule IDs must be unique and use letters, digits, periods, underscores or hyphens"
+    }
+    require(tables.all { it.rules.isNotEmpty() }) { "Every policy table requires rules" }
+    require(tables.all { table -> table.rules.all { validRule(table.kind, it) } }) {
+        "A policy rule has invalid operands or price band"
+    }
+    requireRiskEvidence(bundle)
+}
+
+private fun requireRiskEvidence(bundle: PolicyBundle) {
+    val byKind = bundle.tables.associateBy { it.kind }
+    val adverseBureau = byKind.getValue(PolicyTableKind.EXCLUSION).rules.any {
+        it.attribute == PolicyAttribute.CUSTOMER_TYPE &&
+            it.operator == PolicyOperator.EQ &&
+            it.values == setOf("ADVERSE_BUREAU")
+    }
+    require(adverseBureau) { "A Czech revision must retain the adverse bureau exclusion" }
+    val limits = byKind.getValue(PolicyTableKind.AFFORDABILITY).rules
+        .filter { it.operator == PolicyOperator.LTE }.map { it.attribute }.toSet()
+    require(limits.containsAll(setOf(PolicyAttribute.DSTI, PolicyAttribute.DTI))) {
+        "A Czech revision must define both DSTI and DTI limits"
+    }
+}
+
+private fun validRule(kind: PolicyTableKind, rule: PolicyRule): Boolean {
+    val validOperands = when (rule.operator) {
+        PolicyOperator.IN, PolicyOperator.NOT_IN -> rule.threshold == null && rule.values.isNotEmpty()
+        PolicyOperator.EQ, PolicyOperator.NEQ ->
+            (rule.threshold != null && rule.values.isEmpty()) || (rule.threshold == null && rule.values.size == 1)
+        else -> rule.threshold != null && rule.values.isEmpty()
+    }
+    val validBand = if (kind == PolicyTableKind.PRICING_BAND) {
+        rule.band?.let(PRICE_BAND::matches) == true
+    } else {
+        rule.band == null
+    }
+    return validOperands && validBand
 }
