@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [payments, aml-sanctions, fraud, accounts]
-summary: "Every outbound payment on every rail passes one ordered admission chain before money leaves: standing, limits, sanctions, AML destination risk, fraud, payee check. One decision type, one HELD state, one release path; a control that cannot answer holds."
+summary: "Every outbound payment on every rail passes one ordered admission chain before money leaves: standing, limits, sanctions, AML destination risk, fraud, payee check. One decision type, one HELD state; a control that cannot answer holds."
 ---
 
 # ADR-0374 — Payment admission: one ordered pre-execution control chain with a generic hold
