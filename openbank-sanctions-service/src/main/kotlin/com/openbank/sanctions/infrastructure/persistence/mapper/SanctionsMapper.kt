@@ -4,12 +4,13 @@
 
 package com.openbank.sanctions.infrastructure.persistence.mapper
 
+import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.sanctions.domain.model.*
 import com.openbank.sanctions.infrastructure.persistence.entity.SanctionsCheckEntity
 
-private val mapper = jacksonObjectMapper()
+private val mapper = jacksonObjectMapper().omitAbsentScreeningProfileFields()
 
 fun SanctionsCheckEntity.toDomain() = SanctionsCheck(
     id, idempotencyKey, entityType, name,

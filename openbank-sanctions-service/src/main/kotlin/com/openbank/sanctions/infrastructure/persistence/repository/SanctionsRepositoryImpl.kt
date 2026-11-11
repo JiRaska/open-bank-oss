@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.infrastructure.persistence.repository
 
+import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -27,7 +28,7 @@ class SanctionsRepositoryImpl(private val outboxRepo: SanctionsOutboxRepository)
     SanctionsRepository,
     PanacheRepository<SanctionsCheckEntity> {
 
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
+    private val mapper = jacksonObjectMapper().findAndRegisterModules().omitAbsentScreeningProfileFields()
 
     override suspend fun save(check: SanctionsCheck): SanctionsCheck {
         val e = check.toEntity()

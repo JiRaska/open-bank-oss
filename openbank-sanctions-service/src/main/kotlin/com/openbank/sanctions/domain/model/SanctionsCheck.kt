@@ -4,7 +4,6 @@
 
 package com.openbank.sanctions.domain.model
 
-import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.fincrime.ScreeningPolicy
 import java.time.Instant
 import java.util.UUID
@@ -23,8 +22,8 @@ enum class MatchType { EXACT, FUZZY, PHONETIC, ALIAS }
 
 /**
  * What a match MEANS, as opposed to which list it came from. Set only on checks screened with an
- * explicit [ScreeningProfile]; a legacy (profile-less) check carries none and serialises exactly
- * as before.
+ * explicit [ScreeningProfile]; a legacy (profile-less) check carries none, and the JSON mapping
+ * omits the absent value so such a check serialises exactly as before.
  *
  * A PEP match is deliberately its own kind: a politically exposed person is a customer-risk
  * fact, never a sanctions designation, and must not block a payment as one.
@@ -71,6 +70,9 @@ enum class ScreeningProfile(val lists: List<SanctionsListType>) {
     CUSTOMER(PAYMENT.lists + SanctionsListType.PEP_GLOBAL),
 }
 
+/** PEP outcome of a CUSTOMER-profile screen. A PEP is never whitelisted or escalated as a sanctions hit is. */
+enum class PepStatus { CLEAR, POTENTIAL_HIT, HIT }
+
 /** How a listed jurisdiction is treated: an embargo blocks, a high-risk listing goes to review. */
 enum class JurisdictionMeasure { EMBARGO, HIGH_RISK }
 
@@ -102,7 +104,6 @@ data class SanctionsMatch(
     val listEntryDate: String?,
     val programs: List<String>,
     /** Null on legacy (profile-less) checks, which keep their original wire shape. */
-    @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val matchKind: MatchKind? = null,
 )
 
@@ -128,17 +129,13 @@ data class SanctionsCheck(
     /** A WHITELISTED review may cover later fresh screens only until this instant. */
     val clearanceExpiresAt: Instant? = null,
     /** The explicit screening purpose; null on legacy checks. */
-    @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val profile: ScreeningProfile? = null,
     /** ISO 3166-1 alpha-2 country of the screened counterparty, when the caller supplied one. */
-    @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val country: String? = null,
     /** BIC of the counterparty's bank, when the caller supplied one. */
-    @get:JsonInclude(JsonInclude.Include.NON_NULL)
     val bankIdentifier: String? = null,
     /** PEP outcome of a CUSTOMER-profile screen, reported apart from [status]; null otherwise. */
-    @get:JsonInclude(JsonInclude.Include.NON_NULL)
-    val pepStatus: SanctionsCheckStatus? = null,
+    val pepStatus: PepStatus? = null,
 ) {
     fun isHighRisk() = status == SanctionsCheckStatus.HIT ||
         (status == SanctionsCheckStatus.POTENTIAL_HIT && overallScore > ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD)
