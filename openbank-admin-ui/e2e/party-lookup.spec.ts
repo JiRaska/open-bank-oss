@@ -14,7 +14,7 @@
 // Only a real browser with real timing can express that. The assertions below are the ones that were
 // RED before the generation-counter guard and green after it — the fix's own regression net.
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const A = { id: '05a02ef1-381c-40e7-b73f-d6855eead42e', legalName: 'Jan Novák', email: 'jan@example.test', status: 'ACTIVE', kycStatus: 'VERIFIED' }

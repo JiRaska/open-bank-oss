@@ -1,0 +1,4 @@
+{
+  "_comment": "ADR-0370 U1: known mock/openapi disagreements. May only shrink. Regenerate with OPENBANK_CONTRACT_RECORD.",
+  "violations": []
+}
