@@ -14,12 +14,10 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.ResolutionStep
-import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
-import java.util.HexFormat
 import java.util.UUID
 
 /**
@@ -87,7 +85,7 @@ class NostroBreakResolutionService(
     ): NostroBreakView {
         val account = normalize(iban)
         if (account !in ibans) throw NostroAccountNotFoundException(account)
-        val fingerprint = fingerprint(account, breakId, step, reason ?: discriminator, actor)
+        val fingerprint = NostroBreakResolutionFingerprint.of(account, breakId, step, reason ?: discriminator, actor)
         replayed(idempotencyKey, fingerprint)?.let { return it }
         val stored =
             breakRepo.find(breakId)?.takeIf { it.iban == account } ?: throw NostroBreakNotFoundException(breakId)
@@ -121,11 +119,6 @@ class NostroBreakResolutionService(
 
     private fun view(b: NostroBreak, today: LocalDate) =
         NostroBreakView(b, b.ageBusinessDays(today), policy.isAged(b, today))
-
-    private fun fingerprint(account: String, breakId: UUID, step: ResolutionStep, reason: String?, actor: Actor) =
-        HexFormat.of().formatHex(
-            MessageDigest.getInstance("SHA-256").digest("$account|$breakId|$step|${actor.id}|$reason".toByteArray()),
-        )
 
     /** The Prague bank day, as the sweep and the listing use it. */
     private fun bankToday(): LocalDate = AccountingClock.bank(clock).today()
