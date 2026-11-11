@@ -183,11 +183,9 @@ class BusinessSigningService(
         val payload = codec.canonical(cmd.payload)
         // A consumed challenge can replay only its original frozen instruction.
         repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
-            if (existing.entityPartyId == cmd.entityPartyId &&
-                existing.initiatorPartyId == cmd.initiatorPartyId &&
-                existing.kind == cmd.kind &&
-                existing.payload == payload
-            ) {
+            val sameParties = existing.entityPartyId == cmd.entityPartyId &&
+                existing.initiatorPartyId == cmd.initiatorPartyId
+            if (sameParties && existing.kind == cmd.kind && existing.payload == payload) {
                 return existing
             }
             throw refused(CONFLICT, "SCA_CHALLENGE_USED", "that SCA challenge has already authorised another request")
