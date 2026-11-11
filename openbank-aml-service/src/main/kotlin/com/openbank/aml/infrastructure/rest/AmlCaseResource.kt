@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.usecase.AmlCaseNotFoundException
 import com.openbank.aml.application.port.`in`.ListAmlCasesQuery
+import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.infrastructure.rest.dto.CreateAmlCaseRequest
@@ -81,6 +82,10 @@ class AmlCaseResource(
         requireNamedMachineCaller(identity)
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // ADR-0371: keys with this prefix mark cases the pack evaluation opened; nobody may mint one here.
+        require(!idempotencyKey.startsWith(AmlCase.PACK_MONITORING_KEY_PREFIX)) {
+            "Idempotency-Key prefix '${AmlCase.PACK_MONITORING_KEY_PREFIX}' is reserved"
+        }
         requireFraudReviewKeyCaller(identity, idempotencyKey)
 
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any

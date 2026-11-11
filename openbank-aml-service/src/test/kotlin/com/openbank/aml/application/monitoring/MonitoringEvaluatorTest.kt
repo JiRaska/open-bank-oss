@@ -34,7 +34,7 @@ class MonitoringEvaluatorTest {
     }
 
     @Test
-    fun `a count at the pack's minimum is a finding that carries the evidence it was decided on`(): Unit {
+    fun `a count at the pack's minimum is a finding that carries the evidence it was decided on`() {
         val counts = Counts(mapOf(("CZK" to MovementDirection.OUT) to 3L, ("EUR" to MovementDirection.OUT) to 2L))
         val record = evaluate(counts)
 
@@ -53,7 +53,7 @@ class MonitoringEvaluatorTest {
     }
 
     @Test
-    fun `every question is one currency, one band, one direction over the feature's own window`(): Unit {
+    fun `every question is one currency, one band, one direction over the feature's own window`() {
         val counts = Counts(emptyMap())
         evaluate(counts)
 
@@ -73,7 +73,7 @@ class MonitoringEvaluatorTest {
     }
 
     @Test
-    fun `counts below every minimum are NO_FINDING, which is not a statement about the party`(): Unit {
+    fun `counts below every minimum are NO_FINDING, which is not a statement about the party`() {
         val record = evaluate(Counts(mapOf(("CZK" to MovementDirection.OUT) to 2L)))
         assertThat(record.outcome).isEqualTo(MonitoringEvaluationOutcome.NO_FINDING)
         assertThat(record.hits).isEmpty()
@@ -81,7 +81,7 @@ class MonitoringEvaluatorTest {
     }
 
     @Test
-    fun `a pack that cannot be evaluated is INCOMPLETE with the reason, even over counts that would match`(): Unit {
+    fun `a pack that cannot be evaluated is INCOMPLETE with the reason, even over counts that would match`() {
         val wouldMatch = Counts(mapOf(("CZK" to MovementDirection.OUT) to 99L))
         val record = evaluate(wouldMatch, Instant.parse("2100-01-01T00:00:00Z"))
 

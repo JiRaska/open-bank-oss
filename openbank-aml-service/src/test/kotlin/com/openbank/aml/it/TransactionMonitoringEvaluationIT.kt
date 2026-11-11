@@ -50,9 +50,11 @@ abstract class MonitoringEvaluationITSupport {
         }
     }
 
-    protected fun evaluation(partyId: UUID): Row? =
-        rows("SELECT outcome, failure, pack_hash, input_hash FROM aml_monitoring_evaluation WHERE party_id = $1", partyId)
-            .singleOrNull()
+    protected fun evaluation(partyId: UUID): Row? = rows(
+        "SELECT outcome, failure, pack_hash, input_hash FROM aml_monitoring_evaluation WHERE party_id = $1",
+        partyId,
+    )
+        .singleOrNull()
 
     protected fun hits(partyId: UUID): List<Row> = rows(
         """
@@ -141,7 +143,12 @@ class TransactionMonitoringEvaluationIT : MonitoringEvaluationITSupport() {
         assertThat(hit.getUUID("case_id")).isNull()
         assertThat(hit.getString("pack_hash")).isEqualTo(evaluated.getString("pack_hash"))
         assertThat(hit.getString("counter_snapshot"))
-            .contains("\"count\":3", "\"band\":\"SYN_CZK_BELOW_MARK\"", "\"currency\":\"CZK\"", hit.getString("pack_hash"))
+            .contains(
+                "\"count\":3",
+                "\"band\":\"SYN_CZK_BELOW_MARK\"",
+                "\"currency\":\"CZK\"",
+                hit.getString("pack_hash"),
+            )
 
         val quiet = evaluation(BELOW_MINIMUM)!!
         assertThat(quiet.getString("outcome")).describedAs("rules did not match; not a clear").isEqualTo("NO_FINDING")
@@ -189,7 +196,12 @@ class TransactionMonitoringCaseOpeningIT : MonitoringEvaluationITSupport() {
         assertThat(case.getString("alert_code")).isEqualTo("syn-structuring-czk-out")
         assertThat(case.getString("risk_level")).isEqualTo("MEDIUM")
         assertThat(case.getString("status")).describedAs("opened, never auto-decided").isEqualTo("OPEN")
-        assertThat(case.getString("alert_detail")).contains(hit.getString("pack_hash"), "\"count\":3", "syn-structuring-czk-out")
+        assertThat(
+            case.getString("alert_detail"),
+        ).contains(hit.getString("pack_hash"), "\"count\":3", "syn-structuring-czk-out")
+        assertThat(
+            case.getString("idempotency_key"),
+        ).describedAs("the reserved pack-monitoring key").startsWith("tm:$AT_MINIMUM:")
 
         assertThat(monitoringCases(BELOW_MINIMUM)).describedAs("below the minimum: no case").isEmpty()
     }

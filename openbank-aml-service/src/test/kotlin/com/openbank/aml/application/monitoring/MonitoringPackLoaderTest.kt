@@ -28,7 +28,9 @@ class MonitoringPackLoaderTest {
 
     @Test
     fun `a feature whose window was edited no longer matches the hash the pack pins`() {
-        val edited = MonitoringPackFixture.file("monitoring-count-features.synthetic.json").replaceFirst("86400", "3600")
+        val edited = MonitoringPackFixture.file(
+            "monitoring-count-features.synthetic.json",
+        ).replaceFirst("86400", "3600")
         assertThatThrownBy { MonitoringPackFixture.load(features = edited) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("another revision or content")
@@ -42,12 +44,20 @@ class MonitoringPackLoaderTest {
             MonitoringPackFixture.load(features = features.replace("syn_eur_out_below_mark_w24h", "renamed_feature"))
         }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("undefined feature")
         assertThatThrownBy { MonitoringPackFixture.load(pack = pack.replace("\"HIGH\"", "\"SEVERE\"")) }
-            .describedAs("a severity code the vocabulary does not hold").isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { MonitoringPackFixture.load(pack = pack.replace("SYN_REPEATED_BELOW_MARK", "UNLISTED_REASON")) }
-            .describedAs("a reason code the vocabulary does not hold").isInstanceOf(IllegalArgumentException::class.java)
+            .describedAs(
+                "a severity code the vocabulary does not hold",
+            ).isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            MonitoringPackFixture.load(pack = pack.replace("SYN_REPEATED_BELOW_MARK", "UNLISTED_REASON"))
+        }
+            .describedAs(
+                "a reason code the vocabulary does not hold",
+            ).isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { MonitoringPackFixture.load(scheme = MonitoringPackFixture.scheme.copy(revision = 2)) }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("another counter scheme")
-        assertThatThrownBy { MonitoringPackFixture.load(scheme = MonitoringPackFixture.scheme.copy(bands = emptyList())) }
+        assertThatThrownBy {
+            MonitoringPackFixture.load(scheme = MonitoringPackFixture.scheme.copy(bands = emptyList()))
+        }
             .isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("band the scheme does not define")
         assertThatThrownBy { MonitoringPackFixture.load(features = features.replace("\"purpose\"", "\"porpoise\"")) }
             .isInstanceOf(IllegalArgumentException::class.java)

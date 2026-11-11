@@ -41,7 +41,9 @@ data class CountFeatureDefinition(
         ).joinToString("|")
 
     /** Tumbling window containing [at]: the identity of "the same window" for one open case. */
-    fun windowStart(at: Instant): Instant = Instant.ofEpochSecond(Math.floorDiv(at.epochSecond, windowSeconds) * windowSeconds)
+    fun windowStart(at: Instant): Instant = Instant.ofEpochSecond(
+        Math.floorDiv(at.epochSecond, windowSeconds) * windowSeconds,
+    )
 
     companion object {
         const val ANY = "*"

@@ -46,7 +46,16 @@ class MonitoringEvaluator(
                     rail = feature.rail,
                 ),
             )
-            CounterObservation(feature.id, feature.currency, feature.band, feature.direction, feature.rail, from, at, count)
+            CounterObservation(
+                feature.id,
+                feature.currency,
+                feature.band,
+                feature.direction,
+                feature.rail,
+                from,
+                at,
+                count,
+            )
         }
         val byFeature = observations.associateBy { it.featureId }
         val result = pack.compiled.evaluate(
@@ -83,7 +92,10 @@ class MonitoringEvaluator(
                     partyId = partyId,
                     pack = pack.identity,
                     evaluatedAt = at,
-                    outcome = if (hits.isEmpty()) MonitoringEvaluationOutcome.NO_FINDING else MonitoringEvaluationOutcome.FINDING,
+                    outcome = when {
+                        hits.isEmpty() -> MonitoringEvaluationOutcome.NO_FINDING
+                        else -> MonitoringEvaluationOutcome.FINDING
+                    },
                     failure = null,
                     inputHash = result.inputHash,
                     hits = hits,

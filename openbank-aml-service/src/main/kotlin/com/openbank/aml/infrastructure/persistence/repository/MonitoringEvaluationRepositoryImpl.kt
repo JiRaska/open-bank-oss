@@ -22,22 +22,23 @@ import java.util.UUID
 @ApplicationScoped
 class MonitoringEvaluationRepositoryImpl : MonitoringEvaluationRepository {
 
-    override suspend fun activeParties(since: Instant, afterPartyId: UUID?, limit: Int): List<UUID> = Panache.withSession {
-        Panache.getSession().chain { session ->
-            session.createNativeQuery(
-                """
+    override suspend fun activeParties(since: Instant, afterPartyId: UUID?, limit: Int): List<UUID> =
+        Panache.withSession {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(
+                    """
                 SELECT DISTINCT party_id FROM aml_movement_counter
                  WHERE bucket_start >= :since AND party_id > :after
                  ORDER BY party_id LIMIT :limit
-                """.trimIndent(),
-                UUID::class.java,
-            )
-                .setParameter("since", utc(since))
-                .setParameter("after", afterPartyId ?: LOWEST)
-                .setParameter("limit", limit)
-                .resultList
-        }
-    }.awaitSuspending()
+                    """.trimIndent(),
+                    UUID::class.java,
+                )
+                    .setParameter("since", utc(since))
+                    .setParameter("after", afterPartyId ?: LOWEST)
+                    .setParameter("limit", limit)
+                    .resultList
+            }
+        }.awaitSuspending()
 
     override suspend fun recordEvaluation(record: MonitoringEvaluationRecord) {
         Panache.withTransaction {
@@ -65,7 +66,12 @@ class MonitoringEvaluationRepositoryImpl : MonitoringEvaluationRepository {
         }.awaitSuspending()
     }
 
-    override suspend fun recordHit(hit: MonitoringHit, pack: PackIdentity, snapshotJson: String, at: Instant): RecordedHit {
+    override suspend fun recordHit(
+        hit: MonitoringHit,
+        pack: PackIdentity,
+        snapshotJson: String,
+        at: Instant,
+    ): RecordedHit {
         val candidate = UUID.randomUUID()
         return Panache.withTransaction {
             mutate(
@@ -131,7 +137,8 @@ class MonitoringEvaluationRepositoryImpl : MonitoringEvaluationRepository {
             session.createNativeQuery(
                 """
                 SELECT count(*), min(created_at) FROM aml_cases
-                 WHERE screening_type = 'TRANSACTION_MONITORING' AND status IN ('OPEN', 'UNDER_REVIEW', 'ESCALATED')
+                 WHERE screening_type = 'TRANSACTION_MONITORING' AND idempotency_key LIKE 'tm:%'
+                   AND status IN ('OPEN', 'UNDER_REVIEW', 'ESCALATED')
                 """.trimIndent(),
                 Array<Any>::class.java,
             ).resultList
