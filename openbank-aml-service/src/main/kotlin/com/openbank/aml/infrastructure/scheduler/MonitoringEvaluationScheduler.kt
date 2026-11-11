@@ -53,7 +53,16 @@ import java.util.concurrent.atomic.AtomicLong
  */
 @Startup
 @ApplicationScoped
-class MonitoringEvaluationScheduler {
+class MonitoringEvaluationScheduler(
+    // Constructor parameters without a Kotlin default: a default would make Arc build the bean
+    // through a synthetic constructor and the configured value would never be applied.
+    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.enabled", defaultValue = "true")
+    private val enabled: Boolean,
+    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.open-cases", defaultValue = "false")
+    private val openCases: Boolean,
+    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.page-size", defaultValue = "200")
+    private val pageSize: Int,
+) {
 
     @Inject
     lateinit var pack: MonitoringPack
@@ -84,15 +93,6 @@ class MonitoringEvaluationScheduler {
 
     @Inject
     lateinit var domainMetrics: DomainMetrics
-
-    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.enabled", defaultValue = "true")
-    var enabled: Boolean = true
-
-    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.open-cases", defaultValue = "false")
-    var openCases: Boolean = false
-
-    @ConfigProperty(name = "openbank.aml.monitoring.evaluation.page-size", defaultValue = "200")
-    var pageSize: Int = DEFAULT_PAGE_SIZE
 
     private val log = Logger.getLogger(MonitoringEvaluationScheduler::class.java)
     private val oldestUndecidedAgeSeconds = AtomicLong(0)
@@ -205,7 +205,6 @@ class MonitoringEvaluationScheduler {
         const val METRIC_EVALUATIONS = "openbank.aml.monitoring.evaluations"
         const val METRIC_HITS = "openbank.aml.monitoring.hits"
         const val METRIC_CASES = "openbank.aml.monitoring.cases_opened"
-        private const val DEFAULT_PAGE_SIZE = 200
         private val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(15)
     }
 }

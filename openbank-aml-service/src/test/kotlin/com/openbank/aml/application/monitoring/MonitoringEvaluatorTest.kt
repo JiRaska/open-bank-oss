@@ -7,6 +7,7 @@ package com.openbank.aml.application.monitoring
 import com.openbank.aml.application.port.out.MovementCountQuery
 import com.openbank.aml.application.port.out.MovementCounterReader
 import com.openbank.aml.domain.monitoring.MonitoringEvaluationOutcome
+import com.openbank.aml.domain.monitoring.MonitoringEvaluationRecord
 import com.openbank.aml.domain.monitoring.MovementDirection
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -29,8 +30,9 @@ class MonitoringEvaluatorTest {
         }
     }
 
-    private fun evaluate(counts: Counts, instant: Instant = at) = runBlocking {
-        MonitoringEvaluator(pack, MonitoringPackFixture.scheme, counts).evaluate(party, instant)
+    private fun evaluate(counts: Counts, instant: Instant = at): MonitoringEvaluationRecord {
+        val evaluator = MonitoringEvaluator(pack, MonitoringPackFixture.scheme, counts)
+        return runBlocking { evaluator.evaluate(party, instant) }
     }
 
     @Test
