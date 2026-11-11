@@ -42,7 +42,8 @@ přehraje a neprověřuje se podruhé; případ se uzavře podle stejných pravi
 včetně automatického schválení v sandboxu a nikdy bez výsledku. Prověření potřebuje jméno strany,
 které případ jinak neukládá: drží se v `kyc_cases.pending_screening_name` jen po dobu, kdy je
 opakování potřebuje, a maže se při uzavření kontroly, při uzavření případu a při výmazu podle
-GDPR. Případ, ke kterému úloha jméno nemá (otevřený dříve, nebo z události bez jména), se
+GDPR. Nikdy se neloguje ani nepublikuje. Vymazaný případ se neprověřuje, nezapisuje se do něj
+a neschvaluje se: úloha jej přeskočí při čtení dávky a znovu těsně před každým prověřením. Případ, ke kterému úloha jméno nemá (otevřený dříve, nebo z události bez jména), se
 neopakuje; zůstává vidět v `openbank_kyc_sanctions_unscreened_cases` a uzavře jej posuzovatel
 přes endpoint kontroly.
 

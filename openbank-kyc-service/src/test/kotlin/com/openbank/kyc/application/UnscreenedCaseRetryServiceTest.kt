@@ -51,6 +51,12 @@ class UnscreenedCaseRetryServiceTest {
     private fun settled(case: KycCase) =
         case(CheckStatus.PASSED, KycCase.CUSTOMER_SCREENING_PROVIDER).copy(id = case.id)
 
+    /** The batch as read, and — unless a test says otherwise — unchanged when each case is re-read. */
+    private fun batch(vararg candidates: ScreeningRetryCandidate) {
+        coEvery { store.findRetryCandidates(any(), any()) } returns candidates.toList()
+        candidates.forEach { coEvery { store.findRetryCandidate(it.case.id) } returns it }
+    }
+
     init {
         coEvery { store.releaseClosedCases() } returns 0
         coEvery { kycService.sandboxAutoApprove(any()) } answers { case() }
@@ -69,7 +75,7 @@ class UnscreenedCaseRetryServiceTest {
     @Test
     fun `a retry is the open path's screen followed by the sandbox auto-approval`(): Unit = runBlocking {
         val case = case()
-        coEvery { store.findRetryCandidates(any(), any()) } returns listOf(ScreeningRetryCandidate(case, "Jane Clean"))
+        batch(ScreeningRetryCandidate(case, "Jane Clean"))
         coEvery { screening.screenOnOpen(case, "Jane Clean") } returns settled(case)
 
         val outcome = service.retryBatch(now, cutoff, 10)
@@ -84,7 +90,7 @@ class UnscreenedCaseRetryServiceTest {
     @Test
     fun `a case that is still unscreened after the retry is not counted as settled`(): Unit = runBlocking {
         val case = case()
-        coEvery { store.findRetryCandidates(any(), any()) } returns listOf(ScreeningRetryCandidate(case, "Jane Doe"))
+        batch(ScreeningRetryCandidate(case, "Jane Doe"))
         coEvery { screening.screenOnOpen(case, "Jane Doe") } returns case
 
         assertThat(service.retryBatch(now, cutoff, 10))
@@ -95,8 +101,7 @@ class UnscreenedCaseRetryServiceTest {
     fun `one failing case does not stop the cases after it and goes to the back of the queue`(): Unit = runBlocking {
         val broken = case()
         val healthy = case()
-        coEvery { store.findRetryCandidates(any(), any()) } returns
-            listOf(ScreeningRetryCandidate(broken, "Broken"), ScreeningRetryCandidate(healthy, "Healthy"))
+        batch(ScreeningRetryCandidate(broken, "Broken"), ScreeningRetryCandidate(healthy, "Healthy"))
         coEvery { screening.screenOnOpen(broken, "Broken") } throws IllegalStateException("unexpected")
         coEvery { screening.screenOnOpen(healthy, "Healthy") } returns settled(healthy)
 
@@ -111,7 +116,7 @@ class UnscreenedCaseRetryServiceTest {
     @Test
     fun `a check settled in the meantime is not screened again and its name is forgotten`(): Unit = runBlocking {
         val reviewed = case(sanctions = CheckStatus.MANUAL_REVIEW)
-        coEvery { store.findRetryCandidates(any(), any()) } returns listOf(ScreeningRetryCandidate(reviewed, "Jane"))
+        batch(ScreeningRetryCandidate(reviewed, "Jane"))
 
         val outcome = service.retryBatch(now, cutoff, 10)
 
@@ -127,5 +132,36 @@ class UnscreenedCaseRetryServiceTest {
         service.retryBatch(now, cutoff, 10)
 
         coVerify(exactly = 1) { store.releaseClosedCases() }
+    }
+
+    // ── A batch is read once and worked through later (GDPR Art. 17) ──────────
+
+    @Test
+    fun `a party erased after the batch was read is not screened and not approved`(): Unit = runBlocking {
+        val case = case()
+        coEvery { store.findRetryCandidates(any(), any()) } returns listOf(ScreeningRetryCandidate(case, "Jane Erased"))
+        // Erased, closed or released in the meantime: the fresh read no longer returns it.
+        coEvery { store.findRetryCandidate(case.id) } returns null
+
+        val outcome = service.retryBatch(now, cutoff, 10)
+
+        coVerify(exactly = 0) { screening.screenOnOpen(any(), any()) }
+        coVerify(exactly = 0) { kycService.sandboxAutoApprove(any()) }
+        coVerify(exactly = 0) { store.retainForRetry(any(), any(), any()) }
+        assertThat(outcome).isEqualTo(UnscreenedCaseRetryService.Outcome(attempted = 1, settled = 0, failed = 0))
+    }
+
+    @Test
+    fun `the screen uses the case and name as they are now, not as the batch read them`(): Unit = runBlocking {
+        val stale = case()
+        val current = settled(stale)
+        coEvery { store.findRetryCandidates(any(), any()) } returns listOf(ScreeningRetryCandidate(stale, "Jane"))
+        coEvery { store.findRetryCandidate(stale.id) } returns ScreeningRetryCandidate(current, "Jane")
+
+        service.retryBatch(now, cutoff, 10)
+
+        // Settled since the batch was read: nothing is sent, the name is released.
+        coVerify(exactly = 0) { screening.screenOnOpen(any(), any()) }
+        coVerify(exactly = 1) { store.release(stale.id) }
     }
 }

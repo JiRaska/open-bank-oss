@@ -110,6 +110,13 @@ interface KycCaseRepository {
     suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
 
     /**
+     * True when the PII of [caseId] was erased (GDPR Art. 17). An erased case is a retained
+     * record, not a live one: no screen result may be written to it and it is never approved.
+     * False for an unknown id.
+     */
+    suspend fun isErased(caseId: UUID): Boolean
+
+    /**
      * Distinct party ids with a **non-terminal** KYC case (the ADR-0256 re-screening candidate
      * set). v1 granularity, documented in the ADR-0256 delivery note: kyc-service persists no
      * party ↔ sanctions-list-external-id mapping (screening results record matched names only),

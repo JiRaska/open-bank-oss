@@ -192,6 +192,9 @@ class KycService {
     suspend fun sandboxAutoApprove(caseId: UUID): KycCase {
         val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
         if (!autoApprove || case.status.isTerminal || !case.hasClearScreen()) return case
+        // An erased case is a retained record of a party that no longer exists here; approving
+        // it would publish an activation for that party.
+        if (repo.isErased(caseId)) return case
         val passedChecks = case.checks.map {
             if (it.status == CheckStatus.PASSED) {
                 it

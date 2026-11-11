@@ -34,10 +34,18 @@ interface UnscreenedCaseStore {
     suspend fun release(caseId: UUID)
 
     /**
-     * Non-terminal cases with a retained name whose last attempt is at or before
+     * Non-terminal, un-erased cases with a retained name whose last attempt is at or before
      * [lastAttemptBefore], least recently attempted first, at most [limit].
      */
     suspend fun findRetryCandidates(lastAttemptBefore: Instant, limit: Int): List<ScreeningRetryCandidate>
+
+    /**
+     * The CURRENT state of one candidate, read immediately before it is screened: null when the
+     * party was erased, the case closed or the name was released since the batch was read. A
+     * batch is read once and worked through over seconds; a GDPR erasure landing in between must
+     * stop the name from being sent anywhere.
+     */
+    suspend fun findRetryCandidate(caseId: UUID): ScreeningRetryCandidate?
 
     /** Forget the retained name of every case that has closed; returns how many were cleared. */
     suspend fun releaseClosedCases(): Int

@@ -41,7 +41,9 @@ minutes after the last attempt). The retry is the same request with the same ide
 screened twice, and it settles the case by the same rules as the opening — including the sandbox
 auto-approval, and never on a missing result. The screen needs the party's legal name, which the
 case does not otherwise store: it is kept in `kyc_cases.pending_screening_name` only while a retry
-needs it, and cleared when the check is settled, when the case closes and on GDPR erasure. A case
+needs it, and cleared when the check is settled, when the case closes and on GDPR erasure. It is
+never logged and never published. An erased case is not screened, written to or approved: the
+sweep skips it when it reads a batch and again immediately before each screen. A case
 the sweep has no name for (opened before this existed, or from an event without a legal name) is
 not retried; it stays visible in `openbank_kyc_sanctions_unscreened_cases` and a reviewer settles
 it through the check endpoint.

@@ -60,6 +60,9 @@ class CustomerScreeningService(
     private val log = Logger.getLogger(CustomerScreeningService::class.java)
 
     suspend fun screenOnOpen(case: KycCase, partyName: String): KycCase {
+        // An erased party (GDPR Art. 17) is not screened: its name is not sent to the provider,
+        // not kept for a retry, and no result is written to the retained record.
+        if (repo.isErased(case.id)) return case
         val result = try {
             screeningPort.screenCustomer(
                 CustomerScreeningRequest(
@@ -73,6 +76,9 @@ class CustomerScreeningService(
             log.warnf(e, "Customer screening unavailable for KYC case %s — sanctions check stays PENDING", case.id)
             null
         }
+        // Erased while the provider was being asked: the answer names a match and must not be
+        // written into a record whose PII was just removed.
+        if (repo.isErased(case.id)) return case
         val afterSanctions = applySanctions(case.id, result?.sanctions)
         keepOrForgetName(afterSanctions, partyName)
         val pep = afterSanctions.checks.firstOrNull { it.checkType == CheckType.PEP_SCREENING }

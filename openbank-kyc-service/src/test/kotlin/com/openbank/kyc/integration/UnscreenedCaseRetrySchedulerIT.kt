@@ -91,7 +91,7 @@ class UnscreenedCaseRetrySchedulerIT {
 
         override suspend fun screenCustomer(request: CustomerScreeningRequest): CustomerScreeningResult {
             keys.computeIfAbsent(request.name) { CopyOnWriteArrayList() }.add(request.idempotencyKey)
-            if (!up.get() || request.name == STILL_DOWN || request.name == ERASED) {
+            if (!up.get() || request.name in ALWAYS_DOWN) {
                 throw CustomerScreeningUnavailableException(IllegalStateException("stub outage"))
             }
             // Not the port's declared failure: an unexpected fault in ONE case's retry.
@@ -273,7 +273,55 @@ class UnscreenedCaseRetrySchedulerIT {
         assertThat(retainedName(erased)).isNull()
     }
 
+    @Test
+    fun `a case marked erased is never picked up, even if a name is still stored on it`() {
+        // Not a state the service produces — erasure clears the name — but the sweep must not
+        // depend on that: the erasure mark alone has to keep the name from being sent anywhere.
+        val caseId = UUID.randomUUID()
+        dataSource.connection.use { c ->
+            c.prepareStatement(
+                """
+                INSERT INTO kyc_cases (id, case_id, party_id, status, risk_level, checks_json, created_at,
+                                       updated_at, erased_at, pending_screening_name, screening_attempted_at)
+                VALUES ($GHOST_ROW_ID, ?, ?, 'OPEN', 'MEDIUM', ?, NOW() - INTERVAL '1 hour',
+                        NOW() - INTERVAL '1 hour', NOW() - INTERVAL '30 minutes', ?, NOW() - INTERVAL '1 hour')
+                """.trimIndent(),
+            ).use { st ->
+                st.setObject(1, caseId)
+                st.setObject(2, UUID.randomUUID())
+                st.setString(
+                    3,
+                    """[{"id":"${UUID.randomUUID()}","caseId":"$caseId","checkType":"SANCTIONS_SCREENING",""" +
+                        """"status":"PENDING","result":null,"provider":null,"performedAt":null,""" +
+                        """"createdAt":"2026-11-01T00:00:00Z"}]""",
+                )
+                st.setString(4, GHOST)
+                st.executeUpdate()
+            }
+        }
+        // Known-positive for the wait: a live case opened now IS retried within the same window.
+        val control = onboard(LIVE_CONTROL)
+        await("the live control case to be retried", { screening.keysFor(LIVE_CONTROL).size }) { it >= 3 }
+
+        assertThat(screening.keysFor(GHOST)).describedAs("the name stored on an erased case").isEmpty()
+
+        // Close the control case so it does not stay in the backlog the other test counts.
+        dataSource.connection.use { c ->
+            c.prepareStatement("UPDATE kyc_cases SET status = 'EXPIRED' WHERE party_id = ?").use {
+                it.setObject(1, control)
+                it.executeUpdate()
+            }
+        }
+        await("the closed case's name to be released", { retainedName(control) }) { it == null }
+    }
+
     private companion object {
+        const val GHOST = "Retry Ghost Person"
+
+        // Explicit and far from the Hibernate sequence: the BIGSERIAL default would hand out an id
+        // the application's own pooled sequence already used.
+        const val GHOST_ROW_ID = 9_000_000_001L
+        const val LIVE_CONTROL = "Retry Control Person"
         const val ERASED = "Retry Erased Person"
         const val CLEAR = "Retry Clear Person"
         const val SANCTIONED = "Retry Sanctioned Person"
@@ -283,5 +331,6 @@ class UnscreenedCaseRetrySchedulerIT {
         const val BUDGET_NANOS = 90_000_000_000L
         const val POLL_MILLIS = 200L
         const val SETTLE_MILLIS = 3_000L
+        val ALWAYS_DOWN = setOf(STILL_DOWN, ERASED, LIVE_CONTROL, GHOST)
     }
 }

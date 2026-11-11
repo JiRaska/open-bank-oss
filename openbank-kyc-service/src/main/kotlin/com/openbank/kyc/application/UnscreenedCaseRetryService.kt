@@ -64,7 +64,11 @@ class UnscreenedCaseRetryService(
     }
 
     /** @return true when the sanctions check was settled by this attempt. */
-    private suspend fun retry(candidate: ScreeningRetryCandidate): Boolean {
+    private suspend fun retry(batched: ScreeningRetryCandidate): Boolean {
+        // The batch was read once and is worked through over seconds. Re-read this case now: if
+        // the party was erased (GDPR Art. 17), the case closed or the name was released since,
+        // nothing is sent to the provider and nothing is written.
+        val candidate = store.findRetryCandidate(batched.case.id) ?: return false
         val case = candidate.case
         val sanctions = case.checks.firstOrNull { it.checkType == CheckType.SANCTIONS_SCREENING }
         if (sanctions == null || !sanctions.isUnscreened()) {

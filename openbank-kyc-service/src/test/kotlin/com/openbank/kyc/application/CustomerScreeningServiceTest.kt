@@ -66,6 +66,7 @@ class CustomerScreeningServiceTest {
 
     private fun stubRepo(case: KycCase) {
         coEvery { repo.findById(case.id) } returns case
+        coEvery { repo.isErased(case.id) } returns false
         coEvery { repo.update(any()) } answers { firstArg() }
         coEvery { repo.update(any(), any<KycEvent>()) } answers { firstArg() }
         coEvery { kycService.applyPepScreeningResult(any(), any(), any(), any()) } answers {
@@ -259,6 +260,24 @@ class CustomerScreeningServiceTest {
 
         service.screenOnOpen(case, "Jane Doe")
 
+        coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `an erased case is neither screened nor written to`(): Unit = runBlocking {
+        val case = case()
+        stubRepo(case)
+        coEvery { repo.isErased(case.id) } returns true
+        coEvery { port.screenCustomer(any()) } returns clear
+
+        val result = service.screenOnOpen(case, "Jane Erased")
+
+        assertThat(result).isEqualTo(case)
+        // The name of an erased party is not sent to the provider, kept for a retry or recorded.
+        coVerify(exactly = 0) { port.screenCustomer(any()) }
+        coVerify(exactly = 0) { repo.update(any()) }
+        coVerify(exactly = 0) { repo.update(any(), any<KycEvent>()) }
+        coVerify(exactly = 0) { unscreened.retainForRetry(any(), any(), any()) }
         coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
     }
 }

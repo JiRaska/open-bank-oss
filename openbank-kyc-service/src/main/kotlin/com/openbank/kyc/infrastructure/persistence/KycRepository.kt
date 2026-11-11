@@ -316,7 +316,8 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
     override suspend fun findRetryCandidates(lastAttemptBefore: Instant, limit: Int): List<ScreeningRetryCandidate> =
         Panache.withSession {
             find(
-                "pendingScreeningName is not null and status not in ?1 and screeningAttemptedAt <= ?2 " +
+                "pendingScreeningName is not null and erasedAt is null and status not in ?1 " +
+                    "and screeningAttemptedAt <= ?2 " +
                     "order by screeningAttemptedAt asc",
                 KycCaseStatus.TERMINAL_NAMES,
                 lastAttemptBefore,
@@ -324,6 +325,19 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         }.awaitSuspending().mapNotNull { entity ->
             entity.pendingScreeningName?.let { ScreeningRetryCandidate(entity.toDomain(objectMapper), it) }
         }
+
+    override suspend fun findRetryCandidate(caseId: UUID): ScreeningRetryCandidate? = Panache.withSession {
+        find(
+            "caseId = ?1 and pendingScreeningName is not null and erasedAt is null and status not in ?2",
+            caseId,
+            KycCaseStatus.TERMINAL_NAMES,
+        ).firstResult()
+    }.awaitSuspending()?.let { entity ->
+        entity.pendingScreeningName?.let { ScreeningRetryCandidate(entity.toDomain(objectMapper), it) }
+    }
+
+    override suspend fun isErased(caseId: UUID): Boolean =
+        Panache.withSession { count("caseId = ?1 and erasedAt is not null", caseId) }.awaitSuspending() > 0
 
     override suspend fun releaseClosedCases(): Int = Panache.withTransaction {
         update(
