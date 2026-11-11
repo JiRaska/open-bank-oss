@@ -60,7 +60,7 @@ class OpenBaoKubernetesLogin(
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(body))
             .build()
-        transport.httpClient.send(request, OpenBaoTransport.boundedBody())
+        transport.send(request)
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
         throw FieldProtectionException("OpenBao kubernetes-auth login interrupted", e)

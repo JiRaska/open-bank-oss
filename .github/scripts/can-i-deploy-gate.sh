@@ -128,6 +128,7 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
   fi
   historical_services='[]'
   exact_ci_verified='[]'
+  exact_candidates='{}'
   source_probe_map='{}'
   historical_source_map='{}'
   if [ "$source_failure" -eq 0 ] && [ "$use_explicit_sources" != true ]; then
@@ -144,18 +145,13 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
           # (2026-11-08..10: every scheduled run, 39 services stranded). Fall back to the
           # historical resolver, which demands the same proof (ancestor of main, green
           # build+contract, exact Pact version, tree-equivalent inputs) at an earlier SHA.
+          # Collected here and proven in ONE batch call after the loop: the per-service
+          # check re-lists every job of the run (~45 s each) and a 12-service batch ran
+          # out the job's 10-minute timeout before deploying anything.
           candidate_sha="$GITHUB_SHA"
           [ "$present" = yes ] || candidate_sha="${present#equivalent:}"
-          if python3 .github/scripts/verify-successful-service-ci.py "$svc" "$candidate_sha" 2>/dev/null; then
-            exact_ci_verified="$(jq -cn --argjson old "$exact_ci_verified" --arg svc "$svc" \
-              '$old + [$svc]')"
-          else
-            echo "  ${svc}: no exact Services CI evidence at ${candidate_sha}; resolving an earlier equivalent source"
-            historical_services="$(jq -cn --argjson old "$historical_services" \
-              --arg svc "$svc" '$old + [$svc]')"
-            source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
-              '$old + {($svc): "no"}')"
-          fi
+          exact_candidates="$(jq -cn --argjson old "$exact_candidates" --arg svc "$svc" \
+            --arg sha "$candidate_sha" '$old + {($svc): $sha}')"
           ;;
         no)
           historical_services="$(jq -cn --argjson old "$historical_services" \
@@ -169,6 +165,25 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
           source_failure=1
           ;;
       esac
+    done
+  fi
+  if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$exact_candidates")" -gt 0 ]; then
+    if exact_proven="$(python3 .github/scripts/verify-successful-service-ci.py \
+        --verify-services "$exact_candidates")" \
+       && jq -e 'type == "object"' >/dev/null <<< "$exact_proven"; then
+      exact_ci_verified="$(jq -c 'keys' <<< "$exact_proven")"
+    else
+      # An API failure proves nothing; the historical resolver demands the same evidence.
+      exact_ci_verified='[]'
+    fi
+    for svc in $(jq -r 'keys[]' <<< "$exact_candidates"); do
+      if ! jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "$exact_ci_verified"; then
+        echo "  ${svc}: no exact Services CI evidence at $(jq -r --arg svc "$svc" '.[$svc]' <<< "$exact_candidates"); resolving an earlier equivalent source"
+        historical_services="$(jq -cn --argjson old "$historical_services" \
+          --arg svc "$svc" '$old + [$svc]')"
+        source_probe_map="$(jq -cn --argjson old "$source_probe_map" --arg svc "$svc" \
+          '$old + {($svc): "no"}')"
+      fi
     done
   fi
   if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then

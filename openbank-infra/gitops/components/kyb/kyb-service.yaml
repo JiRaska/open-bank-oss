@@ -57,7 +57,7 @@ spec:
         - name: kyb-service
           # First build lands via auto-deploy on the merge that adds openbank-kyb-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-9e2a55ce@sha256:57d2901c2fdec7aff23b1e09528168e460c42cdd15cf4696f5b000c0dfe60d28
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-kyb-service:sandbox-e8e3b10a@sha256:02259b9ec25da2de8e03fc9d06d1f95f0e9ef8f503f0cdf55d5979b79c1c12ca
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8090 — both read off the service's own
