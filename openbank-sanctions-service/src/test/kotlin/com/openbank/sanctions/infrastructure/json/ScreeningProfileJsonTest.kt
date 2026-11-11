@@ -27,7 +27,8 @@ class ScreeningProfileJsonTest {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules().omitAbsentScreeningProfileFields()
 
-    private val match = SanctionsMatch(SanctionsListType.OFAC_SDN, MatchType.EXACT, 0.97, "Synthetic", "x-1", null, emptyList())
+    private val match =
+        SanctionsMatch(SanctionsListType.OFAC_SDN, MatchType.EXACT, 0.97, "Synthetic", "x-1", null, emptyList())
     private val legacy = SanctionsCheck(
         id = UUID.randomUUID(), idempotencyKey = "k", entityType = EntityType.INDIVIDUAL, name = "Synthetic",
         aliases = emptyList(), dateOfBirth = null, nationality = null, identifiers = emptyMap(),
@@ -50,7 +51,10 @@ class ScreeningProfileJsonTest {
     @Test
     fun `a profiled check serialises the new fields`() {
         val profiled = legacy.copy(
-            profile = ScreeningProfile.CUSTOMER, country = "XE", bankIdentifier = "TESTXEAA", pepStatus = PepStatus.CLEAR,
+            profile = ScreeningProfile.CUSTOMER,
+            country = "XE",
+            bankIdentifier = "TESTXEAA",
+            pepStatus = PepStatus.CLEAR,
             matches = listOf(match.copy(matchKind = MatchKind.SANCTIONS)),
         )
 
@@ -61,6 +65,8 @@ class ScreeningProfileJsonTest {
         assertThat(json.path("bankIdentifier").asText()).isEqualTo("TESTXEAA")
         assertThat(json.path("pepStatus").asText()).isEqualTo("CLEAR")
         assertThat(json.path("matches")[0].path("matchKind").asText()).isEqualTo("SANCTIONS")
-        assertThat(mapper.readValue(mapper.writeValueAsString(profiled), SanctionsCheck::class.java)).isEqualTo(profiled)
+        assertThat(
+            mapper.readValue(mapper.writeValueAsString(profiled), SanctionsCheck::class.java),
+        ).isEqualTo(profiled)
     }
 }

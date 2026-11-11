@@ -4,7 +4,6 @@
 
 package com.openbank.sanctions.infrastructure.persistence.repository
 
-import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -12,6 +11,7 @@ import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsRepository
 import com.openbank.sanctions.domain.model.SanctionsCheck
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
+import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.openbank.sanctions.infrastructure.persistence.entity.SanctionsCheckEntity
 import com.openbank.sanctions.infrastructure.persistence.mapper.toDomain
 import com.openbank.sanctions.infrastructure.persistence.mapper.toEntity
