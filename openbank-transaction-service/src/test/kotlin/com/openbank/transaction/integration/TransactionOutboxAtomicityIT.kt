@@ -18,6 +18,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -136,6 +137,45 @@ class TransactionOutboxAtomicityIT {
         assertThat(replayed.jsonPath().getString("id")).isEqualTo(transactionId.toString())
         assertThat(submitTransfer(payload, tainted = false).statusCode).isEqualTo(409)
     }
+
+    @Test
+    @TestSecurity(user = EDGE_PRINCIPAL, roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = EDGE_PRINCIPAL),
+            Claim(key = "sub", value = "synthetic-transfer-test-edge"),
+        ],
+    )
+    fun `the synthetic-only route derives one tainted posting for a daily direction`() {
+        val party = UUID.randomUUID()
+        val source = UUID.randomUUID()
+        val target = UUID.randomUUID()
+        val date = LocalDate.now(ZoneOffset.UTC)
+        val body = """
+            {"partyId":"$party","sourceAccountId":"$source","targetAccountId":"$target",
+             "runDate":"$date","direction":"OUTBOUND"}
+        """.trimIndent()
+
+        assertThat(submitCanaryTransfer(body, tainted = false).statusCode).isEqualTo(403)
+        val accepted = submitCanaryTransfer(body, tainted = true)
+        assertThat(accepted.statusCode).isEqualTo(201)
+        val id = UUID.fromString(accepted.jsonPath().getString("id"))
+        assertThat(accepted.jsonPath().getString("amount")).isEqualTo("0.01")
+        assertThat(accepted.jsonPath().getString("currencyCode")).isEqualTo("CZK")
+        assertThat(accepted.jsonPath().getString("sourceAccountId")).isEqualTo(source.toString())
+        assertThat(accepted.jsonPath().getString("targetAccountId")).isEqualTo(target.toString())
+        val replay = submitCanaryTransfer(body, tainted = true)
+        assertThat(replay.statusCode).isEqualTo(201)
+        assertThat(replay.jsonPath().getString("id")).isEqualTo(id.toString())
+        assertThat(awaitCompletionEvent(id).values).allMatch { it.transactionSynthetic && it.outboxSynthetic }
+    }
+
+    private fun submitCanaryTransfer(payload: String, tainted: Boolean): Response = RestAssured.given()
+        .contentType("application/json")
+        .body(payload)
+        .apply { if (tainted) header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE) }
+        .post("/api/v1/transactions/synthetic-transfer")
 
     /**
      * Guards the assertions above against reading their success out of a query that never returns

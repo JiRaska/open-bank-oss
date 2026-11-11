@@ -101,3 +101,10 @@ This service's `application.yaml` does not declare the HTTP security response he
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Synthetic own-account transfer admission (#7284)
+
+`POST /api/v1/transactions/synthetic-transfer` requires the verified `openbank-edge` workload
+and the request filter's synthetic decision. It derives a fixed CZK 0.01 transfer and the
+own-account exemption from the fixture request. The party, current UTC date and direction
+form the daily idempotency key. The durable origin controls the synthetic ledger route.

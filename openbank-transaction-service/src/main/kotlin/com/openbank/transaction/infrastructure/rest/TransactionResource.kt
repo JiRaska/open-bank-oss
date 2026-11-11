@@ -7,10 +7,12 @@ package com.openbank.transaction.infrastructure.rest
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.security.Roles
 import com.openbank.libs.spend.SpendCategory
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import com.openbank.libs.web.SyntheticTaintContext
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
@@ -33,12 +35,14 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -47,6 +51,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.math.BigDecimal
 import java.net.URI
+import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
@@ -71,6 +76,9 @@ class TransactionResource(
 ) {
     @Inject
     lateinit var taintContext: SyntheticTaintContext
+
+    @Inject
+    lateinit var clock: Clock
 
     @GET
     @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -173,6 +181,33 @@ class TransactionResource(
     suspend fun initiateTransaction(
         request: InitiateTransactionRequest,
         @Context securityContext: SecurityContext,
+    ): Response = initiate(request, securityContext, taintContext.tainted)
+
+    @POST
+    @Path("/synthetic-transfer")
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
+    @Authorize(action = "transaction.create", resource = "")
+    @Operation(summary = "Initiate the customer-edge synthetic own-account transfer")
+    suspend fun initiateSyntheticTransfer(
+        request: InitiateSyntheticTransferRequest?,
+        @Context securityContext: SecurityContext,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        val trustedSynthetic = taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
+        val client = ServiceAccountIdentity.verifiedClientId(securityContext.userPrincipal)
+        if (!trustedSynthetic || client != "openbank-edge") {
+            throw ForbiddenException("Synthetic transfer requires the verified customer edge")
+        }
+        requireNotNull(request) { "Synthetic transfer run is required" }
+        require(request.runDate == LocalDate.now(clock)) { "Synthetic transfer run date must be today" }
+        require(request.sourceAccountId != request.targetAccountId) { "Synthetic transfer accounts must differ" }
+        return initiate(request.toInitiation(), securityContext, synthetic = true)
+    }
+
+    private suspend fun initiate(
+        request: InitiateTransactionRequest,
+        securityContext: SecurityContext,
+        synthetic: Boolean,
     ): Response {
         val initiatedBy = runCatching { UUID.fromString(securityContext.userPrincipal?.name) }
             .getOrDefault(UUID.fromString("00000000-0000-0000-0000-000000000000"))
@@ -193,7 +228,7 @@ class TransactionResource(
             scaExemption = request.scaExemption,
             rail = parseEnumParam<PaymentRail>("rail", request.rail),
             instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
-            synthetic = taintContext.tainted,
+            synthetic = synthetic,
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))

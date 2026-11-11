@@ -282,6 +282,24 @@ journeys:
       must fail the listing check, and pointing CUSTOMER_BASE at a host that serves 200 for
       every path must fail the 401 and 403 negative checks rather than read as availability.
 
+  - id: synthetic-own-account-transfer
+    title: "Synthetic own-account transfer and return"
+    capability: >-
+      An isolated bank-owned party moves one minor unit between its two CZK accounts,
+      verifies customer history, the synthetic ledger posting and both balance deltas, and
+      returns both accounts to their starting balances.
+    status: planned
+    severity: ticket
+    money_moving: true
+    target_schedule: "15 3 * * *"
+    falsification: >-
+      Drop the trusted synthetic origin or return a mismatched ledger proof. The journey
+      must fail, and its return leg must not follow an unproven outbound leg. Retry the
+      same UTC day after an ambiguous response and verify there are still only two journals.
+    blocked_by: >-
+      Provision the separate sandbox party, funded accounts and read-only proof client
+      and deploy the compatible service versions. The standalone sandbox CronJob renders suspended.
+
   - id: sepa-credit-transfer
     title: "SEPA credit-transfer lifecycle"
     capability: >-

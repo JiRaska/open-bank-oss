@@ -883,3 +883,10 @@ zero-journal run after close. Frozen reports are never replaced by later success
 receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
 receipt and preserve the proof. Producers must refresh the current and immediately prior month,
 including closed days, and explicitly revoke completion while source work is pending.
+
+## Synthetic transfer evidence (#7284)
+
+The dedicated proof identity has a separate read action and is verified again from its OIDC token.
+Evidence requires exactly one posted synthetic journal with two legs matching the configured fixture
+accounts and amount. The response carries the scoped posting evidence. Unknown, ordinary or
+ambiguous journals produce the same absence response.

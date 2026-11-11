@@ -15,6 +15,7 @@ import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.authz.ServiceAccountIdentity
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
@@ -99,6 +100,9 @@ class CustomerEdgeResource(
 
     @Inject
     lateinit var objectMapper: ObjectMapper
+
+    @Inject
+    lateinit var syntheticTransferFixture: SyntheticTransferFixture
 
     @Inject
     lateinit var keycloakAdmin: KeycloakAdminClient
@@ -3546,6 +3550,70 @@ class CustomerEdgeResource(
             ),
         )
         return resp
+    }
+
+    @POST
+    @Path("/synthetic/transfers")
+    @Authorize(action = "customer.transfers.initiate")
+    @Blocking
+    fun createSyntheticTransfer(request: SyntheticTransferRun?): Response {
+        val fixture = syntheticTransferFixture.accounts()
+        if (fixture == null || !isSyntheticTransferCaller(fixture.partyId)) {
+            throw ForbiddenException("Synthetic transfer requires its verified fixture identity")
+        }
+        requireNotNull(request) { "Synthetic transfer run is required" }
+        require(request.runDate == LocalDate.now(clock)) { "Synthetic transfer run date must be today" }
+        if (!isSyntheticTransferParty(fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.sourceAccountId, fixture.partyId) ||
+            !isSyntheticTransferAccount(fixture.targetAccountId, fixture.partyId)
+        ) {
+            throw ForbiddenException("Synthetic transfer fixture ownership could not be verified")
+        }
+
+        val party = fixture.partyId.toString()
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", party)
+            put("sourceAccountId", fixture.sourceAccountId.toString())
+            put("targetAccountId", fixture.targetAccountId.toString())
+            put("runDate", request.runDate.toString())
+            put("direction", request.direction.name)
+        }
+        return upstream.postToService(
+            transactionServiceUrl,
+            "/api/v1/transactions/synthetic-transfer",
+            party,
+            objectMapper.writeValueAsString(body),
+        )
+    }
+
+    private fun isSyntheticTransferCaller(partyId: UUID): Boolean {
+        val client = ServiceAccountIdentity.verifiedClientId(jwt)
+        if (!currentRequestIsSynthetic() || client != "openbank-synthetic-transfer") {
+            return false
+        }
+        return jwt.getClaim<String>("party_id") == partyId.toString() &&
+            requestHeaders.getHeaderString(ACTING_FOR_HEADER) == null
+    }
+
+    private fun isSyntheticTransferAccount(accountId: UUID, partyId: UUID): Boolean {
+        val body = fetchAccount(accountId, partyId) ?: return false
+        return runCatching {
+            val account = objectMapper.readTree(body)
+            val owned = account.path("id").asText() == accountId.toString() &&
+                account.path("partyId").asText() == partyId.toString()
+            owned && account.path("status").asText() == "ACTIVE" && account.path("currencyCode").asText() == "CZK"
+        }.getOrDefault(false)
+    }
+
+    private fun isSyntheticTransferParty(partyId: UUID): Boolean {
+        val response = upstream.get("$partyServiceUrl/api/v1/parties/$partyId", partyId.toString())
+        if (response.status != 200) return false
+        return runCatching {
+            val party = objectMapper.readTree(response.entity.toString())
+            party.path("id").asText() == partyId.toString() &&
+                party.path("classification").asText() == "SYNTHETIC" &&
+                party.path("status").asText() == "ACTIVE"
+        }.getOrDefault(false)
     }
 
     // --- Standing orders (recurring payments / trvalý příkaz) ---

@@ -168,3 +168,10 @@ cannot report for any other participant.
 ## Offline historical FINREP replay
 
 The build defines an explicit `historicalFinrepPactTest` task that replays one validated historical FINREP Pact artifact locally against the ledger provider. It is not broker verification: it never changes broker selectors, never publishes results, and refuses to run unless the supplied provider commit is a 40-hex SHA that is an ancestor of `origin/main`. It is not part of the default build.
+
+## Synthetic transfer proof (#7284)
+
+The dedicated `openbank-synthetic-transfer-verifier` client can read one synthetic journal
+matching both configured fixture accounts, the CZK 0.01 amount and the requested transaction.
+The account IDs come from the sandbox fixture configuration. The proof excludes ordinary
+postings and refuses ambiguous or incomplete journal evidence.

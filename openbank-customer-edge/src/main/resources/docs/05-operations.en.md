@@ -136,3 +136,12 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Diagnosing a failed passkey token exchange
 
 When the token exchange that completes a passkey sign-in is rejected by the identity provider, the service logs a warning with the pseudonymous identity-provider user id and the HTTP status of the response (`impersonate: token-exchange failed for kcUserId=... status=...`). The identity provider's own error event and the exception raised by the service carry no user id, so this line is what ties a failed sign-in to the customer affected. The id is the opaque user UUID, never a username, and no token or credential is logged. A rise in these warnings with a `403` or `400` status usually points to a token-exchange permission or client-configuration problem rather than customer error.
+
+## Synthetic own-account transfer fixture (#7284)
+
+The dedicated customer route verifies the synthetic request and the `openbank-synthetic-transfer`
+service-account token. Set `openbank.synthetic-transfer.party-id`,
+`openbank.synthetic-transfer.source-account-id` and `openbank.synthetic-transfer.target-account-id`
+only for its isolated sandbox fixture. The party must be active and classified SYNTHETIC in
+Party, and it must own both accounts. The route takes the current UTC run date and a direction.
+The dedicated Transaction route requires the authenticated edge and the same synthetic origin.

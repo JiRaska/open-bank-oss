@@ -25,7 +25,7 @@ info:
   # Also additive: TransactionPage.pagination now declares the fields the server actually sends
   # (limit, hasNextPage, previousCursor, totalCount - libs `PageInfo`); `hasMore`, which the server
   # never sent, is kept and labelled. No path, parameter or status code changes.
-  version: 1.22.0
+  version: 1.23.0
   description: BIAN-aligned transaction history, search and retrieval.
   license:
     name: Apache-2.0
@@ -96,6 +96,46 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           description: Idempotency key belongs to a different transaction origin classification
+
+  /api/v1/transactions/synthetic-transfer:
+    post:
+      tags: [Transactions]
+      operationId: initiateSyntheticTransfer
+      summary: Initiate the customer-edge synthetic own-account transfer
+      description: >-
+        Requires the verified customer-edge workload and a trusted synthetic origin. The service
+        derives the transfer direction, a fixed CZK 0.01 amount and a stable daily idempotency key.
+      parameters:
+        - name: x-openbank-synthetic
+          in: header
+          required: true
+          schema: {type: string, const: 'true'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partyId, sourceAccountId, targetAccountId, runDate, direction]
+              properties:
+                partyId: {type: string, format: uuid}
+                sourceAccountId: {type: string, format: uuid}
+                targetAccountId: {type: string, format: uuid}
+                runDate: {type: string, format: date, description: Current UTC date}
+                direction: {type: string, enum: [OUTBOUND, RETURN]}
+      responses:
+        '201':
+          description: Transfer initiated or replayed with the same transaction ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '400':
+          description: Invalid direction, accounts or run date
+        '403':
+          description: Trusted synthetic origin or verified customer-edge workload is absent
+        '409':
+          description: Idempotency key belongs to a different origin
 
   /api/v1/transactions/search:
     get:
