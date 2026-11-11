@@ -69,6 +69,7 @@ The converting party's **name (`partyName`) is not stored** in `fx_conversions` 
 ### Data flows out
 
 - → **sanctions-service** (sync REST): `partyName` for screening — same controller, intra-OpenBank.
+- → **party-service** (sync REST, read-only): the conversion workflow sends the party id and reads back the party's legal and trading name, because a stored conversion carries the id only. The name is used for the sanctions screen and is not stored. If no name can be read, the conversion is held for review and an AML case is opened; the workflow never screens the id in the name's place. Same controller.
 - → **aml-service** (sync REST, best-effort): party/conversion details + matched entity when a case is opened — same controller.
 - → **Kafka** (`openbank.fx.conversion.completed`): conversion event for downstream (transaction/audit) — same controller.
 - → **ČNB** (external, inbound only): the daily fixing feed is read; **no customer data is sent outbound** to ČNB.

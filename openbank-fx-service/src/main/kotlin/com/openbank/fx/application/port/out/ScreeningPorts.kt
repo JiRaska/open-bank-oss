@@ -23,6 +23,27 @@ interface SanctionsScreeningPort {
     suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult
 }
 
+/**
+ * Raised when the converting party's name cannot be established — party-service is unreachable, it
+ * holds no such party, or the party carries no name. Without a name there is nothing to screen, so
+ * the gate fails closed exactly as it does for [ScreeningUnavailableException]: a conversion whose
+ * party could not be named is never "screened clear".
+ */
+class PartyNameUnavailableException(partyId: UUID, cause: Throwable? = null) :
+    RuntimeException("The name of party $partyId is unavailable; conversion held", cause)
+
+/**
+ * Outbound port to party-service, the golden source of a party's name. A persisted conversion
+ * carries only the party id, so a screen that runs after the request is gone (the conversion
+ * workflow) has to ask for the name; screening the id itself compares a UUID against name lists
+ * and can never hit.
+ *
+ * @throws PartyNameUnavailableException when no name could be obtained
+ */
+interface PartyNamePort {
+    suspend fun screeningName(partyId: UUID): String
+}
+
 /** Risk grading of an opened AML case, mirrors aml-service `AmlRiskLevel`. */
 /** Everything the use-case knows at the conversion boundary to open an AML case. */
 data class OpenAmlCaseCommand(

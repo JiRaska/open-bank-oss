@@ -69,6 +69,7 @@ Jméno konvertujícího klienta (`partyName`) se **v `fx_conversions` neukládá
 ### Toky dat ven
 
 - → **sanctions-service** (sync REST): `partyName` k prověrce — stejný správce, intra-OpenBank.
+- → **party-service** (sync REST, jen čtení): workflow konverze pošle ID klienta a přečte jeho právní a obchodní jméno, protože uložená konverze nese pouze ID. Jméno slouží k sankční prověrce a neukládá se. Pokud jméno přečíst nelze, konverze se zadrží k ručnímu posouzení a otevře se AML případ; workflow nikdy neprověřuje ID namísto jména. Stejný správce.
 - → **aml-service** (sync REST, best-effort): detaily klienta/konverze + matched entity při otevření případu — stejný správce.
 - → **Kafka** (`openbank.fx.conversion.completed`): událost konverze pro downstream (transaction/audit) — stejný správce.
 - → **ČNB** (externí, jen příchozí): čte se denní fixing feed; **žádná data klientů se ČNB neposílají**.

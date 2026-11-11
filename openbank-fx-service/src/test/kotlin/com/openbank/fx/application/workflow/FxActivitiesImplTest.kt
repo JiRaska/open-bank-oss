@@ -8,6 +8,8 @@ import com.openbank.fx.application.port.out.AmlCasePort
 import com.openbank.fx.application.port.out.FraudScoreOutcome
 import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.application.port.out.FxConversionRepository
+import com.openbank.fx.application.port.out.PartyNamePort
+import com.openbank.fx.application.port.out.PartyNameUnavailableException
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.fx.domain.model.FxConversion
@@ -24,6 +26,7 @@ import io.mockk.just
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
@@ -35,6 +38,7 @@ class FxActivitiesImplTest {
 
     private val conversionRepository: FxConversionRepository = mockk()
     private val screeningPort: SanctionsScreeningPort = mockk()
+    private val partyNamePort: PartyNamePort = mockk()
     private val amlCasePort: AmlCasePort = mockk()
     private val fraudScoringPort: FraudScoringPort = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
@@ -42,6 +46,7 @@ class FxActivitiesImplTest {
     private val activities: FxActivitiesImpl = object : FxActivitiesImpl(
         conversionRepository,
         screeningPort,
+        partyNamePort,
         amlCasePort,
         fraudScoringPort,
         clock,
@@ -67,6 +72,11 @@ class FxActivitiesImplTest {
             settledAt = null,
         )
 
+    @BeforeEach
+    fun partyHasAName() {
+        coEvery { partyNamePort.screeningName(any()) } returns PARTY_NAME
+    }
+
     @Test
     fun `screenConversion never screens the party id in place of a name`() {
         val conv = aConversion()
@@ -78,6 +88,60 @@ class FxActivitiesImplTest {
 
         // A UUID compared against name lists can never hit: the screen would be CLEAR by construction.
         coVerify(exactly = 0) { screeningPort.screen(conv.partyId.toString(), any(), any()) }
+    }
+
+    @Test
+    fun `screenConversion screens the name party-service holds for the converting party`() {
+        val conv = aConversion()
+        coEvery { conversionRepository.findById(conv.id) } returns conv
+        coEvery { screeningPort.screen(any(), any(), any()) } returns
+            ScreeningResult(PARTY_NAME, ScreeningRole.DEBTOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+
+        activities.screenConversion(conv.id)
+
+        coVerify(exactly = 1) { partyNamePort.screeningName(conv.partyId) }
+        coVerify(exactly = 1) { screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party") }
+    }
+
+    /**
+     * Must-hit / must-clear over a screening double that, like the real lists, knows NAMES. Before
+     * the fix the listed party below was CLEAR, because what reached the screen was its UUID.
+     */
+    @Test
+    fun `a party whose name is on the list is blocked, one whose name is not is clear`() {
+        coEvery { screeningPort.screen(any(), any(), any()) } answers {
+            val name = firstArg<String>()
+            val status = if (name == LISTED_NAME) ScreeningMatchStatus.HIT else ScreeningMatchStatus.CLEAR
+            ScreeningResult(name, ScreeningRole.DEBTOR, status, if (name == LISTED_NAME) 1.0 else 0.0, null)
+        }
+        coEvery { amlCasePort.openCase(any()) } just Runs
+        val listed = aConversion()
+        val clean = aConversion()
+        coEvery { conversionRepository.findById(listed.id) } returns listed
+        coEvery { conversionRepository.findById(clean.id) } returns clean
+        coEvery { partyNamePort.screeningName(listed.partyId) } returns LISTED_NAME
+        coEvery { partyNamePort.screeningName(clean.partyId) } returns PARTY_NAME
+
+        assertThat(activities.screenConversion(listed.id)).isEqualTo(ScreeningDecision.BLOCK)
+        assertThat(activities.screenConversion(clean.id)).isEqualTo(ScreeningDecision.CLEAR)
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "SANCTIONS_HIT" }) }
+    }
+
+    @Test
+    fun `screenConversion holds for REVIEW and never screens when the party name is unavailable`() {
+        val conv = aConversion()
+        coEvery { conversionRepository.findById(conv.id) } returns conv
+        coEvery { partyNamePort.screeningName(conv.partyId) } throws
+            PartyNameUnavailableException(conv.partyId, RuntimeException("party-service down"))
+        coEvery { amlCasePort.openCase(any()) } just Runs
+
+        val decision = activities.screenConversion(conv.id)
+
+        // Fail closed, exactly as an unavailable screen: held for review with a case, never CLEAR.
+        assertThat(decision).isEqualTo(ScreeningDecision.REVIEW)
+        coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "SCREENING_UNAVAILABLE" }) }
+        // …and nothing was screened in the name's place — not the id, not an empty string.
+        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
     }
 
     @Test
@@ -159,5 +223,10 @@ class FxActivitiesImplTest {
         activities.shadowFraudScore(conv.id)
 
         coVerify(exactly = 1) { fraudScoringPort.score(any()) }
+    }
+
+    private companion object {
+        const val PARTY_NAME = "Jana Nováková"
+        const val LISTED_NAME = "Listed Entity Trading Ltd"
     }
 }

@@ -21,11 +21,15 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
                                                                             +--> [(fx_outbox)] --> [Kafka fx events]
                                                                             |
                                                                             +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
+                                                                            |
+                                                                            +--> [party-service] (name for the workflow's sanctions screen, OIDC CC, fail-closed)
 ```
 
 - **External entities:** rate-feed/operator, payment/account services requesting conversion.
 - **Trust boundaries:** rate ingestion (integrity-critical); caller↔service; service↔Postgres/Kafka;
-  service↔fraud-service (OIDC client-credentials + mTLS, internal cluster-only, shadow/read-only).
+  service↔fraud-service (OIDC client-credentials + mTLS, internal cluster-only, shadow/read-only);
+  service↔party-service (OIDC client-credentials, internal cluster-only, read-only: one party's
+  legal and trading name).
 - **Assets:** FX rate table, conversion records.
 
 ## 3. Authn/Authz
@@ -49,9 +53,14 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 - **Rate-source integrity** is the dominant risk — compromise yields silent financial loss.
 - Conversions should pin the rate id/timestamp used (auditability + dispute defense).
+- **The synchronous convert path screens a caller-supplied name.** `POST /api/v1/fx/convert` takes
+  `partyName` from the request body and screens that, so a caller holding the convert role decides
+  which name is compared against the lists. The workflow path reads the name from party-service
+  (#15723); the request path does not yet.
 
 ## 6. Change log
 
+- **2026-11-11** — **The conversion workflow screens the party's NAME, read from party-service (#15723).** `FxActivitiesImpl.screenConversion` passed the party id as the name to screen. A stored conversion carries the id only, so the workflow's sanctions screen compared a UUID against name lists and was CLEAR by construction. It now asks `PartyNameAdapter` (`GET /api/v1/parties/{id}`) for the legal name and screens that. **New outbound edge** fx-service → party-service, over the shared `openbank-services` client-credentials token, read-only. **STRIDE-T/E (screening bypass):** closed for the workflow path; the party cannot influence the screened name, because it no longer comes from the request. **Fail closed:** an unreachable party-service, a party the bank does not hold (404) and a party with no name all raise `PartyNameUnavailableException`, which is handled exactly as an unavailable screen — decision REVIEW, AML case `SCREENING_UNAVAILABLE`, conversion held; nothing is screened in the name's place. **STRIDE-I:** the client binds `legalName` and `tradingName` only (`PartyNameView`, unknown properties ignored), so identifiers, birth data and contact details never enter this service; the name is not persisted in `fx_conversions` and is not logged. **STRIDE-D:** party-service is a new dependency of the workflow's screen only; its outage holds conversions for review, it does not settle them and does not fail the request path. Bounded by a 5 s timeout, 2 retries and a circuit breaker; a 404 is recovered inside the guarded call so unknown parties cannot open the breaker. **Not changed, and a residual risk:** the synchronous `POST /api/v1/fx/convert` path still screens the `partyName` the caller supplies in the request body. Evidence: `FxActivitiesImplTest`, `PartyNameAdapterTest`, `PartyNamePactConsumerTest` (replayed by party-service's `PartyPactFolderProviderVerificationTest`). No wire, DB or event change. Rollback: revert the PR.
 - **2026-10-24** — **Screening, AML case severity and fraud verdict types come from `openbank-libs-fincrime` (ADR-0353, #13435/#13439).** The local copies of `ScreeningPolicy`, `ScreeningMatchStatus`, `ScreeningDecision`, `ScreeningRole`, `ScreeningResult`, the AML case risk level enum (now `AmlCaseSeverity`) and `FraudVerdict` are deleted; the rail uses the one shared definition its producers (sanctions, aml, fraud) also use. Decision logic, the 0.85 block threshold and both fail-closed wire mappings (unknown sanctions status ⇒ ESCALATED ⇒ BLOCK; unknown fraud verdict ⇒ UNKNOWN, never ALLOW) are unchanged — the adapters now call the shared parsers. No wire, DB or Pact change. Rollback: revert the PR.
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `fx_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 

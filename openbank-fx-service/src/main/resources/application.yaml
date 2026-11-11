@@ -83,6 +83,13 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 5000
       scope: jakarta.inject.Singleton
+    # The conversion workflow asks party-service for the name it screens: a stored conversion
+    # carries the party id only. Unreachable means the conversion is held for review, never settled.
+    party-service:
+      url: ${PARTY_SERVICE_URL:http://localhost:8111}
+      connect-timeout: 2000
+      read-timeout: 5000
+      scope: jakarta.inject.Singleton
     aml-service:
       url: ${AML_SERVICE_URL:http://localhost:8117}
       connect-timeout: 2000

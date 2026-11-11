@@ -9,6 +9,8 @@ import com.openbank.fx.application.port.out.FraudScoreCommand
 import com.openbank.fx.application.port.out.FraudScoringPort
 import com.openbank.fx.application.port.out.FxConversionRepository
 import com.openbank.fx.application.port.out.OpenAmlCaseCommand
+import com.openbank.fx.application.port.out.PartyNamePort
+import com.openbank.fx.application.port.out.PartyNameUnavailableException
 import com.openbank.fx.application.port.out.SanctionsScreeningPort
 import com.openbank.fx.application.port.out.ScreeningUnavailableException
 import com.openbank.fx.domain.model.FxConversion
@@ -40,6 +42,7 @@ private const val ALERT_SCREENING_UNAVAILABLE = "SCREENING_UNAVAILABLE"
 open class FxActivitiesImpl(
     private val conversionRepository: FxConversionRepository,
     private val screeningPort: SanctionsScreeningPort,
+    private val partyNamePort: PartyNamePort,
     private val amlCasePort: AmlCasePort,
     private val fraudScoringPort: FraudScoringPort,
     private val clock: Clock,
@@ -54,18 +57,19 @@ open class FxActivitiesImpl(
         val conv = conversionRepository.findById(conversionId)
             ?: error("Conversion $conversionId not found during screening activity")
 
+        // The conversion row holds the party id only (the name is never persisted here), so the
+        // name is asked for from its golden source. An unknown name is an unavailable screen: both
+        // hold the conversion for review, neither lets it settle as though it had been screened.
         val result = try {
-            screeningPort.screen(conv.partyId.toString(), ScreeningRole.DEBTOR, "$conversionId:party")
-        } catch (ex: ScreeningUnavailableException) {
-            log.warnf(ex, "Sanctions screening unavailable for conversion %s; returning REVIEW", conversionId)
-            openCaseQuietly(
-                conv = conv,
-                riskLevel = AmlCaseSeverity.MEDIUM,
-                alertCode = ALERT_SCREENING_UNAVAILABLE,
-                detail = ex.message,
-                matchedEntity = null,
+            screeningPort.screen(
+                partyNamePort.screeningName(conv.partyId),
+                ScreeningRole.DEBTOR,
+                "$conversionId:party",
             )
-            return@vtx ScreeningDecision.REVIEW
+        } catch (ex: PartyNameUnavailableException) {
+            return@vtx heldUnscreened(conv, ex)
+        } catch (ex: ScreeningUnavailableException) {
+            return@vtx heldUnscreened(conv, ex)
         }
 
         val results = listOf(result)
@@ -94,6 +98,18 @@ open class FxActivitiesImpl(
         }
 
         decision
+    }
+
+    private suspend fun heldUnscreened(conv: FxConversion, ex: RuntimeException): ScreeningDecision {
+        log.warnf(ex, "Sanctions screening unavailable for conversion %s; returning REVIEW", conv.id)
+        openCaseQuietly(
+            conv = conv,
+            riskLevel = AmlCaseSeverity.MEDIUM,
+            alertCode = ALERT_SCREENING_UNAVAILABLE,
+            detail = ex.message,
+            matchedEntity = null,
+        )
+        return ScreeningDecision.REVIEW
     }
 
     override fun settleConversion(conversionId: UUID): Unit = vtx {
