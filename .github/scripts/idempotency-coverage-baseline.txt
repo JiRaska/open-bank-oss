@@ -62,6 +62,7 @@ openbank-ledger-service POST /api/v1/journals/{journalId}/reverse  # lifecycle/a
 openbank-ledger-service POST /api/v1/ledger/accounting-days/{businessDate}  # path natural key, 409 on replay (uq V21) — ADR-0294, burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/accounting-days/{businessDate}/transitions/{to}  # monotonic aggregate-state guard, 409 — ADR-0294, burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/close/{fiscalYear}  # DRAFT refresh idempotent, 409 once ATTESTED (uq V9) — ADR-0294, burn-down #8351
+openbank-ledger-service POST /api/v1/ledger/close/{fiscalYear}/result-allocation  # carry-relative: a re-run over an unchanged ledger posts nothing, journal key year-end-result:<year>:<digest> unique — ADR-0096 D3, burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/close/{fiscalYear}/attest  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/fx-revaluation  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-ledger-service POST /api/v1/ledger/periods/{type}/{date}  # DRAFT refresh idempotent, 409 once FROZEN (uq V22) — ADR-0294, burn-down #8351
