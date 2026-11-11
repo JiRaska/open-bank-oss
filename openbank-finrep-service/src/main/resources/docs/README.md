@@ -64,3 +64,9 @@ This service's `application.yaml` does not declare the management interface (`qu
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Supervisory submission lifecycle
+
+`/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTING (an exclusive claim held while the transport is called, so concurrent submits transmit once), SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
+
+Every submit is recorded as an attempt. No supervisory transmission channel is configured, so the default transport transmits nothing and records `DRY_RUN`, which leaves the submission PACKAGED. Only a `SUBMITTED` transport outcome reaches SUBMITTED, and only a SUBMITTED return can have an acknowledgement recorded. A transport error, a cancelled request or a claim older than `openbank.finrep.submission.claim-lease` (default 15 minutes) leaves the return in OUTCOME_UNKNOWN. It may have been delivered, so it is not resubmitted; an ADMIN resolves it with `POST /api/v1/finrep/submissions/{id}/reconcile` after checking with the supervisor. Submissions and attempts live in the service's own Postgres database (`finrep-db`).
