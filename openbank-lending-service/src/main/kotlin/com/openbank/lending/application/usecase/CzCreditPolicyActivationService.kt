@@ -156,7 +156,7 @@ private fun validateBundle(bundle: PolicyBundle) {
     }
     require(tables.all { it.rules.isNotEmpty() }) { "Every policy table requires rules" }
     require(tables.all { table -> table.rules.all { validRule(table.kind, it) } }) {
-        "A policy rule has invalid operands or price band"
+        "A policy rule uses an unsupported input, incompatible operands, or an invalid price band"
     }
     requireRiskEvidence(bundle)
 }
@@ -177,11 +177,30 @@ private fun requireRiskEvidence(bundle: PolicyBundle) {
 }
 
 private fun validRule(kind: PolicyTableKind, rule: PolicyRule): Boolean {
-    val validOperands = when (rule.operator) {
-        PolicyOperator.IN, PolicyOperator.NOT_IN -> rule.threshold == null && rule.values.isNotEmpty()
-        PolicyOperator.EQ, PolicyOperator.NEQ ->
-            (rule.threshold != null && rule.values.isEmpty()) || (rule.threshold == null && rule.values.size == 1)
-        else -> rule.threshold != null && rule.values.isEmpty()
+    val validOperands = when (rule.attribute) {
+        PolicyAttribute.VERIFIED_INCOME_MONTHLY,
+        PolicyAttribute.EXISTING_DEBT_SERVICE_MONTHLY,
+        PolicyAttribute.DTI,
+        PolicyAttribute.DSTI,
+        PolicyAttribute.AGE_YEARS,
+        PolicyAttribute.EMPLOYMENT_TENURE_MONTHS,
+        PolicyAttribute.REQUESTED_AMOUNT,
+        -> rule.threshold != null &&
+            rule.values.isEmpty() &&
+            rule.operator != PolicyOperator.IN &&
+            rule.operator != PolicyOperator.NOT_IN
+        PolicyAttribute.RESIDENCY,
+        PolicyAttribute.CUSTOMER_TYPE,
+        PolicyAttribute.PRODUCT_TYPE,
+        PolicyAttribute.JURISDICTION,
+        -> rule.threshold == null &&
+            when (rule.operator) {
+                PolicyOperator.IN, PolicyOperator.NOT_IN -> rule.values.isNotEmpty()
+                PolicyOperator.EQ, PolicyOperator.NEQ -> rule.values.size == 1
+                else -> false
+            }
+        // These vocabulary entries have no source in the current origination projection.
+        PolicyAttribute.BUREAU_SCORE_BAND, PolicyAttribute.TERM_MONTHS, PolicyAttribute.CHANNEL -> false
     }
     val validBand = if (kind == PolicyTableKind.PRICING_BAND) {
         rule.band?.let(PRICE_BAND::matches) == true

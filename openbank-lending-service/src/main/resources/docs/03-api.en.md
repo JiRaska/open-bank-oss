@@ -102,7 +102,7 @@ policy as of the requested day in Europe/Prague. Versions 1 and 2 are the starte
 Credit-risk staff use the risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
 revision number and future effective date. Submit all four table kinds and retain the adverse
 bureau exclusion and both affordability limits. The pinned compliance pack adds its statutory
-checks during evaluation.
+checks during evaluation. The proposal validates each operand against the inputs that origination supplies.
 
 A second staff member reviews the stored content and hash before posting an explicit decision to
 `/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day.
