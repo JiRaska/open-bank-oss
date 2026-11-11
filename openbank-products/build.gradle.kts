@@ -26,6 +26,7 @@ repositories {
 dependencies {
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-finance"))
+    implementation(project(":openbank-libs-fincrime"))
     // The golden runner, ProductArb and the money-conservation assertion live in libs-testing
     // (ADR-0352 §5); `obp test` runs the same runner the CI gate runs.
     implementation(project(":openbank-libs-testing"))
@@ -42,6 +43,21 @@ dependencies {
 application {
     mainClass.set("com.openbank.products.cli.Obp")
     applicationName = "obp"
+}
+
+tasks.processResources {
+    // The offline proof packages only the existing synthetic kernel vectors it executes.
+    from(rootProject.layout.projectDirectory.dir("openbank-libs-fincrime/src/test/resources/fincrime")) {
+        into("fincrime-proof")
+        include(
+            "aml-count-source.json",
+            "aml-reasons-source.json",
+            "aml-severity-source.json",
+            "fraud-count-pack.canonical.json",
+            "fraud-count-pack.sha256",
+            "fraud-reasons-source.json",
+        )
+    }
 }
 
 tasks.test {

@@ -37,7 +37,7 @@ import kotlin.system.exitProcess
 
 /**
  * `obp` — the Product as Code developer surface (ADR-0352 §11.1). Every command except
- * `propose --execute` is fully offline: it runs [ProductToolkit] — the same functions the
+ * `propose --execute` is fully offline. Product authoring runs [ProductToolkit] — the same functions the
  * agent-service MCP product tools call — against files on disk and prints canonical JSON
  * (RFC 8785 key order) on stdout, so output is diffable, machine-readable and byte-identical between
  * runs.
@@ -57,6 +57,7 @@ import kotlin.system.exitProcess
  *              [--execute --catalog-url URL]              plan (or create) a DRAFT revision; never publishes
  * obp diff     <revA.json> <revB.json> --behavioural --portfolio <fixture.json>
  *                                                          per-rule posting deltas over a portfolio
+ * obp fincrime proof                                     replay the bundled synthetic AML and fraud vectors
  * ```
  *
  * Exit codes: [EXIT_OK] 0 success · [EXIT_FAILURE] 1 the subject is invalid / a check failed ·
@@ -125,6 +126,11 @@ object Obp {
         "simulate" -> simulate(rest, out)
         "sign" -> sign(rest, out, err)
         "propose" -> propose(rest, out, err)
+        "fincrime" -> {
+            if (rest != listOf("proof")) usageError("usage: obp fincrime proof")
+            emit(out, FincrimeProof.report())
+            EXIT_OK
+        }
         else -> usage(err)
     }
 
@@ -136,7 +142,8 @@ object Obp {
                 "explain <product> --rule <ruleId> | explain <product> --instruction <json> | " +
                 "explain <ruleId> [--product <name>] | " +
                 "sign <ir> --key-ref test:<name> --revision-id <uuid> --revision-number <n> | " +
-                "propose <product> --offering <uuid> --schema-id <id> --schema-version <n> [--execute --catalog-url URL]",
+                "propose <product> --offering <uuid> --schema-id <id> --schema-version <n> " +
+                "[--execute --catalog-url URL] | fincrime proof",
         )
         return EXIT_USAGE
     }
