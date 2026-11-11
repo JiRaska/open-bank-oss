@@ -60,8 +60,22 @@ interface RegistryExtractCache {
     suspend fun put(extract: RegistryExtract)
 }
 
+/**
+ * The case was changed by someone else between this caller's read and its write. Nothing was
+ * written; the caller reads the case again and decides again.
+ */
+class ConcurrentCaseUpdateException(caseId: UUID) :
+    RuntimeException("business onboarding case $caseId was changed concurrently; read it again and retry")
+
 interface BusinessOnboardingCaseRepository {
     suspend fun save(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
+
+    /**
+     * Writes [case] only if the stored row is still at [BusinessOnboardingCase.version], and
+     * returns the case at its NEW version — a caller that writes twice must write the returned copy.
+     *
+     * @throws ConcurrentCaseUpdateException when the row has moved on
+     */
     suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?

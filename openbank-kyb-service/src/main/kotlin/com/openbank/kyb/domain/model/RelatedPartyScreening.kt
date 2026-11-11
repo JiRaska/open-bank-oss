@@ -143,12 +143,14 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
     val peps: List<ScreeningSubject> get() = subjects.filter { it.pep }
 
     /**
-     * A human must look before the entity is activated. Deliberately a boolean and not a reason:
+     * A human must look before the entity is activated — true for a case that has EVER had a
+     * finding, whatever was decided about it. A decided finding still means the case is approved
+     * by an operator's review and never by the last signature alone. Deliberately a boolean and not a reason:
      * nothing a screen found may be written where the applicant or an event consumer reads it —
      * naming the cause, even as "screening", is tipping off. Who matched what is in [subjects],
      * which only an operator reads.
      */
-    val requiresReview: Boolean get() = openFindings.isNotEmpty() || confirmedSanctions.isNotEmpty()
+    val requiresReview: Boolean get() = subjects.any { it.finding }
 
     /**
      * [fresh] is the case's CURRENT subject list. Answers already obtained for people still on it

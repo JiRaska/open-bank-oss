@@ -88,6 +88,12 @@ is a bug — that is the drift ADR-0212 already paid for once.
   and a reason; `reviewResolved` refuses while one is open or a sanctions one is confirmed; and
   `CaseScreening.rebuilt` keeps a leaver that carries a finding. If you add a path to SIGNED or
   ACTIVE, it goes through the same two checks.
+- **`cases.update` returns the case at its NEW version — write that copy, not the one you passed
+  in.** `kyb_cases.version` is an optimistic lock and the repository compares it explicitly,
+  because the row is loaded fresh inside the write and `@Version` alone would overwrite a
+  committed change. A second `update` of a stale copy answers `ConcurrentCaseUpdateException`
+  (409 `CASE_CONCURRENT_UPDATE`). An event handler has nobody to retry for it: see
+  `entityPartyActivated`.
 - **A screening is complete for the people on the case NOW, or it is not complete.**
   `RelatedPartyScreeningService.screened` rebuilds the subject list (entity, representatives,
   register owners, declared persons) before every approval and carries answers over by subject; a

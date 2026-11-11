@@ -83,6 +83,11 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
     val screening: CaseScreening? = null,
+    /**
+     * The row version this copy was read at. The repository refuses to write a copy whose version
+     * is no longer the stored one, so a decision made in between is never overwritten.
+     */
+    val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -524,7 +529,11 @@ data class BusinessOnboardingCase(
         reason: String,
         at: Instant,
     ): BusinessOnboardingCase {
-        require(!status.isTerminal) { "case is already $status" }
+        // Only under review. Decided anywhere else, the decision would be followed by the last
+        // signature and the case would be approved with no review step between the two.
+        if (status != CaseStatus.MANUAL_REVIEW) {
+            throw CaseTransitionException("a screening finding can be decided only while the case is under review")
+        }
         val current = screening ?: throw CaseTransitionException("this case has no screening")
         return copy(screening = current.disposed(subjectKey, disposition, operator, reason, at), updatedAt = at)
     }

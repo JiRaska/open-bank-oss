@@ -624,7 +624,9 @@ paths:
       description: >-
         Sets the disposition of one OPEN finding (a sanctions hit, a potential hit or a PEP match)
         to CLEARED_FALSE_POSITIVE or CONFIRMED, recording the authenticated operator, the reason
-        and the time. It never moves the case: approval stays a separate act. A CONFIRMED sanctions
+        and the time. Accepted only while the case is in MANUAL_REVIEW (409 otherwise). It never
+        moves the case: approval stays a separate act, and a case that has ever had a finding is
+        approved only by an operator resolving the review, never by the last signature alone. A CONFIRMED sanctions
         finding leaves only rejection. A decided finding cannot be decided again (409).
       operationId: disposeScreeningFinding
       parameters:
@@ -758,7 +760,9 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Conflict:
-      description: The transition is not valid in the case's current state
+      description: >-
+        The transition is not valid in the case's current state (`error` = INVALID_TRANSITION), or
+        the case was changed concurrently and nothing was written (`error` = CASE_CONCURRENT_UPDATE)
       content:
         application/json:
           schema:
@@ -784,7 +788,9 @@ components:
             $ref: '#/components/schemas/Error'
     AgreementConflict:
       description: >-
-        A state conflict. `error` is INVALID_TRANSITION, or one of the agreement codes
+        A state conflict. `error` is CASE_CONCURRENT_UPDATE when the case was changed by someone
+        else between this caller's read and its write (nothing was written; read it again), or
+        INVALID_TRANSITION, or one of the agreement codes
         (AGREEMENT_PREREQUISITES_MISSING, AGREEMENT_NOT_PREPARED, AGREEMENT_LOCKED, DISCLOSURES_STALE,
         DISCLOSURES_NOT_ACCEPTED, SIGNATURE_REF_MISMATCH, CEREMONY_NOT_FOUND, CEREMONY_CASE_MISMATCH,
         CEREMONY_NOT_SIGNED).

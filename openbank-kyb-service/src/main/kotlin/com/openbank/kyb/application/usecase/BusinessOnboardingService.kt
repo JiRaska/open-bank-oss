@@ -28,6 +28,7 @@ import com.openbank.kyb.application.port.out.BusinessOnboardingCaseRepository
 import com.openbank.kyb.application.port.out.BusinessOnboardingSettings
 import com.openbank.kyb.application.port.out.BusinessOnboardingWorkflowPort
 import com.openbank.kyb.application.port.out.CeremonySignerStatus
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
@@ -357,7 +358,23 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         return cases.update(disposed, null)
     }
 
+    /**
+     * An event, not a request: nobody is there to retry a conflict, and a nacked record is
+     * dead-lettered — so a write that lost the race is re-read and re-applied here. The transition
+     * is idempotent, and the last attempt lets the conflict propagate.
+     */
     override suspend fun entityPartyActivated(entityPartyId: UUID) {
+        repeat(ACTIVATION_ATTEMPTS - 1) {
+            try {
+                return activateOnce(entityPartyId)
+            } catch (e: ConcurrentCaseUpdateException) {
+                log.infof("kyb case of entity party %s changed concurrently; re-reading (%s)", entityPartyId, e.message)
+            }
+        }
+        activateOnce(entityPartyId)
+    }
+
+    private suspend fun activateOnce(entityPartyId: UUID) {
         val case = cases.findByEntityPartyId(entityPartyId) ?: return
         if (case.status.isTerminal) return
         val now = Instant.now(clock)
@@ -512,6 +529,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
 
     private companion object {
         val AGREEMENT_LANGS = setOf("cs", "en")
+        const val ACTIVATION_ATTEMPTS = 3
     }
 
     private fun entityPartyRequest(caseId: UUID, extract: RegistryExtract) = EntityPartyRequest(

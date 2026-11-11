@@ -4,6 +4,7 @@
 
 package com.openbank.kyb.infrastructure.rest
 
+import com.openbank.kyb.application.port.out.ConcurrentCaseUpdateException
 import com.openbank.kyb.application.port.out.RegistryUnavailableException
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
@@ -102,6 +103,16 @@ class ScreeningPendingMapper : ExceptionMapper<ScreeningPendingException> {
 @Provider
 class ScreeningFindingMapper : ExceptionMapper<ScreeningFindingException> {
     override fun toResponse(e: ScreeningFindingException): Response = error(UNPROCESSABLE, e.code, e.message)
+}
+
+/**
+ * The case changed between the caller's read and its write. 409: nothing was written, and the
+ * caller must read the case again — the state it decided on is not the state that is stored.
+ */
+@Provider
+class ConcurrentCaseUpdateMapper : ExceptionMapper<ConcurrentCaseUpdateException> {
+    override fun toResponse(e: ConcurrentCaseUpdateException): Response =
+        error(CONFLICT, "CASE_CONCURRENT_UPDATE", e.message)
 }
 
 private const val NOT_FOUND = 404
