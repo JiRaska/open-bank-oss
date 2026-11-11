@@ -150,9 +150,11 @@ class TemplateWireFormatTest {
             "hasDataGaps",
             "isBalanced",
             "balanceVerdict",
+            "sourceEvidence",
         )
         assertThat(json["templateId"]).isEqualTo("F01.01")
         assertThat(json["period"]).isEqualTo("2026-06-30")
+        assertThat(json["sourceEvidence"]).isEqualTo("FROZEN")
         assertThat(json["isBalanced"]).isEqualTo(true)
         // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
         assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")

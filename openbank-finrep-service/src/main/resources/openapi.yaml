@@ -625,6 +625,10 @@ components:
           type: string
           format: date
           description: The reporting reference date the template was rendered as of
+        sourceEvidence:
+          type: string
+          enum: [FROZEN, LIVE_PREVIEW]
+          description: The ledger evidence mode used to produce the response.
         cells:
           type: array
           items: { $ref: '#/components/schemas/FinrepCell' }

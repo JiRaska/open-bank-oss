@@ -72,7 +72,8 @@ class C0100MapperTest {
             assertThat(cell.value).isEqualByComparingTo(BigDecimal.ZERO)
             assertThat(cell.gapReason).isNotBlank()
         }
-        assertThat(template.cells.filterNot { it.isDataGap }.associate { it.rowRef to it.value }).containsExactlyInAnyOrderEntriesOf(
+        val available = template.cells.filterNot { it.isDataGap }.associate { it.rowRef to it.value }
+        assertThat(available).containsExactlyInAnyOrderEntriesOf(
             mapOf(
                 "r010" to BigDecimal("16250000"),
                 "r015" to BigDecimal("14250000"),

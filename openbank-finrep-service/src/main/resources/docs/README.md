@@ -21,7 +21,8 @@ The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly eviden
 
 F02.00 follows a separate, calendar-year-to-date flow source: `GET /api/v1/ledger/periods/MONTH/{asOf}/frozen-year-to-date-trial-balance` for frozen evidence and `/year-to-date-trial-balance` for live preview. Both cover income and expense movements from January 1 of the reporting year through `asOf`, so a report never inherits a prior year's flows. The frozen route sums hash-verified monthly evidence for every month of the year and is refused when any month's evidence is missing or does not match the journal. A cumulative closing balance must not be substituted for this flow source.
 
-Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+FINREP responses identify the ledger source mode in `sourceEvidence`. Use `LIVE_PREVIEW` to inspect
+current books and `FROZEN` for frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
 
 ## COREP own-funds preview
 

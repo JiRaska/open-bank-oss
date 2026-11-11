@@ -45,7 +45,8 @@ object C0100Mapper {
     private const val CURRENCY_GAP_REASON = "The own-funds preview requires capital amounts in CZK."
     private const val PROFIT_GAP_REASON =
         "The prudential source for profit or loss attributable to the parent is unavailable."
-    private const val GOODWILL_GAP_REASON = "GL 6040 combines regulatory deductions. Goodwill requires a separate source."
+    private const val GOODWILL_GAP_REASON =
+        "GL 6040 combines regulatory deductions. Goodwill requires a separate source."
 
     private val capitalCodes = setOf("6000", "6010", "6020", "6030", "6040", "6050", "6060")
 
