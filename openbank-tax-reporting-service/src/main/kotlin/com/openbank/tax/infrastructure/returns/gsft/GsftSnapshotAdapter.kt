@@ -44,6 +44,9 @@ class GsftSnapshotAdapter(
 
     override suspend fun snapshot(relevantDay: LocalDate): GsftSnapshot {
         val roster = walkRoster().filter { isDeposit(it) }
+        if (roster.map { it.id }.toSet().size != roster.size) {
+            throw ReturnDataUnavailableException("account-service returned a duplicate account in the deposit roster")
+        }
         val knownAt = clock.instant()
         val synthetic = register.syntheticParties(knownAt)
         // CEÚ's account-level taint: an opening event that was itself tainted (CeuRegister.fold). Read up
@@ -52,7 +55,8 @@ class GsftSnapshotAdapter(
             .filter { it is RegisterFact.AccountOpened && it.synthetic }
             .map { it.accountId }
             .toSet()
-        val accounts = roster.map { account ->
+        val (dropped, retained) = roster.partition { it.partyId in synthetic || it.id in syntheticAccounts }
+        val accounts = retained.map { account ->
             DepositAccount(
                 accountId = account.id,
                 iban = account.accountNumber,
@@ -64,7 +68,7 @@ class GsftSnapshotAdapter(
                 accruedInterest = BigDecimal.ZERO,
                 // UNSOURCED (GsftDataGap.JOINT_HOLDERS): account-service knows one party per account.
                 holders = listOf(Holding(account.partyId, null)),
-                synthetic = account.partyId in synthetic || account.id in syntheticAccounts,
+                synthetic = false,
             )
         }
         val depositors = roster.map { it.partyId }.distinct().map { partyId ->
@@ -82,6 +86,7 @@ class GsftSnapshotAdapter(
             specialShares = emptyList(),
             // Claim-based (§ 41e odst. 3): nothing is claimed before a payout starts.
             qualifyingCredits = emptyList(),
+            syntheticAccountsDroppedAtSource = dropped.size,
         )
     }
 
