@@ -30,6 +30,15 @@ import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
+import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
+import com.openbank.kyb.domain.model.CaseScreening
+import com.openbank.kyb.domain.model.ScreeningPendingException
+import com.openbank.kyb.domain.model.ScreeningSubjectKind
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
@@ -180,17 +189,14 @@ class BusinessOnboardingServiceTest {
                 override fun legalFormLabel(country: String?, legalFormCode: String?, lang: String) =
                     "společnost s ručením omezeným"
             }
-            this.ubo = object : BeneficialOwnershipPort {
-                override suspend fun lookup(identifier: LegalEntityIdentifier) = UboFinding(
-                    identifier,
-                    UboSource.REGISTER,
-                    uboOwners.toList(),
-                    emptyList(),
-                    0.25,
-                    null,
-                    null,
-                    now,
-                )
+            this.ubo = uboPort
+            this.screening = RelatedPartyScreeningService().apply {
+                port = screeningPort
+                ubo = uboPort
+                this.metrics = this@BusinessOnboardingServiceTest.metrics
+                this.clock = clock
+                // Off, as shipped: every test above the screening section runs without the control.
+                enabled = Optional.of(false)
             }
         }
         coEvery { parties.pepProfile(any()) } answers { PepProfile(pepOnFile[firstArg()], null) }
@@ -199,6 +205,37 @@ class BusinessOnboardingServiceTest {
     // --- business agreement plumbing ----------------------------------------------------------
 
     private val uboOwners = mutableListOf<BeneficialOwner>()
+    private val uboPort = object : BeneficialOwnershipPort {
+        override suspend fun lookup(identifier: LegalEntityIdentifier) = UboFinding(
+            identifier,
+            UboSource.REGISTER,
+            uboOwners.toList(),
+            emptyList(),
+            0.25,
+            null,
+            null,
+            now,
+        )
+    }
+
+    /** sanctions-service double: answers by NAME, records every request, and can be taken down. */
+    private inner class FakeScreening : RelatedPartyScreeningPort {
+        val answers = mutableMapOf<String, RelatedPartyScreeningResult>()
+        val requests = mutableListOf<RelatedPartyScreeningRequest>()
+        var down = false
+
+        override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
+            requests += request
+            if (down) throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
+            return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
+        }
+    }
+
+    private val screeningPort = FakeScreening()
+
+    private fun screeningOn() {
+        service.screening.enabled = Optional.of(true)
+    }
     private val pepOnFile = mutableMapOf<UUID, Boolean>()
 
     /** document-service double: one agreement per case, SIGNED only for parties a test signs for. */
@@ -816,4 +853,155 @@ class BusinessOnboardingServiceTest {
         assertThat(started.status).isNotEqualTo(CaseStatus.REGISTRY_VERIFIED)
         assertThat(started.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
     }
+
+    // --- related-party sanctions / PEP screening (#15723) --------------------------------------
+
+    @Test
+    fun `switched off, no screen is attempted and nothing is recorded as screened`(): Unit = runBlocking {
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening).describedAs("an unscreened case must not read as a screened one").isNull()
+        assertThat(screeningPort.requests).isEmpty()
+    }
+
+    @Test
+    fun `the entity is screened as an organisation, people as individuals, a corporate owner as an organisation`(): Unit =
+        runBlocking {
+            screeningOn()
+            uboOwners += owner("Karel Vlastník", corporate = false)
+            uboOwners += owner("Holding Alfa a.s.", corporate = true)
+            val id = soleCaseReadyToSign()
+            readyToSign(id, initiator)
+
+            val byName = screeningPort.requests.associateBy { it.name }
+            assertThat(byName.keys)
+                .containsExactlyInAnyOrder("Příklad s.r.o.", "Jana Nováková", "Karel Vlastník", "Holding Alfa a.s.")
+            assertThat(byName.getValue("Příklad s.r.o.").organisation).isTrue()
+            assertThat(byName.getValue("Příklad s.r.o.").subjectId).isEqualTo(entityParty.toString())
+            assertThat(byName.getValue("Jana Nováková").organisation).isFalse()
+            assertThat(byName.getValue("Karel Vlastník").organisation).isFalse()
+            assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
+            // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
+            assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
+            assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
+            assertThat(service.get(id).screening!!.complete).isTrue()
+        }
+
+    @Test
+    fun `everyone clear lets the completing signature through`(): Unit = runBlocking {
+        screeningOn()
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening!!.subjects).allMatch { it.sanctions == ScreeningVerdict.CLEAR && !it.pep }
+    }
+
+    @Test
+    fun `a potential hit on a beneficial owner blocks activation and reviews without naming anyone`(): Unit =
+        runBlocking {
+            screeningOn()
+            val mandates = mutableListOf<MandateRequest>()
+            uboOwners += owner("Karel Vlastník", corporate = false)
+            screeningPort.answers["Karel Vlastník"] =
+                RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+            val id = soleCaseReadyToSign()
+            coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+            val signed = signs(id, initiator, readyToSign(id, initiator))
+
+            assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            assertThat(mandates).describedAs("nobody is authorised for the entity before a human decides").isEmpty()
+            assertThat(events.last().eventType).isEqualTo(KybEvents.REVIEW_REQUIRED)
+            // The reason is shown to the customer and published on the event: it must not tip off.
+            assertThat(signed.reviewReason).contains(CaseScreening.REVIEW_FLAG)
+            assertThat(signed.reviewReason).doesNotContain("Vlastník", "VLASTNIK", "HIT", "sanction")
+            val hit = signed.screening!!.sanctionsHits.single()
+            assertThat(hit.name).isEqualTo("Karel Vlastník")
+            assertThat(hit.kind).isEqualTo(ScreeningSubjectKind.BENEFICIAL_OWNER)
+            assertThat(hit.matchedName).isEqualTo("VLASTNIK Karel")
+
+            // The human decision: an operator who has seen the finding may resolve the review.
+            val resolved = service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna"))
+            assertThat(resolved.status).isEqualTo(CaseStatus.SIGNED)
+            assertThat(mandates).hasSize(1)
+        }
+
+    @Test
+    fun `a PEP match is recorded on that person and reviews, but is not a sanctions hit`(): Unit = runBlocking {
+        screeningOn()
+        screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "NOVAKOVA Jana")
+        val id = soleCaseReadyToSign()
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(signed.screening!!.sanctionsHits).isEmpty()
+        assertThat(signed.screening!!.peps.map { it.name }).containsExactly("Jana Nováková")
+        assertThat(signed.screening!!.subjects.first { it.kind == ScreeningSubjectKind.ENTITY }.pep).isFalse()
+    }
+
+    @Test
+    fun `while sanctions-service is down the completing signature is refused, not recorded, and the retry replays`(): Unit =
+        runBlocking {
+            screeningOn()
+            val mandates = mutableListOf<MandateRequest>()
+            val id = soleCaseReadyToSign()
+            coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+            screeningPort.down = true
+            // The customer's own step does not fail on the outage…
+            val ceremony = readyToSign(id, initiator)
+            assertThat(service.get(id).screening!!.subjects).allMatch { it.sanctions == ScreeningVerdict.PENDING }
+            val firstKeys = screeningPort.requests.map { it.idempotencyKey }.toSet()
+
+            // …but the approval does, and leaves nothing behind that reads as approved.
+            assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+                .isInstanceOf(ScreeningPendingException::class.java)
+            val refused = service.get(id)
+            assertThat(refused.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+            assertThat(refused.signedCount).isZero()
+            assertThat(refused.screening!!.complete).isFalse()
+            assertThat(mandates).isEmpty()
+
+            screeningPort.down = false
+            val signed = service.sign(SignCommand(id, initiator, ceremony))
+            assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+            assertThat(signed.screening!!.complete).isTrue()
+            assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet())
+                .describedAs("a retry must replay the screen of the same (case, subject), not open a new one")
+                .isEqualTo(firstKeys)
+        }
+
+    @Test
+    fun `an operator cannot resolve a review to completion past a screening that has no answer`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        // In review for an unrelated reason (a high-risk country), fully signed.
+        val signed = signs(id, initiator, readyToSign(id, initiator, questionnaire(countries = listOf("CZ", "IR"))))
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        // The answers are lost (the rollback the migration documents) and sanctions-service is down.
+        store[id] = signed.copy(screening = null)
+        screeningPort.down = true
+
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+
+        screeningPort.down = false
+        assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status)
+            .isEqualTo(CaseStatus.SIGNED)
+        assertThat(mandates).hasSize(1)
+    }
+
+    private fun owner(name: String, corporate: Boolean) = BeneficialOwner(
+        fullName = name,
+        dateOfBirth = null,
+        nationality = null,
+        countryOfResidence = null,
+        band = OwnershipBand.PCT_25_TO_50,
+        natureOfControl = emptyList(),
+        notifiedOn = null,
+        corporate = corporate,
+    )
 }

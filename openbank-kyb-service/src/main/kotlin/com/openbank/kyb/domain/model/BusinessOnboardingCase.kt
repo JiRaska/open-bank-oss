@@ -81,6 +81,8 @@ data class BusinessOnboardingCase(
     val declarations: Declarations? = null,
     /** The rendered framework agreement and its signature ceremony; null until prepared. */
     val agreement: AgreementRecord? = null,
+    /** Sanctions / PEP screening of the entity and its related parties; null until first attempted. */
+    val screening: CaseScreening? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -450,6 +452,7 @@ data class BusinessOnboardingCase(
         signatureRef: String,
         at: Instant,
         highRiskCountries: Set<String> = emptySet(),
+        screeningRequired: Boolean = false,
     ): BusinessOnboardingCase {
         val signer = requireSignable(partyId, signatureRef)
         val updated = signers.map {
@@ -463,6 +466,9 @@ data class BusinessOnboardingCase(
         }
         val next = copy(signers = updated, updatedAt = at)
         if (next.signedCount < requireNotNull(requiredSignatures)) return next
+        // The completing signature is the approval. Without a complete screening answer it is
+        // refused — and NOT recorded — so the retry screens again instead of activating unscreened.
+        next.requireScreened(screeningRequired)
         // The offices are re-checked over the people who actually SIGNED. Checking them only when
         // co-signers were invited is not enough: invitations may exceed the count, so a rule of
         // "chair plus one member" could be satisfied on paper by inviting chair, vice and member
@@ -473,7 +479,8 @@ data class BusinessOnboardingCase(
                 status = CaseStatus.MANUAL_REVIEW,
                 reviewReason = "signatures collected do not cover the offices the rule names: " +
                     "${shortfall.joinToString(", ")}. Resolve by inviting someone who holds them, " +
-                    "or by accepting the case with those offices removed.",
+                    "or by accepting the case with those offices removed." +
+                    screening?.reviewFlags().orEmpty().joinToString("") { " Also: $it." },
                 updatedAt = at,
             )
         }
@@ -493,7 +500,15 @@ data class BusinessOnboardingCase(
         declarations,
         identifier.country ?: extract?.registeredAddress?.countryCode,
         highRiskCountries,
-    )
+    ) + screening?.reviewFlags().orEmpty()
+
+    /** The related-party screening as it stands now — answers obtained, and subjects still pending. */
+    fun screeningRecorded(screening: CaseScreening, at: Instant): BusinessOnboardingCase =
+        copy(screening = screening, updatedAt = at)
+
+    private fun requireScreened(required: Boolean) {
+        if (required && screening?.complete != true) throw ScreeningPendingException()
+    }
 
     private fun requireCollecting(what: String) {
         if (status != CaseStatus.INITIATOR_MATCHED &&
@@ -628,6 +643,7 @@ data class BusinessOnboardingCase(
         requiredSignatures: Int,
         at: Instant,
         requiredSignerRoles: List<String> = emptyList(),
+        screeningRequired: Boolean = false,
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
@@ -651,6 +667,8 @@ data class BusinessOnboardingCase(
         // SIGNED: `signed()` refuses a SIGNED signer, so nothing could ever finish it. Two valid
         // signatures collected, entity never activated, and no timer watches READY_TO_SIGN.
         if (next.signedCount >= requiredSignatures && next.officeShortfall(next.signedSigners).isEmpty()) {
+            // An operator may decide a screening FINDING; nobody may approve past a missing one.
+            next.requireScreened(screeningRequired)
             return if (next.entityPartyActive) {
                 next.copy(status = CaseStatus.ACTIVE)
             } else {

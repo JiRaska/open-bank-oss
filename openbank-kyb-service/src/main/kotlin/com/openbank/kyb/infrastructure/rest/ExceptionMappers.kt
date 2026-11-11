@@ -12,6 +12,7 @@ import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
+import com.openbank.kyb.domain.model.ScreeningPendingException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
@@ -80,6 +81,17 @@ class InitiatorIdentityMismatchMapper : ExceptionMapper<InitiatorIdentityMismatc
 class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> {
     override fun toResponse(e: RegistryUnavailableException): Response =
         error(UNAVAILABLE, "REGISTRY_UNAVAILABLE", e.message)
+}
+
+/**
+ * Approval was asked for before the related-party screening has a complete answer. 503, not 409:
+ * nothing is wrong with the request or the case — a check the bank owes has not finished — and the
+ * same request succeeds once it has. The body is the same for every case, so it says nothing about
+ * what any screen found.
+ */
+@Provider
+class ScreeningPendingMapper : ExceptionMapper<ScreeningPendingException> {
+    override fun toResponse(e: ScreeningPendingException): Response = error(UNAVAILABLE, "SCREENING_PENDING", e.message)
 }
 
 private const val NOT_FOUND = 404

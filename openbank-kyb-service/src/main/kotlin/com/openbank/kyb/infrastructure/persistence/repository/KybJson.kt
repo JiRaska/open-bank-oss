@@ -11,11 +11,15 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.kyb.domain.model.AgreementRecord
+import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
+import com.openbank.kyb.domain.model.ScreeningSubject
+import com.openbank.kyb.domain.model.ScreeningSubjectKind
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.Signer
 import java.time.Instant
 import java.time.LocalDate
@@ -155,4 +159,53 @@ internal object KybJson {
     fun readDeclarations(json: String): Declarations = mapper.readValue(json)
 
     fun readAgreement(json: String): AgreementRecord = mapper.readValue(json)
+
+    /**
+     * An explicit document, like the extract: the domain types carry derived properties
+     * (`complete`, `sanctionsHits`) that must never be stored as though they were facts.
+     */
+    data class ScreeningSubjectDoc(
+        val key: String,
+        val kind: String,
+        val name: String,
+        val organisation: Boolean,
+        val sanctions: String,
+        val pep: Boolean,
+        val matchedName: String?,
+        val screenedAt: Instant?,
+    )
+
+    data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>)
+
+    fun writeScreening(screening: CaseScreening): String = mapper.writeValueAsString(
+        ScreeningDoc(
+            screening.subjects.map {
+                ScreeningSubjectDoc(
+                    key = it.key,
+                    kind = it.kind.name,
+                    name = it.name,
+                    organisation = it.organisation,
+                    sanctions = it.sanctions.name,
+                    pep = it.pep,
+                    matchedName = it.matchedName,
+                    screenedAt = it.screenedAt,
+                )
+            },
+        ),
+    )
+
+    fun readScreening(json: String): CaseScreening = CaseScreening(
+        mapper.readValue<ScreeningDoc>(json).subjects.map {
+            ScreeningSubject(
+                key = it.key,
+                kind = ScreeningSubjectKind.valueOf(it.kind),
+                name = it.name,
+                organisation = it.organisation,
+                sanctions = ScreeningVerdict.valueOf(it.sanctions),
+                pep = it.pep,
+                matchedName = it.matchedName,
+                screenedAt = it.screenedAt,
+            )
+        },
+    )
 }

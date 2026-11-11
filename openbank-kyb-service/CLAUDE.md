@@ -71,6 +71,20 @@ is a bug — that is the drift ADR-0212 already paid for once.
   contract. Companies House also publishes only the month and year of a director's birth, so
   `Representative.dateOfBirth` stays null for GB rather than being reconstructed.
 
+- **`reviewReason` is read by the CUSTOMER, and it is on the review event.** `CaseResponse` returns it
+  to the initiator and every signer, and `BUSINESS_ONBOARDING_REVIEW_REQUIRED` publishes it. The
+  flags written there so far all restate what the customer told us, so naming them is harmless. A
+  screening finding is not that: "X matched a sanctions list" in that field is tipping off. The
+  related-party screening therefore raises ONE neutral flag (`CaseScreening.REVIEW_FLAG`) and keeps
+  who-matched-what in `Case.screening`, which `CaseResponse.from` fills only when `viewerPartyId` is
+  null — the operator routes. Anything else you derive from a list, a score or another customer's
+  data belongs behind the same door.
+- **`openbank.kyb.screening.enabled` ships OFF, and "off" stores nothing.** It needs a route to
+  sanctions-service that the deployment has to supply in the same change; switched on without one,
+  every case stops at its last signature with `503 SCREENING_PENDING`. Off is not "screened clear":
+  `Case.screening` stays null, and `RelatedPartyScreeningService` is `@Startup` so the warning is
+  printed at boot. The module's ITs run with it ON against `StubRelatedPartyScreening`.
+
 ## Authorization
 
 `kyb_rest_ext.rego` is narrow on purpose, for the reason `consent_rest_ext.rego` documents at

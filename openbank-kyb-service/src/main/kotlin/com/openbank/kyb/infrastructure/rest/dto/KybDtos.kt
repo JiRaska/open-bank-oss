@@ -6,6 +6,7 @@ package com.openbank.kyb.infrastructure.rest.dto
 
 import com.openbank.kyb.application.port.`in`.DeclaredEntity
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
@@ -320,6 +321,11 @@ data class CaseResponse(
     val questionnaire: Questionnaire?,
     val declarations: DeclarationsResponse?,
     val agreement: AgreementSummary?,
+    /**
+     * The related-party sanctions / PEP screening. OPERATOR view only: it is null on every response
+     * a customer can read, because naming who matched a list to the customer is tipping off.
+     */
+    val screening: ScreeningResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -341,8 +347,41 @@ data class CaseResponse(
             questionnaire = c.questionnaire,
             declarations = c.declarations?.let { DeclarationsResponse.from(it) },
             agreement = c.agreement?.let { AgreementSummary.from(it) },
+            // viewerPartyId is null only on the operator routes (each calls requireOperator first).
+            screening = c.screening?.takeIf { viewerPartyId == null }?.let { ScreeningResponse.from(it) },
             createdAt = c.createdAt,
             updatedAt = c.updatedAt,
+        )
+    }
+}
+
+/** One screened subject of the case, as an operator sees it. */
+data class ScreeningSubjectResponse(
+    val kind: String,
+    val name: String,
+    val organisation: Boolean,
+    /** PENDING | CLEAR | POTENTIAL_HIT | HIT — PENDING means no answer was obtained, never "clear". */
+    val sanctions: String,
+    val pep: Boolean,
+    val matchedName: String?,
+    val screenedAt: Instant?,
+)
+
+data class ScreeningResponse(val complete: Boolean, val subjects: List<ScreeningSubjectResponse>) {
+    companion object {
+        fun from(s: CaseScreening) = ScreeningResponse(
+            complete = s.complete,
+            subjects = s.subjects.map {
+                ScreeningSubjectResponse(
+                    kind = it.kind.name,
+                    name = it.name,
+                    organisation = it.organisation,
+                    sanctions = it.sanctions.name,
+                    pep = it.pep,
+                    matchedName = it.matchedName,
+                    screenedAt = it.screenedAt,
+                )
+            },
         )
     }
 }

@@ -155,6 +155,12 @@ interface KybMetricsPort {
 
     /** Temporal could not be told about a state change; the case is correct, its timers are not armed. */
     fun timerArmingFailed(state: String)
+
+    /**
+     * One related-party screen: [outcome] is `clear` | `pep` | `potential_hit` | `hit` | `unavailable`.
+     * `unavailable` is the one to alert on — while it is the only value moving, no case can be approved.
+     */
+    fun relatedPartyScreened(outcome: String)
 }
 
 /**
