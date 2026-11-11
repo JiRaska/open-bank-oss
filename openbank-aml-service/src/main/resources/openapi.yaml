@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: AML Service API
-  version: 1.3.1
+  version: 1.4.0
   description: >-
     Anti-Money Laundering screening case lifecycle — submit, review, and decide AML cases.
   license:
@@ -14,6 +14,8 @@ servers:
     description: Local development
 tags:
   - name: AML Cases
+  - name: AML Monitoring
+  - name: AML Reports
 
 security:
   - bearerAuth: []
@@ -168,6 +170,303 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals:
+    post:
+      tags: [AML Monitoring]
+      summary: Propose how a transaction-monitoring case is closed
+      operationId: proposeMonitoringDisposition
+      parameters:
+        - name: caseId
+          in: path
+          required: true
+          description: AML case id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeDispositionRequest'
+      responses:
+        '201':
+          description: Proposal recorded; a second, different person decides it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispositionProposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/aml/monitoring/disposition-proposals:
+    get:
+      tags: [AML Monitoring]
+      summary: Disposition proposals awaiting a decision
+      operationId: listPendingMonitoringDispositions
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Pending proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DispositionProposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision:
+    post:
+      tags: [AML Monitoring]
+      summary: Approve or reject a disposition proposal as a second, different person
+      operationId: decideMonitoringDisposition
+      parameters:
+        - name: proposalId
+          in: path
+          required: true
+          description: Disposition proposal id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecideDispositionRequest'
+      responses:
+        '200':
+          description: Proposal decided; on approval the case was moved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispositionProposalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessRule'
+
+  /api/v1/aml/reports:
+    post:
+      tags: [AML Reports]
+      summary: Draft a suspicious-transaction report
+      operationId: draftSuspiciousTransactionReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DraftReportRequest'
+      responses:
+        '201':
+          description: Report drafted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      tags: [AML Reports]
+      summary: List suspicious-transaction reports
+      operationId: listSuspiciousTransactionReports
+      parameters:
+        - name: state
+          in: query
+          schema:
+            $ref: '#/components/schemas/ReportState'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Reports
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/aml/reports/{reportId}:
+    get:
+      tags: [AML Reports]
+      summary: Get a suspicious-transaction report
+      operationId: getSuspiciousTransactionReport
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          description: Report id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/aml/reports/{reportId}/approval:
+    post:
+      tags: [AML Reports]
+      summary: Approve a drafted report as a second, different person
+      operationId: approveSuspiciousTransactionReport
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          description: Report id
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Report approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessRule'
+
+  /api/v1/aml/reports/{reportId}/filing:
+    post:
+      tags: [AML Reports]
+      summary: Record that an approved report was filed outside this system
+      operationId: recordSuspiciousTransactionReportFiling
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          description: Report id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordFilingRequest'
+      responses:
+        '200':
+          description: Filing recorded. The system submits nothing itself.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessRule'
+
+  /api/v1/aml/reports/{reportId}/withdrawal:
+    post:
+      tags: [AML Reports]
+      summary: Withdraw a report that was not filed
+      operationId: withdrawSuspiciousTransactionReport
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          description: Report id
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WithdrawReportRequest'
+      responses:
+        '200':
+          description: Report withdrawn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/BusinessRule'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -228,6 +527,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ApiError'
+    BusinessRule:
+      description: A business rule refused the action, for example the approver is the proposer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
 
   schemas:
     AmlCaseStatus:
@@ -275,9 +580,10 @@ components:
     UpdateAmlDecisionRequest:
       type: object
       description: >-
-        `decidedBy` is additionally rejected when blank, and `decisionReason` is mandatory when
-        `targetStatus` is BLOCKED — both enforced in `AmlCase.transitionTo`.
-      required: [targetStatus, decidedBy]
+        `decisionReason` is mandatory when `targetStatus` is BLOCKED. The decider is the
+        authenticated caller. A transaction-monitoring case can only be moved to UNDER_REVIEW
+        here; closing or escalating it goes through a disposition proposal.
+      required: [targetStatus]
       properties:
         targetStatus:
           $ref: '#/components/schemas/AmlCaseStatus'
@@ -290,6 +596,8 @@ components:
           nullable: true
         decidedBy:
           type: string
+          deprecated: true
+          description: Ignored. The decider is taken from the authenticated caller.
 
     AmlCaseResponse:
       type: object
@@ -392,3 +700,209 @@ components:
           type: string
         rejectedValue:
           nullable: true
+
+    CaseDisposition:
+      type: string
+      enum: [CLEAR, REPORT]
+
+    ProposalState:
+      type: string
+      enum: [PROPOSED, APPROVED, REJECTED, WITHDRAWN, EXECUTED]
+
+    ReportState:
+      type: string
+      enum: [DRAFT, APPROVED, FILED, WITHDRAWN]
+
+    DecisionOutcome:
+      type: object
+      description: A code of one pinned revision of the decision-outcome vocabulary.
+      required: [vocabularyId, vocabularyRevision, vocabularyHash, code]
+      properties:
+        vocabularyId:
+          type: string
+        vocabularyRevision:
+          type: integer
+        vocabularyHash:
+          type: string
+        code:
+          type: string
+
+    ProposeDispositionRequest:
+      type: object
+      required: [disposition, outcomeCode]
+      properties:
+        disposition:
+          $ref: '#/components/schemas/CaseDisposition'
+        outcomeCode:
+          type: string
+          description: A code of the decision-outcome vocabulary. An unknown code is refused.
+        note:
+          type: string
+          nullable: true
+
+    DecideDispositionRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve:
+          type: boolean
+        reason:
+          type: string
+          nullable: true
+
+    DispositionProposalResponse:
+      type: object
+      required: [proposalId, caseId, disposition, outcome, state, proposedBy, proposedAt]
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+        caseId:
+          type: string
+          format: uuid
+        disposition:
+          $ref: '#/components/schemas/CaseDisposition'
+        outcome:
+          $ref: '#/components/schemas/DecisionOutcome'
+        note:
+          type: string
+          nullable: true
+        state:
+          $ref: '#/components/schemas/ProposalState'
+        proposedBy:
+          type: string
+        proposedAt:
+          type: string
+          format: date-time
+        decidedBy:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        decisionReason:
+          type: string
+          nullable: true
+        executedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    ReportedMovement:
+      type: object
+      description: A booked movement, by the booking's own key.
+      required: [journalEntryId, accountId, currency]
+      properties:
+        journalEntryId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+
+    DraftReportRequest:
+      type: object
+      required: [partyId, narrative, caseIds]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+        narrative:
+          type: string
+        caseIds:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            format: uuid
+        movements:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportedMovement'
+
+    RecordFilingRequest:
+      type: object
+      required: [filingReference, filedAt, outcomeCode]
+      properties:
+        filingReference:
+          type: string
+          description: The reference under which the officer filed the report outside this system.
+        filedAt:
+          type: string
+          format: date-time
+        outcomeCode:
+          type: string
+
+    WithdrawReportRequest:
+      type: object
+      required: [outcomeCode]
+      properties:
+        outcomeCode:
+          type: string
+
+    ReportResponse:
+      type: object
+      required: [reportId, partyId, state, narrative, caseIds, movements, draftedBy, draftedAt, updatedAt]
+      properties:
+        reportId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        state:
+          $ref: '#/components/schemas/ReportState'
+        narrative:
+          type: string
+        caseIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        movements:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportedMovement'
+        draftedBy:
+          type: string
+        draftedAt:
+          type: string
+          format: date-time
+        approvedBy:
+          type: string
+          nullable: true
+        approvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        filingReference:
+          type: string
+          nullable: true
+        filedAt:
+          type: string
+          format: date-time
+          nullable: true
+        filingRecordedBy:
+          type: string
+          nullable: true
+        filingRecordedAt:
+          type: string
+          format: date-time
+          nullable: true
+        withdrawnBy:
+          type: string
+          nullable: true
+        withdrawnAt:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          allOf:
+            - $ref: '#/components/schemas/DecisionOutcome'
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time

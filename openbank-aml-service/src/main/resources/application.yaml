@@ -176,7 +176,7 @@ mp:
       auth:
         permission:
           bearer-only:
-            paths: /api/v1/aml/cases,/api/v1/aml/cases/*
+            paths: /api/v1/aml/cases,/api/v1/aml/cases/*,/api/v1/aml/reports,/api/v1/aml/reports/*,/api/v1/aml/monitoring/*
             policy: authenticated
             auth-mechanism: bearer
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
@@ -294,6 +294,9 @@ openbank:
         reasons-resource: aml/monitoring-reasons.synthetic.json
         severities-resource: aml/monitoring-severities.synthetic.json
         features-resource: aml/monitoring-count-features.synthetic.json
+      # ADR-0371 §10: the vocabulary every closing decision takes its structured outcome from.
+      decision-outcomes:
+        resource: aml/decision-outcomes.provisional.json
       evaluation:
         enabled: ${AML_MONITORING_EVALUATION_ENABLED:true}
         cron: "0 3/15 * * * ?"

@@ -105,6 +105,17 @@ class AmlCaseService(
         val amlCase = amlCaseRepository.findById(command.caseId)
             ?: throw AmlCaseNotFoundException(command.caseId)
 
+        // ADR-0371 §5: only an approved four-eyes proposal may close or escalate a monitoring case.
+        // UNDER_REVIEW stays open to one analyst: picking a case up is not deciding it.
+        if (amlCase.screeningType == com.openbank.aml.domain.model.ScreeningType.TRANSACTION_MONITORING &&
+            command.targetStatus != AmlCaseStatus.UNDER_REVIEW &&
+            command.fourEyesProposalId == null
+        ) {
+            throw InvalidAmlCaseStateTransitionException(
+                "A transaction-monitoring case is closed or escalated only through an approved disposition proposal",
+            )
+        }
+
         if (!amlCase.canTransitionTo(command.targetStatus)) {
             throw InvalidAmlCaseStateTransitionException(
                 "Invalid AML case status transition: ${amlCase.status} -> ${command.targetStatus}",
