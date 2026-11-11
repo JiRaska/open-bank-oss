@@ -56,6 +56,9 @@ jobs:
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
           BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          # Kill switch: repo variable CODEQL_JAVA_ON_PR=true restores the java-kotlin leg on every PR.
+          CODEQL_JAVA_ON_PR: ${{ vars.CODEQL_JAVA_ON_PR }}
         run: |
           # Code paths that warrant CodeQL semantic analysis. A gitops/docs/*.md-only PR
           # (e.g. an auto-generated deploy image-bump) changes none of these, so the
@@ -76,6 +79,24 @@ jobs:
           JS_RE='(\.(js|jsx|ts|tsx|mjs|cjs)$|(^|/)package(-lock)?\.json$)'
           # General workflow-only changes do not require semantic analysis. This workflow
           # and its compiler policy do: their changes must exercise actual extraction.
+
+          # java-kotlin on pull requests runs once per merge-train CARRIER, not once per push to
+          # every PR (#15483). The leg is a ~20 min traced fleet compile, it is not a required
+          # check, and the same commits are analysed again on the main push and weekly. Measured
+          # 2026-11-11: 37 of 60 sampled PR runs carried the leg (2 of them carriers), about 150
+          # hosted job-minutes an hour out of ~1200 on the 20-job cap, while carriers queued for
+          # runners. A carrier holds every member's code, so each change is still analysed before
+          # it merges. Exceptions that keep the leg on an ordinary PR: a change to this workflow
+          # or its compiler policy (must exercise real extraction), and the kill switch.
+          # 0 = run the java-kotlin leg on this pull request, 1 = leave it to the carrier.
+          java_leg_on_pr() {
+            if [ "${CODEQL_JAVA_ON_PR:-}" = "true" ]; then return 0; fi
+            if [[ "${HEAD_REF:-}" =~ ^train/(strict-)?[0-9]+-[0-9]+$ ]]; then return 0; fi
+            if grep -qE '^\.github/(scripts/codeql-force-compilers\.init\.gradle|workflows/security\.yml)$' <<< "$1"; then
+              return 0
+            fi
+            return 1
+          }
 
           # Emits codeql_matrix as a JSON array of matrix entries; '[]' means skip the job.
           # The `actions` leg (workflow files, no build, ~1 min) runs on EVERY event so every
@@ -121,10 +142,19 @@ jobs:
               # quiet fallback to "run everything" is indistinguishable from "scoping decided
               # to run everything", so the scoping can stop working and nothing reports it.
               echo "::warning::merge-base against $BASE_REF could not be resolved — running CodeQL for ALL languages (scoping did not engage)"
-              echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix true true
+              J=true
+              if ! java_leg_on_pr ""; then
+                echo "::notice::java-kotlin CodeQL is left to the merge-train carrier for this pull request (#15483)"
+                J=false
+              fi
+              echo "run_codeql=true" >> "$GITHUB_OUTPUT"; emit_matrix "$J" true
             else
               CHANGED="$(git diff --name-only "$BASE" HEAD)"
               classify "$CHANGED"
+              if [ "$J" = "true" ] && ! java_leg_on_pr "$CHANGED"; then
+                echo "::notice::java-kotlin CodeQL is left to the merge-train carrier for this pull request (#15483)"
+                J=false
+              fi
               if [ "$J" = "false" ] && [ "$S" = "false" ]; then
                 echo "run_codeql=false" >> "$GITHUB_OUTPUT"
               else
