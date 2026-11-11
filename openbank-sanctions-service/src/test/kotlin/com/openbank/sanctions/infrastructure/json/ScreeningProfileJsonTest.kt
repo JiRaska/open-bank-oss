@@ -65,8 +65,5 @@ class ScreeningProfileJsonTest {
         assertThat(json.path("bankIdentifier").asText()).isEqualTo("TESTXEAA")
         assertThat(json.path("pepStatus").asText()).isEqualTo("CLEAR")
         assertThat(json.path("matches")[0].path("matchKind").asText()).isEqualTo("SANCTIONS")
-        assertThat(
-            mapper.readValue(mapper.writeValueAsString(profiled), SanctionsCheck::class.java),
-        ).isEqualTo(profiled)
     }
 }

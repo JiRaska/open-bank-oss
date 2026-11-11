@@ -8,6 +8,7 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.json.omitAbsentScreeningProfileFields
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsRepositoryImpl
 import io.quarkus.flyway.FlywayConfigurationCustomizer
 import io.quarkus.test.common.QuarkusTestResource
@@ -61,7 +62,9 @@ class SanctionsJsonbPayloadIT {
     @Inject
     lateinit var repository: SanctionsRepositoryImpl
 
-    private val mapper = jacksonObjectMapper().findAndRegisterModules()
+    // Same mix-ins as the production mappers: a match without a kind is stored without the key,
+    // i.e. in exactly the shape it had before the screening-profile fields existed.
+    private val mapper = jacksonObjectMapper().findAndRegisterModules().omitAbsentScreeningProfileFields()
     private val id = UUID.fromString("a1313131-1313-4131-8131-131313131313")
     private val columns = listOf("aliases", "identifiers", "matches", "checked_lists")
     private val payloads = listOf(
