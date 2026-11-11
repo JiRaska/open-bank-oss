@@ -72,7 +72,16 @@ jobs:
   fleet-lint:
     name: fleet lint + compile
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 25
+    # Sized for a COLD build, not a warm one. Any change under build-logic/ changes the build
+    # script classpath, which invalidates every compile/detekt/ktlint entry in the Gradle build
+    # cache at once, so the next run recompiles the whole fleet: measured 27-36 min on a hosted
+    # runner (2026-11), against 5-12 min warm. At the former limit of 25 that run was cancelled,
+    # and a cancelled job saves no cache -- so the NEXT run was just as cold, and the one after
+    # it: 69 consecutive runs on main ended at the limit with no verdict (2026-11-10/11). The
+    # limit must exceed the cold duration or the gate cannot recover on its own. This value is
+    # the backstop for setup and post steps; the Gradle step carries its own, lower limit below,
+    # because a STEP that times out fails the job whereas a JOB that times out is `cancelled`.
+    timeout-minutes: 50
     permissions:
       contents: read
       issues: write
@@ -204,8 +213,14 @@ jobs:
       # So classify the failure instead of letting both land in the same bucket. The step
       # still fails either way — an OOM'd run has NOT linted the fleet and must not read as
       # a pass — but it says which kind it was, and the alert issue says so too.
+      # timeout-minutes on the STEP, below the job's: a job that hits its own limit concludes
+      # `cancelled`, which skips the `if: failure()` alert below and which main-red-watch files
+      # under "not a verdict" (a spot-killed runner looks the same) -- so a gate that could no
+      # longer finish stayed invisible for two days. A step that hits its limit FAILS instead:
+      # the run concludes `failure`, the alert fires and the watch reads it as red.
       - name: Fleet compile + detekt + ktlint
         id: lint
+        timeout-minutes: 45
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
@@ -266,6 +281,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           FAILURE_KIND: ${{ steps.lint.outputs.kind }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
         with:
           script: |
             const { owner, repo } = context.repo;
@@ -287,7 +303,11 @@ jobs:
               ? 'ABORTED on infrastructure, **not** a lint finding: the Gradle daemon ran out of memory, so the task graph stopped part-way and every module after the abort was never linted. This run is not evidence that the fleet is broken, nor that it is clean — the gate did not run. Raise `-Xmx` in `fleet-lint.yml`\'s `GRADLE_OPTS` (a ratchet — see the comment there) and re-run.'
               : kind === 'lint'
                 ? 'a module no longer compiles or violates the current detekt/ktlint ruleset, even though path-scoped PR CI was green. See the run for the full per-module list.'
-                : 'failed before the classification step could run (setup, checkout, or toolchain) — read the run log directly.';
+                : process.env.LINT_OUTCOME === 'failure'
+                  // The Gradle step itself failed but never reached its classifier, so it was
+                  // killed mid-build -- in practice its own timeout-minutes. Not a finding.
+                  ? 'ABORTED, **not** a lint finding: the Gradle step was killed before it finished (its `timeout-minutes`), so the fleet was not fully linted. A cold build after a `build-logic/` change is the usual cause; if this repeats, the cold build has outgrown the limit in `fleet-lint.yml`.'
+                  : 'failed before the classification step could run (setup, checkout, or toolchain) — read the run log directly.';
             const note = `The fast fleet-lint gate (compile + detekt + ktlint, no tests) failed on \`${trigger}\` — ${cause}\n\nRun: ${runUrl}\nDetected: ${detected}`;
             if (open.length > 0) {
               const n = open[0].number;
