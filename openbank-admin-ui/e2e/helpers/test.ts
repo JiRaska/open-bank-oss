@@ -67,13 +67,15 @@ function wrap(host: RouteHost, found: Violation[]): void {
   }
 }
 
-export const test = base.extend<{ contractGuard: void }>({
-  contractGuard: [
-    async ({ page, context }, use, testInfo) => {
+// The guard wraps the `page` and `context` fixtures rather than depending on them: an auto fixture
+// that asked for `page` would launch a browser for request-only specs (the deployed auth-gate
+// lane runs with no browser installed). `contractViolations` has no dependencies, is torn down
+// after `page` and `context`, and so sees every fulfil of the test before it asserts.
+export const test = base.extend<{ contractViolations: Violation[] }>({
+  contractViolations: [
+    async ({}, use, testInfo) => {
       const found: Violation[] = []
-      wrap(page, found)
-      wrap(context, found)
-      await use()
+      await use(found)
       const specFile = path.relative(E2E_DIR, testInfo.file)
       const fresh = [...new Map(found.map(v => [violationKey(specFile, v), v])).entries()]
         .filter(([key]) => !baseline.has(key))
@@ -91,6 +93,14 @@ export const test = base.extend<{ contractGuard: void }>({
     },
     { auto: true },
   ],
+  context: async ({ context, contractViolations }, provide) => {
+    wrap(context, contractViolations)
+    await provide(context)
+  },
+  page: async ({ page, contractViolations }, provide) => {
+    wrap(page, contractViolations)
+    await provide(page)
+  },
 })
 
 export { expect }
