@@ -15,6 +15,8 @@ import com.openbank.libs.fincrime.pack.RecordedCountShadowEpoch
 import com.openbank.libs.fincrime.pack.SignedCountShadowEpoch
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
 import io.vertx.core.impl.ContextInternal
@@ -39,6 +41,7 @@ import java.util.concurrent.TimeUnit
 
 @QuarkusTest
 @QuarkusTestResource(PostgresRedisTestResource::class, restrictToAnnotatedClass = true)
+@TestProfile(FraudCountShadowEpochStoreIT.OwnProfile::class)
 class FraudCountShadowEpochStoreIT {
     @Inject
     lateinit var epochs: FraudCountShadowEpochStore
@@ -128,4 +131,7 @@ class FraudCountShadowEpochStoreIT {
         }
         return completion
     }
+
+    /** Keep this fixture's reactive session factory scoped to its own application restart. */
+    class OwnProfile : QuarkusTestProfile
 }
