@@ -4,9 +4,9 @@
 
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.it.PostgresRedpandaTestResource
 import com.openbank.libs.synthetic.SyntheticTaint
-import io.quarkus.test.common.QuarkusTestResource
+import com.openbank.libs.testing.containers.PostgresTestResource
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -14,6 +14,7 @@ import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
+import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
@@ -25,17 +26,35 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaTestResource::class)
 @TestProfile(SyntheticTransferEvidenceIT.FixtureProfile::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class SyntheticTransferEvidenceIT {
 
+    class NoBrokerResource : QuarkusTestResourceLifecycleManager {
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("ledger-events-out")
+
+        override fun stop() = InMemoryConnector.clear()
+    }
+
     class FixtureProfile : QuarkusTestProfile {
+        override fun disableGlobalTestResources() = true
+
+        override fun testResources(): List<QuarkusTestProfile.TestResourceEntry> = listOf(
+            QuarkusTestProfile.TestResourceEntry(
+                PostgresTestResource::class.java,
+                mapOf("db" to "openbank_ledger_canary_proof_it"),
+            ),
+            QuarkusTestProfile.TestResourceEntry(NoBrokerResource::class.java),
+        )
+
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.synthetic.trusted-principals" to WRITER,
             "openbank.synthetic-transfer.source-account-id" to SOURCE_ID,
             "openbank.synthetic-transfer.target-account-id" to TARGET_ID,
+            "quarkus.devservices.enabled" to "false",
+            "openbank.outbox.dispatch-enabled" to "false",
             "quarkus.otel.sdk.disabled" to "true",
             "quarkus.scheduler.enabled" to "false",
         )
