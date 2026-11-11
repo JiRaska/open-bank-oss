@@ -114,11 +114,11 @@ class DomesticPaymentResource(
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
         val customerScope = request.customerSubmissionScope?.let {
             requireCustomerEdge()
-            validatedCustomerScope(it)
+            validatedDigest(it, "customer submission scope")
         }
         val originalDigest = originalSubmissionKeyDigest?.let {
             requireCustomerEdge()
-            validatedOriginalDigest(it)
+            validatedDigest(it, "original submission digest")
         }
 
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
@@ -159,8 +159,10 @@ class DomesticPaymentResource(
         }
         val lookup = requireNotNull(request) { "A submission lookup is required" }
         val accountId = requireNotNull(lookup.debtorAccountId) { "debtorAccountId is required" }
-        val scope = validatedCustomerScope(lookup.customerSubmissionScope)
-        val originalDigest = lookup.originalSubmissionKeyDigest?.let(::validatedOriginalDigest)
+        val scope = validatedDigest(lookup.customerSubmissionScope, "customer submission scope")
+        val originalDigest = lookup.originalSubmissionKeyDigest?.let {
+            validatedDigest(it, "original submission digest")
+        }
         val payment = paymentUseCase.findCustomerSubmission(idempotencyKey, accountId, scope, originalDigest)
         val result = if (payment == null) {
             mapOf("outcome" to "UNKNOWN")
@@ -181,14 +183,9 @@ class DomesticPaymentResource(
         }
     }
 
-    private fun validatedOriginalDigest(digest: String): String {
-        require(CUSTOMER_SUBMISSION_SCOPE.matches(digest)) { "Invalid original submission digest" }
+    private fun validatedDigest(digest: String?, field: String): String {
+        require(digest != null && SUBMISSION_DIGEST.matches(digest)) { "Invalid $field" }
         return digest
-    }
-
-    private fun validatedCustomerScope(scope: String?): String {
-        require(scope != null && CUSTOMER_SUBMISSION_SCOPE.matches(scope)) { "Invalid customer submission scope" }
-        return scope
     }
 
     @GET
@@ -259,6 +256,6 @@ class DomesticPaymentResource(
         const val CUSTOMER_EDGE = "service-account-openbank-edge"
         const val ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
         const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
-        val CUSTOMER_SUBMISSION_SCOPE = Regex("[0-9a-f]{64}")
+        val SUBMISSION_DIGEST = Regex("[0-9a-f]{64}")
     }
 }
