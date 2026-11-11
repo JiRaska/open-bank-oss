@@ -170,7 +170,8 @@ class BusinessSigningHandlers(
         val after = objectOrNull(signed) ?: return passThrough(signed)
         val out = detail(after, human, SigningPolicySummary.lang(acceptLanguage))
         if (after.path("status").asText() == "APPROVED" && after.path("kind").asText() in RELEASABLE_KINDS) {
-            out.set<JsonNode>("release", objectMapper.valueToTree(approvals.release(entity, approvalId)))
+            val domestic = after.path("payload").path("rail").asText() == PaymentRail.DOMESTIC.name
+            out.set<JsonNode>("release", objectMapper.valueToTree(approvals.release(entity, approvalId, domestic)))
         }
         return ok(out)
     }

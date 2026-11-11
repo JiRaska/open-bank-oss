@@ -92,9 +92,10 @@ class DelegationSigningAdapter(private val upstream: UpstreamClient, private val
         ),
     )
 
-    override fun releaseClaim(entity: UUID, approvalId: UUID) = reply(
-        upstream.post("${entities(entity)}/approval-requests/$approvalId/release-claim", entity.toString(), "{}"),
-    )
+    override fun releaseClaim(entity: UUID, approvalId: UUID, domestic: Boolean): SigningReply {
+        val action = if (domestic) "domestic-release-claim" else "release-claim"
+        return reply(upstream.post("${entities(entity)}/approval-requests/$approvalId/$action", entity.toString(), "{}"))
+    }
 
     override fun releaseResult(entity: UUID, approvalId: UUID, body: String) = reply(
         upstream.post("${entities(entity)}/approval-requests/$approvalId/release-result", entity.toString(), body),

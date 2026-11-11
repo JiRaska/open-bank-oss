@@ -315,8 +315,8 @@ class BusinessPaymentApprovals(
         .build()
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
-    fun release(entity: UUID, approvalId: UUID): Map<String, Any?> {
-        val claim = signing.releaseClaim(entity, approvalId)
+    fun release(entity: UUID, approvalId: UUID, domestic: Boolean): Map<String, Any?> {
+        val claim = signing.releaseClaim(entity, approvalId, domestic)
         if (!claim.ok) {
             // 409: somebody else holds the claim — the payment is being (or was) released by them.
             return mapOf("status" to "RELEASE_NOT_CLAIMED", "upstreamStatus" to claim.status)
@@ -327,6 +327,9 @@ class BusinessPaymentApprovals(
         val railRequest = payload?.path("railRequest")?.takeIf { it.isObject }
         if (rail == null || railRequest == null) {
             return invalidRelease(entity, approvalId, "frozen payload has no rail request")
+        }
+        if (domestic != (rail == PaymentRail.DOMESTIC)) {
+            return invalidRelease(entity, approvalId, "frozen rail does not match the release route")
         }
         val originalKey = node?.get("originalSubmissionKeyDigest")
         val digest = originalKey?.textOrNull()?.takeIf(ORIGINAL_KEY_DIGEST_PATTERN::matches)
@@ -380,7 +383,7 @@ class BusinessPaymentApprovals(
             upstream.post(railUrl(rail), entity.toString(), body, approvalId.toString())
         } else {
             upstream.post(
-                railUrl(rail),
+                "${railUrl(rail)}/approval-releases",
                 entity.toString(),
                 body,
                 approvalId.toString(),

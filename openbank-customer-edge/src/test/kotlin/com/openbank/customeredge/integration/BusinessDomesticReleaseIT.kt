@@ -25,7 +25,9 @@ private const val APPROVAL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 private const val SCA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 private const val SHA = "abababababababababababababababababababababababababababababababab"
 private const val DETAIL = "/api/v1/entities/$COMPANY/approval-requests/$APPROVAL"
+private const val DOMESTIC_CLAIM = "$DETAIL/domestic-release-claim"
 private const val DOMESTIC_RAIL = "/api/v1/domestic-payments"
+private const val BOUND_DOMESTIC_RAIL = "$DOMESTIC_RAIL/approval-releases"
 
 @QuarkusTest
 @QuarkusTestResource(BusinessApprovalStubs::class, restrictToAnnotatedClass = true)
@@ -49,7 +51,7 @@ class BusinessDomesticReleaseIT {
         BusinessApprovalStubs.stub(
             "POST",
             "$DETAIL/signatures",
-            body = """{"id":"$APPROVAL","kind":"PAYMENT","status":"APPROVED"}""",
+            body = """{"id":"$APPROVAL","kind":"PAYMENT","status":"APPROVED","payload":{"rail":"DOMESTIC"}}""",
         )
     }
 
@@ -65,12 +67,12 @@ class BusinessDomesticReleaseIT {
         val frozen = """{"debtorAccountId":"$ACCOUNT","amount":400,"currency":"CZK"}"""
         BusinessApprovalStubs.stub(
             "POST",
-            "$DETAIL/release-claim",
+            DOMESTIC_CLAIM,
             body = """{"claimToken":"t1","originalSubmissionKeyDigest":"$SHA",
                 "payload":{"rail":"DOMESTIC","railRequest":$frozen}}""",
         )
         val paymentId = "00000000-0000-4000-8000-0000000000f9"
-        BusinessApprovalStubs.stub("POST", DOMESTIC_RAIL, status = 201, body = """{"id":"$paymentId"}""")
+        BusinessApprovalStubs.stub("POST", BOUND_DOMESTIC_RAIL, status = 201, body = """{"id":"$paymentId"}""")
         BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
 
         sign() Then {
@@ -79,17 +81,20 @@ class BusinessDomesticReleaseIT {
             body("release.paymentId", equalTo(paymentId))
         }
 
-        val rail = BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL).single()
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_CLAIM)).hasSize(1)
+        assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/release-claim")).isEmpty()
+        val rail = BusinessApprovalStubs.requests("POST", BOUND_DOMESTIC_RAIL).single()
         assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
         assertThat(rail.header("X-OpenBank-Original-Submission-Key-Digest")).isEqualTo(SHA)
         assertThat(rail.body).isEqualTo(frozen)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 
     @Test
     fun `malformed domestic release digest blocks dispatch`() {
         BusinessApprovalStubs.stub(
             "POST",
-            "$DETAIL/release-claim",
+            DOMESTIC_CLAIM,
             body = """{"claimToken":"t1","originalSubmissionKeyDigest":"wrong",
                 "payload":{"rail":"DOMESTIC","railRequest":{"amount":400}}}""",
         )
@@ -100,5 +105,19 @@ class BusinessDomesticReleaseIT {
             body("release.status", equalTo("RELEASE_FAILED"))
         }
         assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", BOUND_DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    fun `older signing provider cannot trigger a fallback release claim`() {
+        BusinessApprovalStubs.stub("POST", DOMESTIC_CLAIM, status = 404, body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASE_NOT_CLAIMED"))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", "$DETAIL/release-claim")).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", BOUND_DOMESTIC_RAIL)).isEmpty()
     }
 }

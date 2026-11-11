@@ -356,7 +356,7 @@ old company domestic writers before accepting bound commands. Older commands wit
 evidence have no backfilled approval receipt. Clients keep the pending warning if both lookups
 return `UNKNOWN`.
 
-For a mode-bound domestic release, Edge forwards the Delegation claim's original key digest as a
-trusted header. The rail's uniqueness constraint also covers historical direct keys, and the
-frozen rail body and approval-ID idempotency key are preserved. Activate this writer after the rail
-accepts the header and enforces the corresponding constraint.
+For a mode-bound domestic release, Edge uses the dedicated Delegation claim and forwards the
+original key digest to the dedicated rail writer. The rail's uniqueness constraint covers
+historical direct keys. The frozen body and approval-ID idempotency key are preserved. Activate
+this writer after the release-capable Delegation and rail endpoints are available.

@@ -170,7 +170,8 @@ that ID, and a later policy evaluation can choose a different signing route for 
    lifecycle. A claim without a receipt leaves the outcome unknown.
 3. Domestic release keeps the approval ID as the rail idempotency key and conveys the original
    digest separately. The rail enforces one instruction for that digest across original direct
-   keys and held releases. A reported rail ID supplies release evidence.
+   keys and held releases. Bound release uses dedicated Delegation and rail routes. A reported
+   rail ID supplies release evidence.
 4. Deploy the rail constraint and Delegation contract before the Edge writer. Drain previous
    company domestic writers before accepting mode-bound commands. The rollout has no original
    key evidence for older held approvals, so an unmatched lookup keeps the client warning.
