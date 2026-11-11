@@ -184,7 +184,7 @@ mp:
 
 # ADR-0007/0017: the deployed default above is the sentinel, so a pod whose Secret failed to
 # mount fails auth instead of booting on a credential baked into the image. The local-only
-# password the dev compose / test containers use lives here (gate appyaml-secret-literals).
+# password the dev compose / test containers use lives here.
 "%dev,test":
   quarkus:
     datasource:
