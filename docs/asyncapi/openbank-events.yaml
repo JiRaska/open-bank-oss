@@ -5,8 +5,8 @@ info:
   title: OpenBank Async Event API
   # 2.4.0 -> 2.5.0 (#13179): additive minimal oversight-trigger channel and payload.
   # 2.5.0 -> 2.6.0 (#10760): additive CZ_TERRORISTS value on sanctions list enums.
-  # 2.6.0 -> 2.7.0 (#15723): additive optional screening-profile fields on sanctions check events.
-  version: 2.7.0
+  # 2.7.0 -> 2.8.0 (#15723): additive optional screening-profile fields on sanctions check events.
+  version: 2.8.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -299,6 +299,15 @@ channels:
       PartyMerged:
         $ref: '#/components/messages/PartyMerged'
 
+  party-pii-audit:
+    address: openbank.party.audit
+    description: |
+      Staff access to unmasked party records. The party-service direct emitter sets ce-type and body eventType.
+      Party-service publishes and only audit-service reads.
+    messages:
+      PartyPiiRevealed:
+        $ref: '#/components/messages/PartyPiiRevealed'
+
   consent-events:
     address: openbank.consent.events
     description: |
@@ -590,6 +599,12 @@ operations:
       $ref: '#/channels/party-events'
     summary: party-service publishes party master-data events
 
+  publishPartyPiiAudit:
+    action: send
+    channel:
+      $ref: '#/channels/party-pii-audit'
+    summary: Party-service publishes a staff disclosure record for audit-service.
+
   publishConsentEvent:
     action: send
     channel:
@@ -829,6 +844,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PartyMergedPayload'
+
+    PartyPiiRevealed:
+      name: PartyPiiRevealed
+      description: Audited staff access to unmasked party details. Contains no revealed values.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PartyPiiRevealedPayload'
 
     ConsentEvent:
       name: ConsentEvent
@@ -1718,6 +1740,36 @@ components:
             The changed fields that made the event MATERIAL (subset of legalName, dateOfBirth,
             nationality, partyType). Empty for NON_MATERIAL and NO_CHANGE. Note the producer's
             `changedFields` classification field is NOT put on the wire.
+
+    PartyPiiRevealedPayload:
+      type: object
+      additionalProperties: false
+      required: [eventId, eventType, partyId, sourceService, actorId, actorType, reason, occurredAt]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          const: PARTY_PII_REVEALED
+        partyId:
+          type: string
+          format: uuid
+        sourceService:
+          type: string
+          const: party-service
+        actorId:
+          type: string
+          description: Verified interactive staff subject identifier.
+        actorType:
+          type: string
+          const: HUMAN
+        reason:
+          type: string
+          enum: [KYC_REVIEW, CUSTOMER_SUPPORT, DATA_CORRECTION]
+        occurredAt:
+          type: string
+          format: date-time
 
     PartyErasedPayload:
       type: object

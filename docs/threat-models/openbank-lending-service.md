@@ -27,7 +27,11 @@
    client-credentials, behind a `LedgerCallGuard` resilience boundary. This is the money-path crossing.
 3. **Service → event stream (transactional outbox).** Loan state changes flow to the analytics/downstream
    plane through the outbox (ADR-0003) — one local transaction, single extraction path, no second read
-   path into the lending DB.
+   path into the lending DB. The versioned `loan.exposure_fact` envelope (#9890) carries
+   the loan, application and party identifiers, native amounts, recorded status and effective
+   time. The same lending topic ACL controls producer access. Repayment and final-state facts
+   commit with their local source changes. The cash confirmation fact follows both completed
+   disbursement postings and commits with the existing disbursement event.
 4. **Service → credit bureau / risk-parameter / valuation feeds (ports).** `@Default` no-op today; real
    integrations land later as build-time-gated `@Alternative` adapters — each a future trust boundary.
 5. **Service → its own Postgres schema.** Intra-service tables only; no cross-schema reads.
