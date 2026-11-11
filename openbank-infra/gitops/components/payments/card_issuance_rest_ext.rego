@@ -23,13 +23,8 @@
 # — no extension needed for those. card.details.read is the exception: it is listed in rules.yaml
 # authz.operator_read_any_excluded_actions, so no generic read grant reaches the PAN. The remaining actions have no generic base-rego grant.
 #
-# Verified caller: customer-edge calls card.list/card.suspend/card.resume on the customer's own
-# card via the shared `openbank-services` Keycloak client (service-account-openbank-services,
-# whose realmRoles include ROLE_OPERATOR) — see CustomerEdgeResource.kt cardAction(). Per the
-# documented fleet-wide limitation (rules.yaml authz_policy.principal_type_service_unreachable),
-# AuthorizeInterceptor cannot distinguish this M2M caller from a real human operator holding
-# ROLE_OPERATOR, so granting the role necessarily covers both — same stance as consent-service's
-# service-consent-m2m rule.
+# Customer-edge's card control actions use its named workload grant after checking card ownership.
+# The named card-processing workload can read issuer data and submit authorization decisions.
 
 package openbank.rest
 
@@ -69,7 +64,8 @@ allowed_reasons contains "compliance-card-cancel" if {
 
 # Customer edge validates card ownership and the customer action before calling this API.
 allowed_reasons contains "service-edge-card-controls" if {
-	machine_named("service-account-openbank-edge")
+	input.principal.id == "service-account-openbank-edge"
+	machine_named(input.principal.id)
 	"ROLE_OPERATOR" in input.principal.roles
 	input.action in {"card.cancel", "card.limits.update", "card.controls.update"}
 }
