@@ -228,3 +228,10 @@ For a mode-bound release, verified customer-edge sends the approval ID as the ra
 `originalSubmissionKeyDigest`. The lookup requires all four values. It echoes the stored digest
 on `FOUND` so the edge can distinguish exact proof from an older provider's unqualified reply.
 An ordinary direct lookup omits the digest and matches only rows stored without it.
+
+### Dispatch a mode-bound approval
+
+Send mode-bound releases to `POST /api/v1/domestic-payments/approval-releases` with the frozen
+rail instruction, approval ID and original submission digest. The dedicated route requires the
+digest before the payment transaction starts. Its absence on an older provider leaves the
+release unavailable. General payment creation remains available for direct and legacy writes.

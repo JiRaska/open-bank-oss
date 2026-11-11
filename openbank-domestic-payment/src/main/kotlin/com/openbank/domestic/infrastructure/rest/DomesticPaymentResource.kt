@@ -82,7 +82,30 @@ class DomesticPaymentResource(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context requestContext: ContainerRequestContext,
-        @HeaderParam("X-OpenBank-Original-Submission-Key-Digest") originalSubmissionKeyDigest: String? = null,
+        @HeaderParam(ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER) originalSubmissionKeyDigest: String? = null,
+    ): Response = submitPayment(request, idempotencyKey, requestContext, originalSubmissionKeyDigest)
+
+    @POST
+    @Path("/approval-releases")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_API")
+    @Authorize(action = "domestic-payment.create")
+    @Operation(summary = "Release a mode-bound domestic approval from verified customer edge")
+    suspend fun releaseApproval(
+        request: CreateDomesticPaymentRequest,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER) originalSubmissionKeyDigest: String?,
+        @Context requestContext: ContainerRequestContext,
+    ): Response {
+        requireCustomerEdge()
+        requireNotNull(originalSubmissionKeyDigest) { "$ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER is required" }
+        return submitPayment(request, idempotencyKey, requestContext, originalSubmissionKeyDigest)
+    }
+
+    private suspend fun submitPayment(
+        request: CreateDomesticPaymentRequest,
+        idempotencyKey: String?,
+        requestContext: ContainerRequestContext,
+        originalSubmissionKeyDigest: String?,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
         // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
@@ -234,6 +257,7 @@ class DomesticPaymentResource(
 
     private companion object {
         const val CUSTOMER_EDGE = "service-account-openbank-edge"
+        const val ORIGINAL_SUBMISSION_KEY_DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
         const val IDEMPOTENCY_KEY_MAX_LENGTH = 128
         val CUSTOMER_SUBMISSION_SCOPE = Regex("[0-9a-f]{64}")
     }

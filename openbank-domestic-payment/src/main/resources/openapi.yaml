@@ -11,7 +11,7 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.16.0
+  version: 1.17.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -121,6 +121,54 @@ paths:
                   $ref: '#/components/schemas/DomesticPaymentResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/domestic-payments/approval-releases:
+    post:
+      tags: [Domestic Payments]
+      summary: Release a mode-bound domestic approval
+      description: >-
+        Verified customer-edge sends the approval ID as the rail key and the original business
+        submission digest as separate metadata. Uses the unchanged frozen domestic instruction.
+      operationId: releaseDomesticPaymentApproval
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The approval ID used as the rail transport key.
+          schema: {type: string, minLength: 1, maxLength: 128}
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: true
+          schema: {type: string, pattern: '^[0-9a-f]{64}$'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomesticPaymentRequest'
+      responses:
+        '201':
+          description: Payment created, or the durable result of an exact approval release replay
+          headers:
+            X-Idempotency-Replayed:
+              description: Present and true only when this response replays an existing payment.
+              schema: {type: string, enum: ['true']}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentResponse'
+        '400':
+          description: Missing or malformed release metadata or invalid domestic instruction
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Rail or original submission key is already bound to a different or unverifiable request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/IdempotencyConflictResponse'
 
   /api/v1/domestic-payments/submissions/lookup:
     post:

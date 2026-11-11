@@ -54,7 +54,7 @@ class DomesticOriginalSubmissionKeyIT {
     fun `a legacy direct payment blocks a held release under its original key`() {
         val accepted = post(originalKey)
         val directId = paymentId(accepted)
-        assertConflict(post(approvalId, originalDigest), directId)
+        assertConflict(release(originalDigest), directId)
         assertSinglePayment(directId, originalKey, persistedDigest = null)
         assertReplay(post(originalKey), directId)
     }
@@ -120,7 +120,7 @@ class DomesticOriginalSubmissionKeyIT {
     @Test
     fun `bound lookup requires the exact transport key debit account scope and stored digest`() {
         val scope = digest("customer-scope")
-        val id = paymentId(post(approvalId, originalDigest, scope))
+        val id = paymentId(release(originalDigest, scope))
         assertFound(lookup(approvalId, scope, originalDigest), id, originalDigest)
         listOf(
             lookup(approvalId, scope),
@@ -130,6 +130,16 @@ class DomesticOriginalSubmissionKeyIT {
             lookup(originalKey, scope, originalDigest),
         ).forEach(::assertUnknown)
         assertThat(lookup(approvalId, scope, "not-a-digest").statusCode).isEqualTo(HTTP_BAD_REQUEST)
+        assertSinglePayment(id, approvalId, originalDigest)
+    }
+
+    @Test
+    fun `dedicated release refuses missing metadata before writing and replays the exact approval`() {
+        assertThat(release(null).statusCode).isEqualTo(HTTP_BAD_REQUEST)
+        assertThat(release("bad-digest").statusCode).isEqualTo(HTTP_BAD_REQUEST)
+        assertThat(writes()).isEmpty()
+        val id = paymentId(release(originalDigest))
+        assertReplay(release(originalDigest), id)
         assertSinglePayment(id, approvalId, originalDigest)
     }
 
@@ -144,6 +154,7 @@ class DomesticOriginalSubmissionKeyIT {
     )
     fun `an API identity with a forged Edge username cannot attach the digest`() {
         assertThat(post(approvalId, originalDigest).statusCode).isEqualTo(HTTP_FORBIDDEN)
+        assertThat(release(originalDigest).statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(lookup(approvalId, digest("customer-scope"), originalDigest).statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(writes()).isEmpty()
     }
@@ -179,7 +190,15 @@ class DomesticOriginalSubmissionKeyIT {
         assertThat(digest(raw)).isEqualTo(expected)
     }
 
-    private fun post(key: String, originalKeyDigest: String? = null, customerScope: String? = null): Response {
+    private fun release(originalKeyDigest: String?, customerScope: String? = null): Response =
+        post(approvalId, originalKeyDigest, customerScope, path = "/approval-releases")
+
+    private fun post(
+        key: String,
+        originalKeyDigest: String? = null,
+        customerScope: String? = null,
+        path: String = "",
+    ): Response {
         val request = RestAssured.given().contentType(ContentType.JSON).header("Idempotency-Key", key)
         originalKeyDigest?.let { request.header(DIGEST_HEADER, it) }
         return request.body(
@@ -195,7 +214,7 @@ class DomesticOriginalSubmissionKeyIT {
                 "currency" to "CZK",
                 "priority" to "STANDARD",
             ) + customerScope?.let { mapOf("customerSubmissionScope" to it) }.orEmpty(),
-        ).post("/api/v1/domestic-payments")
+        ).post("/api/v1/domestic-payments$path")
     }
 
     private fun lookup(
