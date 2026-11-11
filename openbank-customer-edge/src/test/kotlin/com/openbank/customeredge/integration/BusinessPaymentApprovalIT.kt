@@ -6,6 +6,7 @@ package com.openbank.customeredge.integration
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -14,6 +15,7 @@ import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
@@ -30,6 +32,8 @@ private const val APPROVAL = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 private const val SCA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 private const val SHA = "abababababababababababababababababababababababababababababababab"
 private const val CREDITOR = "DE89370400440532013000"
+private const val DOMESTIC_BBAN = "123456789/0100"
+private const val DOMESTIC_IBAN = "CZ1801000000000123456789"
 private const val ENTITY = "/api/v1/entities/$COMPANY"
 private const val EVALUATE = "$ENTITY/signing/evaluate"
 private const val CREATE = "$ENTITY/approval-requests"
@@ -56,6 +60,9 @@ private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 class BusinessPaymentApprovalIT {
 
     private val json = ObjectMapper()
+
+    @Inject
+    lateinit var paymentSessions: PaymentSessionStore
 
     @BeforeEach
     fun stubs() {
@@ -95,7 +102,7 @@ class BusinessPaymentApprovalIT {
         header("Idempotency-Key", key)
         body(
             """{"debtorAccountId":"$ACCOUNT","amount":"80000.00","currency":"$currency",
-                "creditorAccountNumber":"123456789/0100","creditorName":"Fixture"}""",
+                "creditorAccountNumber":"$DOMESTIC_BBAN","creditorName":"Fixture"}""",
         )
     } When {
         post("/customer/v1/domestic-payments")
@@ -216,6 +223,7 @@ class BusinessPaymentApprovalIT {
         assertThat(claimBody.path("submissionKeyDigest").asText()).isEqualTo(digest)
         assertThat(claimBody.path("submissionCorrelation").asText()).isEqualTo(correlation)
         assertThat(claimBody.path("payload")).isEqualTo(request.path("payload"))
+        assertThat(request.path("payload").path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
         assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
         assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
         assertThat(claimRequest.header("Idempotency-Key")).isNull()
@@ -237,12 +245,52 @@ class BusinessPaymentApprovalIT {
 
         val evaluate = readJson(BusinessApprovalStubs.requests("POST", EVALUATE).single().body)
         assertThat(evaluate.path("currency").asText()).isEqualTo("CZK")
+        assertThat(evaluate.path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
+        val consume = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
+        assertThat(consume.path("creditor").asText()).isEqualTo(DOMESTIC_BBAN)
         val create = BusinessApprovalStubs.requests("POST", CREATE).single()
         val request = readJson(create.body)
         assertDomesticClaimMatchesCreate(key, create, request)
         val payload = request.path("payload")
         assertThat(payload.path("currency").asText()).isEqualTo(currency)
         assertThat(payload.path("railRequest").path("currency").asText()).isEqualTo(currency)
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `session payment binds SCA to the mask and approval to the resolved destination`() {
+        val creditorAccount = "abababab-abab-4bab-8bab-abababababab"
+        val mask = PaymentSessionStore.maskIban(DOMESTIC_IBAN)
+        val token = paymentSessions.create(creditorAccount, COSIGNER, "Fixture", null, mask)
+        BusinessApprovalStubs.stub(
+            "GET",
+            "/api/v1/accounts/$creditorAccount",
+            body = """{"id":"$creditorAccount","partyId":"$COSIGNER","accountNumber":"$DOMESTIC_IBAN"}""",
+        )
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 201, body = """{"id":"$APPROVAL","required":2}""")
+
+        Given {
+            contentType("application/json")
+            header("X-Acting-For", COMPANY)
+            header("X-SCA-Challenge-Id", SCA)
+            header("Idempotency-Key", "fixture-masked-payee-key")
+            body("""{"debtorAccountId":"$ACCOUNT","amount":"80000.00","paymentSessionToken":"$token","creditorName":"Fixture"}""")
+        } When {
+            post("/customer/v1/domestic-payments")
+        } Then {
+            statusCode(202)
+            body("approvalId", equalTo(APPROVAL))
+        }
+
+        val consume = readJson(BusinessApprovalStubs.requests("POST", CONSUME).single().body)
+        assertThat(consume.path("creditor").asText()).isEqualTo(mask)
+        val claim = readJson(BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single().body)
+        assertThat(claim.path("payload").path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
         assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 

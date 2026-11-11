@@ -344,6 +344,8 @@ account, active grant, and frozen payload in Delegation. The claim stores a key 
 separate domain-separated authority correlation. The raw key stays in the client header and the
 existing direct rail header. A missing or unreadable claim stops dispatch. A held command cannot
 fall through to direct dispatch when current signing policy relaxes or enforcement is disabled.
+The approval policy uses the canonical IBAN of the resolved destination. The initiator's SCA
+still validates the original signed destination representation, including a NearbyPay mask.
 
 Lookup verifies the current authority and sends both digests to the named approval endpoint. A
 receipt exposes only the approval ID, lifecycle status and a recorded rail ID. Lookup cannot

@@ -15,6 +15,7 @@ import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.account.CzechDomesticIban
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.logging.Log
 import io.smallrye.common.annotation.Blocking
@@ -3043,13 +3044,16 @@ class CustomerEdgeResource(
             val key = domesticSubmissionKey(idempotencyKey)
                 ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
             val scope = submissionScope ?: return forbidden("Company payment requires a stable debit authority")
+            // Signing policy compares the actual destination. SCA still checks the original signed representation.
+            val creditorIban = CzechDomesticIban.fromAccountNumber(creditorAcctNo, creditorBank)
+                ?: return badRequest("Malformed creditor account")
             businessApprovals.routeDomestic(
                 customer,
                 HeldPayment(
                     PaymentRail.DOMESTIC,
                     amount,
                     currency,
-                    creditorForSca,
+                    creditorIban,
                     extractTextField(objectMapper, body, "creditorName"),
                     extractTextField(objectMapper, body, "reference"),
                     debtor.toString(),
