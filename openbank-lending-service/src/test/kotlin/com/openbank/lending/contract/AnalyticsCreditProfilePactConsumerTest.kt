@@ -65,7 +65,28 @@ class AnalyticsCreditProfilePactConsumerTest {
             .isEqualTo(CreditProfileResponse(0, null, null, null, null))
     }
 
+    @Pact(consumer = "openbank-lending-service", provider = "openbank-analytics-sink")
+    fun forbiddenCreditProfile(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("the caller is an unrelated workload")
+        .uponReceiving("GET a credit profile from an unrelated workload")
+        .path("$CREDIT_PROFILE/$OBSERVED_PARTY")
+        .method("GET").headers(mapOf("Accept" to "application/json"))
+        .willRespondWith().status(403)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "forbiddenCreditProfile")
+    fun `an unrelated workload is refused before profile data is returned`(server: MockServer) {
+        assertThat(requestProfile(server, OBSERVED_PARTY).statusCode()).isEqualTo(403)
+    }
+
     private fun profile(server: MockServer, partyId: String): CreditProfileResponse {
+        val response = requestProfile(server, partyId)
+        assertThat(response.statusCode()).isEqualTo(200)
+        return mapper.readValue(response.body(), CreditProfileResponse::class.java)
+    }
+
+    private fun requestProfile(server: MockServer, partyId: String): HttpResponse<String> {
         val contract = CreditProfileClient::class.java
         val resource = contract.getAnnotation(JaxrsPath::class.java).value
         val operation = contract.getMethod("profile", UUID::class.java).getAnnotation(JaxrsPath::class.java).value
@@ -74,9 +95,7 @@ class AnalyticsCreditProfilePactConsumerTest {
             .header("Accept", "application/json")
             .GET()
             .build()
-        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
-        assertThat(response.statusCode()).isEqualTo(200)
-        return mapper.readValue(response.body(), CreditProfileResponse::class.java)
+        return client.send(request, HttpResponse.BodyHandlers.ofString())
     }
 
     private companion object {

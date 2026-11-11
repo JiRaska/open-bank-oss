@@ -6,12 +6,14 @@ package com.openbank.analytics.contract
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junitsupport.State
+import com.openbank.libs.testing.mtls.ListenerMaterial
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.restassured.RestAssured
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import org.apache.hc.core5.http.HttpRequest
 import java.net.InetSocketAddress
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
@@ -19,7 +21,17 @@ import java.nio.charset.StandardCharsets
 class CreditProfilePactTestProfile : QuarkusTestProfile {
     override fun disableGlobalTestResources() = true
 
-    override fun testResources() = listOf(QuarkusTestProfile.TestResourceEntry(CreditProfilePactResource::class.java))
+    override fun getConfigOverrides() = mapOf(
+        "%test.quarkus.oidc.enabled" to "true",
+        "%test.quarkus.oidc.tenant-enabled" to "true",
+        "%test.quarkus.oidc.devservices.enabled" to "false",
+        "%test.quarkus.keycloak.devservices.enabled" to "false",
+    )
+
+    override fun testResources() = listOf(
+        QuarkusTestProfile.TestResourceEntry(CreditProfilePactResource::class.java),
+        QuarkusTestProfile.TestResourceEntry(ListenerMaterial::class.java),
+    )
 }
 
 /** Serves synthetic ClickHouse 26.8 JSONEachRow responses on loopback. Quarkus uses its real warehouse HTTP client. */
@@ -74,8 +86,14 @@ class CreditProfilePactResource : QuarkusTestResourceLifecycleManager {
     }
 }
 
+private const val UNRELATED_WORKLOAD_STATE = "the caller is an unrelated workload"
+
 class CreditProfilePactStates {
-    @State("a synthetic party has four observed months", "a synthetic party has no observed months")
+    @State(
+        "a synthetic party has four observed months",
+        "a synthetic party has no observed months",
+        UNRELATED_WORKLOAD_STATE,
+    )
     fun syntheticCreditProfiles() {
         // Both immutable fixtures are installed by the loopback warehouse resource before Quarkus starts.
     }
@@ -84,4 +102,13 @@ class CreditProfilePactStates {
 fun configureCreditProfilePact(context: PactVerificationContext) {
     context.target = HttpTestTarget("127.0.0.1", RestAssured.port)
     context.addStateChangeHandlers(CreditProfilePactStates())
+}
+
+/** Select the signed local OIDC identity from the provider state. The pact carries no token. */
+fun verifyCreditProfilePact(context: PactVerificationContext, request: HttpRequest) {
+    val unrelated = context.interaction.providerStates.any { it.name == UNRELATED_WORKLOAD_STATE }
+    val clientId = if (unrelated) "openbank-unrelated" else "openbank-lending"
+    val token = ListenerMaterial.bearer(listOf("ROLE_API"), "credit-profile-pact-subject", clientId, machine = true)
+    request.setHeader("Authorization", "Bearer $token")
+    context.verifyInteraction()
 }

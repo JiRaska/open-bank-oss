@@ -58,6 +58,24 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET a credit profile from an unrelated workload",
+      "providerStates": [
+        {
+          "name": "the caller is an unrelated workload"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/analytics/credit-profile/30000000-0000-0000-0000-000000000101"
+      },
+      "response": {
+        "status": 403
+      }
     }
   ],
   "metadata": {

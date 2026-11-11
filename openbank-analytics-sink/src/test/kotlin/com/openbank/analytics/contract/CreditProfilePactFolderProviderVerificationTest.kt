@@ -13,6 +13,7 @@ import io.quarkus.test.security.TestSecurity
 import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
+import org.apache.hc.core5.http.HttpRequest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestTemplate
@@ -29,15 +30,7 @@ class CreditProfilePactFolderProviderVerificationTest {
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
-    @TestSecurity(user = "service-account-openbank-lending", roles = ["ROLE_API"])
-    @OidcSecurity(
-        claims = [
-            Claim(key = "sub", value = "credit-profile-pact-subject"),
-            Claim(key = "azp", value = "openbank-lending"),
-            Claim(key = "preferred_username", value = "service-account-openbank-lending"),
-        ],
-    )
-    fun verifyPacts(context: PactVerificationContext) = context.verifyInteraction()
+    fun verifyPacts(context: PactVerificationContext, request: HttpRequest) = verifyCreditProfilePact(context, request)
 }
 
 @QuarkusTest
