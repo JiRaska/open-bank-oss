@@ -28,13 +28,10 @@ object NostroPactSeed {
      * nostro, the fixed id V29__treasury_money_market_accounts.sql seeds) — the shape treasury's own
      * SETTLED posting for an MM_PLACEMENT deal produces (`Postings.kt`).
      */
-    fun seedCzkNostroLine(dataSource: DataSource) = dataSource.connection.use { connection ->
-        // One transaction: the database checks a posted journal's balance at commit (ADR-0372).
-        connection.journalTransaction { c ->
-            journal(c, CZK_JOURNAL_ID, CZK_TRANSACTION_ID, "MM placement settlement")
-            line(c, CZK_NOSTRO_LINE_ID, CZK_JOURNAL_ID, NOSTRO_CZK_GL_ID, "C", CZK_AMOUNT, "CZK", CZK_AMOUNT, 1)
-            line(c, CZK_PLACEMENT_LINE_ID, CZK_JOURNAL_ID, PLACEMENT_CZK_GL_ID, "D", CZK_AMOUNT, "CZK", CZK_AMOUNT, 2)
-        }
+    fun seedCzkNostroLine(dataSource: DataSource) = inOneTransaction(dataSource) { c ->
+        journal(c, CZK_JOURNAL_ID, CZK_TRANSACTION_ID, "MM placement settlement")
+        line(c, CZK_NOSTRO_LINE_ID, CZK_JOURNAL_ID, NOSTRO_CZK_GL_ID, "C", CZK_AMOUNT, "CZK", CZK_AMOUNT, 1)
+        line(c, CZK_PLACEMENT_LINE_ID, CZK_JOURNAL_ID, PLACEMENT_CZK_GL_ID, "D", CZK_AMOUNT, "CZK", CZK_AMOUNT, 2)
     }
 
     /**
@@ -42,13 +39,16 @@ object NostroPactSeed {
      * placement), native amount EUR 10,000.00 with a CZK `base_amount` that differs — so a balance
      * read that summed `base_amount` instead of `amount` would answer 251,000 and fail the pact.
      */
-    fun seedEurNostroLine(dataSource: DataSource) = dataSource.connection.use { connection ->
-        connection.journalTransaction { c ->
-            journal(c, EUR_JOURNAL_ID, EUR_TRANSACTION_ID, "EUR MM maturity")
-            line(c, EUR_NOSTRO_LINE_ID, EUR_JOURNAL_ID, NOSTRO_EUR_GL_ID, "D", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 1)
-            line(c, EUR_PLACEMENT_LINE_ID, EUR_JOURNAL_ID, PLACEMENT_EUR_GL_ID, "C", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 2)
-        }
+    fun seedEurNostroLine(dataSource: DataSource) = inOneTransaction(dataSource) { c ->
+        journal(c, EUR_JOURNAL_ID, EUR_TRANSACTION_ID, "EUR MM maturity")
+        line(c, EUR_NOSTRO_LINE_ID, EUR_JOURNAL_ID, NOSTRO_EUR_GL_ID, "D", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 1)
+        line(c, EUR_PLACEMENT_LINE_ID, EUR_JOURNAL_ID, PLACEMENT_EUR_GL_ID, "C", EUR_AMOUNT, "EUR", EUR_BASE_AMOUNT, 2)
     }
+
+    // The journal row and both legs commit together: the database checks a posted journal's
+    // balance at commit (ADR-0372), so statement-by-statement autocommit is refused on the first leg.
+    private fun inOneTransaction(dataSource: DataSource, seed: (Connection) -> Unit) =
+        dataSource.connection.use { connection -> connection.journalTransaction(block = seed) }
 
     private fun journal(c: Connection, id: UUID, transactionId: UUID, description: String) {
         c.prepareStatement(

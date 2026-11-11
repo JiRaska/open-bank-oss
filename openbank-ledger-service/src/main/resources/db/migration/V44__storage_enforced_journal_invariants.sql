@@ -153,7 +153,7 @@ BEGIN
 
     repair_reason := ledger_active_repair_reason();
     IF repair_reason IS NULL THEN
-        RAISE EXCEPTION 'journal % is % and append-only: % refused', OLD.id, OLD.status, TG_OP
+        RAISE EXCEPTION 'journal % (%) is append-only: % refused', OLD.id, OLD.status, TG_OP
             USING ERRCODE = '55000',
                   HINT = 'Correct a posted journal with a reversal. A reviewed repair calls ledger_declare_repair(reason) in the same transaction (ADR-0372).';
     END IF;

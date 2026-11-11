@@ -52,29 +52,8 @@ class JournalHistorySnapshotIT {
     @AfterEach
     fun cleanup() {
         connection().use { c ->
-            c.journalTransaction(REPAIR) { removeFixtureRows(c) }
+            c.journalTransaction(HISTORY_FIXTURE_REPAIR) { removeHistoryFixtureRows(c, journalIds, gl) }
             c.createStatement().use { it.executeUpdate("drop table if exists $partitionName") }
-        }
-    }
-
-    private fun removeFixtureRows(c: Connection) {
-        journalIds.forEach { id ->
-            c.prepareStatement("delete from journal_lines where journal_id = ?").use {
-                it.setObject(1, id)
-                it.executeUpdate()
-            }
-            c.prepareStatement("delete from ledger_idempotency where journal_id = ?").use {
-                it.setObject(1, id)
-                it.executeUpdate()
-            }
-            c.prepareStatement("delete from journal_entries where id = ?").use {
-                it.setObject(1, id)
-                it.executeUpdate()
-            }
-        }
-        c.prepareStatement("delete from gl_accounts where id = ?").use {
-            it.setObject(1, gl)
-            it.executeUpdate()
         }
     }
 
@@ -223,7 +202,7 @@ class JournalHistorySnapshotIT {
                     it.executeUpdate()
                 }
             }.isInstanceOf(SQLException::class.java)
-            c.journalTransaction(REPAIR) {
+            c.journalTransaction(HISTORY_FIXTURE_REPAIR) {
                 c.prepareStatement("delete from journal_lines where journal_id = ?").use {
                     it.setObject(1, source)
                     it.executeUpdate()
@@ -249,7 +228,7 @@ class JournalHistorySnapshotIT {
         val id = UUID.fromString(capture().getString("snapshotId"))
         assertCacheRows(id, 1)
         connection().use { c ->
-            c.journalTransaction(REPAIR) {
+            c.journalTransaction(HISTORY_FIXTURE_REPAIR) {
                 c.prepareStatement("delete from journal_entries where id = ?").use {
                     it.setObject(1, source)
                     assertThat(it.executeUpdate()).isEqualTo(1)
@@ -269,7 +248,7 @@ class JournalHistorySnapshotIT {
         val id = UUID.fromString(capture().getString("snapshotId"))
         assertCacheRows(id, 1)
         connection().use { c ->
-            c.journalTransaction(REPAIR) {
+            c.journalTransaction(HISTORY_FIXTURE_REPAIR) {
                 c.prepareStatement(
                     "update journal_entries set origin_kind=null,origin_record_id=null,origin_submitter=null where id=?",
                 ).use {
@@ -475,21 +454,6 @@ class JournalHistorySnapshotIT {
         }
     }
 
-    /**
-     * ADR-0372: a posted journal row and its lines are append-only, so every source mutation in this
-     * class — attaching or erasing origin evidence, deleting or rewriting lines — is a declared
-     * repair. That is also the only path on which the V36 invalidation triggers remain reachable.
-     */
-    private fun attachOrigin(c: Connection, journal: UUID) = c.journalTransaction(REPAIR) {
-        c.prepareStatement(
-            "update journal_entries set origin_kind='OTHER',origin_record_id=?,origin_submitter='synthetic-actor' where id=?",
-        ).use {
-            it.setObject(1, UUID.randomUUID())
-            it.setObject(2, journal)
-            it.executeUpdate()
-        }
-    }
-
     private fun installCaptureBarrier(name: String, lockKey: Long) = connection().use { c ->
         c.createStatement().use {
             it.executeUpdate(
@@ -531,7 +495,7 @@ class JournalHistorySnapshotIT {
                 }
             }
             c.prepareStatement("select ledger_declare_repair(?)").use {
-                it.setString(1, REPAIR)
+                it.setString(1, HISTORY_FIXTURE_REPAIR)
                 it.execute()
             }
             c.prepareStatement(mutation).use {
@@ -692,6 +656,43 @@ class JournalHistorySnapshotIT {
 
     private companion object {
         const val PATH = "/api/v1/journals/history-snapshots"
-        const val REPAIR = "JournalHistorySnapshotIT source mutation fixture"
+    }
+}
+
+private const val HISTORY_FIXTURE_REPAIR = "JournalHistorySnapshotIT source mutation fixture"
+
+/**
+ * ADR-0372: a posted journal row and its lines are append-only, so every source mutation in this
+ * class — attaching or erasing origin evidence, deleting or rewriting lines — is a declared
+ * repair. That is also the only path on which the V36 invalidation triggers remain reachable.
+ */
+private fun attachOrigin(c: Connection, journal: UUID) = c.journalTransaction(HISTORY_FIXTURE_REPAIR) {
+    c.prepareStatement(
+        "update journal_entries set origin_kind='OTHER',origin_record_id=?,origin_submitter='synthetic-actor' where id=?",
+    ).use {
+        it.setObject(1, UUID.randomUUID())
+        it.setObject(2, journal)
+        it.executeUpdate()
+    }
+}
+
+private fun removeHistoryFixtureRows(c: Connection, journalIds: List<UUID>, gl: UUID) {
+    journalIds.forEach { id ->
+        c.prepareStatement("delete from journal_lines where journal_id = ?").use {
+            it.setObject(1, id)
+            it.executeUpdate()
+        }
+        c.prepareStatement("delete from ledger_idempotency where journal_id = ?").use {
+            it.setObject(1, id)
+            it.executeUpdate()
+        }
+        c.prepareStatement("delete from journal_entries where id = ?").use {
+            it.setObject(1, id)
+            it.executeUpdate()
+        }
+    }
+    c.prepareStatement("delete from gl_accounts where id = ?").use {
+        it.setObject(1, gl)
+        it.executeUpdate()
     }
 }

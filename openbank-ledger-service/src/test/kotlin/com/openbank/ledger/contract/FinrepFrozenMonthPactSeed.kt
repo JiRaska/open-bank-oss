@@ -69,14 +69,7 @@ object FinrepFrozenMonthPactSeed {
         require(reportingMonth.dayOfMonth == reportingMonth.lengthOfMonth())
         c.autoCommit = false
         try {
-            if (resetFixture) {
-                // Removing the fixture's posted journal is a declared repair (ADR-0372).
-                c.prepareStatement("select ledger_declare_repair(?)").use {
-                    it.setString(1, "FinrepFrozenMonthPactSeed fixture reset")
-                    it.execute()
-                }
-                resetOwnedEvidence(c)
-            }
+            if (resetFixture) resetOwnedEvidence(c)
             journal(c, reportingMonth.withDayOfMonth(15))
             line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
             line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)
@@ -99,6 +92,12 @@ object FinrepFrozenMonthPactSeed {
 
     // Remove only rows owned by this fixture, never unrelated journal or closed-period data.
     private fun resetOwnedEvidence(c: Connection) {
+        // Removing the fixture's posted journal is a declared repair (ADR-0372), scoped to the
+        // caller's transaction; without it the database refuses the two deletes at the end.
+        c.prepareStatement("select ledger_declare_repair(?)").use {
+            it.setString(1, "FinrepFrozenMonthPactSeed fixture reset")
+            it.execute()
+        }
         val periodIds = (9601..9612).map { UUID.fromString("00000000-0000-0000-0000-%012d".format(it)) }
         // This reset is only for a dedicated test database. Refuse any foreign evidence before
         // truncating fixture rows; TRUNCATE leaves the immutable UPDATE/DELETE trigger installed.

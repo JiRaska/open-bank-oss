@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.ledger.integration
 
-import com.openbank.ledger.infrastructure.persistence.repository.JournalHistoryManifest
 import com.openbank.ledger.fixtures.journalTransaction
+import com.openbank.ledger.infrastructure.persistence.repository.JournalHistoryManifest
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
