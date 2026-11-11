@@ -1,6 +1,6 @@
 -- ADR-0327 D2 and #11652. V18 already created claimed_at.
 -- Expand only after the compatibility artifact is on every ledger pod. Keep the dispatcher
--- disabled until no pre-v2 dispatcher remains, as described in docs/runbooks/svc-ledger.md.
+-- disabled until no pre-v2 dispatcher remains, as described in docs/runbooks/ledger-outbox-v2-cutover.md.
 -- Rollback retains these nullable columns and indexes for the compatible v1 binary.
 ALTER TABLE ledger_outbox
     ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ,
