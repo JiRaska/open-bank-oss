@@ -31,7 +31,7 @@ data class AuthorityPartyResponse(
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ActingForResponse(val partyId: UUID)
+data class ActingForResponse(val partyId: UUID, val mandate: MandateResponse? = null)
 
 // #10486 batch 8: party.mandate.read is minted by the NAMED oidc-client `m2m` - Keycloak client
 // `openbank-delegation` (ROLE_API only) - never the shared `openbank-services` one.
@@ -51,9 +51,9 @@ interface PartyAuthorityRestClient {
 
 /**
  * Resolves the principal type and re-checks an organisation mandate at the authority boundary.
- * `acting-for` returns only active, in-window mandates over live entities, so matching the
- * principal is the complete ADR-0284 representation decision. Every transport or parse failure
- * remains distinguishable from a real denial and fails closed in the use case.
+ * `acting-for` returns active, in-window mandates. A matching row authorizes profile access;
+ * sole signing requires explicit authority and quorum from its mandate. Transport or parse
+ * failures remain distinguishable from a denial.
  */
 @ApplicationScoped
 class RestGrantorAuthorityClient @Inject constructor(@RestClient private val client: PartyAuthorityRestClient) :
@@ -63,14 +63,16 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     override suspend fun authorityFor(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority = try {
         val principal = client.getParty(principalPartyId)
-        val authorized = when (principal.partyType) {
-            "INDIVIDUAL" -> actorPartyId == principalPartyId && principal.status == "ACTIVE"
-            "SOLE_TRADER", "COMPANY", "TRUST" ->
-                principal.status == "ACTIVE" && client.actingFor(actorPartyId).any { it.partyId == principalPartyId }
-            else -> false
+        val authority = when {
+            principal.id != principalPartyId || principal.status != "ACTIVE" ->
+                GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+            principal.partyType == "INDIVIDUAL" && actorPartyId == principalPartyId ->
+                GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+            principal.partyType in ORGANIZATION_TYPES && actorPartyId != principalPartyId ->
+                organizationAuthority(principalPartyId, actorPartyId)
+            else -> GrantorAuthority(GrantorAuthorityVerdict.DENIED)
         }
-        GrantorAuthority(
-            verdict = if (authorized) GrantorAuthorityVerdict.AUTHORIZED else GrantorAuthorityVerdict.DENIED,
+        authority.copy(
             displayName = principal.legalName?.trim()?.takeIf { it.isNotEmpty() },
             partyType = principal.partyType,
         )
@@ -80,4 +82,23 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         Log.errorf(e, "grantor authority lookup for principal %s failed — refusing", principalPartyId)
         GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)
     }
+
+    private suspend fun organizationAuthority(principalPartyId: UUID, actorPartyId: UUID): GrantorAuthority {
+        val rows = client.actingFor(actorPartyId).filter { it.partyId == principalPartyId }
+        if (rows.isEmpty()) return GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+        val soleIds = rows.mapNotNull { row ->
+            row.mandate?.takeIf { it.isSoleFor(actorPartyId) }?.id
+        }
+        if (soleIds.size != rows.size) return GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
+        return GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = soleIds.minOrNull())
+    }
+
+    private companion object {
+        val ORGANIZATION_TYPES = setOf("SOLE_TRADER", "COMPANY", "TRUST")
+    }
 }
+
+private fun MandateResponse.isSoleFor(actorPartyId: UUID): Boolean = agentPartyId == actorPartyId &&
+    status == "ACTIVE" &&
+    authority == "SOLE" &&
+    requiredSignatures == 1

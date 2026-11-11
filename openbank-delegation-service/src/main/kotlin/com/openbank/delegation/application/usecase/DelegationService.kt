@@ -41,6 +41,7 @@ import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationRecertificationAudience
+import com.openbank.delegation.domain.model.GrantorSigningEvidence
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -145,7 +146,7 @@ class DelegationService(
         // refused anyway must not cost the customer their ceremony.
         verifyAndConsumeSca(
             sessionId = command.grantScaSessionId,
-            expectedPartyId = command.actorPartyId ?: command.grantorPartyId,
+            expectedPartyId = candidate.grantorSigningEvidence.actorPartyId,
             expectedPurpose = SCA_PURPOSE_GRANT,
             errorPrefix = "grant SCA",
             reference = candidate.scaReference,
@@ -173,6 +174,7 @@ class DelegationService(
             validFrom = now,
             validTo = command.validTo,
             grantScaSessionId = command.grantScaSessionId,
+            grantorSigningEvidence = candidate.grantorSigningEvidence,
             note = command.note,
             createdAt = now,
             updatedAt = now,
@@ -216,7 +218,8 @@ class DelegationService(
     private suspend fun validateCandidate(command: DelegationCandidate): ValidatedCandidate {
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
-        val grantorAuthority = verifyGrantorAuthority(command)
+        val actorPartyId = resolveGrantorActor(command)
+        val grantorAuthority = verifySigningAuthority(command.grantorPartyId, actorPartyId)
         rejectUnenforcedCeilings(command)
         val approval = resolveApprovalPolicy(command)
         verifyResourceOwnership(command)
@@ -228,6 +231,7 @@ class DelegationService(
             approvalGroupRevision = approval.revision,
             requiredApprovals = approval.threshold,
             scaReference = scaReference(command, approval),
+            grantorSigningEvidence = GrantorSigningEvidence(actorPartyId, grantorAuthority.soleMandateId),
         )
     }
 
@@ -253,16 +257,15 @@ class DelegationService(
         }
     }
 
-    private suspend fun verifyGrantorAuthority(command: DelegationCandidate): GrantorAuthority {
-        val actor = resolveGrantorActor(command)
-        val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
+    private suspend fun verifySigningAuthority(principal: UUID, actor: UUID): GrantorAuthority {
+        val authority = grantorAuthorityClient.authorityFor(principal, actor)
         return when (authority.verdict) {
             GrantorAuthorityVerdict.AUTHORIZED -> authority
-            GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
-                "actor $actor has no active authority for grantor ${command.grantorPartyId}",
-            )
+            GrantorAuthorityVerdict.DENIED,
+            GrantorAuthorityVerdict.MANDATE_ONLY,
+            -> throw DelegationGrantorAuthorityException("actor $actor has no verified sole authority for $principal")
             GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
-                "authority for grantor ${command.grantorPartyId} could not be established",
+                "authority for $principal could not be established",
             )
         }
     }
@@ -301,13 +304,17 @@ class DelegationService(
         granteePartyId: UUID,
         scaSessionId: UUID,
         callerPartyId: CallerPartyId,
+        actorPartyId: UUID?,
     ): DelegationGrant {
         requireCallerIs(callerPartyId, granteePartyId)
         val grant = loadForGrantee(delegationId, granteePartyId)
         rejectLegacyExposure(grant)
+        verifyIssuedAuthority(grant)
+        val actor = actorPartyId ?: granteePartyId
+        verifySigningAuthority(granteePartyId, actor)
         verifyAndConsumeSca(
             sessionId = scaSessionId,
-            expectedPartyId = granteePartyId,
+            expectedPartyId = actor,
             expectedPurpose = SCA_PURPOSE_ACCEPT,
             errorPrefix = "accept SCA",
         )
@@ -332,6 +339,19 @@ class DelegationService(
                 occurredAt = clock.instant(),
             ),
         )
+    }
+
+    private suspend fun verifyIssuedAuthority(grant: DelegationGrant) {
+        val evidence = grant.grantorSigningEvidence
+        if (evidence != null && evidence.soleMandateId == null) return
+
+        // An old offer with no evidence is admissible only for a verified individual grantor.
+        // The current mandate cannot establish who signed an old organization's offer.
+        val issuer = evidence?.actorPartyId ?: grant.grantorPartyId
+        val current = verifySigningAuthority(grant.grantorPartyId, issuer)
+        if (current.soleMandateId != evidence?.soleMandateId) {
+            throw DelegationGrantorAuthorityException("the verified issuer mandate is no longer current")
+        }
     }
 
     override suspend fun decline(
@@ -776,6 +796,7 @@ class DelegationService(
         val approvalGroupRevision: Long?,
         val requiredApprovals: Int?,
         val scaReference: String,
+        val grantorSigningEvidence: GrantorSigningEvidence,
     )
 
     private fun scaReference(command: DelegationCandidate, approval: ResolvedApproval): String {

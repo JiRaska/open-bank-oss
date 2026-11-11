@@ -17,11 +17,31 @@
       "response": {
         "body": [
           {
+            "mandate": {
+              "agentPartyId": "d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3",
+              "authority": "SOLE",
+              "id": "4628965f-9032-43df-93ea-532db633f05e",
+              "requiredSignatures": 1,
+              "status": "ACTIVE"
+            },
             "partyId": "b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
           }
         ],
         "headers": {
           "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$[0].mandate.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
         },
         "status": 200
       }

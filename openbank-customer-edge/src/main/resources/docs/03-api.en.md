@@ -209,3 +209,9 @@ the outgoing body from the accepted fields and preserves the submitted answer or
 ## Notification page contract
 
 `GET /notifications` returns `{ items, total, unreadCount, page, size }` (`PersonalNotificationPage`). The edge always forwards the token party to notification-service, so `total` and `unreadCount` cover that party's whole history (never negative) rather than the returned page, and `unreadCount` is never null here, unlike the unscoped operator list upstream. `limit` is clamped to 1–100 (default 20) and `page` to 0 or more before the upstream call; `size` echoes the applied limit. Items are metadata only: the rendered body is never returned, and `subject`, `sentAt`, `visibleAt`, `readAt` and `templateRevision` may be null.
+
+## Delegation acceptance for an organization
+
+The edge forwards the active profile as the grantee and the authenticated
+human as the accepting actor. For an organization, delegation-service verifies
+the human's sole mandate before consuming their acceptance challenge.

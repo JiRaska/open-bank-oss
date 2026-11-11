@@ -105,12 +105,20 @@ interface PartyEligibilityClient {
     suspend fun eligibilityOf(partyId: UUID): PartyEligibility
 }
 
-enum class GrantorAuthorityVerdict { AUTHORIZED, DENIED, UNVERIFIABLE }
+enum class GrantorAuthorityVerdict {
+    AUTHORIZED,
+
+    /** An active mandate supports profile access but provides no verified sole signing authority. */
+    MANDATE_ONLY,
+    DENIED,
+    UNVERIFIABLE,
+}
 
 data class GrantorAuthority(
     val verdict: GrantorAuthorityVerdict,
     val displayName: String? = null,
     val partyType: String? = null,
+    val soleMandateId: UUID? = null,
 )
 
 /** ADR-0232 D5 / ADR-0284: may this authenticated human create authority for this principal? */

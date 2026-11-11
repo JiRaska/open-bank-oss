@@ -19,6 +19,8 @@ import com.openbank.delegation.application.port.out.ScaChallengeSnapshot
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.DelegationStatus
+import com.openbank.delegation.domain.model.GrantorSigningEvidence
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -61,6 +63,8 @@ class DelegationOrganizationAuthorityTest {
 
     /** The human acting under the organization's mandate — never the same party as the grantor. */
     private val organizationActor: UUID = UUID.randomUUID()
+    private val mandateId: UUID = UUID.randomUUID()
+    private val granteeActor: UUID = UUID.randomUUID()
     private val grantee: UUID = UUID.randomUUID()
     private val accountId: UUID = UUID.randomUUID()
     private val now: OffsetDateTime = OffsetDateTime.now(clock)
@@ -88,7 +92,7 @@ class DelegationOrganizationAuthorityTest {
     @Test
     fun `organization offer requires an active mandate and spends the human actor SCA`(): Unit = runBlocking {
         coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
-            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, "Acme s.r.o.")
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, "Acme s.r.o.", soleMandateId = mandateId)
         scaOk(organizationActor, "DELEGATION_GRANT")
         eligibilityOk(granteeName = "Bob Zkousky")
         coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
@@ -96,6 +100,7 @@ class DelegationOrganizationAuthorityTest {
         val grant = service.offer(offerCommand().copy(actorPartyId = organizationActor))
 
         assertThat(grant.grantorName).isEqualTo("Acme s.r.o.")
+        assertThat(grant.grantorSigningEvidence).isEqualTo(GrantorSigningEvidence(organizationActor, mandateId))
         coVerify(exactly = 1) { scaClient.consumeChallenge(any(), organizationActor, any()) }
         coVerify(exactly = 0) { eligibilityClient.eligibilityOf(grantor) }
     }
@@ -114,6 +119,19 @@ class DelegationOrganizationAuthorityTest {
     }
 
     @Test
+    fun `organization offer requires sole authority before consuming SCA or saving a grant`() {
+        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
+
+        assertThatThrownBy {
+            runBlocking { service.offer(offerCommand().copy(actorPartyId = organizationActor)) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
     fun `organization authority outage is retryable and happens before SCA or ownership`() {
         coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
             GrantorAuthority(GrantorAuthorityVerdict.UNVERIFIABLE)
@@ -125,6 +143,116 @@ class DelegationOrganizationAuthorityTest {
         coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
+
+    @Test
+    fun `company grantee accepts only with the verified sole actor and that actor's SCA`(): Unit = runBlocking {
+        val offered = offeredGrant(GrantorSigningEvidence(grantor, null))
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantee, granteeActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = UUID.randomUUID())
+        scaOk(granteeActor, "DELEGATION_ACCEPT")
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val result = service.accept(offered.id, grantee, UUID.randomUUID(), grantee, granteeActor)
+
+        assertThat(result.status).isEqualTo(DelegationStatus.ACTIVE)
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), granteeActor, any()) }
+    }
+
+    @Test
+    fun `company grantee with a joint mandate cannot activate a grant`() {
+        val offered = offeredGrant(GrantorSigningEvidence(grantor, null))
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantee, granteeActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.MANDATE_ONLY)
+
+        assertThatThrownBy {
+            runBlocking { service.accept(offered.id, grantee, UUID.randomUUID(), grantee, granteeActor) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `company offer without verified issuer evidence cannot activate`() {
+        val offered = offeredGrant(null)
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.DENIED, partyType = "COMPANY")
+
+        assertThatThrownBy {
+            runBlocking { service.accept(offered.id, grantee, UUID.randomUUID(), grantee) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `company offer with verified current issuer evidence can activate`(): Unit = runBlocking {
+        val offered = offeredGrant(GrantorSigningEvidence(organizationActor, mandateId))
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = mandateId)
+        coEvery { authorityClient.authorityFor(grantee, grantee) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
+        scaOk(grantee, "DELEGATION_ACCEPT")
+        coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
+
+        val result = service.accept(offered.id, grantee, UUID.randomUUID(), grantee)
+
+        assertThat(result.status).isEqualTo(DelegationStatus.ACTIVE)
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), grantee, any()) }
+    }
+
+    @Test
+    fun `company offer with changed issuer mandate cannot activate`() {
+        val offered = offeredGrant(GrantorSigningEvidence(organizationActor, mandateId))
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = UUID.randomUUID())
+
+        assertThatThrownBy {
+            runBlocking { service.accept(offered.id, grantee, UUID.randomUUID(), grantee) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    @Test
+    fun `company offer cannot substitute a different issuer`() {
+        val offered = offeredGrant(GrantorSigningEvidence(organizationActor, mandateId))
+        val newRepresentative = UUID.randomUUID()
+        coEvery { repository.findById(offered.id) } returns offered
+        coEvery { authorityClient.authorityFor(grantor, organizationActor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.DENIED)
+        coEvery { authorityClient.authorityFor(grantor, newRepresentative) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, soleMandateId = UUID.randomUUID())
+
+        assertThatThrownBy {
+            runBlocking { service.accept(offered.id, grantee, UUID.randomUUID(), grantee) }
+        }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
+
+        coVerify(exactly = 1) { authorityClient.authorityFor(grantor, organizationActor) }
+        coVerify(exactly = 0) { authorityClient.authorityFor(grantor, newRepresentative) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
+    }
+
+    private fun offeredGrant(evidence: GrantorSigningEvidence?) = DelegationGrant(
+        grantorPartyId = grantor,
+        granteePartyId = grantee,
+        resourceType = DelegationResourceType.ACCOUNT,
+        resourceId = accountId,
+        capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+        validFrom = now,
+        validTo = now.plusDays(30),
+        grantorSigningEvidence = evidence,
+        createdAt = now,
+        updatedAt = now,
+    )
 
     private fun scaOk(partyId: UUID, purpose: String) {
         coEvery { scaClient.getChallenge(any()) } returns ScaChallengeSnapshot(

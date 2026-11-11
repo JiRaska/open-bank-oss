@@ -323,13 +323,19 @@ class DelegationResource(
         @QueryParam("granteePartyId") granteePartyId: UUID?,
         @QueryParam("scaSessionId") scaSessionId: UUID?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID? = null,
     ): DelegationResponse {
         // #3104 — both identify WHO is accepting and under which SCA session. Absent, they used to
         // reach the use case as null and answer 500.
         requireNotNull(granteePartyId) { "query parameter 'granteePartyId' is required" }
         requireNotNull(scaSessionId) { "query parameter 'scaSessionId' is required" }
+        if (customerActorPartyId != null &&
+            (customerPartyId == null || !ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE_PRINCIPAL))
+        ) {
+            throw ForbiddenException("an accepting actor must be authenticated by the customer edge")
+        }
         return DelegationResponse.from(
-            respondDelegation.accept(id, granteePartyId, scaSessionId, customerPartyId),
+            respondDelegation.accept(id, granteePartyId, scaSessionId, customerPartyId, customerActorPartyId),
         )
     }
 
