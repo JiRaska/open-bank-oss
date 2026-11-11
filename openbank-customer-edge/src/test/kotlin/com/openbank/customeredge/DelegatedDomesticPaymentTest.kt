@@ -230,7 +230,9 @@ class DelegatedDomesticPaymentTest {
         assertThat(details.captured["onBehalfOf"]).isNull()
         assertThat(details.captured["delegationId"]).isNull()
         // The owner path must not consult the delegation endpoint at all.
-        verify(exactly = 0) { upstream.getToService(any(), match { it.endsWith("/payment-authorization") }, any(), any()) }
+        verify(exactly = 0) {
+            upstream.getToService(any(), match { it.endsWith("/payment-authorization") }, any(), any())
+        }
     }
 
     // ── the refusals ───────────────────────────────────────────────────────────────────────
