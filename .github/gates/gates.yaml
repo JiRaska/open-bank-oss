@@ -118,6 +118,17 @@ gates:
     run: |
       python3 .github/scripts/check-verification-metadata-additive.py gradle/verification-metadata.xml gradle/verification-metadata.xml
 
+  - id: verify-added-checksums-falsifiable
+    name: "Dependabot metadata refresh re-downloads every ADDED checksum before trusting it"
+    group: supplychain
+    mode: enforced
+    rationale: "The additive check alone lets an untrusted regeneration pin any coordinate to an attacker-chosen sha256 or add a <pgp> key, and the privileged push would commit it. verify-added-checksums.py recomputes each added sha256 from the allowlisted public repositories; its refusal paths (wrong hash, unfetchable, pgp/also-trust/sha1-only, foreign redirect, count and byte caps) must stay red-reachable on every PR, each asserted with the reason it was refused for. It runs offline on fixtures with a fake transport; the real download only happens in the privileged workflow."
+    review_after: "2027-05-10"
+    budget_seconds: 30
+    selftest_exempt: "is-a-test-suite — the gate IS the fixture harness: every refusal path runs against a fake transport and must fail for its stated reason"
+    run: |
+      python3 .github/scripts/verify-added-checksums.py --self-test
+
   - id: test-intelligence-ecosystem
     name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
     group: kotlin

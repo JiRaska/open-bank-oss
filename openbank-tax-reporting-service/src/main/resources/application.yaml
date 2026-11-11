@@ -202,7 +202,7 @@ openbank:
   # ADR-0336: catalogue-defined statutory returns. Until the reporting start and fund roster are
   # configured, deadline checks fail closed and workflow liveness cannot report success.
   statutory-returns:
-    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json,statutory-returns/cz/ceu.v1.json
+    catalogues: statutory-returns/cz/pension-cnb.v1.json,statutory-returns/cz/tax-information-exchange.v1.json,statutory-returns/cz/ceu.v1.json,statutory-returns/cz/gsft.v1.json
     company-id: company
     deadline-check-every: 1h
     # ADR-0337: the first day of the pension company's books. Unset = every company-books return
@@ -215,6 +215,14 @@ openbank:
   ceu:
     tick-every: 15m
     # reporting-start: 2026-11-09
+  # #15356: GSFT depositor data delivery (catalogue cz-gsft). Both keys are unset by default and
+  # read as Optional: without bank-code no batch is assembled (503, named), without
+  # pgp-public-key (GSFT's ASCII-armoured public key ring, supplied by the gitops env and never
+  # committed) no batch is delivered. The service boots either way.
+  # gsft:
+  #   bank-code: "0000"
+  #   branch-country: ""
+  #   pgp-public-key: <armoured key ring>
   build:
     time: "${BUILD_TIME:unknown}"
   git:
