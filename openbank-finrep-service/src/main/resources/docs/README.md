@@ -105,7 +105,8 @@ FINREP preflight rejects a frozen trial balance with no reportable rows. It also
 foreign-currency rows until the ledger supplies a verified CZK reporting-currency conversion.
 The independent per-currency balance verdict and the reporting-currency checks both apply.
 
-For FINREP9, save the four same-date responses from the frozen template reads. The draft renderer
+For FINREP9, save the four same-date responses from the frozen template reads. Both tools require
+`sourceEvidence: FROZEN` in each response. The draft renderer
 writes the 36 supported facts after reconciling assets with liabilities and equity across F01.
 Supply the reporting entity explicitly. The example uses the EBA's synthetic entity.
 

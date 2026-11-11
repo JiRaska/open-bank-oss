@@ -23,7 +23,7 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
         self.period = "2026-06-30"
         self.value = "123456789123456.789123"
 
-    def sources(self, *, data_gaps=None, values=None):
+    def sources(self, *, data_gaps=None, values=None, source_evidence="FROZEN"):
         paths = []
         values = values or {}
         for template in self.templates:
@@ -40,6 +40,8 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
                     for fact in self.facts if fact["templateId"] == template
                 ],
             }
+            if source_evidence is not None:
+                payload["sourceEvidence"] = source_evidence
             path.write_text(json.dumps(payload), encoding="utf-8")
             paths.append(path)
         return paths
@@ -88,6 +90,16 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "complete mappings"):
             reconcile(self.report, self.sources(data_gaps=[{"code": "INCOMPLETE_OFFICIAL_MAPPING"}]))
 
+
+    def test_rejects_live_or_unlabelled_source_responses(self):
+        self.package()
+        for source_evidence in ("LIVE_PREVIEW", None):
+            with self.subTest(source_evidence=source_evidence):
+                sources = self.sources(source_evidence=source_evidence)
+                with self.assertRaisesRegex(ValueError, "FROZEN source evidence"):
+                    reconcile(self.report, sources)
+                with self.assertRaisesRegex(ValueError, "FROZEN source evidence"):
+                    render(sources, "rs:DUMMYLEI123456789012.CON", self.folder / "blocked.zip")
 
     def test_writes_a_reproducible_draft_and_reconciles_all_supported_facts(self):
         sources = self.sources(values={32354: "300.12", 32592: "200.11", 32464: "100.01", 32654: "300.12"})

@@ -78,6 +78,8 @@ def reconcile(report: Path, previews: list[Path]) -> dict:
 
 def supported_values(source: dict, period: str, facts: list[dict]) -> dict[str, Decimal]:
     template = source["templateId"]
+    if source.get("sourceEvidence") != "FROZEN":
+        raise ValueError(f"{template} requires a response with FROZEN source evidence.")
     if (
         source["period"] != period or source["dataGaps"] != [] or source["isBalanced"] is not True
         or source["balanceVerdict"] != "AGREED_BALANCED"
