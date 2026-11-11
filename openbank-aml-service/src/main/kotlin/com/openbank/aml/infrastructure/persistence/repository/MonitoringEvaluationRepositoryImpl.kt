@@ -9,6 +9,7 @@ import com.openbank.aml.application.port.out.RecordedHit
 import com.openbank.aml.domain.monitoring.MonitoringEvaluationRecord
 import com.openbank.aml.domain.monitoring.MonitoringHit
 import com.openbank.aml.domain.monitoring.PackIdentity
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -72,7 +73,7 @@ class MonitoringEvaluationRepositoryImpl : MonitoringEvaluationRepository {
         snapshotJson: String,
         at: Instant,
     ): RecordedHit {
-        val candidate = UUID.randomUUID()
+        val candidate = Ids.newId()
         return Panache.withTransaction {
             mutate(
                 """
