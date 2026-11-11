@@ -365,7 +365,13 @@ class DomesticPaymentService(
         idempotencyKey: String,
         debtorAccountId: UUID,
         scope: String,
-    ): DomesticPayment? = paymentRepository.findCustomerSubmission(idempotencyKey, debtorAccountId, scope)
+        originalSubmissionKeyDigest: String?,
+    ): DomesticPayment? = paymentRepository.findCustomerSubmission(
+        idempotencyKey,
+        debtorAccountId,
+        scope,
+        originalSubmissionKeyDigest,
+    )
 
     override suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment> = paymentRepository.list(
         status = query.status,

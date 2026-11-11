@@ -220,3 +220,11 @@ first release. Older callers without this header keep their existing replay cont
 
 V21 adds a nullable digest and the unique index. Rollback retains both as durable protection
 for committed rows. A populated deployment needs an index build plan before sending the header.
+
+### Reconcile a release whose rail response was lost
+
+For a mode-bound release, verified customer-edge sends the approval ID as the rail key to
+`/api/v1/domestic-payments/submissions/lookup` with the debit account, stored customer scope and
+`originalSubmissionKeyDigest`. The lookup requires all four values. It echoes the stored digest
+on `FOUND` so the edge can distinguish exact proof from an older provider's unqualified reply.
+An ordinary direct lookup omits the digest and matches only rows stored without it.

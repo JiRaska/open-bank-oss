@@ -129,12 +129,15 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         idempotencyKey: String,
         debtorAccountId: UUID,
         scope: String,
+        originalSubmissionKeyDigest: String?,
     ): DomesticPayment? = Panache.withSession {
         find(
-            "idempotencyKey = ?1 and debtorAccountId = ?2 and customerSubmissionScope = ?3",
+            "idempotencyKey = ?1 and debtorAccountId = ?2 and customerSubmissionScope = ?3 " +
+                "and originalSubmissionKeyDigest is not distinct from ?4",
             idempotencyKey,
             debtorAccountId,
             scope,
+            originalSubmissionKeyDigest,
         ).firstResult()
     }.awaitSuspending()?.toDomain()
 

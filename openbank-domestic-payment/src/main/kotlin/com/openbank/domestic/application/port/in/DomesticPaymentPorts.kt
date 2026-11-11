@@ -79,7 +79,12 @@ data class TransitionDomesticPaymentStatusCommand(
 interface DomesticPaymentUseCase {
     suspend fun createPayment(command: CreateDomesticPaymentCommand): CreateDomesticPaymentResult
     suspend fun getPayment(paymentId: UUID): DomesticPayment
-    suspend fun findCustomerSubmission(idempotencyKey: String, debtorAccountId: UUID, scope: String): DomesticPayment?
+    suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+        originalSubmissionKeyDigest: String? = null,
+    ): DomesticPayment?
     suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment>
     suspend fun transitionStatus(command: TransitionDomesticPaymentStatusCommand): DomesticPayment
 }

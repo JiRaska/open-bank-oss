@@ -109,6 +109,31 @@ class DomesticOriginalSubmissionKeyIT {
     }
 
     @Test
+    fun `a direct row whose key equals an approval UUID cannot satisfy the bound release lookup`() {
+        val scope = digest("customer-scope")
+        val id = paymentId(post(approvalId, customerScope = scope))
+        assertUnknown(lookup(approvalId, scope, originalDigest))
+        assertFound(lookup(approvalId, scope), id, expectedDigest = null)
+        assertSinglePayment(id, approvalId, persistedDigest = null)
+    }
+
+    @Test
+    fun `bound lookup requires the exact transport key debit account scope and stored digest`() {
+        val scope = digest("customer-scope")
+        val id = paymentId(post(approvalId, originalDigest, scope))
+        assertFound(lookup(approvalId, scope, originalDigest), id, originalDigest)
+        listOf(
+            lookup(approvalId, scope),
+            lookup(approvalId, scope, digest("another-original-key")),
+            lookup(approvalId, digest("another-scope"), originalDigest),
+            lookup(approvalId, scope, originalDigest, accountId = UUID.randomUUID()),
+            lookup(originalKey, scope, originalDigest),
+        ).forEach(::assertUnknown)
+        assertThat(lookup(approvalId, scope, "not-a-digest").statusCode).isEqualTo(HTTP_BAD_REQUEST)
+        assertSinglePayment(id, approvalId, originalDigest)
+    }
+
+    @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_OPERATOR", "ROLE_API"])
     @OidcSecurity(
         claims = [
@@ -119,6 +144,7 @@ class DomesticOriginalSubmissionKeyIT {
     )
     fun `an API identity with a forged Edge username cannot attach the digest`() {
         assertThat(post(approvalId, originalDigest).statusCode).isEqualTo(HTTP_FORBIDDEN)
+        assertThat(lookup(approvalId, digest("customer-scope"), originalDigest).statusCode).isEqualTo(HTTP_FORBIDDEN)
         assertThat(writes()).isEmpty()
     }
 
@@ -153,7 +179,7 @@ class DomesticOriginalSubmissionKeyIT {
         assertThat(digest(raw)).isEqualTo(expected)
     }
 
-    private fun post(key: String, originalKeyDigest: String? = null): Response {
+    private fun post(key: String, originalKeyDigest: String? = null, customerScope: String? = null): Response {
         val request = RestAssured.given().contentType(ContentType.JSON).header("Idempotency-Key", key)
         originalKeyDigest?.let { request.header(DIGEST_HEADER, it) }
         return request.body(
@@ -168,8 +194,36 @@ class DomesticOriginalSubmissionKeyIT {
                 "amount" to "100.00".toBigDecimal(),
                 "currency" to "CZK",
                 "priority" to "STANDARD",
-            ),
+            ) + customerScope?.let { mapOf("customerSubmissionScope" to it) }.orEmpty(),
         ).post("/api/v1/domestic-payments")
+    }
+
+    private fun lookup(
+        key: String,
+        scope: String,
+        originalKeyDigest: String? = null,
+        accountId: UUID = debtorAccountId,
+    ): Response = RestAssured.given().contentType(ContentType.JSON).header("Idempotency-Key", key).body(
+        buildMap<String, Any> {
+            put("debtorAccountId", accountId)
+            put("customerSubmissionScope", scope)
+            originalKeyDigest?.let { put("originalSubmissionKeyDigest", it) }
+        },
+    ).post("/api/v1/domestic-payments/submissions/lookup")
+
+    private fun assertFound(response: Response, id: String, expectedDigest: String?) {
+        assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(HTTP_OK)
+        assertThat(response.header("Cache-Control")).isEqualTo("no-store")
+        assertThat(response.jsonPath().getString("outcome")).isEqualTo("FOUND")
+        assertThat(response.jsonPath().getString("paymentId")).isEqualTo(id)
+        assertThat(response.jsonPath().getString("originalSubmissionKeyDigest")).isEqualTo(expectedDigest)
+    }
+
+    private fun assertUnknown(response: Response) {
+        assertThat(response.statusCode).describedAs(response.body.asString()).isEqualTo(HTTP_OK)
+        assertThat(response.header("Cache-Control")).isEqualTo("no-store")
+        assertThat(response.jsonPath().getMap<String, String>("$")).containsOnlyKeys("outcome")
+            .containsEntry("outcome", "UNKNOWN")
     }
 
     private fun paymentId(response: Response): String {
@@ -240,6 +294,7 @@ class DomesticOriginalSubmissionKeyIT {
 
     private companion object {
         const val DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
+        const val HTTP_OK = 200
         const val HTTP_CREATED = 201
         const val HTTP_BAD_REQUEST = 400
         const val HTTP_FORBIDDEN = 403

@@ -93,9 +93,9 @@ class DomesticPaymentResource(
             requireCustomerEdge()
             validatedCustomerScope(it)
         }
-        val originalDigest = originalSubmissionKeyDigest?.also {
+        val originalDigest = originalSubmissionKeyDigest?.let {
             requireCustomerEdge()
-            require(CUSTOMER_SUBMISSION_SCOPE.matches(it)) { "Invalid original submission digest" }
+            validatedOriginalDigest(it)
         }
 
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
@@ -137,11 +137,17 @@ class DomesticPaymentResource(
         val lookup = requireNotNull(request) { "A submission lookup is required" }
         val accountId = requireNotNull(lookup.debtorAccountId) { "debtorAccountId is required" }
         val scope = validatedCustomerScope(lookup.customerSubmissionScope)
-        val payment = paymentUseCase.findCustomerSubmission(idempotencyKey, accountId, scope)
+        val originalDigest = lookup.originalSubmissionKeyDigest?.let(::validatedOriginalDigest)
+        val payment = paymentUseCase.findCustomerSubmission(idempotencyKey, accountId, scope, originalDigest)
         val result = if (payment == null) {
             mapOf("outcome" to "UNKNOWN")
         } else {
-            mapOf("outcome" to "FOUND", "paymentId" to payment.id.toString(), "status" to payment.status.name)
+            buildMap {
+                put("outcome", "FOUND")
+                put("paymentId", payment.id.toString())
+                put("status", payment.status.name)
+                payment.originalSubmissionKeyDigest?.let { put("originalSubmissionKeyDigest", it) }
+            }
         }
         return Response.ok(result).header("Cache-Control", "no-store").build()
     }
@@ -150,6 +156,11 @@ class DomesticPaymentResource(
         if (!ServiceAccountIdentity.isPrincipal(identity, CUSTOMER_EDGE)) {
             throw ForbiddenException("Customer submission scope is restricted to customer-edge")
         }
+    }
+
+    private fun validatedOriginalDigest(digest: String): String {
+        require(CUSTOMER_SUBMISSION_SCOPE.matches(digest)) { "Invalid original submission digest" }
+        return digest
     }
 
     private fun validatedCustomerScope(scope: String?): String {
