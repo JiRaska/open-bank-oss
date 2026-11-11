@@ -25,10 +25,24 @@ data class CzCreditPolicyRevision(
     val decisionReason: String? = null,
 )
 
+data class CzCreditPolicyCommand(val keyDigest: String, val requestHash: String)
+
+data class CzCreditPolicyWrite(val revision: CzCreditPolicyRevision, val replayed: Boolean)
+
 interface CzCreditPolicyStore {
-    fun propose(row: CzCreditPolicyRevision): Uni<CzCreditPolicyRevision>
-    fun find(id: UUID): Uni<CzCreditPolicyRevision?>
+    fun propose(
+        command: CzCreditPolicyCommand,
+        id: UUID,
+        create: () -> CzCreditPolicyRevision,
+    ): Uni<CzCreditPolicyWrite>
+
+    fun decide(
+        command: CzCreditPolicyCommand,
+        id: UUID,
+        approve: Boolean,
+        decide: (CzCreditPolicyRevision) -> Proposal<PolicyBundle>,
+    ): Uni<CzCreditPolicyWrite>
+
     fun pending(): Uni<List<CzCreditPolicyRevision>>
     fun active(asOf: LocalDate): Uni<CzCreditPolicyRevision?>
-    fun decide(id: UUID, decision: Proposal<PolicyBundle>): Uni<Int>
 }

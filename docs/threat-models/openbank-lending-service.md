@@ -381,12 +381,15 @@ The risk console submits complete policy bundles to Lending through the existing
 Only `ROLE_CREDIT_RISK` with a verified interactive staff JWT can read pending versions or write
 proposals and decisions. Lending records the token subject as the actor. Database constraints
 reject a checker equal to the maker and prevent two approvals with the same version or effective
-day. Each transition compares the prior state in the update, so a concurrent decision cannot
-replace an earlier one. The immutable payload and SHA-256 digest are retained with both actors,
-timestamps and the decision reason. The UI presents the exact proposed rules before deciding.
+day. Each decision locks its proposal and checks the prior state. The database permits only the
+transition from a proposed row to a terminal decision and preserves the payload, SHA-256 digest,
+actors, timestamps and reason. The UI presents the exact proposed rules before deciding. A receipt
+bound to the staff subject, idempotency key and request fingerprint commits with each mutation.
+A concurrent or interrupted retry can recover the original response from the same evidence.
 
-Approval schedules a future revision for Czech consumer credit. Origination still applies the
-pinned compliance pack and requires adverse bureau, DSTI and DTI evidence. Earlier dates resolve
+Approval schedules a future revision for Czech consumer credit. PostgreSQL checks its Prague
+business day at commit so a delay acquiring locks cannot backdate approval. Origination still
+applies compliance pack checks and requires adverse bureau, DSTI and DTI evidence. Earlier dates resolve
 to the revision that was effective then. Storage or evaluation errors propagate to the existing
 assessment failure path. Proposal text is for rule and decision rationale only.
 

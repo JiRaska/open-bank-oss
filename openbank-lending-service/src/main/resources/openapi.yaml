@@ -583,7 +583,11 @@ paths:
             schema: { $ref: '#/components/schemas/CzCreditPolicyBundle' }
       responses:
         '201':
-          description: Stored revision proposal
+          description: Stored revision proposal, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
@@ -592,7 +596,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: The idempotency key conflicts with a prior or in-flight request
+          description: The key was used for a different request or identical content is already pending or approved
   /api/v1/lending/risk/policy/proposals/{id}/decide:
     post:
       tags: [Lending]
@@ -616,7 +620,11 @@ paths:
                 reason: { type: string, nullable: true }
       responses:
         '200':
-          description: Recorded policy decision
+          description: Recorded policy decision, including the original response on exact retry
+          headers:
+            X-Idempotency-Replayed:
+              description: True when the original command response is replayed.
+              schema: { type: string, enum: ['true'] }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
@@ -627,7 +635,7 @@ paths:
         '404':
           description: The policy proposal does not exist
         '409':
-          description: The proposal was already decided or an approval uses this version or effective date
+          description: The key was used for a different request, the proposal was decided, or the version or date is in use
         '422':
           description: The checker must differ from the maker
   /api/v1/lending/applications/recent:

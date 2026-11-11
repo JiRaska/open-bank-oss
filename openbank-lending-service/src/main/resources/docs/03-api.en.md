@@ -105,10 +105,14 @@ bureau exclusion and both affordability limits. The pinned compliance pack adds 
 checks during evaluation. The proposal validates each operand against the inputs that origination supplies.
 
 A second staff member reviews the stored content and hash before posting an explicit decision to
-`/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day.
+`/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day
+and the database verifies that the day is still in the future when committing the decision.
 Both POSTs require `Idempotency-Key`. Repeat the same key and request after an interrupted response.
-A completed request can be replayed by the same staff subject for five minutes.
+The original response can be replayed by the same staff subject after approval, rejection or the
+policy's effective date. The command receipt and revision commit in the same transaction. A
+new proposal with identical pending or approved content returns `CREDIT_POLICY_DUPLICATE_CONTENT`.
+Rejection preserves the original evidence and allows a fresh proposal with the same content.
 The engine records the selected table versions with the application decision. Other jurisdictions
-and products use their starter policies. Preserve the revision ledger during a service rollback.
+and products use their starter policies. Preserve the revisions and their command receipts during a service rollback.
 Once an approved version is in effect, coordinate any rollback with Credit Risk because reverting
 the reader would also revert the policy applied to new applications.

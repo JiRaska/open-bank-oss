@@ -83,6 +83,17 @@ describe('Czech credit policy revisions', () => {
     expect(keys[1]).toEqual(keys[0])
   })
 
+  it('shows why an identical pending or approved proposal is refused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_path: string, init: RequestInit) =>
+      init.method === 'POST' ? json({ code: 'CREDIT_POLICY_DUPLICATE_CONTENT' }, 409) : json([proposal])))
+    view()
+    const editor = screen.getByLabelText(/policy JSON for a new version/i)
+    fireEvent.change(editor, { target: { value: proposal.policyJson } })
+    fireEvent.click(screen.getByRole('button', { name: /save proposal/i }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Identical rules are already pending or approved.')
+    expect(editor).toHaveValue(proposal.policyJson)
+  })
+
   it('does not load the queue for a compliance reader without the credit risk role', () => {
     session.roles = ['ROLE_COMPLIANCE']
     const fetcher = vi.fn()

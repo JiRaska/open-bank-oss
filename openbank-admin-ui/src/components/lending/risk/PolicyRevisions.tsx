@@ -57,7 +57,11 @@ function RevisionQueue({ actor }: { actor: string }) {
       if (response.status === 422) {
         setFeedback({ error: true, text: t('Rozhodnout musí jiný pracovník.', 'A different staff member must decide.') })
       } else if (response.status === 409) {
-        setFeedback({ error: true, text: t('O návrhu už bylo rozhodnuto nebo je verze či datum obsazené.', 'The proposal was already decided or the version or date is in use.') })
+        const problem = await response.json().catch(() => null) as { code?: string } | null
+        const text = problem?.code === 'CREDIT_POLICY_DUPLICATE_CONTENT'
+          ? t('Stejná pravidla už čekají na rozhodnutí nebo byla schválena.', 'Identical rules are already pending or approved.')
+          : t('O návrhu už bylo rozhodnuto nebo je verze či datum obsazené.', 'The proposal was already decided or the version or date is in use.')
+        setFeedback({ error: true, text })
       } else if (!response.ok) {
         setFeedback({ error: true, text: t(`Zápis se nezdařil (${response.status}).`, `Write failed (${response.status}).`) })
       } else {

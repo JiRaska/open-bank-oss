@@ -5,6 +5,8 @@
 package com.openbank.lending.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.lending.application.port.out.CzCreditPolicyCommand
+import com.openbank.lending.application.port.out.CzCreditPolicyRevision
 import com.openbank.lending.application.port.out.CzCreditPolicyStore
 import com.openbank.lending.application.port.out.StarterCreditPolicy
 import com.openbank.libs.decision.PolicyAttribute
@@ -12,8 +14,8 @@ import com.openbank.libs.decision.PolicyBundle
 import com.openbank.libs.decision.PolicyOperator
 import com.openbank.libs.decision.PolicyRule
 import com.openbank.libs.decision.PolicyTableKind
+import io.mockk.every
 import io.mockk.mockk
-import io.mockk.verify
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -29,6 +31,11 @@ class CzCreditPolicyActivationServiceTest {
         val effectiveDay = LocalDate.of(2026, 10, 26)
         val starter = StarterCreditPolicy().activeBundle(effectiveDay).await().indefinitely()
         val store = mockk<CzCreditPolicyStore>()
+        every { store.propose(any(), any(), any()) } answers {
+            thirdArg<() -> CzCreditPolicyRevision>()()
+            error("Invalid policy was accepted by the store")
+        }
+        val command = CzCreditPolicyCommand("synthetic-policy-key", "synthetic-request-hash")
         val service = CzCreditPolicyActivationService(store, ObjectMapper(), clock)
         val invalidRules = listOf(
             PolicyRule("numeric-membership", PolicyAttribute.AGE_YEARS, PolicyOperator.IN, values = setOf("18")),
@@ -41,11 +48,11 @@ class CzCreditPolicyActivationServiceTest {
                 val rules = if (table.kind == PolicyTableKind.ELIGIBILITY) table.rules + rule else table.rules
                 table.copy(version = 3, effectiveFrom = effectiveDay, rules = rules)
             }
-            assertThatThrownBy { service.propose(PolicyBundle(tables), "synthetic-credit-policy-maker") }
+            assertThatThrownBy {
+                service.propose(PolicyBundle(tables), "synthetic-credit-policy-maker", command)
+            }
                 .isInstanceOf(IllegalArgumentException::class.java)
                 .hasMessageContaining("unsupported input, incompatible operands")
         }
-
-        verify(exactly = 0) { store.propose(any()) }
     }
 }

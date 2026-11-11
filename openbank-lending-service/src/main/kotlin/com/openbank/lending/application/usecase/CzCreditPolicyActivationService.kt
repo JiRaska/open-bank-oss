@@ -4,8 +4,10 @@
 package com.openbank.lending.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.lending.application.port.out.CzCreditPolicyCommand
 import com.openbank.lending.application.port.out.CzCreditPolicyRevision
 import com.openbank.lending.application.port.out.CzCreditPolicyStore
+import com.openbank.lending.application.port.out.CzCreditPolicyWrite
 import com.openbank.libs.decision.PolicyAttribute
 import com.openbank.libs.decision.PolicyBundle
 import com.openbank.libs.decision.PolicyOperator
@@ -13,7 +15,6 @@ import com.openbank.libs.decision.PolicyRule
 import com.openbank.libs.decision.PolicyTableKind
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.error.ResourceConflictException
-import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
@@ -24,7 +25,6 @@ import java.security.MessageDigest
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
-import java.time.ZoneOffset
 import java.util.UUID
 
 enum class CzCreditPolicyStatus { PROPOSED, EXECUTED, REJECTED }
@@ -43,22 +43,25 @@ data class CzCreditPolicyView(
     val policyJson: String,
 )
 
+data class CzCreditPolicyCommandView(val view: CzCreditPolicyView, val replayed: Boolean)
+
 @ApplicationScoped
 class CzCreditPolicyActivationService(
     private val store: CzCreditPolicyStore,
     private val mapper: ObjectMapper,
     private val clock: Clock,
 ) {
-    fun propose(bundle: PolicyBundle, actor: String): Uni<CzCreditPolicyView> {
-        require(actor.isNotBlank()) { "Proposer identity is required" }
-        validateBundle(bundle)
-        val first = bundle.tables.first()
-        requireFuture(first.effectiveFrom)
-        val payload = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(bundle)
-        val hash = Hex.lower(MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8)))
-        return store.propose(
+    fun propose(bundle: PolicyBundle, actor: String, command: CzCreditPolicyCommand): Uni<CzCreditPolicyCommandView> {
+        val id = Ids.newId()
+        return store.propose(command, id) {
+            require(actor.isNotBlank()) { "Proposer identity is required" }
+            validateBundle(bundle)
+            val first = bundle.tables.first()
+            requireFuture(first.effectiveFrom)
+            val payload = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(bundle)
+            val hash = Hex.lower(MessageDigest.getInstance("SHA-256").digest(payload.toByteArray(Charsets.UTF_8)))
             CzCreditPolicyRevision(
-                id = Ids.newId(),
+                id = id,
                 revision = first.version,
                 effectiveFrom = first.effectiveFrom,
                 payload = payload,
@@ -66,33 +69,22 @@ class CzCreditPolicyActivationService(
                 state = ProposalState.PROPOSED,
                 proposedBy = actor,
                 proposedAt = OffsetDateTime.now(clock),
-            ),
-        ).map { it.toView() }
+            )
+        }.map { it.toCommandView() }
     }
 
-    fun decide(id: UUID, approve: Boolean, actor: String, reason: String?): Uni<CzCreditPolicyView> =
-        store.find(id).flatMap { existing ->
-            val row = existing ?: throw ResourceNotFoundException("Unknown Czech credit policy proposal")
-            if (row.state != ProposalState.PROPOSED) throw alreadyDecided()
-            val now = clock.instant()
-            val policy = row.policy()
-            val proposal = Proposal(id.toString(), policy, row.proposedBy, row.proposedAt.toInstant(), row.state)
-            val decision = if (approve) {
-                requireFuture(row.effectiveFrom)
-                proposal.approve(actor, now, reason).markExecuted(now)
-            } else {
-                proposal.reject(actor, now, reason)
-            }
-            store.decide(id, decision).map { updated ->
-                if (updated != 1) throw alreadyDecided()
-                row.copy(
-                    state = decision.state,
-                    decidedBy = decision.decidedBy,
-                    decidedAt = decision.decidedAt?.atOffset(ZoneOffset.UTC),
-                    decisionReason = decision.decisionReason,
-                ).toView()
-            }
-        }
+    fun decide(
+        id: UUID,
+        approve: Boolean,
+        actor: String,
+        reason: String?,
+        command: CzCreditPolicyCommand,
+    ): Uni<CzCreditPolicyCommandView> = store.decide(command, id, approve) { row ->
+        if (row.state != ProposalState.PROPOSED) throw alreadyDecided()
+        val now = clock.instant()
+        val proposal = Proposal(id.toString(), row.policy(), row.proposedBy, row.proposedAt.toInstant(), row.state)
+        if (approve) proposal.approve(actor, now, reason).markExecuted(now) else proposal.reject(actor, now, reason)
+    }.map { it.toCommandView() }
 
     fun pending(): Uni<List<CzCreditPolicyView>> = store.pending().map { rows -> rows.map { it.toView() } }
 
@@ -110,6 +102,8 @@ class CzCreditPolicyActivationService(
     }
 
     private fun CzCreditPolicyRevision.policy(): PolicyBundle = mapper.readValue(payload, PolicyBundle::class.java)
+
+    private fun CzCreditPolicyWrite.toCommandView() = CzCreditPolicyCommandView(revision.toView(), replayed)
 
     private fun CzCreditPolicyRevision.toView() = CzCreditPolicyView(
         id = id,
