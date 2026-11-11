@@ -203,11 +203,8 @@ class AccountPactFolderProviderVerificationTest {
         // for that principal only, so the class-level pact-verifier identity would answer 403.
         // The GSFT deposit roster (#15356) is the same caller, and its resource additionally
         // requires that verified service-account name.
-        if (context != null && (
-                context.interaction.description.contains("CRS FATCA") ||
-                    context.interaction.description.contains("GSFT deposit roster as of")
-                )
-        ) {
+        val description = context?.interaction?.description.orEmpty()
+        if (description.contains("CRS FATCA") || description.contains("GSFT deposit roster as of")) {
             testIdentityAssociation.setTestIdentity(taxReportingIdentity())
         }
         context?.verifyInteraction()
