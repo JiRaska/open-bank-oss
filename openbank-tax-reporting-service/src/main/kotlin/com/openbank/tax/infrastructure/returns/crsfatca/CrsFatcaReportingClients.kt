@@ -102,6 +102,8 @@ data class AccountSummaryDto(
     val status: String,
     val openedAt: Instant,
     val closedAt: Instant?,
+    /** CURRENT/SAVINGS/TERM_DEPOSIT/NOSTRO/GL_*; the GSFT roster keeps deposit types only. */
+    val accountType: String? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

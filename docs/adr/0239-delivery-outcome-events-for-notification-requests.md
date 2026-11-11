@@ -1,6 +1,6 @@
 ---
 date: 2026-08-03
-decision-status: proposed
+decision-status: accepted
 delivery-status: partial
 followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]

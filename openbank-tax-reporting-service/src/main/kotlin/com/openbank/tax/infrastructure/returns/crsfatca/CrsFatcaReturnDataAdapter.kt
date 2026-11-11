@@ -30,6 +30,9 @@ interface CrsFatcaReportingSources {
 
     /** Booked balance of one account currency at the period end. */
     suspend fun bookedBalance(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal
+
+    /** As [bookedBalance], but a missing balance row FAILS instead of reading as zero (GSFT). */
+    suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal
 }
 
 data class AccountPage(val accounts: List<AccountSummaryDto>, val nextCursor: String?)
@@ -73,6 +76,9 @@ class RestCrsFatcaReportingSources(
     } catch (e: ProcessingException) {
         throw ReturnDataUnavailableException("balance-service unreachable: ${e.message}", e)
     }
+
+    override suspend fun bookedBalanceStrict(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal =
+        sourced("balance-service") { balances.bookedAsOf(accountId, currency, asOf).bookedAmount }
 
     private suspend fun <T> sourced(source: String, call: suspend () -> T): T = try {
         call()

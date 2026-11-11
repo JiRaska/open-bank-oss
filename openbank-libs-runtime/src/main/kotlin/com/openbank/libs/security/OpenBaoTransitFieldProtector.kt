@@ -142,7 +142,7 @@ class OpenBaoTransitFieldProtector(
             .header("X-Vault-Token", token)
             .method(method, publisher)
             .build()
-        transport.httpClient.send(request, OpenBaoTransport.boundedBody())
+        transport.send(request)
     } catch (e: InterruptedException) {
         Thread.currentThread().interrupt()
         throw FieldProtectionException("Transit $operation for key '$keyName' interrupted", e)
