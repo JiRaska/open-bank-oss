@@ -90,9 +90,11 @@ jobs:
     # of git and API work queued 3-14 min behind PR CodeQL/Pact jobs on the 20-job hosted cap
     # (2026-11-11). The repo variable MERGE_TRAIN_RUNNER (e.g. openbank-mini) moves settle and publish,
     # which run main's code only, off that cap. Unset = hosted, and that is the kill switch when the
-    # Mac is down: a job routed there has no hosted fallback once queued. Never for
-    # pull_request_target. `build` stays hosted: it squashes and regenerates PR heads.
-    runs-on: ${{ github.event_name != 'pull_request_target' && vars.MERGE_TRAIN_RUNNER || 'ubuntu-latest' }}
+    # Mac is down: a job routed there has no hosted fallback once queued. Only for main's own ref,
+    # never for pull_request_target. `build` stays hosted: it squashes and regenerates PR heads.
+    # The pool admits main-ref jobs only (_service-ci*.yml are gated the same way), because these
+    # jobs hold App keys and a privileged dind build on the same host must not run branch code.
+    runs-on: ${{ github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main' && vars.MERGE_TRAIN_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     # Main-only environment holding the branch-updater App key (deployment branch policy: main).
     environment: merge-train-branch-update
@@ -247,7 +249,7 @@ jobs:
     needs: [settle, build]
     if: needs.build.outputs.has_train == 'true' || needs.build.outputs.has_drops == 'true'
     # Same routing as settle (see there).
-    runs-on: ${{ github.event_name != 'pull_request_target' && vars.MERGE_TRAIN_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ github.event_name != 'pull_request_target' && github.ref == 'refs/heads/main' && vars.MERGE_TRAIN_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 30
     permissions:
       contents: read
