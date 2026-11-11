@@ -94,3 +94,19 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.
+
+## Czech consumer credit policy revisions
+
+`GET /api/v1/lending/risk/policy?asOf=YYYY-MM-DD` returns the applicable Czech consumer credit
+policy as of the requested day. Versions 1 and 2 are the starter rules. Credit-risk staff use the
+risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
+revision number and future effective date. Submit all four table kinds and retain the adverse
+bureau exclusion and both affordability limits. The pinned compliance pack adds its statutory
+checks during evaluation.
+
+A second staff member reviews the stored content and hash before posting an explicit decision to
+`/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day.
+The engine records the selected table versions with the application decision. Other jurisdictions
+and products use their starter policies. Preserve the revision ledger during a service rollback.
+Once an approved version is in effect, coordinate any rollback with Credit Risk because reverting
+the reader would also revert the policy applied to new applications.

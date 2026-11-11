@@ -80,8 +80,8 @@ class CreditRiskResource(private val insight: CreditRiskInsightUseCase, private 
     @Operation(
         summary = "The credit policy bundle the engine evaluates as of a date",
         description = "Every decision table (exclusion, eligibility, affordability, pricing band) with " +
-            "its rules, version and effective window. codeSeeded=true while the ADR-0213 D3 starter " +
-            "policy is the binding, i.e. before the four-eyes table store (D4) exists.",
+            "its rules, version and effective window for Czech consumer credit. codeSeeded is true " +
+            "when no approved Czech revision was effective on that day.",
     )
     @Authorize(action = "lending.read", resource = "")
     fun policy(@QueryParam("asOf") asOf: String?): Uni<CreditPolicyView> = insight.activePolicy(parseAsOf(asOf))

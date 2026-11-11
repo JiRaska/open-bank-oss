@@ -375,6 +375,21 @@ make the in-memory registry shared. A pack approved on one replica still reaches
 by the convergence path, so the at-most-once guarantee here is about the durable decision, not about
 every pod agreeing at the same instant (#3467, and see the replica-convergence work tracked there).
 
+## 8a. Czech consumer credit policy revisions (issue #8896)
+
+The risk console submits complete policy bundles to Lending through the existing session relay.
+Only `ROLE_CREDIT_RISK` with a verified interactive staff JWT can read pending versions or write
+proposals and decisions. Lending records the token subject as the actor. Database constraints
+reject a checker equal to the maker and prevent two approvals with the same version or effective
+day. Each transition compares the prior state in the update, so a concurrent decision cannot
+replace an earlier one. The immutable payload and SHA-256 digest are retained with both actors,
+timestamps and the decision reason. The UI presents the exact proposed rules before deciding.
+
+Approval schedules a future revision for Czech consumer credit. Origination still applies the
+pinned compliance pack and requires adverse bureau, DSTI and DTI evidence. Earlier dates resolve
+to the revision that was effective then. Storage or evaluation errors propagate to the existing
+assessment failure path. Proposal text is for rule and decision rationale only.
+
 ## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
 
 `CustomerIntakeResource` (`POST /api/v1/lending/intake/applications`) is the first path by which a

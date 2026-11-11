@@ -36,7 +36,7 @@ info:
   # was cut; the api-contract gate requires a fresh MINOR on live main.
   # 1.39.0 -> 1.40.0 (#10558): correct the documented existing Money response shape;
   # requests retain their accepted forms and runtime serialization is unchanged.
-  version: 1.40.0
+  version: 1.41.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -534,9 +534,8 @@ paths:
       summary: The credit policy bundle the engine evaluates as of a date
       description: >-
         Every decision table (exclusion, eligibility, affordability, pricing band) with its rules,
-        version and effective window (ADR-0213 D1). codeSeeded is true while the ADR-0213 D3
-        starter policy is the binding — i.e. before the four-eyes table store D4 describes exists —
-        so a risk committee reading the table knows whether anyone can change it and how.
+        version and effective window for Czech consumer credit. codeSeeded is true when no
+        approved Czech revision was effective on the requested day.
       parameters:
         - name: asOf
           in: query
@@ -553,6 +552,79 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy/proposals:
+    get:
+      tags: [Lending]
+      operationId: listCzCreditPolicyProposals
+      summary: List Czech consumer credit policy revisions awaiting a checker
+      responses:
+        '200':
+          description: Pending immutable proposals
+          headers:
+            Cache-Control:
+              schema: { type: string, example: no-store }
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Lending]
+      operationId: proposeCzCreditPolicy
+      summary: Propose an immutable Czech consumer credit policy revision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CzCreditPolicyBundle' }
+      responses:
+        '201':
+          description: Stored revision proposal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/v1/lending/risk/policy/proposals/{id}/decide:
+    post:
+      tags: [Lending]
+      operationId: decideCzCreditPolicy
+      summary: Approve or reject an exact policy revision as a different staff actor
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approve]
+              properties:
+                approve: { type: boolean }
+                reason: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Recorded policy decision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CzCreditPolicyProposal' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: The policy proposal does not exist
+        '409':
+          description: The proposal was already decided or an approval uses this version or effective date
+        '422':
+          description: The checker must differ from the maker
   /api/v1/lending/applications/recent:
     get:
       tags: [Lending]
@@ -2135,6 +2207,30 @@ components:
         rules:
           type: array
           items: { $ref: '#/components/schemas/PolicyRuleView' }
+    CzCreditPolicyBundle:
+      type: object
+      required: [tables]
+      properties:
+        tables:
+          type: array
+          items: { $ref: '#/components/schemas/PolicyTableView' }
+    CzCreditPolicyProposal:
+      type: object
+      required: [id, revision, effectiveFrom, contentHash, state, proposedBy, proposedAt, policyJson]
+      properties:
+        id: { type: string, format: uuid }
+        revision: { type: integer, minimum: 3 }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string }
+        state: { type: string, enum: [PROPOSED, EXECUTED, REJECTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        policyJson:
+          type: string
+          description: Exact stored UTF-8 policy JSON covered by contentHash.
     CreditPolicyView:
       type: object
       required: [asOf, source, codeSeeded, tables]

@@ -62,10 +62,11 @@ class OriginationDecisionService(
 
     fun evaluate(application: LoanApplication): Uni<DecisionOutcome> =
         bureau.assess(application.partyId, application.requestedAmount).flatMap { assessment ->
-            creditPolicy.activeBundle(LocalDate.now(clock)).map { bundle ->
+            val asOf = LocalDate.now(clock)
+            creditPolicy.forApplication(asOf, application.jurisdiction, application.productType).map { bundle ->
                 val withPackChecks = mergePackChecks(application, bundle)
                 val decision = PolicyEvaluator.evaluate(
-                    PolicyApplication(attributes(application, assessment), LocalDate.now(clock)),
+                    PolicyApplication(attributes(application, assessment), asOf),
                     withPackChecks,
                 )
                 val ratios = affordabilityRatios(application)

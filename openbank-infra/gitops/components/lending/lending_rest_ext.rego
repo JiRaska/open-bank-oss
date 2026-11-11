@@ -105,6 +105,14 @@ allowed_reasons contains "credit-risk-desk" if {
 	}
 }
 
+allowed_reasons contains "credit-risk-cz-policy" if {
+	input.principal.type == "HUMAN"
+	input.principal.service_account == false
+	not startswith(input.principal.id, "service-account-")
+	"ROLE_CREDIT_RISK" in input.principal.roles
+	input.action in {"lending.policy.propose", "lending.policy.read", "lending.policy.decide"}
+}
+
 # Compliance may write off (regulatory workout) and, per the class-level @RolesAllowed,
 # reaches the same origination/servicing surface as the desk; reads also ride on the
 # base compliance-read-any. NOT approve, NOT disburse, NOT collateralDecide.
