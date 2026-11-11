@@ -5,11 +5,11 @@
 package com.openbank.kyb.application.port.`in`
 
 import com.openbank.kyb.application.port.out.BusinessAgreementView
-import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.Declarations
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.KnownPerson
 import com.openbank.kyb.domain.model.Questionnaire

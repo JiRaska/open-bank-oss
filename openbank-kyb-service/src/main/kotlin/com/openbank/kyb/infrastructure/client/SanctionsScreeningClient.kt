@@ -107,7 +107,12 @@ class SanctionsRelatedPartyScreeningAdapter(@RestClient private val client: Sanc
         delay = CB_DELAY_MS,
         successThreshold = CB_SUCCESS_THRESHOLD,
     )
-    @Retry(maxRetries = RETRY_MAX_RETRIES, delay = RETRY_DELAY_MS, jitter = RETRY_JITTER_MS, retryOn = [Exception::class])
+    @Retry(
+        maxRetries = RETRY_MAX_RETRIES,
+        delay = RETRY_DELAY_MS,
+        jitter = RETRY_JITTER_MS,
+        retryOn = [Exception::class],
+    )
     @Timeout(TIMEOUT_MS)
     open suspend fun screenWithResilience(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
         val response = client.screen(

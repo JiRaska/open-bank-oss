@@ -111,25 +111,28 @@ class RelatedPartyScreeningService {
         return if (next == case.screening) case else case.screeningRecorded(next, now)
     }
 
-    private suspend fun screenOne(case: BusinessOnboardingCase, subject: ScreeningSubject, now: Instant): ScreeningSubject =
-        try {
-            val result = port.screen(
-                RelatedPartyScreeningRequest(
-                    name = subject.name,
-                    subjectId = subjectId(case, subject),
-                    organisation = subject.organisation,
-                    idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
-                ),
-            )
-            metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
-            subject.answered(result.sanctions, result.pep, result.matchedName, now)
-        } catch (e: RelatedPartyScreeningUnavailableException) {
-            // Deliberately not rethrown: the customer's step (declarations) must not fail on an
-            // outage. The subject stays PENDING, which is what refuses the approval later.
-            log.warnf(e, "related-party screening unavailable for kyb case %s (%s)", case.id, subject.kind)
-            metrics.relatedPartyScreened("unavailable")
-            subject
-        }
+    private suspend fun screenOne(
+        case: BusinessOnboardingCase,
+        subject: ScreeningSubject,
+        now: Instant,
+    ): ScreeningSubject = try {
+        val result = port.screen(
+            RelatedPartyScreeningRequest(
+                name = subject.name,
+                subjectId = subjectId(case, subject),
+                organisation = subject.organisation,
+                idempotencyKey = "kyb-screen:${case.id}:${subject.key}",
+            ),
+        )
+        metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
+        subject.answered(result.sanctions, result.pep, result.matchedName, now)
+    } catch (e: RelatedPartyScreeningUnavailableException) {
+        // Deliberately not rethrown: the customer's step (declarations) must not fail on an
+        // outage. The subject stays PENDING, which is what refuses the approval later.
+        log.warnf(e, "related-party screening unavailable for kyb case %s (%s)", case.id, subject.kind)
+        metrics.relatedPartyScreened("unavailable")
+        subject
+    }
 
     /** The entity's party id where it has one, so an analyst's clearance follows the party; else a case-scoped id. */
     private fun subjectId(case: BusinessOnboardingCase, subject: ScreeningSubject): String =

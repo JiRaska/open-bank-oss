@@ -4,12 +4,12 @@
 
 package com.openbank.kyb.infrastructure.rest
 
-import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.AttestRepresentationCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
@@ -25,8 +25,8 @@ import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
 import com.openbank.kyb.application.port.out.BeneficialOwnershipPort
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
-import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistrySearchQuery
@@ -35,9 +35,9 @@ import com.openbank.kyb.infrastructure.rest.dto.AttestRepresentationRequest
 import com.openbank.kyb.infrastructure.rest.dto.AttestationResponse
 import com.openbank.kyb.infrastructure.rest.dto.BusinessAgreementResponse
 import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
-import com.openbank.kyb.infrastructure.rest.dto.DisposeFindingRequest
 import com.openbank.kyb.infrastructure.rest.dto.ClaimInvitationRequest
 import com.openbank.kyb.infrastructure.rest.dto.DeclarationsRequest
+import com.openbank.kyb.infrastructure.rest.dto.DisposeFindingRequest
 import com.openbank.kyb.infrastructure.rest.dto.ExtractResponse
 import com.openbank.kyb.infrastructure.rest.dto.InviteCosignersRequest
 import com.openbank.kyb.infrastructure.rest.dto.LookupRequest
@@ -554,7 +554,15 @@ class KybResource {
             "an authenticated operator is required"
         }
         val case = onboarding.disposeFinding(
-            DisposeFindingCommand(id, subjectKey, disposition, requireNotNull(request.reason) { "reason is required" }, operator),
+            DisposeFindingCommand(
+                id,
+                subjectKey,
+                disposition,
+                requireNotNull(request.reason) {
+                    "reason is required"
+                },
+                operator,
+            ),
         )
         return Response.ok(CaseResponse.from(case, null)).build()
     }

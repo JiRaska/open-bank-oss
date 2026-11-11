@@ -57,7 +57,10 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
                     Uni.createFrom().failure(ConcurrentCaseUpdateException(case.id))
                 } else {
                     row.fill(case)
-                    withEvent(event).flatMap { flush() }.map { row.version }
+                    withEvent(event)
+                        .flatMap { Panache.getSession() }
+                        .flatMap { session -> session.flush() }
+                        .map { row.version }
                 }
             }
         }.onFailure(::isStaleWrite).transform { ConcurrentCaseUpdateException(case.id) }.awaitSuspending()
@@ -121,7 +124,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         questionnaireJson = case.questionnaire?.let { KybJson.write(it) }
         declarationsJson = case.declarations?.let { KybJson.write(it) }
         agreementJson = case.agreement?.let { KybJson.write(it) }
-        screeningJson = case.screening?.let { KybJson.writeScreening(it) }
+        screeningJson = case.screening?.let { KybScreeningJson.write(it) }
         updatedAt = case.updatedAt
     }
 
@@ -140,7 +143,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         questionnaire = questionnaireJson?.let { KybJson.readQuestionnaire(it) },
         declarations = declarationsJson?.let { KybJson.readDeclarations(it) },
         agreement = agreementJson?.let { KybJson.readAgreement(it) },
-        screening = screeningJson?.let { KybJson.readScreening(it) },
+        screening = screeningJson?.let { KybScreeningJson.read(it) },
         version = version,
         createdAt = createdAt,
         updatedAt = updatedAt,

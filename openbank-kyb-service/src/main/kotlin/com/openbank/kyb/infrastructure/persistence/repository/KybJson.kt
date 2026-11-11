@@ -11,18 +11,12 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.kyb.domain.model.AgreementRecord
-import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.Declarations
-import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
-import com.openbank.kyb.domain.model.ScreeningSubject
-import com.openbank.kyb.domain.model.ScreeningSubjectKind
-import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.Signer
-import com.openbank.kyb.domain.model.UboSource
 import java.time.Instant
 import java.time.LocalDate
 
@@ -161,70 +155,4 @@ internal object KybJson {
     fun readDeclarations(json: String): Declarations = mapper.readValue(json)
 
     fun readAgreement(json: String): AgreementRecord = mapper.readValue(json)
-
-    /**
-     * An explicit document, like the extract: the domain types carry derived properties
-     * (`complete`, `sanctionsHits`) that must never be stored as though they were facts.
-     */
-    data class ScreeningSubjectDoc(
-        val key: String,
-        val kind: String,
-        val name: String,
-        val organisation: Boolean,
-        val sanctions: String,
-        val pep: Boolean,
-        val matchedName: String?,
-        val screenedAt: Instant?,
-        val current: Boolean = true,
-        val disposition: String? = null,
-        val disposedBy: String? = null,
-        val dispositionReason: String? = null,
-        val disposedAt: Instant? = null,
-    )
-
-    data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>, val ownerSource: String? = null)
-
-    fun writeScreening(screening: CaseScreening): String = mapper.writeValueAsString(
-        ScreeningDoc(
-            screening.subjects.map {
-                ScreeningSubjectDoc(
-                    key = it.key,
-                    kind = it.kind.name,
-                    name = it.name,
-                    organisation = it.organisation,
-                    sanctions = it.sanctions.name,
-                    pep = it.pep,
-                    matchedName = it.matchedName,
-                    screenedAt = it.screenedAt,
-                    current = it.current,
-                    disposition = it.disposition?.name,
-                    disposedBy = it.disposedBy,
-                    dispositionReason = it.dispositionReason,
-                    disposedAt = it.disposedAt,
-                )
-            },
-            screening.ownerSource?.name,
-        ),
-    )
-
-    fun readScreening(json: String): CaseScreening {
-        val doc = mapper.readValue<ScreeningDoc>(json)
-        return CaseScreening(doc.subjects.map(::subjectOf), doc.ownerSource?.let(UboSource::valueOf))
-    }
-
-    private fun subjectOf(doc: ScreeningSubjectDoc) = ScreeningSubject(
-        key = doc.key,
-        kind = ScreeningSubjectKind.valueOf(doc.kind),
-        name = doc.name,
-        organisation = doc.organisation,
-        sanctions = ScreeningVerdict.valueOf(doc.sanctions),
-        pep = doc.pep,
-        matchedName = doc.matchedName,
-        screenedAt = doc.screenedAt,
-        current = doc.current,
-        disposition = doc.disposition?.let(FindingDisposition::valueOf),
-        disposedBy = doc.disposedBy,
-        dispositionReason = doc.dispositionReason,
-        disposedAt = doc.disposedAt,
-    )
 }

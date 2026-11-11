@@ -57,7 +57,12 @@ class SanctionsRelatedPartyScreeningAdapterTest {
         assertThat(screen().pep).isFalse()
         answers(SanctionsScreenResponse(status = "WHITELISTED"))
         assertThat(screen().sanctions).isEqualTo(ScreeningVerdict.CLEAR)
-        answers(SanctionsScreenResponse(status = "HIT", matches = listOf(SanctionsScreenMatch("EU", "SANCTIONS", "NOVAKOVA J"))))
+        answers(
+            SanctionsScreenResponse(
+                status = "HIT",
+                matches = listOf(SanctionsScreenMatch("EU", "SANCTIONS", "NOVAKOVA J")),
+            ),
+        )
         assertThat(screen().sanctions).isEqualTo(ScreeningVerdict.HIT)
         assertThat(screen().matchedName).isEqualTo("NOVAKOVA J")
     }

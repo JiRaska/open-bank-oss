@@ -79,8 +79,14 @@ class CaseScreeningTest {
 
     @Test
     fun `the key is stable and carries no name`() {
-        val a = CaseScreening.subjectsOf(extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")), emptyList())
-        val b = CaseScreening.subjectsOf(extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")), emptyList())
+        val a = CaseScreening.subjectsOf(
+            extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+            emptyList(),
+        )
+        val b = CaseScreening.subjectsOf(
+            extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
+            emptyList(),
+        )
         assertThat(a.map { it.key }).isEqualTo(b.map { it.key })
         assertThat(a.map { it.key }).allMatch { it.matches(Regex("[0-9a-f]{24}")) }
     }
@@ -138,7 +144,15 @@ class CaseScreeningTest {
             emptyList(),
         ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) }
         assertThat(CaseScreening(subjects).requiresReview).isFalse()
-        val hit = subjects.map { if (it.kind == ScreeningSubjectKind.REPRESENTATIVE) it.copy(sanctions = ScreeningVerdict.HIT) else it }
+        val hit = subjects.map {
+            if (it.kind ==
+                ScreeningSubjectKind.REPRESENTATIVE
+            ) {
+                it.copy(sanctions = ScreeningVerdict.HIT)
+            } else {
+                it
+            }
+        }
         val pep = subjects.map { if (it.kind == ScreeningSubjectKind.REPRESENTATIVE) it.copy(pep = true) else it }
         assertThat(CaseScreening(hit).requiresReview).isTrue()
         assertThat(CaseScreening(pep).requiresReview).isTrue()

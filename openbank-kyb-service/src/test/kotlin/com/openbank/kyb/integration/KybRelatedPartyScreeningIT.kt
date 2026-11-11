@@ -130,7 +130,9 @@ class KybRelatedPartyScreeningIT {
             val events = c.prepareStatement("select event_type from kyb_outbox where aggregate_id = ? order by id")
                 .use { st ->
                     st.setString(1, caseId)
-                    st.executeQuery().use { rs -> generateSequence { if (rs.next()) rs.getString(1) else null }.toList() }
+                    st.executeQuery().use { rs ->
+                        generateSequence { if (rs.next()) rs.getString(1) else null }.toList()
+                    }
                 }
             StoredCase(case[0], case[1], case[2].orEmpty(), case[3], events)
         }
@@ -161,7 +163,8 @@ class KybRelatedPartyScreeningIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
-    fun `a potential sanctions hit on a representative blocks activation, reviews, and never reaches the customer`() {
+    @Suppress("LongMethod") // one continuous journey over one stored case, as in KybCaseApiIT
+    fun `a potential hit on a representative blocks activation, reviews, and never reaches the customer`() {
         screening.answers["Radim Prověřený"] =
             RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "PROVERENY Radim")
         val (caseId, ceremonyId) = readyToSign("71000011", "Radim Prověřený")
@@ -188,7 +191,9 @@ class KybRelatedPartyScreeningIT {
         assertThat(row.status).isEqualTo("MANUAL_REVIEW")
         assertThat(row.screeningJson).contains("POTENTIAL_HIT", "Radim Prověřený", "PROVERENY Radim")
         assertThat(row.reviewReason).isEqualTo("AML risk review before activation")
-        assertThat(row.events).contains("BUSINESS_ONBOARDING_REVIEW_REQUIRED").doesNotContain("BUSINESS_AGREEMENT_SIGNED")
+        assertThat(
+            row.events,
+        ).contains("BUSINESS_ONBOARDING_REVIEW_REQUIRED").doesNotContain("BUSINESS_AGREEMENT_SIGNED")
         // The published event says what the applicant is told, and nothing a list found.
         assertThat(reviewEventPayload(caseId))
             .contains("\"reviewReason\":\"AML risk review before activation\"")
@@ -229,7 +234,10 @@ class KybRelatedPartyScreeningIT {
             statusCode(200)
             body("status", equalTo("MANUAL_REVIEW"))
             body("screening.openFindings", equalTo(0))
-            body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.disposedBy", equalTo("service-account-openbank-edge"))
+            body(
+                "screening.subjects.find { it.kind == 'REPRESENTATIVE' }.disposedBy",
+                equalTo("service-account-openbank-edge"),
+            )
         }
         assertThat(stored(caseId).screeningJson)
             .contains("CLEARED_FALSE_POSITIVE", "different date of birth", "service-account-openbank-edge")
@@ -247,7 +255,7 @@ class KybRelatedPartyScreeningIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
-    fun `while the screen cannot be obtained approval is refused and nothing is stored as approved, then the retry replays`() {
+    fun `with no screen obtainable approval is refused and nothing is stored as approved, then the retry replays`() {
         screening.unavailable += "Hana Čekající"
         val (caseId, ceremonyId) = readyToSign("71000020", "Hana Čekající")
 
@@ -297,7 +305,8 @@ class KybRelatedPartyScreeningIT {
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
     fun `a PEP match is stored on that person and reviews, and is not stored as a sanctions hit`() {
-        screening.answers["Petr Exponovaný"] = RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "EXPONOVANY Petr")
+        screening.answers["Petr Exponovaný"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "EXPONOVANY Petr")
         val (caseId, ceremonyId) = readyToSign("71000038", "Petr Exponovaný")
 
         Given {

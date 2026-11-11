@@ -179,7 +179,9 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
     ): CaseScreening {
         require(disposition != FindingDisposition.OPEN) { "a disposition must be CLEARED_FALSE_POSITIVE or CONFIRMED" }
         require(operator.isNotBlank()) { "the deciding operator must be identified" }
-        require(reason.trim().length >= MIN_REASON) { "a disposition needs a reason of at least $MIN_REASON characters" }
+        require(reason.trim().length >= MIN_REASON) {
+            "a disposition needs a reason of at least $MIN_REASON characters"
+        }
         val subject = subjects.firstOrNull { it.key == subjectKey }
             ?: throw IllegalArgumentException("no screened subject '$subjectKey' on this case")
         if (!subject.findingOpen) throw CaseTransitionException("subject '$subjectKey' has no open finding")
@@ -230,8 +232,12 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
             return all.filter { it.name.isNotBlank() }.distinctBy { it.key }
         }
 
-        private fun subject(kind: ScreeningSubjectKind, name: String, organisation: Boolean) =
-            ScreeningSubject(key = keyOf(name, organisation), kind = kind, name = name.trim(), organisation = organisation)
+        private fun subject(kind: ScreeningSubjectKind, name: String, organisation: Boolean) = ScreeningSubject(
+            key = keyOf(name, organisation),
+            kind = kind,
+            name = name.trim(),
+            organisation = organisation,
+        )
 
         /**
          * Derived from the name as [IdentityMatch] reads it (titles, diacritics and word order

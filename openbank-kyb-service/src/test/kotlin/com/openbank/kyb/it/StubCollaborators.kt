@@ -80,10 +80,30 @@ class StubAresAdapter : RegistryAdapter {
             // Three single-jednatel companies reserved for KybRelatedPartyScreeningIT, one per
             // test, each with a representative no other test uses: the screening double answers
             // by NAME, so a shared name would make one test's finding another test's surprise.
-            "71000011" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Radim Prověřený"))
-            "71000020" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Hana Čekající"))
-            "71000038" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Petr Exponovaný"))
-            "71000046" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Olga Souběžná"))
+            "71000011" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Radim Prověřený"),
+            )
+            "71000020" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Hana Čekající"),
+            )
+            "71000038" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Petr Exponovaný"),
+            )
+            "71000046" -> extract(
+                identifier,
+                LegalFormClass.LIMITED_COMPANY,
+                RepresentationRule.SOLE,
+                listOf("Olga Souběžná"),
+            )
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null

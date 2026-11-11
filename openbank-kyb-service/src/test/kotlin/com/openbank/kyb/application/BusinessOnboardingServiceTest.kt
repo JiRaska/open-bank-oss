@@ -7,10 +7,12 @@ package com.openbank.kyb.application
 import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
 import com.openbank.kyb.application.port.`in`.MatchInitiatorCommand
 import com.openbank.kyb.application.port.`in`.PrepareAgreementCommand
+import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.application.port.`in`.ResolveReviewCommand
 import com.openbank.kyb.application.port.`in`.SignCommand
 import com.openbank.kyb.application.port.`in`.StartCaseCommand
@@ -30,40 +32,34 @@ import com.openbank.kyb.application.port.out.DocumentGateway
 import com.openbank.kyb.application.port.out.EntityPartyRequest
 import com.openbank.kyb.application.port.out.InvitationTokens
 import com.openbank.kyb.application.port.out.KybMetricsPort
-import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
-import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
-import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
-import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
-import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
-import com.openbank.kyb.domain.model.ScreeningFindingException
-import com.openbank.kyb.domain.model.ScreeningPendingException
-import com.openbank.kyb.domain.model.FindingDisposition
-import com.openbank.kyb.domain.model.CaseTransitionException
-import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
-import com.openbank.kyb.application.port.`in`.RejectCaseCommand
-import com.openbank.kyb.domain.model.ScreeningSubjectKind
-import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.application.port.out.MandateRequest
 import com.openbank.kyb.application.port.out.PartyGateway
 import com.openbank.kyb.application.port.out.PepProfile
 import com.openbank.kyb.application.port.out.RegistryExtractCache
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.application.usecase.BusinessOnboardingService
 import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.RegistryLookupService
+import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
 import com.openbank.kyb.application.usecase.RepresentationAttestationService
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.BeneficialOwner
-import com.openbank.kyb.domain.model.BusinessOnboardingReviewRequired
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
+import com.openbank.kyb.domain.model.BusinessOnboardingReviewRequired
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.CrsStatus
 import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExpectedTurnover
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.FatcaStatus
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
@@ -82,6 +78,10 @@ import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
+import com.openbank.kyb.domain.model.ScreeningFindingException
+import com.openbank.kyb.domain.model.ScreeningPendingException
+import com.openbank.kyb.domain.model.ScreeningSubjectKind
+import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.SignerStatus
 import com.openbank.kyb.domain.model.SourceOfFunds
 import com.openbank.kyb.domain.model.UboFinding
@@ -106,6 +106,9 @@ import java.time.ZoneOffset
 import java.util.Optional
 import java.util.UUID
 
+// The screening tests share this class's in-memory repository, document double and journey helpers;
+// splitting them out would mean duplicating or abstracting ~250 lines of fixture for no gain in clarity.
+@Suppress("LargeClass")
 class BusinessOnboardingServiceTest {
 
     private val now = Instant.parse("2026-09-05T10:00:00Z")
@@ -879,27 +882,26 @@ class BusinessOnboardingServiceTest {
     }
 
     @Test
-    fun `the entity is screened as an organisation, people as individuals, a corporate owner as an organisation`(): Unit =
-        runBlocking {
-            screeningOn()
-            uboOwners += owner("Karel Vlastník", corporate = false)
-            uboOwners += owner("Holding Alfa a.s.", corporate = true)
-            val id = soleCaseReadyToSign()
-            readyToSign(id, initiator)
+    fun `the entity and a corporate owner are screened as organisations, people as individuals`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        uboOwners += owner("Holding Alfa a.s.", corporate = true)
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
 
-            val byName = screeningPort.requests.associateBy { it.name }
-            assertThat(byName.keys)
-                .containsExactlyInAnyOrder("Příklad s.r.o.", "Jana Nováková", "Karel Vlastník", "Holding Alfa a.s.")
-            assertThat(byName.getValue("Příklad s.r.o.").organisation).isTrue()
-            assertThat(byName.getValue("Příklad s.r.o.").subjectId).isEqualTo(entityParty.toString())
-            assertThat(byName.getValue("Jana Nováková").organisation).isFalse()
-            assertThat(byName.getValue("Karel Vlastník").organisation).isFalse()
-            assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
-            // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
-            assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
-            assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
-            assertThat(service.get(id).screening!!.complete).isTrue()
-        }
+        val byName = screeningPort.requests.associateBy { it.name }
+        assertThat(byName.keys)
+            .containsExactlyInAnyOrder("Příklad s.r.o.", "Jana Nováková", "Karel Vlastník", "Holding Alfa a.s.")
+        assertThat(byName.getValue("Příklad s.r.o.").organisation).isTrue()
+        assertThat(byName.getValue("Příklad s.r.o.").subjectId).isEqualTo(entityParty.toString())
+        assertThat(byName.getValue("Jana Nováková").organisation).isFalse()
+        assertThat(byName.getValue("Karel Vlastník").organisation).isFalse()
+        assertThat(byName.getValue("Holding Alfa a.s.").organisation).isTrue()
+        // One idempotency key per (case, subject): four subjects, four keys, all scoped to the case.
+        assertThat(screeningPort.requests.map { it.idempotencyKey }.toSet()).hasSize(4)
+        assertThat(screeningPort.requests).allMatch { it.idempotencyKey.startsWith("kyb-screen:$id:") }
+        assertThat(service.get(id).screening!!.complete).isTrue()
+    }
 
     @Test
     fun `everyone clear lets the completing signature through`(): Unit = runBlocking {
@@ -948,7 +950,9 @@ class BusinessOnboardingServiceTest {
                     "operator-anna",
                 ),
             )
-            assertThat(cleared.status).describedAs("a disposition never moves the case").isEqualTo(CaseStatus.MANUAL_REVIEW)
+            assertThat(
+                cleared.status,
+            ).describedAs("a disposition never moves the case").isEqualTo(CaseStatus.MANUAL_REVIEW)
             val decided = cleared.screening!!.subjects.single { it.key == hit.key }
             assertThat(decided.disposedBy).isEqualTo("operator-anna")
             assertThat(decided.dispositionReason).isEqualTo("different date of birth")
@@ -962,7 +966,8 @@ class BusinessOnboardingServiceTest {
     @Test
     fun `a PEP match is recorded on that person and reviews, but is not a sanctions hit`(): Unit = runBlocking {
         screeningOn()
-        screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "NOVAKOVA Jana")
+        screeningPort.answers["Jana Nováková"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, "NOVAKOVA Jana")
         val id = soleCaseReadyToSign()
         val signed = signs(id, initiator, readyToSign(id, initiator))
 
@@ -973,7 +978,7 @@ class BusinessOnboardingServiceTest {
     }
 
     @Test
-    fun `while sanctions-service is down the completing signature is refused, not recorded, and the retry replays`(): Unit =
+    fun `while sanctions-service is down the last signature is refused, not recorded, and the retry replays`(): Unit =
         runBlocking {
             screeningOn()
             val mandates = mutableListOf<MandateRequest>()
@@ -1132,7 +1137,13 @@ class BusinessOnboardingServiceTest {
         assertThatThrownBy {
             runBlocking {
                 service.disposeFinding(
-                    DisposeFindingCommand(id, key, FindingDisposition.CLEARED_FALSE_POSITIVE, "different date of birth", "operator-anna"),
+                    DisposeFindingCommand(
+                        id,
+                        key,
+                        FindingDisposition.CLEARED_FALSE_POSITIVE,
+                        "different date of birth",
+                        "operator-anna",
+                    ),
                 )
             }
         }.isInstanceOf(RuntimeException::class.java)
@@ -1166,20 +1177,29 @@ class BusinessOnboardingServiceTest {
         assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
         assertThat(mandates).isEmpty()
         // The operator review path is the one way through.
-        assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")).status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(
+            service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")).status,
+        ).isEqualTo(CaseStatus.SIGNED)
     }
 
     @Test
     fun `a confirmed sanctions finding leaves only rejection`(): Unit = runBlocking {
         screeningOn()
         val mandates = mutableListOf<MandateRequest>()
-        screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
+        screeningPort.answers["Jana Nováková"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
         val id = soleCaseReadyToSign()
         coEvery { parties.grantMandate(capture(mandates)) } returns Unit
         val signed = signs(id, initiator, readyToSign(id, initiator))
         val key = signed.screening!!.openFindings.single().key
         service.disposeFinding(
-            DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "identifiers match the list entry", "operator-anna"),
+            DisposeFindingCommand(
+                id,
+                key,
+                FindingDisposition.CONFIRMED,
+                "identifiers match the list entry",
+                "operator-anna",
+            ),
         )
 
         assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")) } }
@@ -1189,7 +1209,13 @@ class BusinessOnboardingServiceTest {
         assertThatThrownBy {
             runBlocking {
                 service.disposeFinding(
-                    DisposeFindingCommand(id, key, FindingDisposition.CLEARED_FALSE_POSITIVE, "changed my mind about it", "operator-bob"),
+                    DisposeFindingCommand(
+                        id,
+                        key,
+                        FindingDisposition.CLEARED_FALSE_POSITIVE,
+                        "changed my mind about it",
+                        "operator-bob",
+                    ),
                 )
             }
         }.isInstanceOf(CaseTransitionException::class.java)
@@ -1209,18 +1235,32 @@ class BusinessOnboardingServiceTest {
             val key = signed.screening!!.openFindings.single().key
 
             assertThatThrownBy {
-                runBlocking { service.disposeFinding(DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "ok", "operator-anna")) }
+                runBlocking {
+                    service.disposeFinding(
+                        DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "ok", "operator-anna"),
+                    )
+                }
             }.isInstanceOf(IllegalArgumentException::class.java)
             assertThatThrownBy {
                 runBlocking {
-                    service.disposeFinding(DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", " "))
+                    service.disposeFinding(
+                        DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", " "),
+                    )
                 }
             }.isInstanceOf(IllegalArgumentException::class.java)
 
             service.disposeFinding(
-                DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", "operator-anna"),
+                DisposeFindingCommand(
+                    id,
+                    key,
+                    FindingDisposition.CONFIRMED,
+                    "is a member of parliament",
+                    "operator-anna",
+                ),
             )
-            assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status).isEqualTo(CaseStatus.SIGNED)
+            assertThat(
+                service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status,
+            ).isEqualTo(CaseStatus.SIGNED)
         }
 
     /** Chair + ordinary member signed; the rule wants chair + vice. Fully signed, in review for the office. */

@@ -354,7 +354,13 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         val case = get(cmd.caseId)
         val now = Instant.now(clock)
         val disposed = case.findingDisposed(cmd.subjectKey, cmd.disposition, cmd.operator, cmd.reason, now)
-        log.infof("kyb case %s: screening finding %s set to %s by %s", cmd.caseId, cmd.subjectKey, cmd.disposition, cmd.operator)
+        log.infof(
+            "kyb case %s: screening finding %s set to %s by %s",
+            cmd.caseId,
+            cmd.subjectKey,
+            cmd.disposition,
+            cmd.operator,
+        )
         return cases.update(disposed, null)
     }
 
