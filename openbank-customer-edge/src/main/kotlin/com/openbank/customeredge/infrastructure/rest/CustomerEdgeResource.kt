@@ -2735,14 +2735,19 @@ class CustomerEdgeResource(
         amount: String? = null,
         currency: String? = null,
     ): DelegatedPaymentDecision? {
-        val base = "$accountServiceUrl/api/v1/accounts/$accountId/delegation/payment-authorization?partyId=$partyId"
-        val url = if (amount == null) {
-            base
-        } else {
-            "$base&amount=${URLEncoder.encode(amount, StandardCharsets.UTF_8)}" +
-                "&currency=${URLEncoder.encode(requireNotNull(currency), StandardCharsets.UTF_8)}"
+        val query = buildMap {
+            put("partyId", partyId.toString())
+            if (amount != null) {
+                put("amount", amount)
+                put("currency", requireNotNull(currency))
+            }
         }
-        val resp = upstream.get(url, partyId.toString())
+        val resp = upstream.getToService(
+            accountServiceUrl,
+            "/api/v1/accounts/$accountId/delegation/payment-authorization",
+            query,
+            partyId.toString(),
+        )
         if (resp.status != 200) return null
         val node = runCatching { objectMapper.readTree(resp.entity?.toString() ?: return null) }.getOrNull()
             ?: return null

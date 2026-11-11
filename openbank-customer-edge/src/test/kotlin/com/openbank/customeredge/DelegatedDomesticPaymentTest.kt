@@ -115,7 +115,8 @@ class DelegatedDomesticPaymentTest {
                 Response.status(404).entity("""{"error":"Account not found"}""").build()
             }
         }
-        every { upstream.get(match { it.contains("payment-authorization") }, any()) } returns decision
+        every { upstream.getToService(any(), match { it.endsWith("/payment-authorization") }, any(), any()) } returns
+            decision
         every { upstream.get(match { it.contains("/parties/") }, any()) } answers {
             val name = if (secondArg<String>() == grantor.toString()) "Grantor Name" else "Delegate Name"
             Response.ok("""{"legalName":"$name"}""").build()
