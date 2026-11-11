@@ -11,7 +11,7 @@ CREATE TABLE loan_exposure_facts (
     source_reference VARCHAR(160) NOT NULL UNIQUE,
     loan_id UUID NOT NULL,
     effective_at TIMESTAMPTZ NOT NULL,
-    payload JSONB NOT NULL
+    payload JSONB NOT NULL CHECK (jsonb_typeof(payload) = 'object')
 );
 
 CREATE INDEX idx_loan_exposure_facts_effective ON loan_exposure_facts (loan_id, effective_at);

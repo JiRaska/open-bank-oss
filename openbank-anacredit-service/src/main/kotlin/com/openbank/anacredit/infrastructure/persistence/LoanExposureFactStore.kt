@@ -22,10 +22,11 @@ data class LoanExposureFact(
 class LoanExposureFactStore(private val sessionFactory: Mutiny.SessionFactory) {
 
     suspend fun append(fact: LoanExposureFact): Unit = sessionFactory.withTransaction { session ->
+        // Bind text so the reactive driver leaves the original JSON numeric tokens intact.
         session.createNativeQuery<Any>(
             """
             INSERT INTO loan_exposure_facts (event_id, source_reference, loan_id, effective_at, payload)
-            VALUES (:eventId, :sourceReference, :loanId, :effectiveAt, CAST(:payload AS jsonb))
+            VALUES (:eventId, :sourceReference, :loanId, :effectiveAt, CAST(CAST(:payload AS text) AS jsonb))
             ON CONFLICT DO NOTHING
             """.trimIndent(),
         )
@@ -42,7 +43,7 @@ class LoanExposureFactStore(private val sessionFactory: Mutiny.SessionFactory) {
 
     private fun verifyReplay(session: Mutiny.Session, fact: LoanExposureFact): Uni<Unit> = session.createNativeQuery(
         """
-        SELECT payload = CAST(:payload AS jsonb)
+        SELECT payload = CAST(CAST(:payload AS text) AS jsonb)
         FROM loan_exposure_facts
         WHERE event_id = :eventId AND source_reference = :sourceReference
           AND loan_id = :loanId AND effective_at = :effectiveAt
