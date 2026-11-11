@@ -150,7 +150,9 @@ class StatutoryRepresentationApiIT {
             requiredOffices = listOf("chair", "member"),
             representatives = (0..1).map { office ->
                 val actor = UUID.randomUUID()
-                val digest = InputDigest.sha256(mapOf("evidenceRef" to fixtureEvidenceRef(caseId, actor)))
+                val digest = InputDigest.sha256(
+                    mapOf("evidenceRef" to fixtureEvidenceRef(caseId), "representativePartyId" to actor.toString()),
+                )
                 StatutoryRepresentative(actor, setOf(office), digest.hex)
             },
         )
@@ -168,13 +170,13 @@ class StatutoryRepresentationApiIT {
                     authority = MandateAuthority.JOINT,
                     requiredSignatures = 2,
                     source = MandateSource.REGISTRY,
-                    evidenceRef = fixtureEvidenceRef(evidence.caseId, representative.partyId),
+                    evidenceRef = fixtureEvidenceRef(evidence.caseId),
                 ),
             )
         }
     }
 
-    private fun fixtureEvidenceRef(caseId: UUID, partyId: UUID) = "kyb-case:$caseId:signature:synthetic-$partyId"
+    private fun fixtureEvidenceRef(caseId: UUID) = "kyb-case:$caseId:signature:db1bd1c2-8f5a-438e-b8b4-380bc78a3c42"
 
     private fun partyFixture(id: UUID, type: PartyType) = Party(
         id = id,

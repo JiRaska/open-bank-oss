@@ -133,6 +133,7 @@ Then `PARTY_ERASED` is emitted so downstream consumers can erase their projectio
 
 Party stores an immutable revision tied to an attestation ID and rule-text
 hash. It records the exact threshold, office requirements, eligible human party
-IDs and the matching statutory mandates. The latest published revision is
+IDs and the matching statutory mandates. The mandate digest binds the case's shared
+agreement ceremony reference to each separate verified human. The latest published revision is
 available to delegation-service when those mandates are still active. The
 consumer must also check the source attestation with KYB before using it.

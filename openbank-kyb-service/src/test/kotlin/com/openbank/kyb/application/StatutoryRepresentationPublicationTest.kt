@@ -9,8 +9,10 @@ import com.openbank.kyb.application.port.out.RepresentationAttestationRepository
 import com.openbank.kyb.application.port.out.StatutoryRepresentationEvidence
 import com.openbank.kyb.application.port.out.StatutoryRepresentationPublisher
 import com.openbank.kyb.application.usecase.StatutoryRepresentationPublicationService
+import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
+import com.openbank.kyb.domain.model.DisclosureAcceptance
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -45,7 +47,8 @@ class StatutoryRepresentationPublicationTest {
     private val identifier = LegalEntityIdentifier.of(IdentifierScheme.CZ_ICO, "00000001")
     private val entity = UUID.randomUUID()
     private val caseId = UUID.randomUUID()
-    private val humans = listOf(UUID.randomUUID(), UUID.randomUUID())
+    private val humans = List(3) { UUID.randomUUID() }
+    private val ceremonyId = UUID.randomUUID()
     private val text = "Společně jedná předseda a místopředseda."
     private val offices = listOf("predseda", "mistopredseda")
     private val attestation = RepresentationAttestation(
@@ -80,8 +83,13 @@ class StatutoryRepresentationPublicationTest {
             .containsExactlyInAnyOrderEntriesOf(mapOf(humans[0] to setOf(0), humans[1] to setOf(1)))
         assertThat(evidence.captured.representatives.associate { it.partyId to it.mandateEvidenceHash })
             .containsExactlyInAnyOrderEntriesOf(
-                humans.associateWith { human ->
-                    InputDigest.sha256(mapOf("evidenceRef" to "kyb-case:$caseId:signature:synthetic-$human")).hex
+                humans.take(2).associateWith { human ->
+                    InputDigest.sha256(
+                        mapOf(
+                            "evidenceRef" to "kyb-case:$caseId:signature:$ceremonyId",
+                            "representativePartyId" to human.toString(),
+                        ),
+                    ).hex
                 },
             )
         assertThat(service.isCurrent(caseId, entity, attestation.id)).isTrue()
@@ -103,16 +111,33 @@ class StatutoryRepresentationPublicationTest {
         val complete = activeCase()
         coEvery { cases.findById(caseId) } returnsMany listOf(
             complete.copy(signers = complete.signers.take(1)),
-            complete.copy(signers = complete.signers.map { it.copy(signatureRef = "shared-synthetic-reference") }),
+            complete.copy(signers = complete.signers.map { it.copy(signatureRef = UUID.randomUUID().toString()) }),
+            complete.copy(agreement = null),
             complete.copy(representationAttestationId = null),
         )
         coEvery { attestations.findLatestFor(identifier) } returns attestation
 
-        repeat(3) { assertThat(service.publish(caseId, attestation.id)).isNull() }
+        repeat(4) { assertThat(service.publish(caseId, attestation.id)).isNull() }
         coVerify(exactly = 0) { party.publishStatutoryRule(any(), any()) }
     }
 
-    private fun activeCase(): BusinessOnboardingCase {
+    @Test
+    fun `joint all requires every register representative and rejects a signed subset`(): Unit = runBlocking {
+        val partialAll = attestation.copy(confirmedMode = RepresentationMode.JOINT_ALL)
+        val fullAll = partialAll.copy(id = UUID.randomUUID(), confirmedSigners = 3)
+        coEvery { cases.findById(caseId) } returnsMany listOf(activeCase(partialAll), activeCase(fullAll, humans))
+        coEvery { attestations.findLatestFor(identifier) } returnsMany listOf(partialAll, fullAll)
+        coEvery { party.publishStatutoryRule(entity, any()) } returns Unit
+
+        assertThat(service.publish(caseId, partialAll.id)).isNull()
+        assertThat(service.publish(caseId, fullAll.id)).isEqualTo(fullAll.id)
+        coVerify(exactly = 1) { party.publishStatutoryRule(entity, match { it.representatives.size == 3 }) }
+    }
+
+    private fun activeCase(
+        confirmed: RepresentationAttestation = attestation,
+        signedHumans: List<UUID> = humans.take(2),
+    ): BusinessOnboardingCase {
         val extract = RegistryExtract(
             identifier = identifier,
             legalName = "Statutory Test Fixture",
@@ -125,6 +150,7 @@ class StatutoryRepresentationPublicationTest {
             representatives = listOf(
                 Representative("Fixture Chair", null, "board", "předseda představenstva", null),
                 Representative("Fixture Vice", null, "board", "místopředseda představenstva", null),
+                Representative("Fixture Member", null, "board", "člen představenstva", null),
             ),
             representationRule = RepresentationRule(RepresentationMode.JOINT_N, 2, text),
             source = "synthetic-fixture",
@@ -132,28 +158,40 @@ class StatutoryRepresentationPublicationTest {
             verification = ExtractVerification.VERIFIED,
             fetchedAt = instant,
         )
-        return BusinessOnboardingCase.start(caseId, identifier, humans.first(), instant)
-            .registryVerified(extract, RepresentationDecision.Attested(attestation), instant)
+        val ready = BusinessOnboardingCase.start(caseId, identifier, humans.first(), instant)
+            .registryVerified(extract, RepresentationDecision.Attested(confirmed), instant)
             .copy(
-                status = CaseStatus.ACTIVE,
+                status = CaseStatus.READY_TO_SIGN,
                 entityPartyId = entity,
                 entityPartyActive = true,
-                signers = humans.mapIndexed { index, human ->
+                agreement = AgreementRecord(
+                    documentId = UUID.randomUUID(),
+                    ceremonyId = ceremonyId,
+                    templateCode = "fixture-business",
+                    templateVersion = "1",
+                    sha256 = "a".repeat(64),
+                    lang = "cs",
+                    acceptances = signedHumans.map { DisclosureAcceptance(it, instant) },
+                ),
+                signers = signedHumans.mapIndexed { index, human ->
                     Signer(
                         id = UUID.randomUUID(),
                         representativeIndex = index,
                         fullName = "Fixture Representative",
                         dateOfBirth = null,
                         partyId = human,
-                        status = SignerStatus.SIGNED,
+                        status = SignerStatus.IDENTIFIED,
                         invitationToken = null,
                         invitedAt = null,
                         identifiedAt = instant,
-                        signedAt = instant,
-                        signatureRef = "synthetic-$human",
+                        signedAt = null,
+                        signatureRef = null,
                         isInitiator = index == 0,
                     )
                 },
             )
+        return signedHumans.fold(ready) { case, human ->
+            case.signed(human, ceremonyId.toString(), instant.plusSeconds(1))
+        }
     }
 }

@@ -17,7 +17,7 @@ mandates. Delegation-service must establish both sources before using a rule.
 
 | Threat | Control |
 | --- | --- |
-| An incomplete case is published with a guessed quorum or role assignment | KYB requires the exact pinned human attestation, explicit joint mode, matching rule text and a full signed, identity-linked roster. Party checks that distinct humans can fill the attested office slots. |
+| An incomplete case is published with a guessed quorum or role assignment | KYB requires the exact pinned human attestation, explicit joint mode, matching rule text and identity-linked signers of its verified agreement ceremony. Fixed quorum needs the attested count and offices. Joint-all needs the full register roster. Party checks the signer-bound mandate digest and distinct office assignment. |
 | A mandate from another case or actor is substituted | Party compares each active mandate's evidence digest to the value supplied for that actor. The snapshot retains the exact mandate IDs. |
 | A withdrawn mandate or superseded attestation is used | Party rechecks current mandates on every read. KYB returns unavailable when the pinned attestation is superseded, including before a replacement is published. The caller must obtain both current proofs. |
 | A shared role or selected profile is treated as evidence | OPA checks the named client and the service verifies the authenticated identity in code. Employee approval groups remain separate. |

@@ -51,10 +51,8 @@ class StatutoryRepresentationPublicationService(
         if (mode !in setOf(RepresentationMode.JOINT_N, RepresentationMode.JOINT_ALL)) return null
 
         val signed = case.signedStatutoryRoster(extract.representatives.indices) ?: return null
-        if (attestation.confirmedSigners !in 2..signed.size) return null
-        if (mode == RepresentationMode.JOINT_ALL && attestation.confirmedSigners != signed.size) {
-            return null
-        }
+        if (attestation.confirmedSigners !in 2..signed.size || case.officeShortfall(signed).isNotEmpty()) return null
+        if (mode == RepresentationMode.JOINT_ALL && !signed.coversAll(extract, attestation)) return null
 
         val slotsByParty = case.statutoryOfficeSlots(signed)
         return StatutoryRepresentationEvidence(
@@ -67,7 +65,12 @@ class StatutoryRepresentationPublicationService(
             requiredOffices = attestation.confirmedRoles,
             representatives = signed.map { signer ->
                 val partyId = requireNotNull(signer.partyId)
-                val digest = InputDigest.sha256(mapOf("evidenceRef" to case.mandateEvidenceRef(signer)))
+                val digest = InputDigest.sha256(
+                    mapOf(
+                        "evidenceRef" to case.mandateEvidenceRef(signer),
+                        "representativePartyId" to partyId.toString(),
+                    ),
+                )
                 StatutoryRepresentative(
                     partyId = partyId,
                     officeSlots = slotsByParty.getValue(partyId),
@@ -84,19 +87,23 @@ class StatutoryRepresentationPublicationService(
         }
     }
 
-    /** An unlinked or unsigned register representative leaves the roster incomplete. */
     private fun BusinessOnboardingCase.signedStatutoryRoster(registerIndices: IntRange): List<Signer>? {
-        val roster = signers.filter {
-            it.isSignedWithEvidence() && it.partyId != null && it.representativeIndex != null
+        val recordedAgreement = agreement ?: return null
+        val sharedCeremony = recordedAgreement.ceremonyId.toString()
+        val roster = signers.filter { it.status == SignerStatus.SIGNED }
+        val valid = roster.all { signer ->
+            val human = signer.partyId
+            val inRegister = signer.representativeIndex?.let { it in registerIndices } == true
+            val signedCeremony = signer.signedAt != null && signer.signatureRef == sharedCeremony
+            human != null && recordedAgreement.acceptedByParty(human) && inRegister && signedCeremony
         }
-        if (roster.size != registerIndices.count()) return null
-        if (roster.map { it.representativeIndex }.toSet() != registerIndices.toSet()) return null
+        if (!valid || roster.map { it.representativeIndex }.toSet().size != roster.size) return null
         if (roster.map { it.partyId }.toSet().size != roster.size) return null
-        if (roster.map { it.signatureRef }.toSet().size != roster.size) return null
         return roster
     }
 
-    private fun Signer.isSignedWithEvidence() = status == SignerStatus.SIGNED && signatureRef?.isNotBlank() == true
+    private fun List<Signer>.coversAll(extract: RegistryExtract, attestation: RepresentationAttestation) =
+        size == extract.representatives.size && size == attestation.confirmedSigners
 
     private fun RepresentationAttestation.matches(case: BusinessOnboardingCase, actualHash: String): Boolean =
         isActive &&

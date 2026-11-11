@@ -85,9 +85,10 @@ class StatutoryRepresentationService(
             if (actor?.partyType != PartyType.INDIVIDUAL || actor.status != PartyStatus.ACTIVE) return null
             val mandate = eligible[representative.partyId] ?: return null
             val evidenceRef = mandate.evidenceRef ?: return null
-            if (InputDigest.sha256(mapOf("evidenceRef" to evidenceRef)).hex != representative.mandateEvidenceHash) {
-                return null
-            }
+            val digest = InputDigest.sha256(
+                mapOf("evidenceRef" to evidenceRef, "representativePartyId" to representative.partyId.toString()),
+            )
+            if (digest.hex != representative.mandateEvidenceHash) return null
             verified[representative.partyId] = mandate
         }
         return verified

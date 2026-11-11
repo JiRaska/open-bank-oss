@@ -656,7 +656,10 @@ paths:
     post:
       tags: [KYB]
       summary: Publish an active case's verified statutory representation rule to party-service
-      description: Staff publication requires a current human attestation and a complete signed and identity-linked roster.
+      description: >-
+        Staff publication requires a current human attestation and identity-linked signers from
+        the case's verified document ceremony. A fixed quorum requires enough verified signers
+        for the attested count and offices. Joint-all requires all register representatives.
       parameters:
         - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:

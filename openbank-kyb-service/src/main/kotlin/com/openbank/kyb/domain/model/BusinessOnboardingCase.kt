@@ -689,7 +689,7 @@ data class BusinessOnboardingCase(
      * missing: a case that stops moving without naming the reason is the failure mode this whole
      * check exists to avoid, one step later.
      */
-    private fun officeShortfall(chosen: List<Signer>): List<String> {
+    internal fun officeShortfall(chosen: List<Signer>): List<String> {
         val offices = requiredSignerRoles.filter { it.isNotBlank() }
         if (offices.isEmpty()) return emptyList()
         val ex = extract ?: return offices

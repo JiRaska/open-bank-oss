@@ -170,7 +170,12 @@ class KybPartyMandatePactConsumerTest {
             requiredSignatures = 2,
             requiredOffices = listOf("chair", "member"),
             representatives = listOf(STATUTORY_CHAIR_ID, STATUTORY_MEMBER_ID).mapIndexed { index, actor ->
-                val digest = InputDigest.sha256(mapOf("evidenceRef" to "kyb-case:$STATUTORY_CASE_ID:signature:$actor"))
+                val digest = InputDigest.sha256(
+                    mapOf(
+                        "evidenceRef" to "kyb-case:$STATUTORY_CASE_ID:signature:db1bd1c2-8f5a-438e-b8b4-380bc78a3c42",
+                        "representativePartyId" to actor,
+                    ),
+                )
                 StatutoryRepresentative(UUID.fromString(actor), setOf(index), digest.hex)
             },
         )
