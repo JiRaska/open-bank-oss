@@ -111,6 +111,26 @@ Waiting for the per-list lock or generation row is limited to 30 seconds. A time
 leaves journal evidence intact. The scheduler continues to the other lists and retries pending
 publication on its next tick; the import itself runs at its next due time or on a new request.
 
+### Jurisdiction reference data ageing
+
+`sanctions_jurisdictions` is copied from published lists by migration, so it ages without any
+error. Three gauges per `source_list` make that visible
+(`prometheus-rules-sanctions-jurisdictions.yaml`):
+
+| Series | Meaning |
+|---|---|
+| `openbank_sanctions_jurisdiction_rows` | active rows; `0` = an expected list that is not loaded (`JurisdictionReferenceDataNotLoaded`, info) |
+| `openbank_sanctions_jurisdiction_publication_age_seconds` | age of the newest loaded publication |
+| `openbank_sanctions_jurisdiction_verification_age_seconds` | time since the list was compared with its source; over 150 days fires `JurisdictionReferenceDataNotReverified` |
+
+The ages come from dates stored in the table, not from the pod's start, so they are correct on a
+freshly started pod and an alert does not clear on a restart. To clear it:
+
+1. Fetch the current publication from the publisher (never from memory or a secondary summary).
+2. If it changed, add a migration inserting the new rows with `version + 1` and the new
+   `published_on`, and setting `active = false` on the rows it supersedes.
+3. If it did not change, add a migration that only moves `verified_on` for that `source_list`.
+
 ### Large backlog of POTENTIAL_HIT reviews
 
 1. Check the pending queue: `GET /api/v1/sanctions/pending`

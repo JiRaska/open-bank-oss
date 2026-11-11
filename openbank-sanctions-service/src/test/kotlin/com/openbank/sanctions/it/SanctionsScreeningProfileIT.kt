@@ -57,9 +57,13 @@ class SanctionsScreeningProfileIT {
         )
         sql(
             """
-            INSERT INTO sanctions_jurisdictions (list_type, country_code, measure, version, source_ref) VALUES
-              ('EU_CONSOLIDATED', '$EMBARGOED', 'EMBARGO',   1, 'synthetic test fixture'),
-              ('FATF_HIGH_RISK',  '$HIGH_RISK', 'HIGH_RISK', 1, 'synthetic test fixture')
+            INSERT INTO sanctions_jurisdictions
+              (list_type, source_list, country_code, measure, version, source_ref, published_on, verified_on)
+            VALUES
+              ('EU_CONSOLIDATED', 'SYNTHETIC_TEST', '$EMBARGOED', 'EMBARGO',   1, 'synthetic test fixture',
+               DATE '2026-01-01', DATE '2026-01-01'),
+              ('FATF_HIGH_RISK',  'SYNTHETIC_TEST', '$HIGH_RISK', 'HIGH_RISK', 1, 'synthetic test fixture',
+               DATE '2026-01-01', DATE '2026-01-01')
             """.trimIndent(),
         )
     }

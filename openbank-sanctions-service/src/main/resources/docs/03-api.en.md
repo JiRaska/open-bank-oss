@@ -144,9 +144,17 @@ On a profiled check every match carries `matchKind` (`SANCTIONS`, `TERRORIST`, `
 **Jurisdictions.** A `country` (or the country inside `bankIdentifier`) present in the
 jurisdiction reference data matches whatever the name is: an `EMBARGO` entry yields `HIT`, a
 `HIGH_RISK` entry `POTENTIAL_HIT` scored 0.65, which callers applying the shared screening policy
-route to manual review. This data has **no automated feed** — see `04-data` — and ships empty:
-until compliance adds rows, a country never matches. The BIC is not matched against listed
-entities, because the imported sources carry no bank identifiers.
+route to manual review. The match's `programs` carry the measure with the data version and the
+publication the row comes from (for example `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`).
+This data has **no automated feed** — see `04-data` for what is loaded — and a country that is
+not in it never matches. The BIC is not matched against listed entities, because the imported
+sources carry no bank identifiers.
+
+**Fuzzy names.** A name scoring at least 0.85 against a list entry is a `HIT` under every
+profile. Only the `CUSTOMER` profile also returns names scoring 0.65–0.85, as `POTENTIAL_HIT`
+(or `pepStatus: POTENTIAL_HIT` for a PEP entry): onboarding has a reviewer to send a near-miss
+spelling to. `PAYMENT` and profile-less screens do not search below 0.85, so such a name screens
+`CLEAR` there — a payment has no held state to wait for a review in yet (#15724).
 
 `/api/v1` is frozen: it rejects all three inputs with 400, and a check created with them is not
 readable through `/api/v1`.

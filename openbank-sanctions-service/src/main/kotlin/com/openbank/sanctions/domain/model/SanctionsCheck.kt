@@ -79,12 +79,16 @@ enum class JurisdictionMeasure { EMBARGO, HIGH_RISK }
 /**
  * One active row of jurisdiction reference data. There is no machine-readable feed for these
  * lists, so the rows are versioned reference data delivered by reviewed migrations.
+ *
+ * [listType] is the screening-list slot the row is consulted under; [sourceList] is the
+ * publication it was taken from, which is the provenance a reviewer needs to see.
  */
 data class SanctionsJurisdiction(
     val listType: SanctionsListType,
     val countryCode: String,
     val measure: JurisdictionMeasure,
     val version: Int,
+    val sourceList: String,
 )
 
 /**

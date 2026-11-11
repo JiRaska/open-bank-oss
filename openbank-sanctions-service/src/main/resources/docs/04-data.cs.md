@@ -72,14 +72,30 @@ Flyway, neměnné historické skripty, pouze dopředu:
 ## Referenční data jurisdikcí
 
 `sanctions_jurisdictions` (V21) obsahuje země pod embargem a vysoce rizikové země: `list_type`,
-`country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`, `active`.
+`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`,
+`published_on`, `verified_on`, `active`. `list_type` je listina, pod kterou se řádek při prověření
+použije; `source_list` je vydání, ze kterého byl převzat.
 
 Žádný importovaný zdroj je nezveřejňuje jako strojově čitelný feed — import `FATF_HIGH_RISK` se
 přeskakuje, protože není založen na entitách — proto jde o **verzovaná referenční data**. Mění se
 jen revidovanou Flyway migrací: nové vydání přidá řádky s vyšší `version` a nahrazené řádky vyřadí
 (`active = false`), takže historie zůstává v tabulce. Částečný unikátní index dovoluje jeden
-aktivní řádek na (listinu, zemi). Tabulku nezapisuje žádný endpoint a V21 ji dodává prázdnou:
-které země jsou uvedeny, je rozhodnutí compliance zaznamenané v migraci, která je přidá.
+aktivní řádek na (listinu, vydání, zemi). Tabulku nezapisuje žádný endpoint: které země jsou
+uvedeny, je rozhodnutí compliance zaznamenané v migraci, která je přidá.
+
+| `source_list` | Naplněno | Zdroj |
+|---|---|---|
+| `EU_HIGH_RISK_THIRD_COUNTRIES` | V22 — 26 zemí, všechny `HIGH_RISK` | Nařízení Komise v přenesené pravomoci (EU) 2016/1675, příloha, konsolidované znění z 29. 1. 2026; porovnáno s EUR-Lex 11. 11. 2026 |
+| `FATF_CALL_FOR_ACTION` | nenaplněno | web vydavatele se nepodařilo načíst; žádný řádek se nezapisuje zpaměti |
+| `FATF_INCREASED_MONITORING` | nenaplněno | totéž |
+
+Žádný řádek nemá `EMBARGO`: nařízení EU ukládá posílenou due diligence, nikoli zákaz, a žádný
+dosud načtený zdroj embargo země neuvádí.
+
+**Stárnutí.** Tyto listiny se mění několikrát ročně a nic je neimportuje, proto každý řádek nese
+datum svého vydání (`published_on`) a datum posledního porovnání se zdrojem (`verified_on`).
+Ověření, které zjistí, že se zdroj nezměnil, je také migrace — posune `verified_on`. Služba
+zveřejňuje stáří obou údajů podle `source_list`; viz `05-operations`.
 
 ## Indexy
 

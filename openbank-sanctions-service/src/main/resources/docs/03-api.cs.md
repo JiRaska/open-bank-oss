@@ -112,9 +112,16 @@ U prověření s profilem nese každá shoda `matchKind` (`SANCTIONS`, `TERRORIS
 **Jurisdikce.** `country` (nebo země uvnitř `bankIdentifier`), která je v referenčních datech
 jurisdikcí, je shodou bez ohledu na jméno: záznam `EMBARGO` dává `HIT`, záznam `HIGH_RISK`
 `POTENTIAL_HIT` se skóre 0,65, které volající se sdílenou politikou prověřování pošlou k ručnímu
-přezkumu. Tato data **nemají automatický zdroj** — viz `04-data` — a dodávají se prázdná: dokud
-compliance nepřidá řádky, žádná země se neshoduje. BIC se neporovnává s entitami na listinách,
-protože importované zdroje identifikátory bank neobsahují.
+přezkumu. `programs` u shody nesou opatření s verzí dat a vydání, ze kterého řádek pochází
+(například `HIGH_RISK:v1`, `EU_HIGH_RISK_THIRD_COUNTRIES`). Tato data **nemají automatický
+zdroj** — co je načteno, viz `04-data` — a země, která v nich není, se nikdy neshoduje. BIC se
+neporovnává s entitami na listinách, protože importované zdroje identifikátory bank neobsahují.
+
+**Přibližná shoda jména.** Jméno se skóre alespoň 0,85 vůči záznamu listiny je `HIT` v každém
+profilu. Jen profil `CUSTOMER` vrací i jména se skóre 0,65–0,85, jako `POTENTIAL_HIT` (nebo
+`pepStatus: POTENTIAL_HIT` u záznamu PEP): onboarding má pracovníka, kterému lze podobné jméno
+poslat k přezkumu. `PAYMENT` a prověření bez profilu pod 0,85 nehledají, takové jméno tam vyjde
+`CLEAR` — platba zatím nemá stav, ve kterém by na přezkum počkala (#15724).
 
 `/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
 `/api/v1` nelze číst.

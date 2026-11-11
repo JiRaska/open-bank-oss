@@ -70,6 +70,7 @@ class SanctionsService(
     private suspend fun performScreening(
         cmd: ScreenEntityCommand,
         targetLists: List<SanctionsListType>,
+        searchFloor: Double,
     ): Pair<SanctionsCheckStatus, List<SanctionsMatch>> {
         val allNames = listOf(cmd.name) + cmd.aliases.filterNotNull()
         val matchMap = mutableMapOf<String, SanctionsEntryMatch>() // key=listType+externalId, keep best
@@ -79,7 +80,7 @@ class SanctionsService(
             val results = entryRepo.search(
                 normalizedQuery = normalized,
                 listTypes = targetLists,
-                threshold = HIT_THRESHOLD,
+                threshold = searchFloor,
                 limit = 10,
             )
             for (m in results) {
@@ -124,7 +125,7 @@ class SanctionsService(
         val country = profiles.parseCountry(cmd.country)
         val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
         val targetLists = resolveTargetLists(cmd, profile)
-        val (nameStatus, nameMatches) = performScreening(cmd, targetLists)
+        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
         val outcome = profiles.combine(
             profile,
             nameStatus,
@@ -195,8 +196,6 @@ class SanctionsService(
         bankIdentifier == cmd.bankIdentifier?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
 
     companion object {
-        private const val HIT_THRESHOLD = ScreeningProfileEvaluator.HIT_THRESHOLD
-
         /**
          * Emitted by [screen]: an automated screening produced a status from list matching.
          *

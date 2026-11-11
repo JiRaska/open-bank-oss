@@ -23,12 +23,12 @@ class SanctionsJurisdictionRepositoryImpl(private val pool: PgPool) : SanctionsJ
     ): List<SanctionsJurisdiction> {
         if (countryCodes.isEmpty() || listTypes.isEmpty()) return emptyList()
         val sql = """
-            SELECT list_type, country_code, measure, version
+            SELECT list_type, source_list, country_code, measure, version
             FROM sanctions_jurisdictions
             WHERE active = true
               AND country_code = ANY($1)
               AND list_type = ANY($2)
-            ORDER BY list_type, country_code
+            ORDER BY list_type, country_code, source_list
         """.trimIndent()
         val rows = pool.preparedQuery(sql)
             .execute(Tuple.of(countryCodes.toTypedArray(), listTypes.map { it.name }.toTypedArray()))
@@ -39,6 +39,7 @@ class SanctionsJurisdictionRepositoryImpl(private val pool: PgPool) : SanctionsJ
                 countryCode = row.getString("country_code"),
                 measure = JurisdictionMeasure.valueOf(row.getString("measure")),
                 version = row.getInteger("version"),
+                sourceList = row.getString("source_list"),
             )
         }
     }

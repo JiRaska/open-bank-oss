@@ -35,6 +35,19 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
         else -> PepStatus.CLEAR
     }
 
+    /**
+     * The lowest name similarity the candidate search returns for [profile].
+     *
+     * The search floor decides which statuses a NAME can produce at all: with the floor at the
+     * HIT threshold no candidate below it is ever fetched, so a near-miss spelling screens CLEAR
+     * and `POTENTIAL_HIT` is unreachable from a name. The CUSTOMER profile searches down to the
+     * review floor, because onboarding has a reviewer to send a fuzzy match to. PAYMENT and the
+     * profile-less path keep the HIT floor: a payment has no state to hold a review in yet
+     * (issue #15724), so a fuzzy match there could only be dropped or block the payment.
+     */
+    fun nameSearchFloor(profile: ScreeningProfile?): Double =
+        if (profile == ScreeningProfile.CUSTOMER) POTENTIAL_HIT_THRESHOLD else HIT_THRESHOLD
+
     fun parseProfile(raw: String?): ScreeningProfile? {
         val value = raw?.takeIf { it.isNotBlank() } ?: return null
         return ScreeningProfile.entries.firstOrNull { it.name == value }
@@ -79,7 +92,7 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
                 matchedName = row.countryCode,
                 matchedId = "country:${row.countryCode}",
                 listEntryDate = null,
-                programs = listOf("${row.measure.name}:v${row.version}"),
+                programs = listOf("${row.measure.name}:v${row.version}", row.sourceList),
                 matchKind = MatchKind.JURISDICTION,
             )
         }
