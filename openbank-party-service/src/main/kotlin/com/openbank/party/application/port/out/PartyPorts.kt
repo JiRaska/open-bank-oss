@@ -81,6 +81,7 @@ interface PartyRepository {
         limit: Int,
         afterId: UUID?,
         birthDates: List<String> = emptyList(),
+        namesOnly: Boolean = false,
     ): List<Party>
 
     /**
