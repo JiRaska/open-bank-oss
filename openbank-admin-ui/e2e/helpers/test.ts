@@ -6,6 +6,7 @@
 // a generic `/api/svc/<service>/...` proxy call. A violation not in `contract-baseline.json`
 // fails the test after it ran.
 //
+// OPENBANK_CONTRACT_CAPTURE=<file> appends every checked mock as a JSON line (ADR-0370 U7).
 // Set OPENBANK_CONTRACT_RECORD=<file> to append violations to that file as JSON lines instead
 // of failing — the only supported way to (re)generate the baseline.
 
@@ -20,6 +21,7 @@ export * from '@playwright/test'
 const E2E_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const REPO_ROOT = path.resolve(E2E_DIR, '../..')
 const BASELINE_FILE = path.join(E2E_DIR, 'contract-baseline.json')
+const CAPTURE_FILE = process.env.OPENBANK_CONTRACT_CAPTURE
 
 const contract = new OpenApiContract(REPO_ROOT)
 const baseline = new Set<string>(JSON.parse(readFileSync(BASELINE_FILE, 'utf8')).violations as string[])
@@ -42,13 +44,14 @@ function guardRoute(route: Route, found: Violation[]): Route {
         // A fulfil from a real fetched response carries the real shape — nothing to check.
         if (!options.response && !options.path) {
           const request = target.request()
-          const violations = contract.check({
-            method: request.method(),
-            url: request.url(),
-            status: options.status ?? 200,
-            body: mockedBody(options),
-          })
-          if (violations) found.push(...violations)
+          const mock = { method: request.method(), url: request.url(), status: options.status ?? 200, body: mockedBody(options) }
+          const violations = contract.check(mock)
+          if (violations) {
+            found.push(...violations)
+            // ADR-0370 U7: keep every checked service mock so the version-skew check can replay
+            // it against the specs at the latest release tags without a second browser run.
+            if (CAPTURE_FILE) appendFileSync(CAPTURE_FILE, `${JSON.stringify(mock)}\n`)
+          }
         }
         return target.fulfill(options)
       }

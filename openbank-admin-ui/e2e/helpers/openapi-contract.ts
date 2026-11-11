@@ -10,7 +10,8 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import Ajv2020Module, { type ValidateFunction } from 'ajv/dist/2020.js'
+import Ajv2020Module from 'ajv/dist/2020.js'
+import type { ValidateFunction } from 'ajv/dist/2020.js'
 import { parse } from 'yaml'
 
 export type ViolationKind =
@@ -59,7 +60,21 @@ interface LoadedSpec {
 export class OpenApiContract {
   private readonly specs = new Map<string, LoadedSpec | null>()
 
-  constructor(private readonly repoRoot: string) {}
+  /**
+   * `strictObjects` (ADR-0370 U7): an object schema that declares `properties` and says nothing
+   * about `additionalProperties` is read as closed, so a mocked field the spec does not declare
+   * is a violation. Off for the U1 guard, which judges only what a spec states; on for the
+   * version-skew check, which asks whether a field exists in one spec version and not another.
+   */
+  // Plain fields, not parameter properties: Node's type stripping runs this file directly for the
+  // version-skew script, and it cannot transform parameter properties.
+  private readonly repoRoot: string
+  private readonly options: { strictObjects?: boolean }
+
+  constructor(repoRoot: string, options: { strictObjects?: boolean } = {}) {
+    this.repoRoot = repoRoot
+    this.options = options
+  }
 
   /** `null` when the URL is not a generic service-proxy call (BFF-owned route). */
   check(mock: MockedResponse): Violation[] | null {
@@ -104,7 +119,7 @@ export class OpenApiContract {
     const file = resolveSpecFile(this.repoRoot, service)
     let loaded: LoadedSpec | null = null
     if (file) {
-      const doc = normalize(parse(readFileSync(file, 'utf8'))) as JsonObject
+      const doc = normalize(parse(readFileSync(file, 'utf8')), { strictObjects: this.options.strictObjects === true }) as JsonObject
       const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false })
       ajv.addSchema(doc, 'spec')
       const templates = Object.keys((doc.paths ?? {}) as JsonObject).map(template => ({
@@ -178,11 +193,21 @@ function resolveRef(doc: JsonObject, node: unknown): unknown {
  * OpenAPI 3.0 `nullable: true` is not JSON Schema; 3.1 specs already use `type: [x, 'null']`.
  * Rewrite the former into the latter so one 2020-12 validator serves the whole fleet.
  */
-export function normalize(node: unknown): unknown {
-  if (Array.isArray(node)) return node.map(normalize)
+const COMPOSITION = ['allOf', 'oneOf', 'anyOf'] as const
+
+export function normalize(node: unknown, opts: { strictObjects?: boolean } = {}, inComposition = false): unknown {
+  if (Array.isArray(node)) return node.map(n => normalize(n, opts, inComposition))
   if (!node || typeof node !== 'object') return node
   const out: JsonObject = {}
-  for (const [k, v] of Object.entries(node as JsonObject)) out[k] = normalize(v)
+  for (const [k, v] of Object.entries(node as JsonObject)) {
+    out[k] = normalize(v, opts, (COMPOSITION as readonly string[]).includes(k))
+  }
+  // Closing a schema that is a member of allOf would reject the sibling members' properties,
+  // and one that itself composes cannot be closed without merging them, so both stay open.
+  if (opts.strictObjects && !inComposition && out.properties && typeof out.properties === 'object'
+    && out.additionalProperties === undefined && !COMPOSITION.some(k => k in out)) {
+    out.additionalProperties = false
+  }
   if (out.nullable === true) {
     if (typeof out.type === 'string') out.type = [out.type, 'null']
     else if (!out.type) {
