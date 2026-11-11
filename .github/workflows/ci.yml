@@ -339,7 +339,7 @@ jobs:
       - name: E2E flake report
         if: always() && steps.browser_e2e.outcome != 'skipped'
         working-directory: ${{ github.workspace }}
-        run: python3 .github/scripts/check-admin-ui-flake-quarantine.py --junit openbank-admin-ui/build/test-results/e2e/playwright.xml
+        run: python3 .github/scripts/report-admin-ui-e2e-flake.py openbank-admin-ui/build/test-results/e2e/playwright.xml
 
       # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
       # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
