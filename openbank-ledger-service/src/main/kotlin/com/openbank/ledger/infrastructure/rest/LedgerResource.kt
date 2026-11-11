@@ -204,7 +204,7 @@ class LedgerResource(
         request: PostJournalRequest?,
         @Context
         requestContext: ContainerRequestContext,
-    ): Response = postJournal(request, isSynthetic(requestContext))
+    ): Response = bookJournal(request, isSynthetic(requestContext))
 
     @POST
     @Path("/synthetic")
@@ -216,14 +216,14 @@ class LedgerResource(
         @Context requestContext: ContainerRequestContext,
     ): Response {
         if (!isSynthetic(requestContext)) throw ForbiddenException("Synthetic journal requires a trusted origin")
-        return postJournal(request, synthetic = true)
+        return bookJournal(request, synthetic = true)
     }
 
     // Both values carry the filter's authenticated trust decision. Either true value wins.
     private fun isSynthetic(requestContext: ContainerRequestContext): Boolean =
         taintContext.tainted || requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true
 
-    private suspend fun postJournal(request: PostJournalRequest?, synthetic: Boolean): Response {
+    private suspend fun bookJournal(request: PostJournalRequest?, synthetic: Boolean): Response {
         requireNotNull(request) { "a request body is required" }
         // ADR-0096 D3: this prefix is reserved for the year-end closing journal, whose attribution
         // is written only by the allocation's own transaction. A generic post under it would be an
