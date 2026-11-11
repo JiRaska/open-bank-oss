@@ -7,6 +7,7 @@ package com.openbank.account.infrastructure.persistence.repository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.account.application.port.out.AccountOutboxRepository
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.GsftAccountRosterRepository
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
@@ -55,6 +56,7 @@ class AccountRepositoryImpl(
     private val outboxRepository: AccountOutboxRepository,
     private val objectMapper: ObjectMapper,
 ) : AccountRepository,
+    GsftAccountRosterRepository,
     PanacheRepository<AccountEntity> {
 
     override suspend fun findById(id: UUID): Account? =
@@ -121,6 +123,18 @@ class AccountRepositoryImpl(
         }
         query.page(0, limit).list()
     }.awaitSuspending().map { it.toDomain() }
+
+    override suspend fun findDepositAccounts(dayEndExclusive: Instant, limit: Int, afterId: UUID?): List<Account> =
+        Panache.withSession {
+            val availableAtCutoff = "accountType IN ?1 AND openedAt < ?2 AND (closedAt IS NULL OR closedAt >= ?2)"
+            val types = listOf(AccountType.CURRENT.name, AccountType.SAVINGS.name, AccountType.TERM_DEPOSIT.name)
+            val query = if (afterId == null) {
+                find("$availableAtCutoff ORDER BY id", types, dayEndExclusive)
+            } else {
+                find("$availableAtCutoff AND id > ?3 ORDER BY id", types, dayEndExclusive, afterId)
+            }
+            query.page(0, limit).list()
+        }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun save(account: Account): Account {
         val entity = account.toEntity()
