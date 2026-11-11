@@ -792,6 +792,8 @@ jobs:
             scope_guard="$RUNNER_TEMP/pact-consumer-scope.init.gradle"
             cat > "$scope_guard" <<'GRADLE'
           gradle.projectsEvaluated {
+              // Init scripts also run in included builds. Scope the provider check to the main build.
+              if (gradle.parent != null) return
               def provider = gradle.rootProject.project(":" + System.getenv("SERVICE"))
               def task = provider.tasks.named("providerPactTest").get()
               if (!(task instanceof org.gradle.api.tasks.testing.Test) ||
