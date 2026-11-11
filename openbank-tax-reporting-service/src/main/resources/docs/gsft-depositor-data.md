@@ -145,7 +145,24 @@ inconsistent, and how to treat them is not stated by the annex.
 No owning service models special-regime accounts or their beneficiaries today, so nothing feeds
 `SpecialRegimeShare` yet; the format is ready for when one does.
 
+## Transport (`GsftPackage`)
+
+Annex 1.1.6, verified: the batch is compressed with ZIP into **one** file, the batch files added
+without paths, and the archive is encrypted with asymmetric **PGP** (another method of at least
+equal strength only by agreement with GSFT).
+
+- the ZIP is deterministic (decree file order DIW, DIC, DIA, DIL, DII; entry time fixed at the ZIP
+  epoch), so its SHA-256 can be attested before encryption;
+- PGP is binary OpenPGP, AES-256 with an integrity packet, to the first encryption key of GSFT's
+  ASCII-armoured public key ring;
+- the key comes from configuration (`openbank.gsft.pgp-public-key`, `Optional`) and is never
+  committed; tests generate a throwaway key per run.
+
+**Unverified:** the archive name (`GSFT<bank code><branch>.<batch>.zip` here), the symmetric
+cipher and binary-vs-armoured output are not stated by the annex — confirm with GSFT before the
+first live delivery.
+
 ## Not yet here
 
-Data sourcing from the account register and balances, ZIP/PGP
-transport, four-eyes attestation and filing, and the scheduled TEST dry run are follow-ups on #15356.
+Data sourcing from the account register and balances, four-eyes attestation and filing, and the
+scheduled TEST dry run are follow-ups on #15356.
