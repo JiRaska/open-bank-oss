@@ -76,6 +76,14 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start=true`):
 - `aml_cases(false_positive) WHERE NOT false_positive`, `aml_cases(escalated_to_mlro) WHERE escalated_to_mlro`, `aml_cases(transaction_id) WHERE transaction_id IS NOT NULL`
 - `aml_outbox(status, created_at ASC)` — dispatcher poll; `aml_outbox(aggregate_id)`
 
+## Count-pack SHADOW epoch evidence
+
+`V11__aml_count_shadow_epoch.sql` records immutable, signed count-pack epochs for the AML
+domain. The epoch key serializes concurrent inserts of the same epoch. Each successor
+references its immutable predecessor and advances the effective time. Retrying an identical
+envelope replays the existing row. Rollback creates a new verified epoch referring to the
+earlier artifact. Stop the shadow publisher and retain these rows when reverting the code.
+
 ## Retention
 
 | Table | Retention | Reason |
