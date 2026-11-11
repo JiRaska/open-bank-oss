@@ -23,6 +23,8 @@ import io.quarkus.test.junit.QuarkusTest
 @Provider("openbank-kyb-service")
 @PactFolder("../pacts")
 class KybStatutoryPactFolderProviderVerificationTest : KybStatutoryPactVerification() {
+    override val sharedWorkloadStatus: Int = 403
+
     @State(KYB_CURRENT_STATE, KYB_STALE_STATE)
     fun delegation() = currentEvidenceAs("openbank-delegation")
 

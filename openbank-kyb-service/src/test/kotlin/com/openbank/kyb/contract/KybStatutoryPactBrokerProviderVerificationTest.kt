@@ -27,6 +27,8 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class KybStatutoryPactBrokerProviderVerificationTest : KybStatutoryPactVerification() {
+    override val sharedWorkloadStatus: Int = 403
+
     @State(KYB_CURRENT_STATE, KYB_STALE_STATE)
     fun delegation() = currentEvidenceAs("openbank-delegation")
 

@@ -42,6 +42,8 @@ const val KYB_REFUSED_STATE = "the shared backend identity attempts to inspect t
 
 abstract class KybStatutoryPactVerification {
 
+    protected abstract val sharedWorkloadStatus: Int
+
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var testPort: String
 
@@ -61,7 +63,14 @@ abstract class KybStatutoryPactVerification {
     @TestSecurity(user = "pact-verifier", roles = ["ROLE_API"])
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verify(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        if (context == null) return
+        val interaction = context.interaction
+        if (interaction.providerStates.any { it.name == KYB_REFUSED_STATE }) {
+            check(interaction.asSynchronousRequestResponse()?.response?.status == sharedWorkloadStatus) {
+                "the shared workload pact must expect HTTP $sharedWorkloadStatus"
+            }
+        }
+        context.verifyInteraction()
     }
 
     protected fun currentEvidenceAs(client: String) {
