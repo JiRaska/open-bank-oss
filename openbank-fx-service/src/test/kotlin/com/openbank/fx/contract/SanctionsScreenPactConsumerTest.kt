@@ -112,8 +112,7 @@ class SanctionsScreenPactConsumerTest {
     private val objectMapper = ObjectMapper().registerKotlinModule()
 
     /**
-     * The kind `SanctionsScreeningAdapter` sends for a natural person
-     * (`ScreeningEntityType.INDIVIDUAL.name`) — mirrored, not referenced.
+     * `SanctionsScreeningAdapter.ENTITY_TYPE`, a private companion const — mirrored, not referenced.
      * fx sends no `listTypes`, so the provider screens every list: the widest possible screen, which
      * is the strictest thing to pin.
      */
@@ -231,7 +230,7 @@ class SanctionsScreenPactConsumerTest {
     }
 
     private companion object {
-        /** `ScreeningEntityType.INDIVIDUAL.name`, the wire value for a natural person. */
+        /** `SanctionsScreeningAdapter.ENTITY_TYPE`, private. */
         const val ENTITY_TYPE = "INDIVIDUAL"
 
         /**
