@@ -17,6 +17,7 @@ kódu (CEÚ, GSFT) nebyly vidět. Registr to obrací — každá povinnost je ř
   Před podáním vždy ověřte lhůtu v aktuálním znění předpisu.
 - **Pokrytí** popisuje stav na `main`:
   - `filed-return` — výkaz v katalogu, počítá backend
+  - `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport)
   - `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367)
   - `data-only` — data existují, výkaz chybí
   - `missing` — chybí
@@ -34,7 +35,8 @@ Celkem povinností: **70**.
 
 | Stav | Počet |
 |---|---|
-| `filed-return` — výkaz v katalogu, počítá backend | 3 |
+| `filed-return` — výkaz v katalogu, počítá backend | 0 |
+| `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport) | 3 |
 | `bff-only` — výkaz v katalogu, počítá jen admin-ui (dluh ADR-0367) | 5 |
 | `data-only` — data existují, výkaz chybí | 10 |
 | `missing` — chybí | 35 |
@@ -181,7 +183,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Čtvrtletně (12. 5., 11. 8., 11. 11., 11. 2.); některé šablony pololetně/ročně. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT (XBRL-CSV)
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-finrep`; služby `openbank-finrep-service`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-finrep`; služby `openbank-finrep-service`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
 
 ### COREP – kapitál a kapitálové požadavky
 
@@ -193,7 +196,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Čtvrtletně, stejné termíny jako FINREP. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-capital`; služby `openbank-finrep-service`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-capital`; služby `openbank-finrep-service`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
 
 ### Ukazatel krytí likviditou (LCR)
 
@@ -205,7 +209,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Měsíčně, 15 kalendářních dnů po referenčním dni. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
-- **Pokrytí:** `filed-return` — výkaz v katalogu, počítá backend; výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`
+- **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`; sleduje #5914
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
 
 ### Ukazatel čistého stabilního financování (NSFR)
 

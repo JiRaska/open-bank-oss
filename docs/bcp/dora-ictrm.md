@@ -1,6 +1,6 @@
 # DORA ICT Risk Management Framework — OpenBank
 
-Date: 2026-06-30
+Date: 2026-11-11
 Regulation: EU 2022/2554 (DORA), applicable from 17 January 2025
 Supervisory framework: ČNB DORA supervisory expectations
 Owner: CTO / Maintainer Lead
@@ -17,17 +17,21 @@ Owner: CTO / Maintainer Lead
 | Art. 8 — Identification | Maintain asset register | `service-graph.json` (ADR-0029 D3); fleet port map; SBOM per service (ADR-0121) | ✓ |
 | Art. 9 — Protection and prevention | Access control, encryption, patch management | OpenBao secrets; mTLS Kafka (ADR-0137); OPA authz (ADR-0034); Keycloak OIDC | ✓ |
 | Art. 10 — Detection | Continuous monitoring | Grafana + Pyrra SLOs; GoAlert alerting; Falco runtime; HolmesGPT; GlitchTip | ✓ |
-| Art. 11 — Response and recovery | BCP, DRP, RTO/RPO | bcp-policy.md; runbooks 0001–0005; CNPG S3 WAL; ArgoCD rollback | ✓ |
-| Art. 11(3)(c) — DR plan | Documented, tested DR plan | runbook-0002; dr-test-log.md; quarterly table-top exercise | ✓ |
-| Art. 12 — Backup policies | Backup and restore procedures | CNPG continuous WAL + 14-day retention; S3 lifecycle rule | ✓ |
+| Art. 11 — Response and recovery | BCP, DRP, RTO/RPO | bcp-policy.md; runbooks 0001–0005; CNPG S3 WAL; ArgoCD rollback. Application-level RTO and RPO are unmeasured (see `dr-test-log.md`) | partial (#8347) |
+| Art. 11(3)(c) — DR plan | Documented, tested DR plan | runbook-0002; dr-test-log.md. One live restore drill (ledger database only, database-level RTO ~84 s); the other CNPG databases have none, and no failover has been exercised | partial (#8347) |
+| Art. 12 — Backup policies | Backup and restore procedures | CNPG continuous WAL + 14-day retention; S3 lifecycle rule. Restore tested for one database only; backups share the account and region of the data and have no object lock | partial (#8347, #15754) |
 | Art. 13 — Learning and evolving | Post-incident review, lessons learned | dr-test-log.md §3; OpenBank issue tracker | ✓ |
 | Art. 14 — Communication | Crisis communication plan | bcp-policy.md §5; GoAlert on-call | ✓ |
-| Art. 17 — ICT-related incident classification | Classify by impact | GlitchTip severity + Pyrra burn-rate; T0–T3 tiers | ✓ |
-| Art. 19 — Notification to regulators | Report major incidents within 4 h | BCP Owner responsibility; bcp-policy.md §5 | ✓ |
-| Art. 28 — ICT third-party risk | Manage critical third-party providers | ADR-0027 cloud-agnostic; in-cluster OSS preference; vendor risk register (pending) | ~ |
-| Art. 30 — Contractual arrangements | ICT contracts with providers | AWS ToS; Hetzner ToS; GitHub Enterprise (if applicable) | ~ |
+| Art. 17 — ICT-related incident management and classification | Classify by the RTS criteria (clients, transactions, duration, geography, data loss, criticality) | Operator-typed severity (P1–P4) on `IctIncident`; GlitchTip severity + Pyrra burn-rate; T0–T3 tiers. No classification criteria are evaluated in code | not met (#15752) |
+| Art. 18–19 — Classification of major incidents and reporting | Initial, intermediate and final reports in the prescribed time limits | BCP Owner responsibility; bcp-policy.md §5. The incident record has a reported-to-regulator flag only; there are no staged reports, and the incident return is `bff-only` in `regulatory-obligations.yaml` | not met (#15752) |
+| Art. 28 — ICT third-party risk | Register of information; documented and tested exit strategy | ADR-0174 holds the register as prose, not machine-readable; ADR-0027 portability is asserted and no exit has been tested | not met (#15753) |
+| Art. 30 — Contractual arrangements | ICT contracts with providers | Standard provider terms only; no DORA-specific contractual clauses | organisational (#15753) |
 
-Legend: ✓ = control in place  ~= partially addressed, follow-up in backlog
+Legend: ✓ = met (control in place and evidenced); partial = some of the control exists, gaps remain;
+not met = the control does not exist in code or process; organisational = a process or contractual
+duty with no code artefact. The status is the honest position on 2026-11-11, not an aspiration; the
+authoritative per-return statuses live in `openbank-libs/governance/regulatory-obligations.yaml`.
+Articles 5–10 and 13–14 are marked ✓ as documented controls; they have not been re-audited in this revision.
 
 ---
 
