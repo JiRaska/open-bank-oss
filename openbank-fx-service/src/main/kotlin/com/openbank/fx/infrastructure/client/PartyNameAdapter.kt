@@ -52,9 +52,19 @@ class PartyNameAdapter(@RestClient private val client: PartyServiceClient) : Par
      * trading name behind a clean legal name must reach the screen. Empty when the party has
      * neither, or is not held at all.
      */
-    @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
-    @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
-    @Timeout(5_000)
+    @CircuitBreaker(
+        requestVolumeThreshold = CB_REQUEST_VOLUME_THRESHOLD,
+        failureRatio = CB_FAILURE_RATIO,
+        delay = CB_DELAY_MS,
+        successThreshold = CB_SUCCESS_THRESHOLD,
+    )
+    @Retry(
+        maxRetries = RETRY_MAX_RETRIES,
+        delay = RETRY_DELAY_MS,
+        jitter = RETRY_JITTER_MS,
+        retryOn = [Exception::class],
+    )
+    @Timeout(TIMEOUT_MS)
     open suspend fun namesWithResilience(partyId: UUID): List<String> {
         val party = try {
             client.getParty(partyId.toString()).awaitSuspending()
@@ -72,5 +82,15 @@ class PartyNameAdapter(@RestClient private val client: PartyServiceClient) : Par
 
     private companion object {
         const val HTTP_NOT_FOUND = 404
+
+        // Resilience tuning mirrors SanctionsScreeningAdapter (ADR-0032 §D).
+        const val CB_REQUEST_VOLUME_THRESHOLD = 4
+        const val CB_FAILURE_RATIO = 0.5
+        const val CB_DELAY_MS = 10_000L
+        const val CB_SUCCESS_THRESHOLD = 2
+        const val RETRY_MAX_RETRIES = 2
+        const val RETRY_DELAY_MS = 300L
+        const val RETRY_JITTER_MS = 150L
+        const val TIMEOUT_MS = 5_000L
     }
 }

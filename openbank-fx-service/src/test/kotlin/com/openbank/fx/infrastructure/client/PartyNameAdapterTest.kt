@@ -60,7 +60,8 @@ class PartyNameAdapterTest {
 
     @Test
     fun `a party with no name at all is unavailable, never an empty name`() {
-        every { client.getParty(any()) } returns Uni.createFrom().item(PartyNameView(legalName = null, tradingName = ""))
+        every { client.getParty(any()) } returns
+            Uni.createFrom().item(PartyNameView(legalName = null, tradingName = ""))
 
         assertThatThrownBy { names() }.isInstanceOf(PartyNameUnavailableException::class.java)
     }

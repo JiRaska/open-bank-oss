@@ -100,7 +100,9 @@ class FxActivitiesImplTest {
         activities.screenConversion(conv.id)
 
         coVerify(exactly = 1) { partyNamePort.screeningNames(conv.partyId) }
-        coVerify(exactly = 1) { screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party", emptyList()) }
+        coVerify(exactly = 1) {
+            screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party", emptyList())
+        }
     }
 
     /**
