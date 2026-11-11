@@ -179,6 +179,18 @@ jobs:
       contents: read
       security-events: write # upload-sarif
     timeout-minutes: 40
+    # Job-level lane, per language: main pushes queue behind the running analysis and a newer
+    # push replaces only the PENDING leg, so N commits landing within minutes cost two analyses
+    # per language instead of N (java-kotlin measured at ~21 hosted minutes each, 2026-11-11).
+    # cancel-in-progress is false, so a started analysis always finishes and uploads; this is
+    # not the cancel-the-running-run shape of issue #3390. The WORKFLOW group above stays per
+    # commit on purpose: Trivy is a per-commit gate input and must report on every main commit.
+    # A replaced leg ends `cancelled` with no step started, which the watches read as
+    # not-a-verdict and the spot-kill retry reads as a queue cancel. Every other event gets a
+    # lane of its own (run id), so pull requests and the weekly audit are untouched.
+    concurrency:
+      group: codeql-${{ matrix.language }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main-push' || github.run_id }}
+      cancel-in-progress: false
     # The java-kotlin leg's build step shells out to its own `./gradlew classes`
     # (whole-fleet dependency resolution, ~30 modules + quarkus-bom) without picking up
     # any GRADLE_OPTS we'd set in a step — it needs the env var at the job level. Without
