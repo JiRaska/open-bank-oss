@@ -31,12 +31,10 @@ import kotlin.random.Random
  * }
  * ```
  *
- * plus its own `persistInTransaction`. Every column this class reads or writes it reaches through
- * native SQL ([OutboxSql]), never through a mapped property — that is what lets it serve an entity
- * on either [PanacheOutboxEntity] (v1, own `claimedAt`) or [PanacheOutboxEntityV2], provided the
- * TABLE carries `claimed_at`, `next_attempt_at` and the two partial indexes from
- * `db/outbox-v2-template.sql`. `RETURNING *` maps only the columns the entity declares; the rest
- * are ignored by Hibernate.
+ * plus its own `persistInTransaction`. The statements use [OutboxSql] and require
+ * `claimed_at`, `next_attempt_at` and the two partial indexes from `db/outbox-v2-template.sql`.
+ * The entity must map every column returned by the native claim query. Hibernate Reactive can
+ * fail when `RETURNING *` contains an unmapped column, even when the dispatcher never reads it.
  *
  * Reactive surface, event-loop only (ADR-0050 N1): every method runs its statement inside
  * `Panache.withTransaction` on the calling Vert.x context, so the `@Scheduled suspend` dispatcher
