@@ -41,19 +41,33 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8090
+        - protocol: TCP
+          port: 8157
+        - protocol: TCP
+          port: 8181
     - from:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: delegation
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
           port: 8157
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: delegation
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: delegation-service
+      ports:
+        - protocol: TCP
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

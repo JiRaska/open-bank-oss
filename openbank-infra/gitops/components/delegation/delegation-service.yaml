@@ -132,9 +132,9 @@ spec:
             # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
-            # #10247: Read the current KYB attestation as Delegation.
+            # #10247: Verify current KYB evidence over the private mTLS listener as openbank-delegation.
             - name: KYB_SERVICE_URL
-              value: http://kyb-service.kyb.svc:8157
+              value: https://kyb-service.kyb.svc:8443
             - name: DELEGATION_STATUTORY_COLLECTION_ENABLED
               value: "false"
             # Offer-time resource-ownership verification (#3164): a grant naming a

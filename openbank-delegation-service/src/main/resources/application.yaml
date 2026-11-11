@@ -243,6 +243,10 @@ mp:
     rest-client:
       party-service:
         tls-configuration-name: party-authority
+      # Both authority providers trust the mounted Delegation client certificate.
+      kyb-service:
+        url: ${KYB_SERVICE_URL:https://localhost:8443}
+        tls-configuration-name: party-authority
       document-service:
         tls-configuration-name: disclosure
 

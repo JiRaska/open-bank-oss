@@ -55,6 +55,11 @@ verified sole-signature flows use their existing routes. New joint issues use th
 usage policy. The statutory quorum governs creating or accepting a grant, while any existing
 approval-group policy governs later use of that grant.
 
+Delegation verifies the current KYB attestation over private-CA mTLS with its existing client
+certificate and the named `openbank-delegation` bearer. The KYB provider route and policy
+from #15662 must be present in the verified image before configuring the 8443 listener.
+The sandbox collection switch stays off during this rollout.
+
 The V34 migration adds operations, receipts, and grant provenance. Rollback disables collection and
 retains these rows for audit. Deploy the sole issuer provenance guard and the named Party, KYB, and
 SCA contracts before enabling collection in a test environment.
