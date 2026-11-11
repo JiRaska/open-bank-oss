@@ -298,6 +298,29 @@ jobs:
           OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
+      # ADR-0370 U2: quarantined tests (e2e/flaky-quarantine.json) are excluded from the gating
+      # run above and run here, non-gating, so a fix can be seen before the entry expires.
+      - name: Quarantined E2E tests (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        run: npx playwright test --pass-with-no-tests
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          OPENBANK_E2E_QUARANTINE: "only"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-quarantine/playwright.xml"
+
+      # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
+      # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
+      - name: E2E flake report
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        working-directory: ${{ github.workspace }}
+        run: python3 .github/scripts/check-admin-ui-flake-quarantine.py --junit openbank-admin-ui/build/test-results/e2e/playwright.xml
+
       # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
       # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
       # renders inside the pinned Playwright image (scripts/visual.sh), the environment the
