@@ -31,7 +31,8 @@ import org.junit.jupiter.api.extension.ExtendWith
  * The assembly walks this page-by-page to the end; a renamed `data`/`hasNextPage`/`nextCursor`
  * would not fail loudly — the walk would stop after one page and under-report every datapoint.
  * Each row binds `id`, `accountNumber`, `partyId`, `productId`, `currencyCode`, `status` and
- * `openedAt` non-null, exactly the fields a CRS/FATCA line is built from.
+ * `openedAt` non-null, exactly the fields a CRS/FATCA line is built from, plus `accountType`, which
+ * the GSFT deposit roster (#15356) filters on.
  *
  * Reuses the existing provider state "an account owned by a known party exists" (ADR-0143's
  * billing-discovery fixture): the assembly reads the same roster shape interest-service's accrual
@@ -64,6 +65,8 @@ class TaxReportingAccountPactConsumerTest {
                     a.stringType("currencyCode", "CZK")
                     a.stringValue("status", "ACTIVE")
                     a.stringType("openedAt", "2026-01-01T00:00:00Z")
+                    // The GSFT roster (#15356) keeps deposit types only and fails on a missing one.
+                    a.stringType("accountType", "CURRENT")
                     // closedAt deliberately NOT pinned: the shared ADR-0143 seed has closedAt
                     // null and the adapter never reads it — same choice as interest-service's
                     // accrual pact on this same state.
@@ -96,6 +99,7 @@ class TaxReportingAccountPactConsumerTest {
         val page = mapper.readValue(body, object : TypeReference<CursorPage<AccountSummaryDto>>() {})
         assertThat(page.data).isNotEmpty
         assertThat(page.data[0].status).isEqualTo("ACTIVE")
+        assertThat(page.data[0].accountType).isEqualTo("CURRENT")
         assertThat(page.pagination.hasNextPage).isFalse()
     }
 
