@@ -48,8 +48,10 @@ jobs:
           - openbank-ledger-service
           - openbank-balance-service
           # Fleet rollout (#1266): money-path services with substantive domain math.
-          # Thin-domain services (clearing / swift / lending — 1 domain file each) are
-          # skipped on purpose — mutation testing there is noise, not signal (ADR-0063).
+          # Thin-domain services (clearing / swift — 1 domain file each) are skipped on
+          # purpose — mutation testing there is noise, not signal (ADR-0063). lending is NOT
+          # thin (28 branch sites over 7 files); it is a recorded exclusion pending its own
+          # measurement (check-pitest-money-path-coverage.py: EXCLUDED / OVER_THIN_BASELINE).
           - openbank-account-service
           - openbank-transaction-service
           - openbank-fx-service
@@ -57,7 +59,7 @@ jobs:
           # decision logic (3 domain files each — routing, screening, validation); a surviving
           # mutant there is a real miss. Remaining money-path services stay excluded by the
           # same ADR-0063 thin-domain criterion (sca/consent/billing/clearing 1-2 files,
-          # swift/lending 1 file).
+          # swift 1 file; lending is a recorded exclusion, see above).
           - openbank-sepa-payment
           - openbank-sepa-instant
           - openbank-domestic-payment
