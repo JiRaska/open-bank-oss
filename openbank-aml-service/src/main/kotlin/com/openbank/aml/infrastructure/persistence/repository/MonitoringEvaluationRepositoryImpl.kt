@@ -110,7 +110,7 @@ class MonitoringEvaluationRepositoryImpl : MonitoringEvaluationRepository {
             }
         }.awaitSuspending().let { row ->
             val stored = row[0] as UUID
-            RecordedHit(stored, created = stored == candidate, caseId = (row as Array<*>)[1] as UUID?)
+            RecordedHit(stored, created = stored == candidate, caseId = (row as Array<*>)[1] as? UUID)
         }
     }
 

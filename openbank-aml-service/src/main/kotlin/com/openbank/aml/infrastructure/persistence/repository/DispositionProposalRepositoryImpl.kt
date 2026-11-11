@@ -11,6 +11,7 @@ import com.openbank.aml.domain.report.DispositionRequest
 import com.openbank.aml.domain.report.OutcomeLabel
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.instant
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.mutate
+import com.openbank.aml.infrastructure.persistence.repository.NativeSql.requiredInstant
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.select
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.utc
 import com.openbank.libs.governance.Proposal
@@ -83,14 +84,14 @@ class DispositionProposalRepositoryImpl : DispositionProposalRepository {
             caseId = row[CASE] as UUID,
             disposition = CaseDisposition.valueOf(row[DISPOSITION] as String),
             outcome = OutcomeLabel(row[VOCABULARY] as String, (row[REVISION] as Number).toInt(), row[HASH] as String, row[CODE] as String),
-            note = row[NOTE] as String?,
+            note = row[NOTE] as? String,
         ),
         proposedBy = row[PROPOSED_BY] as String,
-        proposedAt = instant(row[PROPOSED_AT])!!,
+        proposedAt = requiredInstant(row[PROPOSED_AT]),
         state = ProposalState.valueOf(row[STATE] as String),
-        decidedBy = row[DECIDED_BY] as String?,
+        decidedBy = row[DECIDED_BY] as? String,
         decidedAt = instant(row[DECIDED_AT]),
-        decisionReason = row[REASON] as String?,
+        decisionReason = row[REASON] as? String,
         executedAt = instant(row[EXECUTED_AT]),
     )
 

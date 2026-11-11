@@ -11,6 +11,7 @@ import com.openbank.aml.domain.report.ReportedMovement
 import com.openbank.aml.domain.report.SuspiciousTransactionReport
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.instant
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.mutate
+import com.openbank.aml.infrastructure.persistence.repository.NativeSql.requiredInstant
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.select
 import com.openbank.aml.infrastructure.persistence.repository.NativeSql.utc
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -194,19 +195,19 @@ class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRep
             caseIds = cases,
             movements = movements,
             draftedBy = row[DRAFTED_BY] as String,
-            draftedAt = instant(row[DRAFTED_AT])!!,
-            approvedBy = row[APPROVED_BY] as String?,
+            draftedAt = requiredInstant(row[DRAFTED_AT]),
+            approvedBy = row[APPROVED_BY] as? String,
             approvedAt = instant(row[APPROVED_AT]),
-            filingReference = row[REFERENCE] as String?,
+            filingReference = row[REFERENCE] as? String,
             filedAt = instant(row[FILED_AT]),
-            filingRecordedBy = row[RECORDED_BY] as String?,
+            filingRecordedBy = row[RECORDED_BY] as? String,
             filingRecordedAt = instant(row[RECORDED_AT]),
-            withdrawnBy = row[WITHDRAWN_BY] as String?,
+            withdrawnBy = row[WITHDRAWN_BY] as? String,
             withdrawnAt = instant(row[WITHDRAWN_AT]),
-            outcome = (row[CODE] as String?)?.let {
+            outcome = (row[CODE] as? String)?.let {
                 OutcomeLabel(row[VOCABULARY] as String, (row[REVISION] as Number).toInt(), row[HASH] as String, it)
             },
-            updatedAt = instant(row[UPDATED_AT])!!,
+            updatedAt = requiredInstant(row[UPDATED_AT]),
         )
     }
 

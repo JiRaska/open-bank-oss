@@ -22,6 +22,8 @@ internal object NativeSql {
         else -> error("unexpected timestamp type ${value.javaClass}")
     }
 
+    fun requiredInstant(value: Any?): Instant = checkNotNull(instant(value)) { "column is NOT NULL" }
+
     /** Runs in the current session; call inside `Panache.withTransaction`. */
     fun mutate(sql: String, values: Map<String, Any>): Uni<Int> = Panache.getSession().chain { session ->
         val query = session.createNativeMutationQuery(sql.trimIndent())

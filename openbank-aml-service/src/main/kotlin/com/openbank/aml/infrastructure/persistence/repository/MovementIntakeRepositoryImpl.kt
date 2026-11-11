@@ -96,8 +96,8 @@ class MovementIntakeRepositoryImpl :
             transactionId = row[UNCOUNTED_TRANSACTION] as UUID,
             bookedAt = instant(row[UNCOUNTED_BOOKED_AT]),
             recordedAt = instant(row[UNCOUNTED_RECORDED_AT]),
-            knownPartyId = nullable(row, UNCOUNTED_PARTY) as UUID?,
-            originRail = nullable(row, UNCOUNTED_RAIL) as String?,
+            knownPartyId = nullable(row, UNCOUNTED_PARTY) as? UUID,
+            originRail = nullable(row, UNCOUNTED_RAIL) as? String,
         )
     }
 
