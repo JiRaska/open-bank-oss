@@ -119,7 +119,9 @@ jobs:
     # main pushes, which gate merges and deploys, always build hosted. The pool is capacity
     # only (rules.yaml: owner_managed_accelerator); the recipe is identical on both pools.
     # Unset or empty variable => every build is hosted (the kill switch when the Mac is down).
-    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'openbank-mini' || 'ubuntu-latest') }}
+    # Main's ref only (and no inputs.ref override): the pool also runs the train settle/publish jobs holding App
+    # keys, so a dispatch on a branch must never put branch code on that host.
+    runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service) && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && inputs.ref == '' && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
     # ADR-0363: a push to main enters `gradle-cache-writer` (branch policy: main only), the sole
     # holder of the cache write secret; every other event runs without an environment. The secret
