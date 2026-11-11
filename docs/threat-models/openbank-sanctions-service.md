@@ -171,6 +171,25 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-11** — **Four-eyes ENFORCED on `sanctions.clear` (`AUTHZ_FOUR_EYES_ENFORCE=true`, #15748).**
+  Until now OPA flagged every hit disposition `four_eyes_required` and the interceptor recorded
+  `required_not_enforced` and executed it on one operator, so section 6's maker-checker control
+  existed in code and in the UI but never stopped anything. The manifest now sets the flag: the
+  maker's `POST /review` answers 202 with an `approvalId`, a DIFFERENT operator decides it from the
+  admin-ui checker queue (`GET/PATCH /api/v1/sanctions/approvals`), and the maker's retry carries
+  `X-Approval-Id`, consumed once (the admin-ui review form already implements both halves).
+  **STRIDE-E/R:** a lone operator can no longer clear a true positive; the self-approval guard in
+  the Redis store refuses maker == checker. **No machine path is paused:** `sanctions.clear` has no
+  `ROLE_API`, no service rule grants it to a `service-account-*`, and the screening callers use
+  `sanctions.create`. A service account holding `ROLE_OPERATOR` (the residual noted 2026-10-08)
+  is now parked at 202 instead of clearing a hit, which narrows that residual. **Availability
+  dependency:** the approval queue now depends on `redis.sanctions.svc`; if it is down an
+  operator's clear fails instead of proceeding — correct for this control. Residual: approvals
+  are Redis records with the interceptor TTL, not durable audit; the disposition audit trail is
+  unchanged. No real-HTTP maker/checker IT exists for this service yet (follow-up on #15748).
+  Rollback: set the env to `"false"` and add a dated `rules.yaml: four_eyes_enforcement.allowlist`
+  entry, or the `four-eyes-enforce-deployed` gate fails.
+
 - **2026-11-04** — **Deferred single-list refresh trigger, v2 (#14780).** New `POST
   /api/v2/sanctions/lists/{listType}/refresh` flags the list (`refresh_requested_at`, the #9048
   refresh-all mechanism) and answers 202 without downloading anything. The import runs through the

@@ -138,6 +138,15 @@ spec:
             # .github/scripts/check-authz-enforce-money-path.py.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # Four-eyes ENFORCED (ADR-0155, #15748): sanctions.clear (deciding a screening hit,
+            # rules.yaml four_eyes.verbs `clear`) answers 202 + approvalId until a DIFFERENT
+            # operator approves it; the maker's retry carries X-Approval-Id (admin-ui /sanctions
+            # review form + checker queue). Human-only: POST /review admits ROLE_OPERATOR/ADMIN
+            # and no rule grants sanctions.clear to a service-account, so no screening caller is
+            # paused (they call sanctions.create). Approvals live in the Redis above.
+            # Rollback: set "false". Gate: four-eyes-enforce-deployed.
+            - name: AUTHZ_FOUR_EYES_ENFORCE
+              value: "true"
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
