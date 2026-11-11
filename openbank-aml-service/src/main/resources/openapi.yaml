@@ -173,7 +173,7 @@ paths:
   /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals:
     post:
       tags: [AML Monitoring]
-      summary: Propose how a transaction-monitoring case is closed
+      summary: Propose how a case opened by the monitoring evaluation is closed
       operationId: proposeMonitoringDisposition
       parameters:
         - name: caseId
@@ -581,8 +581,8 @@ components:
       type: object
       description: >-
         `decisionReason` is mandatory when `targetStatus` is BLOCKED. The decider is the
-        authenticated caller. A transaction-monitoring case can only be moved to UNDER_REVIEW
-        here; closing or escalating it goes through a disposition proposal.
+        authenticated caller. A case opened by the monitoring pack evaluation can only be moved to
+        UNDER_REVIEW here; closing or escalating it goes through a disposition proposal.
       required: [targetStatus]
       properties:
         targetStatus:

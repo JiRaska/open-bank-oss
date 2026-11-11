@@ -134,7 +134,7 @@ Content-Type: application/json
 
 - `targetStatus` musí být platný přechod z aktuálního stavu (viz stavový automat v [02 — Architektura](./02-architecture.md)).
 - `decidedBy` v těle se **ignoruje** (zastaralé): rozhodujícím je přihlášený volající (ADR-0371). `decisionReason` je povinné při `targetStatus = BLOCKED`.
-- Případ `TRANSACTION_MONITORING` lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí.
+- Případ otevřený vyhodnocením balíčku (nikoli případ `TRANSACTION_MONITORING` otevřený platebním kanálem) lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí.
 - **Vedlejší efekty:** přechod + událost `aml.case.status_changed.v1` se commitují atomicky přes outbox.
 
 ## Model chyb

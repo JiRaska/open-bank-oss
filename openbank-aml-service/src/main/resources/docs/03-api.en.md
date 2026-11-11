@@ -134,7 +134,7 @@ Content-Type: application/json
 
 - `targetStatus` must be a valid transition from the current status (see the state machine in [02 — Architecture](./02-architecture.md)).
 - `decidedBy` in the body is **ignored** (deprecated): the decider is the authenticated caller (ADR-0371). `decisionReason` is mandatory when `targetStatus = BLOCKED`.
-- A `TRANSACTION_MONITORING` case can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list.
+- A case opened by the pack evaluation (a pack-monitoring case; not a `TRANSACTION_MONITORING` case a payment rail opened) can only be moved to `UNDER_REVIEW` here; closing or escalating it answers 409 and goes through a disposition proposal (below). To a caller without `ROLE_COMPLIANCE` such a case answers 404 and is absent from the list.
 - **Side-effects:** the transition + an `aml.case.status_changed.v1` event commit atomically via the outbox.
 
 ## Error model

@@ -105,14 +105,15 @@ class AmlCaseService(
         val amlCase = amlCaseRepository.findById(command.caseId)
             ?: throw AmlCaseNotFoundException(command.caseId)
 
-        // ADR-0371 §5: only an approved four-eyes proposal may close or escalate a monitoring case.
+        // ADR-0371 §5: only an approved four-eyes proposal may close or escalate a pack-monitoring case.
+        // A TRANSACTION_MONITORING case a payment rail opened is not one and keeps its single-analyst flow.
         // UNDER_REVIEW stays open to one analyst: picking a case up is not deciding it.
-        if (amlCase.screeningType == com.openbank.aml.domain.model.ScreeningType.TRANSACTION_MONITORING &&
+        if (amlCase.isPackMonitoringCase &&
             command.targetStatus != AmlCaseStatus.UNDER_REVIEW &&
             command.fourEyesProposalId == null
         ) {
             throw InvalidAmlCaseStateTransitionException(
-                "A transaction-monitoring case is closed or escalated only through an approved disposition proposal",
+                "A pack-monitoring case is closed or escalated only through an approved disposition proposal",
             )
         }
 

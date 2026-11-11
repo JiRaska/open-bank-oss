@@ -50,8 +50,9 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
     @Order(1)
     @TestSecurity(user = "alice", roles = ["ROLE_COMPLIANCE"])
     fun `(1) a report rests only on the reported party's own monitoring cases and movements`() {
-        seedCase(CASE, PARTY, "TRANSACTION_MONITORING")
-        seedCase(OTHER_PARTY_CASE, OTHER_PARTY, "TRANSACTION_MONITORING")
+        seedCase(CASE, PARTY, "TRANSACTION_MONITORING", packMonitoring = true)
+        seedCase(OTHER_PARTY_CASE, OTHER_PARTY, "TRANSACTION_MONITORING", packMonitoring = true)
+        seedCase(RAIL_CASE, PARTY, "TRANSACTION_MONITORING")
         rows(
             """
             INSERT INTO aml_booked_movement
@@ -66,6 +67,9 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
             PARTY,
         )
         given().contentType(ContentType.JSON).body(draftBody(PARTY, OTHER_PARTY_CASE))
+            .post("/api/v1/aml/reports").then().statusCode(400)
+        // A rail-opened case of the same party is not a monitoring case and cannot carry a report.
+        given().contentType(ContentType.JSON).body(draftBody(PARTY, RAIL_CASE))
             .post("/api/v1/aml/reports").then().statusCode(400)
         given().contentType(ContentType.JSON).body(draftBody(OTHER_PARTY, OTHER_PARTY_CASE))
             .post("/api/v1/aml/reports").then().statusCode(400)
@@ -175,5 +179,6 @@ class SuspiciousTransactionReportIT : MonitoringDecisionITSupport() {
         val OTHER_PARTY_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c204")
         val JOURNAL: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c205")
         val ACCOUNT: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c206")
+        val RAIL_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c207")
     }
 }

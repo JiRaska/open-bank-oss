@@ -137,6 +137,7 @@ class SuspiciousTransactionReportRepositoryImpl(private val outbox: AmlOutboxRep
                     """
                     SELECT case_id, party_id FROM aml_cases
                      WHERE case_id = :caseId AND party_id = :partyId AND screening_type = 'TRANSACTION_MONITORING'
+                       AND idempotency_key LIKE 'tm:%'
                     """,
                     mapOf("caseId" to caseId, "partyId" to partyId),
                 )

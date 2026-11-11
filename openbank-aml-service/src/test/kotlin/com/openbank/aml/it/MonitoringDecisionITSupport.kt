@@ -27,7 +27,8 @@ abstract class MonitoringDecisionITSupport {
         pool.preparedQuery(sql).execute(Tuple.from(args.toList())).awaitSuspending().toList()
     }
 
-    protected fun seedCase(caseId: UUID, partyId: UUID, screeningType: String) {
+    /** [packMonitoring] seeds the reserved key the evaluation job writes; without it the case is a rail's. */
+    protected fun seedCase(caseId: UUID, partyId: UUID, screeningType: String, packMonitoring: Boolean = false) {
         rows(
             """
             INSERT INTO aml_cases
@@ -37,7 +38,7 @@ abstract class MonitoringDecisionITSupport {
             ON CONFLICT DO NOTHING
             """.trimIndent(),
             caseId,
-            "it:$caseId",
+            if (packMonitoring) "tm:$partyId:syn-structuring-czk-out:$caseId" else "it:$caseId",
             partyId,
             screeningType,
         )

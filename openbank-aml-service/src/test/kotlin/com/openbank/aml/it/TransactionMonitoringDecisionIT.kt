@@ -43,8 +43,10 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
     @Order(1)
     @TestSecurity(user = "alice", roles = ["ROLE_COMPLIANCE"])
     fun `(1) an outcome code the vocabulary does not hold is refused and nothing is proposed`() {
-        seedCase(MONITORING_CASE, PARTY, "TRANSACTION_MONITORING")
+        seedCase(MONITORING_CASE, PARTY, "TRANSACTION_MONITORING", packMonitoring = true)
         seedCase(ONBOARDING_CASE, PARTY, "CUSTOMER_ONBOARDING")
+        // Same screening type, opened by a payment rail: must keep its existing single-analyst flow.
+        seedCase(RAIL_CASE, PARTY, "TRANSACTION_MONITORING")
         propose("LOOKS_FINE").then().statusCode(400)
         assertThat(rows("SELECT 1 FROM aml_case_disposition_proposal WHERE case_id = $1", MONITORING_CASE)).isEmpty()
     }
@@ -86,7 +88,11 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
         given().get("/api/v1/aml/cases/$ONBOARDING_CASE").then().statusCode(200)
         val listed = given().queryParam("partyId", PARTY.toString()).get("/api/v1/aml/cases").then().statusCode(200)
             .extract().jsonPath().getList<String>("id")
-        assertThat(listed).contains(ONBOARDING_CASE.toString()).doesNotContain(MONITORING_CASE.toString())
+        assertThat(listed).contains(ONBOARDING_CASE.toString(), RAIL_CASE.toString()).doesNotContain(MONITORING_CASE.toString())
+        // Control: the rail's TRANSACTION_MONITORING case is still the operator's to read and decide alone.
+        given().get("/api/v1/aml/cases/$RAIL_CASE").then().statusCode(200)
+        given().contentType(ContentType.JSON).body(mapOf("targetStatus" to "CLEARED", "decisionReason" to "released"))
+            .put("/api/v1/aml/cases/$RAIL_CASE/decision").then().statusCode(200).body("decidedBy", equalTo("olga"))
         given().contentType(ContentType.JSON).body(mapOf("targetStatus" to "UNDER_REVIEW"))
             .put("/api/v1/aml/cases/$MONITORING_CASE/decision").then().statusCode(404)
         decide(approve = true).then().statusCode(403)
@@ -141,5 +147,6 @@ class TransactionMonitoringDecisionIT : MonitoringDecisionITSupport() {
         val PARTY: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c101")
         val MONITORING_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c102")
         val ONBOARDING_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c103")
+        val RAIL_CASE: UUID = UUID.fromString("00000000-0000-4000-8000-00000000c104")
     }
 }

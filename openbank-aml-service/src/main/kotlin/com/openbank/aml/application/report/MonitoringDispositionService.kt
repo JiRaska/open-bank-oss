@@ -8,7 +8,6 @@ import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.port.`in`.UpdateAmlDecisionCommand
 import com.openbank.aml.application.port.out.DispositionProposalRepository
 import com.openbank.aml.domain.model.AmlCaseStatus
-import com.openbank.aml.domain.model.ScreeningType
 import com.openbank.aml.domain.report.CaseDisposition
 import com.openbank.aml.domain.report.DispositionProposal
 import com.openbank.aml.domain.report.DispositionRequest
@@ -55,8 +54,8 @@ class MonitoringDispositionService(
         require(note == null || note.length <= MAX_NOTE) { "note is too long" }
         val now = clock.instant()
         val case = cases.getCase(caseId)
-        if (case.screeningType != ScreeningType.TRANSACTION_MONITORING) {
-            throw DispositionConflictException("case $caseId is not a transaction-monitoring case")
+        if (!case.isPackMonitoringCase) {
+            throw DispositionConflictException("case $caseId was not opened by transaction monitoring")
         }
         if (!case.canTransitionTo(target(disposition))) {
             throw DispositionConflictException("case $caseId is ${case.status} and cannot be dispositioned ${disposition.name}")
