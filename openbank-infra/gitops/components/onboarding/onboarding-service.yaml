@@ -55,7 +55,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: onboarding-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-e8e3b10a@sha256:d0dfb0a4e5f0702a7b45db0b80e6fed131e88117e653f8f283f69c0440c2850e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-onboarding-service:sandbox-27e19a17@sha256:dcf74f1528036de422a15e77010c96ee5bd5a967c25297b45f2e235ade37d7c0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
