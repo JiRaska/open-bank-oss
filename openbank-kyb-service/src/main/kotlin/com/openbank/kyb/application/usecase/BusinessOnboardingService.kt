@@ -8,6 +8,7 @@ import com.openbank.kyb.application.port.`in`.AcceptDisclosuresCommand
 import com.openbank.kyb.application.port.`in`.AnswerQuestionnaireCommand
 import com.openbank.kyb.application.port.`in`.BusinessOnboardingUseCase
 import com.openbank.kyb.application.port.`in`.ClaimInvitationCommand
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
 import com.openbank.kyb.application.port.`in`.InviteCosignersCommand
 import com.openbank.kyb.application.port.`in`.LookupCommand
 import com.openbank.kyb.application.port.`in`.MakeDeclarationsCommand
@@ -346,6 +347,14 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         val now = Instant.now(clock)
         val rejected = case.rejected(cmd.reason, now)
         return cases.update(rejected, KybEvents.rejected(rejected, now, cmd.operator)).also(::armTimers)
+    }
+
+    override suspend fun disposeFinding(cmd: DisposeFindingCommand): BusinessOnboardingCase {
+        val case = get(cmd.caseId)
+        val now = Instant.now(clock)
+        val disposed = case.findingDisposed(cmd.subjectKey, cmd.disposition, cmd.operator, cmd.reason, now)
+        log.infof("kyb case %s: screening finding %s set to %s by %s", cmd.caseId, cmd.subjectKey, cmd.disposition, cmd.operator)
+        return cases.update(disposed, null)
     }
 
     override suspend fun entityPartyActivated(entityPartyId: UUID) {

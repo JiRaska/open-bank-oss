@@ -213,6 +213,10 @@ components:
           const: kyb-service
         reviewReason:
           type: [string, 'null']
+          description: >-
+            Why a human must decide. An AML review before activation is published as the fixed text
+            "AML risk review before activation" whatever raised it: neither the customer's risk
+            flags nor any screening finding is on the wire.
     SignerEnvelope:
       type: object
       description: "`CaseSignerEvent` — the case envelope plus which signer moved. `signerName` is present on the invitation only; no date of birth is ever on the wire."

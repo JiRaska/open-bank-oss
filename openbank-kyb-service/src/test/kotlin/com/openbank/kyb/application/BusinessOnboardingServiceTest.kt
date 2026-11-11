@@ -35,7 +35,12 @@ import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
+import com.openbank.kyb.domain.model.ScreeningFindingException
 import com.openbank.kyb.domain.model.ScreeningPendingException
+import com.openbank.kyb.domain.model.FindingDisposition
+import com.openbank.kyb.domain.model.CaseTransitionException
+import com.openbank.kyb.application.port.`in`.DisposeFindingCommand
+import com.openbank.kyb.application.port.`in`.RejectCaseCommand
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.application.port.out.MandateRequest
@@ -927,7 +932,28 @@ class BusinessOnboardingServiceTest {
             assertThat(hit.kind).isEqualTo(ScreeningSubjectKind.BENEFICIAL_OWNER)
             assertThat(hit.matchedName).isEqualTo("VLASTNIK Karel")
 
-            // The human decision: an operator who has seen the finding may resolve the review.
+            // Resolving the review is not a decision about the finding…
+            assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+                .isInstanceOf(ScreeningFindingException::class.java)
+                .extracting { (it as ScreeningFindingException).code }.isEqualTo(ScreeningFindingException.OPEN)
+            assertThat(mandates).isEmpty()
+
+            // …the operator decides it by its own action, and is recorded as having done so.
+            val cleared = service.disposeFinding(
+                DisposeFindingCommand(
+                    id,
+                    hit.key,
+                    FindingDisposition.CLEARED_FALSE_POSITIVE,
+                    "different date of birth",
+                    "operator-anna",
+                ),
+            )
+            assertThat(cleared.status).describedAs("a disposition never moves the case").isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val decided = cleared.screening!!.subjects.single { it.key == hit.key }
+            assertThat(decided.disposedBy).isEqualTo("operator-anna")
+            assertThat(decided.dispositionReason).isEqualTo("different date of birth")
+            assertThat(decided.disposedAt).isEqualTo(now)
+
             val resolved = service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna"))
             assertThat(resolved.status).isEqualTo(CaseStatus.SIGNED)
             assertThat(mandates).hasSize(1)
@@ -1090,6 +1116,60 @@ class BusinessOnboardingServiceTest {
 
     // --- findings need an explicit operator disposition ------------------------------------------
 
+    @Test
+    fun `a confirmed sanctions finding leaves only rejection`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val signed = signs(id, initiator, readyToSign(id, initiator))
+        val key = signed.screening!!.openFindings.single().key
+        service.disposeFinding(
+            DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "identifiers match the list entry", "operator-anna"),
+        )
+
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")) } }
+            .isInstanceOf(ScreeningFindingException::class.java)
+            .extracting { (it as ScreeningFindingException).code }.isEqualTo(ScreeningFindingException.CONFIRMED)
+        // A decision is not revised by deciding again.
+        assertThatThrownBy {
+            runBlocking {
+                service.disposeFinding(
+                    DisposeFindingCommand(id, key, FindingDisposition.CLEARED_FALSE_POSITIVE, "changed my mind about it", "operator-bob"),
+                )
+            }
+        }.isInstanceOf(CaseTransitionException::class.java)
+        assertThat(mandates).isEmpty()
+        assertThat(service.reject(RejectCaseCommand(id, "confirmed sanctions match", "operator-bob")).status)
+            .isEqualTo(CaseStatus.REJECTED)
+    }
+
+    @Test
+    fun `a PEP confirmed by an operator no longer blocks, and a disposition needs an operator and a reason`(): Unit =
+        runBlocking {
+            screeningOn()
+            coEvery { parties.grantMandate(any()) } returns Unit
+            screeningPort.answers["Jana Nováková"] = RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, true, null)
+            val id = soleCaseReadyToSign()
+            val signed = signs(id, initiator, readyToSign(id, initiator))
+            val key = signed.screening!!.openFindings.single().key
+
+            assertThatThrownBy {
+                runBlocking { service.disposeFinding(DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "ok", "operator-anna")) }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy {
+                runBlocking {
+                    service.disposeFinding(DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", " "))
+                }
+            }.isInstanceOf(IllegalArgumentException::class.java)
+
+            service.disposeFinding(
+                DisposeFindingCommand(id, key, FindingDisposition.CONFIRMED, "is a member of parliament", "operator-anna"),
+            )
+            assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status).isEqualTo(CaseStatus.SIGNED)
+        }
+
     /** Chair + ordinary member signed; the rule wants chair + vice. Fully signed, in review for the office. */
     private suspend fun fullySignedOfficeShortfall(): UUID {
         coEvery { registry.lookup(ico, null) } returns
@@ -1133,7 +1213,7 @@ class BusinessOnboardingServiceTest {
 
         // The operator means to settle the OFFICE question. No operator has seen the hit.
         assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 2, "operator-anna")) } }
-            .isInstanceOf(RuntimeException::class.java)
+            .isInstanceOf(ScreeningFindingException::class.java)
         val after = service.get(id)
         assertThat(after.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
         assertThat(mandates).isEmpty()
@@ -1179,6 +1259,10 @@ class BusinessOnboardingServiceTest {
             .isEqualTo(CaseStatus.MANUAL_REVIEW)
         assertThat(signed.screening!!.sanctionsHits.map { it.name }).containsExactly("Karel Vlastník")
         assertThat(mandates).isEmpty()
+        // Kept, marked as no longer on the case, and still standing in the way of a resolution.
+        assertThat(signed.screening!!.openFindings.single().current).isFalse()
+        assertThatThrownBy { runBlocking { service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")) } }
+            .isInstanceOf(ScreeningFindingException::class.java)
     }
 
     private fun owner(name: String, corporate: Boolean) = BeneficialOwner(

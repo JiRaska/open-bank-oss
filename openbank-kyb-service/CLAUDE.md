@@ -81,6 +81,13 @@ is a bug — that is the drift ADR-0212 already paid for once.
   Who matched what is in `Case.screening`, which `CaseResponse.from` fills only when
   `viewerPartyId` is null — the operator routes. Anything else you derive from a list, a score or
   another customer's data belongs behind the same door.
+- **A finding is settled by a disposition, never by a side effect.** `reviewResolved` used to be able
+  to approve a hit that its own pre-approval rebuild had just discovered, and dropping a listed
+  owner from the declarations made the hit vanish. Every non-clear screen now opens a finding
+  (`FindingDisposition.OPEN`); only `findingDisposed` changes it, with the authenticated operator
+  and a reason; `reviewResolved` refuses while one is open or a sanctions one is confirmed; and
+  `CaseScreening.rebuilt` keeps a leaver that carries a finding. If you add a path to SIGNED or
+  ACTIVE, it goes through the same two checks.
 - **A screening is complete for the people on the case NOW, or it is not complete.**
   `RelatedPartyScreeningService.screened` rebuilds the subject list (entity, representatives,
   register owners, declared persons) before every approval and carries answers over by subject; a

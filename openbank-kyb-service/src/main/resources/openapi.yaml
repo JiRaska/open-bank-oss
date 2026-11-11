@@ -7,7 +7,8 @@ info:
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
   # 1.7.0 -> 1.8.0: additive — related-party sanctions / PEP screening: `Case.screening` (operator
-  # view only) and the 503 SCREENING_PENDING refusal on `sign` and `review/resolve`.
+  # view only), the operator disposition route for a finding, the 503 SCREENING_PENDING refusal on
+  # `sign` and `review/resolve`, and the 422 SCREENING_FINDING_* refusal on `review/resolve`.
   version: 1.8.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
@@ -556,6 +557,8 @@ paths:
                 $ref: '#/components/schemas/Case'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ScreeningFinding'
         '503':
           $ref: '#/components/responses/ScreeningPending'
   /api/v1/kyb/representation/{scheme}/{identifier}:
@@ -614,6 +617,43 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Attestation'
+  /api/v1/kyb/cases/{id}/screening/findings/{subjectKey}/disposition:
+    post:
+      tags: [KYB]
+      summary: Operator decides one screening finding
+      description: >-
+        Sets the disposition of one OPEN finding (a sanctions hit, a potential hit or a PEP match)
+        to CLEARED_FALSE_POSITIVE or CONFIRMED, recording the authenticated operator, the reason
+        and the time. It never moves the case: approval stays a separate act. A CONFIRMED sanctions
+        finding leaves only rejection. A decided finding cannot be decided again (409).
+      operationId: disposeScreeningFinding
+      parameters:
+        - $ref: '#/components/parameters/caseId'
+        - name: subjectKey
+          in: path
+          required: true
+          description: '`key` of the subject in `Case.screening.subjects`.'
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisposeFindingRequest'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
   /api/v1/kyb/cases/{id}/reject:
     post:
       tags: [KYB]
@@ -719,6 +759,16 @@ components:
             $ref: '#/components/schemas/Error'
     Conflict:
       description: The transition is not valid in the case's current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ScreeningFinding:
+      description: >-
+        Operator routes only. The review cannot be resolved while a screening finding has no
+        disposition (`error` = SCREENING_FINDING_OPEN), or after a sanctions finding was confirmed
+        (`error` = SCREENING_FINDING_CONFIRMED; the case can only be rejected). Any finding the
+        call itself discovered is stored and visible in `Case.screening`.
       content:
         application/json:
           schema:
@@ -1201,10 +1251,23 @@ components:
         updatedAt:
           type: string
           format: date-time
+    DisposeFindingRequest:
+      type: object
+      required: [disposition, reason]
+      properties:
+        disposition:
+          type: string
+          enum: [CLEARED_FALSE_POSITIVE, CONFIRMED]
+        reason:
+          type: string
+          minLength: 10
     CaseScreening:
       type: object
-      required: [complete, subjects]
+      required: [complete, openFindings, subjects]
       properties:
+        openFindings:
+          type: integer
+          description: Findings with no disposition. The case cannot be approved while this is above zero.
         complete:
           type: boolean
           description: >-
@@ -1220,8 +1283,25 @@ components:
             $ref: '#/components/schemas/ScreeningSubject'
     ScreeningSubject:
       type: object
-      required: [kind, name, organisation, sanctions, pep]
+      required: [key, kind, name, organisation, sanctions, pep, current]
       properties:
+        key:
+          type: string
+          description: Identifies the subject on the disposition route.
+        current:
+          type: boolean
+          description: False for a subject that left the case and is kept because of its finding.
+        disposition:
+          type: [string, 'null']
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED, null]
+          description: Null when there is nothing to decide.
+        disposedBy:
+          type: [string, 'null']
+        dispositionReason:
+          type: [string, 'null']
+        disposedAt:
+          type: [string, 'null']
+          format: date-time
         kind:
           type: string
           enum: [ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER, DECLARED_PERSON]

@@ -43,9 +43,60 @@ data class ScreeningSubject(
     val pep: Boolean = false,
     val matchedName: String? = null,
     val screenedAt: Instant? = null,
+    /**
+     * False once the subject is no longer among the case's parties. Such a subject is kept only
+     * while it carries a finding: a hit does not go away because the person was taken off a form.
+     */
+    val current: Boolean = true,
+    /** Null while there is nothing to decide (pending, or clear and not a PEP). */
+    val disposition: FindingDisposition? = null,
+    val disposedBy: String? = null,
+    val dispositionReason: String? = null,
+    val disposedAt: Instant? = null,
 ) {
     val sanctionsHit: Boolean
         get() = sanctions == ScreeningVerdict.HIT || sanctions == ScreeningVerdict.POTENTIAL_HIT
+
+    /** Anything a human has to decide: a sanctions hit, a potential hit or a PEP match. */
+    val finding: Boolean get() = sanctionsHit || pep
+
+    /** A finding nobody has decided. A finding stored without a disposition counts as open. */
+    val findingOpen: Boolean get() = finding && (disposition == null || disposition == FindingDisposition.OPEN)
+
+    /** An operator confirmed the sanctions match is this subject. Nothing approves past it. */
+    val sanctionsConfirmed: Boolean get() = sanctionsHit && disposition == FindingDisposition.CONFIRMED
+
+    /** The screen's answer. A non-clear answer opens a finding; it is never decided by arriving. */
+    fun answered(verdict: ScreeningVerdict, pep: Boolean, matchedName: String?, at: Instant): ScreeningSubject {
+        val next = copy(sanctions = verdict, pep = pep, matchedName = matchedName, screenedAt = at)
+        return if (next.finding) next.copy(disposition = FindingDisposition.OPEN) else next
+    }
+}
+
+/**
+ * What an operator decided about one finding. There is no implicit way out of [OPEN]: resolving a
+ * review, collecting a signature or removing the person from the case all leave it open.
+ */
+enum class FindingDisposition {
+    OPEN,
+
+    /** The match is not this subject. */
+    CLEARED_FALSE_POSITIVE,
+
+    /** The match is this subject. For a sanctions finding the case can then only be rejected. */
+    CONFIRMED,
+}
+
+/**
+ * An approval was attempted while a finding is undecided, or after a sanctions finding was
+ * confirmed. Thrown on OPERATOR routes only — the applicant's routes never raise it, because its
+ * existence says what a screen found.
+ */
+class ScreeningFindingException(val code: String, message: String) : RuntimeException(message) {
+    companion object {
+        const val OPEN = "SCREENING_FINDING_OPEN"
+        const val CONFIRMED = "SCREENING_FINDING_CONFIRMED"
+    }
 }
 
 /**
@@ -76,8 +127,16 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
     val complete: Boolean
         get() = ownerSource != null &&
             ownerSource != UboSource.UNAVAILABLE &&
-            subjects.isNotEmpty() &&
-            subjects.none { it.sanctions == ScreeningVerdict.PENDING }
+            subjects.any { it.current } &&
+            subjects.none { it.current && it.sanctions == ScreeningVerdict.PENDING }
+
+    /** Findings nobody has decided — on current subjects AND on subjects that have since left. */
+    val openFindings: List<ScreeningSubject> get() = subjects.filter { it.findingOpen }
+
+    val confirmedSanctions: List<ScreeningSubject> get() = subjects.filter { it.sanctionsConfirmed }
+
+    /** Nothing here stands in the way of approval: complete, every finding decided, no confirmed sanctions match. */
+    val approvable: Boolean get() = complete && openFindings.isEmpty() && confirmedSanctions.isEmpty()
 
     val sanctionsHits: List<ScreeningSubject> get() = subjects.filter { it.sanctionsHit }
 
@@ -89,16 +148,58 @@ data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: 
      * naming the cause, even as "screening", is tipping off. Who matched what is in [subjects],
      * which only an operator reads.
      */
-    val requiresReview: Boolean get() = sanctionsHits.isNotEmpty() || peps.isNotEmpty()
+    val requiresReview: Boolean get() = openFindings.isNotEmpty() || confirmedSanctions.isNotEmpty()
 
-    /** [fresh] is the case's CURRENT subject list; answers already obtained for people still on it are kept. */
+    /**
+     * [fresh] is the case's CURRENT subject list. Answers already obtained for people still on it
+     * are kept. A subject that LEFT is dropped only if it was clear or never answered; one that
+     * carries a finding stays, marked no longer current, and keeps counting until an operator
+     * decides it — otherwise taking a listed person off the declarations would approve the case.
+     */
     fun rebuilt(fresh: List<ScreeningSubject>, ownerSource: UboSource): CaseScreening {
         val known = subjects.associateBy { it.key }
-        return CaseScreening(fresh.map { known[it.key] ?: it }, ownerSource)
+        val freshKeys = fresh.map { it.key }.toSet()
+        val now = fresh.map { known[it.key]?.copy(kind = it.kind, name = it.name, current = true) ?: it }
+        val leftWithFinding = subjects.filter { it.key !in freshKeys && it.finding }.map { it.copy(current = false) }
+        return CaseScreening(now + leftWithFinding, ownerSource)
+    }
+
+    /**
+     * An operator decides one finding. Only an OPEN finding can be decided, and a decision is not
+     * revised here: a second opinion is a new screen, not an edit of the first.
+     */
+    fun disposed(
+        subjectKey: String,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): CaseScreening {
+        require(disposition != FindingDisposition.OPEN) { "a disposition must be CLEARED_FALSE_POSITIVE or CONFIRMED" }
+        require(operator.isNotBlank()) { "the deciding operator must be identified" }
+        require(reason.trim().length >= MIN_REASON) { "a disposition needs a reason of at least $MIN_REASON characters" }
+        val subject = subjects.firstOrNull { it.key == subjectKey }
+            ?: throw IllegalArgumentException("no screened subject '$subjectKey' on this case")
+        if (!subject.findingOpen) throw CaseTransitionException("subject '$subjectKey' has no open finding")
+        return copy(
+            subjects = subjects.map {
+                if (it.key != subjectKey) {
+                    it
+                } else {
+                    it.copy(
+                        disposition = disposition,
+                        disposedBy = operator,
+                        dispositionReason = reason.trim(),
+                        disposedAt = at,
+                    )
+                }
+            },
+        )
     }
 
     companion object {
         private const val KEY_HEX_CHARS = 24
+        const val MIN_REASON = 10
 
         /**
          * The people and the entity to screen. A beneficial owner that is itself a company is

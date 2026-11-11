@@ -516,8 +516,42 @@ data class BusinessOnboardingCase(
     fun screeningRecorded(screening: CaseScreening, at: Instant): BusinessOnboardingCase =
         copy(screening = screening, updatedAt = at)
 
+    /** An operator decided one screening finding. Never moves the case: approval stays a separate act. */
+    fun findingDisposed(
+        subjectKey: String,
+        disposition: FindingDisposition,
+        operator: String,
+        reason: String,
+        at: Instant,
+    ): BusinessOnboardingCase {
+        require(!status.isTerminal) { "case is already $status" }
+        val current = screening ?: throw CaseTransitionException("this case has no screening")
+        return copy(screening = current.disposed(subjectKey, disposition, operator, reason, at), updatedAt = at)
+    }
+
     private fun requireScreened(required: Boolean) {
         if (required && screening?.complete != true) throw ScreeningPendingException()
+    }
+
+    /**
+     * No operator act approves past a finding. An OPEN one has to be decided first, by its own
+     * action — resolving a review is not a decision about a finding, least of all one the same call
+     * just discovered. A CONFIRMED sanctions match leaves only rejection.
+     */
+    private fun requireFindingsDecided(required: Boolean) {
+        val s = screening?.takeIf { required } ?: return
+        if (s.confirmedSanctions.isNotEmpty()) {
+            throw ScreeningFindingException(
+                ScreeningFindingException.CONFIRMED,
+                "a sanctions finding on this case is confirmed; the case can only be rejected",
+            )
+        }
+        if (s.openFindings.isNotEmpty()) {
+            throw ScreeningFindingException(
+                ScreeningFindingException.OPEN,
+                "${s.openFindings.size} screening finding(s) on this case have no disposition; decide them first",
+            )
+        }
     }
 
     private fun requireCollecting(what: String) {
@@ -657,6 +691,7 @@ data class BusinessOnboardingCase(
     ): BusinessOnboardingCase {
         require(status == CaseStatus.MANUAL_REVIEW) { "not under review" }
         require(requiredSignatures >= 1) { "at least one signature is required" }
+        requireFindingsDecided(screeningRequired)
         val next = copy(
             requiredSignatures = requiredSignatures,
             // Normalised on the way IN, not as a safety guard — `holdsOffice` folds and

@@ -13,6 +13,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.Declarations
+import com.openbank.kyb.domain.model.FindingDisposition
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.Questionnaire
@@ -174,6 +175,11 @@ internal object KybJson {
         val pep: Boolean,
         val matchedName: String?,
         val screenedAt: Instant?,
+        val current: Boolean = true,
+        val disposition: String? = null,
+        val disposedBy: String? = null,
+        val dispositionReason: String? = null,
+        val disposedAt: Instant? = null,
     )
 
     data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>, val ownerSource: String? = null)
@@ -190,6 +196,11 @@ internal object KybJson {
                     pep = it.pep,
                     matchedName = it.matchedName,
                     screenedAt = it.screenedAt,
+                    current = it.current,
+                    disposition = it.disposition?.name,
+                    disposedBy = it.disposedBy,
+                    dispositionReason = it.dispositionReason,
+                    disposedAt = it.disposedAt,
                 )
             },
             screening.ownerSource?.name,
@@ -210,5 +221,10 @@ internal object KybJson {
         pep = doc.pep,
         matchedName = doc.matchedName,
         screenedAt = doc.screenedAt,
+        current = doc.current,
+        disposition = doc.disposition?.let(FindingDisposition::valueOf),
+        disposedBy = doc.disposedBy,
+        dispositionReason = doc.dispositionReason,
+        disposedAt = doc.disposedAt,
     )
 }

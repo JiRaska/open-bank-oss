@@ -12,6 +12,7 @@ import com.openbank.kyb.application.usecase.StaleAttestationException
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
+import com.openbank.kyb.domain.model.ScreeningFindingException
 import com.openbank.kyb.domain.model.ScreeningPendingException
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
@@ -92,6 +93,15 @@ class RegistryUnavailableMapper : ExceptionMapper<RegistryUnavailableException> 
 @Provider
 class ScreeningPendingMapper : ExceptionMapper<ScreeningPendingException> {
     override fun toResponse(e: ScreeningPendingException): Response = error(UNAVAILABLE, "SCREENING_PENDING", e.message)
+}
+
+/**
+ * An operator tried to approve past a screening finding that is undecided, or confirmed. 422: the
+ * request is well-formed and the case's own facts forbid it. Raised on operator routes only.
+ */
+@Provider
+class ScreeningFindingMapper : ExceptionMapper<ScreeningFindingException> {
+    override fun toResponse(e: ScreeningFindingException): Response = error(UNPROCESSABLE, e.code, e.message)
 }
 
 private const val NOT_FOUND = 404

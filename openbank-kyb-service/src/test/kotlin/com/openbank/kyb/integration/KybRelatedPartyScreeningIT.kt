@@ -194,6 +194,7 @@ class KybRelatedPartyScreeningIT {
         Given { this } When { get("/api/v1/kyb/cases/$caseId") } Then {
             statusCode(200)
             body("screening.complete", equalTo(true))
+            body("screening.openFindings", equalTo(1))
             body("screening.ownerSource", equalTo("SELF_DECLARATION"))
             body("screening.subjects", hasSize<Any>(2))
             body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.sanctions", equalTo("POTENTIAL_HIT"))
@@ -201,7 +202,34 @@ class KybRelatedPartyScreeningIT {
             body("screening.subjects.find { it.kind == 'ENTITY' }.sanctions", equalTo("CLEAR"))
         }
 
-        // The human decision: the operator resolves the review, and only then do the mandates exist.
+        // Resolving the review does not decide the finding: refused, and nothing is granted.
+        Given {
+            contentType("application/json")
+            body("""{"requiredSignatures":1}""")
+        } When { post("/api/v1/kyb/cases/$caseId/review/resolve") } Then {
+            statusCode(422)
+            body("error", equalTo("SCREENING_FINDING_OPEN"))
+        }
+        assertThat(stored(caseId).status).isEqualTo("MANUAL_REVIEW")
+        assertThat(mandatesFor(caseId)).isEmpty()
+
+        // The operator decides the finding by its own action; who decided is the authenticated principal.
+        val key = (
+            Given { this } When { get("/api/v1/kyb/cases/$caseId") } Then { statusCode(200) }
+            ).extract().path<String>("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.key")
+        Given {
+            contentType("application/json")
+            body("""{"disposition":"CLEARED_FALSE_POSITIVE","reason":"different date of birth"}""")
+        } When { post("/api/v1/kyb/cases/$caseId/screening/findings/$key/disposition") } Then {
+            statusCode(200)
+            body("status", equalTo("MANUAL_REVIEW"))
+            body("screening.openFindings", equalTo(0))
+            body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.disposedBy", equalTo("service-account-openbank-edge"))
+        }
+        assertThat(stored(caseId).screeningJson)
+            .contains("CLEARED_FALSE_POSITIVE", "different date of birth", "service-account-openbank-edge")
+
+        // Only now can the review be resolved, and only then do the mandates exist.
         Given {
             contentType("application/json")
             body("""{"requiredSignatures":1}""")

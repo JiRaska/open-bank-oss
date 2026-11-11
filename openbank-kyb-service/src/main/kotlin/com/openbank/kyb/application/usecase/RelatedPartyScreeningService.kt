@@ -101,7 +101,11 @@ class RelatedPartyScreeningService {
         val current = (case.screening ?: CaseScreening(emptyList())).rebuilt(fresh, finding.source)
         val next = current.copy(
             subjects = current.subjects.map { subject ->
-                if (subject.sanctions != ScreeningVerdict.PENDING) subject else screenOne(case, subject, now)
+                if (!subject.current || subject.sanctions != ScreeningVerdict.PENDING) {
+                    subject
+                } else {
+                    screenOne(case, subject, now)
+                }
             },
         )
         return if (next == case.screening) case else case.screeningRecorded(next, now)
@@ -118,12 +122,7 @@ class RelatedPartyScreeningService {
                 ),
             )
             metrics.relatedPartyScreened(outcome(result.sanctions, result.pep))
-            subject.copy(
-                sanctions = result.sanctions,
-                pep = result.pep,
-                matchedName = result.matchedName,
-                screenedAt = now,
-            )
+            subject.answered(result.sanctions, result.pep, result.matchedName, now)
         } catch (e: RelatedPartyScreeningUnavailableException) {
             // Deliberately not rethrown: the customer's step (declarations) must not fail on an
             // outage. The subject stays PENDING, which is what refuses the approval later.
