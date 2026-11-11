@@ -248,9 +248,12 @@ jobs:
       # `pretest` still regenerates governance.json for the suite below.
 
       - name: Test (unit + integration)
-        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
+        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml --coverage --coverage.reporter=text-summary
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
+        # ADR-0370 U3: --coverage makes the floors in vitest.config.ts (global and per src/lib
+        # module) fail this step. Without it they were enforced nowhere. text-summary only: the
+        # html/json reporters cost time and nothing here reads them.
 
       - name: Build
         run: npm run build
