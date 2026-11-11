@@ -215,8 +215,12 @@ class DomesticOriginalSubmissionKeyIT {
                     while (rows.next()) {
                         add(
                             StoredWrite(
-                                rows.getString(1), rows.getString(2), rows.getString(3),
-                                rows.getString(4), rows.getString(5), rows.getString(6),
+                                rows.getString(1),
+                                rows.getString(2),
+                                rows.getString(3),
+                                rows.getString(4),
+                                rows.getString(5),
+                                rows.getString(6),
                             ),
                         )
                     }
