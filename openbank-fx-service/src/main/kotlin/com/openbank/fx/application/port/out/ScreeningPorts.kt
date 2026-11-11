@@ -21,21 +21,38 @@ class ScreeningUnavailableException(cause: Throwable) :
  */
 interface SanctionsScreeningPort {
     /**
-     * [aliases] are further names of the SAME subject (a trading name beside the legal name).
-     * sanctions-service searches the lists for the name and for every alias and reports the worst
-     * outcome, so one call screens them all under one idempotency key.
+     * Screens every name of [subject] in one call: sanctions-service searches the lists for the
+     * primary name and for every alias and reports the worst outcome, under one idempotency key.
      */
-    suspend fun screen(
-        name: String,
-        role: ScreeningRole,
-        idempotencyKey: String,
-        aliases: List<String> = emptyList(),
-    ): ScreeningResult
+    suspend fun screen(subject: ScreeningSubject, role: ScreeningRole, idempotencyKey: String): ScreeningResult
 }
 
 /**
- * Raised when the converting party's names cannot be established — party-service is unreachable, it
- * holds no such party, or the party carries no usable name. Without a name there is nothing to screen, so
+ * What kind of subject is screened, in sanctions-service's `EntityType` wire vocabulary. Only the
+ * two kinds a bank customer can be; never a default, always derived from the party record.
+ */
+enum class ScreeningEntityType { INDIVIDUAL, ORGANIZATION }
+
+/**
+ * The identity a conversion is screened under: every name the bank holds for the party and what
+ * kind of party it is. Built from the party record only — never from anything a caller sent.
+ */
+data class ScreeningSubject(val names: List<String>, val entityType: ScreeningEntityType) {
+    init {
+        require(names.isNotEmpty()) { "a screening subject needs at least one name" }
+    }
+
+    /** The legal name (a natural person's full name). */
+    val primaryName: String get() = names.first()
+
+    /** Further names of the SAME subject, e.g. a trading name beside the legal name. */
+    val aliases: List<String> get() = names.drop(1)
+}
+
+/**
+ * Raised when the converting party's screening identity cannot be established — party-service is
+ * unreachable, it holds no such party, the party carries no usable name, or its record does not say
+ * whether it is a person or an organisation. Without that there is nothing to screen, so
  * the gate fails closed exactly as it does for [ScreeningUnavailableException]: a conversion whose
  * party could not be named is never "screened clear".
  */
@@ -43,10 +60,11 @@ class PartyNameUnavailableException(partyId: UUID, cause: Throwable? = null) :
     RuntimeException("The name of party $partyId is unavailable; conversion held", cause)
 
 /**
- * Outbound port to party-service, the golden source of a party's name. A persisted conversion
- * carries only the party id, so a screen that runs after the request is gone (the conversion
- * workflow) has to ask for the name; screening the id itself compares a UUID against name lists
- * and can never hit.
+ * Outbound port to party-service, the golden source of a party's name. Both screens of a
+ * conversion ask it: the workflow because a persisted conversion carries only the party id (and a
+ * UUID compared against name lists can never hit), the synchronous `POST /convert` path because
+ * the only other name on hand is one the caller typed, and a caller must not choose the name it is
+ * screened under.
  *
  * A party is screened under EVERY name it carries: a listed trading name behind a clean legal name
  * must not pass. The record holds a legal name (a natural person's full name is that field) and
@@ -55,8 +73,11 @@ class PartyNameUnavailableException(partyId: UUID, cause: Throwable? = null) :
  * @throws PartyNameUnavailableException when no name could be obtained
  */
 interface PartyNamePort {
-    /** Every non-blank, distinct name of the party. Never empty: "no name" is the exception. */
-    suspend fun screeningNames(partyId: UUID): List<String>
+    /**
+     * Every non-blank, distinct name of the party and its kind. Never an empty name list: "no
+     * name" is the exception.
+     */
+    suspend fun screeningSubject(partyId: UUID): ScreeningSubject
 }
 
 /** Risk grading of an opened AML case, mirrors aml-service `AmlRiskLevel`. */

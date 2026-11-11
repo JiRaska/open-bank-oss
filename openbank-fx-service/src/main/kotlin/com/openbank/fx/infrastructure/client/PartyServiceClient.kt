@@ -36,10 +36,12 @@ interface PartyServiceClient {
 }
 
 /**
- * The two name fields of party-service's party payload — a local mirror, never a shared type.
+ * The name fields and the party kind of party-service's party payload — a local mirror, never a
+ * shared type. `partyType` carries party-service's `PartyType` name (INDIVIDUAL, SOLE_TRADER,
+ * COMPANY, TRUST) and is kept a string so an added kind cannot fail deserialisation.
  * `ignoreUnknown` is load-bearing: the payload also carries identifiers, birth data and contact
  * details, and not binding them keeps that personal data out of this service's heap and logs
- * (GDPR Art. 5(1)(c)); a sanctions screen compares names and needs nothing else.
+ * (GDPR Art. 5(1)(c)); a sanctions screen needs the names and the kind and nothing else.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class PartyNameView(val legalName: String? = null, val tradingName: String? = null)
+data class PartyNameView(val legalName: String? = null, val tradingName: String? = null, val partyType: String? = null)

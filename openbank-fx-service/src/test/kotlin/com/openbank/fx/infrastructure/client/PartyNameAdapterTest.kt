@@ -5,6 +5,7 @@
 package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.PartyNameUnavailableException
+import com.openbank.fx.application.port.out.ScreeningEntityType
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
@@ -25,12 +26,15 @@ class PartyNameAdapterTest {
     private val adapter = PartyNameAdapter(client).also { it.self = it }
     private val partyId: UUID = UUID.randomUUID()
 
-    private fun names() = runBlocking { adapter.screeningNames(partyId) }
+    private fun subject() = runBlocking { adapter.screeningSubject(partyId) }
+    private fun names() = subject().names
 
     @Test
     fun `the legal name comes first and the trading name follows`() {
         every { client.getParty(partyId.toString()) } returns
-            Uni.createFrom().item(PartyNameView(legalName = " Jana Nováková ", tradingName = "JN Design"))
+            Uni.createFrom().item(
+                PartyNameView(legalName = " Jana Nováková ", tradingName = "JN Design", partyType = "SOLE_TRADER"),
+            )
 
         assertThat(names()).containsExactly("Jana Nováková", "JN Design")
     }
@@ -42,7 +46,7 @@ class PartyNameAdapterTest {
     @Test
     fun `a party with a legal and a trading name has BOTH handed to the screen`() {
         every { client.getParty(any()) } returns
-            Uni.createFrom().item(PartyNameView(legalName = "Clean Legal s.r.o.", tradingName = "Listed Trading"))
+            Uni.createFrom().item(PartyNameView("Clean Legal s.r.o.", "Listed Trading", "COMPANY"))
 
         assertThat(names()).containsExactly("Clean Legal s.r.o.", "Listed Trading")
     }
@@ -50,20 +54,48 @@ class PartyNameAdapterTest {
     @Test
     fun `a blank name is dropped and a trading name equal to the legal name is not repeated`() {
         every { client.getParty(any()) } returns
-            Uni.createFrom().item(PartyNameView(legalName = "  ", tradingName = "JN Design"))
+            Uni.createFrom().item(PartyNameView(legalName = "  ", tradingName = "JN Design", partyType = "COMPANY"))
         assertThat(names()).containsExactly("JN Design")
 
         every { client.getParty(any()) } returns
-            Uni.createFrom().item(PartyNameView(legalName = "Jan Novák", tradingName = "JAN NOVÁK"))
+            Uni.createFrom().item(
+                PartyNameView(legalName = "Jan Novák", tradingName = "JAN NOVÁK", partyType = "INDIVIDUAL"),
+            )
         assertThat(names()).containsExactly("Jan Novák")
     }
 
     @Test
     fun `a party with no name at all is unavailable, never an empty name`() {
         every { client.getParty(any()) } returns
-            Uni.createFrom().item(PartyNameView(legalName = null, tradingName = ""))
+            Uni.createFrom().item(PartyNameView(legalName = null, tradingName = "", partyType = "INDIVIDUAL"))
 
         assertThatThrownBy { names() }.isInstanceOf(PartyNameUnavailableException::class.java)
+    }
+
+    /** The kind is the record's, never a constant: a company screened as a person is misrecorded. */
+    @Test
+    fun `the entity type is derived from the party type`() {
+        fun typeOf(partyType: String): ScreeningEntityType {
+            every { client.getParty(any()) } returns
+                Uni.createFrom().item(PartyNameView(legalName = "Some Name", partyType = partyType))
+            return subject().entityType
+        }
+
+        assertThat(typeOf("INDIVIDUAL")).isEqualTo(ScreeningEntityType.INDIVIDUAL)
+        assertThat(typeOf("SOLE_TRADER")).isEqualTo(ScreeningEntityType.INDIVIDUAL)
+        assertThat(typeOf("COMPANY")).isEqualTo(ScreeningEntityType.ORGANIZATION)
+        assertThat(typeOf("TRUST")).isEqualTo(ScreeningEntityType.ORGANIZATION)
+    }
+
+    @Test
+    fun `a party whose kind is absent or unrecognised is unavailable, never guessed`() {
+        every { client.getParty(any()) } returns
+            Uni.createFrom().item(PartyNameView(legalName = "Some Name", partyType = null))
+        assertThatThrownBy { subject() }.isInstanceOf(PartyNameUnavailableException::class.java)
+
+        every { client.getParty(any()) } returns
+            Uni.createFrom().item(PartyNameView(legalName = "Some Name", partyType = "SOMETHING_NEW"))
+        assertThatThrownBy { subject() }.isInstanceOf(PartyNameUnavailableException::class.java)
     }
 
     @Test

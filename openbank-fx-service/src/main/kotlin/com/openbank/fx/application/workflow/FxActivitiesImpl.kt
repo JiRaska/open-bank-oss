@@ -63,8 +63,8 @@ open class FxActivitiesImpl(
         // Every name the party carries is screened in the one call: the legal name as the subject,
         // any other (a trading name) as an alias, which sanctions-service matches against the lists too.
         val result = try {
-            val names = partyNamePort.screeningNames(conv.partyId)
-            screeningPort.screen(names.first(), ScreeningRole.DEBTOR, "$conversionId:party", names.drop(1))
+            val subject = partyNamePort.screeningSubject(conv.partyId)
+            screeningPort.screen(subject, ScreeningRole.DEBTOR, "$conversionId:party")
         } catch (ex: PartyNameUnavailableException) {
             return@vtx heldUnscreened(conv, ex)
         } catch (ex: ScreeningUnavailableException) {

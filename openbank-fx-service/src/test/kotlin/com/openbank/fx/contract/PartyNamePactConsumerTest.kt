@@ -71,6 +71,10 @@ class PartyNamePactConsumerTest {
                 // is the field being renamed or absent.
                 o.stringType("legalName", "Pact Verify Trading Company a.s.")
                 o.stringType("tradingName", "PactVerify")
+                // The screen's entity type is derived from this field. Pinned to party-service's
+                // `PartyType` names: a renamed or added kind must turn this contract red, because
+                // the adapter holds every conversion of a party whose kind it does not recognise.
+                o.stringMatcher("partyType", "INDIVIDUAL|SOLE_TRADER|COMPANY|TRUST", "COMPANY")
             }.build(),
         )
         .toPact()
@@ -92,6 +96,7 @@ class PartyNamePactConsumerTest {
         val view = mapper.readValue<PartyNameView>(raw)
         assertThat(view.legalName).isNotBlank()
         assertThat(view.tradingName).isNotBlank()
+        assertThat(view.partyType).isEqualTo("COMPANY")
     }
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
