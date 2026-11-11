@@ -203,6 +203,20 @@ gates:
     run: |
       python3 .github/scripts/check-pitest-threshold-single-source.py
 
+  - id: pitest-money-path-coverage
+    name: "every money-path service is in the weekly pitest matrix or has a written exclusion (enforced)"
+    group: lint
+    mode: enforced
+    min_subjects: 20   # 28 money_path_services on 2026-11-10
+    budget_seconds: 10
+    rationale: "The pitest matrix was a hand-kept list: pension (392 domain branch sites) and pension-fund were money-path and unmeasured for weeks, and rules.yaml still described lending as one branchless file. The check derives money_path_services, the matrix and each module's plugin and branch count, and requires them to partition; the self-test feeds it each way the partition can break."
+    review_after: "2027-11-10"
+    selftest: python3 .github/scripts/check-pitest-money-path-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-pitest-money-path-coverage.py", ".github/workflows/pitest.yml"]
+    run: |
+      python3 .github/scripts/check-pitest-money-path-coverage.py
+
   - id: fleet-scanning-test-edges
     name: "services-ci builds tests that read other modules' trees (derived, enforced)"
     group: lint
@@ -7860,7 +7874,7 @@ gates:
       fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
       from history, and counts an unresolvable pin as lagging. It is monotonic once green.
     review_after: "2027-04-11"
-    budget_seconds: 180                  # ~60 compare-API calls in a shallow checkout
+    budget_seconds: 180                  # ~15 s blobless fetch of main in a shallow checkout (#15483)
     min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
     run: |
       bash .github/scripts/check-pdp-flag-rollout.sh

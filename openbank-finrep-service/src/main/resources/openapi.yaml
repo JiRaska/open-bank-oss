@@ -24,10 +24,11 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.14.0
+  version: 1.15.0
 tags:
   - name: FINREP
   - name: COREP
+  - name: Submissions
 paths:
   /api/v1/finrep/templates/{templateId}/xbrl-csv/preflight:
     get:
@@ -218,8 +219,337 @@ paths:
         '403':
           description: Token lacks one of the SERVICE / ADMIN / OPERATOR roles
 
+  /api/v1/finrep/submissions:
+    post:
+      tags: [Submissions]
+      summary: Open (or return) the submission for a return revision
+      description: >-
+        Idempotent per (templateId, referencePeriod, revision): the first call creates a DRAFT and
+        answers 201, a repeat answers 200 with the same submission.
+      operationId: openFinrepSubmission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenSubmissionRequest' }
+      responses:
+        '201':
+          description: Submission created in DRAFT
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '200':
+          description: Submission already existed for this revision
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing or invalid field
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+    get:
+      tags: [Submissions]
+      summary: List submissions, newest reference period first
+      operationId: listFinrepSubmissions
+      parameters:
+        - name: templateId
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Submissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}:
+    get:
+      tags: [Submissions]
+      summary: Read one submission
+      operationId: getFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/package:
+    post:
+      tags: [Submissions]
+      summary: Package a DRAFT return once the XBRL-CSV preflight is READY_FOR_RENDERING
+      description: >-
+        Records a package MANIFEST (identity plus framework/taxonomy versions, SHA-256 hashed). No
+        XBRL-CSV archive is rendered. Idempotent: an already-packaged submission is returned as is.
+      operationId: packageFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission in PACKAGED (or later) state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '409':
+          description: Preflight BLOCKED; the blocker codes are in the message
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/submit:
+    post:
+      tags: [Submissions]
+      summary: Hand a PACKAGED return to the configured supervisory transport
+      description: >-
+        Every call records an attempt. The default transport is a dry run: it transmits nothing,
+        records outcome DRY_RUN and leaves the submission PACKAGED. Only a SUBMITTED transport
+        outcome moves it to SUBMITTED. A return already SUBMITTED, ACKNOWLEDGED or REJECTED is
+        returned unchanged without another transport call.
+      operationId: submitFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Submission after the attempt
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '409':
+          description: >-
+            Submission is still DRAFT, or another request holds the transmission claim
+            (SUBMISSION_IN_PROGRESS), or its outcome is unknown and an ADMIN must reconcile it
+            (OUTCOME_UNKNOWN). The claim is a conditional PACKAGED -> SUBMITTING update, so
+            concurrent submits never call the transport twice. A transport error or a cancelled
+            request records UNKNOWN and moves the return to OUTCOME_UNKNOWN, never back to PACKAGED.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/acknowledgement:
+    post:
+      tags: [Submissions]
+      summary: Record the supervisor's acknowledgement of a SUBMITTED return
+      operationId: acknowledgeFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AcknowledgementRequest' }
+      responses:
+        '200':
+          description: Submission now ACKNOWLEDGED (accepted) or REJECTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing field
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '422':
+          description: Submission is not SUBMITTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: A concurrent acknowledgement settled the submission first; nothing was recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
+  /api/v1/finrep/submissions/{id}/reconcile:
+    post:
+      tags: [Submissions]
+      summary: Resolve an OUTCOME_UNKNOWN return after checking with the supervisor (ADMIN only)
+      description: >-
+        Allowed from OUTCOME_UNKNOWN, or from SUBMITTING once the claim lease has expired (the
+        claim is lapsed to OUTCOME_UNKNOWN first). `sent: true` (with the supervisor's reference)
+        moves the return to SUBMITTED; `sent: false` releases it to PACKAGED. Recorded as an
+        attempt by `operator-reconcile`.
+      operationId: reconcileFinrepSubmission
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReconcileRequest' }
+      responses:
+        '200':
+          description: Submission after reconciliation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SupervisorySubmission' }
+        '400':
+          description: Missing field, or sent=true without a reference
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '409':
+          description: Submission is not in a reconcilable state (NOT_RECONCILABLE)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN
+
+  /api/v1/finrep/submissions/{id}/attempts:
+    get:
+      tags: [Submissions]
+      summary: List transport attempts for a submission
+      operationId: listFinrepSubmissionAttempts
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Attempts in order
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SubmissionAttempt' }
+        '404':
+          description: Unknown submission id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '401':
+          description: Missing or invalid access token
+        '403':
+          description: Token lacks ROLE_ADMIN or ROLE_OPERATOR
+
 components:
   schemas:
+    OpenSubmissionRequest:
+      type: object
+      required: [templateId, referencePeriod, revision]
+      properties:
+        templateId: { type: string }
+        referencePeriod: { type: string, format: date }
+        revision: { type: integer, minimum: 1 }
+    ReconcileRequest:
+      type: object
+      required: [sent]
+      properties:
+        sent: { type: boolean }
+        reference: { type: string }
+        note: { type: string }
+    AcknowledgementRequest:
+      type: object
+      required: [accepted, reference]
+      properties:
+        accepted: { type: boolean }
+        reference: { type: string }
+        message: { type: string }
+    SupervisorySubmission:
+      type: object
+      required: [id, templateId, referencePeriod, revision, state, createdBy, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        templateId: { type: string }
+        referencePeriod: { type: string, format: date }
+        revision: { type: integer }
+        state: { type: string, enum: [DRAFT, PACKAGED, SUBMITTING, OUTCOME_UNKNOWN, SUBMITTED, ACKNOWLEDGED, REJECTED] }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        reportingFrameworkVersion: { type: string, nullable: true }
+        taxonomyVersion: { type: string, nullable: true }
+        packageHash: { type: string, nullable: true }
+        packagedAt: { type: string, format: date-time, nullable: true }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        transportReference: { type: string, nullable: true }
+        acknowledgementAccepted: { type: boolean, nullable: true }
+        acknowledgementReference: { type: string, nullable: true }
+        acknowledgedAt: { type: string, format: date-time, nullable: true }
+        claimedAt: { type: string, format: date-time, nullable: true }
+    SubmissionAttempt:
+      type: object
+      required: [attemptNo, transport, outcome, attemptedBy, attemptedAt]
+      properties:
+        attemptNo: { type: integer }
+        transport: { type: string }
+        outcome: { type: string, enum: [SUBMITTED, DRY_RUN, REJECTED, FAILED, UNKNOWN] }
+        transportReference: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        attemptedBy: { type: string }
+        attemptedAt: { type: string, format: date-time }
     XbrlCsvPreflight:
       type: object
       description: >-
