@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.ledger.integration
 
+import com.openbank.ledger.infrastructure.outbox.LedgerOutboxDispatcher
 import com.openbank.ledger.infrastructure.persistence.entity.LedgerOutboxEntity
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
 import com.openbank.ledger.it.PostgresRedpandaTestResource
@@ -52,6 +53,9 @@ class LedgerFencedOutboxKafkaIT {
             "openbank.outbox.dispatch-enabled" to "true",
             "openbank.outbox.poll-interval" to "1s",
             "openbank.outbox.initial-delay" to "1s",
+            // Cold instrumentation and broker startup share the CI worker. Allow the healthy-path
+            // fixture to finish those first sends without tripping the production circuit breaker.
+            "${LedgerOutboxDispatcher::class.java.name}/publishWithResilience/Timeout/value" to "15000",
         )
     }
 
