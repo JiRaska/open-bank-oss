@@ -53,6 +53,21 @@ class ConsumerScopeTest {
         assertThat(general.permits(approval("xpension-exit:abc"))).isTrue()
     }
 
+    @Test
+    fun `statutory delegation reserves exact issue and accept approval namespaces`() {
+        val statutory = ConsumerScope.Reserved(ReservedNamespace.DELEGATION_STATUTORY)
+        val operation = UUID.randomUUID()
+        listOf("delegation-statutory-issue:$operation", "delegation-statutory-accept:$operation").forEach { id ->
+            assertThat(statutory.permits(approval(id))).isTrue()
+            assertThat(general.permits(approval(id))).isFalse()
+            assertThat(pension.permits(approval(id))).isFalse()
+        }
+        assertThat(statutory.permits(approval("delegation-statutory-issue:bad"))).isFalse()
+        assertThat(general.permits(approval("delegation-statutory-issue:bad"))).isFalse()
+        val wrongPurpose = approval("delegation-statutory-issue:$operation").copy(purpose = ScaPurpose.DELEGATION_GRANT)
+        assertThat(statutory.permits(wrongPurpose)).isFalse()
+    }
+
     private fun approval(approvalRequestId: String?) = ScaChallenge(
         partyId = UUID.randomUUID(),
         purpose = ScaPurpose.APPROVAL,

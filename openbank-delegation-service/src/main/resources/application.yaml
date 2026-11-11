@@ -124,6 +124,10 @@ quarkus:
       url: ${PARTY_SERVICE_URL:http://localhost:8081}
       connect-timeout: 2000
       read-timeout: 2000
+    kyb-service:
+      url: ${KYB_SERVICE_URL:http://localhost:8157}
+      connect-timeout: 2000
+      read-timeout: 2000
     # Resource-ownership gate (ADR-0232 threat model T1): the only services that can answer
     # "does this grantor own that resource?". An outage here refuses new offers — it never
     # affects an existing grant, which is enforced from each product service's own projection.
@@ -276,6 +280,7 @@ openbank:
     # Expand/contract rollout: enable only after account-service has replayed approval-group
     # revisions and its operation-snapshot/decision-ledger health checks are green.
     n-of-m-enabled: ${DELEGATION_N_OF_M_ENABLED:false}
+    statutory-collection-enabled: ${DELEGATION_STATUTORY_COLLECTION_ENABLED:false}
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.
     # Existing neutral reservations and exact replays retain their established behavior.

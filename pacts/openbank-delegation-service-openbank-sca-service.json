@@ -56,6 +56,55 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "POST consume a company and device bound statutory approval",
+      "providerStates": [
+        {
+          "name": "a device approved a verified statutory delegation challenge"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "delegation-statutory-issue:b7190004-0000-4000-8000-000000000001",
+          "companyPartyId": "b7190003-0000-4000-8000-000000000001",
+          "partyId": "b7190002-0000-4000-8000-000000000001",
+          "payloadSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/b7190001-0000-4000-8000-000000000001/consume-statutory-approval"
+      },
+      "response": {
+        "body": {
+          "consumedAt": "2026-08-01T00:00:00Z",
+          "decidedByPartyId": "b7190002-0000-4000-8000-000000000001",
+          "id": "b7190001-0000-4000-8000-000000000001",
+          "onBehalfOfPartyId": "b7190003-0000-4000-8000-000000000001",
+          "partyId": "b7190002-0000-4000-8000-000000000001",
+          "purpose": "APPROVAL",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.consumedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9T:+.Z-]+$"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
     }
   ],
   "metadata": {

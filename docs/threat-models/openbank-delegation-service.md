@@ -380,3 +380,12 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
 Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## Statutory co-signatures (#10247)
+
+Customer-edge supplies separately authenticated company and human identities. Delegation
+corroborates the exact Party rule, active mandates and KYB attestation, then records a bounded
+operation with frozen terms and, for acceptance, the offered grant revision. Different verified
+humans must fill the current quorum and office slots. Each receipt can commit only its company,
+actor, challenge and payload. PostgreSQL locks the operation and grant, and writes signatures,
+provenance and the lifecycle event in one transaction. Collection defaults to disabled.

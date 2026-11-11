@@ -12,6 +12,11 @@ package com.openbank.sca.domain.model
 enum class ReservedNamespace(val prefix: String, val purposes: Set<ScaPurpose>, private val shape: Regex) {
     /** pension-service operations: `pension-onboarding:…`, `pension-transfer-out:…`, `pension-exit:…`. */
     PENSION("pension-", setOf(ScaPurpose.APPROVAL), Regex("^pension-[a-z]+(-[a-z]+)*:\\S+$")),
+    DELEGATION_STATUTORY(
+        "delegation-statutory-",
+        setOf(ScaPurpose.APPROVAL),
+        Regex("^delegation-statutory-(issue|accept):[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$"),
+    ),
     ;
 
     /** Is [approvalRequestId] a well-formed id of this namespace (operation token, colon, reference)? */

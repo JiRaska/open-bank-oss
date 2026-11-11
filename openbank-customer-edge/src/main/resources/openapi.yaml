@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.92.0
+  version: 1.93.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -5426,6 +5426,176 @@ paths:
             cumulative ceiling, or `code: EXPOSURE_UNSUPPORTED` when exposure is non-null.
         '403': {description: grantorPartyId is not the authenticated party, or resource not owned}
 
+  /delegations/statutory-operations:
+    get:
+      tags: [Delegation]
+      summary: Read current signature collections for the verified representative
+      operationId: listStatutoryDelegations
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperationList' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/issue:
+    post:
+      tags: [Delegation]
+      summary: Start collecting statutory signatures for a frozen delegation offer
+      operationId: startStatutoryIssue
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/StatutoryIssueRequest' } }
+      responses:
+        '202':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '400': { description: Invalid terms, receipt or operation state }
+        '409': { description: Conflicting idempotency key or operation state }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/accept/{delegationId}:
+    post:
+      tags: [Delegation]
+      summary: Start collecting statutory signatures to accept an offered delegation
+      operationId: startStatutoryAccept
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: delegationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '202':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '400': { description: Invalid terms, receipt or operation state }
+        '409': { description: Conflicting idempotency key or operation state }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/{id}:
+    get:
+      tags: [Delegation]
+      summary: Read frozen terms and progress for a statutory delegation operation
+      operationId: getStatutoryDelegation
+      security:
+        - customerOidc: [delegations:read]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/{id}/sign:
+    post:
+      tags: [Delegation]
+      summary: Record one exact device-signed statutory approval
+      operationId: signStatutoryDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/StatutorySignatureRequest' } }
+      responses:
+        '200':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '400': { description: Invalid terms, receipt or operation state }
+        '409': { description: Conflicting idempotency key or operation state }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/{id}/close:
+    post:
+      tags: [Delegation]
+      summary: Reject an operation or cancel one's own collection
+      operationId: closeStatutoryDelegation
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/StatutoryClosureRequest' } }
+      responses:
+        '200':
+          description: Current operation evidence
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '400': { description: Invalid terms, receipt or operation state }
+        '409': { description: Conflicting idempotency key or operation state }
+        '503': { description: Current statutory authority could not be verified }
+
+  /delegations/statutory-operations/{id}/challenge:
+    post:
+      tags: [Delegation]
+      summary: Create a device approval bound to the displayed statutory delegation terms
+      operationId: startStatutoryDelegationChallenge
+      security:
+        - customerOidc: [delegations:write]
+      parameters:
+        - { name: X-Acting-For, in: header, required: true, schema: { type: string, format: uuid } }
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        '201':
+          description: Device approval challenge created
+          headers:
+            Cache-Control: { schema: { type: string, const: no-store } }
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/StatutoryDelegationChallenge' } }
+        '403': { description: A verified statutory representative and company profile are required }
+        '404': { description: The operation or offered delegation is unavailable }
+        '400': { description: Invalid terms, receipt or operation state }
+        '409': { description: Conflicting idempotency key or operation state }
+        '503': { description: Current statutory authority could not be verified }
+
   /delegations/preview:
     post:
       tags: [Delegation]
@@ -7011,6 +7181,79 @@ components:
           schema: {$ref: '#/components/schemas/PensionContract'}
 
   schemas:
+    StatutoryIssueRequest:
+      type: object
+      required: [draft]
+      properties:
+        draft: { $ref: '#/components/schemas/StatutoryDelegationDraft' }
+        note: { type: string, nullable: true }
+    StatutorySignatureRequest:
+      type: object
+      required: [scaChallengeId]
+      properties:
+        scaChallengeId: { type: string, format: uuid }
+    StatutoryClosureRequest:
+      type: object
+      required: [cancel]
+      properties:
+        cancel: { type: boolean, description: True to cancel as the initiator. False to reject as a verified representative. }
+    StatutoryDelegationOperationList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/StatutoryDelegationOperation' } }
+    StatutoryDelegationOperation:
+      type: object
+      required: [id, action, delegationId, companyPartyId, status, requiredSignatures, signedCount, signedByCaller, initiatedByCaller, expiresAt, terms, approvalRequestId, payloadSha256]
+      properties:
+        id: { type: string, format: uuid }
+        action: { type: string, enum: [ISSUE, ACCEPT] }
+        delegationId: { type: string, format: uuid }
+        companyPartyId: { type: string, format: uuid }
+        status: { type: string, enum: [COLLECTING, COMMITTED, REJECTED, CANCELLED] }
+        requiredSignatures: { type: integer, minimum: 2 }
+        signedCount: { type: integer, minimum: 0 }
+        signedByCaller: { type: boolean }
+        initiatedByCaller: { type: boolean }
+        expiresAt: { type: string, format: date-time }
+        terms:
+          allOf:
+            - { $ref: '#/components/schemas/StatutoryDelegationDraft' }
+            - type: object
+              properties:
+                note: { type: string, nullable: true }
+                approvalGroupRevision: { type: integer, format: int64, nullable: true }
+                issuedByOperationId: { type: string, format: uuid, nullable: true }
+                validFrom: { type: string, format: date-time, nullable: true }
+        approvalRequestId: { type: string, pattern: '^delegation-statutory-(issue|accept):[0-9a-f-]{36}$' }
+        payloadSha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+
+    StatutoryDelegationDraft:
+      type: object
+      required: [granteePartyId, resourceType, resourceId, capabilities]
+      properties:
+        grantorPartyId: { type: string, format: uuid, description: Optional in an issue request. The verified company is always supplied by the edge. }
+        granteePartyId: { type: string, format: uuid }
+        resourceType: { type: string, enum: [ACCOUNT, SAVINGS_GOAL, CARD, PAYMENT, STATEMENT, DOCUMENT] }
+        resourceId: { type: string, format: uuid }
+        capabilities: { type: array, minItems: 1, uniqueItems: true, items: { type: string } }
+        approvalPolicy: { type: string, default: SOLO, description: Existing usage policy for the grant. }
+        requiredApprovals: { type: integer, nullable: true }
+        approvalGroupId: { type: string, format: uuid, nullable: true }
+        perTransactionLimit: { type: object, nullable: true }
+        dailyLimit: { type: object, nullable: true }
+        monthlyLimit: { type: object, nullable: true }
+        recertificationAudience: { type: string, enum: [PERSONAL, FOP, SME, CORPORATE], nullable: true }
+        validTo: { type: string, format: date-time, nullable: true }
+    StatutoryDelegationChallenge:
+      type: object
+      required: [id, purpose, method, status, onBehalfOfPartyId]
+      properties:
+        id: { type: string, format: uuid }
+        purpose: { type: string, const: APPROVAL }
+        method: { type: string, enum: [BIOMETRIC, PUSH_NOTIFICATION] }
+        status: { type: string }
+        onBehalfOfPartyId: { type: string, format: uuid }
     GameRequirement:
       type: object
       required: [kind]

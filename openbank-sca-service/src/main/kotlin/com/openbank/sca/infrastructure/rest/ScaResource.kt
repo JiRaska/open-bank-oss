@@ -283,8 +283,11 @@ class ScaResource(
                 .type(MediaType.APPLICATION_JSON)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+
             ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+
             ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+
             ReserveResult.Reserved -> Unit
         }
         // Any failure (including cancellation) drops the marker so a retry of the same request
@@ -602,7 +605,7 @@ private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
 }
 
 /** ADR-0335 D3: who (the consuming principal) spent whose (the data subject's) approval. */
-private suspend fun AuditEventPublisher.auditConsume(
+internal suspend fun AuditEventPublisher.auditConsume(
     consumer: String?,
     partyId: UUID,
     challengeId: UUID,

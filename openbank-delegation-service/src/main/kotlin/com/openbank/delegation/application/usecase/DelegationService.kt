@@ -49,6 +49,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Clock
+import java.time.Instant
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -60,7 +61,8 @@ class DelegationNotGrantorException(id: UUID, partyId: UUID) :
 class DelegationScaException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class DelegationEligibilityException(message: String) : RuntimeException(message)
 class DelegationGrantorAuthorityException(message: String) : RuntimeException(message)
-class DelegationGrantorAuthorityUnavailableException(message: String) : RuntimeException(message)
+class DelegationGrantorAuthorityUnavailableException(message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)
 
 /** The authenticated customer is not the party they claim to be acting as. */
 class DelegationCallerMismatchException(callerPartyId: UUID, claimedPartyId: UUID) :
@@ -112,6 +114,7 @@ class DelegationService(
     private val approvalGroupRepository: ApprovalGroupRepository,
     private val nOfMEnabled: Boolean,
     private val clock: Clock,
+    private val statutoryIssuer: StatutoryDelegationIssuerVerifier? = null,
 ) : OfferDelegationUseCase,
     PreviewDelegationUseCase,
     RespondDelegationUseCase,
@@ -128,6 +131,7 @@ class DelegationService(
         resourceOwnershipClient: ResourceOwnershipClient,
         approvalGroupRepository: ApprovalGroupRepository,
         @ConfigProperty(name = "openbank.delegation.n-of-m-enabled", defaultValue = "false") nOfMEnabled: Boolean,
+        statutoryIssuer: StatutoryDelegationIssuerVerifier,
     ) : this(
         delegationRepository,
         scaChallengeClient,
@@ -137,6 +141,7 @@ class DelegationService(
         approvalGroupRepository,
         nOfMEnabled,
         Clock.systemUTC(),
+        statutoryIssuer,
     )
 
     override suspend fun offer(command: OfferDelegationCommand): DelegationGrant {
@@ -179,26 +184,7 @@ class DelegationService(
             createdAt = now,
             updatedAt = now,
         )
-        return delegationRepository.save(
-            grant,
-            DelegationOffered(
-                aggregateId = grant.id,
-                lifecycleRevision = grant.lifecycleRevision,
-                grantorPartyId = grant.grantorPartyId,
-                granteePartyId = grant.granteePartyId,
-                resourceType = grant.resourceType,
-                resourceId = grant.resourceId,
-                capabilities = grant.capabilities,
-                approvalPolicy = grant.approvalPolicy,
-                requiredApprovals = grant.requiredApprovals,
-                approvalGroupId = grant.approvalGroupId,
-                approvalGroupRevision = grant.approvalGroupRevision,
-                validFrom = grant.validFrom,
-                validTo = grant.validTo,
-                perTransactionLimit = EventMoney.from(grant.perTransactionLimit),
-                occurredAt = clock.instant(),
-            ),
-        )
+        return delegationRepository.save(grant, grant.offeredEvent(clock.instant()))
     }
 
     override suspend fun preview(
@@ -235,6 +221,58 @@ class DelegationService(
         )
     }
 
+    internal suspend fun prepareStatutoryOffer(
+        terms: StatutoryDelegationTerms,
+        delegationId: UUID,
+        operationId: UUID,
+        now: OffsetDateTime,
+    ): DelegationGrant {
+        rejectUnsupportedExposure(terms)
+        rejectUnenforcedCeilings(terms)
+        val approval = resolveApprovalPolicy(terms)
+        verifyResourceOwnership(terms)
+        val principal = partyEligibilityClient.eligibilityOf(terms.grantorPartyId)
+        require(principal.active && principal.partyType == "COMPANY") { "a current company grantor is required" }
+        val parties = verifyEligibility(
+            terms,
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, principal.displayName, principal.partyType),
+        )
+        validateRecertificationAudience(terms.recertificationAudience, parties.grantorPartyType)
+        return DelegationGrant(
+            id = delegationId,
+            grantorPartyId = terms.grantorPartyId,
+            granteePartyId = terms.granteePartyId,
+            grantorName = parties.grantorName,
+            granteeName = parties.granteeName,
+            resourceType = terms.resourceType,
+            resourceId = terms.resourceId,
+            capabilities = terms.capabilities,
+            approvalPolicy = terms.approvalPolicy,
+            requiredApprovals = approval.threshold,
+            approvalGroupId = approval.groupId,
+            approvalGroupRevision = approval.revision,
+            perTransactionLimit = terms.perTransactionLimit,
+            dailyLimit = terms.dailyLimit,
+            monthlyLimit = terms.monthlyLimit,
+            recertificationAudience = terms.recertificationAudience,
+            validFrom = now,
+            validTo = terms.validTo,
+            note = terms.note,
+            createdAt = now,
+            updatedAt = now,
+            grantorStatutoryOperationId = operationId,
+        )
+    }
+
+    internal suspend fun verifyStatutoryAcceptance(grant: DelegationGrant, terms: StatutoryDelegationTerms) {
+        rejectLegacyExposure(grant)
+        verifyIssuedAuthority(grant)
+        verifyResourceOwnership(terms)
+        val grantee = partyEligibilityClient.eligibilityOf(grant.granteePartyId)
+        require(grantee.active && grantee.partyType == "COMPANY") { "a current company grantee is required" }
+        requireGranteeKyc(terms, grantee)
+    }
+
     /**
      * This check protects review evidence from becoming misleading. It does not grant, deny or
      * otherwise alter any product capability; all authorization remains the resource/capability
@@ -247,7 +285,9 @@ class DelegationService(
         if (audience == null) return
         val expected = when (audience) {
             DelegationRecertificationAudience.PERSONAL -> "INDIVIDUAL"
+
             DelegationRecertificationAudience.FOP -> "SOLE_TRADER"
+
             DelegationRecertificationAudience.SME,
             DelegationRecertificationAudience.CORPORATE,
             -> "COMPANY"
@@ -261,9 +301,11 @@ class DelegationService(
         val authority = grantorAuthorityClient.authorityFor(principal, actor)
         return when (authority.verdict) {
             GrantorAuthorityVerdict.AUTHORIZED -> authority
+
             GrantorAuthorityVerdict.DENIED,
             GrantorAuthorityVerdict.MANDATE_ONLY,
             -> throw DelegationGrantorAuthorityException("actor $actor has no verified sole authority for $principal")
+
             GrantorAuthorityVerdict.UNVERIFIABLE -> throw DelegationGrantorAuthorityUnavailableException(
                 "authority for $principal could not be established",
             )
@@ -319,29 +361,17 @@ class DelegationService(
             errorPrefix = "accept SCA",
         )
         val accepted = grant.accept(scaSessionId, OffsetDateTime.now(clock))
-        return delegationRepository.save(
-            accepted,
-            DelegationActivated(
-                aggregateId = accepted.id,
-                lifecycleRevision = accepted.lifecycleRevision,
-                grantorPartyId = accepted.grantorPartyId,
-                granteePartyId = accepted.granteePartyId,
-                resourceType = accepted.resourceType,
-                resourceId = accepted.resourceId,
-                capabilities = accepted.capabilities,
-                approvalPolicy = accepted.approvalPolicy,
-                requiredApprovals = accepted.requiredApprovals,
-                approvalGroupId = accepted.approvalGroupId,
-                approvalGroupRevision = accepted.approvalGroupRevision,
-                validFrom = accepted.validFrom,
-                validTo = accepted.validTo,
-                perTransactionLimit = EventMoney.from(accepted.perTransactionLimit),
-                occurredAt = clock.instant(),
-            ),
-        )
+        return delegationRepository.save(accepted, accepted.activatedEvent(clock.instant()))
     }
 
-    private suspend fun verifyIssuedAuthority(grant: DelegationGrant) {
+    internal suspend fun verifyIssuedAuthority(grant: DelegationGrant) {
+        if (grant.grantorStatutoryOperationId != null) {
+            val verifier = statutoryIssuer ?: throw DelegationGrantorAuthorityUnavailableException(
+                "joint issuer evidence is unavailable",
+            )
+            verifier.requireCurrent(grant)
+            return
+        }
         val evidence = grant.grantorSigningEvidence
         if (evidence != null && evidence.soleMandateId == null) return
 
@@ -836,3 +866,39 @@ class DelegationService(
         val KYC_RANK = mapOf("NONE" to 0, "BASIC" to 1, "ENHANCED" to 2, "FULL" to 3)
     }
 }
+
+internal fun DelegationGrant.offeredEvent(at: Instant) = DelegationOffered(
+    aggregateId = id,
+    lifecycleRevision = lifecycleRevision,
+    grantorPartyId = grantorPartyId,
+    granteePartyId = granteePartyId,
+    resourceType = resourceType,
+    resourceId = resourceId,
+    capabilities = capabilities,
+    approvalPolicy = approvalPolicy,
+    requiredApprovals = requiredApprovals,
+    approvalGroupId = approvalGroupId,
+    approvalGroupRevision = approvalGroupRevision,
+    validFrom = validFrom,
+    validTo = validTo,
+    perTransactionLimit = EventMoney.from(perTransactionLimit),
+    occurredAt = at,
+)
+
+internal fun DelegationGrant.activatedEvent(at: Instant) = DelegationActivated(
+    aggregateId = id,
+    lifecycleRevision = lifecycleRevision,
+    grantorPartyId = grantorPartyId,
+    granteePartyId = granteePartyId,
+    resourceType = resourceType,
+    resourceId = resourceId,
+    capabilities = capabilities,
+    approvalPolicy = approvalPolicy,
+    requiredApprovals = requiredApprovals,
+    approvalGroupId = approvalGroupId,
+    approvalGroupRevision = approvalGroupRevision,
+    validFrom = validFrom,
+    validTo = validTo,
+    perTransactionLimit = EventMoney.from(perTransactionLimit),
+    occurredAt = at,
+)

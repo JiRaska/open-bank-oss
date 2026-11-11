@@ -13,6 +13,7 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.openbank.delegation.infrastructure.client.ScaServiceRestClient
+import com.openbank.delegation.infrastructure.client.StatutoryScaRestClient
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import org.assertj.core.api.Assertions.assertThat
@@ -54,6 +55,12 @@ class DelegationScaChallengePactConsumerTest {
         const val CHALLENGE_ID = "d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f"
         const val PARTY_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         const val STATE = "a COMPLETED DELEGATION_GRANT SCA challenge exists"
+        const val STATUTORY_STATE = "a device approved a verified statutory delegation challenge"
+        const val STATUTORY_CHALLENGE = "b7190001-0000-4000-8000-000000000001"
+        const val STATUTORY_ACTOR = "b7190002-0000-4000-8000-000000000001"
+        const val STATUTORY_COMPANY = "b7190003-0000-4000-8000-000000000001"
+        const val STATUTORY_OPERATION = "delegation-statutory-issue:b7190004-0000-4000-8000-000000000001"
+        val STATUTORY_DIGEST = "b".repeat(64)
     }
 
     @Pact(consumer = "openbank-delegation-service", provider = "openbank-sca-service")
@@ -129,5 +136,55 @@ class DelegationScaChallengePactConsumerTest {
 
         assertThat(body.getString("id")).isEqualTo(CHALLENGE_ID)
         assertThat(body.getString("purpose")).isEqualTo("DELEGATION_GRANT")
+    }
+
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-sca-service")
+    fun consumeStatutoryApprovalPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATUTORY_STATE)
+        .uponReceiving("POST consume a company and device bound statutory approval")
+        .path("/api/v1/sca/challenges/$STATUTORY_CHALLENGE/consume-statutory-approval")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { request ->
+                request.stringValue("partyId", STATUTORY_ACTOR)
+                request.stringValue("companyPartyId", STATUTORY_COMPANY)
+                request.stringValue("approvalRequestId", STATUTORY_OPERATION)
+                request.stringValue("payloadSha256", STATUTORY_DIGEST)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonBody { response ->
+                response.stringValue("id", STATUTORY_CHALLENGE)
+                response.stringValue("partyId", STATUTORY_ACTOR)
+                response.stringValue("decidedByPartyId", STATUTORY_ACTOR)
+                response.stringValue("onBehalfOfPartyId", STATUTORY_COMPANY)
+                response.stringValue("purpose", "APPROVAL")
+                response.stringValue("status", "COMPLETED")
+                response.stringMatcher("consumedAt", "^[0-9T:+.Z-]+$", "2026-08-01T00:00:00Z")
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "consumeStatutoryApprovalPact")
+    fun `a statutory receipt identifies the exact company and human device`(mockServer: MockServer) {
+        val body = given().baseUri(mockServer.getUrl()).contentType(ContentType.JSON)
+            .body(
+                mapOf(
+                    "partyId" to STATUTORY_ACTOR,
+                    "companyPartyId" to STATUTORY_COMPANY,
+                    "approvalRequestId" to STATUTORY_OPERATION,
+                    "payloadSha256" to STATUTORY_DIGEST,
+                ),
+            )
+            .post(ClientRoute.of(StatutoryScaRestClient::class.java, "consume", "id" to STATUTORY_CHALLENGE))
+            .then().statusCode(200).extract().jsonPath()
+        assertThat(body.getString("onBehalfOfPartyId")).isEqualTo(STATUTORY_COMPANY)
+        assertThat(body.getString("decidedByPartyId")).isEqualTo(STATUTORY_ACTOR)
+        assertThat(body.getString("consumedAt")).isNotBlank()
     }
 }

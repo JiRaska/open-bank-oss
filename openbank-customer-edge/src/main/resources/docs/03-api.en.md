@@ -215,3 +215,11 @@ the outgoing body from the accepted fields and preserves the submitted answer or
 The edge forwards the active profile as the grantee and the authenticated
 human as the accepting actor. For an organization, delegation-service verifies
 the human's sole mandate before consuming their acceptance challenge.
+
+### Statutory delegation collection
+
+A customer uses the verified company profile for
+`/customer/v1/delegations/statutory-operations`. The edge forwards the resolved company and
+authenticated human separately. It creates a device approval from the current frozen operation
+after the customer reads the terms. The app supplies its own idempotency keys for starting a
+collection or device approval. The edge serves these responses with `Cache-Control: no-store`.

@@ -135,9 +135,17 @@ data class DelegationGrant(
     val closedAt: OffsetDateTime? = null,
     val closedBy: UUID? = null,
     val closedReason: String? = null,
+    val grantorStatutoryOperationId: UUID? = null,
+    val granteeStatutoryOperationId: UUID? = null,
 ) {
     init {
         require(grantorPartyId != granteePartyId) { "grantor and grantee must differ" }
+        require(grantorStatutoryOperationId == null || (grantorSigningEvidence == null && grantScaSessionId == null)) {
+            "joint issuance must reference its statutory signatures"
+        }
+        require(granteeStatutoryOperationId == null || acceptScaSessionId == null) {
+            "joint acceptance must reference its statutory signatures"
+        }
         grantorSigningEvidence?.let {
             require((it.actorPartyId == grantorPartyId) == (it.soleMandateId == null)) {
                 "an organization grantor must have a human actor and a verified sole mandate"
@@ -221,12 +229,17 @@ data class DelegationGrant(
         return amount.amount.compareTo(perTransactionLimit.amount) <= 0
     }
 
-    fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {
+    fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant = activate(scaSessionId, null, now)
+
+    fun acceptStatutorily(operationId: UUID, now: OffsetDateTime): DelegationGrant = activate(null, operationId, now)
+
+    private fun activate(scaSessionId: UUID?, operationId: UUID?, now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
         return copy(
             status = DelegationStatus.ACTIVE,
             lifecycleRevision = nextLifecycleRevision(),
             acceptScaSessionId = scaSessionId,
+            granteeStatutoryOperationId = operationId,
             updatedAt = now,
         )
     }

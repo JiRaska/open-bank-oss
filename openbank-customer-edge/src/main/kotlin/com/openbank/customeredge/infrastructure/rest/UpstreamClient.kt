@@ -291,6 +291,13 @@ class UpstreamClient {
 
     fun get(url: String, partyId: String? = null): Response = get(url, partyId, requestTimeoutMs)
 
+    fun getWithHeaders(url: String, partyId: String, extraHeaders: Map<String, String>): Response = try {
+        get(validatedUri(url), partyId, requestTimeoutMs, extraHeaders)
+    } catch (e: Exception) {
+        Log.error("upstream call to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""").type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** GET with a fixed service authority and raw query values encoded independently of that authority. */
     fun getToService(baseUrl: String, path: String, query: Map<String, String>, partyId: String?): Response = try {
         val builder = UriBuilder.fromUri(structuredUri(baseUrl, path))
@@ -317,12 +324,20 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
-    private fun get(uri: URI, partyId: String?, timeoutMs: Long): Response {
+    private fun get(
+        uri: URI,
+        partyId: String?,
+        timeoutMs: Long,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): Response {
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMs.coerceIn(1, requestTimeoutMs))
         val request = upstreamRequest()
             .uri(uri)
             .header("Authorization", "Bearer ${serviceToken(deadline)}")
-            .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
+            .apply {
+                if (partyId != null) header(PARTY_HEADER, partyId)
+                extraHeaders.forEach { (name, value) -> header(name, value) }
+            }
             .header("Accept", "application/json")
             .timeout(Duration.ofMillis(remainingMillis(deadline)))
             .GET().build()

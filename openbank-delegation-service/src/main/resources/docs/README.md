@@ -41,3 +41,20 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Owner portfolio path parameter
 
 `GET /api/v1/delegation-portfolios/owner/{ownerPartyId}` names its path parameter `ownerPartyId`, in the OpenAPI document and in the served resource alike. It must equal the authenticated active profile; any other value is rejected with `403`. Generated clients use `ownerPartyId`; the shared `partyId` parameter does not apply to this route.
+
+### Joint statutory representation
+
+The statutory issue and acceptance routes collect separate device-backed signatures under an
+exact Party rule and KYB attestation. An operation fixes its grant terms, target revision, company,
+representatives, office slots, quorum, and expiry. Every receipt binds one human and the frozen
+operation. The last qualifying signature, the OFFERED or ACTIVE transition, its provenance, and the
+existing lifecycle outbox event commit in one database transaction.
+
+`openbank.delegation.statutory-collection-enabled` defaults to false. Ordinary individual and
+verified sole-signature flows use their existing routes. New joint issues use the existing SOLO
+usage policy. The statutory quorum governs creating or accepting a grant, while any existing
+approval-group policy governs later use of that grant.
+
+The V34 migration adds operations, receipts, and grant provenance. Rollback disables collection and
+retains these rows for audit. Deploy the sole issuer provenance guard and the named Party, KYB, and
+SCA contracts before enabling collection in a test environment.

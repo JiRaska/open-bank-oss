@@ -30,10 +30,12 @@ import com.openbank.sca.application.port.out.PartyTypeLookup
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.application.port.out.ScaIdempotencyStore
+import com.openbank.sca.domain.model.ConsumerScope
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.DeviceDecisionType
 import com.openbank.sca.domain.model.DynamicLinkingData
 import com.openbank.sca.domain.model.EnrolledDevice
+import com.openbank.sca.domain.model.ReservedNamespace
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.ScaMethod
 import com.openbank.sca.domain.model.ScaPurpose
@@ -223,6 +225,7 @@ class ScaService(
                 val otp = otpGenerator.generate()
                 otpStore.store(saved.id, otp, ttlSeconds)
             }
+
             ScaMethod.PUSH_NOTIFICATION, ScaMethod.BIOMETRIC -> {
                 notificationDispatchGuard.sendPushNotification(
                     command.partyId,
@@ -245,6 +248,7 @@ class ScaService(
 
         return when (challenge.method) {
             ScaMethod.TOTP -> verifyOtp(challenge, command, now)
+
             // Decoupled methods (ADR-0021): never auto-approve. The authentication happened
             // out-of-band on the enrolled device; we consult the signature-verified decision
             // recorded by recordDecision(). No decision yet => the challenge stays PENDING
@@ -280,6 +284,7 @@ class ScaService(
         )
         return when (decision.decision) {
             DeviceDecisionType.APPROVED -> repository.save(attributed.complete(now)).also { recordResolution(it) }
+
             DeviceDecisionType.DENIED -> repository.save(attributed.fail("Denied on device", now)).also {
                 recordResolution(it)
                 if (it.status == ScaStatus.FAILED) throw ScaVerificationFailedException(challenge.id)
@@ -422,7 +427,11 @@ class ScaService(
     override suspend fun getChallenge(challengeId: UUID): ScaChallenge =
         repository.findById(challengeId) ?: throw ScaChallengeNotFoundException(challengeId)
 
-    override suspend fun listPendingByParty(partyId: UUID): List<ScaChallenge> = repository.findPendingByParty(partyId)
+    override suspend fun listPendingByParty(partyId: UUID): List<ScaChallenge> =
+        repository.findPendingByParty(partyId).filter {
+            ReservedNamespace.of(it) !=
+                ReservedNamespace.DELEGATION_STATUTORY
+        }
 
     /**
      * Settlement gate (ADR-0021): spend an approved challenge on exactly the operation the
@@ -441,7 +450,7 @@ class ScaService(
         // spends that namespace. Checked on the STORED (device-signed) linking data, before anything
         // that could burn the challenge.
         if (!command.scope.permits(challenge)) throw ScaConsumerScopeViolationException(command.challengeId)
-        if (challenge.consumedAt != null) throw ScaChallengeAlreadyConsumedException(command.challengeId)
+        if (challenge.consumedAt != null) return recoverStatutoryReceipt(challenge, command)
         if (challenge.isExpired(now)) throw ScaChallengeExpiredException(command.challengeId)
         // A decoupled challenge may hold a signature-verified device decision that nobody has
         // promoted yet (verify() is a separate call) — resolve it now rather than refusing.
@@ -450,14 +459,50 @@ class ScaService(
         ) {
             challenge = verifyDecoupled(challenge, now)
         }
-        if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
-        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)
-        if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
+        requireApprovedLink(challenge, command)
         if (!repository.markConsumed(command.challengeId)) {
-            throw ScaChallengeAlreadyConsumedException(command.challengeId)
+            if (command.scope != STATUTORY_DELEGATION_SCOPE) {
+                throw ScaChallengeAlreadyConsumedException(command.challengeId)
+            }
+            val stored = repository.findById(command.challengeId)
+                ?: throw ScaChallengeAlreadyConsumedException(command.challengeId)
+            return recoverStatutoryReceipt(stored, command)
         }
         metrics.scaChallengeResolved(challenge.method.name, "consumed")
+        if (command.scope == STATUTORY_DELEGATION_SCOPE) {
+            val stored = repository.findById(command.challengeId)
+                ?: throw ScaChallengeAlreadyConsumedException(command.challengeId)
+            return recoverStatutoryReceipt(stored, command)
+        }
         return challenge.copy(consumedAt = now)
+    }
+
+    private fun recoverStatutoryReceipt(challenge: ScaChallenge, command: ConsumeScaCommand): ScaChallenge {
+        if (command.scope != STATUTORY_DELEGATION_SCOPE || challenge.consumedAt == null) {
+            throw ScaChallengeAlreadyConsumedException(command.challengeId)
+        }
+        if (challenge.partyId != command.expectedPartyId || !command.scope.permits(challenge)) {
+            throw ScaConsumerScopeViolationException(command.challengeId)
+        }
+        requireApprovedLink(challenge, command)
+        return challenge
+    }
+
+    private fun requireApprovedLink(challenge: ScaChallenge, command: ConsumeScaCommand) {
+        if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
+        if (!linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)) {
+            throw ScaDynamicLinkingMismatchException(command.challengeId)
+        }
+        if (command.scope == STATUTORY_DELEGATION_SCOPE) requireStatutoryDevice(challenge, command)
+    }
+
+    private fun requireStatutoryDevice(challenge: ScaChallenge, command: ConsumeScaCommand) {
+        val statutoryPrincipal = command.statutoryPrincipalPartyId
+        val correctCompany = statutoryPrincipal != null && challenge.onBehalfOfPartyId == statutoryPrincipal
+        val deviceDecision = challenge.method == ScaMethod.PUSH_NOTIFICATION || challenge.method == ScaMethod.BIOMETRIC
+        if (!correctCompany || !deviceDecision || challenge.decidedByPartyId != command.expectedPartyId) {
+            throw ScaDynamicLinkingMismatchException(command.challengeId)
+        }
     }
 
     /**
@@ -492,12 +537,14 @@ class ScaService(
     private fun buildPushMessage(purpose: ScaPurpose, data: DynamicLinkingData?): String = when (purpose) {
         ScaPurpose.PAYMENT_INITIATION ->
             "Potvrďte platbu ${data?.amount} ${data?.currency} pro ${data?.creditorName}"
+
         ScaPurpose.APPROVAL ->
             if (data?.amount != null) {
                 "Podepište platbu ${data.amount} ${data.currency} pro ${data.creditorName ?: data.creditorIban}"
             } else {
                 "Podepište firemní požadavek ke schválení"
             }
+
         else -> checkNotNull(STATIC_PUSH_MESSAGES[purpose]) { "no push message for $purpose" }
     }
 
@@ -563,6 +610,8 @@ class ScaService(
         return (base + cardSegments + approvalSegments).joinToString(":") { it?.toString() ?: "-" }
     }
 }
+
+private val STATUTORY_DELEGATION_SCOPE = ConsumerScope.Reserved(ReservedNamespace.DELEGATION_STATUTORY)
 
 /**
  * An idempotent challenge may be replayed only while it is still actionable: still PENDING,
