@@ -74,14 +74,14 @@ jobs:
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     # Sized for a COLD build, not a warm one. Any change under build-logic/ changes the build
     # script classpath, which invalidates every compile/detekt/ktlint entry in the Gradle build
-    # cache at once, so the next run recompiles the whole fleet: measured 27-36 min on a hosted
-    # runner (2026-11), against 5-12 min warm. At the former limit of 25 that run was cancelled,
+    # cache at once, so the next run recompiles the whole fleet: measured 43 min on a hosted
+    # runner (run 43108818019, 2026-11-11: 1557 of 1693 tasks executed), against 5-12 min warm. At the former limit of 25 that run was cancelled,
     # and a cancelled job saves no cache -- so the NEXT run was just as cold, and the one after
     # it: 69 consecutive runs on main ended at the limit with no verdict (2026-11-10/11). The
     # limit must exceed the cold duration or the gate cannot recover on its own. This value is
     # the backstop for setup and post steps; the Gradle step carries its own, lower limit below,
     # because a STEP that times out fails the job whereas a JOB that times out is `cancelled`.
-    timeout-minutes: 50
+    timeout-minutes: 75
     permissions:
       contents: read
       issues: write
@@ -220,7 +220,7 @@ jobs:
       # the run concludes `failure`, the alert fires and the watch reads it as red.
       - name: Fleet compile + detekt + ktlint
         id: lint
-        timeout-minutes: 45
+        timeout-minutes: 70
         run: |
           set -o pipefail
           log="$RUNNER_TEMP/fleet-lint.log"
