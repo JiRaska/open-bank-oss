@@ -56,7 +56,9 @@ Audit: one AI-attributed event per disposition (`actorType=AI_AGENT`) — `agent
 
 Fleet execution evidence comes from Admin UI Test Intelligence snapshots at `POST /api/v1/flaky-test-hunter/evidence/analyze`. The operator-triggered source pilot reads only this module's tests from a read-only sparse snapshot of public main, taken at pod startup with its exact revision logged. It never builds or executes that source. No JUnit execution reports are mounted; the scanner keeps a missing execution count unknown. A deployment refreshes the snapshot. Source scans remain reachable through the operator trigger and CI-failure webhook; no periodic fleet sweep is enabled.
 
-A finding with no mechanical fix opens a GitHub issue labelled `flaky-test` with the finding and diagnosis. An open issue with the same title is reused, so a re-run does not flood the tracker. The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. Ticket and diagnosis text from an issue is treated as untrusted input.
+A finding with no mechanical fix reuses an open GitHub issue carrying its stable finding marker, regardless of the issue's title or labels. The writer checks up to 20 pages of 100 entries and skips pull requests. It creates a new issue with the `flaky-test` label only after reading the complete list and finding no match. An unreadable response or a full last page at the limit prevents creation.
+
+The writer uses the same token as the PR path and fails closed without `FLAKY_TEST_HUNTER_GITHUB_TOKEN`. It treats finding and diagnosis text as untrusted input.
 
 ## Build identity
 

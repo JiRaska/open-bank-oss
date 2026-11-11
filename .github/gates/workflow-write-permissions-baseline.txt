@@ -37,6 +37,8 @@ ci.yml|job:app-status|pull-requests
 credential-inventory.yml|job:inventory|issues
 db-backup-associations.yml|job:live-check|id-token
 dependency-review.yml|job:dependency-review|pull-requests
+# Fixed-text refusal comment only; the job never checks out or runs PR code.
+dependabot-verification-metadata-push.yml|job:push|pull-requests
 dependency-submission.yml|job:raise-issue|issues
 # ADR-0361 drill: OIDC to a role that reads one SSM parameter (schedule/dispatch only); issues to post on #14163.
 deception-drill.yml|job:drill|id-token
