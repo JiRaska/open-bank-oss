@@ -5093,7 +5093,7 @@ def retry_planner_self_test(check) -> None:
         check("retry planner: current CI declares the selected receiver and direct gate dependency",
               "name: Receive trusted ruleset evidence" in workflow
               and "needs: [agent-admission, ruleset-evidence]" in workflow
-              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]" in workflow)
+              and "needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]" in workflow)
     finally:
         globals()["_http_open"], globals()["_api_sleep"] = saved[:2]
         if saved[2] is None:
