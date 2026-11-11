@@ -7,8 +7,8 @@ package com.openbank.domestic.application.port.out
 import com.openbank.domestic.domain.model.DelegatedSpendBinding
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
+import com.openbank.libs.persistence.outbox.ClaimFencedOutboxRepositoryV2
 import com.openbank.libs.persistence.outbox.OutboxMessage
-import com.openbank.libs.persistence.outbox.OutboxRepository
 import java.time.Instant
 import java.util.UUID
 
@@ -112,7 +112,7 @@ interface DomesticPaymentRepository {
 }
 
 /** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
-interface DomesticPaymentOutboxRepository : OutboxRepository
+interface DomesticPaymentOutboxRepository : ClaimFencedOutboxRepositoryV2
 
 /**
  * Outbound port for domestic-payment domain events. The `*Payload` methods serialize the event body

@@ -141,26 +141,26 @@ sequenceDiagram
 
   S->>DB: INSERT payment + INSERT outbox(status=PENDING) [same TX]
   loop @Scheduled every 5s (batch 25, SKIP concurrent)
-    D->>DB: claimProcessable(25)  (PENDING, oldest first)
+    D->>DB: claimWithTokens(25)
     D->>K: publishWithResilience(payload)  (CircuitBreaker+Retry+Timeout+Bulkhead)
     alt published
-      D->>DB: markSent(eventId)
+      D->>DB: markClaimsSent(claims)
     else failed
-      D->>DB: markFailed(eventId, error)
+      D->>DB: markClaimFailed(claim, error)
     end
   end
 ```
 
 **Why outbox:** transactional consistency between the DB write and the Kafka publish. At-least-once delivery; consumers must be idempotent. The publish call is wrapped in MicroProfile fault-tolerance (`@CircuitBreaker`, `@Retry`, `@Timeout`, `@Bulkhead`).
 
-The dispatcher claims rows with an atomic PostgreSQL update. The claim returns the explicit fields mapped by the current outbox entity, including `synthetic`. Adding nullable columns to `domestic_payment_outbox` therefore keeps this dispatcher compatible.
+Outbox v2 (ADR-0327) claims the oldest unsent event per aggregate. Independent aggregates dispatch concurrently. Acknowledgement requires the current claim token, failed sends back off, and exhausted rows move to `DEAD`. Delivery remains at least once and consumers deduplicate by event ID. The v2 cutover quiesces the previous dispatcher before activating the new one.
 
 ## Key ports (application/port/out)
 
 | Port | Responsibility |
 |---|---|
 | `DomesticPaymentRepository` | persist/find/list payments; `save`/`update` take the outbox message so the row and event commit atomically |
-| `DomesticPaymentOutboxRepository` | drain the outbox — `listProcessable`, `markSent`, `markFailed` |
+| `DomesticPaymentOutboxRepository` | drain the outbox — `claimWithTokens`, `markClaimsSent`, `markClaimFailed` |
 | `DomesticPaymentEventPublisher` | serialize `created`/`status-changed` payloads at write time; `publish` is the transport call at drain time |
 | `SanctionsScreeningPort` | screen a name; throws `ScreeningUnavailableException` when the sanctions service is unreachable (→ fail-closed) |
 | `AmlCasePort` | open an AML case (risk level + alert code + matched entity) |
