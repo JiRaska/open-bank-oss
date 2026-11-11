@@ -248,12 +248,10 @@ jobs:
       # `pretest` still regenerates governance.json for the suite below.
 
       - name: Test (unit + integration)
-        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml --coverage --coverage.reporter=text-summary
+        run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
-        # ADR-0370 U3: --coverage makes the floors in vitest.config.ts (global and per src/lib
-        # module) fail this step. Without it they were enforced nowhere. text-summary only: the
-        # html/json reporters cost time and nothing here reads them.
+        # Coverage floors are enforced by the parallel `ui-coverage` job (ADR-0370 U3).
 
       # ADR-0370 U5: mutation testing on the decision-module files this PR changed. Coverage says
       # a line ran; a surviving mutant says no test would notice if it were wrong. ADVISORY while
@@ -440,9 +438,35 @@ jobs:
   #   pull_request     — still a hard failure. A cancelled PR run has not built
   #                      anything, and letting it read green would be exactly the
   #                      vacuous green this repo works to avoid.
+  # ADR-0370 U3: the Vitest coverage floors in vitest.config.ts (global and per src/lib
+  # decision module). Until 2026-11-11 CI never ran with --coverage, so they were enforced
+  # nowhere. Measured on #15697, --coverage turned the 81 s unit step into 312 s; as its own
+  # job it runs beside ui-build (well over 15 min) and adds CPU, not PR wall time. The
+  # `Admin UI` verdict requires it.
+  ui-coverage:
+    name: Admin UI coverage
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Test with coverage floors
+        run: npm run test -- --coverage --coverage.reporter=text-summary
+
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build, ui-rbac-contract]
+    needs: [changes-ui, ui-build, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2
@@ -451,6 +475,7 @@ jobs:
         name: Check build result
         env:
           RESULT: ${{ needs.ui-build.result }}
+          COVERAGE_RESULT: ${{ needs.ui-coverage.result }}
           DETECTION_RESULT: ${{ needs.changes-ui.result }}
           UI_CHANGED: ${{ needs.changes-ui.outputs.changed }}
           RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
@@ -490,6 +515,14 @@ jobs:
           if [ "$UI_CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
             echo "::error::Admin UI changed but its build did not succeed ($RESULT)."
             exit 1
+          fi
+          if [ "$UI_CHANGED" = "true" ] && [ "$COVERAGE_RESULT" != "success" ]; then
+            if [ "$COVERAGE_RESULT" = "cancelled" ] && [ "$EVENT" = "push" ]; then
+              echo "::warning::Admin UI coverage was CANCELLED by a newer push to this ref (#2185)."
+            else
+              echo "::error::Admin UI changed but its coverage floors did not pass ($COVERAGE_RESULT, ADR-0370 U3)."
+              exit 1
+            fi
           fi
           echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
 
@@ -942,7 +975,7 @@ jobs:
   # Detection, cross-package guards and the golden-path suite remain merge-blocking.
   validate:
     name: Validate manifests
-    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
+    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2
