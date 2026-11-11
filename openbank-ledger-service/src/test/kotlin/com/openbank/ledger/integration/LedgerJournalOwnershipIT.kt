@@ -6,23 +6,10 @@ package com.openbank.ledger.integration
 
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestSecurity
-import io.restassured.module.kotlin.extensions.Given
-import io.restassured.module.kotlin.extensions.Then
-import io.restassured.module.kotlin.extensions.When
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
-import org.eclipse.microprofile.config.ConfigProvider
-import org.hamcrest.Matchers.equalTo
-import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
 import java.sql.Connection
-import java.sql.Date
-import java.sql.DriverManager
-import java.sql.SQLException
-import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -212,14 +199,17 @@ class LedgerJournalOwnershipIT : LedgerStorageInvariantFixture() {
             val id = UUID.randomUUID()
             connection().use { c ->
                 c.autoCommit = false
-                c.insertJournal(id, "POSTED")
-                for (n in 1..width) {
-                    val amount = if (n == wrongLine) "1.01" else "1.00"
-                    c.insertAlternatingLine(id, n, amount)
-                }
+                c.insertWideJournal(id, width, wrongLine)
                 assertThatThrownBy { c.commit() }.describedAs("wrong line %d", wrongLine).isBalanceViolation()
             }
             assertThat(count("journal_entries where id = ?", id)).isZero()
+        }
+    }
+
+    private fun Connection.insertWideJournal(id: UUID, width: Int, wrongLine: Int?) {
+        insertJournal(id, "POSTED")
+        for (n in 1..width) {
+            insertAlternatingLine(id, n, if (n == wrongLine) "1.01" else "1.00")
         }
     }
 
@@ -249,10 +239,7 @@ class LedgerJournalOwnershipIT : LedgerStorageInvariantFixture() {
         val balanced = UUID.randomUUID()
         connection().use { c ->
             c.autoCommit = false
-            c.insertJournal(balanced, "POSTED")
-            for (n in 1..width) {
-                c.insertAlternatingLine(balanced, n, "1.00")
-            }
+            c.insertWideJournal(balanced, width, wrongLine = null)
             c.commit()
         }
         journals += balanced

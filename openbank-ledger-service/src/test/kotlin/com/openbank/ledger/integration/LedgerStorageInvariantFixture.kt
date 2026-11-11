@@ -4,19 +4,10 @@
 
 package com.openbank.ledger.integration
 
-import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestSecurity
-import io.restassured.module.kotlin.extensions.Given
-import io.restassured.module.kotlin.extensions.Then
-import io.restassured.module.kotlin.extensions.When
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.eclipse.microprofile.config.ConfigProvider
-import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.sql.Connection
 import java.sql.Date
