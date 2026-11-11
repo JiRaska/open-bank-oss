@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.52.0...tax-reporting-service-v0.53.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** file the GSFT depositor batch on the statutory-return lifecycle ([#15563](https://github.com/JiRaska/open-bank-oss/issues/15563)) ([45a7c95](https://github.com/JiRaska/open-bank-oss/commit/45a7c951a22d943d69c5265a05038d42431617f2))
+
 ## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.51.0...tax-reporting-service-v0.52.0) (2026-11-11)
 
 
