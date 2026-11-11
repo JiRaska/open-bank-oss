@@ -126,7 +126,7 @@ spec:
         # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
         # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
         # 3 = v4 write mode + pid/tid table drop (wave C2).
-        openbank.io/langfuse-env-revision: "3"
+        open-bank.tech/langfuse-env-revision: "3"
       labels:
         app.kubernetes.io/name: langfuse-web
         app.kubernetes.io/part-of: ai-platform
@@ -256,7 +256,7 @@ spec:
         # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
         # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
         # 3 = v4 write mode + pid/tid table drop (wave C2).
-        openbank.io/langfuse-env-revision: "3"
+        open-bank.tech/langfuse-env-revision: "3"
       labels:
         app.kubernetes.io/name: langfuse-worker
         app.kubernetes.io/part-of: ai-platform

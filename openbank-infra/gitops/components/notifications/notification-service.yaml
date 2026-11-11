@@ -19,7 +19,7 @@ metadata:
   labels:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
-    # No openbank.io/finops-tier: the T2 declaration was removed with the KEDA
+    # No open-bank.tech/finops-tier: the T2 declaration was removed with the KEDA
     # ScaledObject it named (ADR-0057 T2 == "KEDA ScaledObject on Kafka consumer-group
     # lag"). T2 stopped being true the moment the warm floor went to 1 for the
     # customer-edge synchronous read; the scaler that made it nominally true had never
@@ -55,7 +55,7 @@ spec:
         # Oversight webhook egress (ADR-0059). Permits (does not force) internet
         # egress on 443 for the Slack/Teams call. Harmless while the feature is
         # off (SLACK_WEBHOOK_ENABLED=false); required the moment it is enabled.
-        openbank.io/allow-internet-egress: "true"
+        open-bank.tech/allow-internet-egress: "true"
     spec:
       securityContext:
         runAsNonRoot: true

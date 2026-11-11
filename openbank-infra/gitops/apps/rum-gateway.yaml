@@ -91,7 +91,7 @@ spec:
             # browser and no session to gate on. The paths are already narrowed to
             # /v1/traces and /v1/metrics, and the pod's own NetworkPolicy
             # (networkpolicy-rum-gateway.yaml) is what contains it.
-            openbank.io/ungated-machine-callers: >-
+            open-bank.tech/ungated-machine-callers: >-
               Mobile OTLP/HTTP export from SDKs in the field; no browser session
               exists to authenticate against.
             nginx.ingress.kubernetes.io/limit-rps: "20"

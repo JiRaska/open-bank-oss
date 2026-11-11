@@ -40,7 +40,7 @@ metadata:
   name: stateful-on-demand-cel
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: "Route money-path databases (and temporal-db) to on-demand capacity"
     policies.kyverno.io/category: "Reliability"

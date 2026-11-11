@@ -7,7 +7,7 @@ metadata:
   name: sdd-service
   namespace: sdd
   annotations:
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: sdd-service
     app.kubernetes.io/part-of: sdd

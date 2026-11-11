@@ -35,7 +35,7 @@ exceed `stateful_load_by_zone`, the measurement the derived NodePool limit is co
 WHAT IT DOES NOT PROVE, AND WHAT DOES
 The CEL is checked here as TEXT. `--kyverno` runs the pinned Kyverno CLI (docker) over
 openbank-infra/tests/kyverno-cel/stateful-resources.yaml and compares every fixture with its
-`openbank.io/expect` annotation. The gates shard has no docker, so that half runs locally.
+`open-bank.tech/expect` annotation. The gates shard has no docker, so that half runs locally.
 
 Usage:
     check-stateful-not-on-spot.py                # gate (exit 1 on any finding)
@@ -397,7 +397,7 @@ def kyverno() -> int:
     expect = {}
     for d in gatelib.load_yaml_all(REPO / FIXTURES):
         md = d["metadata"]
-        expect[f"{md['namespace']}/Pod/{md['name']}"] = md["annotations"]["openbank.io/expect"]
+        expect[f"{md['namespace']}/Pod/{md['name']}"] = md["annotations"]["open-bank.tech/expect"]
     got: dict[str, str] = {}
     for block in re.split(r"^policy \S+ applied to ", out, flags=re.M)[1:]:
         res, _, body = block.partition(":\n")
@@ -528,7 +528,7 @@ def self_test() -> int:
             tf0, pol0.replace("in variables.targets", "in ['x/y']"), fleet(), "no longer keys on variables.targets"),
         "on-demand retyped to spot in the affinity": (tf0, pol0.replace('values: ["on-demand"]', 'values: ["spot"]'), fleet(), "no required affinity"),
         "taint renamed without the toleration": (
-            tf0.replace('key = "openbank.io/stateful", value = "true"', 'key = "openbank.io/db", value = "true"'),
+            tf0.replace('key = "openbank.io/stateful", value = "true"', 'key = "open-bank.tech/db", value = "true"'),
             pol0, fleet(), "routed pods could never schedule"),
         "money-path Cluster with its own required nodeAffinity": (
             tf0, pol0, fleet(pay_extra="  affinity:\n    nodeAffinity:\n      requiredDuringSchedulingIgnoredDuringExecution:\n"

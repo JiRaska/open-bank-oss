@@ -43,7 +43,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: temporal
     app.kubernetes.io/component: namespace-registration
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
   annotations:
     # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '10 4 * * *' plus slack.
     openbank.tech/max-success-age-seconds: "180000"

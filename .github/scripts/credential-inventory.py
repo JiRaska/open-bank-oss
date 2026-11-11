@@ -16,7 +16,7 @@ CONVENTION INTRODUCED (and enforced on NEW manifests only):
     or another dynamic mount) must carry metadata annotation
     `open-bank.tech/rotation-deadline: YYYY-MM-DD` — the date by which the credential is
     rotated or the reference migrates to a dynamic mount;
-  * dynamic references may annotate `openbank.io/rotation: dynamic` for the reader's
+  * dynamic references may annotate `open-bank.tech/rotation: dynamic` for the reader's
     benefit, but the path prefix already proves it, so it is not required.
 
 MODES:
@@ -50,7 +50,7 @@ except ImportError:  # pragma: no cover - the gate runner installs PyYAML
 GITOPS = Path("openbank-infra/gitops")
 DYNAMIC_KEY = re.compile(r"database/creds/|(^|/)creds/[a-z0-9-]+-db-vault-role")
 DEADLINE = "open-bank.tech/rotation-deadline"
-DYNAMIC_ANN = "openbank.io/rotation"
+DYNAMIC_ANN = "open-bank.tech/rotation"
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 DOC_SPLIT = re.compile(r"^---\s*$", re.M)
