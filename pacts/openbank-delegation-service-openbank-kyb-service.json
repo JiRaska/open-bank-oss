@@ -1,0 +1,84 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "GET a stale statutory representation revision as delegation",
+      "providerStates": [
+        {
+          "name": "delegation may inspect a stale statutory representation"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/kyb/cases/b7300000-0000-4000-8000-000000000001/statutory-representation/b7300000-0000-4000-8000-000000000003/current",
+        "query": {
+          "entityPartyId": [
+            "b7300000-0000-4000-8000-000000000004"
+          ]
+        }
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 404
+      }
+    },
+    {
+      "description": "GET the current statutory representation revision as delegation",
+      "providerStates": [
+        {
+          "name": "delegation may inspect the current statutory representation"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/kyb/cases/b7300000-0000-4000-8000-000000000001/statutory-representation/b7300000-0000-4000-8000-000000000002/current",
+        "query": {
+          "entityPartyId": [
+            "b7300000-0000-4000-8000-000000000004"
+          ]
+        }
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 204
+      }
+    },
+    {
+      "description": "GET the current statutory representation revision as an unapproved workload",
+      "providerStates": [
+        {
+          "name": "the shared backend identity attempts to inspect the current statutory representation"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/kyb/cases/b7300000-0000-4000-8000-000000000001/statutory-representation/b7300000-0000-4000-8000-000000000002/current",
+        "query": {
+          "entityPartyId": [
+            "b7300000-0000-4000-8000-000000000004"
+          ]
+        }
+      },
+      "response": {
+        "status": 403
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-kyb-service"
+  }
+}
