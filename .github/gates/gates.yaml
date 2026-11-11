@@ -7874,7 +7874,7 @@ gates:
       fleet-wide 403. The gate derives the consumers from build.gradle.kts and the marker commit
       from history, and counts an unresolvable pin as lagging. It is monotonic once green.
     review_after: "2027-04-11"
-    budget_seconds: 180                  # ~60 compare-API calls in a shallow checkout
+    budget_seconds: 180                  # ~15 s blobless fetch of main in a shallow checkout (#15483)
     min_subjects: 29   # 58 libs-runtime consumers derived 2026-10-11; half
     run: |
       bash .github/scripts/check-pdp-flag-rollout.sh
