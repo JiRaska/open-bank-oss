@@ -78,6 +78,10 @@ class GsftSnapshotAdapter(
             identities = emptyList(),
             rates = null,
             gaps = UNRESOLVED_GAPS,
+            // UNSOURCED: no owning service models special-regime beneficiaries yet.
+            specialShares = emptyList(),
+            // Claim-based (§ 41e odst. 3): nothing is claimed before a payout starts.
+            qualifyingCredits = emptyList(),
         )
     }
 

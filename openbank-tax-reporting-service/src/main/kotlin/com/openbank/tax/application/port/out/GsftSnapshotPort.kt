@@ -8,6 +8,8 @@ import com.openbank.tax.domain.gsft.DepositAccount
 import com.openbank.tax.domain.gsft.Depositor
 import com.openbank.tax.domain.gsft.DepositorIdentity
 import com.openbank.tax.domain.gsft.FxRates
+import com.openbank.tax.domain.gsft.QualifyingCredit
+import com.openbank.tax.domain.gsft.SpecialRegimeShare
 import java.time.LocalDate
 
 /**
@@ -32,6 +34,10 @@ data class GsftSnapshot(
     val identities: List<DepositorIdentity>,
     val rates: FxRates?,
     val gaps: Set<GsftDataGap>,
+    /** Beneficiary shares of special-regime accounts (DII); no owning service models them yet. */
+    val specialShares: List<SpecialRegimeShare>,
+    /** § 41e odst. 3 credits a depositor has claimed; claim-based, so empty until one is filed. */
+    val qualifyingCredits: List<QualifyingCredit>,
 ) {
     val complete: Boolean get() = gaps.isEmpty()
 
