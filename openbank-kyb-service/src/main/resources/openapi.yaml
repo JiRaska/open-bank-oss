@@ -1263,7 +1263,10 @@ components:
       properties:
         disposition:
           type: string
-          enum: [CLEARED_FALSE_POSITIVE, CONFIRMED]
+          enum: [OPEN, CLEARED_FALSE_POSITIVE, CONFIRMED]
+          description: >-
+            CLEARED_FALSE_POSITIVE or CONFIRMED. OPEN is the state a finding starts in and is
+            refused here with 400: a decision cannot be withdrawn through this route.
         reason:
           type: string
           minLength: 10
