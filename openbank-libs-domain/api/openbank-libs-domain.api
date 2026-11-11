@@ -4930,6 +4930,15 @@ public final class com/openbank/libs/synthetic/SyntheticTaint {
 	public final fun isTainted (Ljava/util/Map;)Z
 }
 
+public final class com/openbank/libs/synthetic/SyntheticTransferDirection : java/lang/Enum {
+	public static final field OUTBOUND Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static final field RETURN Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun idempotencyKey (Ljava/util/UUID;Ljava/time/LocalDate;)Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+	public static fun values ()[Lcom/openbank/libs/synthetic/SyntheticTransferDirection;
+}
+
 public final class com/openbank/libs/util/BuildInfo {
 	public static final field INSTANCE Lcom/openbank/libs/util/BuildInfo;
 	public final fun getBuildTime ()Ljava/lang/String;
