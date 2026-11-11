@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.33.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.1...agent-service-v1.33.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **agent:** send the charter id as the OpenAI user field ([#15510](https://github.com/JiRaska/open-bank-oss/issues/15510)) ([9227598](https://github.com/JiRaska/open-bank-oss/commit/9227598e4577792f02217a3f7407ee08caadaeb0))
+
 ## [1.33.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.33.0...agent-service-v1.33.1) (2026-11-09)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.8.0...incentive-service-v0.8.1) (2026-11-11)
+
+
+### Security
+
+* **campaign:** drop baked-in datasource password fallbacks + gate ([#15540](https://github.com/JiRaska/open-bank-oss/issues/15540)) ([d5d111d](https://github.com/JiRaska/open-bank-oss/commit/d5d111df2bda173c5645fc9e05e52aebc4cd1cb0))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/incentive-service-v0.7.2...incentive-service-v0.8.0) (2026-10-18)
 
 
