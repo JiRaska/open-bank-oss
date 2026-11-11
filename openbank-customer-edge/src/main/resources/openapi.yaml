@@ -3691,6 +3691,12 @@ paths:
         The delegate still authenticates as themselves: SCA is unchanged and a grant is not a
         substitute for it. Every refusal — not yours, no grant, expired, over the ceiling — returns
         the identical 403, so this route is not an oracle for other parties' accounts or grants.
+
+
+        For company payments the original key binds the verified debit authority, frozen instruction
+        and signing route before SCA. Reuse with a different instruction or authority returns 409.
+        If current policy no longer permits the original route, the request is refused without
+        switching routes. Use the read-only submission lookups after an ambiguous response.
       operationId: createDomesticPayment
       security:
         - customerOidc: [payments:initiate]
@@ -3733,7 +3739,9 @@ paths:
         '201':
           description: Payment instruction created
         '400':
-          description: Malformed request or CURRENCY_NOT_ALLOWED when currency is not CZK; rejected before spend reservation or SCA
+          description: >-
+            Malformed request, missing or invalid company submission key, or CURRENCY_NOT_ALLOWED
+            when currency is not CZK. Rejected before spend reservation or SCA.
         '403':
           description: >-
             Caller may not debit this account — not the owner and no authorising delegation grant
@@ -3743,12 +3751,15 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+            Company submissions require an owner debit or an attributable payment grant.
         '409':
-          description: Original held-payment key already belongs to a different frozen instruction
+          description: >-
+            The original submission key already binds a different instruction or debit authority
+            (SUBMISSION_CORRELATION_REUSED), or current policy conflicts with its stored mode
+            (DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED or DOMESTIC_HELD_POLICY_CHANGED).
         '503':
           description: >-
-            Under X-Acting-For only: the company's signing policy could not be evaluated, so the
-            payment is refused rather than sent with a single signature.
+            Company signing policy or durable submission mode could not be established. Dispatch is refused.
 
   /domestic-payments/submissions/lookup:
     post:

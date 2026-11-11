@@ -215,8 +215,11 @@ původní částku v CZK jako `amount`.
 upozornění na neověřený stav a nezadávejte novou platbu. Dohledání nespotřebovává SCA
 a nevytváří platební příkaz.
 
-
 U firemní platby čekající na další podpis použijte `POST /customer/v1/domestic-payments/submissions/approval-lookup`
 se stejným klíčem, účtem, firemním profilem a původní částkou. Dohledání vrátí ID schválení a jeho
 aktuální stav, pokud existuje uložený záznam. Samotný příznak uvolnění ID platby nedokládá.
 Výsledek ho obsahuje až po uložení odpovědi platební služby.
+
+U nového firemního příkazu se před SCA trvale uloží vazba klíče na oprávnění k účtu,
+obsah příkazu a způsob zpracování. Změněný obsah, jiné oprávnění nebo pravidlo podpisů,
+které už původní způsob nepovoluje, vede k odpovědi `409`. Po timeoutu použijte dohledání.

@@ -33,7 +33,9 @@ private const val CREDITOR = "DE89370400440532013000"
 private const val ENTITY = "/api/v1/entities/$COMPANY"
 private const val EVALUATE = "$ENTITY/signing/evaluate"
 private const val CREATE = "$ENTITY/approval-requests"
+private const val CLAIM_SUBMISSION = "$CREATE/submissions/claim"
 private const val DETAIL = "$ENTITY/approval-requests/$APPROVAL"
+private const val DOMESTIC_RAIL = "/api/v1/domestic-payments"
 private const val SEPA_RAIL = "/api/v1/sepa-payments"
 private const val CONSUME = "/api/v1/sca/challenges/$SCA/consume"
 
@@ -141,6 +143,7 @@ class BusinessPaymentApprovalIT {
     @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
     @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
     fun `original domestic key recovers a held approval after the response is lost`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
         BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
         BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
         BusinessApprovalStubs.stub("POST", CREATE, status = 503, body = """{"error":"fixture lost response"}""")
@@ -149,16 +152,27 @@ class BusinessPaymentApprovalIT {
         postDomestic(key) Then { statusCode(503) }
         val create = BusinessApprovalStubs.requests("POST", CREATE).single()
         val request = readJson(create.body)
+        val claimRequest = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single()
+        val claimBody = readJson(claimRequest.body)
+        val digest = request.path("submissionKeyDigest").asText()
         val correlation = request.path("submissionCorrelation").asText()
+        assertThat(digest).matches("[0-9a-f]{64}").isNotEqualTo(correlation)
         assertThat(correlation).matches("[0-9a-f]{64}")
-        assertThat(create.body).doesNotContain(key)
+        assertThat(claimBody.path("submissionKeyDigest").asText()).isEqualTo(digest)
+        assertThat(claimBody.path("submissionCorrelation").asText()).isEqualTo(correlation)
+        assertThat(claimBody.path("payload")).isEqualTo(request.path("payload"))
+        assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
+        assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
+        assertThat(claimRequest.header("Idempotency-Key")).isNull()
         assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
 
         val route = "$CREATE/submissions/lookup"
         val releaseEvidence = AtomicReference("""{"approvalId":"$APPROVAL","status":"PENDING"}""")
         BusinessApprovalStubs.stub("POST", route) { body ->
             val lookup = readJson(body)
-            if (lookup.path("submissionCorrelation").asText() == correlation &&
+            if (lookup.path("submissionKeyDigest").asText() == digest &&
+                lookup.path("submissionCorrelation").asText() == correlation &&
+                lookup.path("debtorAccountId").asText() == ACCOUNT &&
                 lookup.path("initiatorPartyId").asText() == INITIATOR
             ) {
                 200 to releaseEvidence.get()
@@ -195,22 +209,76 @@ class BusinessPaymentApprovalIT {
         }
         assertThat(BusinessApprovalStubs.requests("POST", CREATE)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).hasSize(1)
-        assertThat(BusinessApprovalStubs.requests("POST", "/api/v1/domestic-payments")).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 
     @Test
     @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
     @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
-    fun `a changed instruction under the original held payment key returns a conflict`() {
-        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
-        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
-        BusinessApprovalStubs.stub("POST", CREATE, status = 409, body = """{"code":"SUBMISSION_CORRELATION_REUSED"}""")
+    fun `a changed instruction under the original key returns a conflict before SCA or dispatch`() {
+        BusinessApprovalStubs.stub(
+            "POST",
+            CLAIM_SUBMISSION,
+            status = 409,
+            body = """{"code":"SUBMISSION_CORRELATION_REUSED"}""",
+        )
 
         postDomestic("fixture-conflict-key") Then {
             statusCode(409)
             body("code", equalTo("SUBMISSION_CORRELATION_REUSED"))
         }
-        assertThat(BusinessApprovalStubs.requests("POST", "/api/v1/domestic-payments")).isEmpty()
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a held command cannot go direct when policy relaxes between claim and SCA`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{"mode":"HELD"}""")
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":1}""")
+
+        postDomestic("fixture-held-key") Then {
+            statusCode(409)
+            body("code", equalTo("DOMESTIC_HELD_POLICY_CHANGED"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a direct command cannot dispatch once approval policy tightens`() {
+        BusinessApprovalStubs.stub(
+            "POST",
+            CLAIM_SUBMISSION,
+            status = 409,
+            body = """{"code":"DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"}""",
+        )
+
+        postDomestic("fixture-direct-key") Then {
+            statusCode(409)
+            body("code", equalTo("DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a missing durable mode is unavailable before SCA or dispatch`() {
+        BusinessApprovalStubs.stub("POST", CLAIM_SUBMISSION, body = """{}""")
+
+        postDomestic("fixture-unavailable-key") Then {
+            statusCode(503)
+            body("code", equalTo("APPROVAL_UNAVAILABLE"))
+        }
+        assertNoDomesticDispatch()
+    }
+
+    private fun assertNoDomesticDispatch() {
+        assertThat(BusinessApprovalStubs.requests("POST", CREATE)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).isEmpty()
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 
     @Test

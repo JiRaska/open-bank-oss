@@ -191,8 +191,8 @@ class CustomerEdgeResource(
     lateinit var scaServiceUrl: String
 
     /**
-     * Multi-signature hold for payments under `X-Acting-For` (#10281). Field-injected and optional:
-     * a resource built by hand in a test has none and takes the single-signature path unchanged.
+     * Multi-signature hold for payments under `X-Acting-For` (#10281) and durable company
+     * domestic submission routing (#12317).
      */
     @Inject
     lateinit var businessApprovals: BusinessPaymentApprovals
@@ -3040,7 +3040,10 @@ class CustomerEdgeResource(
             customerSubmissionScope = submissionScope,
         ) ?: return badRequest("Malformed or incomplete payment body")
         if (customer.actingFor != null) {
-            holdForApproval(
+            val key = domesticSubmissionKey(idempotencyKey)
+                ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+            val scope = submissionScope ?: return forbidden("Company payment requires a stable debit authority")
+            businessApprovals.routeDomestic(
                 customer,
                 HeldPayment(
                     PaymentRail.DOMESTIC,
@@ -3053,11 +3056,10 @@ class CustomerEdgeResource(
                     enriched,
                 ),
                 scaChallengeId,
-                "payments.domestic",
-                approvalSubmissionCorrelation = submissionScope?.let { scope ->
-                    domesticSubmissionKey(idempotencyKey)?.let { domesticApprovalCorrelation(scope, it) }
-                },
-            )?.let { return it }
+                domesticApprovalSubmission(scope, key),
+            ) {
+                scaGate(scaChallengeId, customer, amount, currency, creditorForSca, "payments.domestic")
+            }?.let { return it }
         }
         // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
         // delegate's monthly limit will refuse must not first cost them a biometric prompt and a
@@ -3150,9 +3152,12 @@ class CustomerEdgeResource(
         val customer = customer()
         val entity = customer.actingFor ?: return domesticSubmissionResult()
         val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
-        val correlation = domesticApprovalCorrelation(scope, key)
-        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, correlation)
-            ?: return domesticSubmissionResult()
+        val receipt = businessApprovals.lookupDomesticSubmission(
+            entity,
+            customer.human,
+            debtor,
+            domesticApprovalSubmission(scope, key),
+        ) ?: return domesticSubmissionResult()
         val result = mutableMapOf(
             "outcome" to "FOUND",
             "approvalId" to receipt.approvalId.toString(),
@@ -5496,10 +5501,9 @@ class CustomerEdgeResource(
         payment: HeldPayment,
         scaChallengeId: String?,
         operation: String,
-        approvalSubmissionCorrelation: String? = null,
     ): Response? {
         if (customer.actingFor == null || !this::businessApprovals.isInitialized) return null
-        return businessApprovals.hold(customer, payment, scaChallengeId, approvalSubmissionCorrelation) {
+        return businessApprovals.hold(customer, payment, scaChallengeId) {
             scaGate(scaChallengeId, customer, payment.amount, payment.currency, payment.creditor, operation)
         }
     }
@@ -6215,11 +6219,11 @@ class CustomerEdgeResource(
             it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
         }
 
-        private fun domesticApprovalCorrelation(scope: String, key: String): String {
-            val material = "openbank-domestic-approval-v1|$scope|$key"
-            val digest = MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8))
-            return HexFormat.of().formatHex(digest)
-        }
+        private fun domesticApprovalSubmission(scope: String, key: String): DomesticApprovalSubmission =
+            DomesticApprovalSubmission(
+                keyDigest = domesticSubmissionDigest("openbank-domestic-approval-key-v1|$key"),
+                correlation = domesticSubmissionDigest("openbank-domestic-approval-v1|$scope|$key"),
+            )
 
         private fun domesticSubmissionScope(customer: CustomerIdentity, account: UUID, grant: String?): String {
             val scope = listOf(
@@ -6229,9 +6233,13 @@ class CustomerEdgeResource(
                 account,
                 grant.orEmpty(),
             ).joinToString("|")
-            val digest = MessageDigest.getInstance("SHA-256").digest(scope.toByteArray(StandardCharsets.UTF_8))
-            return HexFormat.of().formatHex(digest)
+            return domesticSubmissionDigest(scope)
         }
+
+        private fun domesticSubmissionDigest(material: String): String =
+            HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8)),
+            )
 
         private fun normalizeDomesticPriority(priority: String?): String =
             priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"

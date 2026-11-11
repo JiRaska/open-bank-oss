@@ -6,7 +6,9 @@ package com.openbank.customeredge.infrastructure.rest
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.application.port.out.BusinessSigningPort
+import com.openbank.customeredge.application.port.out.SigningReply
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import jakarta.enterprise.context.ApplicationScoped
@@ -49,6 +51,8 @@ data class HeldPayment(
 )
 
 internal data class DomesticApprovalReceipt(val approvalId: UUID, val status: String, val paymentId: UUID?)
+
+internal data class DomesticApprovalSubmission(val keyDigest: String, val correlation: String)
 
 /**
  * Multi-signature business payments at the edge (#10281 item 2).
@@ -125,7 +129,6 @@ class BusinessPaymentApprovals(
         customer: CustomerIdentity,
         payment: HeldPayment,
         scaChallengeId: String?,
-        submissionCorrelation: String? = null,
         scaGate: () -> Response?,
     ): Response? {
         val entity = customer.actingFor ?: return null
@@ -135,9 +138,59 @@ class BusinessPaymentApprovals(
         if (required < 1) return unavailable("signing policy answered no signer count")
         if (required == 1) return null
 
+        return createHeld(customer, payment, scaChallengeId, required, null, scaGate)
+    }
+
+    /**
+     * A successful DIRECT claim is the only answer that lets the caller dispatch to the rail.
+     * HELD stays held even when a subsequent policy read would normally select direct dispatch.
+     */
+    internal fun routeDomestic(
+        customer: CustomerIdentity,
+        payment: HeldPayment,
+        scaChallengeId: String?,
+        submission: DomesticApprovalSubmission,
+        scaGate: () -> Response?,
+    ): Response? {
+        val entity = checkNotNull(customer.actingFor)
+        val payload = frozenPayload(payment)
+        val claimBody = objectMapper.createObjectNode().apply {
+            put("initiatorPartyId", customer.human.toString())
+            put("enforceApprovalPolicy", enforce)
+            putSubmission(submission)
+            set<JsonNode>("payload", payload)
+        }
+        val claim = signing.claimDomesticSubmission(entity, claimBody.toString())
+        if (claim.status != Response.Status.OK.statusCode) {
+            return submissionConflict(claim) ?: unavailable("domestic submission could not be bound")
+        }
+        return when (read(claim.body)?.path("mode")?.textOrNull()) {
+            "DIRECT" -> null
+            "HELD" -> {
+                if (!enforce) return conflict(DOMESTIC_HELD_POLICY_CHANGED, "The payment must stay in approval")
+                val required = evaluate(entity, payment)?.path("required")?.asInt(0) ?: 0
+                when {
+                    required < 1 -> unavailable("signing policy could not be evaluated")
+                    required == 1 -> conflict(DOMESTIC_HELD_POLICY_CHANGED, "The payment must stay in approval")
+                    else -> createHeld(customer, payment, scaChallengeId, required, submission, scaGate)
+                }
+            }
+            else -> unavailable("domestic submission mode was unreadable")
+        }
+    }
+
+    private fun createHeld(
+        customer: CustomerIdentity,
+        payment: HeldPayment,
+        scaChallengeId: String?,
+        required: Int,
+        submission: DomesticApprovalSubmission?,
+        scaGate: () -> Response?,
+    ): Response {
+        val entity = checkNotNull(customer.actingFor)
         scaGate()?.let { return it }
         val challenge = UUID.fromString(requireNotNull(scaChallengeId).trim())
-        val body = createBody(customer.human, challenge, payment, submissionCorrelation)
+        val body = createBody(customer.human, challenge, payment, submission)
         val created = signing.createApproval(entity, body)
         if (!created.ok) {
             audit.emit(
@@ -147,13 +200,7 @@ class BusinessPaymentApprovals(
                 result = "FAILURE",
                 details = mapOf("reason" to "APPROVAL_NOT_CREATED", "upstreamStatus" to created.status.toString()),
             )
-            val code = read(created.body)?.path("code")?.asText()
-            if (created.status == Response.Status.CONFLICT.statusCode && code == SUBMISSION_CORRELATION_REUSED) {
-                return Response.status(Response.Status.CONFLICT)
-                    .entity(mapOf("code" to SUBMISSION_CORRELATION_REUSED, "message" to "Submission key already used"))
-                    .type(MediaType.APPLICATION_JSON)
-                    .build()
-            }
+            submissionConflict(created)?.let { return it }
             return unavailable("approval request could not be created; the initiator's authentication was used")
         }
         val node = read(created.body) ?: return unavailable("approval request answer was unreadable")
@@ -186,9 +233,15 @@ class BusinessPaymentApprovals(
     internal fun lookupDomesticSubmission(
         entity: UUID,
         initiator: UUID,
-        submissionCorrelation: String,
+        debtorAccountId: UUID,
+        submission: DomesticApprovalSubmission,
     ): DomesticApprovalReceipt? {
-        val reply = signing.lookupDomesticApproval(entity, initiator, submissionCorrelation)
+        val body = objectMapper.createObjectNode().apply {
+            put("initiatorPartyId", initiator.toString())
+            put("debtorAccountId", debtorAccountId.toString())
+            putSubmission(submission)
+        }
+        val reply = signing.lookupDomesticApproval(entity, body.toString())
         if (reply.status != Response.Status.OK.statusCode) return null
         val receipt = read(reply.body) ?: return null
         val id = receipt.path("approvalId").textOrNull()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -213,8 +266,8 @@ class BusinessPaymentApprovals(
         return if (reply.ok) read(reply.body) else null
     }
 
-    private fun createBody(human: UUID, challenge: UUID, p: HeldPayment, submissionCorrelation: String?): String {
-        val payload = objectMapper.createObjectNode().apply {
+    private fun frozenPayload(p: HeldPayment): JsonNode =
+        objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
             p.amount?.let { put("amount", it) }
             p.currency?.let { put("currency", it) }
@@ -225,17 +278,41 @@ class BusinessPaymentApprovals(
             put("debtorAccountId", p.debtorAccountId)
             set<JsonNode>("railRequest", objectMapper.readTree(p.railRequest))
         }
-        val body = objectMapper.createObjectNode().apply {
-            put("kind", p.rail.kind)
-            submissionCorrelation?.let { put("submissionCorrelation", it) }
-            set<JsonNode>("payload", payload)
-            putObject("initiatorSignature").apply {
-                put("partyId", human.toString())
-                put("scaChallengeId", challenge.toString())
-            }
+    private fun createBody(
+        human: UUID,
+        challenge: UUID,
+        p: HeldPayment,
+        submission: DomesticApprovalSubmission?,
+    ): String = objectMapper.createObjectNode().apply {
+        put("kind", p.rail.kind)
+        submission?.let { putSubmission(it) }
+        set<JsonNode>("payload", frozenPayload(p))
+        putObject("initiatorSignature").apply {
+            put("partyId", human.toString())
+            put("scaChallengeId", challenge.toString())
         }
-        return objectMapper.writeValueAsString(body)
+    }.toString()
+
+    private fun ObjectNode.putSubmission(submission: DomesticApprovalSubmission) {
+        put("submissionKeyDigest", submission.keyDigest)
+        put("submissionCorrelation", submission.correlation)
     }
+
+    private fun submissionConflict(reply: SigningReply): Response? {
+        if (reply.status != Response.Status.CONFLICT.statusCode) return null
+        return when (val code = read(reply.body)?.path("code")?.textOrNull()) {
+            SUBMISSION_CORRELATION_REUSED -> conflict(code, "Submission key already used")
+            DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED -> conflict(code, "The original payment requires review")
+            DOMESTIC_HELD_POLICY_CHANGED -> conflict(code, "The payment must stay in approval")
+            else -> null
+        }
+    }
+
+    private fun conflict(code: String, message: String): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(mapOf("code" to code, "message" to message))
+            .type(MediaType.APPLICATION_JSON)
+            .build()
 
     /** Release after the last signature. Returns the release outcome for the sign response. */
     fun release(entity: UUID, approvalId: UUID): Map<String, Any?> {
@@ -339,6 +416,8 @@ class BusinessPaymentApprovals(
         )
 
         const val SUBMISSION_CORRELATION_REUSED = "SUBMISSION_CORRELATION_REUSED"
+        const val DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED = "DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"
+        const val DOMESTIC_HELD_POLICY_CHANGED = "DOMESTIC_HELD_POLICY_CHANGED"
 
         const val ERROR_MAX_CHARS = 300
     }

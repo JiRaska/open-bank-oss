@@ -339,7 +339,17 @@ The named TLS bucket reloads certificate material hourly. A matching `Certificat
 
 ## Business domestic approval recovery
 
-The held payment sends Delegation a domain-separated hash of the original key and the scoped debit
-authority. The key remains in the client header. The read rechecks the same human, company, account
-and active authority before calling the named approval endpoint. A receipt exposes only the approval
-ID, lifecycle status and a recorded rail ID. Lookup cannot release the approval or consume SCA.
+Before SCA or dispatch, Edge binds a new company domestic key to the same human, company, debit
+account, active grant, and frozen payload in Delegation. The claim stores a key digest and a
+separate domain-separated authority correlation. The raw key stays in the client header and the
+existing direct rail header. A missing or unreadable claim stops dispatch. A held command cannot
+fall through to direct dispatch when current signing policy relaxes or enforcement is disabled.
+
+Lookup verifies the current authority and sends both digests to the named approval endpoint. A
+receipt exposes only the approval ID, lifecycle status and a recorded rail ID. Lookup cannot
+release the approval or consume SCA. A dispatch claim alone cannot prove that a payment exists.
+
+Activate the new Edge writer after the Delegation migrations and routes are available, and drain
+old company domestic writers before accepting bound commands. Older commands without original-key
+evidence have no backfilled approval receipt. Clients keep the pending warning if both lookups
+return `UNKNOWN`.
