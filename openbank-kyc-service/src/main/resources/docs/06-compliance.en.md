@@ -31,8 +31,25 @@ A PEP match is a risk input, not a sanctions hit: it sets `PEP_SCREENING` to `MA
 raises the tier to at least `HIGH`, as before.
 
 Only a `PENDING` sanctions check is settled automatically, so a redelivered event does not replace
-a reviewer's decision. There is no automatic retry of a check left `PENDING` by an outage; a
-reviewer settles it through the check endpoint.
+a reviewer's decision. The PEP check follows the same rule: a screen writes it only while it is
+`PENDING`, or while it is under review because an earlier screen was unavailable.
+
+**Retry after an outage.** A check left `PENDING` because `sanctions-service` was unavailable is
+screened again by a scheduled sweep (every minute, at most 50 cases per run, at the earliest two
+minutes after the last attempt). The retry is the same request with the same idempotency key
+(`kyc-screen-<caseId>`), so a result the provider stored but could not deliver is replayed, not
+screened twice, and it settles the case by the same rules as the opening — including the sandbox
+auto-approval, and never on a missing result. The screen needs the party's legal name, which the
+case does not otherwise store: it is kept in `kyc_cases.pending_screening_name` only while a retry
+needs it, and cleared when the check is settled, when the case closes and on GDPR erasure. A case
+the sweep has no name for (opened before this existed, or from an event without a legal name) is
+not retried; it stays visible in `openbank_kyc_sanctions_unscreened_cases` and a reviewer settles
+it through the check endpoint.
+
+**Operator PEP re-screen.** `POST /cases/{caseId}/pep-rescreen` sends an idempotency key that
+includes the time of the PEP result it replaces, so each re-screen after a recorded result is a
+new screen against the current list. A request retried before its result was recorded carries the
+same key and is replayed by the provider.
 
 **Sandbox auto-approve** (`openbank.kyc.auto-approve`) now runs after the screen and approves only
 a case screened clear. A sanctions match, a PEP match, a party that could not be screened and a

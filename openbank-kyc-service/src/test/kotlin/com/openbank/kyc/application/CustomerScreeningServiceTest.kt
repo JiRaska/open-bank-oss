@@ -13,6 +13,7 @@ import com.openbank.kyc.application.port.out.PepScreeningResult
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.application.port.out.SanctionsScreeningOutcome
 import com.openbank.kyc.application.port.out.SanctionsScreeningStatus
+import com.openbank.kyc.application.port.out.UnscreenedCaseStore
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
@@ -39,7 +40,9 @@ class CustomerScreeningServiceTest {
     private val port = mockk<CustomerScreeningPort>()
     private val repo = mockk<KycCaseRepository>()
     private val kycService = mockk<KycService>()
-    private val service = CustomerScreeningService(port, repo, kycService, Clock.fixed(now, ZoneOffset.UTC))
+    private val unscreened = mockk<UnscreenedCaseStore>(relaxUnitFun = true)
+    private val service =
+        CustomerScreeningService(port, repo, kycService, Clock.fixed(now, ZoneOffset.UTC), unscreened)
 
     private val clearPep = PepScreeningResult(PepScreeningStatus.CLEAR, 0.0, null)
 
@@ -173,5 +176,89 @@ class CustomerScreeningServiceTest {
 
         coVerify(exactly = 0) { repo.update(any()) }
         coVerify(exactly = 0) { repo.update(any(), any<KycEvent>()) }
+    }
+
+    // ── Retry state (issue #15723) ────────────────────────────────────────────
+
+    private val clear =
+        CustomerScreeningResult(SanctionsScreeningOutcome(SanctionsScreeningStatus.CLEAR, 0.0, null), clearPep)
+
+    private fun KycCase.withPep(status: CheckStatus, result: String?) = copy(
+        checks = checks.map {
+            if (it.checkType == CheckType.PEP_SCREENING) it.copy(status = status, result = result) else it
+        },
+    )
+
+    @Test
+    fun `an unavailable screen keeps the name for the retry, and only then`(): Unit = runBlocking {
+        val case = case()
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } throws CustomerScreeningUnavailableException(RuntimeException("down"))
+
+        service.screenOnOpen(case, "Jane Doe")
+
+        coVerify(exactly = 1) { unscreened.retainForRetry(case.id, "Jane Doe", now) }
+        coVerify(exactly = 0) { unscreened.release(any()) }
+    }
+
+    @Test
+    fun `an obtained screen forgets the name`(): Unit = runBlocking {
+        val case = case()
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } returns clear
+
+        service.screenOnOpen(case, "Jane Clean")
+
+        coVerify(exactly = 1) { unscreened.release(case.id) }
+        coVerify(exactly = 0) { unscreened.retainForRetry(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a check a reviewer decided forgets the name even when the screen is still unavailable`(): Unit = runBlocking {
+        val case = case(sanctions = CheckStatus.MANUAL_REVIEW)
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } throws
+            CustomerScreeningUnavailableException(RuntimeException("down"))
+
+        service.screenOnOpen(case, "Jane Doe")
+
+        coVerify(exactly = 1) { unscreened.release(case.id) }
+        coVerify(exactly = 0) { unscreened.retainForRetry(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a PEP check left under review by an outage is replaced by a later result`(): Unit = runBlocking {
+        val case = case().withPep(CheckStatus.MANUAL_REVIEW, KycService.PEP_UNAVAILABLE_RESULT)
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } returns clear
+
+        service.screenOnOpen(case, "Jane Clean")
+
+        coVerify(exactly = 1) { kycService.applyPepScreeningResult(case.id, PepScreeningStatus.CLEAR, 0.0, null) }
+    }
+
+    @Test
+    fun `a PEP check a reviewer decided is not overwritten by a retried screen`(): Unit = runBlocking {
+        val case = case().withPep(CheckStatus.PASSED, "reviewed: namesake, different date of birth")
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } returns CustomerScreeningResult(
+            SanctionsScreeningOutcome(SanctionsScreeningStatus.CLEAR, 0.0, null),
+            PepScreeningResult(PepScreeningStatus.MATCH, 0.96, "Synthetic Politician"),
+        )
+
+        service.screenOnOpen(case, "Synthetic Politician")
+
+        coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a repeated outage does not rewrite a PEP check it already put under review`(): Unit = runBlocking {
+        val case = case().withPep(CheckStatus.MANUAL_REVIEW, KycService.PEP_UNAVAILABLE_RESULT)
+        stubRepo(case)
+        coEvery { port.screenCustomer(any()) } throws CustomerScreeningUnavailableException(RuntimeException("down"))
+
+        service.screenOnOpen(case, "Jane Doe")
+
+        coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
     }
 }

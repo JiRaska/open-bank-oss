@@ -7,6 +7,9 @@ package com.openbank.kyc.infrastructure.persistence
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.KycOutboxRepository
+import com.openbank.kyc.application.port.out.ScreeningRetryCandidate
+import com.openbank.kyc.application.port.out.UnscreenedBacklog
+import com.openbank.kyc.application.port.out.UnscreenedCaseStore
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
@@ -101,12 +104,21 @@ class KycCaseEntity : PanacheEntity() {
 
     @Column(name = "erased_at")
     var erasedAt: Instant? = null
+
+    // V13: the name a retry of the customer screen needs, and when it was last attempted. Not
+    // part of KycCase — see UnscreenedCaseStore.
+    @Column(name = "pending_screening_name")
+    var pendingScreeningName: String? = null
+
+    @Column(name = "screening_attempted_at")
+    var screeningAttemptedAt: Instant? = null
 }
 
 @Suppress("TooManyFunctions")
 @ApplicationScoped
 class KycRepository(private val outboxRepository: KycOutboxRepository) :
     KycCaseRepository,
+    UnscreenedCaseStore,
     PanacheRepository<KycCaseEntity> {
 
     @Inject lateinit var objectMapper: ObjectMapper
@@ -253,6 +265,9 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
                     c.screeningRef = null
                     c.escalatedTo = null
                     c.escalationReason = null
+                    // V13: the retained legal name is PII and no retry may follow an erasure
+                    c.pendingScreeningName = null
+                    c.screeningAttemptedAt = null
                     // ADR-0118 §5: record when PII was erased so the retention job can delete after 5y
                     if (c.erasedAt == null) c.erasedAt = now
                 }
@@ -274,6 +289,64 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
 
     override suspend fun deleteErasedCasesOlderThan(cutoff: Instant): Long = Panache.withTransaction {
         delete("erasedAt IS NOT NULL AND erasedAt < ?1", cutoff)
+    }.awaitSuspending()
+
+    // `erasedAt is null`: a name is never (re)stored for a party whose PII was erased.
+    override suspend fun retainForRetry(caseId: UUID, partyName: String, attemptedAt: Instant) {
+        Panache.withTransaction {
+            update(
+                "pendingScreeningName = ?1, screeningAttemptedAt = ?2 where caseId = ?3 and erasedAt is null",
+                partyName,
+                attemptedAt,
+                caseId,
+            )
+        }.awaitSuspending()
+    }
+
+    override suspend fun release(caseId: UUID) {
+        Panache.withTransaction {
+            update(
+                "pendingScreeningName = null, screeningAttemptedAt = null " +
+                    "where caseId = ?1 and pendingScreeningName is not null",
+                caseId,
+            )
+        }.awaitSuspending()
+    }
+
+    override suspend fun findRetryCandidates(lastAttemptBefore: Instant, limit: Int): List<ScreeningRetryCandidate> =
+        Panache.withSession {
+            find(
+                "pendingScreeningName is not null and status not in ?1 and screeningAttemptedAt <= ?2 " +
+                    "order by screeningAttemptedAt asc",
+                KycCaseStatus.TERMINAL_NAMES,
+                lastAttemptBefore,
+            ).page(0, limit).list()
+        }.awaitSuspending().mapNotNull { entity ->
+            entity.pendingScreeningName?.let { ScreeningRetryCandidate(entity.toDomain(objectMapper), it) }
+        }
+
+    override suspend fun releaseClosedCases(): Int = Panache.withTransaction {
+        update(
+            "pendingScreeningName = null, screeningAttemptedAt = null " +
+                "where pendingScreeningName is not null and status in ?1",
+            KycCaseStatus.TERMINAL_NAMES,
+        )
+    }.awaitSuspending()
+
+    // Two scalar reads rather than one tuple: a native multi-column result comes back as an
+    // untyped array whose timestamp element type depends on the driver, and this runs on every
+    // tick of a monitoring job.
+    override suspend fun backlog(): UnscreenedBacklog = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery(UNSCREENED_COUNT_SQL, java.lang.Long::class.java).singleResult
+                .flatMap { count ->
+                    session.createNativeQuery(UNSCREENED_OLDEST_EPOCH_SQL, java.lang.Long::class.java)
+                        .singleResultOrNull
+                        .map { oldest ->
+                            UnscreenedBacklog(count.toLong(), oldest?.let { Instant.ofEpochSecond(it.toLong()) })
+                        }
+                }
+        }
     }.awaitSuspending()
 
     companion object {
@@ -308,6 +381,20 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         // is therefore about the VALUE being null, and the query always returns exactly one row.
         private const val EARLIEST_CASE_CREATED_AT_HQL =
             "SELECT MIN(c.createdAt) FROM KycCaseEntity c"
+
+        // An in-flight, un-erased case whose SANCTIONS_SCREENING check is PENDING and carries no
+        // provider, i.e. no screen ever settled it. checks_json is TEXT (V1), hence the cast; CAST
+        // rather than `::`, which Hibernate's native-query parser reads as a named parameter.
+        private const val UNSCREENED_WHERE =
+            "FROM kyc_cases c WHERE c.status NOT IN ('APPROVED', 'REJECTED', 'EXPIRED') AND c.erased_at IS NULL " +
+                "AND EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(c.checks_json AS jsonb)) chk " +
+                "WHERE chk ->> 'checkType' = 'SANCTIONS_SCREENING' AND chk ->> 'status' = 'PENDING' " +
+                "AND chk ->> 'provider' IS NULL)"
+
+        private const val UNSCREENED_COUNT_SQL = "SELECT COUNT(*) $UNSCREENED_WHERE"
+
+        private const val UNSCREENED_OLDEST_EPOCH_SQL =
+            "SELECT CAST(EXTRACT(EPOCH FROM MIN(c.created_at)) AS bigint) $UNSCREENED_WHERE"
 
         private const val PARTY_IDS_WITH_CASE_HQL =
             "SELECT c.partyId FROM KycCaseEntity c WHERE c.partyId IN :ids"

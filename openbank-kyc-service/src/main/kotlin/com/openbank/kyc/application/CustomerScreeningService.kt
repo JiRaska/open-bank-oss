@@ -11,10 +11,12 @@ import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.application.port.out.SanctionsScreeningOutcome
 import com.openbank.kyc.application.port.out.SanctionsScreeningStatus
+import com.openbank.kyc.application.port.out.UnscreenedCaseStore
 import com.openbank.kyc.domain.model.CheckStatus
 import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
+import com.openbank.kyc.domain.model.KycCheck
 import com.openbank.kyc.domain.model.KycEvents
 import com.openbank.kyc.domain.model.RiskLevel
 import com.openbank.kyc.domain.model.SubjectType
@@ -36,7 +38,15 @@ import java.util.UUID
  *    missing result, and a PENDING check blocks approval exactly like an undecided one.
  *
  * Only a PENDING check is settled here. A redelivered event must not replace a reviewer's
- * decision, or an earlier screening result, with a replay of the first answer.
+ * decision, or an earlier screening result, with a replay of the first answer. The same holds for
+ * the PEP check: it is written only while it still awaits a screen ([awaitsScreen]).
+ *
+ * A screen that could not be obtained is retried by
+ * [com.openbank.kyc.infrastructure.screening.UnscreenedCaseRetryJob] through this same method,
+ * with the same idempotency key — so if the provider stored a result whose response was lost, the
+ * retry is answered with that result instead of creating a second screen. The retry needs the
+ * party's name, which only the opening event carried; it is kept in [UnscreenedCaseStore] until
+ * the check is settled.
  */
 @ApplicationScoped
 class CustomerScreeningService(
@@ -44,6 +54,7 @@ class CustomerScreeningService(
     private val repo: KycCaseRepository,
     private val kycService: KycService,
     private val clock: Clock,
+    private val unscreened: UnscreenedCaseStore,
 ) {
 
     private val log = Logger.getLogger(CustomerScreeningService::class.java)
@@ -63,7 +74,9 @@ class CustomerScreeningService(
             null
         }
         val afterSanctions = applySanctions(case.id, result?.sanctions)
-        if (afterSanctions.checks.none { it.checkType == CheckType.PEP_SCREENING }) return afterSanctions
+        keepOrForgetName(afterSanctions, partyName)
+        val pep = afterSanctions.checks.firstOrNull { it.checkType == CheckType.PEP_SCREENING }
+        if (pep == null || !pep.awaitsScreen(hasResult = result != null)) return afterSanctions
         return kycService.applyPepScreeningResult(
             case.id,
             result?.pep?.status ?: PepScreeningStatus.UNAVAILABLE,
@@ -71,6 +84,27 @@ class CustomerScreeningService(
             result?.pep?.matchedName,
         )
     }
+
+    /**
+     * The name is kept exactly while the sanctions check is still PENDING and unscreened on an
+     * open case — the state a retry can change. In every other state it is forgotten.
+     */
+    private suspend fun keepOrForgetName(case: KycCase, partyName: String) {
+        val sanctions = case.checks.firstOrNull { it.checkType == CheckType.SANCTIONS_SCREENING }
+        if (sanctions != null && sanctions.isUnscreened() && !case.status.isTerminal) {
+            unscreened.retainForRetry(case.id, partyName, Instant.now(clock))
+        } else {
+            unscreened.release(case.id)
+        }
+    }
+
+    /**
+     * A PEP check may be written by a screen only while no result and no reviewer has settled it:
+     * it is still PENDING, or it was put under review by an earlier outage and this call brings an
+     * actual result. Anything else is a decision that a retry or a redelivered event must keep.
+     */
+    private fun KycCheck.awaitsScreen(hasResult: Boolean): Boolean =
+        status == CheckStatus.PENDING || (hasResult && result == KycService.PEP_UNAVAILABLE_RESULT)
 
     private suspend fun applySanctions(caseId: UUID, outcome: SanctionsScreeningOutcome?): KycCase {
         val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
@@ -112,5 +146,8 @@ class CustomerScreeningService(
     companion object {
         /** Recorded on a check settled by an actual screen; the sandbox auto-approval requires it. */
         const val PROVIDER = KycCase.CUSTOMER_SCREENING_PROVIDER
+
+        /** PENDING with no provider: no screen has ever settled this check. */
+        fun KycCheck.isUnscreened(): Boolean = status == CheckStatus.PENDING && provider == null
     }
 }

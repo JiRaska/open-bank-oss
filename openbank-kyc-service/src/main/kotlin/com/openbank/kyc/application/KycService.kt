@@ -87,6 +87,14 @@ class KycService {
 
         /** Minimum reason length enforced by the ČNB four-eyes audit trail mandate (AML Act §8). */
         const val MIN_REASON_LENGTH = 10
+
+        /**
+         * Result recorded on a PEP check whose screen could not be obtained. A check still
+         * carrying exactly this text was put under review by an outage, not by a reviewer, so a
+         * later screen may replace it.
+         */
+        const val PEP_UNAVAILABLE_RESULT =
+            "openbank-sanctions-service:PEP_GLOBAL unavailable — routed to manual review, not auto-cleared"
     }
 
     @Inject lateinit var repo: KycCaseRepository
@@ -320,8 +328,7 @@ class KycService {
                 "openbank-sanctions-service:PEP_GLOBAL match — \"$matchedName\" (score=$matchScore)"
             PepScreeningStatus.POTENTIAL_MATCH ->
                 "openbank-sanctions-service:PEP_GLOBAL potential match — \"$matchedName\" (score=$matchScore)"
-            PepScreeningStatus.UNAVAILABLE ->
-                "openbank-sanctions-service:PEP_GLOBAL unavailable — routed to manual review, not auto-cleared"
+            PepScreeningStatus.UNAVAILABLE -> PEP_UNAVAILABLE_RESULT
         }
 
     /** Same all-passed/any-failed transition rule [updateCheckStatus] uses, reused for a PEP-check update. */

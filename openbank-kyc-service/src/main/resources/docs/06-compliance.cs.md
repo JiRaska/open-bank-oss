@@ -31,8 +31,25 @@ Shoda PEP je rizikový vstup, ne sankční zásah: nastaví `PEP_SCREENING` na `
 úroveň alespoň na `HIGH`, jako dosud.
 
 Automaticky se uzavírá jen sankční kontrola ve stavu `PENDING`, takže znovu doručená událost
-nepřepíše rozhodnutí posuzovatele. Kontrola ponechaná ve stavu `PENDING` kvůli výpadku se
-automaticky neopakuje; uzavře ji posuzovatel přes endpoint kontroly.
+nepřepíše rozhodnutí posuzovatele. Pro kontrolu PEP platí totéž: prověření ji zapíše jen tehdy,
+je-li `PENDING`, nebo je-li v přezkumu proto, že dřívější prověření nebylo dostupné.
+
+**Opakování po výpadku.** Kontrolu ponechanou ve stavu `PENDING`, protože `sanctions-service`
+nebyla dostupná, prověří znovu plánovaná úloha (každou minutu, nejvýše 50 případů na běh,
+nejdříve dvě minuty po posledním pokusu). Opakuje se tentýž požadavek se stejným idempotenčním
+klíčem (`kyc-screen-<caseId>`), takže výsledek, který poskytovatel uložil, ale nedoručil, se
+přehraje a neprověřuje se podruhé; případ se uzavře podle stejných pravidel jako při otevření —
+včetně automatického schválení v sandboxu a nikdy bez výsledku. Prověření potřebuje jméno strany,
+které případ jinak neukládá: drží se v `kyc_cases.pending_screening_name` jen po dobu, kdy je
+opakování potřebuje, a maže se při uzavření kontroly, při uzavření případu a při výmazu podle
+GDPR. Případ, ke kterému úloha jméno nemá (otevřený dříve, nebo z události bez jména), se
+neopakuje; zůstává vidět v `openbank_kyc_sanctions_unscreened_cases` a uzavře jej posuzovatel
+přes endpoint kontroly.
+
+**Opakované prověření PEP operátorem.** `POST /cases/{caseId}/pep-rescreen` posílá idempotenční
+klíč, který obsahuje čas výsledku PEP, jejž nahrazuje, takže každé opakované prověření po
+zaznamenaném výsledku je nové prověření proti aktuálnímu seznamu. Požadavek zopakovaný dříve, než
+byl jeho výsledek zaznamenán, nese stejný klíč a poskytovatel jej přehraje.
 
 **Automatické schválení v sandboxu** (`openbank.kyc.auto-approve`) nyní běží až po prověření
 a schválí jen případ prověřený bez nálezu. Sankční shoda, shoda PEP, strana, kterou nešlo
