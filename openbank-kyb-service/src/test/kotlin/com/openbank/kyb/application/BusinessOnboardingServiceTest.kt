@@ -51,6 +51,7 @@ import com.openbank.kyb.application.usecase.RepresentationAttestationService
 import com.openbank.kyb.domain.model.AcceptedDisclosure
 import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.BeneficialOwner
+import com.openbank.kyb.domain.model.BusinessOnboardingReviewRequired
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.CrsStatus
@@ -82,6 +83,7 @@ import com.openbank.kyb.domain.model.SourceOfFunds
 import com.openbank.kyb.domain.model.UboFinding
 import com.openbank.kyb.domain.model.UboSource
 import com.openbank.kyb.infrastructure.registry.DemoEntity
+import com.openbank.kyb.infrastructure.rest.dto.CaseResponse
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -205,10 +207,11 @@ class BusinessOnboardingServiceTest {
     // --- business agreement plumbing ----------------------------------------------------------
 
     private val uboOwners = mutableListOf<BeneficialOwner>()
+    private var uboSource = UboSource.REGISTER
     private val uboPort = object : BeneficialOwnershipPort {
         override suspend fun lookup(identifier: LegalEntityIdentifier) = UboFinding(
             identifier,
-            UboSource.REGISTER,
+            uboSource,
             uboOwners.toList(),
             emptyList(),
             0.25,
@@ -223,10 +226,13 @@ class BusinessOnboardingServiceTest {
         val answers = mutableMapOf<String, RelatedPartyScreeningResult>()
         val requests = mutableListOf<RelatedPartyScreeningRequest>()
         var down = false
+        val downFor = mutableSetOf<String>()
 
         override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
             requests += request
-            if (down) throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
+            if (down || request.name in downFor) {
+                throw RelatedPartyScreeningUnavailableException(IllegalStateException("sanctions-service down"))
+            }
             return answers[request.name] ?: RelatedPartyScreeningResult(ScreeningVerdict.CLEAR, false, null)
         }
     }
@@ -992,6 +998,76 @@ class BusinessOnboardingServiceTest {
         assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-anna")).status)
             .isEqualTo(CaseStatus.SIGNED)
         assertThat(mandates).hasSize(1)
+    }
+
+    /**
+     * Tipping off. What an applicant reads and what goes on the event bus must be the same words
+     * for a case a list matched as for a case in an ordinary AML review.
+     */
+    @Test
+    fun `a sanctions hit reads to the applicant and on the event exactly like an ordinary review`(): Unit =
+        runBlocking {
+            screeningOn()
+            // Ordinary review: the customer's own answer (cash-intensive) raises it, nobody matched.
+            val ordinaryId = soleCaseReadyToSign()
+            val ordinary = signs(ordinaryId, initiator, readyToSign(ordinaryId, initiator, questionnaire(cash = true)))
+            assertThat(ordinary.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val ordinaryEvent = (events.last().payload as BusinessOnboardingReviewRequired).reviewReason
+            store.clear()
+
+            // Same company, clean answers, and its representative is on a list.
+            screeningPort.answers["Jana Nováková"] =
+                RelatedPartyScreeningResult(ScreeningVerdict.HIT, false, "NOVAKOVA Jana")
+            val hitId = soleCaseReadyToSign()
+            val hit = signs(hitId, initiator, readyToSign(hitId, initiator))
+            assertThat(hit.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+            val hitEvent = (events.last().payload as BusinessOnboardingReviewRequired).reviewReason
+
+            assertThat(CaseResponse.from(hit, initiator).reviewReason)
+                .isEqualTo(CaseResponse.from(ordinary, initiator).reviewReason)
+            assertThat(hitEvent).isEqualTo(ordinaryEvent)
+            assertThat(CaseResponse.from(hit, initiator).screening).isNull()
+        }
+
+    /** Completeness is about who is on the case NOW, not who was on it when the screen ran. */
+    @Test
+    fun `an owner who appears after the screening must be screened before approval`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        val id = soleCaseReadyToSign()
+        val ceremony = readyToSign(id, initiator)
+        assertThat(service.get(id).screening!!.complete).isTrue()
+
+        // The register now reports a second owner, and that person cannot be screened yet.
+        uboOwners += owner("Nový Majitel", corporate = false)
+        screeningPort.downFor += "Nový Majitel"
+        assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.READY_TO_SIGN)
+
+        screeningPort.downFor.clear()
+        val signed = service.sign(SignCommand(id, initiator, ceremony))
+        assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
+        assertThat(signed.screening!!.subjects.map { it.name }).contains("Karel Vlastník", "Nový Majitel")
+        assertThat(screeningPort.requests.map { it.name }).contains("Nový Majitel")
+    }
+
+    @Test
+    fun `approval is refused while the beneficial-owner lookup is unavailable`(): Unit = runBlocking {
+        screeningOn()
+        val id = soleCaseReadyToSign()
+        val ceremony = readyToSign(id, initiator)
+        assertThat(service.get(id).screening!!.complete).isTrue()
+
+        // Nobody can say who owns the company right now, so nobody can say everyone was screened.
+        uboSource = UboSource.UNAVAILABLE
+        assertThatThrownBy { runBlocking { signs(id, initiator, ceremony) } }
+            .isInstanceOf(ScreeningPendingException::class.java)
+        assertThat(service.get(id).status).isEqualTo(CaseStatus.READY_TO_SIGN)
+        assertThat(service.get(id).signedCount).isZero()
+
+        uboSource = UboSource.REGISTER
+        assertThat(service.sign(SignCommand(id, initiator, ceremony)).status).isEqualTo(CaseStatus.SIGNED)
     }
 
     private fun owner(name: String, corporate: Boolean) = BeneficialOwner(
