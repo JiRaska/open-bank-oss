@@ -82,7 +82,7 @@ gates:
     mode: enforced
     rationale: "A qualification workload with inconsistent rates, duplicate YAML keys or invented scenario coverage cannot support reproducible measurements. This checks the profile contract only, not measured capacity or bank approval."
     review_after: "2027-01-26"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1
     selftest: python3 .github/scripts/check-capacity-profile.py --self-test
     selftest_expect: pass
@@ -96,7 +96,7 @@ gates:
     mode: enforced
     rationale: "The counting gh shim sits first on PATH in CI gates, Services CI changes, CodeQL and the merge-train build. A shim that altered arguments, output or exit code, or that died on an unwritable log, would break every job it measures; one that logged field values would publish them in step summaries. Its self-test proves each of those is caught."
     review_after: "2027-05-10"
-    budget_seconds: 60
+    budget_seconds: 30
     # One subject per assertion the harness makes (passthrough, exit code, stderr, log line, no values, report, unwritable log, missing counter).
     min_subjects: 8
     selftest_exempt: "is-a-test-suite - the run: IS the shim's own --self-test, which fails when the passthrough is sabotaged"
@@ -109,7 +109,7 @@ gates:
     mode: enforced
     rationale: "The privileged workflow_run push trusts this validator with an artifact produced by a build that ran the bump's own plugins. Its self-test must stay red-reachable on every PR, not first run after merge, and main's own file must still parse under its strict rules or every refresh would be refused."
     review_after: "2027-05-09"
-    budget_seconds: 60
+    budget_seconds: 30
     # main pins ~7,000 artifacts; a count near zero means the parse or the path broke.
     min_subjects: 1000
     selftest: python3 .github/scripts/check-verification-metadata-additive.py --self-test
@@ -124,7 +124,7 @@ gates:
     mode: enforced
     rationale: "The additive check alone lets an untrusted regeneration pin any coordinate to an attacker-chosen sha256 or add a <pgp> key, and the privileged push would commit it. verify-added-checksums.py recomputes each added sha256 from the allowlisted public repositories; its refusal paths (wrong hash, unfetchable, pgp/also-trust/sha1-only, foreign redirect, count and byte caps) must stay red-reachable on every PR, each asserted with the reason it was refused for. It runs offline on fixtures with a fake transport; the real download only happens in the privileged workflow."
     review_after: "2027-05-10"
-    budget_seconds: 60
+    budget_seconds: 30
     selftest_exempt: "is-a-test-suite — the gate IS the fixture harness: every refusal path runs against a fake transport and must fail for its stated reason"
     run: |
       python3 .github/scripts/verify-added-checksums.py --self-test
@@ -386,7 +386,7 @@ gates:
     name: "issue kind classifier flags zero and several kinds (rules.yaml: issues.kinds, enforced)"
     group: lint
     mode: enforced
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 11   # classifier fixture cases
     rationale: "issue-kind.yml removes needs-kind wherever the classifier says ok; a classifier that cannot go red would silently clear the backlog's only kind-debt signal. Its fixtures hold missing, ambiguous, exempt and ok cases, and the real rules.yaml kind set must parse."
     review_after: "2027-05-03"
@@ -401,7 +401,7 @@ gates:
     name: "PDP service-account rollout probe stays executable (#12448, enforced)"
     group: security
     mode: enforced
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1
     rationale: "A broken rollout probe could falsely declare all PEP images current and let Phase 2 policy read a field that old PEPs never send. Its fixtures test current, stale and unresolved pins before deployment."
     review_after: "2027-04-11"
@@ -630,7 +630,7 @@ gates:
     group: gitops
     mode: advisory
     needs_base: optional
-    budget_seconds: 60
+    budget_seconds: 30
     verified: "2026-10-22 — 0 findings; 45 treasury rows seeded from ADR-0344's catalogue (2 BUILT, 12 PARTIAL, 31 MISSING)"
     rationale: >-
       ADR-0344's functional baseline had no link from an item to the code delivering it, so 38 items
@@ -653,7 +653,7 @@ gates:
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 60
+    budget_seconds: 30
     rationale: >-
       A releasing PR spanning many released components cannot be reviewed as one unit, conflicts
       with everything, and lands one squash commit in many changelogs. Work that must land together
@@ -1044,7 +1044,7 @@ gates:
     name: "per-service alert baseline drift gate (observability audit 2026-10-17)"
     group: gitops
     mode: enforced
-    budget_seconds: 60
+    budget_seconds: 30
     rationale: "A workload added without its alert-baseline inventory entry would ship with no per-service alerts and nothing would say so; this regenerates the inventory and fails on any diff, including an untracked output."
     review_after: "2027-10-17"
     min_subjects: 20
@@ -2408,7 +2408,7 @@ gates:
     mode: enforced
     rationale: "Guards the hours-scale deployed-code-lag report: aged own-source drift feeds the deploy-code-lag-watch escalation, marker-only drift stays in deploy-drift-watch's lane — a silently wrong report either misses real lag or cries wolf on every marker."
     review_after: "2027-04-01"
-    budget_seconds: 60
+    budget_seconds: 30
     run: |
       bash .github/scripts/test-deploy-code-lag-report.sh
       python3 .github/scripts/test-deploy-lag-blockers.py
@@ -2512,7 +2512,7 @@ gates:
     name: "provider twins serve the same @State set (issue #9752, enforced)"
     group: supplychain
     mode: enforced
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 8   # 10 twin pairs today; a collapse means the annotation scan broke, not that the fleet did
     selftest_inputs:
       - ".github/scripts/check-pact-twin-state-parity.py"
@@ -3638,7 +3638,7 @@ gates:
     rationale: "application.yaml is baked into the image, so a literal or plausible-credential fallback on a secret-named key ships that credential in every deployed image and lets a pod whose Secret failed to mount boot on it. Its self-test holds the known-positive and known-negative shapes; dev/test profile blocks are the only permitted home for a local-only value."
     review_after: "2027-05-10"
     min_subjects: 50   # 71 application*.yaml under */src/main/resources today
-    budget_seconds: 60
+    budget_seconds: 30
     selftest_inputs: [".github/scripts/check-appyaml-secret-literals.py"]
     selftest: python3 .github/scripts/check-appyaml-secret-literals.py --self-test
     selftest_expect: pass
@@ -3745,7 +3745,7 @@ gates:
       failed, the pod stayed Ready, and no test reads gitops. First run found 18 such URLs fleet-wide;
       17 are baselined untriaged, the aml one is fixed in the same change.
     review_after: '2027-03-19'
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 80
     selftest_inputs: [".github/scripts/check-restclient-url-supplied.py"]
     selftest: |
@@ -4228,7 +4228,7 @@ gates:
       setting structurally impossible instead of a per-site review item.
     review_after: "2027-04-03"
     verified: "2026-10-03 — self-test flags raw DOM/SAX/Schema/StAX factories and ignores comments, src/test and SecureXml.kt; run against an origin/main snapshot of the three migrated modules it reported all 10 pre-migration sites and exited 1"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1300   # 2747 src/main Kotlin/Java files measured 2026-10-03; half
     selftest: python3 .github/scripts/check-xml-factory-hardened.py --self-test
     selftest_expect: pass
@@ -4253,7 +4253,7 @@ gates:
       one tested helper in the same change; this keeps a fourteenth from being hand-rolled.
     review_after: "2027-04-10"
     verified: "2026-10-10 — self-test covers literal ==, !in allow-list, == configured principal, the two-step alias, userPrincipal, and the clean helper/attribution/startsWith/comment/src-test/opt-out cases; run against the tree before the service migration it reported all 13 sites and exited 1, after it 0"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1400   # 2832 src/main Kotlin files measured 2026-10-10; half
     selftest: python3 .github/scripts/check-principal-name-trust.py --self-test
     selftest_expect: pass
@@ -4275,7 +4275,7 @@ gates:
       RoundingPolicy registry; this ratchet keeps new inline sites from appearing meanwhile.
     review_after: "2027-03-26"
     verified: "2026-09-26 — advisory per ADR-0318 until the money-path baseline is empty; self-test flags a new site, a stale baseline and an unknown service, and an injected unknown baseline entry made the real run exit 1"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 12   # 25 money-path services measured 2026-09-26; half
     selftest: python3 .github/scripts/check-money-rounding-inline.py --self-test
     selftest_expect: pass
@@ -4301,7 +4301,7 @@ gates:
       migration PRs have each added theirs.
     review_after: "2027-03-31"
     verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags an uncovered owner, a file named like the kit that inherits nothing, a stale covered entry and a stale non-owner entry; the real run flagged a wrong baseline entry (agent-service) before it was corrected"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 19   # 38 dispatcher owners measured 2026-10-01; half
     selftest: python3 .github/scripts/check-outbox-conformance-it.py --self-test
     selftest_expect: pass
@@ -4321,7 +4321,7 @@ gates:
       by module with a reason and may only shrink.
     review_after: "2027-04-30"
     verified: "2026-10-03 — self-test flags an import/comment/string/method-name-only mention, a stale exemption both ways and a reasonless one; on the real tree, removing sca-service's opt-in was flagged, and the first run caught case-coordinator's body-less class header before the parser was fixed"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 20   # 40 dispatcher owners measured 2026-10-03; half
     selftest: python3 .github/scripts/check-outbox-sent-retention.py --self-test
     selftest_expect: pass
@@ -4347,7 +4347,7 @@ gates:
       migration PR shrink the baseline rather than leave a stale entry behind.
     review_after: "2027-03-31"
     verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags a new site, a second site in a baselined file, a stale entry, a vanished file and proves comments (nested) do not count; the real run flagged one mis-keyed baseline path in both directions before it was corrected"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 38   # 77 modules with src/main scanned 2026-10-01; half
     selftest: python3 .github/scripts/check-outbox-claim-sql.py --self-test
     selftest_expect: pass
@@ -5357,7 +5357,7 @@ gates:
     review_after: "2027-04-23"
     # Re-derived 2026-11-02 (#14370) per derive-gate-observability-budgets.py, ceil(max(p95*3,
     # max*1.5, 5)): p95 ~9.8s, max 10.1s over 24 runs. 10 failed on budget alone with passing content.
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 83
     selftest: |
       python3 .github/scripts/generate-service-ci-jobs.py --self-test
@@ -5399,7 +5399,7 @@ gates:
     selftest_exempt: "is-a-test-suite"
     rationale: "Deploy-pin PRs ran the full Services CI fleet (#14413). The comparator decides inertness structurally; this runs its end-to-end git cases and proves a comparator forced to 'equal' fails them."
     review_after: "2027-04-30"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 21
     run: |
       python3 .github/scripts/gitops-image-pin-only.py --self-test
@@ -6029,7 +6029,7 @@ gates:
     mode: enforced
     rationale: "The resolver trusts whatever digest the lock states, so a missing or malformed sha256, a duplicated name or a latest tag would let unverified bytes run in CI while every fetch reports verified."
     review_after: "2027-05-08"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 20   # 23 artifacts on 2026-11-08: gitleaks, promtool, 21 Helm charts
     selftest_inputs:
       - ".github/scripts/check-artifact-lock.py"
@@ -6053,7 +6053,7 @@ gates:
     mode: enforced
     rationale: "Runs 42461736478, 42570587622 and 42570652696 lost 36+ contract jobs each to a single-attempt services.gradle.org 504/timeout, skipping every auto-deploy; the installer that prevents it is inert unless the lock and the wrapper agree."
     review_after: "2027-05-09"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1   # one wrapper per repo
     selftest_inputs:
       - ".github/scripts/ensure-gradle-distribution.py"
@@ -6074,7 +6074,7 @@ gates:
     rationale: "A direct curl or helm pull trusts whatever bytes arrive and turns an upstream outage into a red required check; on 2026-11-08 GitHub Releases 504s reddened Gitleaks and helm-values-key-effect with no change at fault."
     review_after: "2027-02-08"
     verified: "2026-11-08 — 11 direct downloads remain after PR 1 migrated gitleaks (secret-scan.yml), promtool and the helm-values charts: cosign x5, opa x3, oasdiff x2, gitleaks in public-readiness.yml; all #15216 rollout step 3 debt"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 300   # 735 files under .github/ on 2026-11-08
     selftest_inputs: [".github/scripts/check-artifact-fetch-via-resolver.py"]
     selftest: python3 -I .github/scripts/check-artifact-fetch-via-resolver.py --self-test
@@ -6489,7 +6489,7 @@ gates:
     group: security
     mode: enforced
     min_subjects: 2
-    budget_seconds: 60
+    budget_seconds: 30
     rationale: "A rego rule keyed on a service-account principal name only matches if that client's tokens carry preferred_username, which Keycloak adds only via the profile default scope; a template without it cold-starts into policies that silently never match."
     review_after: "2027-09-21"
     selftest: python3 .github/scripts/check-rego-service-account-profile-scope.py --self-test
@@ -7400,7 +7400,7 @@ gates:
     mode: enforced
     rationale: "A self-test that reads an undeclared repo file is skipped on the PR that changes that file and fails on main instead; tracing the reads makes the declaration checkable rather than remembered."
     review_after: "2027-05-09"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 200   # 280 gates declare selftest_inputs on 2026-11-09
     selftest: python3 .github/scripts/selftest_input_trace.py --self-test
     selftest_expect: pass
@@ -7559,7 +7559,7 @@ gates:
     rationale: "Route coverage by axe specs is only visible as an inventory; the gate keeps the literal-navigation evidence from silently disappearing."
     review_after: "2027-02-28"
     min_subjects: 50  # 171 page routes inventoried on 2026-11-04
-    budget_seconds: 60
+    budget_seconds: 30
     selftest: python3 .github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-admin-ui-a11y-route-coverage.py"]
@@ -7874,7 +7874,7 @@ gates:
       it poised to merge later without a fresh intentional check; these fixtures keep each
       arming workflow fail-closed on current PR readiness.
     review_after: "2027-04-16"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 3
     selftest_exempt: "is-a-test-suite - executes trusted verifier and actual workflow arming blocks against offline GitHub fixtures"
     run: |
@@ -7920,7 +7920,7 @@ gates:
       notification V4/V5) before a per-service test existed.
     review_after: "2027-04-17"
     verified: "2026-10-17 — self-test has a PanacheEntity missing its _seq (flagged), a correct one (clean), quoted/_id_seq/cross-module negatives; run on origin/main: 55 tables, 0 findings; dropping one CREATE SEQUENCE from a real migration made it exit 1"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 27   # 55 PanacheEntity tables measured 2026-10-17; half
     selftest: python3 .github/scripts/check-hibernate-sequence-guard.py --self-test
     selftest_expect: pass
@@ -7943,7 +7943,7 @@ gates:
       new group fails.
     review_after: "2027-04-23"
     verified: "2026-10-23 — self-test has a 3-module package-only copy (flagged), a 2-module one, a one-line variation, a grown baselined group (flagged), a shrunk and a vanished one (both flagged: lower the baseline) and a package directory named build (scanned); on origin/main with an empty baseline it reports TraceContractRecorder (20), TraceContractProfile (11) and MockAuthzProducer (3)"
-    budget_seconds: 60
+    budget_seconds: 30
     min_subjects: 1380   # 2760 distinct test-file contents measured 2026-10-23; half
     selftest: python3 .github/scripts/check-duplicate-test-files.py --self-test
     selftest_expect: pass
