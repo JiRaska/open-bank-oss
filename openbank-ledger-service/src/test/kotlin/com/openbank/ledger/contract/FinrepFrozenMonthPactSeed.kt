@@ -69,7 +69,14 @@ object FinrepFrozenMonthPactSeed {
         require(reportingMonth.dayOfMonth == reportingMonth.lengthOfMonth())
         c.autoCommit = false
         try {
-            if (resetFixture) resetOwnedEvidence(c)
+            if (resetFixture) {
+                // Removing the fixture's posted journal is a declared repair (ADR-0372).
+                c.prepareStatement("select ledger_declare_repair(?)").use {
+                    it.setString(1, "FinrepFrozenMonthPactSeed fixture reset")
+                    it.execute()
+                }
+                resetOwnedEvidence(c)
+            }
             journal(c, reportingMonth.withDayOfMonth(15))
             line(c, CASH_LINE_ID, CASH_GL_ID, "D", 1)
             line(c, DEPOSITS_LINE_ID, DEPOSITS_GL_ID, "C", 2)

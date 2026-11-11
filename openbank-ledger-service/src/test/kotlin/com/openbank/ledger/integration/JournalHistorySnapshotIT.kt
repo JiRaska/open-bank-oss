@@ -5,6 +5,7 @@
 package com.openbank.ledger.integration
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.ledger.fixtures.journalTransaction
 import com.openbank.ledger.infrastructure.partition.JournalPartitionMaintainer
 import com.openbank.ledger.infrastructure.persistence.repository.JournalHistorySnapshotSql
 import io.quarkus.test.common.QuarkusTestResource
@@ -51,25 +52,29 @@ class JournalHistorySnapshotIT {
     @AfterEach
     fun cleanup() {
         connection().use { c ->
-            journalIds.forEach { id ->
-                c.prepareStatement("delete from journal_lines where journal_id = ?").use {
-                    it.setObject(1, id)
-                    it.executeUpdate()
-                }
-                c.prepareStatement("delete from ledger_idempotency where journal_id = ?").use {
-                    it.setObject(1, id)
-                    it.executeUpdate()
-                }
-                c.prepareStatement("delete from journal_entries where id = ?").use {
-                    it.setObject(1, id)
-                    it.executeUpdate()
-                }
-            }
-            c.prepareStatement("delete from gl_accounts where id = ?").use {
-                it.setObject(1, gl)
+            c.journalTransaction(REPAIR) { removeFixtureRows(c) }
+            c.createStatement().use { it.executeUpdate("drop table if exists $partitionName") }
+        }
+    }
+
+    private fun removeFixtureRows(c: Connection) {
+        journalIds.forEach { id ->
+            c.prepareStatement("delete from journal_lines where journal_id = ?").use {
+                it.setObject(1, id)
                 it.executeUpdate()
             }
-            c.createStatement().use { it.executeUpdate("drop table if exists $partitionName") }
+            c.prepareStatement("delete from ledger_idempotency where journal_id = ?").use {
+                it.setObject(1, id)
+                it.executeUpdate()
+            }
+            c.prepareStatement("delete from journal_entries where id = ?").use {
+                it.setObject(1, id)
+                it.executeUpdate()
+            }
+        }
+        c.prepareStatement("delete from gl_accounts where id = ?").use {
+            it.setObject(1, gl)
+            it.executeUpdate()
         }
     }
 
@@ -218,9 +223,11 @@ class JournalHistorySnapshotIT {
                     it.executeUpdate()
                 }
             }.isInstanceOf(SQLException::class.java)
-            c.prepareStatement("delete from journal_lines where journal_id = ?").use {
-                it.setObject(1, source)
-                it.executeUpdate()
+            c.journalTransaction(REPAIR) {
+                c.prepareStatement("delete from journal_lines where journal_id = ?").use {
+                    it.setObject(1, source)
+                    it.executeUpdate()
+                }
             }
             c.prepareStatement("select count(*) from journal_history_snapshot_entries where snapshot_id = ?").use {
                 it.setObject(1, id)
@@ -242,9 +249,11 @@ class JournalHistorySnapshotIT {
         val id = UUID.fromString(capture().getString("snapshotId"))
         assertCacheRows(id, 1)
         connection().use { c ->
-            c.prepareStatement("delete from journal_entries where id = ?").use {
-                it.setObject(1, source)
-                assertThat(it.executeUpdate()).isEqualTo(1)
+            c.journalTransaction(REPAIR) {
+                c.prepareStatement("delete from journal_entries where id = ?").use {
+                    it.setObject(1, source)
+                    assertThat(it.executeUpdate()).isEqualTo(1)
+                }
             }
         }
         assertCacheRows(id, 0)
@@ -255,24 +264,18 @@ class JournalHistorySnapshotIT {
     fun `erasing source origin metadata removes the old attributed copy`() {
         val source = connection().use { c ->
             seedGl(c)
-            seed(c, LocalDate.parse("2026-10-01"), "C", "10").also { id ->
-                c.prepareStatement(
-                    "update journal_entries set origin_kind='OTHER',origin_record_id=?,origin_submitter='synthetic-actor' where id=?",
-                ).use {
-                    it.setObject(1, UUID.randomUUID())
-                    it.setObject(2, id)
-                    it.executeUpdate()
-                }
-            }
+            seed(c, LocalDate.parse("2026-10-01"), "C", "10").also { id -> attachOrigin(c, id) }
         }
         val id = UUID.fromString(capture().getString("snapshotId"))
         assertCacheRows(id, 1)
         connection().use { c ->
-            c.prepareStatement(
-                "update journal_entries set origin_kind=null,origin_record_id=null,origin_submitter=null where id=?",
-            ).use {
-                it.setObject(1, source)
-                assertThat(it.executeUpdate()).isEqualTo(1)
+            c.journalTransaction(REPAIR) {
+                c.prepareStatement(
+                    "update journal_entries set origin_kind=null,origin_record_id=null,origin_submitter=null where id=?",
+                ).use {
+                    it.setObject(1, source)
+                    assertThat(it.executeUpdate()).isEqualTo(1)
+                }
             }
         }
         assertCacheRows(id, 0)
@@ -404,14 +407,15 @@ class JournalHistorySnapshotIT {
 
     @Test
     fun `concurrent source line deletion cannot leave an erased copy`() {
-        concurrentErase(false, "delete from journal_lines where journal_id=? and sub_account_id is not null")
+        // Both legs: a posted journal left with one leg cannot commit, declared repair or not (ADR-0372).
+        concurrentErase(false, "delete from journal_lines where journal_id=?")
     }
 
     @Test
     fun `concurrent source line update cannot leave an old copy`() {
         concurrentErase(
             false,
-            "update journal_lines set amount=11,base_amount=11 where journal_id=? and sub_account_id is not null",
+            "update journal_lines set amount=11,base_amount=11 where journal_id=?",
         )
     }
 
@@ -467,15 +471,22 @@ class JournalHistorySnapshotIT {
     private fun seedConcurrentSource(mutation: String): UUID = connection().use { c ->
         seedGl(c)
         seed(c, LocalDate.parse("2026-10-01"), "C", "10").also { source ->
-            if (mutation.contains("origin_kind")) {
-                c.prepareStatement(
-                    "update journal_entries set origin_kind='OTHER',origin_record_id=?,origin_submitter='synthetic-actor' where id=?",
-                ).use {
-                    it.setObject(1, UUID.randomUUID())
-                    it.setObject(2, source)
-                    it.executeUpdate()
-                }
-            }
+            if (mutation.contains("origin_kind")) attachOrigin(c, source)
+        }
+    }
+
+    /**
+     * ADR-0372: a posted journal row and its lines are append-only, so every source mutation in this
+     * class — attaching or erasing origin evidence, deleting or rewriting lines — is a declared
+     * repair. That is also the only path on which the V36 invalidation triggers remain reachable.
+     */
+    private fun attachOrigin(c: Connection, journal: UUID) = c.journalTransaction(REPAIR) {
+        c.prepareStatement(
+            "update journal_entries set origin_kind='OTHER',origin_record_id=?,origin_submitter='synthetic-actor' where id=?",
+        ).use {
+            it.setObject(1, UUID.randomUUID())
+            it.setObject(2, journal)
+            it.executeUpdate()
         }
     }
 
@@ -519,10 +530,14 @@ class JournalHistorySnapshotIT {
                     pid.complete(rs.getInt(1))
                 }
             }
+            c.prepareStatement("select ledger_declare_repair(?)").use {
+                it.setString(1, REPAIR)
+                it.execute()
+            }
             c.prepareStatement(mutation).use {
                 it.queryTimeout = 20
                 it.setObject(1, source)
-                assertThat(it.executeUpdate()).isEqualTo(1)
+                assertThat(it.executeUpdate()).isEqualTo(if (mutation.contains("journal_lines")) 2 else 1)
             }
             if (rollback) c.rollback() else c.commit()
         }
@@ -617,7 +632,15 @@ class JournalHistorySnapshotIT {
         }
     }
 
-    private fun seed(c: Connection, date: LocalDate, side: String, amount: String, status: String = "POSTED"): UUID {
+    /** One transaction per journal (ADR-0372 checks balance at commit); joins the caller's if one is open. */
+    private fun seed(c: Connection, date: LocalDate, side: String, amount: String, status: String = "POSTED"): UUID =
+        if (c.autoCommit) {
+            c.journalTransaction { insertJournal(c, date, side, amount, status) }
+        } else {
+            insertJournal(c, date, side, amount, status)
+        }
+
+    private fun insertJournal(c: Connection, date: LocalDate, side: String, amount: String, status: String): UUID {
         val id = UUID.randomUUID()
         journalIds += id
         c.prepareStatement(
@@ -669,5 +692,6 @@ class JournalHistorySnapshotIT {
 
     private companion object {
         const val PATH = "/api/v1/journals/history-snapshots"
+        const val REPAIR = "JournalHistorySnapshotIT source mutation fixture"
     }
 }
