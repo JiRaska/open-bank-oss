@@ -39,6 +39,7 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.mockk)
     testImplementation(libs.pact.consumer)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
