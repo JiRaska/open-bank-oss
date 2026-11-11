@@ -110,6 +110,25 @@ irrevocable step, and give every rail the same hold.
     human decisions; an agent proposal is not an approval and does not count as one of the
     two.
 
+13. **How a hold is carried, decided for delivery.**
+    - *Case intake.* The rail writes a `PaymentHeld` event in the same transaction as the
+      status change; aml-service consumes it and opens the case. No rail calls the case
+      endpoint for a hold, so a hold without a case cannot exist and the per-rail case
+      adapters go away.
+    - *Unavailable control.* The payment is HELD at once and re-evaluated automatically on a
+      bounded schedule. A case is opened only when re-evaluation is exhausted or the control
+      answers with a true review; an outage does not flood the queue.
+    - *Funds.* A held payment reserves its amount through the same reserve, confirm and
+      release operations as limits (point 4). Until those exist a release re-runs standing
+      and balance, and a failed re-run rejects.
+    - *Manual status change.* The existing operator status endpoint stays, but refuses any
+      transition out of RECEIVED or HELD; leaving those states is the chain's and the
+      four-eyes release's alone.
+    - *Standing from party state.* A party that is suspended or closed freezes its accounts
+      with the origin recorded; returning to active lifts only party-origin freezes. The
+      propagation compares event time, so a late replay of an older state changes nothing.
+      The customer is not told why.
+
 Delivery order, each a separately approved release: (A) chain types, HELD and release on
 domestic and SEPA, with standing; (B) limits; (C) sanctions coverage and inputs;
 (D) remaining rails; (E) AML destination risk; (F) fraud enforcement per rail.
