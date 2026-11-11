@@ -180,12 +180,13 @@ class BusinessSigningService(
     // ---------------------------------------------------------------- creation
 
     suspend fun createPayment(cmd: PaymentApprovalCommand): ApprovalRequest {
-        // Natural-key idempotency: the initiator's single-use SCA challenge. A retry of a request
-        // that was already created replays it; the same challenge for anything else is refused.
+        val payload = codec.canonical(cmd.payload)
+        // A consumed challenge can replay only its original frozen instruction.
         repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
             if (existing.entityPartyId == cmd.entityPartyId &&
                 existing.initiatorPartyId == cmd.initiatorPartyId &&
-                existing.kind == cmd.kind
+                existing.kind == cmd.kind &&
+                existing.payload == payload
             ) {
                 return existing
             }
@@ -204,7 +205,6 @@ class BusinessSigningService(
             )
             ScaVerdict.UNAVAILABLE -> throw refused(UNAVAILABLE, "SCA_UNAVAILABLE", "sca-service could not be reached")
         }
-        val payload = codec.canonical(cmd.payload)
         val summary = codec.canonical(
             linkedMapOf<String, Any?>(
                 "amount" to cmd.amount?.amount?.toPlainString(),
