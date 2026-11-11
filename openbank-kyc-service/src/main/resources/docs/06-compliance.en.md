@@ -15,6 +15,29 @@
 | **DORA** (Reg. (EU) 2022/2554) | Operational resilience | health probes, outbox resilience, audit events, SLO, runbooks |
 | **NIS2** | Network & info security | mTLS in-cluster, security response headers, OPA authz, audit log |
 
+## Automated customer screening at case opening
+
+When a case opens from `PARTY_CREATED`, the service asks `sanctions-service` for one screen with
+the `CUSTOMER` profile (sanctions lists, the national terrorist list and the PEP list) and settles
+two checks from the answer:
+
+| Outcome | `SANCTIONS_SCREENING` | Effect |
+|---|---|---|
+| no sanctions match | `PASSED` | — |
+| match or potential match | `MANUAL_REVIEW` | risk tier `VERY_HIGH` (match) or at least `HIGH`; the case cannot reach `UNDER_REVIEW`, so it cannot be approved and the party is not activated, until a reviewer decides the check |
+| no result (`sanctions-service` unreachable, or the event carries no legal name) | stays `PENDING` | never passed on a missing result; a pending check blocks approval the same way |
+
+A PEP match is a risk input, not a sanctions hit: it sets `PEP_SCREENING` to `MANUAL_REVIEW` and
+raises the tier to at least `HIGH`, as before.
+
+Only a `PENDING` sanctions check is settled automatically, so a redelivered event does not replace
+a reviewer's decision. There is no automatic retry of a check left `PENDING` by an outage; a
+reviewer settles it through the check endpoint.
+
+**Sandbox auto-approve** (`openbank.kyc.auto-approve`) now runs after the screen and approves only
+a case screened clear. A sanctions match, a PEP match, a party that could not be screened and a
+screening outage all leave the case open.
+
 ## Four-eyes control (ADR-0068)
 
 Approval and rejection are **dual-control** actions: `POST /cases/{id}/approve` and `/reject` require `ROLE_ADMIN`/`ROLE_KYC` **and** pass through `@Authorize` (OPA, ADR-0034). The operator who opened/worked a case must not be the one approving it — enforced via the onboarding cockpit four-eyes policy. The sandbox straight-through path (`openbank.kyc.auto-approve`) bypasses this and **must be false in production**; an approval attributed to `sandbox-auto-approval` outside sandbox is a compliance incident.

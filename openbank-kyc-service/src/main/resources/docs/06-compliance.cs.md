@@ -15,6 +15,29 @@
 | **DORA** (Nař. (EU) 2022/2554) | Provozní odolnost | health probes, odolnost outboxu, audit události, SLO, runbooky |
 | **NIS2** | Bezpečnost sítí a informací | mTLS v clusteru, bezpečnostní response hlavičky, OPA autorizace, audit log |
 
+## Automatické prověření zákazníka při otevření případu
+
+Když se případ otevře z `PARTY_CREATED`, služba požádá `sanctions-service` o jedno prověření
+s profilem `CUSTOMER` (sankční seznamy, národní seznam teroristů a seznam PEP) a z odpovědi
+uzavře dvě kontroly:
+
+| Výsledek | `SANCTIONS_SCREENING` | Důsledek |
+|---|---|---|
+| žádná sankční shoda | `PASSED` | — |
+| shoda nebo možná shoda | `MANUAL_REVIEW` | riziková úroveň `VERY_HIGH` (shoda) nebo alespoň `HIGH`; případ nemůže přejít do `UNDER_REVIEW`, takže jej nelze schválit a strana není aktivována, dokud o kontrole nerozhodne posuzovatel |
+| žádný výsledek (`sanctions-service` nedostupná, nebo událost nenese jméno) | zůstává `PENDING` | nikdy neprojde bez výsledku; čekající kontrola blokuje schválení stejně |
+
+Shoda PEP je rizikový vstup, ne sankční zásah: nastaví `PEP_SCREENING` na `MANUAL_REVIEW` a zvýší
+úroveň alespoň na `HIGH`, jako dosud.
+
+Automaticky se uzavírá jen sankční kontrola ve stavu `PENDING`, takže znovu doručená událost
+nepřepíše rozhodnutí posuzovatele. Kontrola ponechaná ve stavu `PENDING` kvůli výpadku se
+automaticky neopakuje; uzavře ji posuzovatel přes endpoint kontroly.
+
+**Automatické schválení v sandboxu** (`openbank.kyc.auto-approve`) nyní běží až po prověření
+a schválí jen případ prověřený bez nálezu. Sankční shoda, shoda PEP, strana, kterou nešlo
+prověřit, i výpadek prověřování ponechají případ otevřený.
+
 ## Kontrola čtyř očí (ADR-0068)
 
 Schválení a zamítnutí jsou akce **dvojí kontroly**: `POST /cases/{id}/approve` a `/reject` vyžadují `ROLE_ADMIN`/`ROLE_KYC` **a** procházejí přes `@Authorize` (OPA, ADR-0034). Operátor, který případ otevřel/zpracoval, jej nesmí schvalovat — vynuceno politikou čtyř očí onboarding cockpitu. Sandboxová straight-through cesta (`openbank.kyc.auto-approve`) toto obchází a **v produkci musí být false**; schválení připsané `sandbox-auto-approval` mimo sandbox je compliance incident.

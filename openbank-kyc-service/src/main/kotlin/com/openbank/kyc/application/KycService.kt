@@ -101,8 +101,10 @@ class KycService {
     private fun caseType(subjectType: SubjectType) = subjectType.name.lowercase()
 
     // Sandbox-only straight-through processing (ADR-0116 §4): when true, a case opened from a
-    // PARTY_CREATED event is auto-evaluated (all checks PASSED) and approved, so onboarding
-    // activates without an operator. MUST stay false in production (four-eyes, ADR-0068).
+    // PARTY_CREATED event whose customer screen came back clear is auto-evaluated (remaining
+    // checks PASSED) and approved, so onboarding activates without an operator. A sanctions or
+    // PEP match, or a screen that could not be obtained, is never auto-approved.
+    // MUST stay false in production (four-eyes, ADR-0068).
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "openbank.kyc.auto-approve", defaultValue = "false")
     var autoApprove: Boolean = false
 
@@ -167,15 +169,27 @@ class KycService {
             val existing = repo.findActiveByPartyId(partyId) ?: throw e
             return KycCaseResult(existing, created = false)
         }
-        // Sandbox straight-through: pass every check and approve so the party clears KYC
-        // automatically. No-op (and the four-eyes approve endpoint remains the only path) in prod.
-        val settled = if (autoApprove) autoEvaluateAndApprove(opened) else opened
-        return KycCaseResult(settled, created = true)
+        // The sandbox straight-through approval is NOT applied here: it needs the customer screen,
+        // which runs after the case exists. See [sandboxAutoApprove].
+        return KycCaseResult(opened, created = true)
     }
 
-    private suspend fun autoEvaluateAndApprove(case: KycCase): KycCase {
+    /**
+     * Sandbox straight-through approval, applied after the customer screen. A no-op unless
+     * `openbank.kyc.auto-approve` is on AND the case was actually screened clear
+     * ([KycCase.hasClearScreen]): a sanctions match, a PEP match, a party that could not be
+     * screened and a screening outage all leave the case open for a human. The real screening
+     * results are kept; only the remaining checks are stamped `sandbox-auto`.
+     */
+    suspend fun sandboxAutoApprove(caseId: UUID): KycCase {
+        val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
+        if (!autoApprove || case.status.isTerminal || !case.hasClearScreen()) return case
         val passedChecks = case.checks.map {
-            it.copy(status = CheckStatus.PASSED, result = "sandbox-auto", performedAt = Instant.now(clock))
+            if (it.status == CheckStatus.PASSED) {
+                it
+            } else {
+                it.copy(status = CheckStatus.PASSED, result = "sandbox-auto", performedAt = Instant.now(clock))
+            }
         }
         val cleared = case.copy(
             status = KycCaseStatus.APPROVED,
