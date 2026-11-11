@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.49.0...tax-reporting-service-v0.50.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** render the GSFT DII file for special-regime accounts ([#15518](https://github.com/JiRaska/open-bank-oss/issues/15518)) ([5a99a15](https://github.com/JiRaska/open-bank-oss/commit/5a99a15c6f382377e2dced97b9ad81d59e198cd4))
+
 ## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.48.0...tax-reporting-service-v0.49.0) (2026-11-10)
 
 
