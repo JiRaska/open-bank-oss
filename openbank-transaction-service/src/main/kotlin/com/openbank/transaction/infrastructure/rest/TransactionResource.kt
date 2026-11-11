@@ -11,6 +11,7 @@ import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
 import com.openbank.libs.security.Roles
 import com.openbank.libs.spend.SpendCategory
+import com.openbank.libs.web.SyntheticTaintContext
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
 import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
@@ -29,6 +30,7 @@ import com.openbank.transaction.infrastructure.persistence.repository.PanacheTra
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionCategoryOverrideRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
@@ -67,6 +69,8 @@ class TransactionResource(
     private val categoryOverrides: TransactionCategoryOverrideRepository,
     private val merchantLocations: MerchantLocationRepository,
 ) {
+    @Inject
+    lateinit var taintContext: SyntheticTaintContext
 
     @GET
     @RolesAllowed(Roles.API, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
@@ -189,6 +193,7 @@ class TransactionResource(
             scaExemption = request.scaExemption,
             rail = parseEnumParam<PaymentRail>("rail", request.rail),
             instructionType = parseEnumParam<InstructionType>("instructionType", request.instructionType),
+            synthetic = taintContext.tainted,
         )
         val tx = transactionUseCase.initiateTransaction(command)
         return Response.created(URI.create("/api/v1/transactions/${tx.id}"))

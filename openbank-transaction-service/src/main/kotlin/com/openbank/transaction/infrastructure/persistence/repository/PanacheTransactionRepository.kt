@@ -280,6 +280,7 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         reversalOf = reversalOf,
         isReversal = isReversal,
         counterpartyName = counterpartyName,
+        synthetic = synthetic,
     )
 }
 
@@ -318,6 +319,7 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     reversalOf = this@toEntity.reversalOf
     isReversal = this@toEntity.isReversal
     counterpartyName = this@toEntity.counterpartyName
+    synthetic = this@toEntity.synthetic
 }
 
 /**
