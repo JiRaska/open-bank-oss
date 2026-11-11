@@ -114,6 +114,52 @@ listed in `GsftBatch.rejected` with the reason, for correction and a follow-up t
 `T_PAYMENT` counts only persons actually rendered. Only batch-level errors (bank code, batch
 number, rate day) fail the render.
 
+## Data sourcing
+
+`GsftSnapshotPort.snapshot(D)` (adapter `infrastructure/returns/gsft/GsftSnapshotAdapter`) returns
+the inputs of `assemble` and `render` for relevant day D. It uses only reads this service's own
+machine identity is admitted to by the provider's policy, reusing the CRS/FATCA clients. A field
+with no verified source is never filled with a plausible value: it is listed in
+`GsftSnapshot.gaps`, and `requireComplete()` refuses any snapshot whose gap set is non-empty.
+**Today every gap below is open, so no snapshot is fit for a KEEN delivery.**
+
+Sourced:
+
+| Input | Source |
+|---|---|
+| Account roster | account-service `GET /api/v1/accounts/active` (cursor-walked to the end). Only `accountType` CURRENT, SAVINGS and TERM_DEPOSIT are deposits; NOSTRO and GL_* are dropped; any other or missing type fails the snapshot. |
+| IBAN, currency, holder party | the same roster row (`accountNumber`, `currencyCode`, `partyId`) |
+| Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; ANY failure, including 404, fails the snapshot — unlike CRS/FATCA, a missing row is never read as zero) |
+| Synthetic taint (ADR-0252) | this service's own CEÚ register, as known at snapshot time: an account is synthetic when its holder party is classified SYNTHETIC (`syntheticParties`) or its opening event was tainted (`factsUpTo`, `AccountOpened.synthetic`), the same rule as the CEÚ fold. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
+
+Unresolved gaps (each a `GsftDataGap`):
+
+- **ROSTER_ACTIVE_ONLY_CURRENT — unresolved.** The roster is the CURRENT list of ACTIVE accounts.
+  Dormant and frozen accounts hold insured deposits and are missing; an account closed after D is
+  missing, one opened after D is present. Claims are understated.
+- **JOINT_HOLDERS — unresolved.** account-service carries a single `partyId` per account, so every
+  account is reported single-holder with no shares; DIL is never produced from sourced data.
+- **ACCRUED_INTEREST — unresolved, understates every claim.** interest-service exposes accrual
+  reads, but its policy admits no rule for this service's identity, so accrued interest is set to
+  zero and flagged. Every claim is understated by the interest accrued up to D.
+- **DEPOSITOR_IDENTITY — unresolved.** No party-service read exposes birth number, registration
+  number or address to this caller. No `DepositorIdentity` is built, so the renderer rejects every
+  person; nothing is fabricated from the holder name.
+- **EXCLUSION_CATEGORY — unresolved.** No read exposes the § 41b exclusion category. `exclusion` is
+  null meaning "not known", and the gap is flagged.
+- **BALANCE_AS_OF_UNVERIFIED — unresolved.** balance-service computes `asOf` as the current
+  booked balance minus projected movements after D; when its projection holds no later events
+  (projection disabled or not yet populated) it silently answers the CURRENT balance, and nothing on
+  the wire distinguishes the two. The principal is therefore not proven to be D's.
+- **FX_RATES — unresolved.** fx-service serves ČNB fixings for a day through
+  `GET /api/v1/fx/rates/{base}/{quote}/history?source=CNB&from=&to=` (the latest-only
+  `GET /api/v1/fx/cnb/rates/{base}` cannot answer for day D), but its policy admits no rule for this
+  service's identity. `rates` is null.
+
+Closing a gap needs a provider-side read (or policy rule) in another service, which is out of
+scope for the sourcing change; each closure must shrink `GsftSnapshotAdapter.UNRESOLVED_GAPS`
+together with the source that closes it.
+
 ## Special-regime accounts (`DII`)
 
 An account in the special regime (účet ve speciálním režimu, § 41f) is held by an owner for

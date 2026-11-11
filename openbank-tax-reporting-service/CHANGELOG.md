@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.50.0...tax-reporting-service-v0.51.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** package the GSFT batch as one ZIP encrypted with PGP ([#15546](https://github.com/JiRaska/open-bank-oss/issues/15546)) ([27e19a1](https://github.com/JiRaska/open-bank-oss/commit/27e19a170bad72e55c2684d2734b6478d8b1d666))
+
 ## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.49.0...tax-reporting-service-v0.50.0) (2026-11-10)
 
 
