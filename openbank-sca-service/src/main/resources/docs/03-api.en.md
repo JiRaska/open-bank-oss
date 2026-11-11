@@ -95,3 +95,12 @@ API changes follow the OpenAPI-diff (`oasdiff`) classification, independent of t
 ## Operator approvals (four-eyes)
 
 `GET /api/v1/sca/approvals` and `GET /api/v1/sca/approvals/{id}` (operator/admin) return each approval with `decidedAt` and a `summary` of what it binds, rendered by `ScaApprovalSummaryRenderer` when the approval is created and stored with it: for `device.enroll` the credential handle, algorithm and the first 8 hex of the public key SHA-256 (never the key); for `device.revoke` the device and credential handles, algorithm and enrolment date; for `scaChallenge.consume` the purpose, amount, currency and the creditor masked to its last 4 characters. The summary is informational; the request fingerprint decides which retry an approval unlocks.
+
+### Statutory delegation approval
+
+The named Delegation service consumes an APPROVAL challenge in the
+`delegation-statutory-(issue|accept):<operation-id>` namespace. The stored device approval must
+match the human signer, company, exact operation identifier and frozen payload hash. Repeating the
+identical scoped consume can read its persisted receipt after an interrupted response. General
+consumers cannot spend these receipts. The statutory operation screen presents the terms and starts
+the device approval, so these challenges stay out of the generic pending SCA inbox.

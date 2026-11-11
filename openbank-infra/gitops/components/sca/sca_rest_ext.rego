@@ -101,6 +101,18 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
 
+allowed_reasons contains "service-sca-statutory-delegation" if {
+    input.principal.type == "HUMAN"
+    machine_named("service-account-openbank-delegation")
+    "ROLE_API" in input.principal.roles
+    input.action == "scaChallenge.consume.statutory"
+}
+
+prohibited if {
+    input.action == "scaChallenge.consume.statutory"
+    not machine_named("service-account-openbank-delegation")
+}
+
 # ADR-0335 D1 — pension-service's own Keycloak client (`openbank-pension`, ROLE_API only) is a
 # SCOPED consumer: consume and nothing else. No initiate (customer-edge raises pension challenges),
 # no read, no decide, no verify. This rule admits the identity to the action; WHICH challenges it

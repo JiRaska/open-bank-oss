@@ -16,7 +16,7 @@ info:
   # 1.15 -> 1.16 (#11588): additive verified makerActorKind on approval responses.
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
-  version: 1.17.0
+  version: 1.18.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -372,8 +372,8 @@ paths:
           description: >-
             The challenge belongs to another party, or lies outside the caller's consumer scope
             (ADR-0335 D1): an APPROVAL challenge whose device-signed approvalRequestId begins
-            `pension-` is spendable only by pension-service, which may spend nothing else. A
-            refusal never burns the challenge.
+            `pension-` is spendable only by pension-service. Statutory delegation approvals use
+            the dedicated consume route. A refusal never burns the challenge.
         '404':
           description: Challenge not found
         '409':
@@ -382,6 +382,47 @@ paths:
           description: >-
             Challenge expired, or concurrently modified by another lifecycle write; re-read the
             challenge before retrying.
+
+  /api/v1/sca/challenges/{id}/consume-statutory-approval:
+    post:
+      tags: [SCA]
+      operationId: consumeStatutoryApproval
+      summary: Consume or recover the exact device-signed statutory delegation approval
+      description: >-
+        Only delegation-service may call this operation. The approved device, actor, company
+        and signed request and digest must match. Repeating an exact already-consumed binding
+        returns the recorded receipt for reconciliation of the same operation.
+      parameters:
+        - $ref: '#/components/parameters/challengeId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must be the challenge UUID from the path in canonical UUID form.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [partyId, companyPartyId, approvalRequestId, payloadSha256]
+              properties:
+                partyId: {type: string, format: uuid}
+                companyPartyId: {type: string, format: uuid}
+                approvalRequestId: {type: string}
+                payloadSha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Exact approved challenge and its consumption time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScaChallengeResponse'
+        '400': {description: The statutory binding is invalid or the challenge is not approved}
+        '403': {description: The caller, actor or challenge namespace does not match}
+        '404': {description: Challenge not found}
+        '409': {description: The signed binding differs from the submitted statutory operation}
+        '422': {description: The unused challenge expired}
 
   /api/v1/sca/challenges/{id}/decision:
     post:

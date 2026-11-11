@@ -39,6 +39,7 @@ data class MandateResponse(
     val status: String? = null,
     val validFrom: Instant? = null,
     val validTo: Instant? = null,
+    val id: UUID? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

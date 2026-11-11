@@ -380,12 +380,15 @@ class CustomerDelegationResource(private val upstream: UpstreamClient) {
     @Path("/{id}/accept")
     @Blocking
     fun accept(@PathParam("id") id: UUID, @QueryParam("scaSessionId") scaSessionId: UUID?): Response {
-        val partyId = partyId()
+        val context = partyContext()
+        val partyId = context.principal.toString()
         if (scaSessionId == null) return refuse(Response.Status.BAD_REQUEST, "scaSessionId is required")
         return upstream.post(
             "$delegationServiceUrl$UPSTREAM/$id/accept?granteePartyId=$partyId&scaSessionId=$scaSessionId",
             partyId,
             "",
+            null,
+            mapOf(ACTOR_PARTY_HEADER to context.actor.toString()),
         )
     }
 

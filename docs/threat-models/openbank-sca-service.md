@@ -383,3 +383,10 @@ this integration. Consumer contracts pin request/response shape; they do not pro
 or account entitlement. No live deployment verification is claimed by this documentation update.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+### Statutory delegation receipts
+
+The reserved statutory namespace requires the named Delegation caller and a completed device
+decision. The receipt binds the human, the company and the frozen operation identifier and hash.
+The same scoped request can recover its persisted receipt after an interrupted response. The
+generic SCA inbox excludes these challenges because the statutory screen supplies the terms.

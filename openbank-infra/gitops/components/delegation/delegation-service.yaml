@@ -42,7 +42,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-delegation-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0bca4ebf0c4cd8f0"
+        openbank.tech/policy-checksum: "f2239d5c81b619ae"
       labels:
         app.kubernetes.io/name: delegation-service
         app.kubernetes.io/part-of: delegation
@@ -132,6 +132,11 @@ spec:
             # retail -> SME/corporate bridge; failure refuses preview/offer before SCA is spent.
             - name: PARTY_SERVICE_URL
               value: https://party-service.party.svc:8443
+            # #10247: Verify current KYB evidence over the private mTLS listener as openbank-delegation.
+            - name: KYB_SERVICE_URL
+              value: https://kyb-service.kyb.svc:8443
+            - name: DELEGATION_STATUTORY_COLLECTION_ENABLED
+              value: "false"
             # Offer-time resource-ownership verification (#3164): a grant naming a
             # stranger's account must not be issuable. ACCOUNT/SAVINGS_GOAL resolve
             # against account-service, CARD against card-issuance. Declared as explicit

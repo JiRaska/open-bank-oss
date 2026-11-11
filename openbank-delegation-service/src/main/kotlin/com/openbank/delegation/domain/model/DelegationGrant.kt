@@ -9,6 +9,9 @@ import com.openbank.libs.domain.money.Money
 import java.time.OffsetDateTime
 import java.util.UUID
 
+/** The human and, for an organization, the verified sole mandate used at issuance. */
+data class GrantorSigningEvidence(val actorPartyId: UUID, val soleMandateId: UUID?)
+
 /**
  * ADR-0232 D1. LOAN is a deliberate omission in this first slice: no loan-scoped
  * capability ships yet, so a LOAN value would be an offerable resource type with
@@ -124,6 +127,7 @@ data class DelegationGrant(
      */
     val lifecycleRevision: Long = 0,
     val grantScaSessionId: UUID? = null,
+    val grantorSigningEvidence: GrantorSigningEvidence? = null,
     val acceptScaSessionId: UUID? = null,
     val note: String? = null,
     val createdAt: OffsetDateTime,
@@ -131,9 +135,22 @@ data class DelegationGrant(
     val closedAt: OffsetDateTime? = null,
     val closedBy: UUID? = null,
     val closedReason: String? = null,
+    val grantorStatutoryOperationId: UUID? = null,
+    val granteeStatutoryOperationId: UUID? = null,
 ) {
     init {
         require(grantorPartyId != granteePartyId) { "grantor and grantee must differ" }
+        require(grantorStatutoryOperationId == null || (grantorSigningEvidence == null && grantScaSessionId == null)) {
+            "joint issuance must reference its statutory signatures"
+        }
+        require(granteeStatutoryOperationId == null || acceptScaSessionId == null) {
+            "joint acceptance must reference its statutory signatures"
+        }
+        grantorSigningEvidence?.let {
+            require((it.actorPartyId == grantorPartyId) == (it.soleMandateId == null)) {
+                "an organization grantor must have a human actor and a verified sole mandate"
+            }
+        }
         require(capabilities.isNotEmpty()) { "DelegationGrant must have at least one capability" }
         val allowed = CAPABILITY_MATRIX.getValue(resourceType)
         require(capabilities.all { it in allowed }) {
@@ -212,12 +229,17 @@ data class DelegationGrant(
         return amount.amount.compareTo(perTransactionLimit.amount) <= 0
     }
 
-    fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant {
+    fun accept(scaSessionId: UUID, now: OffsetDateTime): DelegationGrant = activate(scaSessionId, null, now)
+
+    fun acceptStatutorily(operationId: UUID, now: OffsetDateTime): DelegationGrant = activate(null, operationId, now)
+
+    private fun activate(scaSessionId: UUID?, operationId: UUID?, now: OffsetDateTime): DelegationGrant {
         check(status == DelegationStatus.OFFERED) { "only an OFFERED grant can be accepted (is $status)" }
         return copy(
             status = DelegationStatus.ACTIVE,
             lifecycleRevision = nextLifecycleRevision(),
             acceptScaSessionId = scaSessionId,
+            granteeStatutoryOperationId = operationId,
             updatedAt = now,
         )
     }

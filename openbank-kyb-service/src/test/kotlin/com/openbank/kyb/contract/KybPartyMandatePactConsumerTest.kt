@@ -13,15 +13,22 @@ import au.com.dius.pact.core.model.PactSpecVersion
 import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.kyb.application.port.out.StatutoryRepresentationEvidence
+import com.openbank.kyb.application.port.out.StatutoryRepresentative
+import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.infrastructure.client.MandateBody
 import com.openbank.kyb.infrastructure.client.PartyServiceRestClient
+import com.openbank.libs.audit.decision.InputDigest
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -73,7 +80,7 @@ class KybPartyMandatePactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "jointMandatePact")
     fun `party response preserves the statutory quorum`(mockServer: MockServer) {
-        assertClientPathMatchesContract()
+        assertClientPathMatchesContract("grantMandate", PRINCIPAL_PARTY_ID, EXPECTED_PATH)
         val body = mandateBody()
 
         val response = given()
@@ -127,6 +134,56 @@ class KybPartyMandatePactConsumerTest {
             .statusCode(404)
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun statutoryRepresentationPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a company has two active linked KYB statutory mandates")
+        .uponReceiving("PUT an attested joint statutory rule for the verified roster")
+        .path(STATUTORY_PATH)
+        .method("PUT")
+        .headers(mapOf("Content-Type" to "application/json", "Accept" to "application/json"))
+        .body(statutoryEvidenceBody())
+        .willRespondWith()
+        .status(200)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "statutoryRepresentationPact")
+    fun `the published statutory rule binds two distinct representative signatures`(mockServer: MockServer) {
+        assertClientPathMatchesContract("publishStatutoryRule", STATUTORY_PRINCIPAL_ID, STATUTORY_PATH)
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .accept("application/json")
+            .body(statutoryEvidenceBody())
+            .put(STATUTORY_PATH)
+            .then()
+            .statusCode(200)
+    }
+
+    private fun statutoryEvidenceBody(): String {
+        val evidence = StatutoryRepresentationEvidence(
+            caseId = UUID.fromString(STATUTORY_CASE_ID),
+            attestationId = UUID.fromString("d51d07bf-1cd4-4098-85f1-628a0d3da622"),
+            ruleTextHash = "a".repeat(64),
+            attestedAt = Instant.parse("2026-08-01T00:00:00Z"),
+            mode = RepresentationMode.JOINT_ALL,
+            requiredSignatures = 2,
+            requiredOffices = listOf("chair", "member"),
+            representatives = listOf(STATUTORY_CHAIR_ID, STATUTORY_MEMBER_ID).mapIndexed { index, actor ->
+                val digest = InputDigest.sha256(
+                    mapOf(
+                        "evidenceRef" to "kyb-case:$STATUTORY_CASE_ID:signature:db1bd1c2-8f5a-438e-b8b4-380bc78a3c42",
+                        "representativePartyId" to actor,
+                    ),
+                )
+                StatutoryRepresentative(UUID.fromString(actor), setOf(index), digest.hex)
+            },
+        )
+        return jacksonObjectMapper().registerModule(JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .writeValueAsString(evidence)
+    }
+
     private fun mandateBody(evidenceRef: String = "kyb-case:pact-joint-3") = MandateBody(
         agentPartyId = UUID.fromString(AGENT_PARTY_ID),
         role = "LEGAL_REPRESENTATIVE",
@@ -136,12 +193,12 @@ class KybPartyMandatePactConsumerTest {
         evidenceRef = evidenceRef,
     )
 
-    private fun assertClientPathMatchesContract() {
+    private fun assertClientPathMatchesContract(methodName: String, partyId: String, expected: String) {
         val base = PartyServiceRestClient::class.java.getAnnotation(Path::class.java).value
         val method = PartyServiceRestClient::class.java.methods
-            .single { it.name == "grantMandate" }
+            .single { it.name == methodName }
             .getAnnotation(Path::class.java).value
-        assertThat((base + method).replace("{id}", PRINCIPAL_PARTY_ID)).isEqualTo(EXPECTED_PATH)
+        assertThat((base + method).replace("{id}", partyId)).isEqualTo(expected)
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -161,5 +218,10 @@ class KybPartyMandatePactConsumerTest {
         const val UNKNOWN_PRINCIPAL_ID = "00000000-0000-4000-8000-000000000284"
         const val EXPECTED_PATH = "/api/v1/parties/$PRINCIPAL_PARTY_ID/mandates"
         const val UNKNOWN_PATH = "/api/v1/parties/$UNKNOWN_PRINCIPAL_ID/mandates"
+        const val STATUTORY_PRINCIPAL_ID = "171f78d9-a747-4730-b804-535f93d93efa"
+        const val STATUTORY_CASE_ID = "1ffb1a70-12e4-4409-8333-bb48acbd6e48"
+        const val STATUTORY_CHAIR_ID = "6eb9e3d4-94d7-4224-9ce3-f6388d992a94"
+        const val STATUTORY_MEMBER_ID = "1acb27bc-6d9c-4974-abf5-9249d4883d86"
+        const val STATUTORY_PATH = "/api/v1/parties/$STATUTORY_PRINCIPAL_ID/statutory-representation"
     }
 }

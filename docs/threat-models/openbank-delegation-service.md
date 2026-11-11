@@ -54,7 +54,8 @@ and require a human operator plus OPA; client applications do not receive a bank
    domestic reservation snapshots. The stream is default-off for new domestic reservations until
    a compatible binding consumer is deployed; rail-neutral callers remain unchanged.
 7. delegation-service → party-service (`https://party-service.party.svc:8443`) — authoritative
-   principal status/type and live representation mandates. Mutual TLS uses the platform private CA
+   principal status/type and live representation mandates. Single-signature preview and offer
+   require the current actor's explicit sole mandate with a one-signature quorum. Mutual TLS uses the platform private CA
    with per-service client identity and hostname verification; OIDC authenticates the application
    principal and the network policy admits only the declared namespace/port edge.
 8. Customer edge → business-signing API (`/api/v1/entities/{entityId}/…`,
@@ -186,12 +187,16 @@ gap closes only with a consumer pact or a run against a deployed stack.
 - **LEGAL_ENTITY grantors are bound to a human actor** (ADR-0232 D5 / ADR-0284): customer-edge
   derives `X-Customer-Actor-Party-Id` from the authenticated token while keeping the selected
   entity in `X-Customer-Party-Id`; delegation-service resolves the principal type in party-service
-  and requires that human to appear in its active `acting-for` mandate set. The same human owns
-  the consumed grant SCA challenge. Missing identity, a revoked/expired mandate, a non-active
-  principal, malformed data or either lookup being unavailable refuses preview and offer before
-  SCA is spent. Retail remains the degenerate case actor == principal. Residual: this proves a
-  statutory/owner mandate, not an employee delegation carrying `delegation.manage`; employee-level
-  sub-administration remains a later, explicitly capability-scoped grant.
+  and requires a current mandate in which that human has explicit sole authority and a quorum of
+  one. The same human owns the consumed grant SCA challenge. Missing identity, an expired or
+  revoked mandate, an inactive principal, malformed evidence or unavailable evidence refuses preview
+  and offer before SCA is spent. A verified retail principal signs directly. Approval-group
+  management applies its own current-mandate checks.
+- **Company offer acceptance retains issuer evidence** (#10247). An offer stores the issuing
+  human and their exact mandate ID. Acceptance revalidates that mandate with Party before spending
+  the grantee's SCA. A company grantee must also present the customer-edge-authenticated human
+  with a current sole mandate. For an older offer without recorded issuer evidence, only a verified
+  individual grantor can be established. The new nullable columns retain historical records.
 
 ## Change log
 
@@ -375,3 +380,12 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
 Recertification confirmation (`POST /recertifications/{id}/confirm`) admits only customer-edge, recognised by `ServiceAccountIdentity` (openbank-libs-runtime): a verified JWT with `azp` = `openbank-edge` and `preferred_username` = `service-account-openbank-edge`. It is never recognised by the principal name, which Quarkus takes from a username claim. A token carrying that username but issued to another client is refused with 403.
 
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
+
+## Statutory co-signatures (#10247)
+
+Customer-edge supplies separately authenticated company and human identities. Delegation
+corroborates the exact Party rule, active mandates and KYB attestation, then records a bounded
+operation with frozen terms and, for acceptance, the offered grant revision. Different verified
+humans must fill the current quorum and office slots. Each receipt can commit only its company,
+actor, challenge and payload. PostgreSQL locks the operation and grant, and writes signatures,
+provenance and the lifecycle event in one transaction. Collection defaults to disabled.

@@ -11,3 +11,18 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.
 - Signals: `openbank_outbox_purged_total{service,status="SENT"}`, `openbank_outbox_purge_failed_total`, and workflow liveness `outbox-sent-retention`.
 - Opt-out: `openbank.outbox.retention.enabled=false` (logs a WARN at boot). Don't lower `sent-days` below what any reader of SENT rows needs.
+
+## Organization delegation authority
+
+Preview and offer resolve the actor's current mandate from party-service. An
+organization delegation requires explicit sole signing authority with a quorum
+of one. A joint mandate or incomplete representation evidence needs a separate
+statutory signing workflow. Employee approval groups retain their own
+management and operation rules.
+
+At offer creation the grant stores the signing human and, for an organization,
+the verified sole mandate ID. Acceptance rechecks the issuing organization's
+mandate and confirms that the accepting human can sign for the grantee. The
+grantee's SCA challenge belongs to that human. Organization offers created
+without verified issuance evidence require a new offer. Existing individual
+offers remain eligible after party-service verifies the grantor.

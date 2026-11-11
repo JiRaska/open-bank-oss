@@ -82,6 +82,8 @@ data class ConsumeScaCommand(
     val payloadSha256: String? = null,
     /** What the authenticated consumer may spend (ADR-0335 D1); resolved from the principal at the edge of the service. */
     val scope: ConsumerScope = ConsumerScope.General,
+    /** The company whose action the verified human signed in a statutory approval. */
+    val statutoryPrincipalPartyId: UUID? = null,
 )
 
 /**

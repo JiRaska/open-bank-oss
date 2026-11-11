@@ -273,6 +273,21 @@ authz:
       worker:
         enabled: false
 
+"%prod":
+  quarkus:
+    http:
+      # Quarkus fixes client authentication at build time. Existing 8157 callers still use
+      # their established listener, while 8443 requires a certificate and an OIDC bearer.
+      ssl:
+        client-auth: required
+      insecure-requests: enabled
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
+
 "%test":
   quarkus:
     datasource:
