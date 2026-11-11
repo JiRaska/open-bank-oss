@@ -58,6 +58,7 @@ TRUTHY = {"true", "1", "yes", "y", "on"}
 SKIP_DIRS = {".git", "node_modules", "build", ".gradle", ".terraform", ".next", ".agent-work", "target"}
 MANIFEST_EXT = (".yaml", ".yml")
 TEXT_EXT = (".properties", ".tf", ".tfvars", ".env")
+UNATTRIBUTED_PATCH = "<index-based env patch>"
 TEMPLATE_RE = re.compile(r"\$\{|\{\{")
 
 
@@ -133,6 +134,11 @@ def iter_scan_files(root: Path):
 def walk(node, names, props, hits, path=""):
     """Collect (name, raw_value, kind) for every setting of a watched name inside a parsed doc."""
     if isinstance(node, dict):
+        pth = node.get("path")
+        if isinstance(pth, str) and re.search(r"/env/(\d+|-)/value$", pth) and "value" in node:
+            # JSON6902 index-based env patch: the flag name is not in the patch, so it cannot be
+            # attributed. Fail closed outside permitted environments (UNATTRIBUTED_PATCH).
+            hits.append((UNATTRIBUTED_PATCH, node["value"], "patch"))
         nm = node.get("name")
         if isinstance(nm, str) and nm in names:
             if "valueFrom" in node and "value" not in node:
@@ -147,6 +153,13 @@ def walk(node, names, props, hits, path=""):
         for v in node:
             walk(v, names, props, hits, path)
     elif isinstance(node, str):
+        if "\n" in node and (" op:" in node or "op:" in node or "env" in node):
+            try:  # kustomize `patches: - patch: |-` carries a YAML/JSON document as a string
+                for sub in gatelib.loads_all(node):
+                    if isinstance(sub, (dict, list)):
+                        walk(sub, names, props, hits, path)
+            except Exception:
+                pass
         for m in re.finditer(r"(?:^|[\s\-D])([A-Za-z0-9_.\-]+)=(\S*)", node):
             if m.group(1) in names | props:
                 hits.append((m.group(1), m.group(2), "assign"))
@@ -158,7 +171,7 @@ def scan_file(path: Path, names: set, props: set):
     hits: list = []
     parsed = False
     if path.suffix in MANIFEST_EXT:
-        if not any(n in text for n in names | props):
+        if not any(n in text for n in names | props) and "/env/" not in text:
             return hits, True
         try:
             for doc in gatelib.loads_all(text):
@@ -207,25 +220,24 @@ def default_of(raw):
 
 
 def split_profile(key: str):
-    """'%prod.a.b' -> ('prod', 'a.b'); 'a.b' -> (None, 'a.b')."""
-    m = re.match(r"%([A-Za-z0-9_\-]+)\.(.*)", key)
-    return (m.group(1), m.group(2)) if m else (None, key)
+    """'%prod.a.b' -> (['prod'], 'a.b'); '%dev,test.a' -> (['dev','test'], 'a'); 'a.b' -> ([], 'a.b')."""
+    m = re.match(r"%([A-Za-z0-9_,\-]+)\.(.*)", key)
+    return ([x for x in m.group(1).split(",") if x], m.group(2)) if m else ([], key)
 
 
 def yaml_settings(path: Path, prop: str):
     """Yield (profile or None, raw value) for every setting of `prop` in one application yaml."""
     for doc in gatelib.load_yaml_all(path):
         for key, val in flatten(doc).items():
-            profile, bare = split_profile(key)
-            if profile is None:  # a profile as a top-level key: `%prod:` -> `%prod.<rest>`
-                pass
+            profiles, bare = split_profile(key)
             if bare == prop:
-                yield profile, val
+                yield profiles, val
 
 
 def annotation_defaults(svc_dir: Path, prop: str):
-    """@ConfigProperty(name = "<prop>") in src/main: its defaultValue, "" if it has none, None if absent."""
-    found = None
+    """Every @ConfigProperty(name = "<prop>") in src/main: a list of defaultValue strings
+    ("" for a declaration with none). Empty list => the property is declared nowhere."""
+    found = []
     pat = re.compile(r"ConfigProperty\s*\(([^)]*)\)", re.S)
     for kt in sorted(svc_dir.rglob("*.kt")):
         if "/src/main/" not in kt.as_posix():
@@ -237,9 +249,7 @@ def annotation_defaults(svc_dir: Path, prop: str):
             args = m.group(1)
             if re.search(rf'name\s*=\s*"{re.escape(prop)}"', args):
                 d = re.search(r'defaultValue\s*=\s*"([^"]*)"', args)
-                if d:
-                    return d.group(1)
-                found = ""
+                found.append(d.group(1) if d else "")
     return found
 
 
@@ -269,41 +279,50 @@ def code_findings(root: Path, flag: dict, permitted_profiles: set):
         except Exception as e:  # unreadable config must not read as clean
             f.append(("C", f"{name}: cannot parse {yf.relative_to(root)}: {e}"))
             continue
-        for profile, raw in settings:
+        for profiles, raw in settings:
             exists = True
-            prof = profile or file_profile
+            profs = profiles or ([file_profile] if file_profile else [])
             has, val = default_of(raw)
-            if prof is None:
+            if not profs:
                 base_has, base_default = has, val
-            elif prof not in permitted_profiles and truthy(val):
-                f.append(("D", f"{name}: profile %{prof} in {yf.relative_to(root)} sets {prop}={val}"))
+                continue
+            for prof in profs:  # `%dev,prod.key` carries several profiles: each one is checked
+                if prof not in permitted_profiles and truthy(val):
+                    f.append(("D", f"{name}: profile %{prof} in {yf.relative_to(root)} sets {prop}={val}"))
     for pf in sorted(res.glob("application*.properties")) if res.is_dir() else []:
         for line in gatelib.read_text(pf, errors="replace").splitlines():
-            m = re.match(rf"\s*(?:%([A-Za-z0-9_\-]+)\.)?{re.escape(prop)}\s*=\s*(.*)", line)
+            m = re.match(rf"\s*(?:%([A-Za-z0-9_,\-]+)\.)?{re.escape(prop)}\s*=\s*(.*)", line)
             if m:
                 exists = True
-                prof = m.group(1)
-                if prof is None:
+                profs = [x for x in (m.group(1) or "").split(",") if x]
+                if not profs:
                     base_has, base_default = True, m.group(2).strip()
-                elif prof not in permitted_profiles and truthy(m.group(2)):
-                    f.append(("D", f"{name}: profile %{prof} in {pf.relative_to(root)} sets {prop}={m.group(2).strip()}"))
-    ann = annotation_defaults(svc_dir, prop) if svc_dir.is_dir() else None
-    if ann is not None:
+                for prof in profs:
+                    if prof not in permitted_profiles and truthy(m.group(2)):
+                        f.append(("D", f"{name}: profile %{prof} in {pf.relative_to(root)} sets {prop}={m.group(2).strip()}"))
+    anns = annotation_defaults(svc_dir, prop) if svc_dir.is_dir() else []
+    if anns:
         exists = True
-    if not exists and svc_dir.is_dir() and not _mentions(svc_dir, name):
-        f.append(("C", f"{name}: stale registry entry - {prop} / {name} not found in {svc}/src/main"))
-        return f
     if not svc_dir.is_dir():
         f.append(("C", f"{name}: owning service directory {svc} does not exist"))
         return f
+    if not exists and not _mentions(svc_dir, name):
+        f.append(("C", f"{name}: stale registry entry - {prop} / {name} not found in {svc}/src/main"))
+        return f
+    # Every declaration must be an explicit false and they must agree: Quarkus lets whichever
+    # injection point is read first win, so one truthy or missing default is enough.
+    for d in anns:
+        if d == "":
+            f.append(("B", f"{name}: a @ConfigProperty({prop}) in {svc} declares no default (must be an explicit false)"))
+        elif truthy(d):
+            f.append(("B", f"{name}: a @ConfigProperty({prop}) in {svc} defaults to {d!r}, must be false"))
+    if len(set(anns)) > 1:
+        f.append(("B", f"{name}: @ConfigProperty declarations of {prop} in {svc} disagree on the default: {sorted(set(anns))}"))
     if base_has:
-        default = base_default
-    else:
-        default = ann if ann else None
-    if default is None or default == "":
+        if base_default is None or base_default == "" or truthy(base_default):
+            f.append(("B", f"{name}: application config default of {prop} in {svc} is {base_default!r}, must be false"))
+    elif not anns:
         f.append(("B", f"{name}: {svc} declares no default for {prop} (must be an explicit false)"))
-    elif truthy(default):
-        f.append(("B", f"{name}: code default of {prop} in {svc} is {default!r}, must be false"))
     return f
 
 
@@ -329,6 +348,14 @@ def check(root: Path, reg: dict):
             continue
         env = classify(rel, envs)
         for nm, val, kind in hits:
+            if nm == UNATTRIBUTED_PATCH:
+                if truthy(val) or (isinstance(val, str) and TEMPLATE_RE.search(val)):
+                    allowed = set.intersection(*(set(f["permitted_environments"]) for f in flags))
+                    if env not in allowed:
+                        findings.append(("A", f"{rel} (environment {env!r}) JSON6902 patch sets an env value to {val!r}; "
+                                              "it cannot be attributed to a flag, so it is refused outside the "
+                                              f"environments every registered flag permits {sorted(allowed)}"))
+                continue
             flag = by_name[nm]
             if env in flag["permitted_environments"]:
                 continue
@@ -408,6 +435,22 @@ def self_test() -> int:
         ("D+: application-prod.yaml sets true",
          (lambda r: (_w(r, "openbank-x-service/src/main/resources/application-prod.yaml",
                         "openbank:\n  x:\n    auto-clear: true\n"), r)[1])(_fixture()), ["D"]),
+        ("B+: second @ConfigProperty declaration defaults true",
+         _fixture(kt=KT + KT.replace("class A", "class B").replace('"false"', '"true"')), ["B"]),
+        ("B+: two declarations disagree (one without default)",
+         _fixture(kt=KT + 'class B(@ConfigProperty(name = "openbank.x.auto-clear") val v: Boolean)\n'), ["B"]),
+        ("B-: two declarations both false", _fixture(kt=KT + KT.replace("class A", "class B")), []),
+        ("D+: multi-profile key %dev,prod", _fixture(yaml_text="'%dev,prod.openbank.x.auto-clear': 'true'\n"), ["D"]),
+        ("D-: multi-profile key %dev,test", _fixture(yaml_text="'%dev,test.openbank.x.auto-clear': 'true'\n"), []),
+        ("A+: JSON6902 index patch sets env true outside permitted env",
+         _fixture(manifests={"openbank-infra/k8s/overlays/local/p.yaml":
+                             "- op: replace\n  path: /spec/template/spec/containers/0/env/3/value\n  value: \"true\"\n"}), ["A"]),
+        ("A+: JSON6902 patch embedded as kustomize patch string",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml":
+                             "patches:\n  - patch: |-\n      - op: replace\n        path: /spec/template/spec/containers/0/env/3/value\n        value: \"true\"\n"}), ["A"]),
+        ("A-: JSON6902 index patch in the permitted environment",
+         _fixture(manifests={"openbank-infra/gitops/p.yaml":
+                             "- op: replace\n  path: /spec/template/spec/containers/0/env/3/value\n  value: \"true\"\n"}), []),
         ("D-: %dev sets true", _fixture(yaml_text="'%dev':\n  openbank:\n    x:\n      auto-clear: true\n"), []),
         ("D-: %prod sets false", _fixture(yaml_text="'%prod':\n  openbank:\n    x:\n      auto-clear: false\n"), []),
     ]

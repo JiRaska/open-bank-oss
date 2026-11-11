@@ -5014,3 +5014,13 @@ demo_only_flags:
       config_property: lending.risk.allow-demonstration-model
       reason: "Posts IFRS 9 allowances from unvalidated placeholder PD/LGD parameters; sandbox demonstration only."
       permitted_environments: [sandbox]
+    - env_var: LENDING_ORIGINATION_AUTO_APPROVE
+      service: openbank-lending-service
+      config_property: lending.origination.auto-approve
+      reason: "Drives a submitted loan application to READY_TO_DISBURSE as 'sandbox-auto-approval', bypassing the four-eyes gate (ADR-0211 D5). Unset in gitops today."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYB_DEMO_ENTITY_ENABLED
+      service: openbank-kyb-service
+      config_property: openbank.kyb.demo-entity.enabled
+      reason: "Makes the company register answer for a fictitious company, an onboarding bypass anywhere but a sandbox."
+      permitted_environments: [sandbox]
