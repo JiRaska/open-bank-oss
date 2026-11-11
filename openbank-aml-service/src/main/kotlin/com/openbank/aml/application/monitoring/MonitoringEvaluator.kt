@@ -6,6 +6,7 @@ package com.openbank.aml.application.monitoring
 
 import com.openbank.aml.application.port.out.MovementCountQuery
 import com.openbank.aml.application.port.out.MovementCounterReader
+import com.openbank.aml.domain.monitoring.CountFeatureDefinition
 import com.openbank.aml.domain.monitoring.CounterObservation
 import com.openbank.aml.domain.monitoring.CounterScheme
 import com.openbank.aml.domain.monitoring.MonitoringEvaluationOutcome
@@ -30,34 +31,7 @@ class MonitoringEvaluator(
     private val reader: MovementCounterReader,
 ) {
     suspend fun evaluate(partyId: UUID, at: Instant): MonitoringEvaluationRecord {
-        val observations = pack.features.values.map { feature ->
-            // Buckets whose start lies in the window ending now; the current bucket is included.
-            val from = scheme.bucketStart(at.minusSeconds(feature.windowSeconds))
-            val to = at.plusMillis(1)
-            val count = reader.countMovements(
-                MovementCountQuery(
-                    partyId = partyId,
-                    currency = feature.currency,
-                    bandCode = feature.band,
-                    schemeRevision = feature.schemeRevision,
-                    fromInclusive = from,
-                    toExclusive = to,
-                    direction = feature.direction,
-                    rail = feature.rail,
-                ),
-            )
-            CounterObservation(
-                feature.id,
-                feature.currency,
-                feature.band,
-                feature.direction,
-                feature.rail,
-                from,
-                at,
-                count,
-            )
-        }
-        val byFeature = observations.associateBy { it.featureId }
+        val observations = pack.features.values.map { observe(partyId, it, at) }
         val result = pack.compiled.evaluate(
             pack.compiled.reference,
             at,
@@ -76,18 +50,7 @@ class MonitoringEvaluator(
                 hits = emptyList(),
             )
             is CountEvaluation.Evaluated -> {
-                val hits = result.findings.map { finding ->
-                    val rule = pack.rules.first { it.id == finding.ruleId }
-                    val feature = pack.features.getValue(rule.feature.id)
-                    MonitoringHit(
-                        partyId = partyId,
-                        scenarioCode = finding.ruleId,
-                        reasonCode = rule.reasonCode,
-                        severityCode = rule.severityCode,
-                        windowStart = feature.windowStart(at),
-                        observation = byFeature.getValue(feature.id),
-                    )
-                }
+                val hits = hits(partyId, at, result, observations.associateBy { it.featureId })
                 MonitoringEvaluationRecord(
                     partyId = partyId,
                     pack = pack.identity,
@@ -102,5 +65,50 @@ class MonitoringEvaluator(
                 )
             }
         }
+    }
+
+    private suspend fun observe(partyId: UUID, feature: CountFeatureDefinition, at: Instant): CounterObservation {
+        // Buckets whose start lies in the window ending now; the current bucket is included.
+        val from = scheme.bucketStart(at.minusSeconds(feature.windowSeconds))
+        val count = reader.countMovements(
+            MovementCountQuery(
+                partyId = partyId,
+                currency = feature.currency,
+                bandCode = feature.band,
+                schemeRevision = feature.schemeRevision,
+                fromInclusive = from,
+                toExclusive = at.plusMillis(1),
+                direction = feature.direction,
+                rail = feature.rail,
+            ),
+        )
+        return CounterObservation(
+            featureId = feature.id,
+            currency = feature.currency,
+            band = feature.band,
+            direction = feature.direction,
+            rail = feature.rail,
+            windowFrom = from,
+            windowTo = at,
+            count = count,
+        )
+    }
+
+    private fun hits(
+        partyId: UUID,
+        at: Instant,
+        result: CountEvaluation.Evaluated,
+        byFeature: Map<String, CounterObservation>,
+    ): List<MonitoringHit> = result.findings.map { finding ->
+        val rule = pack.rules.first { it.id == finding.ruleId }
+        val feature = pack.features.getValue(rule.feature.id)
+        MonitoringHit(
+            partyId = partyId,
+            scenarioCode = finding.ruleId,
+            reasonCode = rule.reasonCode,
+            severityCode = rule.severityCode,
+            windowStart = feature.windowStart(at),
+            observation = byFeature.getValue(feature.id),
+        )
     }
 }
