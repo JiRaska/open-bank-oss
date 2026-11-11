@@ -83,6 +83,7 @@ data class BusinessOnboardingCase(
     val agreement: AgreementRecord? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val representationAttestationId: UUID? = null,
 ) {
 
     val initiator: Signer? get() = signers.firstOrNull { it.isInitiator }
@@ -125,28 +126,14 @@ data class BusinessOnboardingCase(
         decision: RepresentationDecision,
         at: Instant,
     ): BusinessOnboardingCase = when (decision) {
-        is RepresentationDecision.Attested -> {
-            val a = decision.attestation
-            if (a.confirmedRoles.isNotEmpty()) {
-                // The operator confirmed the rule names WHICH offices sign. Who signs is checked
-                // against those offices when co-signers are invited; the count alone is not enough.
-                copy(
-                    status = CaseStatus.REGISTRY_VERIFIED,
-                    extract = extract,
-                    requiredSignatures = a.confirmedSigners,
-                    requiredSignerRoles = a.confirmedRoles,
-                    updatedAt = at,
-                )
-            } else {
-                copy(
-                    status = CaseStatus.REGISTRY_VERIFIED,
-                    extract = extract,
-                    requiredSignatures = a.confirmedSigners,
-                    requiredSignerRoles = emptyList(),
-                    updatedAt = at,
-                )
-            }
-        }
+        is RepresentationDecision.Attested -> copy(
+            status = CaseStatus.REGISTRY_VERIFIED,
+            extract = extract,
+            requiredSignatures = decision.attestation.confirmedSigners,
+            requiredSignerRoles = decision.attestation.confirmedRoles,
+            updatedAt = at,
+            representationAttestationId = decision.attestation.id,
+        )
 
         // The rule text CHANGED since the last confirmation. Say so rather than present a blank
         // form: this is the event the whole control exists for, and a reviewer who is not told
@@ -198,6 +185,8 @@ data class BusinessOnboardingCase(
         }
     }
 
+    fun mandateEvidenceRef(signer: Signer): String = "kyb-case:$id:signature:${signer.signatureRef}"
+
     private fun foldedRoles(ex: RegistryExtract, chosen: List<Signer>): List<String?> = chosen.map { s ->
         // getOrNull: a sole trader's initiatorMatched does not bounce an out-of-range index, and a
         // raw IndexOutOfBounds here would surface as an unmapped 500.
@@ -247,6 +236,18 @@ data class BusinessOnboardingCase(
      */
     private fun masculine(folded: String): String =
         FEMININE_OFFICES.entries.fold(folded) { acc, (f, m) -> acc.replace(f, m) }
+
+    /** Projects the existing register-office matching into the attested office slot order. */
+    internal fun statutoryOfficeSlots(chosen: List<Signer>): Map<UUID, Set<Int>> {
+        val register = requireNotNull(extract)
+        val roles = foldedRoles(register, chosen)
+        return chosen.mapIndexed { index, signer ->
+            val slots = requiredSignerRoles.indices.filter {
+                holdsOffice(roles[index], requiredSignerRoles[it])
+            }.toSet()
+            requireNotNull(signer.partyId) to slots
+        }.toMap()
+    }
 
     private fun roleSuffix(roles: List<String>) = if (roles.isEmpty()) "" else ", offices: ${roles.joinToString(", ")}"
 

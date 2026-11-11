@@ -21,3 +21,11 @@ Representation lookup validates the legal-entity identifier before contacting th
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Statutory representation publication
+
+KYB staff can publish a completed case's joint representation evidence when its human
+attestation explicitly confirms a joint mode and remains current. The Active cases view
+submits the ID of the confirmation shown to the reviewer. Every registered representative
+must have a distinct verified party and signature. Delegation-service can verify that the exact
+source attestation remains current, including before KYB publishes its replacement to Party.

@@ -187,6 +187,9 @@ class PartyEventPactProviderVerificationTest {
         if (context.interaction.providerStates.any { it.name == TAX_FACTS_STATE }) {
             testIdentityAssociation.setTestIdentity(taxReportingIdentity())
         }
+        if (context.interaction.providerStates.any { it.name == StatutoryRepresentationPactFixture.STATE }) {
+            testIdentityAssociation.setTestIdentity(StatutoryRepresentationPactFixture.kybIdentity())
+        }
         context.verifyInteraction()
     }
 
@@ -232,6 +235,11 @@ class PartyEventPactProviderVerificationTest {
     fun partiesExistForJointKybMandate() = runOnVertxContext {
         seedMandateParty(KYB_MANDATE_PRINCIPAL_ID, PartyType.COMPANY, "Pact Joint Company a.s.")
         seedMandateParty(KYB_MANDATE_AGENT_ID, PartyType.INDIVIDUAL, "Pact Joint Signatory")
+    }
+
+    @State(StatutoryRepresentationPactFixture.STATE)
+    fun companyHasVerifiedStatutoryMandates() = runOnVertxContext {
+        StatutoryRepresentationPactFixture.seed(partyUseCase, ::seedMandateParty)
     }
 
     private suspend fun seedMandateParty(id: UUID, type: PartyType, name: String) {

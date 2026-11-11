@@ -6,7 +6,7 @@ info:
   # 1.5.0 -> 1.6.0: additive — AML questionnaire, declarations, business agreement + acceptance,
   # prefill; `sign` keeps its schema and gains stricter, documented semantics.
   # 1.6.0 -> 1.7.0: additive — company-scoped PSC record and corporate registration evidence.
-  version: 1.7.0
+  version: 1.8.0
   description: |
     Legal-entity verification and business onboarding (ADR-0284). Business identifiers are
     verified against public registers (ARES for CZ, GLEIF for LEI, manual attestation elsewhere);
@@ -652,6 +652,57 @@ paths:
               schema: { $ref: '#/components/schemas/UboFinding' }
         '400':
           description: Missing or unparseable scheme/identifier
+  /api/v1/kyb/cases/{id}/statutory-representation:
+    post:
+      tags: [KYB]
+      summary: Publish an active case's verified statutory representation rule to party-service
+      description: Staff publication requires a current human attestation and a complete signed and identity-linked roster.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attestationId]
+              properties:
+                attestationId: {type: string, format: uuid, description: The current confirmation displayed to the reviewer}
+      responses:
+        '200':
+          description: The exact attestation published
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [attestationId]
+                properties:
+                  attestationId: {type: string, format: uuid}
+        '400': {description: Missing attestation identifier}
+        '403': {description: Only authenticated KYB staff can publish}
+        '404': {description: Case or complete verified statutory evidence unavailable, or the attestation changed}
+  /api/v1/kyb/cases/{id}/statutory-representation/{attestationId}/current:
+    get:
+      tags: [KYB]
+      summary: Verify that an exact statutory representation attestation remains current
+      description: This check is restricted to the verified delegation service identity.
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: attestationId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: entityPartyId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: The case's verified statutory attestation is current
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+        '400': {description: Missing entity party}
+        '403': {description: Only delegation-service can verify the source revision}
+        '404':
+          description: Case or entity mismatch, incomplete evidence, or superseded attestation
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
 components:
   securitySchemes:
     bearerAuth:
@@ -764,6 +815,10 @@ components:
           type: integer
           minimum: 1
           description: What the human decided. This is what binds an agreement.
+        confirmedMode:
+          type: [string, 'null']
+          enum: [SOLE, JOINT_N, JOINT_ALL, null]
+          description: Explicitly confirmed mode. Legacy count-only attestations have no confirmed mode.
         confirmedRoles:
           type: array
           items: { type: string }
@@ -777,6 +832,10 @@ components:
       required: [confirmedSigners, ruleTextHash]
       properties:
         confirmedSigners: { type: integer, minimum: 1 }
+        confirmedMode:
+          type: string
+          enum: [SOLE, JOINT_N, JOINT_ALL]
+          description: An explicit mode is required to publish a joint statutory representation revision.
         confirmedRoles:
           type: array
           items: { type: string }

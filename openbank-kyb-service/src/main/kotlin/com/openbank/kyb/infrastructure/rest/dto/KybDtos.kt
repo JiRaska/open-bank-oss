@@ -81,6 +81,7 @@ data class AttestRepresentationRequest(
      */
     val ruleTextHash: String?,
     val note: String? = null,
+    val confirmedMode: String? = null,
 )
 
 data class AttestationResponse(
@@ -97,6 +98,7 @@ data class AttestationResponse(
     val attestedAt: Instant,
     val supersededAt: Instant?,
     val note: String?,
+    val confirmedMode: String? = null,
 ) {
     companion object {
         fun from(a: RepresentationAttestation) = AttestationResponse(
@@ -113,6 +115,7 @@ data class AttestationResponse(
             attestedAt = a.attestedAt,
             supersededAt = a.supersededAt,
             note = a.note,
+            confirmedMode = a.confirmedMode?.name,
         )
     }
 }

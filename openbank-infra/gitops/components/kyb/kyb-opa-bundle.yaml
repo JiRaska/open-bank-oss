@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "ec329ba1715627e1"
+    openbank.tech/policy-checksum: "c5bce2558d995b15"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -867,6 +867,7 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
     	role in input.principal.roles
     	startswith(input.action, "kyb.")
+        not startswith(input.action, "kyb.statutory-representation.")
     }
 
     # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,
@@ -889,6 +890,21 @@ data:
     		"kyb.case.sign",
     		"kyb.case.abandon",
     	}
+    }
+
+    allowed_reasons contains "kyb-staff-publishes-statutory-representation" if {
+        input.principal.type == "HUMAN"
+        not principal_is_machine
+        some role in {"ROLE_ADMIN", "ROLE_KYC"}
+        role in input.principal.roles
+        input.action == "kyb.statutory-representation.publish"
+    }
+
+    allowed_reasons contains "delegation-inspects-statutory-attestation" if {
+        input.principal.type == "HUMAN"
+        input.principal.service_account == true
+        machine_named("service-account-openbank-delegation")
+        input.action == "kyb.statutory-representation.inspect"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
