@@ -19,6 +19,7 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.atomic.AtomicReference
 
 private const val INITIATOR = "11111111-1111-4111-8111-111111111111"
 private const val COSIGNER = "22222222-2222-4222-8222-222222222222"
@@ -85,6 +86,28 @@ class BusinessPaymentApprovalIT {
         post("/customer/v1/sepa-payments")
     }
 
+    private fun postDomestic(key: String) = Given {
+        contentType("application/json")
+        header("X-Acting-For", COMPANY)
+        header("X-SCA-Challenge-Id", SCA)
+        header("Idempotency-Key", key)
+        body(
+            """{"debtorAccountId":"$ACCOUNT","amount":"80000.00","currency":"CZK",
+                "creditorAccountNumber":"123456789/0100","creditorName":"Fixture"}""",
+        )
+    } When {
+        post("/customer/v1/domestic-payments")
+    }
+
+    private fun lookupDomesticApproval(key: String) = Given {
+        contentType("application/json")
+        header("X-Acting-For", COMPANY)
+        header("Idempotency-Key", key)
+        body("""{"debtorAccountId":"$ACCOUNT","amount":"80000.00"}""")
+    } When {
+        post("/customer/v1/domestic-payments/submissions/approval-lookup")
+    }
+
     private fun detailBody(status: String = "PENDING", signatures: String = """[{"partyId":"$INITIATOR"}]""") = """
         {"id":"$APPROVAL","entityPartyId":"$COMPANY","kind":"PAYMENT","status":"$status","required":2,
          "payloadSha256":"$SHA","initiatorPartyId":"$INITIATOR","eligibleSignerIds":["$INITIATOR","$COSIGNER"],
@@ -113,6 +136,82 @@ class BusinessPaymentApprovalIT {
     private fun readJson(body: String): JsonNode = json.readTree(body)
 
     // ── hold ───────────────────────────────────────────────────────────────────────────────
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `original domestic key recovers a held approval after the response is lost`() {
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 503, body = """{"error":"fixture lost response"}""")
+
+        val key = "fixture-original-payment-key"
+        postDomestic(key) Then { statusCode(503) }
+        val create = BusinessApprovalStubs.requests("POST", CREATE).single()
+        val request = readJson(create.body)
+        val correlation = request.path("submissionCorrelation").asText()
+        assertThat(correlation).matches("[0-9a-f]{64}")
+        assertThat(create.body).doesNotContain(key)
+        assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
+
+        val route = "$CREATE/submissions/lookup"
+        val releaseEvidence = AtomicReference("""{"approvalId":"$APPROVAL","status":"PENDING"}""")
+        BusinessApprovalStubs.stub("POST", route) { body ->
+            val lookup = readJson(body)
+            if (lookup.path("submissionCorrelation").asText() == correlation &&
+                lookup.path("initiatorPartyId").asText() == INITIATOR
+            ) {
+                200 to releaseEvidence.get()
+            } else {
+                404 to """{"code":"NOT_FOUND"}"""
+            }
+        }
+        lookupDomesticApproval("a-different-key") Then {
+            statusCode(200)
+            body("outcome", equalTo("UNKNOWN"))
+        }
+        lookupDomesticApproval(key) Then {
+            statusCode(200)
+            header("Cache-Control", equalTo("no-store"))
+            body("outcome", equalTo("FOUND"))
+            body("approvalId", equalTo(APPROVAL))
+            body("approvalStatus", equalTo("PENDING"))
+        }
+
+        releaseEvidence.set("""{"approvalId":"$APPROVAL","status":"RELEASED"}""")
+        val claim = lookupDomesticApproval(key) Then {
+            statusCode(200)
+            body("approvalStatus", equalTo("RELEASED"))
+        }
+        assertThat(claim.extract().jsonPath().getMap<String, String>("")).doesNotContainKey("paymentId")
+        val paymentId = "00000000-0000-4000-8000-0000000000f9"
+        releaseEvidence.set("""{"approvalId":"$APPROVAL","status":"RELEASED","releaseRef":"$paymentId"}""")
+        lookupDomesticApproval(key) Then {
+            statusCode(200)
+            body("paymentId", equalTo(paymentId))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", route).map { it.body }).allSatisfy {
+            assertThat(it).doesNotContain(key)
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", CREATE)).hasSize(1)
+        assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).hasSize(1)
+        assertThat(BusinessApprovalStubs.requests("POST", "/api/v1/domestic-payments")).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = INITIATOR)])
+    fun `a changed instruction under the original held payment key returns a conflict`() {
+        BusinessApprovalStubs.stub("POST", EVALUATE, body = """{"required":2,"eligibleSignerIds":[],"trusted":false}""")
+        BusinessApprovalStubs.stub("POST", CONSUME, body = """{"status":"COMPLETED"}""")
+        BusinessApprovalStubs.stub("POST", CREATE, status = 409, body = """{"code":"SUBMISSION_CORRELATION_REUSED"}""")
+
+        postDomestic("fixture-conflict-key") Then {
+            statusCode(409)
+            body("code", equalTo("SUBMISSION_CORRELATION_REUSED"))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", "/api/v1/domestic-payments")).isEmpty()
+    }
 
     @Test
     @TestSecurity(user = "customer:$INITIATOR", roles = ["ROLE_CUSTOMER"])

@@ -220,3 +220,9 @@ account, supply the original CZK `amount` when several grants cover the account.
 `FOUND` contains the durable `paymentId` and current `status`. `UNKNOWN` means the
 edge could not establish the original instruction. Keep the pending warning and never start a
 new payment from this result. This lookup consumes no SCA and sends no payment.
+
+
+For a company payment held for co-signature, send `POST /customer/v1/domestic-payments/submissions/approval-lookup`
+with the same key, debit account, business profile and original amount. The lookup returns the
+original approval ID and current status when the receipt exists. A release claim alone supplies
+no payment ID. The result includes a rail ID only after Delegation records the release result.

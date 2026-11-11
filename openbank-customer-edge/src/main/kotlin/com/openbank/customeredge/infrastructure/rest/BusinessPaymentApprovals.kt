@@ -48,6 +48,8 @@ data class HeldPayment(
     val extras: Map<String, String?> = emptyMap(),
 )
 
+internal data class DomesticApprovalReceipt(val approvalId: UUID, val status: String, val paymentId: UUID?)
+
 /**
  * Multi-signature business payments at the edge (#10281 item 2).
  *
@@ -123,6 +125,7 @@ class BusinessPaymentApprovals(
         customer: CustomerIdentity,
         payment: HeldPayment,
         scaChallengeId: String?,
+        submissionCorrelation: String? = null,
         scaGate: () -> Response?,
     ): Response? {
         val entity = customer.actingFor ?: return null
@@ -134,7 +137,7 @@ class BusinessPaymentApprovals(
 
         scaGate()?.let { return it }
         val challenge = UUID.fromString(requireNotNull(scaChallengeId).trim())
-        val created = signing.createApproval(entity, createBody(customer.human, challenge, payment))
+        val created = signing.createApproval(entity, createBody(customer.human, challenge, payment, submissionCorrelation))
         if (!created.ok) {
             audit.emit(
                 eventType = "CUSTOMER_PAYMENT_REFUSED",
@@ -143,6 +146,12 @@ class BusinessPaymentApprovals(
                 result = "FAILURE",
                 details = mapOf("reason" to "APPROVAL_NOT_CREATED", "upstreamStatus" to created.status.toString()),
             )
+            if (created.status == 409 && read(created.body)?.path("code")?.asText() == "SUBMISSION_CORRELATION_REUSED") {
+                return Response.status(Response.Status.CONFLICT)
+                    .entity(mapOf("code" to "SUBMISSION_CORRELATION_REUSED", "message" to "Submission key already used"))
+                    .type(MediaType.APPLICATION_JSON)
+                    .build()
+            }
             return unavailable("approval request could not be created; the initiator's authentication was used")
         }
         val node = read(created.body) ?: return unavailable("approval request answer was unreadable")
@@ -172,6 +181,22 @@ class BusinessPaymentApprovals(
         return Response.status(Response.Status.ACCEPTED).entity(out).type(MediaType.APPLICATION_JSON).build()
     }
 
+    internal fun lookupDomesticSubmission(
+        entity: UUID,
+        initiator: UUID,
+        submissionCorrelation: String,
+    ): DomesticApprovalReceipt? {
+        val reply = signing.lookupDomesticApproval(entity, initiator, submissionCorrelation)
+        if (reply.status != 200) return null
+        val receipt = read(reply.body) ?: return null
+        val id = receipt.path("approvalId").textOrNull()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return null
+        val status = receipt.path("status").textOrNull()?.takeIf(DOMESTIC_APPROVAL_STATUSES::contains) ?: return null
+        val paymentId = receipt.path("releaseRef").textOrNull()?.takeIf { status == "RELEASED" }
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        return DomesticApprovalReceipt(id, status, paymentId)
+    }
+
     private fun evaluate(entity: UUID, payment: HeldPayment): JsonNode? {
         val body = objectMapper.writeValueAsString(
             mapOf(
@@ -186,7 +211,7 @@ class BusinessPaymentApprovals(
         return if (reply.ok) read(reply.body) else null
     }
 
-    private fun createBody(human: UUID, challenge: UUID, p: HeldPayment): String {
+    private fun createBody(human: UUID, challenge: UUID, p: HeldPayment, submissionCorrelation: String?): String {
         val payload = objectMapper.createObjectNode().apply {
             put("rail", p.rail.name)
             p.amount?.let { put("amount", it) }
@@ -200,6 +225,7 @@ class BusinessPaymentApprovals(
         }
         val body = objectMapper.createObjectNode().apply {
             put("kind", p.rail.kind)
+            submissionCorrelation?.let { put("submissionCorrelation", it) }
             set<JsonNode>("payload", payload)
             putObject("initiatorSignature").apply {
                 put("partyId", human.toString())
@@ -300,6 +326,10 @@ class BusinessPaymentApprovals(
     private fun JsonNode.textOrNull(): String? = takeIf { it.isTextual && it.asText().isNotBlank() }?.asText()
 
     private companion object {
+        val DOMESTIC_APPROVAL_STATUSES = setOf(
+            "AWAITING_INITIATOR", "PENDING", "APPROVED", "REJECTED", "EXPIRED", "RELEASED", "RELEASE_FAILED",
+        )
+
         const val ERROR_MAX_CHARS = 300
     }
 }

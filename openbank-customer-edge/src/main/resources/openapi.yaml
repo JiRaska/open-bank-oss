@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.92.0
+  version: 1.93.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -3743,6 +3743,8 @@ paths:
             `code: DELEGATED_SPEND_LIMIT_EXCEEDED` (ADR-0249 D3) — the delegate already knows they
             hold the grant, so naming their own limit is not an oracle; how much headroom remains
             is deliberately not echoed.
+        '409':
+          description: Original held-payment key already belongs to a different frozen instruction
         '503':
           description: >-
             Under X-Acting-For only: the company's signing policy could not be evaluated, so the
@@ -3794,6 +3796,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentSubmission'
+        '400':
+          description: Malformed lookup or missing Idempotency-Key
+        '403':
+          description: Caller lacks customer access or may not act for the requested business
+
+  /domestic-payments/submissions/approval-lookup:
+    post:
+      tags: [Payments]
+      summary: Recover a domestic business payment approval after an ambiguous response
+      description: >-
+        Use the original Idempotency-Key, debit account, amount and verified business profile.
+        This read creates no payment or approval and consumes no SCA. FOUND identifies the
+        original approval and its current lifecycle. A payment identifier is present only when
+        the released rail reference has been recorded. An unproven attempt returns UNKNOWN.
+      operationId: lookupDomesticPaymentApproval
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128, pattern: '^[ -~]+$'}
+        - name: X-Acting-For
+          in: header
+          required: false
+          description: Use the same verified business context as the original submission.
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                amount:
+                  type: string
+                  description: Original CZK amount when delegations overlap.
+      responses:
+        '200':
+          description: Current durable approval state, or UNKNOWN
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticApprovalSubmission'
         '400':
           description: Malformed lookup or missing Idempotency-Key
         '403':
@@ -7076,6 +7127,27 @@ components:
             status:
               type: string
               enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+          additionalProperties: false
+
+    DomesticApprovalSubmission:
+      oneOf:
+        - type: object
+          required: [outcome]
+          properties:
+            outcome: {type: string, enum: [UNKNOWN]}
+          additionalProperties: false
+        - type: object
+          required: [outcome, approvalId, approvalStatus]
+          properties:
+            outcome: {type: string, enum: [FOUND]}
+            approvalId: {type: string, format: uuid}
+            approvalStatus:
+              type: string
+              enum: [AWAITING_INITIATOR, PENDING, APPROVED, REJECTED, EXPIRED, RELEASED, RELEASE_FAILED]
+            paymentId:
+              type: string
+              format: uuid
+              description: Persisted domestic rail identifier for a released approval, when available.
           additionalProperties: false
 
     GameRequirement:

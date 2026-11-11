@@ -61,6 +61,14 @@ class DelegationSigningAdapter(private val upstream: UpstreamClient, private val
     override fun createApproval(entity: UUID, body: String) =
         reply(upstream.post("${entities(entity)}/approval-requests", entity.toString(), body))
 
+    override fun lookupDomesticApproval(entity: UUID, initiator: UUID, submissionCorrelation: String) = reply(
+        upstream.post(
+            "${entities(entity)}/approval-requests/submissions/lookup",
+            entity.toString(),
+            json("initiatorPartyId" to initiator.toString(), "submissionCorrelation" to submissionCorrelation),
+        ),
+    )
+
     override fun approvals(entity: UUID, status: String?, signer: UUID?): SigningReply {
         val query = listOfNotNull(status?.let { "status=$it" }, signer?.let { "signer=$it" })
             .joinToString("&").let { if (it.isEmpty()) "" else "?$it" }

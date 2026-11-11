@@ -38,6 +38,8 @@ interface BusinessSigningPort {
 
     fun createApproval(entity: UUID, body: String): SigningReply
 
+    fun lookupDomesticApproval(entity: UUID, initiator: UUID, submissionCorrelation: String): SigningReply
+
     fun approvals(entity: UUID, status: String?, signer: UUID?): SigningReply
 
     fun approval(entity: UUID, approvalId: UUID): SigningReply

@@ -3023,6 +3023,11 @@ class CustomerEdgeResource(
         }
         val (creditorAcctNo, creditorBank) = resolveCreditorBban(creditorRaw)
             ?: return badRequest("Malformed creditor account (expected number/bankcode or Czech IBAN)")
+        val submissionScope = if (debit.onBehalfOf == null || debit.delegationId != null) {
+            domesticSubmissionScope(customer, debtor, debit.delegationId)
+        } else {
+            null // A legacy bank mandate has no stable grant identity to bind.
+        }
         val enriched = buildDomesticRequest(
             objectMapper,
             body,
@@ -3032,11 +3037,7 @@ class CustomerEdgeResource(
             debtorName,
             creditorAcctNo,
             creditorBank,
-            customerSubmissionScope = if (debit.onBehalfOf == null || debit.delegationId != null) {
-                domesticSubmissionScope(customer, debtor, debit.delegationId)
-            } else {
-                null // A legacy bank mandate has no stable grant identity to bind.
-            },
+            customerSubmissionScope = submissionScope,
         ) ?: return badRequest("Malformed or incomplete payment body")
         if (customer.actingFor != null) {
             holdForApproval(
@@ -3053,6 +3054,9 @@ class CustomerEdgeResource(
                 ),
                 scaChallengeId,
                 "payments.domestic",
+                approvalSubmissionCorrelation = submissionScope?.let { scope ->
+                    domesticSubmissionKey(idempotencyKey)?.let { domesticApprovalCorrelation(scope, it) }
+                },
             )?.let { return it }
         }
         // Cumulative ceiling (ADR-0249 D3) BEFORE the SCA gate, not after: a payment that the
@@ -3108,21 +3112,11 @@ class CustomerEdgeResource(
         body: DomesticSubmissionLookup?,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        val key = idempotencyKey?.takeIf {
-            it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
-        } ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val key = domesticSubmissionKey(idempotencyKey)
+            ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
         val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
         val customer = customer()
-        val scope = if (ownsAccount(debtor, customer.partyId)) {
-            domesticSubmissionScope(customer, debtor, null)
-        } else {
-            // Reuse the account service's grant selection. When several grants overlap, the
-            // original amount lets it select the same grant as it did at submission.
-            val grant = fetchDelegatedPaymentDecision(debtor, customer.partyId, body.amount, "CZK")
-                ?.takeIf { it.authorized && it.grantorPartyId != null }?.delegationId
-                ?: return domesticSubmissionResult()
-            domesticSubmissionScope(customer, debtor, grant)
-        }
+        val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
         val input = objectMapper.createObjectNode()
             .put("debtorAccountId", debtor.toString())
             .put("customerSubmissionScope", scope)
@@ -3140,6 +3134,39 @@ class CustomerEdgeResource(
         val status = result.path("status").asText().takeIf(DOMESTIC_PAYMENT_STATUSES::contains)
             ?: return domesticSubmissionResult()
         return domesticSubmissionResult(paymentId, status)
+    }
+
+    @POST
+    @Path("/domestic-payments/submissions/approval-lookup")
+    @Authorize(action = "customer.payments.read")
+    @Blocking
+    fun lookupDomesticPaymentApproval(
+        body: DomesticSubmissionLookup?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        val key = domesticSubmissionKey(idempotencyKey)
+            ?: return badRequest("Idempotency-Key must be between 1 and 128 printable characters")
+        val debtor = body?.debtorAccountId ?: return badRequest("debtorAccountId is required")
+        val customer = customer()
+        val entity = customer.actingFor ?: return domesticSubmissionResult()
+        val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
+        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, domesticApprovalCorrelation(scope, key))
+            ?: return domesticSubmissionResult()
+        val result = mutableMapOf(
+            "outcome" to "FOUND",
+            "approvalId" to receipt.approvalId.toString(),
+            "approvalStatus" to receipt.status,
+        )
+        receipt.paymentId?.let { result["paymentId"] = it.toString() }
+        return Response.ok(result).header("Cache-Control", "no-store").build()
+    }
+
+    private fun domesticLookupScope(customer: CustomerIdentity, debtor: UUID, amount: String?): String? {
+        if (ownsAccount(debtor, customer.partyId)) return domesticSubmissionScope(customer, debtor, null)
+        // The original amount lets the account service select the same grant when several overlap.
+        val grant = fetchDelegatedPaymentDecision(debtor, customer.partyId, amount, "CZK")
+            ?.takeIf { it.authorized && it.grantorPartyId != null }?.delegationId ?: return null
+        return domesticSubmissionScope(customer, debtor, grant)
     }
 
     private fun domesticSubmissionResult(paymentId: UUID? = null, status: String? = null): Response {
@@ -5468,9 +5495,10 @@ class CustomerEdgeResource(
         payment: HeldPayment,
         scaChallengeId: String?,
         operation: String,
+        approvalSubmissionCorrelation: String? = null,
     ): Response? {
         if (customer.actingFor == null || !this::businessApprovals.isInitialized) return null
-        return businessApprovals.hold(customer, payment, scaChallengeId) {
+        return businessApprovals.hold(customer, payment, scaChallengeId, approvalSubmissionCorrelation) {
             scaGate(scaChallengeId, customer, payment.amount, payment.currency, payment.creditor, operation)
         }
     }
@@ -6180,6 +6208,16 @@ class CustomerEdgeResource(
             if (account.isEmpty() || bank.length != 4 || !bank.all { it.isDigit() }) return null
             if (!account.all { it.isDigit() || it == '-' }) return null
             return account to bank
+        }
+
+        private fun domesticSubmissionKey(key: String?): String? = key?.takeIf {
+            it.isNotBlank() && it.length <= DOMESTIC_IDEMPOTENCY_KEY_MAX_LENGTH && it.all { c -> c in ' '..'~' }
+        }
+
+        private fun domesticApprovalCorrelation(scope: String, key: String): String {
+            val material = "openbank-domestic-approval-v1|$scope|$key"
+            val digest = MessageDigest.getInstance("SHA-256").digest(material.toByteArray(StandardCharsets.UTF_8))
+            return HexFormat.of().formatHex(digest)
         }
 
         private fun domesticSubmissionScope(customer: CustomerIdentity, account: UUID, grant: String?): String {
