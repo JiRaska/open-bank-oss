@@ -373,7 +373,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0366](0366-ci-fetches-external-tools-and-charts-through-a-pinned-lock-a-resolver-and-a-mirror-outside-github.md) | CI fetches external tools and charts through a pinned lock, a resolver and a mirror outside GitHub | Proposed | Planned | ci,supply-chain,resilience | — |
 | [0367](0367-regulatory-reporting-as-code-declared-return-specs-and-the-ceu-daily-feed-pilot.md) | Regulatory reporting as code: declared return specs and the CEÚ daily feed pilot | Accepted | Partial | regulatory-reporting,compliance,governance,ai-agents | — |
 | [0368](0368-deploy-every-services-ci-service-from-its-completed-main-push-run-not-from-the-push.md) | Deploy every Services CI service from its completed main-push run, not from the push | Accepted | Partial | ci,gitops,api-contract | — |
-| [0370](0370-admin-ui-test-strategy-falsifiable-mocks-measured-flake-mutation-and-budgets.md) | Admin UI test strategy: falsifiable mocks, measured flake, mutation and budgets | Proposed | Planned | admin-ui,testing,api-contract | — |
+| [0370](0370-admin-ui-test-strategy-falsifiable-mocks-measured-flake-mutation-and-budgets.md) | Admin UI test strategy: falsifiable mocks, measured flake, mutation and budgets | Proposed | Partial | admin-ui,testing,api-contract | — |
 
 ## By tag
 
