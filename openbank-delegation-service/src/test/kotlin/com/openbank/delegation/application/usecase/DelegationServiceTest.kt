@@ -594,6 +594,8 @@ class DelegationServiceTest {
         val offered = offeredGrant()
         coEvery { repository.findById(offered.id) } returns offered
         scaOk(grantee, "DELEGATION_ACCEPT")
+        coEvery { authorityClient.authorityFor(grantee, grantee) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { repository.save(any<DelegationGrant>(), any()) } answers { firstArg() }
 
         val accepted = service.accept(offered.id, grantee, UUID.randomUUID(), grantee)

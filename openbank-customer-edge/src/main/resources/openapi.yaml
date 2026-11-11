@@ -61,7 +61,7 @@ info:
   # GET /notifications/unified, and an optional origin `partyId` on PATCH /notifications/read-all.
   # 1.88.0 -> 1.89.0 (#14649): additive — documents the 403 PENSION_ACCESS_DENIED response on
   # GET /pension/transfers (a pension-service read refusal, never a change refusal).
-  version: 1.91.0
+  version: 1.92.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -6503,9 +6503,9 @@ paths:
       tags: [Delegation]
       summary: Accept an offered grant (grantee's own SCA)
       description: >-
-        granteePartyId is the authenticated party, so a caller can only accept an offer addressed to
-        themselves. scaSessionId is the grantee's OWN challenge (purpose DELEGATION_ACCEPT) — the
-        grantor's ceremony does not carry over.
+        The offer must be addressed to the active profile. An organization requires a verified sole
+        signatory. The edge supplies that human's identity from the customer session, and
+        scaSessionId must name the human's DELEGATION_ACCEPT challenge.
       operationId: acceptDelegation
       security:
         - customerOidc: [delegations:write]
@@ -6515,7 +6515,8 @@ paths:
       responses:
         '200': {description: Grant accepted and now ACTIVE}
         '400': {description: scaSessionId missing}
-        '403': {description: Offer is not addressed to the caller, or SCA invalid}
+        '403': {description: Offer is not addressed to the active profile or signing authority is missing}
+        '503': {description: Signing authority could not be verified}
 
   /delegations/{id}/decline:
     post:

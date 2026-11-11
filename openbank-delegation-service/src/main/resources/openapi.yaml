@@ -12,7 +12,8 @@ info:
   # (default false) for SAVINGS_GOAL + SAVINGS_PROPOSE_WITHDRAW only.
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
   # 1.26 -> 1.27 (#10247): document the sole statutory signing requirement for preview and offer.
-  version: 1.27.0
+  # 1.27 -> 1.28 (#10247): accept a verified human actor from customer-edge and report unavailable evidence.
+  version: 1.28.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -446,7 +447,8 @@ paths:
   /api/v1/delegations/{id}/accept:
     post:
       tags: [Delegations]
-      summary: Accept an OFFERED grant after the grantee's SCA completes
+      summary: Accept an OFFERED grant after the signing human's SCA completes
+      description: An organization grantee requires a verified sole signatory authenticated by customer-edge.
       parameters:
         - $ref: '#/components/parameters/DelegationId'
         - name: granteePartyId
@@ -458,6 +460,7 @@ paths:
           required: true
           schema: { type: string, format: uuid }
         - $ref: '#/components/parameters/CustomerPartyId'
+        - $ref: '#/components/parameters/CustomerActorPartyId'
       responses:
         '200':
           description: Grant activated
@@ -465,7 +468,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '400': { description: SCA invalid or expired, or EXPOSURE_UNSUPPORTED for a historical exposure grant }
-        '403': { description: The authenticated party is not the grantee }
+        '403': { description: The caller is not the grantee, or verified signing authority is missing }
+        '503': { description: Signing authority could not be verified; the SCA challenge was not consumed }
         '409': { description: A concurrent lifecycle transition won; reload the grant before retrying }
   /api/v1/delegations/{id}/decline:
     post:
@@ -1075,7 +1079,8 @@ components:
       required: false
       description: |
         The natural person authenticated by customer-edge. Required together with
-        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls. It equals the principal for an
+        X-Customer-Party-Id on customer preview/offer and approval-group mutation calls, and when accepting for an
+        organization. It equals the principal for an
         individual profile; for an organization profile it differs and the service verifies the
         actor's active PartyMandate before accepting the request. Never supplied by the app.
       schema: { type: string, format: uuid }

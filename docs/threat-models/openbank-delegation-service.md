@@ -192,6 +192,11 @@ gap closes only with a consumer pact or a run against a deployed stack.
   revoked mandate, an inactive principal, malformed evidence or unavailable evidence refuses preview
   and offer before SCA is spent. A verified retail principal signs directly. Approval-group
   management applies its own current-mandate checks.
+- **Company offer acceptance retains issuer evidence** (#10247). An offer stores the issuing
+  human and their exact mandate ID. Acceptance revalidates that mandate with Party before spending
+  the grantee's SCA. A company grantee must also present the customer-edge-authenticated human
+  with a current sole mandate. For an older offer without recorded issuer evidence, only a verified
+  individual grantor can be established. The new nullable columns retain historical records.
 
 ## Change log
 

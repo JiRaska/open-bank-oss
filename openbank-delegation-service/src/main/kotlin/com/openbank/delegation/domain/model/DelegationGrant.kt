@@ -9,6 +9,9 @@ import com.openbank.libs.domain.money.Money
 import java.time.OffsetDateTime
 import java.util.UUID
 
+/** The human and, for an organization, the verified sole mandate used at issuance. */
+data class GrantorSigningEvidence(val actorPartyId: UUID, val soleMandateId: UUID?)
+
 /**
  * ADR-0232 D1. LOAN is a deliberate omission in this first slice: no loan-scoped
  * capability ships yet, so a LOAN value would be an offerable resource type with
@@ -124,6 +127,7 @@ data class DelegationGrant(
      */
     val lifecycleRevision: Long = 0,
     val grantScaSessionId: UUID? = null,
+    val grantorSigningEvidence: GrantorSigningEvidence? = null,
     val acceptScaSessionId: UUID? = null,
     val note: String? = null,
     val createdAt: OffsetDateTime,
@@ -134,6 +138,11 @@ data class DelegationGrant(
 ) {
     init {
         require(grantorPartyId != granteePartyId) { "grantor and grantee must differ" }
+        grantorSigningEvidence?.let {
+            require((it.actorPartyId == grantorPartyId) == (it.soleMandateId == null)) {
+                "an organization grantor must have a human actor and a verified sole mandate"
+            }
+        }
         require(capabilities.isNotEmpty()) { "DelegationGrant must have at least one capability" }
         val allowed = CAPABILITY_MATRIX.getValue(resourceType)
         require(capabilities.all { it in allowed }) {

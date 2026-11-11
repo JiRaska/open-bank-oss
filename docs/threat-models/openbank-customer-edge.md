@@ -119,6 +119,11 @@ Trust boundaries:
 | E-9 | Customer reads, revalues or withdraws ANOTHER party's declared holding by guessing or replaying its id (#11966) | wealth-service acts on a holding id alone and trusts its M2M caller, so the edge enforces ownership: every `/customer/v1/holdings/{holdingId}` route first reads the holding and answers 404 unless `ownerPartyId` equals the caller's resolved party (token claim, merge-followed, verified `X-Acting-For`). An unknown id, a malformed id and another party's id give the same 404, and nothing is written in any of them. Only the canonical UUID goes upstream. Upstream error bodies are never forwarded (one names the pledging loan). Proven by `CustomerHoldingsResourceTest`; removing the ownership check fails it. | Low — enforced by the edge only; a direct M2M caller bypasses it, the same class as the open risk on account/balance-service below |
 ---
 
+Company delegation acceptance (#10247) sends the verified human actor and acting-for principal
+separately. Delegation-service accepts the actor header only from the authenticated edge service
+account and checks the actor's current sole mandate and human-owned SCA. The edge depends on that
+current Party mandate evidence for company acceptance.
+
 ## 4. Open Risks (pre-GA gate)
 
 | Risk | Severity | Owner | Target |

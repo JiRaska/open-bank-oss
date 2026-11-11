@@ -19,3 +19,10 @@ organization delegation requires explicit sole signing authority with a quorum
 of one. A joint mandate or incomplete representation evidence needs a separate
 statutory signing workflow. Employee approval groups retain their own
 management and operation rules.
+
+At offer creation the grant stores the signing human and, for an organization,
+the verified sole mandate ID. Acceptance rechecks the issuing organization's
+mandate and confirms that the accepting human can sign for the grantee. The
+grantee's SCA challenge belongs to that human. Organization offers created
+without verified issuance evidence require a new offer. Existing individual
+offers remain eligible after party-service verifies the grantor.
