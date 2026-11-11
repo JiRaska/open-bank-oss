@@ -18,14 +18,18 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -43,6 +47,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(LedgerOutboxDispatchFailureIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
+@OptIn(ExperimentalCoroutinesApi::class)
 class LedgerOutboxDispatchFailureIT {
 
     // Keep app startup off a real broker; the mocked publisher never touches this channel, but the
@@ -69,8 +74,19 @@ class LedgerOutboxDispatchFailureIT {
         },
     ) { "outbox row for $eventId not found" }
 
-    private fun processableIds(): List<UUID> =
-        VertxContextSupport.subscribeAndAwait { repository.listProcessableUni(50) }.map { it.eventId }
+    private fun processableIds(): List<UUID> = VertxContextSupport.subscribeAndAwait {
+        uni(CoroutineScope(Dispatchers.Unconfined)) { repository.listProcessable(50).map { it.eventId } }
+    }
+
+    private fun setRetryAt(eventId: UUID, nextAttemptAt: Instant) {
+        VertxContextSupport.subscribeAndAwait {
+            uni(CoroutineScope(Dispatchers.Unconfined)) {
+                Panache.withTransaction {
+                    repository.update("nextAttemptAt = ?1 where eventId = ?2", nextAttemptAt, eventId)
+                }.awaitSuspending()
+            }
+        }
+    }
 
     // Drive one dispatch tick to completion.
     // CoroutineScope(Dispatchers.Unconfined) starts on the Vert.x event loop that
@@ -88,7 +104,7 @@ class LedgerOutboxDispatchFailureIT {
     }
 
     @Test
-    fun `publish failure marks the row FAILED, keeps it processable, then parks it DEAD after MAX_ATTEMPTS`() {
+    fun `publish failure schedules a retry and parks the row DEAD at the attempt cap`() {
         clearOutbox()
 
         // A publisher whose every send fails — a broker outage on the money path.
@@ -100,6 +116,7 @@ class LedgerOutboxDispatchFailureIT {
             failingPublisher,
             dispatchEnabled = true,
             metrics = mockk(relaxed = true),
+            dispatchPollInterval = Duration.ofSeconds(5),
         )
 
         val msg = OutboxMessage(
@@ -118,12 +135,17 @@ class LedgerOutboxDispatchFailureIT {
             assertThat(row.attemptCount).isEqualTo(1)
             assertThat(row.sentAt).isNull()
             assertThat(row.lastError).contains("simulated broker outage")
+            assertThat(row.nextAttemptAt).isAfter(row.updatedAt)
+            assertThat(row.claimToken).isNull()
         }
-        // FAILED rows stay eligible, so a later tick re-attempts them (bounded retry).
-        assertThat(processableIds()).contains(msg.eventId)
+        setRetryAt(msg.eventId, Instant.now().plus(1, ChronoUnit.DAYS))
+        assertThat(processableIds()).doesNotContain(msg.eventId)
 
-        // Drive the remaining ticks up to the cap; the row must terminate as DEAD.
-        repeat(LedgerOutboxRepositoryImpl.MAX_ATTEMPTS - 1) { tick(dispatcher) }
+        // Advance only the fixture's retry timestamp so each subsequent tick can reclaim it.
+        repeat(LedgerOutboxRepositoryImpl.MAX_ATTEMPTS - 1) {
+            setRetryAt(msg.eventId, Instant.EPOCH)
+            tick(dispatcher)
+        }
         entityFor(msg.eventId).let { row ->
             assertThat(row.status).isEqualTo("DEAD")
             assertThat(row.attemptCount).isEqualTo(LedgerOutboxRepositoryImpl.MAX_ATTEMPTS)

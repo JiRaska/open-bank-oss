@@ -123,13 +123,13 @@ sequenceDiagram
   end
 ```
 
-**Outbox (ADR-0050).** Účetní zápis a jeho outbox řádek se uloží v jedné transakci PostgreSQL.
-Dispatcher doručuje do Kafky alespoň jednou. Atomické nárokování přes
-`FOR UPDATE SKIP LOCKED` koordinuje souběžné repliky a plánovač v každé replice vynechá
-překrývající se spuštění. Dotaz vrací pouze mapované sloupce entity, takže tato verze
-může dál odesílat i po přidání sloupců v pozdější migraci. Po vyčerpání pokusů se vadný
-řádek přesune do stavu `DEAD`. Dispatcher běží na Vert.x event loopu kvůli zachování
-reaktivní Panache session.
+**Outbox (ADR-0050, ADR-0327).** Účetní zápis a jeho outbox řádek se uloží v jedné
+transakci PostgreSQL. Dispatcher nárokuje nejstarší neodeslaný řádek každého agregátu
+a nezávislé agregáty odesílá souběžně. Potvrzení odeslání může změnit řádek pouze
+s platným tokenem jeho aktuálního nároku. Po chybě následuje prodleva před dalším
+pokusem a po vyčerpání pokusů stav `DEAD`. Kafka doručuje alespoň jednou a příjemci
+odstraňují duplicity podle ID události. Plánovač běží na Vert.x event loopu a v každé
+replice vynechá překrývající se spuštění. Přechod na V2 nejprve zastaví starší dispatcher.
 
 ## Životní cyklus partitionů
 

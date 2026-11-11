@@ -41,6 +41,31 @@ triaging an incident that starts on `ledger`.
 - **Scale:** `kubectl scale rollout/ledger-service -n ledger --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
+## Outbox V2 cutover
+
+The ledger deployment hold applies to this change. Schedule the cutover through
+the normal GitOps review after the hold conditions are satisfied.
+
+1. Roll out the compatibility release that explicitly projects the V1 claim's
+   mapped columns. Confirm every ledger pod runs that release before applying V43.
+   A binary that still uses `RETURNING *` can fail when V43 adds unmapped columns.
+2. Quiesce dispatch through GitOps with `OPENBANK_OUTBOX_DISPATCH_ENABLED=false`.
+   Confirm every pod has the flag and no earlier pod can still dispatch. Allow the
+   two-minute claim lease to expire after the last active tick. Ledger writes
+   still commit their outbox rows and backlog can grow while the relay is paused.
+3. Roll out the V2 binary with dispatch still disabled. Verify Flyway V43, both
+   valid partial indexes, pod readiness and the absence of V1 pods before
+   enabling dispatch. For a large table, follow the concurrent index preparation
+   in ADR-0327 D2 before the Flyway rollout.
+4. Enable dispatch through the reviewed GitOps change. Verify committed sends,
+   falling backlog and normal retry and dead-letter metrics before closing the cutover.
+
+To roll back, quiesce the V2 dispatcher and wait for active leases to expire.
+Return to the compatibility release with dispatch disabled, verify the V2 pods
+have stopped, then enable dispatch. Retain V43's nullable columns and indexes.
+A paused process can send a duplicate before it discovers its lease was
+replaced. Consumers still deduplicate by event ID.
+
 ## Common failure modes
 
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
