@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.51.0...tax-reporting-service-v0.52.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** source the GSFT depositor snapshot from admitted read models ([#15524](https://github.com/JiRaska/open-bank-oss/issues/15524)) ([850e9a8](https://github.com/JiRaska/open-bank-oss/commit/850e9a8e3b52ec79ac95cdc2599d41ff4328509d))
+
 ## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.50.0...tax-reporting-service-v0.51.0) (2026-11-11)
 
 
