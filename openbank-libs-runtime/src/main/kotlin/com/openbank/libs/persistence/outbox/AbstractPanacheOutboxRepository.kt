@@ -140,34 +140,50 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
      * Returns the status actually persisted, as the port requires (#5128 finding 3).
      */
     override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
-        inTransaction<OutboxStatus> { s ->
-            s.createNativeQuery(OutboxSql.lockForFailure(shape), java.lang.Integer::class.java)
-                .setParameter("eventId", eventId)
-                .singleResultOrNull
-                .chain { current: java.lang.Integer? ->
-                    if (current == null) {
-                        // Unreachable in practice — the dispatcher only marks a row it just claimed —
-                        // but degrade rather than throw out of a batch that is otherwise mid-flight.
-                        Uni.createFrom().item(OutboxStatus.FAILED)
+        recordFailure(eventId, error, failedAt, claimToken = null) ?: OutboxStatus.FAILED
+
+    protected suspend fun recordFailure(
+        eventId: UUID,
+        error: String,
+        failedAt: Instant,
+        claimToken: UUID?,
+    ): OutboxStatus? = inTransaction<OutboxStatus?> { s ->
+        val lockSql = if (claimToken == null) {
+            OutboxSql.lockForFailure(shape)
+        } else {
+            OutboxClaimFenceSql.lockForFailure(shape)
+        }
+        s.createNativeQuery(lockSql, java.lang.Integer::class.java)
+            .bindFailureOwner(eventId, claimToken)
+            .singleResultOrNull
+            .chain { current: java.lang.Integer? ->
+                if (current == null) {
+                    Uni.createFrom().nullItem<OutboxStatus?>()
+                } else {
+                    val attempts = current.toInt() + 1
+                    val next = OutboxFailurePolicy.statusAfterFailure(attempts, maxAttempts)
+                    val schedule = if (next == OutboxStatus.DEAD) {
+                        null
                     } else {
-                        val attempts = current.toInt() + 1
-                        val next = OutboxFailurePolicy.statusAfterFailure(attempts, maxAttempts)
-                        val schedule = if (next ==
-                            OutboxStatus.DEAD
-                        ) {
-                            null
-                        } else {
-                            OutboxBackoff.nextAttemptAt(attempts, failedAt, random)
-                        }
-                        s.createNativeQuery<Int>(OutboxSql.markFailed(shape))
-                            .setParameter("status", next.name)
-                            .setParameter("attempts", attempts)
-                            .setParameter("error", error.take(OutboxFailurePolicy.MAX_ERROR_LEN))
-                            .setParameter("now", failedAt)
-                            .setParameter("nextAttemptAt", schedule)
-                            .setParameter("eventId", eventId)
-                            .executeUpdate()
-                            .invoke { _ ->
+                        OutboxBackoff.nextAttemptAt(attempts, failedAt, random)
+                    }
+                    val updateSql = if (claimToken == null) {
+                        OutboxSql.markFailed(shape)
+                    } else {
+                        OutboxClaimFenceSql.markFailed(shape)
+                    }
+                    s.createNativeQuery<Int>(updateSql)
+                        .setParameter("status", next.name)
+                        .setParameter("attempts", attempts)
+                        .setParameter("error", error.take(OutboxFailurePolicy.MAX_ERROR_LEN))
+                        .setParameter("now", failedAt)
+                        .setParameter("nextAttemptAt", schedule)
+                        .bindFailureOwner(eventId, claimToken)
+                        .executeUpdate()
+                        .map { updated ->
+                            if (claimToken != null && updated == 0) {
+                                null
+                            } else {
                                 if (next == OutboxStatus.DEAD) {
                                     log.warnf(
                                         "%s.outbox.dead event_id=%s attempts=%d last_error=%s",
@@ -177,11 +193,12 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
                                         error.take(LOG_ERROR_LEN),
                                     )
                                 }
+                                next
                             }
-                            .replaceWith(next)
-                    }
+                        }
                 }
-        }.awaitSuspending()
+            }
+    }.awaitSuspending()
 
     override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int =
         PanacheOutboxRetention.purgeSent(shape, olderThan, batch, now)
@@ -207,6 +224,71 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
     }
 }
 
+/**
+ * Opt-in V2 repository whose table also carries a nullable UUID `claim_token` column.
+ * Roll out with one dispatcher generation at a time because an older writer cannot honour the token.
+ */
+abstract class AbstractClaimFencedOutboxRepository<E : PanacheClaimFencedOutboxEntityV2> :
+    AbstractPanacheOutboxRepository<E>,
+    ClaimFencedOutboxRepositoryV2 {
+
+    constructor(shape: OutboxTableShape, entityClass: Class<E>, clock: Clock = Clock.systemUTC()) :
+        super(shape, entityClass, clock)
+
+    protected constructor() : super()
+
+    override suspend fun claimWithTokens(limit: Int, staleAfter: Duration): List<OutboxClaim> {
+        require(!staleAfter.isNegative && !staleAfter.isZero) { "Outbox reclaim timeout must be positive" }
+        val token = UUID.randomUUID()
+        val now = Instant.now(clock)
+        return inTransaction { s ->
+            s.createNativeQuery(OutboxClaimFenceSql.claim(shape), entityClass)
+                .bindEligibility(now, now.minus(staleAfter))
+                .setParameter("claimToken", token)
+                .setParameter("limit", limit.coerceAtLeast(1))
+                .resultList
+        }.map { rows ->
+            rows.map { row ->
+                val persistedToken = checkNotNull(row.claimToken) { "Claim returned without its ownership token" }
+                OutboxClaim(row.toEntry(), persistedToken)
+            }
+        }.awaitSuspending()
+    }
+
+    override suspend fun markClaimsSent(claims: List<OutboxClaim>, sentAt: Instant): Set<UUID> {
+        if (claims.isEmpty()) return emptySet()
+        return inTransaction { s ->
+            val query = s.createNativeQuery(OutboxClaimFenceSql.markSent(shape, claims.size), UUID::class.java)
+                .setParameter("sent", OutboxStatus.SENT.name)
+                .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+                .setParameter("now", sentAt)
+            claims.forEachIndexed { index, claim ->
+                query.setParameter("eventId$index", claim.entry.eventId)
+                    .setParameter("claimToken$index", claim.token)
+            }
+            query.resultList
+        }.map { it.toSet() }.awaitSuspending()
+    }
+
+    override suspend fun markClaimFailed(claim: OutboxClaim, error: String, failedAt: Instant): OutboxStatus? =
+        recordFailure(claim.entry.eventId, error, failedAt, claim.token)
+
+    // The untyped methods inherited from V2 cannot carry ownership. Fail closed if another
+    // caller invokes them instead of going through the dispatcher's opt-in fenced path.
+    override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> = error(TOKEN_REQUIRED)
+
+    override suspend fun markSent(eventId: UUID, sentAt: Instant): Unit = error(TOKEN_REQUIRED)
+
+    override suspend fun markSentBatch(eventIds: Collection<UUID>, sentAt: Instant): Unit = error(TOKEN_REQUIRED)
+
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
+        error(TOKEN_REQUIRED)
+
+    private companion object {
+        const val TOKEN_REQUIRED = "This outbox requires a claim token"
+    }
+}
+
 /** One `Panache.withTransaction` on the calling Vert.x context around [block]. */
 private fun <T> inTransaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> =
     Panache.withTransaction { Panache.getSession().chain { session -> block(session) } }
@@ -218,3 +300,11 @@ private fun <E> Mutiny.SelectionQuery<E>.bindEligibility(now: Instant, stale: In
         .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
         .setParameter("stale", stale)
         .setParameter("now", now)
+
+private fun <Q : Mutiny.AbstractQuery> Q.bindFailureOwner(eventId: UUID, claimToken: UUID?): Q = apply {
+    setParameter("eventId", eventId)
+    if (claimToken != null) {
+        setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+        setParameter("claimToken", claimToken)
+    }
+}

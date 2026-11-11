@@ -7,6 +7,7 @@ package com.openbank.libs.persistence.outbox
 import jakarta.persistence.Column
 import jakarta.persistence.MappedSuperclass
 import java.time.Instant
+import java.util.UUID
 
 /**
  * [PanacheOutboxEntity] plus the two ADR-0327 D1 columns, `claimed_at` and `next_attempt_at`.
@@ -39,4 +40,11 @@ open class PanacheOutboxEntityV2 : PanacheOutboxEntity() {
     var nextAttemptAt: Instant? = null
 
     override fun toEntry(): OutboxEntry = super.toEntry().copy(claimedAt = claimedAt, nextAttemptAt = nextAttemptAt)
+}
+
+/** V2 entity for tables that opt into claim fencing with a nullable UUID `claim_token` column. */
+@MappedSuperclass
+open class PanacheClaimFencedOutboxEntityV2 : PanacheOutboxEntityV2() {
+    @Column(name = "claim_token")
+    var claimToken: UUID? = null
 }
