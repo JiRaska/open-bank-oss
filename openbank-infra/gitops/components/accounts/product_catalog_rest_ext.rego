@@ -80,6 +80,15 @@ allowed_reasons contains "operator-catalog-publish-write" if {
 	role in input.principal.roles
 }
 
+# The handler requires the verified Admin UI JWT and matches its derived authority to the exact
+# revision's pack policy. These authorities carry no catalog authoring or publishing grant.
+allowed_reasons contains "fincrime-catalog-shadow-review" if {
+    catalog_staff
+    input.action == "catalog.revisionApproval.decide"
+    some authority in {"FINCRIME_AML_APPROVER", "FINCRIME_FRAUD_APPROVER"}
+    authority in input.principal.roles
+}
+
 catalog_staff if {
 	input.principal.type == "HUMAN"
 	not principal_is_machine
