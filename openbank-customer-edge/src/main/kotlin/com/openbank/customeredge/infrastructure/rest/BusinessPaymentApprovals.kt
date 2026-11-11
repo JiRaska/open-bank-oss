@@ -326,15 +326,25 @@ class BusinessPaymentApprovals(
         val rail = payload?.path("rail")?.asText()?.let { runCatching { PaymentRail.valueOf(it) }.getOrNull() }
         val railRequest = payload?.path("railRequest")?.takeIf { it.isObject }
         if (rail == null || railRequest == null) {
-            report(entity, approvalId, ok = false, ref = null, error = "frozen payload has no rail request")
-            return mapOf("status" to "RELEASE_FAILED", "error" to "frozen payload has no rail request")
+            return invalidRelease(entity, approvalId, "frozen payload has no rail request")
         }
-        val resp = upstream.post(
-            railUrl(rail),
-            entity.toString(),
-            objectMapper.writeValueAsString(railRequest),
-            approvalId.toString(),
-        )
+        val originalKey = node?.get("originalSubmissionKeyDigest")
+        val digest = originalKey?.textOrNull()?.takeIf(ORIGINAL_KEY_DIGEST_PATTERN::matches)
+        if (originalKey != null && (rail != PaymentRail.DOMESTIC || digest == null)) {
+            return invalidRelease(entity, approvalId, "invalid original submission digest")
+        }
+        val body = objectMapper.writeValueAsString(railRequest)
+        val resp = if (digest == null) {
+            upstream.post(railUrl(rail), entity.toString(), body, approvalId.toString())
+        } else {
+            upstream.post(
+                railUrl(rail),
+                entity.toString(),
+                body,
+                approvalId.toString(),
+                mapOf(ORIGINAL_KEY_DIGEST_HEADER to digest),
+            )
+        }
         val respBody = (resp.entity as? String).orEmpty()
         val ok = resp.statusInfo.family == Response.Status.Family.SUCCESSFUL
         val ref = read(respBody)?.path("id")?.textOrNull()
@@ -367,6 +377,11 @@ class BusinessPaymentApprovals(
             "paymentId" to ref,
             "error" to error,
         )
+    }
+
+    private fun invalidRelease(entity: UUID, approvalId: UUID, error: String): Map<String, String> {
+        report(entity, approvalId, ok = false, ref = null, error = error)
+        return mapOf("status" to "RELEASE_FAILED", "error" to error)
     }
 
     private fun report(entity: UUID, approvalId: UUID, ok: Boolean, ref: String?, error: String?) {
@@ -418,6 +433,8 @@ class BusinessPaymentApprovals(
         const val SUBMISSION_CORRELATION_REUSED = "SUBMISSION_CORRELATION_REUSED"
         const val DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED = "DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED"
         const val DOMESTIC_HELD_POLICY_CHANGED = "DOMESTIC_HELD_POLICY_CHANGED"
+        const val ORIGINAL_KEY_DIGEST_HEADER = "X-OpenBank-Original-Submission-Key-Digest"
+        val ORIGINAL_KEY_DIGEST_PATTERN = Regex("[0-9a-f]{64}")
 
         const val ERROR_MAX_CHARS = 300
     }

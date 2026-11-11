@@ -463,10 +463,59 @@ class BusinessPaymentApprovalIT {
         assertThat(signature.path("scaChallengeId").asText()).isEqualTo(SCA)
         val rail = BusinessApprovalStubs.requests("POST", SEPA_RAIL).single()
         assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-OpenBank-Original-Submission-Key-Digest")).isNull()
         assertThat(readJson(rail.body).path("creditorIban").asText()).isEqualTo(CREDITOR)
         val result = readJson(BusinessApprovalStubs.requests("POST", "$DETAIL/release-result").single().body)
         assertThat(result.path("ok").asBoolean()).isTrue()
         assertThat(result.path("releaseRef").asText()).isEqualTo("pay-9")
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `domestic release sends original key digest outside the frozen rail body`() {
+        stubLastSignature()
+        val frozen = """{"debtorAccountId":"$ACCOUNT","amount":400,"currency":"CZK"}"""
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","originalSubmissionKeyDigest":"$SHA",
+                "payload":{"rail":"DOMESTIC","railRequest":$frozen}}""",
+        )
+        val paymentId = "00000000-0000-4000-8000-0000000000f9"
+        BusinessApprovalStubs.stub("POST", DOMESTIC_RAIL, status = 201, body = """{"id":"$paymentId"}""")
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASED"))
+            body("release.paymentId", equalTo(paymentId))
+        }
+
+        val rail = BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL).single()
+        assertThat(rail.header("Idempotency-Key")).isEqualTo(APPROVAL)
+        assertThat(rail.header("X-OpenBank-Original-Submission-Key-Digest")).isEqualTo(SHA)
+        assertThat(rail.body).isEqualTo(frozen)
+    }
+
+    @Test
+    @TestSecurity(user = "customer:$COSIGNER", roles = ["ROLE_CUSTOMER"])
+    @OidcSecurity(claims = [Claim(key = "party_id", value = COSIGNER)])
+    fun `malformed domestic release digest blocks dispatch`() {
+        stubLastSignature()
+        BusinessApprovalStubs.stub(
+            "POST",
+            "$DETAIL/release-claim",
+            body = """{"claimToken":"t1","originalSubmissionKeyDigest":"wrong",
+                "payload":{"rail":"DOMESTIC","railRequest":{"amount":400}}}""",
+        )
+        BusinessApprovalStubs.stub("POST", "$DETAIL/release-result", body = "{}")
+
+        sign() Then {
+            statusCode(200)
+            body("release.status", equalTo("RELEASE_FAILED"))
+        }
+        assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
     }
 
     @Test
