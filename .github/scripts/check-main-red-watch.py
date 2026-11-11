@@ -110,6 +110,12 @@ WATCH_WORKFLOW = ".github/workflows/main-red-watch.yml"
 # R2 exclusions. Each needs a reason, and the reason has to survive being read out loud: every
 # entry here is a lane whose red nobody will be told about.
 NOT_WATCHED: dict[str, str] = {
+    "Admin UI engines nightly": (
+        "Advisory by design (ADR-0370 U8): the Firefox and WebKit run never gates a merge and opens "
+        "or refreshes its own tracking issue naming the failing tests. Its push trigger exists only "
+        "to exercise a change to the workflow or the Playwright config; a red there is an engine "
+        "difference or a browser download, not a broken main tree."
+    ),
     "Auto deploy": (
         "Owns its own escalation. It reconciles on a 3-hourly cron and a transient cluster or "
         "registry failure is not a defect in main's source tree, so watching it would make this "
