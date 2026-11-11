@@ -58,14 +58,13 @@ open class FxActivitiesImpl(
             ?: error("Conversion $conversionId not found during screening activity")
 
         // The conversion row holds the party id only (the name is never persisted here), so the
-        // name is asked for from its golden source. An unknown name is an unavailable screen: both
+        // names are asked for from their golden source. An unknown name is an unavailable screen: both
         // hold the conversion for review, neither lets it settle as though it had been screened.
+        // Every name the party carries is screened in the one call: the legal name as the subject,
+        // any other (a trading name) as an alias, which sanctions-service matches against the lists too.
         val result = try {
-            screeningPort.screen(
-                partyNamePort.screeningName(conv.partyId),
-                ScreeningRole.DEBTOR,
-                "$conversionId:party",
-            )
+            val names = partyNamePort.screeningNames(conv.partyId)
+            screeningPort.screen(names.first(), ScreeningRole.DEBTOR, "$conversionId:party", names.drop(1))
         } catch (ex: PartyNameUnavailableException) {
             return@vtx heldUnscreened(conv, ex)
         } catch (ex: ScreeningUnavailableException) {

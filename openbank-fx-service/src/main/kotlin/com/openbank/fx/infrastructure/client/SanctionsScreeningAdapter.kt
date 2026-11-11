@@ -30,8 +30,13 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @Inject
     lateinit var self: SanctionsScreeningAdapter
 
-    override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult = try {
-        self.screenWithResilience(name, role, idempotencyKey)
+    override suspend fun screen(
+        name: String,
+        role: ScreeningRole,
+        idempotencyKey: String,
+        aliases: List<String>,
+    ): ScreeningResult = try {
+        self.screenWithResilience(name, role, idempotencyKey, aliases)
     } catch (ex: Exception) {
         throw ScreeningUnavailableException(ex)
     }
@@ -39,9 +44,14 @@ class SanctionsScreeningAdapter(@RestClient private val client: SanctionsService
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
     @Timeout(5_000)
-    open suspend fun screenWithResilience(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult {
+    open suspend fun screenWithResilience(
+        name: String,
+        role: ScreeningRole,
+        idempotencyKey: String,
+        aliases: List<String> = emptyList(),
+    ): ScreeningResult {
         val response = client.screen(
-            ScreenRequest(idempotencyKey = idempotencyKey, entityType = ENTITY_TYPE, name = name),
+            ScreenRequest(idempotencyKey = idempotencyKey, entityType = ENTITY_TYPE, name = name, aliases = aliases),
         ).awaitSuspending()
         return ScreeningResult(
             subject = name,

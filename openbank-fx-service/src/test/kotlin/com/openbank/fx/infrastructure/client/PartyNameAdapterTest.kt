@@ -25,14 +25,14 @@ class PartyNameAdapterTest {
     private val adapter = PartyNameAdapter(client).also { it.self = it }
     private val partyId: UUID = UUID.randomUUID()
 
-    private fun name() = runBlocking { adapter.screeningName(partyId) }
+    private fun names() = runBlocking { adapter.screeningNames(partyId) }
 
     @Test
-    fun `the legal name is the screened name`() {
+    fun `the legal name comes first and the trading name follows`() {
         every { client.getParty(partyId.toString()) } returns
             Uni.createFrom().item(PartyNameView(legalName = " Jana Nováková ", tradingName = "JN Design"))
 
-        assertThat(name()).isEqualTo("Jana Nováková")
+        assertThat(names()).containsExactly("Jana Nováková", "JN Design")
     }
 
     /**
@@ -44,29 +44,32 @@ class PartyNameAdapterTest {
         every { client.getParty(any()) } returns
             Uni.createFrom().item(PartyNameView(legalName = "Clean Legal s.r.o.", tradingName = "Listed Trading"))
 
-        assertThat(listOf(name()).flatMap { it.split('|') }).contains("Listed Trading")
+        assertThat(names()).containsExactly("Clean Legal s.r.o.", "Listed Trading")
     }
 
     @Test
-    fun `the trading name is used only when the party carries no legal name`() {
+    fun `a blank name is dropped and a trading name equal to the legal name is not repeated`() {
         every { client.getParty(any()) } returns
             Uni.createFrom().item(PartyNameView(legalName = "  ", tradingName = "JN Design"))
+        assertThat(names()).containsExactly("JN Design")
 
-        assertThat(name()).isEqualTo("JN Design")
+        every { client.getParty(any()) } returns
+            Uni.createFrom().item(PartyNameView(legalName = "Jan Novák", tradingName = "JAN NOVÁK"))
+        assertThat(names()).containsExactly("Jan Novák")
     }
 
     @Test
     fun `a party with no name at all is unavailable, never an empty name`() {
         every { client.getParty(any()) } returns Uni.createFrom().item(PartyNameView(legalName = null, tradingName = ""))
 
-        assertThatThrownBy { name() }.isInstanceOf(PartyNameUnavailableException::class.java)
+        assertThatThrownBy { names() }.isInstanceOf(PartyNameUnavailableException::class.java)
     }
 
     @Test
     fun `a party the bank does not hold is unavailable`() {
         every { client.getParty(any()) } returns Uni.createFrom().failure(WebApplicationException(404))
 
-        assertThatThrownBy { name() }
+        assertThatThrownBy { names() }
             .isInstanceOf(PartyNameUnavailableException::class.java)
             .hasMessageContaining(partyId.toString())
     }
@@ -74,11 +77,11 @@ class PartyNameAdapterTest {
     @Test
     fun `an unreachable or failing party-service is unavailable and keeps its cause`() {
         every { client.getParty(any()) } returns Uni.createFrom().failure(WebApplicationException(503))
-        assertThatThrownBy { name() }
+        assertThatThrownBy { names() }
             .isInstanceOf(PartyNameUnavailableException::class.java)
             .hasCauseInstanceOf(WebApplicationException::class.java)
 
         every { client.getParty(any()) } throws IllegalStateException("connection refused")
-        assertThatThrownBy { name() }.isInstanceOf(PartyNameUnavailableException::class.java)
+        assertThatThrownBy { names() }.isInstanceOf(PartyNameUnavailableException::class.java)
     }
 }

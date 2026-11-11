@@ -24,7 +24,7 @@ import java.util.UUID
  * caller's question is "what do I screen", and "nothing" must never become "clear".
  *
  * The `self` injection is load-bearing: fault-tolerance interceptors only fire through the CDI
- * proxy, so calling [nameWithResilience] on `this` would bypass all three annotations. Mirrors
+ * proxy, so calling [namesWithResilience] on `this` would bypass all three annotations. Mirrors
  * [SanctionsScreeningAdapter].
  */
 @ApplicationScoped
@@ -36,34 +36,38 @@ class PartyNameAdapter(@RestClient private val client: PartyServiceClient) : Par
     // Deliberately broad, as in SanctionsScreeningAdapter: the caller must not have to enumerate
     // which failure types mean "no name".
     @Suppress("TooGenericExceptionCaught")
-    override suspend fun screeningName(partyId: UUID): String {
-        val name = try {
-            self.nameWithResilience(partyId)
+    override suspend fun screeningNames(partyId: UUID): List<String> {
+        val names = try {
+            self.namesWithResilience(partyId)
         } catch (ex: Exception) {
             throw PartyNameUnavailableException(partyId, ex)
         }
-        return name ?: throw PartyNameUnavailableException(partyId)
+        if (names.isEmpty()) throw PartyNameUnavailableException(partyId)
+        return names
     }
 
     /**
-     * `legalName` is the authoritative name and the one sanctions lists are matched against;
-     * `tradingName` is used only where a party carries no legal name at all. Null when the party
-     * has neither.
+     * Every non-blank, distinct name on the party record, `legalName` first (for a natural person
+     * that field is the full name), then `tradingName`. BOTH, never one or the other: a listed
+     * trading name behind a clean legal name must reach the screen. Empty when the party has
+     * neither, or is not held at all.
      */
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
     @Timeout(5_000)
-    open suspend fun nameWithResilience(partyId: UUID): String? {
+    open suspend fun namesWithResilience(partyId: UUID): List<String> {
         val party = try {
             client.getParty(partyId.toString()).awaitSuspending()
         } catch (ex: WebApplicationException) {
             // Recovered INSIDE the guarded method: a 404 is an answer, not a fault, and must not be
             // retried or counted towards opening the breaker for every other conversion.
-            if (ex.response?.status == HTTP_NOT_FOUND) return null
+            if (ex.response?.status == HTTP_NOT_FOUND) return emptyList()
             throw ex
         }
-        return party.legalName?.trim()?.takeIf { it.isNotEmpty() }
-            ?: party.tradingName?.trim()?.takeIf { it.isNotEmpty() }
+        return listOfNotNull(party.legalName, party.tradingName)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinctBy { it.lowercase() }
     }
 
     private companion object {

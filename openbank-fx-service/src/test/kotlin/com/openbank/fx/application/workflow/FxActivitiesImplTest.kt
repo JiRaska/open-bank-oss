@@ -74,7 +74,7 @@ class FxActivitiesImplTest {
 
     @BeforeEach
     fun partyHasAName() {
-        coEvery { partyNamePort.screeningName(any()) } returns PARTY_NAME
+        coEvery { partyNamePort.screeningNames(any()) } returns listOf(PARTY_NAME)
     }
 
     @Test
@@ -87,7 +87,7 @@ class FxActivitiesImplTest {
         activities.screenConversion(conv.id)
 
         // A UUID compared against name lists can never hit: the screen would be CLEAR by construction.
-        coVerify(exactly = 0) { screeningPort.screen(conv.partyId.toString(), any(), any()) }
+        coVerify(exactly = 0) { screeningPort.screen(conv.partyId.toString(), any(), any(), any()) }
     }
 
     @Test
@@ -99,8 +99,8 @@ class FxActivitiesImplTest {
 
         activities.screenConversion(conv.id)
 
-        coVerify(exactly = 1) { partyNamePort.screeningName(conv.partyId) }
-        coVerify(exactly = 1) { screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party") }
+        coVerify(exactly = 1) { partyNamePort.screeningNames(conv.partyId) }
+        coVerify(exactly = 1) { screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party", emptyList()) }
     }
 
     /**
@@ -109,18 +109,14 @@ class FxActivitiesImplTest {
      */
     @Test
     fun `a party whose name is on the list is blocked, one whose name is not is clear`() {
-        coEvery { screeningPort.screen(any(), any(), any()) } answers {
-            val name = firstArg<String>()
-            val status = if (name == LISTED_NAME) ScreeningMatchStatus.HIT else ScreeningMatchStatus.CLEAR
-            ScreeningResult(name, ScreeningRole.DEBTOR, status, if (name == LISTED_NAME) 1.0 else 0.0, null)
-        }
+        listsKnow(LISTED_NAME)
         coEvery { amlCasePort.openCase(any()) } just Runs
         val listed = aConversion()
         val clean = aConversion()
         coEvery { conversionRepository.findById(listed.id) } returns listed
         coEvery { conversionRepository.findById(clean.id) } returns clean
-        coEvery { partyNamePort.screeningName(listed.partyId) } returns LISTED_NAME
-        coEvery { partyNamePort.screeningName(clean.partyId) } returns PARTY_NAME
+        coEvery { partyNamePort.screeningNames(listed.partyId) } returns listOf(LISTED_NAME)
+        coEvery { partyNamePort.screeningNames(clean.partyId) } returns listOf(PARTY_NAME)
 
         assertThat(activities.screenConversion(listed.id)).isEqualTo(ScreeningDecision.BLOCK)
         assertThat(activities.screenConversion(clean.id)).isEqualTo(ScreeningDecision.CLEAR)
@@ -131,7 +127,7 @@ class FxActivitiesImplTest {
     fun `screenConversion holds for REVIEW and never screens when the party name is unavailable`() {
         val conv = aConversion()
         coEvery { conversionRepository.findById(conv.id) } returns conv
-        coEvery { partyNamePort.screeningName(conv.partyId) } throws
+        coEvery { partyNamePort.screeningNames(conv.partyId) } throws
             PartyNameUnavailableException(conv.partyId, RuntimeException("party-service down"))
         coEvery { amlCasePort.openCase(any()) } just Runs
 
@@ -141,7 +137,32 @@ class FxActivitiesImplTest {
         assertThat(decision).isEqualTo(ScreeningDecision.REVIEW)
         coVerify(exactly = 1) { amlCasePort.openCase(match { it.alertCode == "SCREENING_UNAVAILABLE" }) }
         // …and nothing was screened in the name's place — not the id, not an empty string.
-        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any()) }
+        coVerify(exactly = 0) { screeningPort.screen(any(), any(), any(), any()) }
+    }
+
+    /** The case a single screened name lets through: the legal name is clean, the trading name is listed. */
+    @Test
+    fun `a listed trading name behind a clean legal name blocks the conversion`() {
+        listsKnow(LISTED_NAME)
+        coEvery { amlCasePort.openCase(any()) } just Runs
+        val conv = aConversion()
+        coEvery { conversionRepository.findById(conv.id) } returns conv
+        coEvery { partyNamePort.screeningNames(conv.partyId) } returns listOf(PARTY_NAME, LISTED_NAME)
+
+        assertThat(activities.screenConversion(conv.id)).isEqualTo(ScreeningDecision.BLOCK)
+        // One call, one idempotency key: the legal name as the subject, the trading name as its alias.
+        coVerify(exactly = 1) {
+            screeningPort.screen(PARTY_NAME, ScreeningRole.DEBTOR, "${conv.id}:party", listOf(LISTED_NAME))
+        }
+    }
+
+    /** A screening double that, like sanctions-service, searches the name AND every alias. */
+    private fun listsKnow(listed: String) {
+        coEvery { screeningPort.screen(any(), any(), any(), any()) } answers {
+            val hit = (listOf(firstArg<String>()) + arg<List<String>>(3)).contains(listed)
+            val status = if (hit) ScreeningMatchStatus.HIT else ScreeningMatchStatus.CLEAR
+            ScreeningResult(firstArg(), ScreeningRole.DEBTOR, status, if (hit) 1.0 else 0.0, null)
+        }
     }
 
     @Test
