@@ -18,6 +18,8 @@ openbank-infra/scripts/build-push-service.sh ledger-service
 
 The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). Kover floor is enforced at **40%** lines (`koverVerify` wired into `check`); money-path target is 70%. Provider-side Pact verification runs against the shared `pacts/` dir (ADR-0063).
 
+The standard Gradle `test` task caps its JVM heap at 3 GiB, with a 2 GiB cap for specialized test tasks.
+
 ## Endpoints
 
 | Path | Port | Purpose |
