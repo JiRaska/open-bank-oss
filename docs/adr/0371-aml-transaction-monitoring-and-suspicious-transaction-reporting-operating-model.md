@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [aml-sanctions, regulatory-reporting, compliance]
-summary: "aml-service monitors booked money movement after posting with ADR-0354 packs over bucketed per-party counts, raises cases decided four-eyes, and owns a suspicious-transaction report that never reaches a customer surface."
+summary: "aml-service monitors booked money movement with ADR-0354 packs over bucketed per-party counts, raises cases decided four-eyes, and owns a suspicious-transaction report that never reaches a customer surface. Pre-send checks are ADR-0374."
 ---
 
 # ADR-0371 — AML transaction monitoring and suspicious-transaction reporting operating model
@@ -44,12 +44,13 @@ We will make aml-service the single owner of post-booking transaction monitoring
 suspicious-transaction report.
 
 1. **Source: booked movement, after the fact.** Monitoring consumes events for money that
-   has been booked. It never sits in a payment hot path; the synchronous control stays the
-   ADR-0032 gate. The ledger event establishes that a movement is booked (ADR-0039); party,
-   counterparty and rail come from the originating domain event. Slice 1 fixes the exact
-   topic set by reading real payloads, and adds consumers to aml-service rather than a second
-   ingestion platform (#1035). Every consumer is idempotent on the source event id and wires
-   a dead-letter topic in the same change as its rethrow.
+   has been booked and reasons over windows of history. Controls that must act before money
+   leaves, including the AML destination check, belong to the admission chain of ADR-0374
+   and read the counters this ADR maintains. The ledger event establishes that a movement is
+   booked (ADR-0039); party, counterparty and rail come from the originating domain event.
+   Slice 1 fixes the exact topic set by reading real payloads, and adds consumers to
+   aml-service rather than a second ingestion platform (#1035). Every consumer is idempotent
+   on the source event id and wires a dead-letter topic in the same change as its rethrow.
 
 2. **Features: bucketed per-party counts, per currency.** aml-service persists rolling
    counters keyed by party, currency, direction, rail, window and amount band. Amounts are
@@ -108,10 +109,9 @@ a flag, (3) four-eyes decisions and the report aggregate with the return spec, (
   Kafka (ADR-0084), so intake would be free. Rejected: ADR-0354 keeps fraud verdicts and AML
   typologies under different authority, and the confidentiality rule in point 7 is far easier
   to hold when the data never enters a service that answers the payment path.
-- **Evaluate synchronously in the payment path.** Would allow blocking before booking.
-  Rejected: monitoring reasons over windows of history, a slow or failed evaluation would
-  have to fail open or stop payments, and the only lawful pre-booking stop here is the
-  sanctions gate.
+- **Do all AML evaluation synchronously in the payment path.** Would stop everything before
+  booking. Rejected for pattern scenarios: they reason over windows of history and inbound
+  money. The bounded pre-send part is decided separately in ADR-0374.
 - **Stream processing engine with windowed sums.** Expressive, and the standard shape for
   this problem at scale. Rejected for now: a new runtime and state store for a platform with
   no production traffic, and a second evaluator beside the ADR-0354 interpreter. Revisit when
@@ -169,6 +169,6 @@ is denied.
 
 ## References
 
-- ADR-0032, ADR-0118, ADR-0247, ADR-0268, ADR-0304, ADR-0353, ADR-0354, ADR-0367
+- ADR-0032, ADR-0118, ADR-0247, ADR-0268, ADR-0304, ADR-0353, ADR-0354, ADR-0367, ADR-0374
 - Issues #13775, #1035
 - `docs/compliance/regulatory-obligations.md`, entry `fau-suspicious-transaction`
