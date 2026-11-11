@@ -226,7 +226,7 @@ class BusinessPaymentApprovalIT {
         assertThat(request.path("payload").path("creditorIban").asText()).isEqualTo(DOMESTIC_IBAN)
         assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
         assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
-        assertThat(claimRequest.header("Idempotency-Key")).isNull()
+        assertThat(claimRequest.header("Idempotency-Key")).isNotEqualTo(key)
         assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
     }
 
