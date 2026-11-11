@@ -20,6 +20,7 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.sql.Connection
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
