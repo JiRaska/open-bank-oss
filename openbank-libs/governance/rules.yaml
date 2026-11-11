@@ -4977,3 +4977,40 @@ pr_span_limits:
   gate: pr-component-span
   enforced: enforced
   ci_producer: ".github/scripts/check-pr-component-span.py"
+
+# ---------------------------------------------------------------------------------------
+# Demo-only switches - check-demo-only-flags.py (gate demo-only-flags, enforced, #15760).
+# A switch that turns a regulatory control into a no-op may be true only in an environment
+# listed here. The environment of a manifest is derived from its PATH: the gitops tree IS the
+# sandbox cluster (no per-environment overlay exists), the kustomize overlays are
+# k8s/overlays/{sandbox,local}. A file under a scanned root that matches no declared
+# environment is "unclassified" and never permitted, so a new production tree fails until
+# someone declares it here, on purpose. The code default must be false and no profile other
+# than permitted_profiles may set it. Read by no .rego: editing this key restamps no bundle.
+# ---------------------------------------------------------------------------------------
+demo_only_flags:
+  gate: demo-only-flags
+  enforced: enforced
+  ci_producer: ".github/scripts/check-demo-only-flags.py"
+  environments:
+    sandbox:
+      paths: ["openbank-infra/gitops/", "openbank-infra/k8s/overlays/sandbox/"]
+    local:
+      paths: ["openbank-infra/k8s/overlays/local/"]
+  permitted_profiles: [dev, test]
+  flags:
+    - env_var: OPENBANK_AML_AUTO_CLEAR
+      service: openbank-aml-service
+      config_property: openbank.aml.auto-clear
+      reason: "Clears onboarding AML screenings without an analyst decision; sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: OPENBANK_KYC_AUTO_APPROVE
+      service: openbank-kyc-service
+      config_property: openbank.kyc.auto-approve
+      reason: "Approves KYC cases without four-eyes review (ADR-0116 section 4); sandbox straight-through only."
+      permitted_environments: [sandbox]
+    - env_var: LENDING_RISK_ALLOW_DEMONSTRATION_MODEL
+      service: openbank-lending-service
+      config_property: lending.risk.allow-demonstration-model
+      reason: "Posts IFRS 9 allowances from unvalidated placeholder PD/LGD parameters; sandbox demonstration only."
+      permitted_environments: [sandbox]
