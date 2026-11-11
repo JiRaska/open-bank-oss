@@ -133,7 +133,8 @@ Content-Type: application/json
 ```
 
 - `targetStatus` musí být platný přechod z aktuálního stavu (viz stavový automat v [02 — Architektura](./02-architecture.md)).
-- `decidedBy` je povinné; `decisionReason` je povinné při `targetStatus = BLOCKED`.
+- `decidedBy` v těle se **ignoruje** (zastaralé): rozhodujícím je přihlášený volající (ADR-0371). `decisionReason` je povinné při `targetStatus = BLOCKED`.
+- Případ `TRANSACTION_MONITORING` lze zde pouze převést do `UNDER_REVIEW`; uzavření nebo eskalace vrací 409 a jde přes návrh dispozice (níže). Volajícímu bez `ROLE_COMPLIANCE` takový případ vrací 404 a v seznamu chybí.
 - **Vedlejší efekty:** přechod + událost `aml.case.status_changed.v1` se commitují atomicky přes outbox.
 
 ## Model chyb
@@ -167,3 +168,23 @@ Události jsou **append-only**; opravy se dělají následným přechodovým eve
 - **Verze API v URL** (`/api/v1/...`). Breaking změny ⇒ `/api/v2/...`. Dvě verzovací osy (release `version.txt` vs `openapi.yaml:info.version`) jsou nezávislé (ADR-0048).
 - **Verze události v příponě typu** (`...v1`). Evoluce schématu je aditivní (volitelná pole); breaking změny dostanou novou příponu verze.
 - **OpenAPI diff** v CI proti `main` — ale pozor, výše popsaný drift specifikace je nutné nejprve smířit.
+
+
+## Dispozice monitoringu a oznámení podezřelého obchodu (ADR-0371)
+
+Pouze `ROLE_COMPLIANCE`, pouze lidé. Každý aktér je přihlášený volající. Úplná schémata jsou v `openapi.yaml`.
+
+| Metoda a cesta | Akce | Poznámky |
+|---|---|---|
+| `POST /api/v1/aml/monitoring/cases/{caseId}/disposition-proposals` | `amlMonitoring.propose` | `disposition` `CLEAR` nebo `REPORT`, `outcomeCode` ze slovníku výsledků; jeden otevřený návrh na případ |
+| `POST /api/v1/aml/monitoring/disposition-proposals/{proposalId}/decision` | `amlMonitoring.decide` | druhá, jiná osoba; navrhovatel dostane 422 |
+| `GET /api/v1/aml/monitoring/disposition-proposals` | `amlMonitoring.inspect` | návrhy čekající na rozhodnutí |
+| `POST /api/v1/aml/reports` | `amlReport.draft` | odkazuje na vlastní monitorovací případy a zaúčtované pohyby strany |
+| `GET /api/v1/aml/reports`, `GET /api/v1/aml/reports/{reportId}` | `amlReport.inspect` | |
+| `POST /api/v1/aml/reports/{reportId}/approval` | `amlReport.approve` | druhá, jiná osoba; autor dostane 422 |
+| `POST /api/v1/aml/reports/{reportId}/filing` | `amlReport.file` | zaznamená podání provedené **mimo** tento systém: reference, okamžik, kód výsledku |
+| `POST /api/v1/aml/reports/{reportId}/withdrawal` | `amlReport.withdraw` | pouze před podáním; vyžaduje kód výsledku |
+
+- Neznámý `outcomeCode` vrací 400. Kódy jsou data (`aml/decision-outcomes.provisional.json`), ne výčet v API.
+- Služba nic žádnému úřadu neodesílá. `FILED` znamená, že jmenovaný pracovník zaznamenal podání.
+- `aml.report.state_changed.v1` na `openbank.aml.events` nese pouze `reportId`, `state` a `occurredAt`.
