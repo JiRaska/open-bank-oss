@@ -68,6 +68,19 @@ class FxActivitiesImplTest {
         )
 
     @Test
+    fun `screenConversion never screens the party id in place of a name`() {
+        val conv = aConversion()
+        coEvery { conversionRepository.findById(conv.id) } returns conv
+        coEvery { screeningPort.screen(any(), any(), any()) } returns
+            ScreeningResult("name", ScreeningRole.DEBTOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+
+        activities.screenConversion(conv.id)
+
+        // A UUID compared against name lists can never hit: the screen would be CLEAR by construction.
+        coVerify(exactly = 0) { screeningPort.screen(conv.partyId.toString(), any(), any()) }
+    }
+
+    @Test
     fun `screenConversion returns CLEAR when sanctions clear`() {
         val conv = aConversion()
         coEvery { conversionRepository.findById(conv.id) } returns conv
