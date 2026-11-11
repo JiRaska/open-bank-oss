@@ -26,6 +26,9 @@ interface CreditPolicyPort {
     fun isCodeSeeded(bundle: PolicyBundle): Boolean = this is StarterCreditPolicy
 }
 
+internal fun isCzConsumerCredit(jurisdiction: String?, productType: String?): Boolean =
+    jurisdiction == "CZ" && productType == "CONSUMER_CREDIT"
+
 /**
  * Phase-1 deterministic starter bundle (ADR-0213 D3): a conservative, code-seeded
  * policy — eligibility (majority, residency), affordability (DSTI ≤ 0.45, DTI ≤ 8),

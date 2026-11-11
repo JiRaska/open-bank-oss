@@ -541,7 +541,7 @@ paths:
           in: query
           required: false
           schema: { type: string, format: date }
-          description: ISO-8601 date; defaults to today. A malformed value is a 400.
+          description: ISO-8601 date. Defaults to today's date in Europe/Prague. A malformed value is a 400.
       responses:
         '200':
           description: The active bundle

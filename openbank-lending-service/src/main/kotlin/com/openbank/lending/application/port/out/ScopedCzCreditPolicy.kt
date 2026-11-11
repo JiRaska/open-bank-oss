@@ -23,7 +23,7 @@ class ScopedCzCreditPolicy(
     }
 
     override fun forApplication(asOf: LocalDate, jurisdiction: String?, productType: String?): Uni<PolicyBundle> =
-        if (jurisdiction == "CZ" && productType == "CONSUMER_CREDIT") activeBundle(asOf) else starter.activeBundle(asOf)
+        if (isCzConsumerCredit(jurisdiction, productType)) activeBundle(asOf) else starter.activeBundle(asOf)
 
     override fun isCodeSeeded(bundle: PolicyBundle): Boolean =
         bundle.tables.all { it.version < CzCreditPolicyActivationService.FIRST_STORED_REVISION }

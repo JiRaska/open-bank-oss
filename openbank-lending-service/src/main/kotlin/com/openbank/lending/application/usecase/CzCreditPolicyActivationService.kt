@@ -11,6 +11,7 @@ import com.openbank.libs.decision.PolicyBundle
 import com.openbank.libs.decision.PolicyOperator
 import com.openbank.libs.decision.PolicyRule
 import com.openbank.libs.decision.PolicyTableKind
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
@@ -103,7 +104,9 @@ class CzCreditPolicyActivationService(
     )
 
     private fun requireFuture(day: LocalDate) {
-        require(day.isAfter(LocalDate.now(clock))) { "A credit policy revision must take effect on a future day" }
+        require(day.isAfter(AccountingClock.bank(clock).today())) {
+            "A credit policy revision must take effect on a future day"
+        }
     }
 
     private fun CzCreditPolicyRevision.policy(): PolicyBundle = mapper.readValue(payload, PolicyBundle::class.java)

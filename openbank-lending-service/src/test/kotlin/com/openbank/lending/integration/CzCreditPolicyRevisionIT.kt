@@ -3,7 +3,7 @@
 
 package com.openbank.lending.integration
 
-import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.util.Hex
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
@@ -13,12 +13,18 @@ import io.quarkus.test.security.oidc.Claim
 import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.inject.Alternative
+import jakarta.enterprise.inject.Produces
+import jakarta.inject.Singleton
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.security.MessageDigest
+import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -29,12 +35,25 @@ class CzCreditPolicyRevisionIT {
     class IsolatedProfile : QuarkusTestProfile {
         override fun disableGlobalTestResources() = true
 
+        override fun getEnabledAlternatives() = setOf(PolicyClockProducer::class.java)
+
+        override fun getConfigOverrides() = mapOf("quarkus.scheduler.enabled" to "false")
+
         override fun testResources() = listOf(
             QuarkusTestProfile.TestResourceEntry(
-                PostgresRedpandaRedisTestResource::class.java,
+                PostgresRedisTestResource::class.java,
                 mapOf("db" to "openbank_lending_policy_it"),
             ),
+            QuarkusTestProfile.TestResourceEntry(CreditRiskConsoleIT.InMemoryKafkaResource::class.java),
         )
+    }
+
+    @Alternative
+    @ApplicationScoped
+    class PolicyClockProducer {
+        @Produces
+        @Singleton
+        fun clock(): Clock = Clock.fixed(Instant.parse("2026-10-24T22:30:00Z"), ZoneOffset.UTC)
     }
 
     @Test
@@ -52,6 +71,9 @@ class CzCreditPolicyRevisionIT {
         given().contentType(ContentType.JSON).header("Idempotency-Key", "invalid-evidence")
             .body(bundle(903, adverseBureauCheck = false))
             .post(PROPOSALS).then().statusCode(400)
+        val defaultDay = given().get(POLICY).then().statusCode(200).extract().path<String>("asOf")
+        assertThat(defaultDay).isEqualTo(PRAGUE_DAY.toString())
+        proposalRequest(903, day = PRAGUE_DAY).post(PROPOSALS).then().statusCode(400)
         val id = propose(901)
         val replay = proposalRequest(901).post(PROPOSALS).then().statusCode(201)
             .header("X-Idempotency-Replayed", "true").extract().jsonPath()
@@ -120,8 +142,11 @@ class CzCreditPolicyRevisionIT {
     private fun propose(version: Int): String = proposalRequest(version)
         .post(PROPOSALS).then().statusCode(201).extract().path("id")
 
-    private fun proposalRequest(version: Int, key: String = "policy-proposal-$version") = given()
-        .contentType(ContentType.JSON).header("Idempotency-Key", key).body(bundle(version))
+    private fun proposalRequest(
+        version: Int,
+        key: String = "policy-proposal-$version",
+        day: LocalDate = EFFECTIVE_DAY,
+    ) = given().contentType(ContentType.JSON).header("Idempotency-Key", key).body(bundle(version, effectiveDay = day))
 
     private fun decide(id: String, approve: Boolean, expectedStatus: Int) = decisionRequest(id, approve)
         .post("$PROPOSALS/$id/decide").then().statusCode(expectedStatus).extract().jsonPath()
@@ -133,7 +158,11 @@ class CzCreditPolicyRevisionIT {
     private fun activeAsOf(day: LocalDate) = given().queryParam("asOf", day.toString()).get(POLICY)
         .then().statusCode(200).extract().jsonPath()
 
-    private fun bundle(version: Int, adverseBureauCheck: Boolean = true): Map<String, Any> {
+    private fun bundle(
+        version: Int,
+        adverseBureauCheck: Boolean = true,
+        effectiveDay: LocalDate = EFFECTIVE_DAY,
+    ): Map<String, Any> {
         val rule = mapOf("attribute" to "AGE_YEARS", "operator" to "GTE", "threshold" to 18)
         val pricing = mapOf("attribute" to "DSTI", "operator" to "LTE", "threshold" to 0.5, "band" to "TEST_BAND")
         val tables = listOf("EXCLUSION", "ELIGIBILITY", "AFFORDABILITY", "PRICING_BAND").map { kind ->
@@ -161,7 +190,7 @@ class CzCreditPolicyRevisionIT {
                 "kind" to kind,
                 "name" to kind.lowercase(),
                 "version" to version,
-                "effectiveFrom" to EFFECTIVE_DAY.toString(),
+                "effectiveFrom" to effectiveDay.toString(),
                 "rules" to rules,
             )
         }
@@ -171,6 +200,7 @@ class CzCreditPolicyRevisionIT {
     private companion object {
         const val POLICY = "/api/v1/lending/risk/policy"
         const val PROPOSALS = "$POLICY/proposals"
-        val EFFECTIVE_DAY: LocalDate = LocalDate.now(ZoneOffset.UTC).plusDays(7)
+        val PRAGUE_DAY: LocalDate = LocalDate.of(2026, 10, 25)
+        val EFFECTIVE_DAY: LocalDate = PRAGUE_DAY.plusDays(7)
     }
 }

@@ -98,8 +98,8 @@ Customer intake, quote, credit journey and financial-health routes bind their co
 ## Czech consumer credit policy revisions
 
 `GET /api/v1/lending/risk/policy?asOf=YYYY-MM-DD` returns the applicable Czech consumer credit
-policy as of the requested day. Versions 1 and 2 are the starter rules. Credit-risk staff use the
-risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
+policy as of the requested day in Europe/Prague. Versions 1 and 2 are the starter rules.
+Credit-risk staff use the risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
 revision number and future effective date. Submit all four table kinds and retain the adverse
 bureau exclusion and both affordability limits. The pinned compliance pack adds its statutory
 checks during evaluation.
