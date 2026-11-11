@@ -322,28 +322,25 @@ class PartyEventConsumer(
                 val frozen = partyStanding.freezeAccountsOf(partyId, status)
                 if (frozen > 0) log.infof("Party %s is %s: froze %d account(s)", partyId, status, frozen)
             }
-            "ACTIVE" -> activatePendingAndRestore(partyId)
+            "ACTIVE" -> {
+                val restored = partyStanding.restoreAccountsOf(partyId)
+                if (restored > 0) log.infof("Party %s is ACTIVE again: unfroze %d account(s)", partyId, restored)
+                accountRepository.findByPartyId(partyId, 50, null)
+                    .filter { it.status == AccountStatus.PENDING_ACTIVATION }
+                    .forEach {
+                        accountUseCase.activateAccount(it.id)
+                        log.infof("Activated onboarding account %s for party %s", it.id, partyId)
+                        // The incentive is one credit per CUSTOMER, not per account — the savings
+                        // account activates dry and gets funded by the customer's own transfers.
+                        // A business account never gets it: the incentive is retail-only and its CZK
+                        // amount does not match the business product's currency.
+                        val retail = it.productId != UUID.fromString(businessProductId)
+                        if (it.accountType == AccountType.CURRENT && retail) grantWelcomeBonus(it.id, partyId)
+                    }
+            }
             // PENDING_KYC, MERGED and anything unknown: no account standing follows from them.
             else -> Unit
         }
-    }
-
-    private suspend fun activatePendingAndRestore(partyId: UUID) {
-        val restored = partyStanding.restoreAccountsOf(partyId)
-        if (restored > 0) log.infof("Party %s is ACTIVE again: unfroze %d account(s)", partyId, restored)
-        accountRepository.findByPartyId(partyId, 50, null)
-            .filter { it.status == AccountStatus.PENDING_ACTIVATION }
-            .forEach {
-                accountUseCase.activateAccount(it.id)
-                log.infof("Activated onboarding account %s for party %s", it.id, partyId)
-                // The incentive is one credit per CUSTOMER, not per account — the savings
-                // account activates dry and gets funded by the customer's own transfers.
-                // A business account never gets it: the incentive is retail-only and its CZK
-                // amount does not match the business product's currency.
-                if (it.accountType == AccountType.CURRENT && it.productId != UUID.fromString(businessProductId)) {
-                    grantWelcomeBonus(it.id, partyId)
-                }
-            }
     }
 
     // GDPR Art. 17 right to erasure: null out the stored legalName for every account of the
