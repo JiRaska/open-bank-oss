@@ -13,7 +13,20 @@ Dedikovaná PostgreSQL databáze **`openbank_ledger`** (reaktivní PG klient pro
 | `journal_lines` | debetní/kreditní řádky | `gl_account_id`, `side` (D/C), `amount` NUMERIC(20,6) (>0), `currency_code`, `fx_rate` NUMERIC(20,10), `base_amount`, `base_currency`, `sequence`, `sub_account_id` (nullable, jen deposit-control) |
 | `ledger_outbox` | transakční outbox | `event_id` (unique), `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error` |
 | `ledger_idempotency` | dedup zaúčtování | `idempotency_key` (PK), `journal_id`, `journal_entry_date` |
+| `ledger_repair_audit` | append-only log deklarovaných oprav zaúčtovaných dokladů (ADR-0372) | `reason`, `table_name`, `operation` (UPDATE/DELETE/TRUNCATE), `journal_id`, `entry_date`, `line_id`, `changed_columns`, `database_role`, `transaction_xid`, `recorded_at` |
 | `partition_lifecycle_audit` | neměnný log akcí partitionů | `parent_table`, `partition_name`, `action` (CREATE/DETACH/DROP/DEFAULT_NONEMPTY/NOOP), `reason`, `dry_run`, `executed_at` |
+
+### Invarianty deníku vynucené databází (ADR-0372, V44)
+
+Databáze vynucuje dva invarianty, které už drží doménový model, a to pro každého zapisovatele na spojení, nejen pro službu:
+
+- **Vyrovnanost při commitu.** Odložené constraint triggery odmítnou COMMIT transakce, po které by zaúčtovaný doklad (status `POSTED` nebo `REVERSED`) nebyl vyrovnaný v každé `base_currency` (`side` D/C nad `base_amount`). SQLSTATE `23514`. Výjimka neexistuje.
+- **Po zaúčtování jen přidávat.** Řádek zaúčtovaného dokladu přijme jedinou změnu, `POSTED → REVERSED` s `version + 1` a bez změny jiného sloupce (označení storna). Řádek `journal_lines` zaúčtovaného dokladu nelze změnit ani smazat a žádnou z obou tabulek nelze TRUNCATEnout. SQLSTATE `55000`. Doklady ve stavu `PENDING` a jejich řádky zůstávají editovatelné.
+- **Deklarovaná oprava.** Schválená oprava dat zavolá `SELECT ledger_declare_repair('důvod')` ve stejné transakci jako přepis. Deklarace je vázaná na tuto transakci (nastavení na úrovni session nic neotevře) a každý přepsaný řádek se zapíše do `ledger_repair_audit`, která sama odmítá UPDATE, DELETE i TRUNCATE. Ani oprava nesmí commitnout nevyrovnaný doklad.
+
+Důsledky pro každého, kdo do těchto tabulek zapisuje přímo (migrace, fixtures, ruční session): zaúčtovaný doklad a všechny jeho řádky vkládej v **jedné transakci**, protože autocommit po jednotlivých příkazech selže na první straně zápisu; zaúčtovaný doklad opravuj stornem, ne updatem.
+
+Limity: jde o ochranu proti chybám a nerevidovanému kódu. Superuser nebo vlastník tabulky může trigger vypnout či zrušit; `DETACH`/`DROP` partitionu a `TRUNCATE` jednoho partitionu trigger nespustí; runtime role může opravu deklarovat sama (je zalogována, ne nezávisle schválena). Cena je jeden indexovaný agregát na každý zapsaný řádek dokladu při commitu: lineární v počtu dokladů, kvadratická v počtu řádků jednoho dokladu.
 
 ### Partitioning
 
@@ -36,6 +49,7 @@ V1 seeduje hotovostní/vkladové/úrokové/poplatkové účty (1000, 1001, 2000,
 | `V6__fx_revaluation_counter_value_accounts` | CZK counter-value účty 1995–1997 (ADR-0046) | smazat naseedované řádky |
 | `V7__add_sub_account_id_to_journal_lines` | nullable `sub_account_id` + partial index (ADR-0039 fáze B) | dokumentováno v souboru: drop indexu + sloupce (zpětně kompatibilní) |
 | `V8__journal_partition_lifecycle` | pre-create partitionů 2027/2028, tabulka `partition_lifecycle_audit` | drop partitionů/tabulky |
+| `V44__storage_enforced_journal_invariants` | constraint triggery vyrovnanosti při commitu, append-only ochrany `journal_entries`/`journal_lines`, `ledger_declare_repair()`, `ledger_repair_audit` (ADR-0372); žádný existující řádek se nepřepisuje, již nevyrovnané doklady jsou hlášeny jako varování | zrušit triggery a funkce vyjmenované v souboru; `ledger_repair_audit` ponechat |
 | `V34__per_currency_fee_income_accounts` | výnosy z poplatků 4004 EUR / 4005 USD / 4006 GBP + řádky mapy `FEE_INCOME_ACCOUNT`; selže, pokud se měny výnosů z poplatků a deposit-control liší (#13226) | smazat řádky mapy a účty, jen před prvním odkazem z účetního řádku |
 
 **Nikdy needituj migraci po aplikaci na živou DB** — Flyway checksum mismatch shodí startup (dočasná náprava `QUARKUS_FLYWAY_REPAIR_AT_START=true`, poté odstranit).
