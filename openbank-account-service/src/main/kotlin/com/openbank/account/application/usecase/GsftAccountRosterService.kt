@@ -9,10 +9,10 @@ import com.openbank.account.domain.model.AccountStatus
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
+import com.openbank.libs.domain.calendar.AccountingClock
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.UUID
 
 /** The minimal account register fields GSFT needs before looking up balances and holder facts. */
@@ -25,9 +25,11 @@ data class GsftRosterEntry(
 )
 
 @ApplicationScoped
-class GsftAccountRosterService(private val repository: GsftAccountRosterRepository, private val clock: Clock) {
+class GsftAccountRosterService(private val repository: GsftAccountRosterRepository, clock: Clock) {
+    private val accountingClock = AccountingClock.bank(clock)
+
     suspend fun list(relevantDay: LocalDate, requestedLimit: Int, cursor: String?): CursorPage<GsftRosterEntry> {
-        require(!relevantDay.isAfter(LocalDate.now(clock.withZone(REPORTING_ZONE)))) {
+        require(!accountingClock.isFuture(relevantDay)) {
             "asOf must not be in the future"
         }
         val limit = requestedLimit.coerceIn(1, MAX_PAGE_SIZE)
@@ -37,7 +39,7 @@ class GsftAccountRosterService(private val repository: GsftAccountRosterReposito
             require(value.startsWith(prefix)) { "account roster cursor does not match asOf" }
             UUID.fromString(value.removePrefix(prefix))
         }
-        val cutoff = relevantDay.plusDays(1).atStartOfDay(REPORTING_ZONE).toInstant()
+        val cutoff = relevantDay.plusDays(1).atStartOfDay(accountingClock.zone).toInstant()
         val rows = repository.findDepositAccounts(cutoff, limit + 1, afterId)
         check(rows.none { it.status == AccountStatus.CLOSED && it.closedAt == null }) {
             "account roster cannot establish when a closed account left the register"
@@ -55,7 +57,6 @@ class GsftAccountRosterService(private val repository: GsftAccountRosterReposito
     }
 
     private companion object {
-        val REPORTING_ZONE: ZoneId = ZoneId.of("Europe/Prague")
         const val MAX_PAGE_SIZE = 200
     }
 }
