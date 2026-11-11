@@ -56,15 +56,19 @@ class LedgerJournalKeysetIT {
             assertThat(page(from, to, CursorEncoder.encode(outsideRange.toString())).getList<String>("data.id"))
                 .isEqualTo(first.getList<String>("data.id"))
         } finally {
-            dataSource.connection.use { connection ->
-                listOf(
-                    "DELETE FROM journal_lines WHERE journal_id IN (SELECT id FROM journal_entries WHERE transaction_id = ?)",
-                    "DELETE FROM journal_entries WHERE transaction_id = ?",
-                ).forEach { sql ->
-                    connection.prepareStatement(sql).use { statement ->
-                        statement.setObject(1, transaction)
-                        statement.executeUpdate()
-                    }
+            cleanup(transaction)
+        }
+    }
+
+    private fun cleanup(transaction: UUID) {
+        dataSource.connection.use { connection ->
+            listOf(
+                "DELETE FROM journal_lines WHERE journal_id IN (SELECT id FROM journal_entries WHERE transaction_id = ?)",
+                "DELETE FROM journal_entries WHERE transaction_id = ?",
+            ).forEach { sql ->
+                connection.prepareStatement(sql).use { statement ->
+                    statement.setObject(1, transaction)
+                    statement.executeUpdate()
                 }
             }
         }
