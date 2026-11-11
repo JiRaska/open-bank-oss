@@ -59,6 +59,7 @@ class DelegationScaChallengePactConsumerTest {
         const val STATUTORY_CHALLENGE = "b7190001-0000-4000-8000-000000000001"
         const val STATUTORY_ACTOR = "b7190002-0000-4000-8000-000000000001"
         const val STATUTORY_COMPANY = "b7190003-0000-4000-8000-000000000001"
+        const val DIFFERENT_STATUTORY_ACTOR = "b7190002-0000-4000-8000-000000000002"
         const val STATUTORY_OPERATION = "delegation-statutory-issue:b7190004-0000-4000-8000-000000000001"
         val STATUTORY_DIGEST = "b".repeat(64)
     }
@@ -144,7 +145,7 @@ class DelegationScaChallengePactConsumerTest {
         .uponReceiving("POST consume a company and device bound statutory approval")
         .path("/api/v1/sca/challenges/$STATUTORY_CHALLENGE/consume-statutory-approval")
         .method("POST")
-        .headers(mapOf("Content-Type" to "application/json"))
+        .headers(mapOf("Content-Type" to "application/json", "Idempotency-Key" to STATUTORY_CHALLENGE))
         .body(
             newJsonBody { request ->
                 request.stringValue("partyId", STATUTORY_ACTOR)
@@ -172,19 +173,47 @@ class DelegationScaChallengePactConsumerTest {
     @Test
     @PactTestFor(pactMethod = "consumeStatutoryApprovalPact")
     fun `a statutory receipt identifies the exact company and human device`(mockServer: MockServer) {
-        val body = given().baseUri(mockServer.getUrl()).contentType(ContentType.JSON)
+        val body = consumeStatutory(mockServer, STATUTORY_ACTOR).then().statusCode(200).extract().jsonPath()
+        assertThat(body.getString("onBehalfOfPartyId")).isEqualTo(STATUTORY_COMPANY)
+        assertThat(body.getString("decidedByPartyId")).isEqualTo(STATUTORY_ACTOR)
+        assertThat(body.getString("consumedAt")).isNotBlank()
+    }
+
+    @Pact(consumer = "openbank-delegation-service", provider = "openbank-sca-service")
+    fun refuseAnotherStatutoryActorPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(STATUTORY_STATE)
+        .uponReceiving("POST refuse statutory approval for another actor")
+        .path("/api/v1/sca/challenges/$STATUTORY_CHALLENGE/consume-statutory-approval")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "Idempotency-Key" to STATUTORY_CHALLENGE))
+        .body(
+            newJsonBody { request ->
+                request.stringValue("partyId", DIFFERENT_STATUTORY_ACTOR)
+                request.stringValue("companyPartyId", STATUTORY_COMPANY)
+                request.stringValue("approvalRequestId", STATUTORY_OPERATION)
+                request.stringValue("payloadSha256", STATUTORY_DIGEST)
+            }.build(),
+        )
+        .willRespondWith()
+        .status(403)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "refuseAnotherStatutoryActorPact")
+    fun `another actor cannot consume a statutory approval`(mockServer: MockServer) {
+        consumeStatutory(mockServer, DIFFERENT_STATUTORY_ACTOR).then().statusCode(403)
+    }
+
+    private fun consumeStatutory(mockServer: MockServer, actor: String) =
+        given().baseUri(mockServer.getUrl()).contentType(ContentType.JSON)
+            .header("Idempotency-Key", STATUTORY_CHALLENGE)
             .body(
                 mapOf(
-                    "partyId" to STATUTORY_ACTOR,
+                    "partyId" to actor,
                     "companyPartyId" to STATUTORY_COMPANY,
                     "approvalRequestId" to STATUTORY_OPERATION,
                     "payloadSha256" to STATUTORY_DIGEST,
                 ),
             )
             .post(ClientRoute.of(StatutoryScaRestClient::class.java, "consume", "id" to STATUTORY_CHALLENGE))
-            .then().statusCode(200).extract().jsonPath()
-        assertThat(body.getString("onBehalfOfPartyId")).isEqualTo(STATUTORY_COMPANY)
-        assertThat(body.getString("decidedByPartyId")).isEqualTo(STATUTORY_ACTOR)
-        assertThat(body.getString("consumedAt")).isNotBlank()
-    }
 }

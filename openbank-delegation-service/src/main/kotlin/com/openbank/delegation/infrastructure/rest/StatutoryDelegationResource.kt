@@ -121,9 +121,11 @@ class StatutoryDelegationResource(
         body: StatutorySignatureRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) principal: UUID?,
         @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) human: UUID?,
+        @HeaderParam("Idempotency-Key") requestKey: String?,
     ): Response {
         val actor = actor(principal, human)
         val challenge = requireNotNull(body?.scaChallengeId) { "scaChallengeId is required" }
+        require(requestKey(requestKey) == challenge.toString()) { "Idempotency-Key must be the challenge UUID" }
         return respond(view(actor, service.sign(actor, id, challenge)))
     }
 
@@ -135,9 +137,11 @@ class StatutoryDelegationResource(
         body: StatutoryClosureRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) principal: UUID?,
         @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) human: UUID?,
+        @HeaderParam("Idempotency-Key") requestKey: String?,
     ): Response {
         val actor = actor(principal, human)
         val cancel = requireNotNull(body?.cancel) { "cancel is required" }
+        require(requestKey(requestKey) == id.toString()) { "Idempotency-Key must be the operation UUID" }
         return respond(view(actor, service.close(actor, id, cancel)))
     }
 

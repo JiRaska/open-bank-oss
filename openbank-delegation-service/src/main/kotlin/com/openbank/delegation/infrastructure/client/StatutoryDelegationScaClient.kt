@@ -10,6 +10,7 @@ import com.openbank.delegation.domain.model.StatutoryDelegationOperation
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -45,7 +46,11 @@ data class StatutoryScaReceipt(
 interface StatutoryScaRestClient {
     @POST
     @Path("/{id}/consume-statutory-approval")
-    suspend fun consume(@PathParam("id") challengeId: UUID, request: StatutoryScaRequest): StatutoryScaReceipt
+    suspend fun consume(
+        @PathParam("id") challengeId: UUID,
+        @HeaderParam("Idempotency-Key") requestKey: String,
+        request: StatutoryScaRequest,
+    ): StatutoryScaReceipt
 }
 
 @ApplicationScoped
@@ -61,6 +66,7 @@ class RestStatutoryDelegationSca(@RestClient private val client: StatutoryScaRes
         val receipt = try {
             client.consume(
                 challengeId,
+                challengeId.toString(),
                 StatutoryScaRequest(actorPartyId, company, operation.approvalRequestId, operation.payloadDigest.hex),
             )
         } catch (e: CancellationException) {

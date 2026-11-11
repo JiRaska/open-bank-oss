@@ -93,6 +93,29 @@ class CustomerStatutoryDelegationResourceTest {
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `the edge derives stable keys for statutory signing and closing`() {
+        val challenge = UUID.randomUUID().toString()
+        val authority = mapOf("X-Customer-Actor-Party-Id" to actor.toString())
+        val signature = """{"scaChallengeId":"$challenge"}"""
+        val cancellation = """{"cancel":true}"""
+        every {
+            upstream.post("$DELEGATION$OPERATIONS/$operation/sign", company.toString(), signature, challenge, authority)
+        } returns Response.ok().build()
+        every {
+            upstream.post(
+                "$DELEGATION$OPERATIONS/$operation/close",
+                company.toString(),
+                cancellation,
+                operation.toString(),
+                authority,
+            )
+        } returns Response.ok().build()
+
+        assertThat(resource.sign(operation, mapper.readTree(signature), company.toString()).status).isEqualTo(200)
+        assertThat(resource.close(operation, mapper.readTree(cancellation), company.toString()).status).isEqualTo(200)
+    }
+
     private fun operationBody(expiresAt: Instant) = """
         {"id":"$operation","companyPartyId":"$company","action":"ISSUE","status":"COLLECTING",
         "signedByCaller":false,"expiresAt":"$expiresAt","approvalRequestId":"delegation-statutory-issue:$operation",

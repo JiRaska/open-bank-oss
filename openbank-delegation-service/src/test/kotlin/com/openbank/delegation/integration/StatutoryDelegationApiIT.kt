@@ -125,7 +125,8 @@ class StatutoryDelegationApiIT {
         assertThat(provenance(acceptOperationId, grantId, "DelegationActivated")).isEmpty()
         val acceptReceipt = UUID.randomUUID()
         coEvery { rules.current(issuer) } returns issuerRule.copy(attestationId = UUID.randomUUID())
-        request(recipient, recipientActors.last()).body("""{"scaChallengeId":"$acceptReceipt"}""")
+        request(recipient, recipientActors.last()).header("Idempotency-Key", acceptReceipt)
+            .body("""{"scaChallengeId":"$acceptReceipt"}""")
             .post("$ROOT/$acceptOperationId/sign").then().statusCode(403)
         assertThat(provenance(acceptOperationId, grantId, "DelegationActivated")).isEmpty()
         coEvery { rules.current(issuer) } returns issuerRule
@@ -135,6 +136,34 @@ class StatutoryDelegationApiIT {
         request(recipient, recipientActors.first()).header("Idempotency-Key", acceptKey)
             .post("$ROOT/accept/$grantId").then().statusCode(202)
             .body("id", equalTo(acceptOperationId.toString()))
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "synthetic-edge-subject"),
+            Claim(key = "azp", value = "openbank-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-edge"),
+        ],
+    )
+    fun `statutory mutations reject unbound keys and replay a closed operation`() {
+        val actor = issuerActors.first()
+        val operation = request(issuer, actor).header("Idempotency-Key", UUID.randomUUID())
+            .body(issueBody(UUID.randomUUID())).post("$ROOT/issue").then().statusCode(202).extract().path<String>("id")
+        val signature = """{"scaChallengeId":"${UUID.randomUUID()}"}"""
+        request(issuer, actor).body(signature).post("$ROOT/$operation/sign").then().statusCode(400)
+        request(issuer, actor).header("Idempotency-Key", UUID.randomUUID())
+            .body(signature).post("$ROOT/$operation/sign").then().statusCode(400)
+        val cancellation = """{"cancel":true}"""
+        request(issuer, actor).body(cancellation).post("$ROOT/$operation/close").then().statusCode(400)
+        request(issuer, actor).header("Idempotency-Key", UUID.randomUUID())
+            .body(cancellation).post("$ROOT/$operation/close").then().statusCode(400)
+        repeat(2) {
+            request(issuer, actor).header("Idempotency-Key", operation)
+                .body(cancellation).post("$ROOT/$operation/close").then().statusCode(200)
+                .body("status", equalTo("CANCELLED")).body("signedCount", equalTo(0))
+        }
     }
 
     @Test
@@ -170,7 +199,8 @@ class StatutoryDelegationApiIT {
         .header("X-Customer-Actor-Party-Id", actor)
 
     private fun sign(company: UUID, actor: UUID, operation: UUID, challenge: UUID, state: String) {
-        request(company, actor).body("""{"scaChallengeId":"$challenge"}""").post("$ROOT/$operation/sign")
+        request(company, actor).header("Idempotency-Key", challenge)
+            .body("""{"scaChallengeId":"$challenge"}""").post("$ROOT/$operation/sign")
             .then().statusCode(200).body("status", equalTo(state))
     }
 

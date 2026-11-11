@@ -72,7 +72,8 @@
           "payloadSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
         "headers": {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "Idempotency-Key": "b7190001-0000-4000-8000-000000000001"
         },
         "method": "POST",
         "path": "/api/v1/sca/challenges/b7190001-0000-4000-8000-000000000001/consume-statutory-approval"
@@ -104,6 +105,31 @@
           }
         },
         "status": 200
+      }
+    },
+    {
+      "description": "POST refuse statutory approval for another actor",
+      "providerStates": [
+        {
+          "name": "a device approved a verified statutory delegation challenge"
+        }
+      ],
+      "request": {
+        "body": {
+          "approvalRequestId": "delegation-statutory-issue:b7190004-0000-4000-8000-000000000001",
+          "companyPartyId": "b7190003-0000-4000-8000-000000000001",
+          "partyId": "b7190002-0000-4000-8000-000000000002",
+          "payloadSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "b7190001-0000-4000-8000-000000000001"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/b7190001-0000-4000-8000-000000000001/consume-statutory-approval"
+      },
+      "response": {
+        "status": 403
       }
     }
   ],

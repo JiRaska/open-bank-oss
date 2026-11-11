@@ -385,6 +385,11 @@ paths:
         - { name: X-Customer-Party-Id, in: header, required: true, schema: { type: string, format: uuid } }
         - { name: X-Customer-Actor-Party-Id, in: header, required: true, schema: { type: string, format: uuid } }
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must be the challenge UUID in canonical UUID form.
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
@@ -411,6 +416,11 @@ paths:
         - { name: X-Customer-Party-Id, in: header, required: true, schema: { type: string, format: uuid } }
         - { name: X-Customer-Actor-Party-Id, in: header, required: true, schema: { type: string, format: uuid } }
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must be the operation UUID in canonical UUID form.
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:

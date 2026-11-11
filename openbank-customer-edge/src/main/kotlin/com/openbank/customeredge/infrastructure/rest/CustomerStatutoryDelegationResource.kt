@@ -121,7 +121,11 @@ class CustomerStatutoryDelegationResource(
         @PathParam("id") id: UUID,
         body: JsonNode?,
         @HeaderParam(ACTING_FOR_HEADER) actingFor: String?,
-    ): Response = post(customer(actingFor), "/$id/sign", body)
+    ): Response {
+        val customer = customer(actingFor)
+        val challenge = requireNotNull(body?.get("scaChallengeId")?.textValue()) { "scaChallengeId is required" }
+        return post(customer, "/$id/sign", body, UUID.fromString(challenge).toString())
+    }
 
     @POST
     @Path("/{id}/close")
@@ -130,7 +134,7 @@ class CustomerStatutoryDelegationResource(
         @PathParam("id") id: UUID,
         body: JsonNode?,
         @HeaderParam(ACTING_FOR_HEADER) actingFor: String?,
-    ): Response = post(customer(actingFor), "/$id/close", body)
+    ): Response = post(customer(actingFor), "/$id/close", body, id.toString())
 
     private fun get(customer: CustomerIdentity, path: String): Response = noStore(
         upstream.getWithHeaders(
@@ -140,16 +144,15 @@ class CustomerStatutoryDelegationResource(
         ),
     )
 
-    private fun post(customer: CustomerIdentity, path: String, body: JsonNode?, requestKey: String? = null): Response =
-        noStore(
-            upstream.post(
-                "$delegationServiceUrl$UPSTREAM$path",
-                customer.partyId.toString(),
-                body?.let(mapper::writeValueAsString) ?: "{}",
-                requestKey,
-                mapOf(ACTOR_PARTY_HEADER to customer.human.toString()),
-            ),
-        )
+    private fun post(customer: CustomerIdentity, path: String, body: JsonNode?, requestKey: String): Response = noStore(
+        upstream.post(
+            "$delegationServiceUrl$UPSTREAM$path",
+            customer.partyId.toString(),
+            body?.let(mapper::writeValueAsString) ?: "{}",
+            requestKey,
+            mapOf(ACTOR_PARTY_HEADER to customer.human.toString()),
+        ),
+    )
 
     private fun customer(actingFor: String?): CustomerIdentity {
         val claim = CustomerEdgeResource.resolvePartyIdClaim(jwt.getClaim<String>("party_id"), jwt.subject)

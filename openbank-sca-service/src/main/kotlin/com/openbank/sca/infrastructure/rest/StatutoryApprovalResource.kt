@@ -18,6 +18,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -43,10 +44,15 @@ class StatutoryApprovalResource(
 ) {
     @POST
     @Authorize(action = "scaChallenge.consume.statutory", resource = "#id")
-    suspend fun consume(@PathParam("id") id: UUID, body: ConsumeStatutoryApprovalRequest?): ScaChallengeResponse {
+    suspend fun consume(
+        @PathParam("id") id: UUID,
+        body: ConsumeStatutoryApprovalRequest?,
+        @HeaderParam("Idempotency-Key") requestKey: String?,
+    ): ScaChallengeResponse {
         if (!ServiceAccountIdentity.isPrincipal(identity, DELEGATION_PRINCIPAL)) {
             throw ForbiddenException("only delegation-service may verify statutory approval")
         }
+        require(requestKey == id.toString()) { "Idempotency-Key must be the challenge UUID" }
         val actor = requireNotNull(body?.partyId) { "partyId is required" }
         val company = requireNotNull(body.companyPartyId) { "companyPartyId is required" }
         require(actor != company) { "the statutory signer must be a human acting for the company" }

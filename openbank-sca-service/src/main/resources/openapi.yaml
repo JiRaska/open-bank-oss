@@ -394,6 +394,11 @@ paths:
         returns the recorded receipt for reconciliation of the same operation.
       parameters:
         - $ref: '#/components/parameters/challengeId'
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Must be the challenge UUID from the path in canonical UUID form.
+          schema: { type: string, format: uuid }
       requestBody:
         required: true
         content:
