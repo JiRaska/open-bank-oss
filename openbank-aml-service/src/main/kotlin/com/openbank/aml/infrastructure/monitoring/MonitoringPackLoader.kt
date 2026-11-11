@@ -60,7 +60,15 @@ class MonitoringPackLoader(
     @Startup
     @Singleton
     fun monitoringPack(): MonitoringPack {
-        val pack = load(objectMapper, scheme, read(packResource), read(reasonsResource), read(severitiesResource), read(featuresResource))
+        val pack =
+            load(
+                objectMapper,
+                scheme,
+                read(packResource),
+                read(reasonsResource),
+                read(severitiesResource),
+                read(featuresResource),
+            )
         log.infof(
             "[aml-monitoring] pack %s rev %d (%s), %d rule(s)",
             pack.identity.id,
@@ -71,10 +79,9 @@ class MonitoringPackLoader(
         return pack
     }
 
-    private fun read(resource: String): String =
-        Thread.currentThread().contextClassLoader.getResourceAsStream(resource)
-            ?.use { String(it.readNBytes(CounterSchemeLoader.MAX_BYTES + 1), Charsets.UTF_8) }
-            ?: error("monitoring resource '$resource' not found")
+    private fun read(resource: String): String = Thread.currentThread().contextClassLoader.getResourceAsStream(resource)
+        ?.use { String(it.readNBytes(CounterSchemeLoader.MAX_BYTES + 1), Charsets.UTF_8) }
+        ?: error("monitoring resource '$resource' not found")
 
     companion object {
         private val ROOT_FIELDS = setOf("schemaVersion", "id", "revision", "purpose", "counterScheme", "features")
@@ -98,7 +105,11 @@ class MonitoringPackLoader(
                 val feature = rule["feature"]
                 PackRule(
                     id = rule["id"].textValue(),
-                    feature = CountFeatureRef(feature["id"].textValue(), feature["revision"].intValue(), feature["hash"].textValue()),
+                    feature = CountFeatureRef(
+                        feature["id"].textValue(),
+                        feature["revision"].intValue(),
+                        feature["hash"].textValue(),
+                    ),
                     reasonCode = rule["reason"].textValue(),
                     severityCode = rule["effect"]["severity"].textValue(),
                 )
@@ -108,10 +119,14 @@ class MonitoringPackLoader(
 
         /** Strict: an unknown or missing field is an error, never a default. */
         fun features(objectMapper: ObjectMapper, json: String): List<CountFeatureDefinition> {
-            require(json.toByteArray(Charsets.UTF_8).size <= CounterSchemeLoader.MAX_BYTES) { "features exceed size limit" }
+            require(json.toByteArray(Charsets.UTF_8).size <= CounterSchemeLoader.MAX_BYTES) {
+                "features exceed size limit"
+            }
             val root = objectMapper.readTree(json)
             exact(root, ROOT_FIELDS)
-            require(root["schemaVersion"].isInt && root["schemaVersion"].intValue() == 1) { "unsupported features schema" }
+            require(root["schemaVersion"].isInt && root["schemaVersion"].intValue() == 1) {
+                "unsupported features schema"
+            }
             val counterScheme = root["counterScheme"]
             exact(counterScheme, setOf("id", "revision"))
             require(root["features"].isArray) { "features must be an array" }

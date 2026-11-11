@@ -27,7 +27,7 @@ interface MonitoringEvaluationRepository {
     /** Links the hit to the case opened for it. A hit that already has a case is left alone. */
     suspend fun markCaseOpened(hitId: UUID, caseId: UUID)
 
-    /** Creation instant of the oldest transaction-monitoring case nobody has decided yet. */
+    /** Creation instant of the oldest pack-monitoring case nobody has decided yet (rail-opened cases excluded). */
     suspend fun oldestUndecidedMonitoringCase(): Instant?
 }
 

@@ -11,7 +11,11 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 class InMemoryKafkaTestResource : QuarkusTestResourceLifecycleManager {
     override fun start(): Map<String, String> =
         InMemoryConnector.switchOutgoingChannelsToInMemory("aml-events-out", "oversight-events-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in", "ledger-events-in", "transaction-events-in")
+            InMemoryConnector.switchIncomingChannelsToInMemory(
+                "party-events-in",
+                "ledger-events-in",
+                "transaction-events-in",
+            )
 
     override fun stop() = InMemoryConnector.clear()
 }
