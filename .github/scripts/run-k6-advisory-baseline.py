@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Keep evaluated threshold breaches advisory, never runtime/configuration errors."""
+"""Run k6 and retain the evaluated threshold summary."""
 import argparse
 import json
 import os
@@ -14,6 +14,7 @@ def main():
     parser.add_argument('--definition', required=True)
     parser.add_argument('--summary', required=True)
     parser.add_argument('--check-config', action='store_true')
+    parser.add_argument('--fail-thresholds', action='store_true')
     parser.add_argument('--required-fixtures', default='')
     parser.add_argument('--pass-env', action='append', default=[])
     parser.add_argument('--target-env', action='append', default=[])
@@ -51,19 +52,22 @@ def main():
     try:
         document = json.loads(summary.read_text())
         metrics = document['metrics']
-        thresholds = [value for metric in metrics.values()
-                      for value in metric.get('thresholds', {}).values()]
-        if not thresholds or any(not isinstance(value, bool) for value in thresholds):
+        thresholds = [(name, threshold, value) for name, metric in metrics.items()
+                      for threshold, value in metric.get('thresholds', {}).items()]
+        if not thresholds or any(not isinstance(value, bool) for _, _, value in thresholds):
             raise ValueError('missing or invalid evaluated thresholds')
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         print('::error::k6 did not produce a valid evaluated-threshold summary.')
         return 1
-    breaches = sum(thresholds)
+    breaches = [f'{name} {threshold}' for name, threshold, value in thresholds if value]
     if result.returncode == 99 and not breaches:
         print('::error::k6 exit 99 lacks a threshold breach; refusing an unexplained failure.')
         return 1
+    if breaches and args.fail_thresholds:
+        print(f"::error::Money-path k6 threshold breaches: {', '.join(breaches)}.")
+        return 1
     if breaches:
-        print(f'::warning::{breaches} advisory threshold breach(s); retained in the performance evidence.')
+        print(f'::warning::{len(breaches)} advisory threshold breach(s); retained in the performance evidence.')
     return 0
 
 
