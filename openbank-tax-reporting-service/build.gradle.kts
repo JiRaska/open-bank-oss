@@ -45,9 +45,10 @@ dependencies {
 }
 
 // Independent Quarkus boot profiles retain more than the default 512 MiB test heap.
-// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250).
+// The complete real-DB/Kafka suite measured 680 MiB after GC with a 1 GiB cap (#12250); the GSFT
+// dry-run IT (#15356) is one more profile boot and the suite then ran out of heap at 1 GiB.
 tasks.named<Test>("test") {
-    maxHeapSize = "1g"
+    maxHeapSize = "1536m"
 }
 
 // Coverage floor (ADR-0020, ratchet-only). This module had no verify{} rule, so koverVerify

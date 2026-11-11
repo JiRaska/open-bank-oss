@@ -191,6 +191,52 @@ inconsistent, and how to treat them is not stated by the annex.
 No owning service models special-regime accounts or their beneficiaries today, so nothing feeds
 `SpecialRegimeShare` yet; the format is ready for when one does.
 
+## Data sourcing
+
+`GsftSnapshotPort.snapshot(D)` (adapter `infrastructure/returns/gsft/GsftSnapshotAdapter`) returns
+the inputs of `assemble` and `render` for relevant day D. It uses only reads this service's own
+machine identity is admitted to by the provider's policy, reusing the CRS/FATCA clients. A field
+with no verified source is never filled with a plausible value: it is listed in
+`GsftSnapshot.gaps`, and `requireComplete()` refuses any snapshot whose gap set is non-empty.
+**Today every gap below is open, so no snapshot is fit for a KEEN delivery.**
+
+Sourced:
+
+| Input | Source |
+|---|---|
+| Account roster | account-service `GET /api/v1/accounts/active` (cursor-walked to the end). Only `accountType` CURRENT, SAVINGS and TERM_DEPOSIT are deposits; NOSTRO and GL_* are dropped; any other or missing type fails the snapshot. |
+| IBAN, currency, holder party | the same roster row (`accountNumber`, `currencyCode`, `partyId`) |
+| Principal | balance-service `GET /api/v1/balances/{accountId}/{currency}?asOf=D` (booked balance; ANY failure, including 404, fails the snapshot — unlike CRS/FATCA, a missing row is never read as zero) |
+| Synthetic taint (ADR-0252) | this service's own CEÚ register, as known at snapshot time: an account is synthetic when its holder party is classified SYNTHETIC (`syntheticParties`) or its opening event was tainted (`factsUpTo`, `AccountOpened.synthetic`), the same rule as the CEÚ fold. A party whose lifecycle events predate the projection, or carried no classification, reads as real (the fail-to-real direction ADR-0252 accepts). |
+
+Unresolved gaps (each a `GsftDataGap`):
+
+- **ROSTER_ACTIVE_ONLY_CURRENT — unresolved.** The roster is the CURRENT list of ACTIVE accounts.
+  Dormant and frozen accounts hold insured deposits and are missing; an account closed after D is
+  missing, one opened after D is present. Claims are understated.
+- **JOINT_HOLDERS — unresolved.** account-service carries a single `partyId` per account, so every
+  account is reported single-holder with no shares; DIL is never produced from sourced data.
+- **ACCRUED_INTEREST — unresolved, understates every claim.** interest-service exposes accrual
+  reads, but its policy admits no rule for this service's identity, so accrued interest is set to
+  zero and flagged. Every claim is understated by the interest accrued up to D.
+- **DEPOSITOR_IDENTITY — unresolved.** No party-service read exposes birth number, registration
+  number or address to this caller. No `DepositorIdentity` is built, so the renderer rejects every
+  person; nothing is fabricated from the holder name.
+- **EXCLUSION_CATEGORY — unresolved.** No read exposes the § 41b exclusion category. `exclusion` is
+  null meaning "not known", and the gap is flagged.
+- **BALANCE_AS_OF_UNVERIFIED — unresolved.** balance-service computes `asOf` as the current
+  booked balance minus projected movements after D; when its projection holds no later events
+  (projection disabled or not yet populated) it silently answers the CURRENT balance, and nothing on
+  the wire distinguishes the two. The principal is therefore not proven to be D's.
+- **FX_RATES — unresolved.** fx-service serves ČNB fixings for a day through
+  `GET /api/v1/fx/rates/{base}/{quote}/history?source=CNB&from=&to=` (the latest-only
+  `GET /api/v1/fx/cnb/rates/{base}` cannot answer for day D), but its policy admits no rule for this
+  service's identity. `rates` is null.
+
+Closing a gap needs a provider-side read (or policy rule) in another service, which is out of
+scope for the sourcing change; each closure must shrink `GsftSnapshotAdapter.UNRESOLVED_GAPS`
+together with the source that closes it.
+
 ## Transport (`GsftPackage`)
 
 Annex 1.1.6, verified: the batch is compressed with ZIP into **one** file, the batch files added
@@ -208,7 +254,57 @@ equal strength only by agreement with GSFT).
 cipher and binary-vs-armoured output are not stated by the annex — confirm with GSFT before the
 first live delivery.
 
+## Filing (catalogue `cz-gsft`)
+
+The batch rides the statutory-return lifecycle (ADR-0336) as catalogue
+`statutory-returns/cz/gsft.v1.json`. Verified: the obligation is to deliver within **3 working
+days** of the relevant day (zákon č. 21/1992 Sb. § 41d odst. 4), so the period is the relevant day
+itself (`Periodicity.DAY`) and the deadline counts working days (`DeadlineBasis.WORKING_DAYS`):
+Monday's relevant day is due on Thursday. The return is `onDemand` — an insured event or a test
+request names the day, so the deadline check never reports an un-named day as missing; a stored
+LIVE revision that is not filed by its due date is still a breach. `GSFT-DIW-TEST` carries
+`filingObligation: false` — a dry run is never a breach, assembled or not.
+
+| Step | Route | Guard |
+|---|---|---|
+| Assemble | `POST /api/v1/statutory-returns/assemble`, `catalogueId: cz-gsft`, `returnCode: GSFT-DIW-TEST` (DIW.TEST = `TEST`) or `GSFT-DIW-LIVE` (`KEEN`, only when named), `period: <relevant day>` | snapshot → `requireComplete()` → `InsuredClaims.assemble` → `GsftBatchRenderer.render` → `GsftPackage.zip`; refused (503) with every open gap named; refused while `openbank.gsft.bank-code` is unset |
+| Approve | `POST /{id}/approve` | four-eyes: the assembler is refused (409); attests the content hash |
+| Submit | `POST /{id}/gsft-delivery` with `reference` | reloads the archive by the attested SHA-256, refuses unless it and every file inside hash to the attested lines, encrypts it to `openbank.gsft.pgp-public-key` (Optional; 503 while unset, boot unaffected), PERSISTS the encrypted artefact (`gsft_delivery`), then records the submission and returns it. Repeating the call with the same reference while SUBMITTED re-fetches the stored artefact; a different reference, or an answered return, is 409. The generic `/submitted` refuses a GSFT return. |
+| Answer | `POST /{id}/acknowledgement` | GSFT's acknowledgement reference or rejection reason |
+
+Every route is operator-only, `@Authorize`d (`tax.statutory-return.deliver` is the new action) and
+refuses a service-account. The datapoints are the batch's own figures — `N_CLIENT`, `N_ACCOUNT`,
+`N_COLLECTIVE`, `N_SPECIAL` counted from the rendered files, `T_PAYMENT`, the batch number and DIW
+time — plus the exclusion and cover evidence (rejected, excluded, capped, synthetic, overdrawn, THB
+counts); each is held non-negative. The lines are one per decree file and one for the ZIP, each with
+its SHA-256 and size, so the approval attests the exact package. The ZIP itself is stored
+content-addressed (`gsft_package`, V7), written only after its return has validated and been
+stored, with `INSERT … ON CONFLICT DO NOTHING` so concurrent assemblies cannot race.
+
+**Personal data at rest — accepted control, open gap.** `gsft_package.archive` holds depositor
+names, birth numbers and addresses in cleartext. This service has no envelope-encryption (transit)
+protector; the accepted control is the database's own (storage and backup encryption, a
+service-only role, one reading route). Retention rule: a return's archive and delivery rows are to
+be deleted once it is ACKNOWLEDGED or REJECTED with no correction open. **No purge job exists, and
+column-level envelope encryption is not built** — both are open on #15356.
+
+**Unverified / unresolved in the filing:**
+
+- the **batch number** comes from one atomic per-bank counter (`gsft_batch_counter`) shared by TEST
+  and LIVE; a number is consumed even when rendering then fails, so the sequence can have gaps. The
+  annex says only that numbering starts at 00001 — the scope (per bank, TEST and LIVE together, gaps
+  allowed) is **unverified**; confirm the sequence GSFT expects;
+- the **working-day calendar** is the CERTIS (Czech public-holiday) calendar; the statute's
+  "pracovní den" is assumed to match it;
+- the archive name, PGP cipher and binary output (see Transport) are still unconfirmed;
+- how the encrypted package is handed to GSFT (channel, the reference it returns) is not modelled:
+  the operator carries the returned file and records the reference GSFT gives;
+- the § 41n yearly test run has no scheduler: an operator assembles `GSFT-DIW-TEST` on request;
+- `GSFT-DIW-LIVE` cannot be assembled from production data until every data-sourcing gap above is
+  closed — today every production assembly is refused.
+
 ## Not yet here
 
-Closing the data-sourcing gaps above, four-eyes attestation and filing, and the scheduled TEST dry
-run are follow-ups on #15356.
+Closing the data-sourcing gaps above (each needs a provider-side read in another service), a
+scheduled yearly TEST run, the delivery channel to GSFT, envelope encryption of the stored archive
+and the retention purge are follow-ups on #15356.
