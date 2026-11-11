@@ -46,7 +46,16 @@ import java.util.concurrent.atomic.AtomicLong
  */
 @Startup
 @ApplicationScoped
-class MovementAttributionScheduler {
+class MovementAttributionScheduler(
+    // Constructor parameters without a Kotlin default: a default would make Arc build the bean
+    // through a synthetic constructor and the configured value would never be applied.
+    @ConfigProperty(name = "openbank.aml.monitoring.attribution.enabled", defaultValue = "true")
+    private val enabled: Boolean,
+    @ConfigProperty(name = "openbank.aml.monitoring.attribution.batch-limit", defaultValue = "200")
+    private val batchLimit: Int,
+    @ConfigProperty(name = "openbank.aml.monitoring.attribution.origin-grace", defaultValue = "PT5M")
+    private val originGrace: Duration,
+) {
 
     @Inject
     lateinit var repository: MovementIntakeRepository
@@ -65,15 +74,6 @@ class MovementAttributionScheduler {
 
     @Inject
     lateinit var domainMetrics: DomainMetrics
-
-    @ConfigProperty(name = "openbank.aml.monitoring.attribution.enabled", defaultValue = "true")
-    var enabled: Boolean = true
-
-    @ConfigProperty(name = "openbank.aml.monitoring.attribution.batch-limit", defaultValue = "200")
-    var batchLimit: Int = DEFAULT_BATCH_LIMIT
-
-    @ConfigProperty(name = "openbank.aml.monitoring.attribution.origin-grace", defaultValue = "PT5M")
-    var originGrace: Duration = Duration.ofMinutes(DEFAULT_GRACE_MINUTES)
 
     private val log = Logger.getLogger(MovementAttributionScheduler::class.java)
     private val uncounted = AtomicLong(0)
@@ -142,8 +142,6 @@ class MovementAttributionScheduler {
         /** Rail of a booked movement that no originating transaction event ever named. */
         const val NO_ORIGIN_RAIL = "NONE"
         const val WORKFLOW_NAME = "aml-movement-attribution"
-        private const val DEFAULT_BATCH_LIMIT = 200
-        private const val DEFAULT_GRACE_MINUTES = 5L
         private val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(1)
     }
 }
