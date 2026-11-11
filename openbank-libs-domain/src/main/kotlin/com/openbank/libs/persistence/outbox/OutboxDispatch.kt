@@ -145,12 +145,14 @@ object OutboxDispatch {
         publish: suspend (entry: OutboxEntry) -> Unit,
     ): OutboxDispatchResult {
         val claimStart = System.nanoTime()
-        val batch = runCatching {
+        var fencedClaims = emptyMap<UUID, OutboxClaim>()
+        val claimed = runCatching {
             if (repository is ClaimFencedOutboxRepositoryV2) {
                 val claims = repository.claimWithTokens(batchSize)
-                ClaimedBatch(claims.map { it.entry }, claims.associateBy { it.entry.eventId })
+                fencedClaims = claims.associateBy { it.entry.eventId }
+                claims.map { it.entry }
             } else {
-                ClaimedBatch(repository.claimProcessable(batchSize))
+                repository.claimProcessable(batchSize)
             }
         }
             .onFailure { ex ->
@@ -161,9 +163,9 @@ object OutboxDispatch {
         claimObserver?.invoke(Duration.ofNanos(System.nanoTime() - claimStart))
 
         return if (repository is OutboxRepositoryV2) {
-            dispatchConcurrently(repository, batch, publish)
+            dispatchConcurrently(repository, claimed, fencedClaims, publish)
         } else {
-            dispatchSequentially(repository, batch.entries, publish)
+            dispatchSequentially(repository, claimed, publish)
         }
     }
 
@@ -261,13 +263,14 @@ object OutboxDispatch {
      */
     private suspend fun dispatchConcurrently(
         repository: OutboxRepositoryV2,
-        batch: ClaimedBatch,
+        claimed: List<OutboxEntry>,
+        fencedClaims: Map<UUID, OutboxClaim>,
         publish: suspend (entry: OutboxEntry) -> Unit,
     ): OutboxDispatchResult {
         val permits = Semaphore(SEND_CONCURRENCY)
         val abandoned = AtomicBoolean(false)
         val attempts: List<SendAttempt> = coroutineScope {
-            batch.entries.map { entry ->
+            claimed.map { entry ->
                 async {
                     permits.withPermit {
                         if (abandoned.get()) return@withPermit SendAttempt.Skipped(entry)
@@ -289,7 +292,7 @@ object OutboxDispatch {
             }.awaitAll()
         }
 
-        val outcomes = acknowledgeBatch(repository, batch, attempts)
+        val outcomes = acknowledgeBatch(repository, fencedClaims, attempts)
         val unavailable = attempts.filterIsInstance<SendAttempt.TransportUnavailable>()
         if (unavailable.isNotEmpty()) {
             val left = unavailable.size + attempts.count { it is SendAttempt.Skipped }
@@ -300,33 +303,35 @@ object OutboxDispatch {
                 unavailable.first().error,
             )
         }
-        return OutboxDispatchResult(outcomes, batch.entries.size, abandoned = unavailable.isNotEmpty())
+        return OutboxDispatchResult(outcomes, claimed.size, abandoned = unavailable.isNotEmpty())
     }
 
     private suspend fun acknowledgeBatch(
         repository: OutboxRepositoryV2,
-        batch: ClaimedBatch,
+        fencedClaims: Map<UUID, OutboxClaim>,
         attempts: List<SendAttempt>,
     ): List<OutboxDispatchOutcome> {
         val outcomes = mutableListOf<OutboxDispatchOutcome>()
         val sent = attempts.filterIsInstance<SendAttempt.Sent>()
         if (sent.isNotEmpty()) {
-            val sentIds = sent.map { it.entry.eventId }
             val committed = if (repository is ClaimFencedOutboxRepositoryV2) {
-                repository.markClaimsSent(sentIds.map(batch.claims::getValue))
+                repository.markClaimsSent(sent.map { fencedClaims.getValue(it.entry.eventId) })
             } else {
-                repository.markSentBatch(sentIds)
-                sentIds.toSet()
+                repository.markSentBatch(sent.map { it.entry.eventId })
+                null
             }
-            sent.filter { it.entry.eventId in committed }
-                .forEach { outcomes += OutboxDispatchOutcome.Dispatched(it.entry) }
+            for (attempt in sent) {
+                if (committed == null || attempt.entry.eventId in committed) {
+                    outcomes += OutboxDispatchOutcome.Dispatched(attempt.entry)
+                }
+            }
         }
         for (failure in attempts.filterIsInstance<SendAttempt.Failed>()) {
             val ex = failure.error
             val eventId = failure.entry.eventId
             val message = ex.message ?: ex.javaClass.simpleName
             val persistedStatus = if (repository is ClaimFencedOutboxRepositoryV2) {
-                repository.markClaimFailed(batch.claims.getValue(eventId), message) ?: continue
+                repository.markClaimFailed(fencedClaims.getValue(eventId), message) ?: continue
             } else {
                 repository.markFailed(eventId, message)
             }
@@ -334,8 +339,6 @@ object OutboxDispatch {
         }
         return outcomes
     }
-
-    private data class ClaimedBatch(val entries: List<OutboxEntry>, val claims: Map<UUID, OutboxClaim> = emptyMap())
 
     private sealed class SendAttempt {
         abstract val entry: OutboxEntry
