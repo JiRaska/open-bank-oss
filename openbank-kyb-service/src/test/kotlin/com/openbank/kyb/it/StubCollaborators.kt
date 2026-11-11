@@ -39,11 +39,13 @@ import com.openbank.kyb.domain.model.ScreeningVerdict
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import kotlinx.coroutines.CompletableDeferred
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
 
 /**
  * Test doubles for the two out-of-process collaborators. `@Alternative @Priority` beans in the
@@ -81,6 +83,7 @@ class StubAresAdapter : RegistryAdapter {
             "71000011" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Radim Prověřený"))
             "71000020" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Hana Čekající"))
             "71000038" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Petr Exponovaný"))
+            "71000046" -> extract(identifier, LegalFormClass.LIMITED_COMPANY, RepresentationRule.SOLE, listOf("Olga Souběžná"))
             // 26185610 — a sole trader.
             "26185610" -> extract(identifier, LegalFormClass.SOLE_TRADER, RepresentationRule.SOLE, listOf("Jan Novák"))
             else -> null
@@ -173,8 +176,17 @@ class StubRelatedPartyScreening : RelatedPartyScreeningPort {
     val unavailable: MutableSet<String> = ConcurrentHashMap.newKeySet()
     val requests = CopyOnWriteArrayList<RelatedPartyScreeningRequest>()
 
+    /**
+     * Holds the screen of one name open until the test releases it, so a test can put another
+     * request BETWEEN a use case's read of the case and its write. [entered] says the screen began.
+     */
+    val held = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+    val entered = ConcurrentHashMap<String, CountDownLatch>()
+
     override suspend fun screen(request: RelatedPartyScreeningRequest): RelatedPartyScreeningResult {
         requests += request
+        entered[request.name]?.countDown()
+        held[request.name]?.await()
         if (request.name in unavailable) {
             throw RelatedPartyScreeningUnavailableException(IllegalStateException("stubbed outage"))
         }

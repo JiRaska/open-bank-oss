@@ -1117,6 +1117,59 @@ class BusinessOnboardingServiceTest {
     // --- findings need an explicit operator disposition ------------------------------------------
 
     @Test
+    fun `a finding can be decided only while the case is under review`(): Unit = runBlocking {
+        screeningOn()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        readyToSign(id, initiator)
+        val before = service.get(id)
+        assertThat(before.status).isEqualTo(CaseStatus.READY_TO_SIGN)
+        val key = before.screening!!.openFindings.single().key
+
+        // Cleared here, the last signature would approve the case with no review step at all.
+        assertThatThrownBy {
+            runBlocking {
+                service.disposeFinding(
+                    DisposeFindingCommand(id, key, FindingDisposition.CLEARED_FALSE_POSITIVE, "different date of birth", "operator-anna"),
+                )
+            }
+        }.isInstanceOf(RuntimeException::class.java)
+        assertThat(service.get(id).screening!!.openFindings).hasSize(1)
+    }
+
+    @Test
+    fun `a case that ever had a finding is never approved by the last signature alone`(): Unit = runBlocking {
+        screeningOn()
+        val mandates = mutableListOf<MandateRequest>()
+        uboOwners += owner("Karel Vlastník", corporate = false)
+        screeningPort.answers["Karel Vlastník"] =
+            RelatedPartyScreeningResult(ScreeningVerdict.POTENTIAL_HIT, false, "VLASTNIK Karel")
+        val id = soleCaseReadyToSign()
+        coEvery { parties.grantMandate(capture(mandates)) } returns Unit
+        val ceremony = readyToSign(id, initiator)
+        // However the finding came to be cleared, the case has had one.
+        val case = service.get(id)
+        val key = case.screening!!.openFindings.single().key
+        store[id] = case.copy(
+            screening = case.screening!!.disposed(
+                key,
+                FindingDisposition.CLEARED_FALSE_POSITIVE,
+                "operator-anna",
+                "different date of birth",
+                now,
+            ),
+        )
+
+        val signed = signs(id, initiator, ceremony)
+        assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
+        assertThat(mandates).isEmpty()
+        // The operator review path is the one way through.
+        assertThat(service.resolveReview(ResolveReviewCommand(id, 1, "operator-bob")).status).isEqualTo(CaseStatus.SIGNED)
+    }
+
+    @Test
     fun `a confirmed sanctions finding leaves only rejection`(): Unit = runBlocking {
         screeningOn()
         val mandates = mutableListOf<MandateRequest>()

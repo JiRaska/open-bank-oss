@@ -14,10 +14,12 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
+import kotlinx.coroutines.CompletableDeferred
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
@@ -27,6 +29,9 @@ import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * The related-party screening gate, driven over real HTTP against a real Postgres (#15723).
@@ -311,6 +316,57 @@ class KybRelatedPartyScreeningIT {
             body("screening.subjects.find { it.kind == 'ENTITY' }.pep", equalTo(false))
         }
         assertThat(stored(caseId).screeningJson).doesNotContain("HIT")
+        assertThat(mandatesFor(caseId)).isEmpty()
+    }
+
+    /**
+     * Two interleaved writers on one case row. The completing signature has READ the case and is
+     * held inside its screening rebuild; an operator rejects the case meanwhile; the signature is
+     * then released. Whoever wrote second must not silently win: a rejected case must stay
+     * rejected, and the late writer must be told (409), not answered 200.
+     */
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API", "ROLE_KYC"])
+    fun `a stale write cannot overwrite a compliance decision made in between`() {
+        val name = "Olga Souběžná"
+        screening.unavailable += name
+        val (caseId, ceremonyId) = readyToSign("71000046", name)
+        screening.unavailable -= name
+        val entered = CountDownLatch(1)
+        val release = CompletableDeferred<Unit>()
+        screening.entered[name] = entered
+        screening.held[name] = release
+
+        val port = RestAssured.port
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val lateSignature = pool.submit<Int> {
+                RestAssured.given().port(port).contentType("application/json")
+                    .header(PARTY, initiator.toString())
+                    .body("""{"signatureRef":"$ceremonyId"}""")
+                    .post("/api/v1/kyb/cases/$caseId/sign").statusCode
+            }
+            assertThat(entered.await(20, TimeUnit.SECONDS)).describedAs("the signature reached its rebuild").isTrue()
+
+            Given {
+                contentType("application/json")
+                body("""{"reason":"confirmed sanctions match on the entity"}""")
+            } When { post("/api/v1/kyb/cases/$caseId/reject") } Then {
+                statusCode(200)
+                body("status", equalTo("REJECTED"))
+            }
+
+            release.complete(Unit)
+            assertThat(lateSignature.get(30, TimeUnit.SECONDS)).isEqualTo(409)
+        } finally {
+            release.complete(Unit)
+            screening.held.remove(name)
+            screening.entered.remove(name)
+            pool.shutdownNow()
+        }
+        val row = stored(caseId)
+        assertThat(row.status).describedAs("the operator's rejection must survive the late write").isEqualTo("REJECTED")
+        assertThat(row.events).doesNotContain("BUSINESS_AGREEMENT_SIGNED")
         assertThat(mandatesFor(caseId)).isEmpty()
     }
 
