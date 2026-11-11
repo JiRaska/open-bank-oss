@@ -4,6 +4,53 @@
   },
   "interactions": [
     {
+      "description": "PUT an attested joint statutory rule for the verified roster",
+      "providerStates": [
+        {
+          "name": "a company has two active linked KYB statutory mandates"
+        }
+      ],
+      "request": {
+        "body": {
+          "attestationId": "d51d07bf-1cd4-4098-85f1-628a0d3da622",
+          "attestedAt": "2026-08-01T00:00:00Z",
+          "caseId": "1ffb1a70-12e4-4409-8333-bb48acbd6e48",
+          "mode": "JOINT_ALL",
+          "representatives": [
+            {
+              "mandateEvidenceHash": "98abebbfb15471570558ef134627fdfebfd4c02ceeb0d52ddd2f2b80a63398d4",
+              "officeSlots": [
+                0
+              ],
+              "partyId": "6eb9e3d4-94d7-4224-9ce3-f6388d992a94"
+            },
+            {
+              "mandateEvidenceHash": "0f37416789ee9fb2e9dbae1206522517961991c9941bca125a60bd8c32477832",
+              "officeSlots": [
+                1
+              ],
+              "partyId": "1acb27bc-6d9c-4974-abf5-9249d4883d86"
+            }
+          ],
+          "requiredOffices": [
+            "chair",
+            "member"
+          ],
+          "requiredSignatures": 2,
+          "ruleTextHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "PUT",
+        "path": "/api/v1/parties/171f78d9-a747-4730-b804-535f93d93efa/statutory-representation"
+      },
+      "response": {
+        "status": 200
+      }
+    },
+    {
       "description": "POST a registry mandate preserving a three-signature statutory quorum",
       "providerStates": [
         {

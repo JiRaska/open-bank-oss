@@ -45,6 +45,9 @@ class BusinessOnboardingCaseEntity : PanacheEntity() {
     @Column(name = "required_signatures")
     var requiredSignatures: Int? = null
 
+    @Column(name = "representation_attestation_id")
+    var representationAttestationId: UUID? = null
+
     @Column(name = "signers_json", nullable = false, columnDefinition = "TEXT")
     var signersJson: String = "[]"
 
@@ -124,6 +127,9 @@ class RepresentationAttestationEntity : PanacheEntity() {
 
     @Column(name = "confirmed_signers", nullable = false)
     var confirmedSigners: Int = 0
+
+    @Column(name = "confirmed_mode")
+    var confirmedMode: String? = null
 
     @Column(name = "confirmed_roles", nullable = false, columnDefinition = "TEXT")
     lateinit var confirmedRoles: String

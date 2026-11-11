@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "8f9fc0cb6eca597a"
+    openbank.tech/policy-checksum: "f499a5b85cd24abb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -960,6 +960,20 @@ data:
     	input.principal.type == "HUMAN"
     	machine_named("service-account-openbank-delegation")
     	input.action in {"party.mandate.read"}
+    }
+
+    allowed_reasons contains "kyb-publishes-statutory-representation" if {
+        input.principal.type == "HUMAN"
+        input.principal.service_account == true
+        machine_named("service-account-openbank-kyb")
+        input.action == "party.statutory-representation.publish"
+    }
+
+    allowed_reasons contains "delegation-inspects-statutory-representation" if {
+        input.principal.type == "HUMAN"
+        input.principal.service_account == true
+        machine_named("service-account-openbank-delegation")
+        input.action == "party.statutory-representation.inspect"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0

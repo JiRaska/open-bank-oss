@@ -55,10 +55,23 @@ data class RepresentationAttestation(
     /** Set when a later attestation supersedes this one; a superseded row is never used for a decision. */
     val supersededAt: Instant? = null,
     val note: String? = null,
+    /** A mode explicitly confirmed by the reviewer. Legacy count-only attestations have none. */
+    val confirmedMode: RepresentationMode? = null,
 ) {
     init {
         require(confirmedSigners >= 1) { "at least one signature is required" }
         require(attestedBy.isNotBlank()) { "an attestation must name who made it" }
+        when (confirmedMode) {
+            null -> Unit
+            RepresentationMode.SOLE -> require(confirmedSigners == 1) { "sole mode requires one signature" }
+            RepresentationMode.JOINT_N,
+            RepresentationMode.JOINT_ALL,
+            -> require(confirmedSigners >= 2) { "joint mode requires at least two signatures" }
+            RepresentationMode.UNKNOWN -> throw IllegalArgumentException("an unknown mode cannot be confirmed")
+        }
+        require(confirmedMode == null || confirmedRoles.size <= confirmedSigners) {
+            "confirmed offices exceed the signature threshold"
+        }
     }
 
     val isActive: Boolean get() = supersededAt == null

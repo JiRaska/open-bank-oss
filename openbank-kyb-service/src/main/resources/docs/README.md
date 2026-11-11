@@ -29,3 +29,13 @@ listener posture before applying the TLS certificate and port configuration.
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Statutory representation publication
+
+KYB staff can publish a completed case's joint representation evidence when its human
+attestation explicitly confirms a joint mode and remains current. The Active cases view
+submits the ID of the confirmation shown to the reviewer. The verified humans must have
+signed the case's own agreement ceremony. A fixed quorum needs enough verified signers for
+the attested count and offices. Joint-all requires all register representatives.
+Delegation-service can verify that the exact source attestation remains current, including
+before KYB publishes its replacement to Party.

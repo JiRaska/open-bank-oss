@@ -19,7 +19,7 @@ info:
   # 1.27.0 -> 1.28.0: additive only — GET /api/v1/reporting/parties/{id}/tax-facts (ADR-0340 B1,
   # the CRS/FATCA TIN boundary: the derived statuses and residencies WITH TINs, readable by
   # service-account-openbank-tax-reporting alone, audit-logged without TINs).
-  version: 1.29.0
+  version: 1.30.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -844,6 +844,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
 
+  /api/v1/parties/{id}/statutory-representation:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    put:
+      summary: Record an immutable verified statutory representation revision
+      description: Only the verified KYB service identity may publish. Repeating the same attestation and evidence returns the existing revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/StatutoryRepresentationEvidence'}
+      responses:
+        '200':
+          description: Stored statutory representation snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryRepresentationRule'}
+        '400': {description: Evidence is invalid, incomplete, or conflicts with the existing attestation revision}
+        '403': {description: Caller is outside the statutory representation publishing boundary}
+    get:
+      summary: Get the latest published statutory representation revision
+      description: Only the verified delegation service identity may read. A consumer verifies current attestation status with KYB before using this snapshot as authority.
+      responses:
+        '200':
+          description: Latest effective snapshot with its recorded mandates still active
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatutoryRepresentationRule'}
+        '403': {description: Caller is outside the statutory representation reading boundary}
+        '404':
+          description: The entity has no usable published snapshot
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
 components:
   parameters:
     partyId:
@@ -863,6 +903,47 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    StatutoryRepresentationEvidence:
+      type: object
+      required: [caseId, attestationId, ruleTextHash, attestedAt, mode, requiredSignatures, requiredOffices, representatives]
+      properties:
+        caseId: {type: string, format: uuid}
+        attestationId: {type: string, format: uuid}
+        ruleTextHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+        attestedAt: {type: string, format: date-time}
+        mode: {type: string, enum: [JOINT_N, JOINT_ALL]}
+        requiredSignatures: {type: integer, minimum: 2, maximum: 64}
+        requiredOffices:
+          type: array
+          maxItems: 64
+          description: Ordered office slots from the human-confirmed rule.
+          items: {type: string, minLength: 1}
+        representatives:
+          type: array
+          minItems: 2
+          maxItems: 64
+          items:
+            type: object
+            required: [partyId, officeSlots, mandateEvidenceHash]
+            properties:
+              partyId: {type: string, format: uuid}
+              mandateEvidenceHash: {type: string, pattern: '^[0-9a-f]{64}$'}
+              officeSlots:
+                type: array
+                uniqueItems: true
+                items: {type: integer, minimum: 0, maximum: 63}
+    StatutoryRepresentationRule:
+      type: object
+      required: [principalPartyId, evidence, mandatesByRepresentative, effectiveFrom, validTo]
+      properties:
+        principalPartyId: {type: string, format: uuid}
+        evidence: {$ref: '#/components/schemas/StatutoryRepresentationEvidence'}
+        mandatesByRepresentative:
+          type: object
+          description: Map from each eligible human party ID to the verified mandate ID.
+          additionalProperties: {type: string, format: uuid}
+        effectiveFrom: {type: string, format: date-time}
+        validTo: {type: [string, 'null'], format: date-time}
     PartyDetail:
       type: object
       description: A party record. Only the AML-derived facts are enumerated here; other fields are unchanged.

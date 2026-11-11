@@ -95,6 +95,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         entityPartyActive = case.entityPartyActive
         requiredSignatures = case.requiredSignatures
         requiredSignerRoles = KybJson.writeStrings(case.requiredSignerRoles)
+        representationAttestationId = case.representationAttestationId
         signersJson = KybJson.writeSigners(case.signers)
         invitationTokens =
             case.signers.mapNotNull { it.invitationToken }.takeIf { it.isNotEmpty() }?.joinToString("|", "|", "|")
@@ -116,6 +117,7 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         requiredSignatures = requiredSignatures,
         requiredSignerRoles = KybJson.readStrings(requiredSignerRoles),
         signers = KybJson.readSigners(signersJson),
+        representationAttestationId = representationAttestationId,
         reviewReason = reviewReason,
         entityPartyActive = entityPartyActive,
         questionnaire = questionnaireJson?.let { KybJson.readQuestionnaire(it) },

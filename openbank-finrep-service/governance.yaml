@@ -3,8 +3,8 @@
 # derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
 # openbank-libs/governance/governance.schema.json
 dataDomain: reporting
-primaryDatastore: none
-ownsNoDatabase: true
+primaryDatastore: PostgreSQL
+databaseName: openbank_finrep
 dataLineageRole: consumer
 dataClassification: confidential
 retentionPolicy: 10 years
