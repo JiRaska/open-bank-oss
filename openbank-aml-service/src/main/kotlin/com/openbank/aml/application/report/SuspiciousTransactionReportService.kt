@@ -11,6 +11,7 @@ import com.openbank.aml.domain.report.ReportState
 import com.openbank.aml.domain.report.ReportedMovement
 import com.openbank.aml.domain.report.SuspiciousTransactionReport
 import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
@@ -44,7 +45,7 @@ class SuspiciousTransactionReportService(
         drafter: String,
     ): SuspiciousTransactionReport {
         val report = SuspiciousTransactionReport.draft(
-            UUID.randomUUID(),
+            Ids.newId(),
             partyId,
             narrative,
             caseIds,
@@ -105,7 +106,7 @@ class SuspiciousTransactionReportService(
     }
 
     private fun event(report: SuspiciousTransactionReport) = OutboxMessage(
-        eventId = UUID.randomUUID(),
+        eventId = Ids.newId(),
         aggregateId = report.id,
         eventType = EVENT_STATE_CHANGED,
         payload = objectMapper.writeValueAsString(

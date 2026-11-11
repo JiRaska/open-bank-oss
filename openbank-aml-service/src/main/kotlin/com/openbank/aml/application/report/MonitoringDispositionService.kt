@@ -12,6 +12,7 @@ import com.openbank.aml.domain.report.CaseDisposition
 import com.openbank.aml.domain.report.DispositionProposal
 import com.openbank.aml.domain.report.DispositionRequest
 import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
@@ -62,7 +63,7 @@ class MonitoringDispositionService(
         }
         if (refusal != null) throw DispositionConflictException(refusal)
         val proposal: DispositionProposal = Proposal(
-            id = UUID.randomUUID().toString(),
+            id = Ids.newId().toString(),
             action = DispositionRequest(
                 caseId,
                 disposition,
