@@ -49,6 +49,8 @@ data class CreateDomesticPaymentCommand(
     val initiatorScope: InitiatorScope = InitiatorScope.General,
     /** Opaque customer binding asserted by the verified customer-edge workload. */
     val customerSubmissionScope: String? = null,
+    /** Original business submission digest supplied only when the Edge releases a mode-bound approval. */
+    val originalSubmissionKeyDigest: String? = null,
 ) {
     init {
         require((delegationId == null) == (reservationId == null)) {

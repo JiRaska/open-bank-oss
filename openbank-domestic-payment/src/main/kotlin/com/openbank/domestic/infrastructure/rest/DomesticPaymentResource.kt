@@ -82,6 +82,7 @@ class DomesticPaymentResource(
         request: CreateDomesticPaymentRequest,
         @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         @Context requestContext: ContainerRequestContext,
+        @HeaderParam("X-OpenBank-Original-Submission-Key-Digest") originalSubmissionKeyDigest: String? = null,
     ): Response {
         // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
         // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
@@ -91,6 +92,10 @@ class DomesticPaymentResource(
         val customerScope = request.customerSubmissionScope?.let {
             requireCustomerEdge()
             validatedCustomerScope(it)
+        }
+        val originalDigest = originalSubmissionKeyDigest?.also {
+            requireCustomerEdge()
+            require(CUSTOMER_SUBMISSION_SCOPE.matches(it)) { "Invalid original submission digest" }
         }
 
         // SyntheticTaintRequestFilter accepts this flag only after authenticating a configured
@@ -105,6 +110,7 @@ class DomesticPaymentResource(
             ).copy(
                 initiatorScope = initiatorScopes.of(identity),
                 customerSubmissionScope = customerScope,
+                originalSubmissionKeyDigest = originalDigest,
             ),
         )
         val responseBody = result.payment.toResponse()

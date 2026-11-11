@@ -11,7 +11,7 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.14.0
+  version: 1.15.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -38,6 +38,8 @@ paths:
         X-Idempotency-Replayed=true. Reusing the key for a different normalized payment command,
         actor scope, delegation or reservation is refused with 409 IDEMPOTENCY_KEY_REUSED. A
         pre-upgrade row without a durable request fingerprint also fails closed with that response.
+        For a mode-bound business approval release, verified customer-edge supplies the original-key digest.
+        The digest binds that release to the same namespace as prior direct payments and is required on exact replay.
         A ROLE_API machine may create only as a scoped initiator declared in rules.yaml
         scoped_payment_initiators (ADR-0335 D5, e.g. pension-service), and only from its one
         configured debtor account; anything else is 403 before the key is claimed.
@@ -48,6 +50,13 @@ paths:
           required: true
           schema:
             type: string
+        - name: X-OpenBank-Original-Submission-Key-Digest
+          in: header
+          required: false
+          description: Original business submission digest for approval releases by verified customer-edge only.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
       requestBody:
         required: true
         content:
@@ -68,7 +77,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/DomesticPaymentResponse'
         '409':
-          description: Idempotency-Key is already bound to a different or unverifiable legacy request
+          description: Rail or original submission key is already bound to a different or unverifiable request
           content:
             application/problem+json:
               schema:

@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.persistence.repository
 import com.openbank.domestic.application.port.out.DelegatedPaymentSaveOutcome
 import com.openbank.domestic.application.port.out.DomesticBookingWrites
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.application.usecase.DomesticPaymentIdempotencyConflictException
 import com.openbank.domestic.domain.model.DelegatedSpendBindingState
 import com.openbank.domestic.domain.model.DelegatedSpendReservationSnapshot
 import com.openbank.domestic.domain.model.DelegatedSpendReservationState
@@ -22,13 +23,14 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
+import java.sql.SQLException
 import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
 // Reactive transaction failures can be wrapped by Mutiny/Hibernate in different RuntimeException
 // subtypes. Both catch sites inspect the complete cause chain and immediately rethrow anything
-// other than the one named idempotency constraint.
+// other than either of the named idempotency constraints.
 @Suppress("TooManyFunctions", "TooGenericExceptionCaught")
 class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymentOutboxRepositoryImpl) :
     DomesticPaymentRepository,
@@ -41,12 +43,7 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
                 .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
         }.awaitSuspending()
     } catch (exception: RuntimeException) {
-        if (!exception.isIdempotencyKeyViolation()) throw exception
-
-        // A concurrent creator committed this key while our transaction was in flight. Postgres
-        // has already rolled our whole transaction back, including its outbox row; return the
-        // winner so the use case can compare its durable request fingerprint before replaying it.
-        findByIdempotencyKey(payment.idempotencyKey) ?: throw exception
+        resolveIdempotencyRace(payment.idempotencyKey, exception)
     }
 
     override suspend fun saveDelegated(
@@ -112,9 +109,14 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
             }
         }.awaitSuspending()
     } catch (exception: RuntimeException) {
-        if (!exception.isIdempotencyKeyViolation()) throw exception
-        val winner = findByIdempotencyKey(payment.idempotencyKey) ?: throw exception
-        DelegatedPaymentSaveOutcome.Replayed(winner)
+        DelegatedPaymentSaveOutcome.Replayed(resolveIdempotencyRace(payment.idempotencyKey, exception))
+    }
+
+    private suspend fun resolveIdempotencyRace(idempotencyKey: String, failure: RuntimeException): DomesticPayment {
+        if (!failure.isIdempotencyKeyViolation()) throw failure
+        // The payment, reservation update and outbox have already rolled back. Only a winner with
+        // the caller's own rail key can replay. A different rail key yields the generic conflict.
+        return findByIdempotencyKey(idempotencyKey) ?: throw DomesticPaymentIdempotencyConflictException()
     }
 
     override suspend fun findById(paymentId: UUID): DomesticPayment? =
@@ -249,9 +251,12 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     private fun Throwable.isIdempotencyKeyViolation(): Boolean =
         generateSequence(this) { cause -> cause.cause.takeIf { it !== cause } }.any { cause ->
-            val hibernateConstraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
-            hibernateConstraint == IDEMPOTENCY_KEY_CONSTRAINT ||
-                cause.message?.contains(IDEMPOTENCY_KEY_CONSTRAINT) == true
+            val constraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
+            if (constraint != null && constraint in IDEMPOTENCY_CONSTRAINTS) return@any true
+            val sql = cause as? SQLException ?: return@any false
+            val message = sql.message.orEmpty()
+            val duplicateKey = sql.sqlState == UNIQUE_VIOLATION || message.contains("($UNIQUE_VIOLATION)")
+            duplicateKey && IDEMPOTENCY_CONSTRAINTS.any { message.contains("\"$it\"") }
         }
 
     private fun DelegatedSpendBindingEntity.mismatchWith(payment: DomesticPayment, debitOwnerPartyId: UUID): String? =
@@ -282,6 +287,10 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
         }
 
     private companion object {
-        const val IDEMPOTENCY_KEY_CONSTRAINT = "domestic_payments_idempotency_key_key"
+        const val UNIQUE_VIOLATION = "23505"
+        val IDEMPOTENCY_CONSTRAINTS = setOf(
+            "domestic_payments_idempotency_key_key",
+            "uq_domestic_payment_original_submission_key",
+        )
     }
 }
