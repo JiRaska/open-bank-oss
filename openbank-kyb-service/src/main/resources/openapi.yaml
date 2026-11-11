@@ -484,9 +484,12 @@ paths:
         flag named in `reviewReason`; activation then waits for the reviewer. Where related-party
         screening is switched on, the LAST required signature is refused with 503 SCREENING_PENDING
         (and not recorded) until the entity, every listed representative and every reportable
-        beneficial owner has a screening answer; a sanctions hit, a potential hit or a PEP match on
-        any of them raises one neutral review flag, with the detail in the operator-only
-        `Case.screening`.
+        beneficial owner and every person named in the declarations has a screening answer and the
+        beneficial-owner lookup is available. The subject list is rebuilt from the case's current
+        parties on every attempt. A sanctions hit, a potential hit or a PEP match moves the case to
+        MANUAL_REVIEW and adds nothing to `reviewReason`; the finding is in the operator-only
+        `Case.screening`. On a customer response an AML review reads "AML risk review before
+        activation" whatever raised it; the flags are in the operator's `reviewReason` only.
       operationId: signCase
       parameters:
         - $ref: '#/components/parameters/caseId'
@@ -1170,6 +1173,9 @@ components:
             $ref: '#/components/schemas/Signer'
         reviewReason:
           type: [string, 'null']
+          description: >-
+            Why the case is under review. On a customer response an AML review carries no flags and
+            no cause; an operator response carries the flags the customer's own answers raised.
         questionnaire:
           oneOf:
             - $ref: '#/components/schemas/Questionnaire'
@@ -1201,7 +1207,13 @@ components:
       properties:
         complete:
           type: boolean
-          description: Every subject has an answer. False while any subject is PENDING.
+          description: >-
+            Every subject has an answer and the beneficial owners were established. False while any
+            subject is PENDING, and while `ownerSource` is UNAVAILABLE.
+        ownerSource:
+          type: [string, 'null']
+          enum: [REGISTER, SELF_DECLARATION, UNAVAILABLE, null]
+          description: Where the beneficial owners among the subjects came from when the list was last built.
         subjects:
           type: array
           items:
@@ -1212,7 +1224,7 @@ components:
       properties:
         kind:
           type: string
-          enum: [ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER]
+          enum: [ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER, DECLARED_PERSON]
         name:
           type: string
         organisation:

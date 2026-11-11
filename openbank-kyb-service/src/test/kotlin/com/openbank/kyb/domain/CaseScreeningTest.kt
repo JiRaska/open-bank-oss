@@ -17,6 +17,7 @@ import com.openbank.kyb.domain.model.RepresentationRule
 import com.openbank.kyb.domain.model.Representative
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.UboSource
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -85,47 +86,61 @@ class CaseScreeningTest {
     }
 
     @Test
-    fun `nothing screened is not complete, and neither is anything still pending`() {
+    fun `complete needs an answer for everyone AND an ownership lookup that was actually made`() {
         val subjects = CaseScreening.subjectsOf(
             extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
             emptyList(),
         )
-        assertThat(CaseScreening(emptyList()).complete).isFalse()
-        assertThat(CaseScreening(subjects).complete).isFalse()
+        val clear = subjects.map { it.copy(sanctions = ScreeningVerdict.CLEAR) }
+        assertThat(CaseScreening(emptyList(), UboSource.REGISTER).complete).isFalse()
+        assertThat(CaseScreening(subjects, UboSource.REGISTER).complete).isFalse()
         val oneAnswered = subjects.mapIndexed { i, s -> if (i == 0) s.copy(sanctions = ScreeningVerdict.CLEAR) else s }
-        assertThat(CaseScreening(oneAnswered).complete).isFalse()
-        assertThat(CaseScreening(subjects.map { it.copy(sanctions = ScreeningVerdict.CLEAR) }).complete).isTrue()
+        assertThat(CaseScreening(oneAnswered, UboSource.REGISTER).complete).isFalse()
+        assertThat(CaseScreening(clear, UboSource.REGISTER).complete).isTrue()
+        assertThat(CaseScreening(clear, UboSource.SELF_DECLARATION).complete).isTrue()
+        // Everyone on the list is clear, but nobody could say who the owners are: not complete.
+        assertThat(CaseScreening(clear, UboSource.UNAVAILABLE).complete).isFalse()
+        assertThat(CaseScreening(clear, null).complete).isFalse()
     }
 
     @Test
-    fun `a rebuilt subject list keeps the answers already obtained and drops people no longer on the case`() {
+    fun `a rebuilt subject list keeps the answers already obtained, adds newcomers as pending, drops leavers`() {
         val before = CaseScreening(
             CaseScreening.subjectsOf(
                 extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
                 listOf(owner("Karel Vlastník")),
             ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) },
+            UboSource.REGISTER,
         )
+        assertThat(before.complete).isTrue()
         val fresh = CaseScreening.subjectsOf(
             extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
             listOf(owner("Nový Majitel")),
+            declaredPersons = listOf("Jana Nováková", "Tichý Společník"),
         )
-        val merged = before.mergedInto(fresh)
-        assertThat(merged.subjects.map { it.name }).containsExactly("Příklad s.r.o.", "Jana Nováková", "Nový Majitel")
-        assertThat(merged.subjects.map { it.sanctions })
-            .containsExactly(ScreeningVerdict.CLEAR, ScreeningVerdict.CLEAR, ScreeningVerdict.PENDING)
+        val rebuilt = before.rebuilt(fresh, UboSource.REGISTER)
+        assertThat(rebuilt.subjects.map { it.name })
+            .containsExactly("Příklad s.r.o.", "Jana Nováková", "Nový Majitel", "Tichý Společník")
+        assertThat(rebuilt.subjects.map { it.sanctions }).containsExactly(
+            ScreeningVerdict.CLEAR,
+            ScreeningVerdict.CLEAR,
+            ScreeningVerdict.PENDING,
+            ScreeningVerdict.PENDING,
+        )
+        assertThat(rebuilt.subjects.last().kind).isEqualTo(ScreeningSubjectKind.DECLARED_PERSON)
+        assertThat(rebuilt.complete).isFalse()
     }
 
     @Test
-    fun `the review flag is one neutral sentence for a hit and for a PEP, and absent when everyone is clear`() {
+    fun `a hit and a PEP both require review, and everyone clear does not`() {
         val subjects = CaseScreening.subjectsOf(
             extract("Příklad s.r.o.", LegalFormClass.LIMITED_COMPANY, listOf("Jana Nováková")),
             emptyList(),
         ).map { it.copy(sanctions = ScreeningVerdict.CLEAR) }
-        assertThat(CaseScreening(subjects).reviewFlags()).isEmpty()
+        assertThat(CaseScreening(subjects).requiresReview).isFalse()
         val hit = subjects.map { if (it.kind == ScreeningSubjectKind.REPRESENTATIVE) it.copy(sanctions = ScreeningVerdict.HIT) else it }
         val pep = subjects.map { if (it.kind == ScreeningSubjectKind.REPRESENTATIVE) it.copy(pep = true) else it }
-        assertThat(CaseScreening(hit).reviewFlags()).containsExactly(CaseScreening.REVIEW_FLAG)
-        assertThat(CaseScreening(pep).reviewFlags()).containsExactly(CaseScreening.REVIEW_FLAG)
-        assertThat(CaseScreening.REVIEW_FLAG).doesNotContain("Nováková", "sanction", "PEP")
+        assertThat(CaseScreening(hit).requiresReview).isTrue()
+        assertThat(CaseScreening(pep).requiresReview).isTrue()
     }
 }

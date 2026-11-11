@@ -343,7 +343,8 @@ data class CaseResponse(
             signedCount = c.signedCount,
             extract = c.extract?.let { ExtractResponse.from(it) },
             signers = c.signers.map { SignerResponse.from(it, revealToken = viewerPartyId == c.initiatorPartyId) },
-            reviewReason = c.reviewReason,
+            // The operator reads the flags; the applicant reads wording that cannot tell why.
+            reviewReason = if (viewerPartyId == null) c.reviewReason else c.applicantReviewReason,
             questionnaire = c.questionnaire,
             declarations = c.declarations?.let { DeclarationsResponse.from(it) },
             agreement = c.agreement?.let { AgreementSummary.from(it) },
@@ -367,10 +368,16 @@ data class ScreeningSubjectResponse(
     val screenedAt: Instant?,
 )
 
-data class ScreeningResponse(val complete: Boolean, val subjects: List<ScreeningSubjectResponse>) {
+data class ScreeningResponse(
+    val complete: Boolean,
+    /** Where the beneficial owners came from: REGISTER | SELF_DECLARATION | UNAVAILABLE, null if never built. */
+    val ownerSource: String?,
+    val subjects: List<ScreeningSubjectResponse>,
+) {
     companion object {
         fun from(s: CaseScreening) = ScreeningResponse(
             complete = s.complete,
+            ownerSource = s.ownerSource?.name,
             subjects = s.subjects.map {
                 ScreeningSubjectResponse(
                     kind = it.kind.name,

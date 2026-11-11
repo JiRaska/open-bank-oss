@@ -479,16 +479,17 @@ data class BusinessOnboardingCase(
                 status = CaseStatus.MANUAL_REVIEW,
                 reviewReason = "signatures collected do not cover the offices the rule names: " +
                     "${shortfall.joinToString(", ")}. Resolve by inviting someone who holds them, " +
-                    "or by accepting the case with those offices removed." +
-                    screening?.reviewFlags().orEmpty().joinToString("") { " Also: $it." },
+                    "or by accepting the case with those offices removed.",
                 updatedAt = at,
             )
         }
         val flags = next.riskFlags(highRiskCountries)
-        if (flags.isNotEmpty()) {
+        // A screening finding sends the case to the same review and adds NOTHING to the reason:
+        // what a list said about a person never appears where the applicant can read it.
+        if (flags.isNotEmpty() || next.screening?.requiresReview == true) {
             return next.copy(
                 status = CaseStatus.MANUAL_REVIEW,
-                reviewReason = "AML risk review before activation: ${flags.joinToString("; ")}",
+                reviewReason = if (flags.isEmpty()) AML_REVIEW else "$AML_REVIEW: ${flags.joinToString("; ")}",
                 updatedAt = at,
             )
         }
@@ -500,7 +501,16 @@ data class BusinessOnboardingCase(
         declarations,
         identifier.country ?: extract?.registeredAddress?.countryCode,
         highRiskCountries,
-    ) + screening?.reviewFlags().orEmpty()
+    )
+
+    /**
+     * The review reason as the APPLICANT and every event consumer may read it. An AML review reads
+     * the same whatever raised it — the customer's own answers, a list match, or both — so its
+     * wording cannot tell a screened-out applicant from anyone else. Operators read [reviewReason]
+     * and [screening].
+     */
+    val applicantReviewReason: String?
+        get() = reviewReason?.let { if (it.startsWith(AML_REVIEW)) AML_REVIEW else it }
 
     /** The related-party screening as it stands now — answers obtained, and subjects still pending. */
     fun screeningRecorded(screening: CaseScreening, at: Instant): BusinessOnboardingCase =
@@ -718,6 +728,8 @@ data class BusinessOnboardingCase(
     }
 
     companion object {
+        const val AML_REVIEW = "AML risk review before activation"
+
         /**
          * The feminine spellings the register uses, mapped to the masculine stem — applied to both
          * the operator's office and the register's role, so `předsedkyně představenstva` satisfies

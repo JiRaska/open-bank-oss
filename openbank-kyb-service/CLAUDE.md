@@ -74,11 +74,18 @@ is a bug — that is the drift ADR-0212 already paid for once.
 - **`reviewReason` is read by the CUSTOMER, and it is on the review event.** `CaseResponse` returns it
   to the initiator and every signer, and `BUSINESS_ONBOARDING_REVIEW_REQUIRED` publishes it. The
   flags written there so far all restate what the customer told us, so naming them is harmless. A
-  screening finding is not that: "X matched a sanctions list" in that field is tipping off. The
-  related-party screening therefore raises ONE neutral flag (`CaseScreening.REVIEW_FLAG`) and keeps
-  who-matched-what in `Case.screening`, which `CaseResponse.from` fills only when `viewerPartyId` is
-  null — the operator routes. Anything else you derive from a list, a score or another customer's
-  data belongs behind the same door.
+  screening finding is not that: "X matched a sanctions list" in that field is tipping off, and so
+  is a neutral-sounding "screening requires review" — it still names the cause. A finding therefore
+  adds NOTHING to the reason, and the applicant view and the event carry
+  `BusinessOnboardingCase.applicantReviewReason`: an AML review reads the same whatever raised it.
+  Who matched what is in `Case.screening`, which `CaseResponse.from` fills only when
+  `viewerPartyId` is null — the operator routes. Anything else you derive from a list, a score or
+  another customer's data belongs behind the same door.
+- **A screening is complete for the people on the case NOW, or it is not complete.**
+  `RelatedPartyScreeningService.screened` rebuilds the subject list (entity, representatives,
+  register owners, declared persons) before every approval and carries answers over by subject; a
+  stored "complete" from an earlier owner list is never trusted. An ownership lookup that answers
+  `UNAVAILABLE` makes the screening incomplete by itself, because the list may be short.
 - **`openbank.kyb.screening.enabled` ships OFF, and "off" stores nothing.** It needs a route to
   sanctions-service that the deployment has to supply in the same change; switched on without one,
   every case stops at its last signature with `503 SCREENING_PENDING`. Off is not "screened clear":

@@ -21,6 +21,7 @@ import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
 import com.openbank.kyb.domain.model.Signer
+import com.openbank.kyb.domain.model.UboSource
 import java.time.Instant
 import java.time.LocalDate
 
@@ -175,7 +176,7 @@ internal object KybJson {
         val screenedAt: Instant?,
     )
 
-    data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>)
+    data class ScreeningDoc(val subjects: List<ScreeningSubjectDoc>, val ownerSource: String? = null)
 
     fun writeScreening(screening: CaseScreening): String = mapper.writeValueAsString(
         ScreeningDoc(
@@ -191,21 +192,23 @@ internal object KybJson {
                     screenedAt = it.screenedAt,
                 )
             },
+            screening.ownerSource?.name,
         ),
     )
 
-    fun readScreening(json: String): CaseScreening = CaseScreening(
-        mapper.readValue<ScreeningDoc>(json).subjects.map {
-            ScreeningSubject(
-                key = it.key,
-                kind = ScreeningSubjectKind.valueOf(it.kind),
-                name = it.name,
-                organisation = it.organisation,
-                sanctions = ScreeningVerdict.valueOf(it.sanctions),
-                pep = it.pep,
-                matchedName = it.matchedName,
-                screenedAt = it.screenedAt,
-            )
-        },
+    fun readScreening(json: String): CaseScreening {
+        val doc = mapper.readValue<ScreeningDoc>(json)
+        return CaseScreening(doc.subjects.map(::subjectOf), doc.ownerSource?.let(UboSource::valueOf))
+    }
+
+    private fun subjectOf(doc: ScreeningSubjectDoc) = ScreeningSubject(
+        key = doc.key,
+        kind = ScreeningSubjectKind.valueOf(doc.kind),
+        name = doc.name,
+        organisation = doc.organisation,
+        sanctions = ScreeningVerdict.valueOf(doc.sanctions),
+        pep = doc.pep,
+        matchedName = doc.matchedName,
+        screenedAt = doc.screenedAt,
     )
 }

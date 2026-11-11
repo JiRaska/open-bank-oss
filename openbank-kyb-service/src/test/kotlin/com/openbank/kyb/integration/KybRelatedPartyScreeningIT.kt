@@ -20,10 +20,8 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
-import org.hamcrest.Matchers.not
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
@@ -132,6 +130,20 @@ class KybRelatedPartyScreeningIT {
             StoredCase(case[0], case[1], case[2].orEmpty(), case[3], events)
         }
 
+    private fun reviewEventPayload(caseId: String): String =
+        DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
+            c.prepareStatement(
+                "select payload from kyb_outbox where aggregate_id = ? " +
+                    "and event_type = 'BUSINESS_ONBOARDING_REVIEW_REQUIRED' order by id desc limit 1",
+            ).use { st ->
+                st.setString(1, caseId)
+                st.executeQuery().use { rs ->
+                    check(rs.next()) { "no review event for $caseId" }
+                    rs.getString(1)
+                }
+            }
+        }
+
     private data class StoredCase(
         val status: String,
         val signersJson: String,
@@ -156,28 +168,33 @@ class KybRelatedPartyScreeningIT {
         } When { post("/api/v1/kyb/cases/$caseId/sign") } Then {
             statusCode(200)
             body("status", equalTo("MANUAL_REVIEW"))
-            // What the customer is told: that a review is needed. Not who, not what.
-            body("reviewReason", containsString("related-party screening requires review"))
-            body("reviewReason", not(containsString("Prověřený")))
-            body("reviewReason", not(containsString("PROVERENY")))
+            // What the applicant is told: the same words as for any AML review. Not who, not what,
+            // not even that a screen was the cause.
+            body("reviewReason", equalTo("AML risk review before activation"))
             body("screening", nullValue())
         }
         Given { header(PARTY, initiator.toString()) } When { get("/api/v1/kyb/cases/$caseId") } Then {
             statusCode(200)
+            body("reviewReason", equalTo("AML risk review before activation"))
             body("screening", nullValue())
         }
 
         val row = stored(caseId)
         assertThat(row.status).isEqualTo("MANUAL_REVIEW")
         assertThat(row.screeningJson).contains("POTENTIAL_HIT", "Radim Prověřený", "PROVERENY Radim")
-        assertThat(row.reviewReason).doesNotContain("Prověřený", "PROVERENY", "HIT")
+        assertThat(row.reviewReason).isEqualTo("AML risk review before activation")
         assertThat(row.events).contains("BUSINESS_ONBOARDING_REVIEW_REQUIRED").doesNotContain("BUSINESS_AGREEMENT_SIGNED")
+        // The published event says what the applicant is told, and nothing a list found.
+        assertThat(reviewEventPayload(caseId))
+            .contains("\"reviewReason\":\"AML risk review before activation\"")
+            .doesNotContain("Prověřený", "PROVERENY", "HIT", "screening", "sanction")
         assertThat(mandatesFor(caseId)).describedAs("nobody may act for the entity before a human decides").isEmpty()
 
         // The operator's view (no customer header) is where the finding is.
         Given { this } When { get("/api/v1/kyb/cases/$caseId") } Then {
             statusCode(200)
             body("screening.complete", equalTo(true))
+            body("screening.ownerSource", equalTo("SELF_DECLARATION"))
             body("screening.subjects", hasSize<Any>(2))
             body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.sanctions", equalTo("POTENTIAL_HIT"))
             body("screening.subjects.find { it.kind == 'REPRESENTATIVE' }.matchedName", equalTo("PROVERENY Radim"))

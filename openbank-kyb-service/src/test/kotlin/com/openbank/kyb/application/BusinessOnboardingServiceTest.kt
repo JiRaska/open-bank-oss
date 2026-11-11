@@ -35,7 +35,6 @@ import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.application.usecase.RelatedPartyScreeningService
-import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.ScreeningPendingException
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
@@ -317,7 +316,10 @@ class BusinessOnboardingServiceTest {
 
     private suspend fun cleanDeclarations(caseId: UUID) = Declarations(
         uboConfirmed = true,
-        peps = (service.get(caseId).extract!!.representatives.map { it.fullName } + uboOwners.map { it.fullName })
+        peps = (
+            service.get(caseId).extract!!.representatives.map { it.fullName } +
+                uboOwners.filter { !it.corporate }.map { it.fullName }
+            )
             .map { PepEntry(it, false) },
         truthful = true,
     )
@@ -918,9 +920,8 @@ class BusinessOnboardingServiceTest {
             assertThat(signed.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
             assertThat(mandates).describedAs("nobody is authorised for the entity before a human decides").isEmpty()
             assertThat(events.last().eventType).isEqualTo(KybEvents.REVIEW_REQUIRED)
-            // The reason is shown to the customer and published on the event: it must not tip off.
-            assertThat(signed.reviewReason).contains(CaseScreening.REVIEW_FLAG)
-            assertThat(signed.reviewReason).doesNotContain("Vlastník", "VLASTNIK", "HIT", "sanction")
+            // Not even the operator-facing reason says what a list found; that is in `screening`.
+            assertThat(signed.reviewReason).isEqualTo(BusinessOnboardingCase.AML_REVIEW)
             val hit = signed.screening!!.sanctionsHits.single()
             assertThat(hit.name).isEqualTo("Karel Vlastník")
             assertThat(hit.kind).isEqualTo(ScreeningSubjectKind.BENEFICIAL_OWNER)
@@ -1068,6 +1069,23 @@ class BusinessOnboardingServiceTest {
 
         uboSource = UboSource.REGISTER
         assertThat(service.sign(SignCommand(id, initiator, ceremony)).status).isEqualTo(CaseStatus.SIGNED)
+    }
+
+    /** No public ownership register: the people the customer names are the only owners anyone knows. */
+    @Test
+    fun `a self-declared person who is on no register is screened too`(): Unit = runBlocking {
+        screeningOn()
+        uboSource = UboSource.SELF_DECLARATION
+        val id = soleCaseReadyToSign()
+        service.answerQuestionnaire(AnswerQuestionnaireCommand(id, initiator, questionnaire()))
+        val declared = cleanDeclarations(id).let { it.copy(peps = it.peps + PepEntry("Tichý Společník", false)) }
+        service.makeDeclarations(MakeDeclarationsCommand(id, initiator, declared))
+
+        val screening = service.get(id).screening!!
+        assertThat(screening.ownerSource).isEqualTo(UboSource.SELF_DECLARATION)
+        assertThat(screening.subjects.single { it.kind == ScreeningSubjectKind.DECLARED_PERSON }.name)
+            .isEqualTo("Tichý Společník")
+        assertThat(screeningPort.requests.map { it.name }).contains("Tichý Společník")
     }
 
     private fun owner(name: String, corporate: Boolean) = BeneficialOwner(

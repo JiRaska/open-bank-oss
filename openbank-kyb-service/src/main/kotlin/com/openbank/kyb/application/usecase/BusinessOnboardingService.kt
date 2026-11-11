@@ -197,12 +197,12 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         // The people a PEP entry must cover: every natural-person beneficial owner the register
         // reports (a corporate owner is not a person and has no PEP status of its own), plus every
         // listed representative, which the aggregate adds from the extract.
-        val owners = ubo.lookup(case.identifier).reportableOwners
-        val uboNames = owners.filter { !it.corporate }.map { it.fullName }
+        val finding = ubo.lookup(case.identifier)
+        val uboNames = finding.reportableOwners.filter { !it.corporate }.map { it.fullName }
         val made = case.declarationsMade(cmd.declarations, uboNames, knownPersons(case), cmd.callerPartyId, now)
         // The related parties are known from here on, so this is where they are screened. An
         // outage does not fail the customer's step: the subjects stay pending and approval waits.
-        return cases.update(screening.screenRelatedParties(made, owners), null).also(::armTimers)
+        return cases.update(screening.screened(made, finding), null).also(::armTimers)
     }
 
     override suspend fun questionnairePrefill(caseId: UUID, callerPartyId: UUID): QuestionnairePrefill {
@@ -373,7 +373,7 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
      * so an answer obtained on an attempt the aggregate then refuses is not asked for again.
      */
     private suspend fun screenedBeforeApproval(case: BusinessOnboardingCase): BusinessOnboardingCase {
-        val screened = screening.ensureScreened(case)
+        val screened = screening.screened(case)
         return if (screened === case) case else cases.update(screened, null)
     }
 

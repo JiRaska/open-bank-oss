@@ -9,12 +9,12 @@ import com.openbank.kyb.application.port.out.KybMetricsPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningPort
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
-import com.openbank.kyb.domain.model.BeneficialOwner
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseScreening
 import com.openbank.kyb.domain.model.ScreeningSubject
 import com.openbank.kyb.domain.model.ScreeningSubjectKind
 import com.openbank.kyb.domain.model.ScreeningVerdict
+import com.openbank.kyb.domain.model.UboFinding
 import io.quarkus.runtime.Startup
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
@@ -27,7 +27,7 @@ import java.util.Optional
 
 /**
  * Screens the entity and its related parties (every listed representative, every reportable
- * beneficial owner) against the sanctions, terrorist and PEP lists, and records the answer on the
+ * beneficial owner, every person named in the declarations) against the sanctions, terrorist and PEP lists, and records the answer on the
  * case. It never decides anything: the aggregate gates approval on what is recorded here.
  *
  * Three outcomes per subject, kept apart on purpose:
@@ -74,35 +74,37 @@ class RelatedPartyScreeningService {
     }
 
     /**
-     * The related parties are known (the declarations name the beneficial owners): rebuild the
-     * subject list from the register's current answer, keep what was already screened, screen the rest.
+     * Brings the screening up to date with who is on the case NOW, and screens whoever has no
+     * answer. Called when the declarations are made and again before every approval.
+     *
+     * The subject list is REBUILT on every call — the entity, the register's representatives, the
+     * beneficial owners the ownership register reports at this moment, and every person the
+     * customer named in the declarations — and answers are carried over by subject. A screening
+     * that was complete for yesterday's owners is therefore not complete once a new owner
+     * appears: that person arrives PENDING and approval waits for them. When the ownership lookup
+     * itself is unavailable the list cannot be trusted to be whole, which [CaseScreening.complete]
+     * refuses on its own.
+     *
+     * Returns the SAME instance when nothing changed. An unreachable sanctions-service never
+     * fails this call; it leaves subjects PENDING, and the aggregate refuses the approval.
      */
-    suspend fun screenRelatedParties(case: BusinessOnboardingCase, owners: List<BeneficialOwner>): BusinessOnboardingCase {
+    suspend fun screened(case: BusinessOnboardingCase, known: UboFinding? = null): BusinessOnboardingCase {
         if (!required) return case
         val extract = case.extract ?: return case
-        val fresh = CaseScreening.subjectsOf(extract, owners)
-        return screenPending(case, case.screening?.mergedInto(fresh) ?: CaseScreening(fresh))
-    }
-
-    /**
-     * Called before an approval is attempted. Screens whatever still has no answer; a case that was
-     * never screened (it made its declarations before this control existed, or while sanctions-service
-     * was down) is screened from scratch. Returns the SAME instance when there was nothing to do.
-     */
-    suspend fun ensureScreened(case: BusinessOnboardingCase): BusinessOnboardingCase {
-        if (!required || case.screening?.complete == true) return case
-        val extract = case.extract ?: return case
-        val current = case.screening
-            ?: CaseScreening(CaseScreening.subjectsOf(extract, ubo.lookup(case.identifier).reportableOwners))
-        return screenPending(case, current)
-    }
-
-    private suspend fun screenPending(case: BusinessOnboardingCase, screening: CaseScreening): BusinessOnboardingCase {
+        val finding = known ?: ubo.lookup(case.identifier)
+        val fresh = CaseScreening.subjectsOf(
+            extract,
+            finding.reportableOwners,
+            case.declarations?.peps.orEmpty().map { it.name },
+        )
         val now = Instant.now(clock)
-        val subjects = screening.subjects.map { subject ->
-            if (subject.sanctions != ScreeningVerdict.PENDING) subject else screenOne(case, subject, now)
-        }
-        return case.screeningRecorded(CaseScreening(subjects), now)
+        val current = (case.screening ?: CaseScreening(emptyList())).rebuilt(fresh, finding.source)
+        val next = current.copy(
+            subjects = current.subjects.map { subject ->
+                if (subject.sanctions != ScreeningVerdict.PENDING) subject else screenOne(case, subject, now)
+            },
+        )
+        return if (next == case.screening) case else case.screeningRecorded(next, now)
     }
 
     private suspend fun screenOne(case: BusinessOnboardingCase, subject: ScreeningSubject, now: Instant): ScreeningSubject =

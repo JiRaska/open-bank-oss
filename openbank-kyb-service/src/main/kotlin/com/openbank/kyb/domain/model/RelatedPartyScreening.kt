@@ -8,7 +8,16 @@ import java.security.MessageDigest
 import java.time.Instant
 
 /** Why a subject is on the case. A person who is both keeps the first role found; see [CaseScreening.subjectsOf]. */
-enum class ScreeningSubjectKind { ENTITY, REPRESENTATIVE, BENEFICIAL_OWNER }
+enum class ScreeningSubjectKind {
+    ENTITY,
+    REPRESENTATIVE,
+
+    /** A beneficial owner the ownership register reports. */
+    BENEFICIAL_OWNER,
+
+    /** A person the customer named in the declarations who is on neither register. */
+    DECLARED_PERSON,
+}
 
 /**
  * The sanctions and terrorist-list outcome for one subject. [PENDING] is "no answer yet" — the
@@ -48,36 +57,47 @@ class ScreeningPendingException :
 
 /**
  * The sanctions / PEP screening of everyone the case is about: the entity, every listed
- * representative and every reportable beneficial owner.
+ * representative, every reportable beneficial owner and every person the customer declared.
+ *
+ * [ownerSource] is where the beneficial owners in [subjects] came from when the list was last
+ * built. It is part of the answer: with [UboSource.UNAVAILABLE] nobody could say who owns the
+ * entity, so the list may be short and "everyone on it is clear" proves nothing.
  */
-data class CaseScreening(val subjects: List<ScreeningSubject>) {
+data class CaseScreening(val subjects: List<ScreeningSubject>, val ownerSource: UboSource? = null) {
 
-    /** Every subject has an answer. An empty subject list is not complete: nothing was screened. */
+    /**
+     * Every subject has an answer AND the owners among them were actually established. An empty
+     * list is not complete (nothing was screened), and neither is a list built while the ownership
+     * lookup could not be made.
+     *
+     * This says nothing about people who joined the case AFTER the list was built — the use case
+     * rebuilds the list from the case's current parties before every approval for that reason.
+     */
     val complete: Boolean
-        get() = subjects.isNotEmpty() && subjects.none { it.sanctions == ScreeningVerdict.PENDING }
+        get() = ownerSource != null &&
+            ownerSource != UboSource.UNAVAILABLE &&
+            subjects.isNotEmpty() &&
+            subjects.none { it.sanctions == ScreeningVerdict.PENDING }
 
     val sanctionsHits: List<ScreeningSubject> get() = subjects.filter { it.sanctionsHit }
 
     val peps: List<ScreeningSubject> get() = subjects.filter { it.pep }
 
     /**
-     * The review flag a screening finding raises. ONE neutral sentence, with no subject and no
-     * outcome in it: the review reason is shown to the customer and published on the case events,
-     * and telling a customer that a named person matched a sanctions list is tipping off. Who
-     * matched what is in [subjects], which only an operator reads.
+     * A human must look before the entity is activated. Deliberately a boolean and not a reason:
+     * nothing a screen found may be written where the applicant or an event consumer reads it —
+     * naming the cause, even as "screening", is tipping off. Who matched what is in [subjects],
+     * which only an operator reads.
      */
-    fun reviewFlags(): List<String> =
-        if (sanctionsHits.isNotEmpty() || peps.isNotEmpty()) listOf(REVIEW_FLAG) else emptyList()
+    val requiresReview: Boolean get() = sanctionsHits.isNotEmpty() || peps.isNotEmpty()
 
-    /** Carries over the answers already obtained for subjects that are still on the case. */
-    fun mergedInto(fresh: List<ScreeningSubject>): CaseScreening {
+    /** [fresh] is the case's CURRENT subject list; answers already obtained for people still on it are kept. */
+    fun rebuilt(fresh: List<ScreeningSubject>, ownerSource: UboSource): CaseScreening {
         val known = subjects.associateBy { it.key }
-        return CaseScreening(fresh.map { known[it.key] ?: it })
+        return CaseScreening(fresh.map { known[it.key] ?: it }, ownerSource)
     }
 
     companion object {
-        const val REVIEW_FLAG = "related-party screening requires review"
-
         private const val KEY_HEX_CHARS = 24
 
         /**
@@ -85,7 +105,11 @@ data class CaseScreening(val subjects: List<ScreeningSubject>) {
          * screened as an organisation; a person listed twice (a director who is also an owner)
          * is one subject, because the screen is of the person and not of the role.
          */
-        fun subjectsOf(extract: RegistryExtract, owners: List<BeneficialOwner>): List<ScreeningSubject> {
+        fun subjectsOf(
+            extract: RegistryExtract,
+            owners: List<BeneficialOwner>,
+            declaredPersons: List<String> = emptyList(),
+        ): List<ScreeningSubject> {
             val all = buildList {
                 add(subject(ScreeningSubjectKind.ENTITY, extract.legalName, organisation = !extract.isSoleTrader))
                 extract.representatives.forEach {
@@ -93,6 +117,11 @@ data class CaseScreening(val subjects: List<ScreeningSubject>) {
                 }
                 owners.forEach {
                     add(subject(ScreeningSubjectKind.BENEFICIAL_OWNER, it.fullName, organisation = it.corporate))
+                }
+                // Where the register has no owners to report (no public register, or the customer
+                // corrected it), the people the customer named are the only owners anyone knows of.
+                declaredPersons.forEach {
+                    add(subject(ScreeningSubjectKind.DECLARED_PERSON, it, organisation = false))
                 }
             }
             return all.filter { it.name.isNotBlank() }.distinctBy { it.key }
