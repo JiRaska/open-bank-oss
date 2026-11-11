@@ -107,6 +107,17 @@ class CountShadowEpochTest {
         }
     }
 
+    @Test
+    fun `oversized replay inputs cannot be approved using a digest of their prefix`() {
+        val (baseline, candidate) = fixtures(PackDomain.AML)
+        val oversized = CountReplayCase("oversized", at, List(CompiledCountPack.MAX_RULES + 1) { input })
+        assertThatIllegalArgumentException().isThrownBy {
+            CountShadowReplay.evidence(baseline, candidate, cases + oversized)
+        }
+        val result = candidate.evaluate(candidate.reference, at, oversized.observations)
+        assertThat(result).isEqualTo(CountEvaluation.Incomplete(CountEvaluationFailure.INVALID_INPUT))
+    }
+
     private fun fixtures(domain: PackDomain): Pair<CompiledCountPack, CompiledCountPack> {
         val aml = domain == PackDomain.AML
         val file = if (aml) "aml-count-source.json" else "fraud-count-pack.canonical.json"

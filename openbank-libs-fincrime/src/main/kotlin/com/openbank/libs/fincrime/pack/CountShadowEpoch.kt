@@ -37,7 +37,9 @@ object CountShadowReplay {
         cases: List<CountReplayCase>,
     ): CountShadowReplayEvidence {
         val corpus = cases.take(CountPackReplay.MAX_CASES + 1).map { case ->
-            case.copy(observations = case.observations.take(CompiledCountPack.MAX_RULES + 1))
+            val observations = case.observations.take(CompiledCountPack.MAX_RULES + 1)
+            require(observations.size <= CompiledCountPack.MAX_RULES) { "shadow replay case exceeds its input bound" }
+            case.copy(observations = observations)
         }.sortedBy { it.id }
         val differences = CountPackReplay.compare(baseline, candidate, corpus)
         val records = corpus.zip(differences).map { (case, difference) ->
