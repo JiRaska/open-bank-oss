@@ -21,6 +21,7 @@ fun SanctionsCheckEntity.toDomain() = SanctionsCheck(
     overallScore,
     mapper.readValue<List<SanctionsListType>>(checkedListsJson),
     reviewedBy, reviewNote, checkedAt, reviewedAt, subjectId, clearanceExpiresAt,
+    profile, country, bankIdentifier, pepStatus,
 )
 
 fun SanctionsCheck.toEntity() = SanctionsCheckEntity().also {
@@ -42,4 +43,8 @@ fun SanctionsCheck.toEntity() = SanctionsCheckEntity().also {
     it.reviewedAt = reviewedAt
     it.subjectId = subjectId
     it.clearanceExpiresAt = clearanceExpiresAt
+    it.profile = profile
+    it.country = country
+    it.bankIdentifier = bankIdentifier
+    it.pepStatus = pepStatus
 }

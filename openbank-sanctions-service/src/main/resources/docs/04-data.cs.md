@@ -69,6 +69,18 @@ Flyway, neměnné historické skripty, pouze dopředu:
 
 > Migrace jsou po aplikování neměnné. Nikdy neupravujte migraci, která byla aplikována na produkční DB.
 
+## Referenční data jurisdikcí
+
+`sanctions_jurisdictions` (V21) obsahuje země pod embargem a vysoce rizikové země: `list_type`,
+`country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`, `active`.
+
+Žádný importovaný zdroj je nezveřejňuje jako strojově čitelný feed — import `FATF_HIGH_RISK` se
+přeskakuje, protože není založen na entitách — proto jde o **verzovaná referenční data**. Mění se
+jen revidovanou Flyway migrací: nové vydání přidá řádky s vyšší `version` a nahrazené řádky vyřadí
+(`active = false`), takže historie zůstává v tabulce. Částečný unikátní index dovoluje jeden
+aktivní řádek na (listinu, zemi). Tabulku nezapisuje žádný endpoint a V21 ji dodává prázdnou:
+které země jsou uvedeny, je rozhodnutí compliance zaznamenané v migraci, která je přidá.
+
 ## Indexy
 
 - `sanctions_checks(idempotency_key)` — UNIQUE, deduplikace při insertu

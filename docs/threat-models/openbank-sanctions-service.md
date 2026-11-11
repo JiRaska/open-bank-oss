@@ -171,6 +171,24 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-11** — **Screening profiles, country and bank identifier on `/api/v3/sanctions/screen`
+  (#15723).** Three optional inputs; a request without them is unchanged, and `/api/v1` rejects
+  them (400). `profile=PAYMENT` consults the sanctions lists, the national terrorist list and the
+  jurisdiction data and no PEP list; `profile=CUSTOMER` adds the PEP list and reports it apart
+  (`matchKind: PEP`, `pepStatus`), never in `status`. A listed `country`, or the country inside a
+  BIC, matches independently of the name (`EMBARGO` = HIT, `HIGH_RISK` = POTENTIAL_HIT at 0.65).
+  **STRIDE-T:** `profile` and `listTypes` together are refused, so a caller cannot name a profile
+  and silently narrow it; an unknown profile, country or BIC shape is a 400, never a narrower
+  screen. The jurisdiction table has no write endpoint: rows arrive only by reviewed migration,
+  so a single operator cannot delist an embargoed country at run time. **STRIDE-E:** no new
+  action or role; the operation keeps `sanctions.create`. **Residual:** the jurisdiction table
+  ships EMPTY and has no feed — until compliance adds rows a country never matches, so this
+  change alone embargoes nothing. Existing rails still call `/api/v1` without a profile and keep
+  the old list set (PEP counted, national terrorist list absent) until each opts in. A BIC is
+  checked for its country only; listed banks are not matched by identifier. A WHITELISTED
+  clearance now also requires the same profile, country and BIC. Evidence:
+  `SanctionsScreeningProfileIT` (real Postgres, must-hit and must-clear per profile). Rollback:
+  revert the PR; V21 only adds nullable columns and a new table.
 - **2026-11-04** — **Deferred single-list refresh trigger, v2 (#14780).** New `POST
   /api/v2/sanctions/lists/{listType}/refresh` flags the list (`refresh_requested_at`, the #9048
   refresh-all mechanism) and answers 202 without downloading anything. The import runs through the

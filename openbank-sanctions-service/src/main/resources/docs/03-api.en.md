@@ -121,6 +121,36 @@ Content-Type: application/json
 - Legacy checks without `subjectId` cannot newly receive `WHITELISTED`. Screen the subject again
   with its explicit id and review that new check instead.
 
+### Screening profiles, country and bank identifier (v3)
+
+`POST /api/v3/sanctions/screen` accepts three optional inputs. A request carrying none of them
+behaves and answers exactly as before.
+
+| Field | Meaning |
+|---|---|
+| `profile` | `PAYMENT` or `CUSTOMER`. Fixes the list set; cannot be combined with `listTypes` (400). |
+| `country` | ISO 3166-1 alpha-2 country of the counterparty. |
+| `bankIdentifier` | BIC (8 or 11 characters) of the counterparty's bank; its country code is checked like `country`. |
+
+| Profile | Lists consulted | PEP |
+|---|---|---|
+| `PAYMENT` | `OFAC_SDN`, `EU_CONSOLIDATED`, `UN_CONSOLIDATED`, `HM_TREASURY`, `CNB_DOMESTIC`, `CZ_TERRORISTS`, jurisdiction data | not consulted — a PEP name cannot stop a payment |
+| `CUSTOMER` | the `PAYMENT` set plus `PEP_GLOBAL` | reported apart: `matchKind: PEP` and `pepStatus`; never raises `status` or `overallScore` |
+| *(none)* | `listTypes`, or every enabled list | counts toward `status`, as before |
+
+On a profiled check every match carries `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`,
+`JURISDICTION`).
+
+**Jurisdictions.** A `country` (or the country inside `bankIdentifier`) present in the
+jurisdiction reference data matches whatever the name is: an `EMBARGO` entry yields `HIT`, a
+`HIGH_RISK` entry `POTENTIAL_HIT` scored 0.65, which callers applying the shared screening policy
+route to manual review. This data has **no automated feed** — see `04-data` — and ships empty:
+until compliance adds rows, a country never matches. The BIC is not matched against listed
+entities, because the imported sources carry no bank identifiers.
+
+`/api/v1` is frozen: it rejects all three inputs with 400, and a check created with them is not
+readable through `/api/v1`.
+
 ### Submit a manual review decision
 
 ```http
@@ -231,7 +261,7 @@ Authorization: Bearer <token>
 | `EU_CONSOLIDATED` | EU Council | Consolidated EU sanctions list |
 | `UN_CONSOLIDATED` | UN Security Council | UN consolidated list |
 | `HM_TREASURY` | UK HM Treasury | UK Financial Sanctions |
-| `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions |
+| `FATF_HIGH_RISK` | FATF | High-risk and monitored jurisdictions — no entity feed; countries are held as jurisdiction reference data |
 | `CNB_DOMESTIC` | Czech Ministry of Foreign Affairs (MZV) | Czech national sanctions list (Act No. 1/2023 Coll.) |
 | `CZ_TERRORISTS` | Czech e-Sbírka | Anti-terrorism designations (Regulation No. 210/2008 Coll.), imported from official SPARQL open data |
 

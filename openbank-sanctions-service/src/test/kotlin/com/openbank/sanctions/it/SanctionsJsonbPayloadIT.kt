@@ -77,6 +77,7 @@ class SanctionsJsonbPayloadIT {
 
     @BeforeEach
     fun seedLegacyRow() {
+        addColumnsAddedAfterLegacyPin(dataSource)
         dataSource.connection.use { c ->
             c.createStatement().use { s ->
                 s.executeQuery("SELECT max(version::integer) FROM flyway_schema_history WHERE success").use {

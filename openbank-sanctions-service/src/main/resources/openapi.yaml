@@ -15,7 +15,11 @@ info:
   # unchanged (synchronous import, 200 + the refreshed list). Moving it would flip its meaning from
   # "imported" to "queued", which #9048 treated as breaking for refresh-all. v1 additionally
   # documents 409 for a refresh of the same list already in flight (additive response).
-  version: 3.1.0
+  # 3.1.0 -> 3.2.0 (#15723): ADDITIVE on /api/v3 only. The screen request gains optional `profile`
+  # (PAYMENT | CUSTOMER), `country` and `bankIdentifier`; the result gains optional `profile`,
+  # `country`, `bankIdentifier`, `pepStatus` and, per match, `matchKind`. A request without any of
+  # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400).
+  version: 3.2.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -172,7 +176,7 @@ paths:
   /api/v3/sanctions/screen:
     post:
       tags: [Sanctions]
-      summary: Screen an entity against all enabled sanctions lists
+      summary: Screen an entity against the lists of an explicit profile, or all enabled lists
       operationId: screenEntityV3
       requestBody:
         required: true
@@ -693,6 +697,7 @@ components:
           description: >-
             Restrict screening to these lists. Omitted, null or empty means every enabled list,
             including CZ_TERRORISTS. An unrecognised name is rejected with 400 — it is never dropped.
+            Cannot be combined with `profile` (400).
           items:
             type: string
             enum:
@@ -704,6 +709,32 @@ components:
               - PEP_GLOBAL
               - CNB_DOMESTIC
               - CZ_TERRORISTS
+        profile:
+          type: string
+          enum: [PAYMENT, CUSTOMER]
+          description: >-
+            Explicit purpose of the screen; fixes the list set. PAYMENT consults the sanctions
+            lists, the national terrorist list and the jurisdiction reference data, and no PEP
+            list — a PEP name cannot stop a payment. CUSTOMER adds the PEP list and reports PEP
+            matches apart (`matchKind: PEP`, `pepStatus`); they never raise `status` or
+            `overallScore`. Omitted keeps the profile-less behaviour, in which every list counts
+            toward `status`. An unknown value is rejected with 400.
+        country:
+          type: string
+          pattern: '^[A-Za-z]{2}$'
+          description: >-
+            ISO 3166-1 alpha-2 country of the screened counterparty. A country present in the
+            jurisdiction reference data matches independently of the name: an EMBARGO entry yields
+            HIT, a HIGH_RISK entry POTENTIAL_HIT with score 0.65 (manual review). The reference
+            data is versioned and changed only through reviewed migrations; it has no automated
+            feed, and an empty data set never matches.
+        bankIdentifier:
+          type: string
+          pattern: '^[A-Za-z]{4}[A-Za-z]{2}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$'
+          description: >-
+            BIC (8 or 11 characters) of the counterparty's bank. Its country code is checked
+            against the jurisdiction reference data exactly like `country`. The BIC is not matched
+            against listed entities: the imported list sources carry no bank identifiers.
 
     ReviewCommand:
       type: object
@@ -888,6 +919,22 @@ components:
             End of the 90-day WHITELISTED clearance on this check; null for other statuses and
             legacy checks. A new attempt receives WHITELISTED only while this clearance is valid
             and covers the fresh result's subject and match identities.
+        profile:
+          type: string
+          enum: [PAYMENT, CUSTOMER]
+          description: The profile the screen was requested with. Absent on profile-less checks.
+        country:
+          type: string
+          description: Country the screen was asked about, upper-cased. Absent when none was supplied.
+        bankIdentifier:
+          type: string
+          description: BIC the screen was asked about, upper-cased. Absent when none was supplied.
+        pepStatus:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT]
+          description: >-
+            PEP outcome of a CUSTOMER-profile screen, reported apart from `status`. Absent for any
+            other profile and for profile-less checks.
 
     SanctionsMatchV3:
       type: object
@@ -915,6 +962,13 @@ components:
           type: array
           items:
             type: string
+        matchKind:
+          type: string
+          enum: [SANCTIONS, TERRORIST, PEP, JURISDICTION]
+          description: >-
+            What the match means, set only on checks screened with a `profile`. A JURISDICTION
+            match names the listed country in `matchedName`, `country:<code>` in `matchedId` and
+            the measure and reference-data version in `programs`.
 
     SanctionsList:
       type: object

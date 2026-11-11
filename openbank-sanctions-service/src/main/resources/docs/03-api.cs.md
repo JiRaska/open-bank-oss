@@ -89,6 +89,36 @@ Authorization: Bearer <token>
 - Staré záznamy bez `subjectId` nelze nově označit `WHITELISTED`. Subjekt znovu prověř s explicitním
   ID a přezkum proveď nad tímto novým záznamem.
 
+### Profily prověření, země a identifikátor banky (v3)
+
+`POST /api/v3/sanctions/screen` přijímá tři volitelné vstupy. Požadavek bez nich se chová
+a odpovídá přesně jako dosud.
+
+| Pole | Význam |
+|---|---|
+| `profile` | `PAYMENT` nebo `CUSTOMER`. Určuje sadu listin; nelze kombinovat s `listTypes` (400). |
+| `country` | Země protistrany, ISO 3166-1 alpha-2. |
+| `bankIdentifier` | BIC (8 nebo 11 znaků) banky protistrany; kód země v něm se kontroluje stejně jako `country`. |
+
+| Profil | Prověřované listiny | PEP |
+|---|---|---|
+| `PAYMENT` | `OFAC_SDN`, `EU_CONSOLIDATED`, `UN_CONSOLIDATED`, `HM_TREASURY`, `CNB_DOMESTIC`, `CZ_TERRORISTS`, data jurisdikcí | neprověřuje se — jméno PEP platbu nezastaví |
+| `CUSTOMER` | sada `PAYMENT` a navíc `PEP_GLOBAL` | hlásí se zvlášť: `matchKind: PEP` a `pepStatus`; nikdy nezvyšuje `status` ani `overallScore` |
+| *(žádný)* | `listTypes`, nebo všechny povolené listiny | počítá se do `status` jako dosud |
+
+U prověření s profilem nese každá shoda `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`,
+`JURISDICTION`).
+
+**Jurisdikce.** `country` (nebo země uvnitř `bankIdentifier`), která je v referenčních datech
+jurisdikcí, je shodou bez ohledu na jméno: záznam `EMBARGO` dává `HIT`, záznam `HIGH_RISK`
+`POTENTIAL_HIT` se skóre 0,65, které volající se sdílenou politikou prověřování pošlou k ručnímu
+přezkumu. Tato data **nemají automatický zdroj** — viz `04-data` — a dodávají se prázdná: dokud
+compliance nepřidá řádky, žádná země se neshoduje. BIC se neporovnává s entitami na listinách,
+protože importované zdroje identifikátory bank neobsahují.
+
+`/api/v1` je zmrazené: všechny tři vstupy odmítá s 400 a prověření vytvořené s nimi přes
+`/api/v1` nelze číst.
+
 ### Odeslat rozhodnutí o ručním přezkumu
 
 ```http
@@ -189,7 +219,7 @@ POST /api/v1/sanctions/lists/refresh-all
 | `EU_CONSOLIDATED` | EU Rada | Konsolidovaný seznam sankcí EU |
 | `UN_CONSOLIDATED` | Rada bezpečnosti OSN | Konsolidovaný seznam OSN |
 | `HM_TREASURY` | UK HM Treasury | UK finanční sankce |
-| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce |
+| `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce — bez zdroje entit; země jsou vedeny jako referenční data jurisdikcí |
 | `CNB_DOMESTIC` | Ministerstvo zahraničních věcí (MZV) | Vnitrostátní sankční seznam ČR (zákon č. 1/2023 Sb.) |
 | `CZ_TERRORISTS` | Česká e-Sbírka | Protiteroristická označení (nařízení vlády č. 210/2008 Sb.), import z oficiálních SPARQL otevřených dat |
 
