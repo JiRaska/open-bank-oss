@@ -70,3 +70,49 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 `/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTING (an exclusive claim held while the transport is called, so concurrent submits transmit once), SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
 
 Every submit is recorded as an attempt. No supervisory transmission channel is configured, so the default transport transmits nothing and records `DRY_RUN`, which leaves the submission PACKAGED. Only a `SUBMITTED` transport outcome reaches SUBMITTED, and only a SUBMITTED return can have an acknowledgement recorded. A transport error, a cancelled request or a claim older than `openbank.finrep.submission.claim-lease` (default 15 minutes) leaves the return in OUTCOME_UNKNOWN. It may have been delivered, so it is not resubmitted; an ADMIN resolves it with `POST /api/v1/finrep/submissions/{id}/reconcile` after checking with the supervisor. Submissions and attempts live in the service's own Postgres database (`finrep-db`).
+
+## Offline XBRL-CSV structure check
+
+The local validator checks FINREP9 or COREP OF report-package structure, XBRL-CSV data types and
+taxonomy resolution. It records the package digest, validator version and pinned taxonomy digests.
+The structural check skips the EBA validation-rule linkbases. Reconciliation, filing rules,
+formula assertions and submission acceptance require their own evidence.
+
+From the repository root, use a Python environment containing `arelle-release==2.47.4` and put
+`7z` on PATH. Obtain the **Taxonomy package 4.2** and **Full taxonomy** downloads from the EBA.
+The validator checks their SHA-256 digests and resolves schemas offline from those archives.
+
+```sh
+python openbank-finrep-service/tools/validate_xbrl_csv_structure.py \
+  --module FINREP9 --report report.zip \
+  --taxonomy-package taxo_package_4.2_hotfix.zip \
+  --full-taxonomy Full_taxonomy_and_technical_documentation.zip
+```
+
+A successful run emits `STRUCTURE_VALIDATED`. The existing FINREP preflight still enforces data
+completeness and trial-balance agreement independently. The EBA publishes synthetic sample reports
+for both supported modules. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
+
+The coordinate check reads the official xBRL-CSV table definitions and compares the repository's
+36 ledger-mapper coordinates and monetary datapoint IDs against the same hotfix archive.
+
+```sh
+python openbank-finrep-service/tools/check_finrep_datapoints.py \
+  --taxonomy-package taxo_package_4.2_hotfix.zip
+```
+
+FINREP preflight rejects a frozen trial balance with no reportable rows. It also rejects nonzero
+foreign-currency rows until the ledger supplies a verified CZK reporting-currency conversion.
+The independent per-currency balance verdict and the reporting-currency checks both apply.
+
+For FINREP9, save the four same-date responses from the frozen template reads and compare them to
+an existing report package. The reconciliation checks exact decimal amounts and records the report
+and source digests for the 36 supported facts.
+
+```sh
+python openbank-finrep-service/tools/reconcile_finrep_facts.py --report report.zip \
+  --template F01.01.json --template F01.02.json --template F01.03.json --template F02.00.json
+```
+
+`SUPPORTED_FACTS_RECONCILED` covers those coordinates. COREP requires an independently reconciled
+prudential capital source. An export also requires coverage of the other applicable EBA tables.
