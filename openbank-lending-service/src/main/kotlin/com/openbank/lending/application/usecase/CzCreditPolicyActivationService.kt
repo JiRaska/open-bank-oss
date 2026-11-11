@@ -27,14 +27,12 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
-enum class CzCreditPolicyStatus { PROPOSED, EXECUTED, REJECTED }
-
 data class CzCreditPolicyView(
     val id: UUID,
     val revision: Int,
     val effectiveFrom: LocalDate,
     val contentHash: String,
-    val state: CzCreditPolicyStatus,
+    val state: ProposalState,
     val proposedBy: String,
     val proposedAt: OffsetDateTime,
     val decidedBy: String?,
@@ -110,7 +108,10 @@ class CzCreditPolicyActivationService(
         revision = revision,
         effectiveFrom = effectiveFrom,
         contentHash = contentHash,
-        state = CzCreditPolicyStatus.valueOf(state.name),
+        state = when (state) {
+            ProposalState.PROPOSED, ProposalState.EXECUTED, ProposalState.REJECTED -> state
+            ProposalState.APPROVED, ProposalState.WITHDRAWN -> error("Unexpected Czech credit policy state: $state")
+        },
         proposedBy = proposedBy,
         proposedAt = proposedAt,
         decidedBy = decidedBy,
