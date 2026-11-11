@@ -307,6 +307,8 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 
 ## 5. Residual risks / assumptions
 
+The v1 dispatcher claims rows from `transaction_outbox` with an explicit mapped-column projection. This keeps the existing dispatcher available across additive schema expansion. The claim and acknowledgement semantics stay the same.
+
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
   balance-service directly; it posts the ledger journal and `placeHold`s the synchronous cover. The
   booked movement and the cover-hold release both land asynchronously in balance-service as it projects
