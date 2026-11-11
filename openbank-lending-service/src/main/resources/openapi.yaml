@@ -36,7 +36,8 @@ info:
   # was cut; the api-contract gate requires a fresh MINOR on live main.
   # 1.39.0 -> 1.40.0 (#10558): correct the documented existing Money response shape;
   # requests retain their accepted forms and runtime serialization is unchanged.
-  version: 1.40.0
+  # 1.42.0 adds the bank-recorded signature receipt time to the application response (#9890).
+  version: 1.42.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -877,11 +878,9 @@ paths:
       summary: Record the customer's signature on the offered contract
       description: >-
         ADR-0211 D1 + ADR-0214: the explicit AWAITING_SIGNATURE → SIGNED step, persisting the
-        signature artefact hash on the application row in the same conditional claim as the
-        transition (V27). The hash is the evidence anchor of the signature artefact and is never
-        a validate-and-discard. A SYSTEM actor can never drive this transition — the state
-        machine refuses non-human signers. Only an application actually in AWAITING_SIGNATURE
-        moves; anything else answers 422.
+        signature artefact hash and its bank-recorded receipt time in the same transaction as the
+        application state and SIGNED audit evidence. A SYSTEM actor cannot drive this transition.
+        Only an application in AWAITING_SIGNATURE can move. Other states return 422.
       parameters:
         - $ref: '#/components/parameters/IdPath'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -892,7 +891,11 @@ paths:
             schema:
               $ref: '#/components/schemas/SignApplicationRequest'
       responses:
-        '200': { description: Application signed; artefact hash persisted }
+        '200':
+          description: Application signed and receipt evidence stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -2298,6 +2301,11 @@ components:
         existingDebtOutstanding:
           anyOf:
             - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        signatureRecordedAt:
+          description: Bank-recorded signature receipt time from the explicit sign command. Unknown on legacy rows.
+          anyOf:
+            - { type: string, format: date-time }
             - { type: 'null' }
     DecisionRequest:
       type: object

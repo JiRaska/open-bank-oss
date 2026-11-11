@@ -78,6 +78,7 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -363,6 +364,8 @@ class LendingService @Inject constructor(
         reason: String,
     ): LendingOutboxMessage {
         val id = application.id.value
+        val signedAt = application.signatureRecordedAt?.takeIf { to == OriginationState.SIGNED }
+        val occurredAt = signedAt?.toInstant() ?: clock.instant()
         val payload = buildString {
             append("""{"eventType":"credit.application.transition",""")
             append(""""aggregateType":"LOAN_APPLICATION",""")
@@ -375,7 +378,7 @@ class LendingService @Inject constructor(
             append(""""actorKind":"${actorKind.name}",""")
             append(""""reason":"${reason.replace("\"", "'")}",""")
             append(""""packVersion":${application.packVersion ?: "null"},""")
-            append(""""occurredAt":"${clock.instant()}",""")
+            append(""""occurredAt":"$occurredAt",""")
             append(""""correlationId":"$id",""")
             append(""""sourceService":"lending"}""")
         }
@@ -751,35 +754,40 @@ class LendingService @Inject constructor(
                 ) {
                     is OriginationTransitionResult.Rejected ->
                         Uni.createFrom().failure(IllegalStateException(result.reason))
-                    // The artefact hash rides the SAME conditional statement as the transition —
-                    // see LoanApplicationRepository.compareAndSetSignature for why a second write
-                    // would re-open the split-write window #3850 closed.
                     is OriginationTransitionResult.Applied ->
-                        applications.compareAndSetSignature(
-                            existing.copy(status = result.newState, signatureArtefactHash = request.artefactHash),
-                            existing.status,
-                        ).flatMap { claimed ->
-                            if (claimed == 0) {
-                                Uni.createFrom().failure(
-                                    IllegalStateException(
-                                        "Concurrent modification: application ${existing.id} is no longer " +
-                                            "in ${existing.status}",
-                                    ),
-                                )
-                            } else {
-                                Uni.createFrom().item(existing.copy(status = result.newState))
-                            }
-                        }
-                            .signalWorkflow()
-                            .emitEvidence(
-                                existing.status.name,
-                                signedBy,
-                                OriginationActorKind.HUMAN,
-                                "customer signature received (artefact ${request.artefactHash})",
-                            )
+                        recordSignature(existing, result.newState, request, signedBy)
                 }
             }
         }
+
+    private fun recordSignature(
+        existing: LoanApplication,
+        state: OriginationState,
+        request: SignApplicationRequest,
+        signedBy: String,
+    ): Uni<LoanApplication> = applications.withLocked(existing.id) { locked ->
+        val current = locked ?: throw signatureClaimLost(existing)
+        if (current.status != existing.status) throw signatureClaimLost(existing)
+        if (lacksDecision(current)) throw decisionMissing(current)
+        val signed = current.copy(
+            status = state,
+            signatureArtefactHash = request.artefactHash,
+            signatureRecordedAt = OffsetDateTime.now(clock).truncatedTo(ChronoUnit.MICROS),
+        )
+        applications.compareAndSetSignature(signed, existing.status).map { claimed ->
+            if (claimed == 0) throw signatureClaimLost(existing)
+            signed
+        }.emitEvidence(
+            existing.status.name,
+            signedBy,
+            OriginationActorKind.HUMAN,
+            "customer signature received (artefact ${request.artefactHash})",
+        )
+    }.signalWorkflow()
+
+    private fun signatureClaimLost(existing: LoanApplication) = IllegalStateException(
+        "Concurrent modification: application ${existing.id} is no longer in ${existing.status}",
+    )
 
     override fun escalateFourEyesSlaIfPending(id: LoanApplicationId, actor: String): Uni<Boolean> =
         applications.findById(id).flatMap { existing ->

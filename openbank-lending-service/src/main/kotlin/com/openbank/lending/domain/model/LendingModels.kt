@@ -161,6 +161,8 @@ data class LoanApplication(
      */
     val signatureArtefactHash: String? = null,
     val catalogSnapshot: CatalogLoanSnapshot? = null,
+    /** Bank-recorded receipt of the signature artefact from the explicit signing command. */
+    val signatureRecordedAt: OffsetDateTime? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */

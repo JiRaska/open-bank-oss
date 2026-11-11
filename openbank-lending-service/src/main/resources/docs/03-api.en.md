@@ -94,3 +94,12 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.
+
+### Recorded signature receipt
+
+The explicit `POST /api/v1/lending/applications/{id}/sign` command stores `signatureRecordedAt`
+with the signature artefact hash, `SIGNED` state and `credit.application.transition` outbox row
+in one PostgreSQL transaction. The event's `occurredAt` equals the stored receipt instant.
+An existing loan's `applicationId` links the loan back to its application evidence. Earlier or
+implicitly advanced applications can have an unknown receipt time. The field attests the time
+Lending recorded the receipt and has no legal inception semantics for AnaCredit (#9890).
