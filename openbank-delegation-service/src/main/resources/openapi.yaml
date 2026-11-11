@@ -11,7 +11,7 @@ info:
   # approval-group snapshot fields; N_OF_M is admitted behind openbank.delegation.n-of-m-enabled
   # (default false) for SAVINGS_GOAL + SAVINGS_PROPOSE_WITHDRAW only.
   # 1.25 -> 1.26 (#12693): correct the owner portfolio path parameter name in the document.
-  version: 1.27.0
+  version: 1.29.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -868,7 +868,10 @@ paths:
         JSON SHA-256 is `payloadSha256`, which every co-signer's SCA is dynamically linked to. The
         initiator's SCA challenge must already be consumed by customer-edge (payment initiation,
         linked to amount/currency/creditor) and counts as the first signature. Replaying that
-        challenge requires the same entity, initiator, kind and canonical payload. `kind`
+        challenge requires the same entity, initiator, kind and canonical payload. Verified customer
+        edge may also attach a domestic submission correlation. Replaying that correlation in the
+        original scope returns the original approval when the canonical payload matches. Mode-bound
+        creation requires a preceding HELD claim for the same scope and frozen payload. `kind`
         STANDING_ORDER and SDD_MANDATE (#10281) are recurring outflows, held and released exactly
         like a payment: a standing order is banded by its per-execution amount, an SDD mandate by
         its maximum amount or, without one, by the strictest rule; neither takes the trusted-payee
@@ -888,7 +891,11 @@ paths:
               schema: { $ref: '#/components/schemas/ApprovalRequest' }
         '400': { description: Missing or malformed field }
         '403': { $ref: '#/components/responses/SigningForbidden' }
-        '409': { description: SCA challenge already belongs to a different instruction }
+        '409':
+          description: >-
+            SCA_CHALLENGE_USED for an already bound SCA challenge or SUBMISSION_CORRELATION_REUSED
+            when a correlation already binds a different instruction. DOMESTIC_HELD_POLICY_CHANGED when the
+            current policy no longer allows creation of a mode-bound held request.
         '422': { $ref: '#/components/responses/SigningUnsatisfiable' }
         '503': { $ref: '#/components/responses/SigningUnavailable' }
     get:
@@ -922,6 +929,73 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/ApprovalRequest' }
         '400': { description: Unknown status }
+  /api/v1/entities/{entityId}/approval-requests/submissions/claim:
+    post:
+      tags: [Business signing]
+      summary: Bind the routing mode of a domestic submission
+      description: >-
+        Internal verified customer-edge workload only. After validating debit authority and before SCA
+        or dispatch, the edge binds an original-key digest to the frozen domestic payload and authority.
+        The result is a routing decision and does not establish whether a payment was accepted.
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DomesticSubmissionClaim' }
+      responses:
+        '200':
+          description: The immutable routing mode for the submission
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mode]
+                properties:
+                  mode: { type: string, enum: [DIRECT, HELD] }
+        '400': { description: Missing or malformed scope or domestic payload }
+        '401': { description: Missing or invalid workload token }
+        '403': { description: Caller is outside the verified customer-edge workload or initiator is ineligible }
+        '409':
+          description: >-
+            SUBMISSION_CORRELATION_REUSED for a changed scope or payload, DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED
+            when a direct retry now requires co-signature, or DOMESTIC_HELD_POLICY_CHANGED when a held attempt
+            can no longer create a co-signature request under current policy.
+        '503': { $ref: '#/components/responses/SigningUnavailable' }
+  /api/v1/entities/{entityId}/approval-requests/submissions/lookup:
+    post:
+      tags: [Business signing]
+      summary: Resolve a domestic approval submission receipt
+      description: >-
+        Internal verified customer-edge workload only. Reads the receipt in the requested entity and
+        initiator scope. For a mode-bound submission supply the original-key digest and debit account as well.
+        A missing receipt or a routing claim alone does not establish whether a payment executed.
+      parameters: [ { $ref: '#/components/parameters/EntityId' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalSubmissionLookup' }
+      responses:
+        '200':
+          description: Approval identity, current persisted lifecycle and any recorded rail reference
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApprovalSubmissionState' }
+        '400': { description: Missing or malformed scope }
+        '401': { description: Missing or invalid workload token }
+        '403': { description: Caller is outside the verified customer-edge workload }
+        '404':
+          description: No receipt in this scope
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
   /api/v1/entities/{entityId}/approval-requests/{approvalId}:
     get:
       tags: [Business signing]
@@ -1742,6 +1816,78 @@ components:
           minimum: 1
           maximum: 259200
           description: Defaults to 72 hours, which is also the maximum.
+        submissionCorrelation:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: >-
+            Optional lowercase SHA-256 correlation computed by verified customer edge from the
+            original domestic submission and its authority scope. Carried outside the frozen payload.
+        submissionKeyDigest:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Original-key digest of a previously claimed HELD domestic mode. Requires submissionCorrelation.
+    DomesticSubmissionClaim:
+      type: object
+      required: [submissionKeyDigest, submissionCorrelation, initiatorPartyId, payload]
+      properties:
+        submissionKeyDigest:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Domain-separated SHA-256 digest of the original idempotency key alone.
+        submissionCorrelation:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Independently computed correlation bound to the original key and current debit authority.
+        initiatorPartyId: { type: string, format: uuid }
+        payload:
+          type: object
+          required: [rail, debtorAccountId, amount, currency, creditorIban, railRequest]
+          additionalProperties: true
+          properties:
+            rail: { type: string, enum: [DOMESTIC] }
+            debtorAccountId: { type: string, format: uuid }
+            amount: { type: string }
+            currency: { type: string }
+            creditorIban: { type: string }
+            railRequest:
+              type: object
+              required: [debtorAccountId, amount, currency]
+              additionalProperties: true
+              properties:
+                debtorAccountId: { type: string, format: uuid }
+                amount: { type: number }
+                currency: { type: string }
+        enforceApprovalPolicy:
+          type: boolean
+          default: true
+          description: >-
+            Uses the verified edge's business approval setting. False selects DIRECT for a new key and never
+            changes a held binding.
+    ApprovalSubmissionLookup:
+      type: object
+      required: [submissionCorrelation, initiatorPartyId]
+      properties:
+        submissionCorrelation: { type: string, pattern: '^[0-9a-f]{64}$' }
+        initiatorPartyId: { type: string, format: uuid }
+        submissionKeyDigest:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Required with debtorAccountId for mode-bound submissions.
+        debtorAccountId:
+          type: string
+          format: uuid
+          description: Required with submissionKeyDigest for mode-bound submissions.
+    ApprovalSubmissionState:
+      type: object
+      required: [approvalId, status]
+      properties:
+        approvalId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ApprovalStatus' }
+        releaseRef:
+          type: string
+          maxLength: 200
+          nullable: true
+          description: Persisted successful rail reference, when recorded after release claim.
     ApprovalRejectionRequest:
       type: object
       required: [partyId]

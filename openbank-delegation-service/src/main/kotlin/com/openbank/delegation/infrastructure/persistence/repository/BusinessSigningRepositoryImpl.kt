@@ -7,8 +7,14 @@ package com.openbank.delegation.infrastructure.persistence.repository
 import com.fasterxml.jackson.core.type.TypeReference
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.out.AppliedChange
+import com.openbank.delegation.application.port.out.ApprovalSignatureChallengeConflict
+import com.openbank.delegation.application.port.out.ApprovalSubmissionScope
+import com.openbank.delegation.application.port.out.ApprovalSubmissionState
 import com.openbank.delegation.application.port.out.BusinessSigningRepository
 import com.openbank.delegation.application.port.out.DelegationOutboxRepository
+import com.openbank.delegation.application.port.out.DomesticSubmissionBinding
+import com.openbank.delegation.application.port.out.DomesticSubmissionKey
+import com.openbank.delegation.application.port.out.DomesticSubmissionMode
 import com.openbank.delegation.application.port.out.Transition
 import com.openbank.delegation.application.port.out.TransitionContext
 import com.openbank.delegation.application.usecase.BusinessSigningService
@@ -36,6 +42,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.LockModeType
 import org.hibernate.reactive.mutiny.Mutiny
+import java.sql.SQLException
 import java.time.Instant
 import java.util.UUID
 
@@ -77,13 +84,144 @@ class BusinessSigningRepositoryImpl(
 
     override suspend fun create(request: ApprovalRequest, events: List<DomainEvent>) {
         Panache.withTransaction {
-            Panache.getSession().flatMap { s ->
-                s.persist(request.toEntity())
-                    .chain { _ -> persistSignatures(s, request, emptySet()) }
-                    .chain { _ -> persistEvents(events) }
+            Panache.getSession().flatMap { persistRequest(it, request, events) }
+        }.mapChallengeConflict().awaitSuspending()
+    }
+
+    override suspend fun createWithSubmission(
+        request: ApprovalRequest,
+        events: List<DomainEvent>,
+        scope: ApprovalSubmissionScope,
+    ): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Any>(
+                """
+                INSERT INTO approval_submission_receipts
+                    (correlation_digest, approval_request_id, submission_key_digest, bound_mode)
+                VALUES (:correlation, :approvalId, :keyDigest, :boundMode)
+                ON CONFLICT (correlation_digest) DO NOTHING
+                """.trimIndent(),
+            )
+                .setParameter("correlation", scope.correlation)
+                .setParameter("approvalId", request.id)
+                .setParameter("keyDigest", scope.key?.digest)
+                .setParameter("boundMode", scope.key?.let { DomesticSubmissionMode.HELD.name })
+                .executeUpdate()
+                .flatMap { count ->
+                    if (count == 0) {
+                        Uni.createFrom().item(false)
+                    } else {
+                        persistRequest(session, request, events).replaceWith(true)
+                    }
+                }
+        }
+    }.mapChallengeConflict().awaitSuspending()
+
+    override suspend fun findSubmission(scope: ApprovalSubmissionScope): ApprovalSubmissionState? =
+        Panache.withSession {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery<Array<Any?>>(
+                    """
+                    SELECT approval.id, approval.status, approval.release_ref
+                    FROM approval_submission_receipts receipt
+                    JOIN approval_requests approval ON approval.id = receipt.approval_request_id
+                    LEFT JOIN approval_submission_mode_claims binding
+                      ON binding.submission_key_digest = receipt.submission_key_digest
+                    WHERE receipt.correlation_digest = :correlation
+                      AND approval.entity_party_id = :entityId AND approval.initiator_party_id = :initiatorId
+                      AND receipt.submission_key_digest IS NOT DISTINCT FROM CAST(:keyDigest AS VARCHAR)
+                      AND binding.debit_account_id IS NOT DISTINCT FROM CAST(:debitAccountId AS UUID)
+                      AND (binding.submission_key_digest IS NULL OR
+                           (binding.entity_party_id = :entityId AND binding.initiator_party_id = :initiatorId))
+                    """.trimIndent(),
+                )
+                    .setParameter("correlation", scope.correlation)
+                    .setParameter("entityId", scope.entityPartyId)
+                    .setParameter("initiatorId", scope.initiatorPartyId)
+                    .setParameter("keyDigest", scope.key?.digest)
+                    .setParameter("debitAccountId", scope.key?.debitAccountId)
+                    .singleResultOrNull
+                    .map { row ->
+                        row?.let {
+                            val status = ApprovalStatus.valueOf(it[1] as String)
+                            ApprovalSubmissionState(
+                                it[0] as UUID,
+                                status,
+                                (it[2] as? String).takeIf { status == ApprovalStatus.RELEASED },
+                            )
+                        }
+                    }
             }
         }.awaitSuspending()
-    }
+
+    override suspend fun findSubmissionBinding(key: DomesticSubmissionKey): DomesticSubmissionBinding? =
+        Panache.withSession {
+            Panache.getSession().flatMap { selectSubmissionBinding(it, key.digest) }
+        }.awaitSuspending()
+
+    override suspend fun bindSubmission(candidate: DomesticSubmissionBinding): DomesticSubmissionBinding =
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                val key = checkNotNull(candidate.scope.key)
+                session.createNativeQuery<Any>(
+                    """
+                    INSERT INTO approval_submission_mode_claims
+                      (submission_key_digest, authority_digest, entity_party_id, initiator_party_id,
+                       debit_account_id, payload_sha256, mode)
+                    VALUES (:keyDigest, :authority, :entityId, :initiatorId, :debitAccountId, :payloadSha256, :mode)
+                    ON CONFLICT (submission_key_digest) DO NOTHING
+                    """.trimIndent(),
+                )
+                    .setParameter("keyDigest", key.digest)
+                    .setParameter("authority", candidate.scope.correlation)
+                    .setParameter("entityId", candidate.scope.entityPartyId)
+                    .setParameter("initiatorId", candidate.scope.initiatorPartyId)
+                    .setParameter("debitAccountId", key.debitAccountId)
+                    .setParameter("payloadSha256", candidate.payloadSha256)
+                    .setParameter("mode", candidate.mode.name)
+                    .executeUpdate()
+                    .flatMap { count ->
+                        if (count == 0) {
+                            selectSubmissionBinding(session, key.digest).map { checkNotNull(it) }
+                        } else {
+                            Uni.createFrom().item(candidate)
+                        }
+                    }
+            }
+        }.awaitSuspending()
+
+    private fun selectSubmissionBinding(session: Mutiny.Session, digest: String): Uni<DomesticSubmissionBinding?> =
+        session.createNativeQuery<Array<Any?>>(
+            """
+            SELECT entity_party_id, initiator_party_id, authority_digest, debit_account_id, payload_sha256, mode
+            FROM approval_submission_mode_claims WHERE submission_key_digest = :digest
+            """.trimIndent(),
+        )
+            .setParameter("digest", digest)
+            .singleResultOrNull
+            .map { row ->
+                row?.let {
+                    val scope = ApprovalSubmissionScope(
+                        it[0] as UUID,
+                        it[1] as UUID,
+                        it[2] as String,
+                        DomesticSubmissionKey(digest, it[3] as UUID),
+                    )
+                    DomesticSubmissionBinding(scope, it[4] as String, DomesticSubmissionMode.valueOf(it[5] as String))
+                }
+            }
+
+    private fun persistRequest(session: Mutiny.Session, request: ApprovalRequest, events: List<DomainEvent>) =
+        session.persist(request.toEntity())
+            .chain { _ -> persistSignatures(session, request, emptySet()) }
+            .chain { _ -> persistEvents(events) }
+
+    private fun <T> Uni<T>.mapChallengeConflict(): Uni<T> = onFailure { failure ->
+        generateSequence(failure) { it.cause }.filterIsInstance<SQLException>().any {
+            it.message?.contains("uq_approval_signature_challenge") == true &&
+                (it.sqlState == "23505" || it.message.orEmpty().contains("(23505)"))
+        }
+    }.transform { ApprovalSignatureChallengeConflict() }
 
     override suspend fun find(entityPartyId: UUID, id: UUID): ApprovalRequest? = Panache.withSession {
         Panache.getSession().flatMap { s ->

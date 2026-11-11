@@ -7,7 +7,13 @@ package com.openbank.delegation.application.usecase
 import com.openbank.delegation.application.port.out.AppliedChange
 import com.openbank.delegation.application.port.out.ApprovalLink
 import com.openbank.delegation.application.port.out.ApprovalScaVerifier
+import com.openbank.delegation.application.port.out.ApprovalSignatureChallengeConflict
+import com.openbank.delegation.application.port.out.ApprovalSubmissionScope
+import com.openbank.delegation.application.port.out.ApprovalSubmissionState
 import com.openbank.delegation.application.port.out.BusinessSigningRepository
+import com.openbank.delegation.application.port.out.DomesticSubmissionBinding
+import com.openbank.delegation.application.port.out.DomesticSubmissionKey
+import com.openbank.delegation.application.port.out.DomesticSubmissionMode
 import com.openbank.delegation.application.port.out.MandateDirectory
 import com.openbank.delegation.application.port.out.MandateDirectoryUnavailableException
 import com.openbank.delegation.application.port.out.ScaVerdict
@@ -73,15 +79,31 @@ data class PaymentApprovalCommand(
     val ttl: Duration?,
     val kind: ApprovalKind = ApprovalKind.PAYMENT,
     val summaryExtras: Map<String, Any?> = emptyMap(),
+    val submissionCorrelation: String? = null,
+    val submissionKey: DomesticSubmissionKey? = null,
 ) {
     init {
         require(kind.releasable) { "kind $kind is not a held instruction" }
+        require(submissionKey == null || submissionCorrelation != null) {
+            "submissionCorrelation is required with submissionKeyDigest"
+        }
+        require(submissionCorrelation == null || kind == ApprovalKind.PAYMENT && rail == "DOMESTIC") {
+            "submissionCorrelation is only supported for held domestic payments"
+        }
         if (kind != ApprovalKind.SDD_MANDATE) {
             requireNotNull(amount) { "amount is required for $kind" }
             requireNotNull(creditorIban) { "creditorIban is required for $kind" }
         }
     }
 }
+
+data class DomesticSubmissionClaimCommand(
+    val scope: ApprovalSubmissionScope,
+    val amount: SigningAmount,
+    val creditorIban: String,
+    val payload: Map<String, Any?>,
+    val enforceApprovalPolicy: Boolean,
+)
 
 data class ReleaseClaim(val claimToken: UUID, val payload: String)
 
@@ -179,20 +201,81 @@ class BusinessSigningService(
 
     // ---------------------------------------------------------------- creation
 
+    suspend fun claimDomesticSubmission(cmd: DomesticSubmissionClaimCommand): DomesticSubmissionMode {
+        val key = checkNotNull(cmd.scope.key)
+        val fingerprint = sha256(codec.canonical(cmd.payload))
+        val existing = repository.findSubmissionBinding(key)
+        if (existing != null) return routeBoundSubmission(existing, cmd, fingerprint)
+
+        if (repository.findSubmission(cmd.scope.copy(key = null)) != null) throw correlationReused()
+        val selected = currentSubmissionMode(cmd)
+        val candidate = DomesticSubmissionBinding(cmd.scope, fingerprint, selected)
+        val bound = repository.bindSubmission(candidate)
+        return if (bound == candidate) selected else routeBoundSubmission(bound, cmd, fingerprint)
+    }
+
+    private suspend fun routeBoundSubmission(
+        bound: DomesticSubmissionBinding,
+        cmd: DomesticSubmissionClaimCommand,
+        fingerprint: String,
+    ): DomesticSubmissionMode {
+        requireSubmissionMatch(bound, cmd.scope, fingerprint)
+        if (bound.mode == DomesticSubmissionMode.HELD && !cmd.enforceApprovalPolicy) {
+            throw submissionPolicyChanged(bound.mode)
+        }
+        if (bound.mode == DomesticSubmissionMode.HELD && repository.findSubmission(cmd.scope) != null) return bound.mode
+        if (bound.mode != currentSubmissionMode(cmd)) throw submissionPolicyChanged(bound.mode)
+        return bound.mode
+    }
+
+    private suspend fun currentSubmissionMode(cmd: DomesticSubmissionClaimCommand): DomesticSubmissionMode {
+        if (!cmd.enforceApprovalPolicy) return DomesticSubmissionMode.DIRECT
+        val evaluation = evaluate(cmd.scope.entityPartyId, cmd.amount, cmd.creditorIban, "DOMESTIC")
+        requireEligibleInitiator(cmd.scope.initiatorPartyId, evaluation)
+        return if (evaluation.required > 1) DomesticSubmissionMode.HELD else DomesticSubmissionMode.DIRECT
+    }
+
+    private fun requireSubmissionMatch(
+        bound: DomesticSubmissionBinding,
+        scope: ApprovalSubmissionScope,
+        fingerprint: String,
+    ) {
+        if (bound.scope != scope || bound.payloadSha256 != fingerprint) throw correlationReused()
+    }
+
+    private suspend fun requireHeldSubmission(scope: ApprovalSubmissionScope, payload: String) {
+        val key = checkNotNull(scope.key)
+        val bound = repository.findSubmissionBinding(key) ?: throw correlationReused()
+        requireSubmissionMatch(bound, scope, sha256(payload))
+        if (bound.mode != DomesticSubmissionMode.HELD) throw correlationReused()
+    }
+
+    private fun submissionPolicyChanged(mode: DomesticSubmissionMode): BusinessSigningException = when (mode) {
+        DomesticSubmissionMode.DIRECT -> refused(
+            CONFLICT,
+            "DOMESTIC_DIRECT_NO_LONGER_AUTHORIZED",
+            "current signing policy does not allow dispatch of this direct submission",
+        )
+        DomesticSubmissionMode.HELD -> refused(
+            CONFLICT,
+            "DOMESTIC_HELD_POLICY_CHANGED",
+            "current signing policy does not allow creation of this held submission",
+        )
+    }
+
     suspend fun createPayment(cmd: PaymentApprovalCommand): ApprovalRequest {
         val payload = codec.canonical(cmd.payload)
-        // A consumed challenge can replay only its original frozen instruction.
-        repository.findBySignatureChallenge(cmd.initiatorScaChallengeId)?.let { existing ->
-            val sameParties = existing.entityPartyId == cmd.entityPartyId &&
-                existing.initiatorPartyId == cmd.initiatorPartyId
-            if (sameParties && existing.kind == cmd.kind && existing.payload == payload) {
-                return existing
-            }
-            throw refused(CONFLICT, "SCA_CHALLENGE_USED", "that SCA challenge has already authorised another request")
+        val submission = cmd.submissionCorrelation?.let {
+            ApprovalSubmissionScope(cmd.entityPartyId, cmd.initiatorPartyId, it, cmd.submissionKey)
         }
+        if (submission?.key != null) requireHeldSubmission(submission, payload)
+        findPaymentReplay(cmd, payload, submission)?.let { return it }
         val now = clock.instant()
         val evaluation = evaluateFor(cmd.kind, cmd.entityPartyId, cmd.amount, cmd.creditorIban, cmd.rail)
         requireEligibleInitiator(cmd.initiatorPartyId, evaluation)
+        if (submission?.key != null && evaluation.required <= 1) {
+            return matchingSubmission(submission, payload) ?: throw submissionPolicyChanged(DomesticSubmissionMode.HELD)
+        }
         requireSatisfiable(evaluation)
         when (sca.verifyConsumedInitiatorChallenge(cmd.initiatorScaChallengeId, cmd.initiatorPartyId)) {
             ScaVerdict.VERIFIED -> Unit
@@ -227,9 +310,57 @@ class BusinessSigningService(
         val request = base.sign(cmd.initiatorPartyId, cmd.initiatorScaChallengeId, now)
         val events = mutableListOf(event(ApprovalRequested.EVENT_TYPE, request, cmd.initiatorPartyId, now))
         if (request.status == ApprovalStatus.APPROVED) events += event(ApprovalCompleted.EVENT_TYPE, request, null, now)
-        repository.create(request, events)
+        val created = try {
+            if (submission == null) {
+                repository.create(request, events)
+                true
+            } else {
+                repository.createWithSubmission(request, events, submission)
+            }
+        } catch (_: ApprovalSignatureChallengeConflict) {
+            // A competing request committed this single-use SCA challenge before our transaction.
+            return findPaymentReplay(cmd, payload, submission) ?: throw challengeUsed()
+        }
+        if (created) return request
+        return matchingSubmission(checkNotNull(submission), payload) ?: throw correlationReused()
+    }
+
+    suspend fun lookupSubmission(scope: ApprovalSubmissionScope): ApprovalSubmissionState? =
+        repository.findSubmission(scope)
+
+    private suspend fun findPaymentReplay(
+        cmd: PaymentApprovalCommand,
+        payload: String,
+        submission: ApprovalSubmissionScope?,
+    ): ApprovalRequest? {
+        submission?.let { matchingSubmission(it, payload)?.let { replay -> return replay } }
+        val existing = repository.findBySignatureChallenge(cmd.initiatorScaChallengeId) ?: return null
+        if (submission != null) {
+            // The request and its receipt may have committed since the first read.
+            return matchingSubmission(submission, payload) ?: throw challengeUsed()
+        }
+        val initiatorChallenge = existing.signatures.any {
+            it.partyId == cmd.initiatorPartyId && it.scaChallengeId == cmd.initiatorScaChallengeId
+        }
+        val sameParties = existing.entityPartyId == cmd.entityPartyId &&
+            existing.initiatorPartyId == cmd.initiatorPartyId
+        val sameInstruction = existing.kind == cmd.kind && existing.payload == payload
+        if (sameParties && initiatorChallenge && sameInstruction) return existing
+        throw challengeUsed()
+    }
+
+    private suspend fun matchingSubmission(scope: ApprovalSubmissionScope, payload: String): ApprovalRequest? {
+        val state = repository.findSubmission(scope) ?: return null
+        val request = checkNotNull(repository.find(scope.entityPartyId, state.approvalId))
+        if (request.payload != payload) throw correlationReused()
         return request
     }
+
+    private fun challengeUsed() =
+        refused(CONFLICT, "SCA_CHALLENGE_USED", "that SCA challenge has already authorised another request")
+
+    private fun correlationReused() =
+        refused(CONFLICT, "SUBMISSION_CORRELATION_REUSED", "submission correlation already belongs to another request")
 
     suspend fun proposePolicy(
         entityPartyId: UUID,

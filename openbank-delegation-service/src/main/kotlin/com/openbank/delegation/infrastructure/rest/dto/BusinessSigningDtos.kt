@@ -176,7 +176,28 @@ data class CreatePaymentApprovalRequest(
     val payload: Map<String, Any?>?,
     val initiatorSignature: SignatureBody?,
     val expiresInSeconds: Long? = null,
+    val submissionCorrelation: String? = null,
+    val submissionKeyDigest: String? = null,
 )
+
+data class DomesticSubmissionClaimBody(
+    val submissionKeyDigest: String?,
+    val submissionCorrelation: String?,
+    val initiatorPartyId: UUID?,
+    val payload: Map<String, Any?>?,
+    val enforceApprovalPolicy: Boolean? = null,
+)
+
+data class DomesticSubmissionClaimResponse(val mode: String)
+
+data class ApprovalSubmissionLookupBody(
+    val submissionCorrelation: String?,
+    val initiatorPartyId: UUID?,
+    val submissionKeyDigest: String? = null,
+    val debtorAccountId: UUID? = null,
+)
+
+data class ApprovalSubmissionLookupResponse(val approvalId: UUID, val status: String, val releaseRef: String?)
 
 data class RemovePayeeBody(val initiatorPartyId: UUID? = null)
 
