@@ -59,6 +59,9 @@ SKIP_DIRS = {".git", "node_modules", "build", ".gradle", ".terraform", ".next", 
 MANIFEST_EXT = (".yaml", ".yml")
 TEXT_EXT = (".properties", ".tf", ".tfvars", ".env")
 UNATTRIBUTED_PATCH = "<index-based env patch>"
+ENV_PATH_RE = re.compile(r"/env/(\d+|-)(/value|/valueFrom)?$")
+OP_TEXT_RE = re.compile(r"""["']?\bop\b["']?\s*:""")
+FALSY = {"false", "0", "no", "off", "n"}
 TEMPLATE_RE = re.compile(r"\$\{|\{\{")
 
 
@@ -131,14 +134,56 @@ def iter_scan_files(root: Path):
                 yield rel
 
 
+def embedded(text, names, props, hits, path, force):
+    """Parse a string scalar that may carry a kustomize patch (YAML or JSON). A string that looks
+    like a patch but does not parse is refused outside permitted environments (fail closed)."""
+    looks = force or ("/env/" in text and OP_TEXT_RE.search(text))
+    try:
+        subs = gatelib.loads_all(text)
+    except Exception:
+        if looks:
+            hits.append((UNATTRIBUTED_PATCH, None, "unparsable"))
+        return
+    for sub in subs:
+        if isinstance(sub, (dict, list)):
+            walk(sub, names, props, hits, path)
+        elif force and sub is not None:
+            hits.append((UNATTRIBUTED_PATCH, None, "unparsable"))
+
+
+def referenced_patch_files(root: Path, rel: str):
+    """JSON patch files a kustomization.yaml references through patches / patchesJson6902."""
+    out = []
+    try:
+        docs = gatelib.loads_all(gatelib.read_text(root / rel, errors="replace"))
+    except Exception:
+        return out
+    base = (root / rel).parent
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        for key in ("patches", "patchesJson6902"):
+            for ent in doc.get(key) or []:
+                ref = ent.get("path") if isinstance(ent, dict) else None
+                if isinstance(ref, str) and ref.lower().endswith(".json"):
+                    f = (base / ref).resolve()
+                    try:
+                        out.append(f.relative_to(root.resolve()).as_posix())
+                    except ValueError:
+                        pass
+    return out
+
+
 def walk(node, names, props, hits, path=""):
     """Collect (name, raw_value, kind) for every setting of a watched name inside a parsed doc."""
     if isinstance(node, dict):
-        pth = node.get("path")
-        if isinstance(pth, str) and re.search(r"/env/(\d+|-)/value$", pth) and "value" in node:
-            # JSON6902 index-based env patch: the flag name is not in the patch, so it cannot be
-            # attributed. Fail closed outside permitted environments (UNATTRIBUTED_PATCH).
-            hits.append((UNATTRIBUTED_PATCH, node["value"], "patch"))
+        for ref_key in ("path", "from"):
+            ref = node.get(ref_key)
+            if isinstance(ref, str) and ENV_PATH_RE.search(ref):
+                # JSON6902 op (add/replace/copy/move) on an index-based env entry: the flag name is
+                # not in the patch, so it cannot be attributed. Fail closed outside permitted
+                # environments (UNATTRIBUTED_PATCH); only an explicit falsy value is tolerated.
+                hits.append((UNATTRIBUTED_PATCH, node.get("value"), "patch"))
         nm = node.get("name")
         if isinstance(nm, str) and nm in names:
             if "valueFrom" in node and "value" not in node:
@@ -148,18 +193,15 @@ def walk(node, names, props, hits, path=""):
         for k, v in node.items():
             if isinstance(k, str) and k in names | props and not isinstance(v, (dict, list)):
                 hits.append((k, v, "map"))
+            if k == "patch" and isinstance(v, str):
+                embedded(v, names, props, hits, path, force=True)
             walk(v, names, props, hits, f"{path}/{k}")
     elif isinstance(node, list):
         for v in node:
             walk(v, names, props, hits, path)
     elif isinstance(node, str):
-        if "\n" in node and (" op:" in node or "op:" in node or "env" in node):
-            try:  # kustomize `patches: - patch: |-` carries a YAML/JSON document as a string
-                for sub in gatelib.loads_all(node):
-                    if isinstance(sub, (dict, list)):
-                        walk(sub, names, props, hits, path)
-            except Exception:
-                pass
+        if "/env/" in node or OP_TEXT_RE.search(node):
+            embedded(node, names, props, hits, path, force=False)
         for m in re.finditer(r"(?:^|[\s\-D])([A-Za-z0-9_.\-]+)=(\S*)", node):
             if m.group(1) in names | props:
                 hits.append((m.group(1), m.group(2), "assign"))
@@ -170,7 +212,7 @@ def scan_file(path: Path, names: set, props: set):
     text = gatelib.read_text(path, errors="replace")
     hits: list = []
     parsed = False
-    if path.suffix in MANIFEST_EXT:
+    if path.suffix in MANIFEST_EXT or path.suffix == ".json":
         if not any(n in text for n in names | props) and "/env/" not in text:
             return hits, True
         try:
@@ -341,7 +383,15 @@ def check(root: Path, reg: dict):
         by_name[f["config_property"]] = f
     findings = []
     subjects = 0
-    for rel in iter_scan_files(root):
+    files = list(iter_scan_files(root))
+    seen = set(files)
+    for rel in list(files):
+        if Path(rel).name.lower() in ("kustomization.yaml", "kustomization.yml"):
+            for ref in referenced_patch_files(root, rel):
+                if ref not in seen and (root / ref).is_file():
+                    seen.add(ref)
+                    files.append(ref)
+    for rel in files:
         subjects += 1
         hits, _ = scan_file(root / rel, names, props)
         if not hits:
@@ -349,7 +399,8 @@ def check(root: Path, reg: dict):
         env = classify(rel, envs)
         for nm, val, kind in hits:
             if nm == UNATTRIBUTED_PATCH:
-                if truthy(val) or (isinstance(val, str) and TEMPLATE_RE.search(val)):
+                explicit_falsy = val is False or (isinstance(val, str) and val.strip().lower() in FALSY)
+                if not explicit_falsy:
                     allowed = set.intersection(*(set(f["permitted_environments"]) for f in flags))
                     if env not in allowed:
                         findings.append(("A", f"{rel} (environment {env!r}) JSON6902 patch sets an env value to {val!r}; "
@@ -451,6 +502,24 @@ def self_test() -> int:
         ("A-: JSON6902 index patch in the permitted environment",
          _fixture(manifests={"openbank-infra/gitops/p.yaml":
                              "- op: replace\n  path: /spec/template/spec/containers/0/env/3/value\n  value: \"true\"\n"}), []),
+        ("A+: embedded patch string without newline (JSON)",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml":
+                             "patches:\n  - patch: '[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/env/3/value\",\"value\":\"true\"}]'\n"}), ["A"]),
+        ("A+: unparsable embedded patch string fails closed",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml": "patches:\n  - patch: '[{op: replace, path: /env/0/value'\n"}), ["A"]),
+        ("A-: embedded patch string touching something else",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml":
+                             "patches:\n  - patch: '[{\"op\":\"replace\",\"path\":\"/spec/replicas\",\"value\":3}]'\n"}), []),
+        ("A+: JSON6902 op move/copy via `from` on an env entry",
+         _fixture(manifests={"openbank-infra/gitops-prod/p.yaml": "- op: copy\n  from: /spec/template/spec/containers/0/env/2/valueFrom\n  path: /x\n"}), ["A"]),
+        ("A+: referenced .json patch file is scanned",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml": "patches:\n  - path: p.json\n",
+                             "openbank-infra/gitops-prod/p.json":
+                             '[{"op":"add","path":"/spec/template/spec/containers/0/env/-","value":{"name":"OPENBANK_X_AUTO_CLEAR","value":"true"}}]'}), ["A"]),
+        ("A-: unreferenced .json file is not scanned",
+         _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml": "resources: []\n",
+                             "openbank-infra/gitops-prod/p.json":
+                             '[{"op":"replace","path":"/spec/template/spec/containers/0/env/3/value","value":"true"}]'}), []),
         ("D-: %dev sets true", _fixture(yaml_text="'%dev':\n  openbank:\n    x:\n      auto-clear: true\n"), []),
         ("D-: %prod sets false", _fixture(yaml_text="'%prod':\n  openbank:\n    x:\n      auto-clear: false\n"), []),
     ]
