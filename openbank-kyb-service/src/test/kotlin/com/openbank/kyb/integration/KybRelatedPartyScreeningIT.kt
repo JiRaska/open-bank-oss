@@ -129,7 +129,7 @@ class KybRelatedPartyScreeningIT {
             }
             val events = c.prepareStatement("select event_type from kyb_outbox where aggregate_id = ? order by id")
                 .use { st ->
-                    st.setString(1, caseId)
+                    st.setObject(1, UUID.fromString(caseId))
                     st.executeQuery().use { rs ->
                         generateSequence { if (rs.next()) rs.getString(1) else null }.toList()
                     }
@@ -143,7 +143,7 @@ class KybRelatedPartyScreeningIT {
                 "select payload from kyb_outbox where aggregate_id = ? " +
                     "and event_type = 'BUSINESS_ONBOARDING_REVIEW_REQUIRED' order by id desc limit 1",
             ).use { st ->
-                st.setString(1, caseId)
+                st.setObject(1, UUID.fromString(caseId))
                 st.executeQuery().use { rs ->
                     check(rs.next()) { "no review event for $caseId" }
                     rs.getString(1)

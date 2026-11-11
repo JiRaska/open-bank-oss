@@ -313,3 +313,11 @@ authz:
       # No Temporal frontend in @QuarkusTest: the workflow test drives its own TestWorkflowEnvironment.
       worker:
         enabled: false
+      # The related-party screening gate is ON for every @QuarkusTest in this module, against the
+      # StubRelatedPartyScreening double (clear unless a test names someone). It ships OFF; running
+      # the ITs with it on is what proves the journeys still complete once it is switched on. Set
+      # HERE and not in src/test/resources/application.properties: measured twice, a key in that
+      # file (plain or %test-prefixed) did not reach the application and every IT ran with the
+      # gate off, reading green about a control that was not there.
+      screening:
+        enabled: true
