@@ -137,7 +137,8 @@ class BusinessPaymentApprovals(
 
         scaGate()?.let { return it }
         val challenge = UUID.fromString(requireNotNull(scaChallengeId).trim())
-        val created = signing.createApproval(entity, createBody(customer.human, challenge, payment, submissionCorrelation))
+        val body = createBody(customer.human, challenge, payment, submissionCorrelation)
+        val created = signing.createApproval(entity, body)
         if (!created.ok) {
             audit.emit(
                 eventType = "CUSTOMER_PAYMENT_REFUSED",
@@ -146,9 +147,10 @@ class BusinessPaymentApprovals(
                 result = "FAILURE",
                 details = mapOf("reason" to "APPROVAL_NOT_CREATED", "upstreamStatus" to created.status.toString()),
             )
-            if (created.status == 409 && read(created.body)?.path("code")?.asText() == "SUBMISSION_CORRELATION_REUSED") {
+            val code = read(created.body)?.path("code")?.asText()
+            if (created.status == Response.Status.CONFLICT.statusCode && code == SUBMISSION_CORRELATION_REUSED) {
                 return Response.status(Response.Status.CONFLICT)
-                    .entity(mapOf("code" to "SUBMISSION_CORRELATION_REUSED", "message" to "Submission key already used"))
+                    .entity(mapOf("code" to SUBMISSION_CORRELATION_REUSED, "message" to "Submission key already used"))
                     .type(MediaType.APPLICATION_JSON)
                     .build()
             }
@@ -187,7 +189,7 @@ class BusinessPaymentApprovals(
         submissionCorrelation: String,
     ): DomesticApprovalReceipt? {
         val reply = signing.lookupDomesticApproval(entity, initiator, submissionCorrelation)
-        if (reply.status != 200) return null
+        if (reply.status != Response.Status.OK.statusCode) return null
         val receipt = read(reply.body) ?: return null
         val id = receipt.path("approvalId").textOrNull()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return null
@@ -327,8 +329,16 @@ class BusinessPaymentApprovals(
 
     private companion object {
         val DOMESTIC_APPROVAL_STATUSES = setOf(
-            "AWAITING_INITIATOR", "PENDING", "APPROVED", "REJECTED", "EXPIRED", "RELEASED", "RELEASE_FAILED",
+            "AWAITING_INITIATOR",
+            "PENDING",
+            "APPROVED",
+            "REJECTED",
+            "EXPIRED",
+            "RELEASED",
+            "RELEASE_FAILED",
         )
+
+        const val SUBMISSION_CORRELATION_REUSED = "SUBMISSION_CORRELATION_REUSED"
 
         const val ERROR_MAX_CHARS = 300
     }

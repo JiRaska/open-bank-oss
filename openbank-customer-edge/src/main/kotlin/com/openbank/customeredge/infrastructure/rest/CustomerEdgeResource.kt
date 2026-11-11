@@ -3150,7 +3150,8 @@ class CustomerEdgeResource(
         val customer = customer()
         val entity = customer.actingFor ?: return domesticSubmissionResult()
         val scope = domesticLookupScope(customer, debtor, body.amount) ?: return domesticSubmissionResult()
-        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, domesticApprovalCorrelation(scope, key))
+        val correlation = domesticApprovalCorrelation(scope, key)
+        val receipt = businessApprovals.lookupDomesticSubmission(entity, customer.human, correlation)
             ?: return domesticSubmissionResult()
         val result = mutableMapOf(
             "outcome" to "FOUND",
