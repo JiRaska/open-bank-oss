@@ -105,14 +105,24 @@ FINREP preflight rejects a frozen trial balance with no reportable rows. It also
 foreign-currency rows until the ledger supplies a verified CZK reporting-currency conversion.
 The independent per-currency balance verdict and the reporting-currency checks both apply.
 
-For FINREP9, save the four same-date responses from the frozen template reads and compare them to
-an existing report package. The reconciliation checks exact decimal amounts and records the report
-and source digests for the 36 supported facts.
+For FINREP9, save the four same-date responses from the frozen template reads. The draft renderer
+writes the 36 supported facts after reconciling assets with liabilities and equity across F01.
+Supply the reporting entity explicitly. The example uses the EBA's synthetic entity.
 
 ```sh
-python openbank-finrep-service/tools/reconcile_finrep_facts.py --report report.zip \
+python openbank-finrep-service/tools/render_finrep_supported_facts.py \
+  --entity-id rs:DUMMYLEI123456789012.CON --output finrep-supported.zip \
+  --template F01.01.json --template F01.02.json --template F01.03.json --template F02.00.json
+```
+
+`SUPPORTED_FACTS_DRAFT_WRITTEN` records the source and package digests. Validate the package with
+Arelle, then use the reconciliation check to compare its exact decimal amounts with the four
+source responses.
+
+```sh
+python openbank-finrep-service/tools/reconcile_finrep_facts.py --report finrep-supported.zip \
   --template F01.01.json --template F01.02.json --template F01.03.json --template F02.00.json
 ```
 
 `SUPPORTED_FACTS_RECONCILED` covers those coordinates. COREP requires an independently reconciled
-prudential capital source. An export also requires coverage of the other applicable EBA tables.
+prudential capital source. A filing also requires coverage of the other applicable EBA tables.

@@ -28,9 +28,7 @@ def unique(rows: list[dict], key: str) -> dict:
     return indexed
 
 
-def reconcile(report: Path, previews: list[Path]) -> dict:
-    report_payload = report.read_bytes()
-    check_report(io.BytesIO(report_payload), "FINREP9")
+def load_sources(previews: list[Path]) -> tuple[dict, list[dict], dict]:
     supported = json.loads(FIXTURE.read_bytes())["supportedFacts"]
     expected_templates = {fact["templateId"] for fact in supported}
     sources = []
@@ -43,6 +41,13 @@ def reconcile(report: Path, previews: list[Path]) -> dict:
     templates = unique(sources, "templateId")
     if set(templates) != expected_templates:
         raise ValueError("Supply one frozen source response for each supported FINREP template.")
+    return templates, supported, source_hashes
+
+
+def reconcile(report: Path, previews: list[Path]) -> dict:
+    report_payload = report.read_bytes()
+    check_report(io.BytesIO(report_payload), "FINREP9")
+    templates, supported, source_hashes = load_sources(previews)
 
     with ZipFile(io.BytesIO(report_payload)) as archive:
         metadata = next(name for name in archive.namelist() if name.endswith("/reports/report.json"))
@@ -58,7 +63,10 @@ def reconcile(report: Path, previews: list[Path]) -> dict:
                 raise ValueError(f"The report does not declare {table} as reported.")
             report_rows = unique(csv_rows(archive, f"{directory}{table.lower()}.csv"), "datapoint")
             facts = [fact for fact in supported if fact["templateId"] == template_id]
-            check_template(source, period, report_rows, facts)
+            for datapoint, source_value in supported_values(source, period, facts).items():
+                report_value = Decimal(report_rows[datapoint]["factValue"])
+                if not report_value.is_finite() or source_value != report_value:
+                    raise ValueError(f"{template_id} {datapoint} differs from the frozen source.")
     return {
         "result": "SUPPORTED_FACTS_RECONCILED",
         "period": period,
@@ -68,7 +76,7 @@ def reconcile(report: Path, previews: list[Path]) -> dict:
     }
 
 
-def check_template(source: dict, period: str, rows: dict, facts: list[dict]) -> None:
+def supported_values(source: dict, period: str, facts: list[dict]) -> dict[str, Decimal]:
     template = source["templateId"]
     if (
         source["period"] != period or source["dataGaps"] != [] or source["isBalanced"] is not True
@@ -79,16 +87,15 @@ def check_template(source: dict, period: str, rows: dict, facts: list[dict]) -> 
     expected = {(fact["rowRef"], fact["colRef"]) for fact in facts}
     if len(cells) != len(source["cells"]) or set(cells) != expected:
         raise ValueError(f"{template} source coordinates differ from the pinned mapping.")
+    values = {}
     for fact in facts:
         cell = cells[(fact["rowRef"], fact["colRef"])]
         datapoint = f"dp{fact['datapointId']}"
-        report_value = Decimal(rows[datapoint]["factValue"])
         source_value = Decimal(cell["value"])
-        if (
-            cell["currency"] != "CZK" or not source_value.is_finite() or not report_value.is_finite()
-            or source_value != report_value
-        ):
-            raise ValueError(f"{template} {datapoint} differs from the frozen source.")
+        if cell["currency"] != "CZK" or not source_value.is_finite():
+            raise ValueError(f"{template} {datapoint} needs a finite CZK source value.")
+        values[datapoint] = source_value
+    return values
 
 
 def main() -> int:

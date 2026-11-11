@@ -7,6 +7,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from reconcile_finrep_facts import reconcile
+from render_finrep_supported_facts import render
 from check_finrep_datapoints import FIXTURE
 from validate_xbrl_csv_structure import ENTRYPOINTS
 
@@ -22,8 +23,9 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
         self.period = "2026-06-30"
         self.value = "123456789123456.789123"
 
-    def sources(self, *, data_gaps=None):
+    def sources(self, *, data_gaps=None, values=None):
         paths = []
+        values = values or {}
         for template in self.templates:
             path = self.folder / f"{template}.json"
             payload = {
@@ -31,7 +33,10 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
                 "isBalanced": True, "balanceVerdict": "AGREED_BALANCED",
                 "dataGaps": data_gaps or [],
                 "cells": [
-                    {"rowRef": fact["rowRef"], "colRef": fact["colRef"], "value": self.value, "currency": "CZK"}
+                    {
+                        "rowRef": fact["rowRef"], "colRef": fact["colRef"],
+                        "value": values.get(fact["datapointId"], self.value), "currency": "CZK",
+                    }
                     for fact in self.facts if fact["templateId"] == template
                 ],
             }
@@ -82,6 +87,25 @@ class ReconcileFinrepFactsTest(unittest.TestCase):
         self.package()
         with self.assertRaisesRegex(ValueError, "complete mappings"):
             reconcile(self.report, self.sources(data_gaps=[{"code": "INCOMPLETE_OFFICIAL_MAPPING"}]))
+
+
+    def test_writes_a_reproducible_draft_and_reconciles_all_supported_facts(self):
+        sources = self.sources(values={32354: "300.12", 32592: "200.11", 32464: "100.01", 32654: "300.12"})
+        rendered = render(sources, "rs:DUMMYLEI123456789012.CON", self.report)
+        replay = self.folder / "replay.zip"
+        result = render(list(reversed(sources)), "rs:DUMMYLEI123456789012.CON", replay)
+        self.assertEqual(rendered, result)
+        self.assertEqual(self.report.read_bytes(), replay.read_bytes())
+        self.assertEqual(reconcile(self.report, sources)["reportSha256"], rendered["reportSha256"])
+        with self.assertRaises(FileExistsError):
+            render(sources, "rs:DUMMYLEI123456789012.CON", self.report)
+        self.assertEqual(self.report.read_bytes(), replay.read_bytes())
+
+    def test_rejects_a_balance_sheet_mismatch_before_creating_a_package(self):
+        sources = self.sources(values={32354: "300.13", 32592: "200.11", 32464: "100.01", 32654: "300.13"})
+        with self.assertRaisesRegex(ValueError, "Assets do not reconcile"):
+            render(sources, "rs:DUMMYLEI123456789012.CON", self.report)
+        self.assertFalse(self.report.exists())
 
 
 if __name__ == "__main__":
