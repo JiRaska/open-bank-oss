@@ -28,3 +28,12 @@ class StubConsentCheckPort : ConsentCheckPort {
         val granted: AtomicBoolean = AtomicBoolean(true)
     }
 }
+
+/** Test-only suppression list: consent-service does not run in this IT stack (see above). */
+@Alternative
+@Priority(1)
+@ApplicationScoped
+class StubContactSuppressionPort : com.openbank.libs.contact.ContactSuppressionPort {
+    override suspend fun activeSuppressions(partyId: java.util.UUID): List<com.openbank.libs.contact.SuppressionEntry> =
+        emptyList()
+}
