@@ -152,19 +152,9 @@ class BusinessPaymentApprovalIT {
         postDomestic(key) Then { statusCode(503) }
         val create = BusinessApprovalStubs.requests("POST", CREATE).single()
         val request = readJson(create.body)
-        val claimRequest = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single()
-        val claimBody = readJson(claimRequest.body)
         val digest = request.path("submissionKeyDigest").asText()
         val correlation = request.path("submissionCorrelation").asText()
-        assertThat(digest).matches("[0-9a-f]{64}").isNotEqualTo(correlation)
-        assertThat(correlation).matches("[0-9a-f]{64}")
-        assertThat(claimBody.path("submissionKeyDigest").asText()).isEqualTo(digest)
-        assertThat(claimBody.path("submissionCorrelation").asText()).isEqualTo(correlation)
-        assertThat(claimBody.path("payload")).isEqualTo(request.path("payload"))
-        assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
-        assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
-        assertThat(claimRequest.header("Idempotency-Key")).isNull()
-        assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
+        assertDomesticClaimMatchesCreate(key, create, request)
 
         val route = "$CREATE/submissions/lookup"
         val releaseEvidence = AtomicReference("""{"approvalId":"$APPROVAL","status":"PENDING"}""")
@@ -210,6 +200,26 @@ class BusinessPaymentApprovalIT {
         assertThat(BusinessApprovalStubs.requests("POST", CREATE)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", CONSUME)).hasSize(1)
         assertThat(BusinessApprovalStubs.requests("POST", DOMESTIC_RAIL)).isEmpty()
+    }
+
+    private fun assertDomesticClaimMatchesCreate(
+        key: String,
+        create: BusinessApprovalStubs.Request,
+        request: JsonNode,
+    ) {
+        val claimRequest = BusinessApprovalStubs.requests("POST", CLAIM_SUBMISSION).single()
+        val claimBody = readJson(claimRequest.body)
+        val digest = request.path("submissionKeyDigest").asText()
+        val correlation = request.path("submissionCorrelation").asText()
+        assertThat(digest).matches("[0-9a-f]{64}").isNotEqualTo(correlation)
+        assertThat(correlation).matches("[0-9a-f]{64}")
+        assertThat(claimBody.path("submissionKeyDigest").asText()).isEqualTo(digest)
+        assertThat(claimBody.path("submissionCorrelation").asText()).isEqualTo(correlation)
+        assertThat(claimBody.path("payload")).isEqualTo(request.path("payload"))
+        assertThat(claimBody.path("enforceApprovalPolicy").asBoolean()).isTrue()
+        assertThat(listOf(claimRequest.body, create.body)).allSatisfy { assertThat(it).doesNotContain(key) }
+        assertThat(claimRequest.header("Idempotency-Key")).isNull()
+        assertThat(request.path("payload").has("submissionCorrelation")).isFalse()
     }
 
     @Test
