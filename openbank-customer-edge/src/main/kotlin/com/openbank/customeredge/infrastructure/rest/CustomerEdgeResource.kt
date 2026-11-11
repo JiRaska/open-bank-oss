@@ -6189,6 +6189,9 @@ class CustomerEdgeResource(
             return HexFormat.of().formatHex(digest)
         }
 
+        private fun normalizeDomesticPriority(priority: String?): String =
+            priority?.uppercase()?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
+
         /**
          * Build the full CreateDomesticPaymentRequest the upstream needs from the app's lightweight body
          * plus the edge-resolved debtor/creditor parts. Amount is emitted as a JSON number; the optional
@@ -6230,9 +6233,7 @@ class CustomerEdgeResource(
             txt("specificSymbol")?.let { out.put("specificSymbol", it) }
             txt("constantSymbol")?.let { out.put("constantSymbol", it) }
             txt("reference")?.let { out.put("messageForPayee", it) }
-            val priority = txt("priority")?.uppercase()
-                ?.takeIf { it in setOf("STANDARD", "URGENT", "INSTANT") } ?: "STANDARD"
-            out.put("priority", priority)
+            out.put("priority", normalizeDomesticPriority(txt("priority")))
             mapper.writeValueAsString(out)
         }.getOrNull()
 
