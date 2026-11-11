@@ -21,6 +21,8 @@ internal val CARD_READ_CALLERS = setOf(
     "service-account-openbank-delegation",
     // Customer edge checks ownership/delegation before returning card data.
     "service-account-openbank-edge",
+    // Card processing resolves the issuer card before an authorization decision.
+    "service-account-openbank-card-processing",
 )
 
 /**

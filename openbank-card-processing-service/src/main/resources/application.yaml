@@ -47,6 +47,13 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    card-issuer:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-card-processing
+      credentials:
+        secret: ${OIDC_ISSUER_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
   # ADR-0319: the generated transaction-service client binds its responses with this mapper. A field
   # the provider adds must never fail a bind AFTER the clearing has committed (Quarkus' default, pinned).
   jackson:

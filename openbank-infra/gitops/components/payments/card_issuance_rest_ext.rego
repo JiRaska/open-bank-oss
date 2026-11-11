@@ -50,6 +50,36 @@ allowed_reasons contains "operator-card-write" if {
 	input.action in {"card.create", "card.activate", "card.block", "card.suspend", "card.resume"}
 }
 
+# These operations are available to interactive staff. A workload with the same
+# realm role needs an explicit grant for its own operations below.
+allowed_reasons contains "staff-card-controls" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action in {"card.cancel", "card.limits.update", "card.controls.update", "card.category-limits.update"}
+}
+
+allowed_reasons contains "compliance-card-cancel" if {
+	input.principal.type == "HUMAN"
+	not principal_is_machine
+	"ROLE_COMPLIANCE" in input.principal.roles
+	input.action == "card.cancel"
+}
+
+# Customer edge validates card ownership and the customer action before calling this API.
+allowed_reasons contains "service-edge-card-controls" if {
+	machine_named("service-account-openbank-edge")
+	"ROLE_OPERATOR" in input.principal.roles
+	input.action in {"card.cancel", "card.limits.update", "card.controls.update"}
+}
+
+allowed_reasons contains "service-card-processing-decision" if {
+	machine_named("service-account-openbank-card-processing")
+	"ROLE_API" in input.principal.roles
+	input.action == "card.authorization.decide"
+}
+
 # Requeueing dead-lettered outbox rows (CardOutboxAdminResource, #4005) republishes events that
 # may already have been delivered — openbank-audit-service appends a second, permanently
 # undeletable audit record for each — so it is granted to ROLE_ADMIN **only**, exactly matching
@@ -80,9 +110,10 @@ allowed_reasons contains "compliance-card-block" if {
 #   customer-edge      authenticated customer list and card ownership/delegation checks
 #   delegation-service CardIssuanceRestClient.getCard  GET /cards/{id}             card.read
 #   party-service      CardServiceRestClient.listByParty GET /cards/party/{partyId} card.list
+#   card-processing    CardIssuanceClient.getCard before issuing an authorization decision
 allowed_reasons contains "service-delegation-card-read" if {
 	input.principal.type == "HUMAN"
-	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge"}
+	some caller in {"service-account-openbank-delegation", "service-account-openbank-edge", "service-account-openbank-card-processing"}
 	machine_named(caller)
 	input.action == "card.read"
 }
