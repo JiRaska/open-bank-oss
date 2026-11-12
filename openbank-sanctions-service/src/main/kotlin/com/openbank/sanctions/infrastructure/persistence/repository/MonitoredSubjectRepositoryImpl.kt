@@ -153,6 +153,8 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
         // every entry, here one entry against every subject, with the same function and operand
         // order. No index serves it (the indexable side of word_similarity is the haystack, and
         // here the haystack is the constant), so this is one pass over the registry per entry.
+        // No ORDER BY: with one, the planner walks the primary key to feed the LIMIT and reads the
+        // heap in random order, which measured 9.7 s per entry on a million rows.
         val MATCH_SQL = """
             SELECT $COLUMNS, m.match_score
             FROM sanctions_monitored_subjects s
@@ -160,13 +162,14 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
                 SELECT max(word_similarity(n, $1)) AS match_score FROM unnest(s.search_names) AS n
             ) m
             WHERE m.match_score >= $2
-            ORDER BY s.id
             LIMIT $3
         """.trimIndent()
 
         const val LEASE_FREE =
             "(sweep_claimed_at IS NULL OR sweep_claimed_at < clock_timestamp() - make_interval(secs => $1))"
 
+        // The cutoff uses now(), not clock_timestamp(): a volatile function cannot be an index
+        // condition, and with it an idle tick read all of the index (1.5 s on a million rows).
         // Two statements, one per index, so a tick with nothing due reads a few index entries
         // instead of the registry: never-swept rows live in a partial index, the rest are ordered
         // by last_swept_at. FOR UPDATE SKIP LOCKED keeps two pods from claiming the same rows.
@@ -186,7 +189,7 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
                 SELECT id FROM sanctions_monitored_subjects
                 WHERE last_swept_at IS NOT NULL
                   AND last_swept_at < GREATEST(
-                        clock_timestamp() - make_interval(secs => $3),
+                        now() - make_interval(secs => $3),
                         COALESCE((SELECT resweep_requested_at FROM sanctions_monitoring_state WHERE id = 1),
                                  '-infinity'::timestamptz))
                   AND $LEASE_FREE

@@ -21,7 +21,11 @@ info:
   # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400);
   # its request schema names the three fields only to say so, because the shared request type
   # parses them and a parsed field that is not published is a contract gap.
-  version: 3.2.0
+  # 3.2.0 -> 3.3.0 (ADR-0376): ADDITIVE. PUT and DELETE
+  # /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef} register a subject for ongoing
+  # monitoring and withdraw it. No existing operation, schema or response changes. Registration
+  # answers 503 while `openbank.sanctions.monitoring.enabled` is false, which is the default.
+  version: 3.3.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
   # oasdiff classifies 200 -> 202 as breaking, and a breaking change here means a new URL major:
@@ -40,6 +44,7 @@ servers:
 tags:
   - name: Sanctions
   - name: SanctionsLists
+  - name: Monitoring
 
 paths:
   /api/v1/sanctions:
@@ -195,6 +200,72 @@ paths:
                 $ref: '#/components/schemas/SanctionsCheckV3'
         '400':
           $ref: '#/components/responses/BadRequest'
+
+  /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}:
+    parameters:
+      - name: ownerService
+        in: path
+        required: true
+        description: The service that owns the subject and receives its findings, e.g. `kyc-service`.
+        schema:
+          type: string
+          pattern: '^[a-z][a-z0-9-]{1,62}$'
+      - name: subjectRef
+        in: path
+        required: true
+        description: >-
+          The owning service's stable reference for the subject — the value it sends as `subjectId`
+          when it screens the subject, so that an analyst's clearance is honoured by monitoring.
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 255
+    put:
+      tags: [Monitoring]
+      summary: Register a subject for ongoing monitoring, or replace its attributes
+      description: >-
+        Idempotent. Registering the same attributes again changes nothing; different attributes
+        replace the stored ones and the subject is evaluated afresh. The response describes the
+        registration only: whether the subject matches anything is never returned over REST, it is
+        published to the owning service as a `MONITORED_SUBJECT_MATCHED` event.
+      operationId: registerMonitoredSubject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MonitoredSubjectRequest'
+      responses:
+        '200':
+          description: The subject was already registered; its attributes are as sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoredSubjectRegistration'
+        '201':
+          description: The subject is now monitored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoredSubjectRegistration'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '503':
+          description: Ongoing monitoring is not enabled in this environment; nothing was stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags: [Monitoring]
+      summary: Stop monitoring a subject and delete what is stored about it
+      description: >-
+        Deletes the registry row and every finding recorded for it. Idempotent: the answer is 204
+        whether or not the subject was registered. Works while monitoring is disabled.
+      operationId: deregisterMonitoredSubject
+      responses:
+        '204':
+          description: The subject is not monitored and nothing about it is stored
 
   /api/v3/sanctions/review:
     post:
@@ -752,6 +823,50 @@ components:
             against the jurisdiction reference data exactly like `country`. The BIC is not matched
             against listed entities: the imported list sources carry no bank identifiers.
 
+    MonitoredSubjectRequest:
+      type: object
+      required: [entityType, name]
+      description: >-
+        The attributes the CUSTOMER screening profile reads. Send the same values as on the
+        subject's live screen; no document identifiers are accepted or stored.
+      properties:
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+          minLength: 1
+          maxLength: 500
+        aliases:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            minLength: 1
+            maxLength: 500
+        dateOfBirth:
+          type: [string, 'null']
+        nationality:
+          type: [string, 'null']
+        country:
+          type: [string, 'null']
+          pattern: '^[A-Za-z]{2}$'
+          description: ISO 3166-1 alpha-2. A listed jurisdiction raises a finding whatever the name is.
+    MonitoredSubjectRegistration:
+      type: object
+      required: [ownerService, subjectRef, registeredAt, updatedAt]
+      properties:
+        ownerService:
+          type: string
+        subjectRef:
+          type: string
+        registeredAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+          description: When the stored attributes last changed; unchanged by an identical registration.
     ReviewCommand:
       type: object
       required: [checkId, reviewedBy, note, newStatus]

@@ -169,3 +169,16 @@ Every `sanctions_lists.list_type` requires a row in `sanctions_change_publicatio
 `V19__backfill_sanctions_publication_state.sql` initializes any missing list state with the table defaults. Existing fingerprints, generations and active-refresh flags are preserved by `ON CONFLICT (list_type) DO NOTHING`. Fresh-schema and V18-upgrade integration tests cover this invariant and replay with nondefault existing state.
 
 Retain these additive control rows when rolling back application code, together with pending journal and outbox evidence. Removing a row can discard a generation, active fence or fingerprint and prevent older application code from publishing safely. Apply state repairs through forward migrations rather than manual recovery SQL.
+
+## Ongoing monitoring tables (V23, ADR-0376)
+
+| Table | Holds | Retention |
+|---|---|---|
+| `sanctions_monitored_subjects` | One row per registered subject: owning service, subject reference, entity type, name, aliases, normalised search names, date of birth, nationality, country, sweep bookkeeping | Until deregistration, which deletes the row |
+| `sanctions_monitoring_findings` | One row per subject, list entry and version of the entry's names; `delisted_at` once the entry left its list | Deleted with the subject (`ON DELETE CASCADE`) |
+| `sanctions_monitoring_pending` | Queue of committed list-entry changes not yet matched | Until matched, or dropped in favour of a re-sweep |
+| `sanctions_monitoring_state` | One row: when a full re-sweep was last requested | Permanent |
+
+The registry and the findings are personal data (name, aliases and date of birth are direct identifiers; a finding links a subject to a list entry). Unlike `sanctions_checks`, they are not the statutory AML record: the owning service keeps that. Erasure therefore applies, and deregistration is how it is carried out.
+
+Indexes: `uq_sanctions_monitored_subject (owner_service, subject_ref)` for registration; the partial `idx_sanctions_monitored_unswept (id) WHERE last_swept_at IS NULL` and `idx_sanctions_monitored_swept (last_swept_at, id)` for the sweep, so an idle tick reads a few index entries; the partial unique `uq_sanctions_monitoring_finding_open` is what makes a finding idempotent. The delta match has no index: the subject's name is the needle of `word_similarity`, and pg_trgm can only index the haystack.

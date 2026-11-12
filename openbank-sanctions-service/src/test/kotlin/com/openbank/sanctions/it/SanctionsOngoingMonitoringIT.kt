@@ -367,7 +367,7 @@ class SanctionsOngoingMonitoringIT {
 
     private companion object {
         val EVENT_FIELDS = arrayOf(
-            "eventType", "schemaVersion", "aggregateId", "aggregateType", "findingId", "ownerService", "subjectRef",
+            "schemaVersion", "aggregateId", "aggregateType", "findingId", "ownerService", "subjectRef",
             "entityType", "matchKind", "listType", "listEntryRef", "listEntryVersion", "matchScore", "matchStatus",
             "detection", "occurredAt", "sourceService",
         )

@@ -175,3 +175,15 @@ Událost `SanctionChecked`, která odpovídá `SanctionsCheck.isHighRisk()`, se 
 ## Sdílený stav kontroly a práh blokace (ADR-0353)
 
 `SanctionsCheckStatus` je typealias `ScreeningMatchStatus` z `openbank-libs-fincrime`, typu, který platební kanály čtou z drátu. `isHighRisk` čte sdílený práh `ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD` (0,85), stejný, podle kterého kanály blokují. Ukládané hodnoty (`@Enumerated(STRING)`) ani zápis v API se nemění.
+
+## Průběžný monitoring (ADR-0376)
+
+Ve výchozím stavu vypnuto (`openbank.sanctions.monitoring.enabled=false`). Kontrola odpovídá za okamžik, kdy proběhla; průběžný monitoring pokrývá to, co se se seznamy stane potom.
+
+- **Registr.** Služba zaregistruje subjekt, který přijala (`sanctions_monitored_subjects`), s atributy, které čte profil `CUSTOMER`, pod stejnou referencí, jakou posílá jako `subjectId` při kontrole.
+- **Delta.** Žurnál změn, který už zaznamenává každou potvrzenou změnu položky seznamu, plní také `sanctions_monitoring_pending` (trigger; dokud je registr prázdný, nic nezapisuje). `SanctionsMonitoringService.runDelta` vezme omezenou dávku změněných položek a každou porovná s registrem stejnou funkcí `word_similarity(jméno subjektu, text položky)` a stejným prahem profilu `CUSTOMER` jako živá kontrola. Je to kontrola obráceně: jedna položka, všechny subjekty.
+- **Sweep.** `runSweep` znovu vyhodnotí omezenou dávku celých subjektů přes `SanctionsService.uncoveredMatches`, tedy funkci, na které stojí samotný `screen`. Nejdřív subjekty, které ještě vyhodnoceny nebyly, potom ty nejdéle nevyhodnocené; každý subjekt je znovu na řadě po `sweep.interval` (výchozí hodnota 30 dní). Je to pojistka pro zmeškanou deltu a jediná cesta, která vidí referenční data jurisdikcí.
+- **Záložní cesta.** Fronta delší než `delta.max-pending` nebo položka odpovídající více než `delta.max-candidates-per-entry` subjektům se neporovnává po položkách: fronta se zahodí a všechny subjekty se v jedné transakci označí k novému vyhodnocení.
+- **Nálezy.** Jeden řádek na subjekt, položku seznamu a verzi jmen položky, zapsaný v jedné transakci s outbox událostí `MONITORED_SUBJECT_MATCHED`. Verze nezávisí na pořadí jmen, takže zdroj, který jen přeskládá aliasy, nic nevyvolá. Analytikovo vyjasnění se uplatní stejným pravidlem jako v živé kontrole; shodu PEP ani shodu jurisdikce nekryje nikdy.
+
+Obě plánované metody jsou `suspend` funkce a heartbeaty `sanctions-monitoring-delta` a `sanctions-monitoring-sweep` registrují jen při zapnutém monitoringu; vypnutá úloha s registrovaným heartbeatem by vyvolala `WorkflowLivenessStale` v každém prostředí, které funkci nezapnulo.

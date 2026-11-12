@@ -254,3 +254,36 @@ Topic: `openbank.sanctions.screening.event` (CloudEvents binding, JSON).
 | `sanctions.review.submitted.v1` | POST /review | checkId, reviewedBy, newStatus, reviewNote, reviewedAt |
 
 Eventy jsou append-only; následný přezkum vytváří nový event `sanctions.review.submitted.v1`, nepřepisuje původní event prověření.
+
+## Průběžný monitoring (ADR-0376)
+
+Dostupné od verze API kontraktu 3.3.0. Chráněno stejně jako `POST /api/v3/sanctions/screen`: role `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` a akce `sanctions.create`.
+
+### Registrace nebo aktualizace sledovaného subjektu
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+```
+
+`ownerService` je registrující služba (například `kyc-service`); `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
+
+| Stav | Význam |
+|---|---|
+| 201 | Subjekt je nově sledován |
+| 200 | Už byl registrován; stejné atributy nic nemění, jiné nahradí uložené |
+| 400 | Neplatná hodnota v cestě nebo v těle (prázdné jméno, alias `null`, neplatný formát země, znak NUL) |
+| 503 | Monitoring není v tomto prostředí zapnut; nic nebylo uloženo |
+
+Odpověď popisuje registraci (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). Nikdy neříká, zda subjekt něčemu odpovídá.
+
+### Odregistrace sledovaného subjektu
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+```
+
+Smaže řádek registru i jeho nálezy. Vždy 204, ať subjekt registrován byl, nebo ne, a funguje i při vypnutém monitoringu. Volá se při ukončení vztahu a při výmazu.
+
+### Událost nálezu
+
+`MONITORED_SUBJECT_MATCHED` na `openbank.sanctions.screening.event` (typ v hlavičce `ce-type`), verze schématu 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. Jméno klienta se nepřenáší. Žádná REST operace nálezy nevrací.

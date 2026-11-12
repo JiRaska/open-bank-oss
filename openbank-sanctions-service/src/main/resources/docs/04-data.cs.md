@@ -160,3 +160,16 @@ Právní základ pro zpracování: **Právní povinnost** (čl. 6 odst. 1 písm.
 Sloupce `aliases`, `identifiers`, `matches` a `checked_lists` v `sanctions_checks` zůstávají JSONB s původními výchozími hodnotami a omezením NOT NULL. Entita drží JSON jako text v Kotlinu: SQL při čtení převádí sloupce na text a při zápisu převádí vázaný text na JSONB. Mezilehlý textový cast při zápisu brání uložení JSON dokumentu jako citovaného JSON řetězce. Databázová validace JSON zůstává zachovaná; migrace typu těchto sloupců není potřeba.
 
 Mapování umožňuje seznamu, detailu a čekajícím kontrolám číst neprázdná pole i objekty bez změny odpovědí nebo screeningových rozhodnutí. Regresní test se skutečným PostgreSQL pokrývá existující JSONB záznamy, reaktivní vložení a aktualizaci s opětovným načtením změněných payloadů, volitelná metadata, odmítnutí neplatného JSON a404 pro chybějící id. Kladné HTTP testy používají testovací identitu a neprokazují produkční JWT ani vynucení politik.
+
+## Tabulky průběžného monitoringu (V23, ADR-0376)
+
+| Tabulka | Obsah | Retence |
+|---|---|---|
+| `sanctions_monitored_subjects` | Jeden řádek na registrovaný subjekt: vlastnící služba, reference subjektu, typ entity, jméno, aliasy, normalizovaná jména pro hledání, datum narození, státní příslušnost, země, evidence sweepu | Do odregistrace, která řádek smaže |
+| `sanctions_monitoring_findings` | Jeden řádek na subjekt, položku seznamu a verzi jmen položky; `delisted_at`, jakmile položka seznam opustila | Maže se se subjektem (`ON DELETE CASCADE`) |
+| `sanctions_monitoring_pending` | Fronta potvrzených změn položek, které ještě nebyly porovnány | Do porovnání, nebo do zahození ve prospěch nového sweepu |
+| `sanctions_monitoring_state` | Jeden řádek: kdy byl naposledy vyžádán úplný sweep | Trvale |
+
+Registr a nálezy jsou osobní údaje (jméno, aliasy a datum narození jsou přímé identifikátory; nález spojuje subjekt s položkou seznamu). Na rozdíl od `sanctions_checks` nejde o zákonný AML záznam: ten vede vlastnící služba. Právo na výmaz se proto uplatní a provádí se odregistrací.
+
+Indexy: `uq_sanctions_monitored_subject (owner_service, subject_ref)` pro registraci; částečný `idx_sanctions_monitored_unswept (id) WHERE last_swept_at IS NULL` a `idx_sanctions_monitored_swept (last_swept_at, id)` pro sweep, takže nečinný tick přečte jen několik položek indexu; částečný unikátní `uq_sanctions_monitoring_finding_open` zajišťuje idempotenci nálezu. Porovnání delty index nemá: jméno subjektu je hledaným řetězcem funkce `word_similarity` a pg_trgm umí indexovat jen prohledávaný text.

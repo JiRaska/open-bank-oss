@@ -154,3 +154,36 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Průběžný monitoring (ADR-0376)
+
+| Vlastnost | Výchozí hodnota | Účel |
+|---|---|---|
+| `openbank.sanctions.monitoring.enabled` (`SANCTIONS_MONITORING_ENABLED`) | `false` | Hlavní vypínač. Vypnuto: registrace odpovídá 503 a žádný běh nic neporovnává |
+| `openbank.sanctions.monitoring.delta.max-entries-per-run` | `5` | Počet změněných položek porovnaných za tick |
+| `openbank.sanctions.monitoring.delta.max-pending` | `20000` | Délka fronty, nad kterou deltu nahradí úplný sweep |
+| `openbank.sanctions.monitoring.delta.max-candidates-per-entry` | `5000` | Počet shod na položku, nad kterým práci převezme sweep |
+| `openbank.sanctions.monitoring.sweep.batch-size` | `25` | Počet subjektů vyhodnocených za tick |
+| `openbank.sanctions.monitoring.sweep.interval` | `P30D` | Jak často se každý subjekt plně vyhodnotí |
+| `openbank.sanctions.monitoring.claim-lease` | `PT15M` | Jak dlouho zůstává převzatý subjekt nebo řádek fronty převzatý |
+
+Metriky (názvy v Prometheu):
+
+| Metrika | Význam |
+|---|---|
+| `openbank_sanctions_monitoring_enabled` | 1 nebo 0: stav vypínače |
+| `openbank_sanctions_monitoring_subjects` | Počet registrovaných subjektů. NaN, dokud běh registr nepřečetl, tedy NaN při vypnutém monitoringu |
+| `openbank_sanctions_monitoring_delta_pending` | Změněné položky čekající na porovnání |
+| `openbank_sanctions_monitoring_sweep_lag_seconds` | O kolik je nejdéle nevyhodnocený subjekt po termínu; 0, dokud sweep stíhá |
+| `openbank_sanctions_monitoring_findings_total{match_kind,detection}` | Zapsané nálezy. Shoda už nalezená nebo krytá vyjasněním se nepočítá |
+| `openbank_sanctions_monitoring_runs_total{path,outcome}` | Běhy podle výsledku: `completed`, `resweep_requested`, `disabled`, `failed` |
+
+Dimenzování: sweep pokryje `batch-size` subjektů za minutu, celý cyklus přes N subjektů tedy trvá N / (batch-size × 1440) dní; tato hodnota má zůstat pod `sweep.interval`, jinak `sweep_lag_seconds` roste. Jedna položka delty stojí jeden průchod registrem.
+
+### Roste zpoždění sweepu
+
+`sweep_lag_seconds` nad nulou znamená subjekty po termínu. Zkontrolujte `runs_total{path="sweep",outcome="failed"}` a log se zprávou `Sanctions monitoring sweep failed for registry row` (subjekt, který nelze vyhodnotit, se po vypršení převzetí zkouší znovu a pokaždé označí běh jako neúspěšný); jinak zvyšte `sweep.batch-size`.
+
+### Roste fronta delty
+
+Rostoucí `delta_pending` znamená, že změny seznamů přicházejí rychleji, než se porovnávají. Nad `delta.max-pending` služba frontu zahodí a vyhodnotí všechny subjekty znovu (`outcome="resweep_requested"`), což je správné, jen pomalejší. Zvýšení `delta.max-entries-per-run` spotřebuje víc času databáze na tick.

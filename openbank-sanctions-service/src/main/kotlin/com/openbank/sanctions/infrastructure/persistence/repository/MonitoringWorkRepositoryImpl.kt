@@ -145,13 +145,15 @@ class MonitoringWorkRepositoryImpl(
      * reference: no customer name, date of birth or nationality leaves this service. A consumer
      * has what it needs to open a review case — whose subject, which entry and version, what kind
      * of match, how strong — and deduplicates on `findingId`.
+     *
+     * The body carries no `eventType`, like every other message on this outbox-relayed channel:
+     * the dispatcher puts the type on the `ce-type` header, and that is what a consumer reads.
      */
     private fun event(finding: MonitoringFinding) = OutboxMessage(
         aggregateId = finding.id,
         eventType = EVENT_MATCHED,
         payload = mapper.writeValueAsString(
             mapOf(
-                "eventType" to EVENT_MATCHED,
                 "schemaVersion" to SCHEMA_VERSION,
                 "aggregateId" to finding.id.toString(),
                 "aggregateType" to "MonitoringFinding",

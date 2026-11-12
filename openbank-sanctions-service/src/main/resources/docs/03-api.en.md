@@ -311,3 +311,36 @@ Events are append-only; a subsequent review creates a new `sanctions.review.subm
 - API version in URL. A breaking contract change gets a new parallel major; the six v1 check
   operations are superseded by `/api/v3/...` and remain available for the documented sunset window.
 - Event version in type name (`...v1`). Schema evolution: additive only; breaking = new type + version suffix.
+
+## Ongoing monitoring (ADR-0376)
+
+Available from API contract 3.3.0. Protected like `POST /api/v3/sanctions/screen`: roles `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_API` and the `sanctions.create` action.
+
+### Register or update a monitored subject
+
+```
+PUT /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+```
+
+`ownerService` is the registering service (for example `kyc-service`); `subjectRef` is the value that service sends as `subjectId` when it screens the subject. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
+
+| Status | Meaning |
+|---|---|
+| 201 | The subject is now monitored |
+| 200 | It was already registered; identical attributes change nothing, different ones replace the stored ones |
+| 400 | Invalid path value or body (blank name, `null` alias, unknown country format, NUL character) |
+| 503 | Monitoring is not enabled in this environment; nothing was stored |
+
+The response describes the registration (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). It never says whether the subject matches anything.
+
+### Deregister a monitored subject
+
+```
+DELETE /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+```
+
+Deletes the registry row and its findings. Always 204, whether or not the subject was registered, and it works while monitoring is disabled. Call it on offboarding and on erasure.
+
+### Finding event
+
+`MONITORED_SUBJECT_MATCHED` on `openbank.sanctions.screening.event` (type in the `ce-type` header), schema version 1: `findingId`, `ownerService`, `subjectRef`, `entityType`, `matchKind` (`SANCTIONS`, `TERRORIST`, `PEP`, `JURISDICTION`), `listType`, `listEntryRef`, `listEntryVersion`, `matchScore`, `matchStatus`, `detection` (`LIST_DELTA`, `BASELINE_SWEEP`, `PERIODIC_SWEEP`), `occurredAt`, `sourceService`. No customer name is carried. There is no REST operation that returns findings.

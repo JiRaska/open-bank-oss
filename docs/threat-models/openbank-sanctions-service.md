@@ -38,6 +38,8 @@ Assets protected, in priority order:
 4. **Import provenance** — which URL was fetched, when, and how many entries were upserted
    (`last_updated_at`, `last_entry_count`) — the audit trail for "was the fleet's sanctions data
    current when a given screening decision was made."
+5. **The monitored-subject registry and its findings** (ADR-0376, section 6b) — personal data of
+   the subjects other services asked this one to keep screening, and the fact that one matched.
 
 ## 2. Data-flow diagram (textual)
 
@@ -174,7 +176,52 @@ repository port, so it asserted a call that in production always threw; no UI ex
 distinguishes from noise. The only signal available anywhere was `listPending()` never shrinking —
 and nothing alerts on a queue that fails to drain (the same class as #3273).
 
+## 6b. Ongoing monitoring of registered subjects (ADR-0376)
+
+Off by default (`openbank.sanctions.monitoring.enabled=false`). This section describes the
+surface that exists once an environment switches it on.
+
+**New asset: the monitored-subject registry.** `sanctions_monitored_subjects` (V23) is the first
+store in this service that holds a standing population of the bank's own customers rather than
+one row per screening request: name, aliases, date of birth, nationality, country and entity
+type per subject, keyed by the owning service's reference. `sanctions_monitoring_findings` links
+a subject to the list entries it matched, which is the more sensitive fact: that a named
+customer is, or resembles, a sanctioned or politically exposed person.
+
+**New inbound operations.** `PUT` and `DELETE
+/api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}` (`SanctionsMonitoringResource`),
+with the roles and the `sanctions.create` action of `POST /api/v3/sanctions/screen`. There is no
+read operation.
+
+**New internal flows.** A trigger on `sanctions_change_journal` queues each committed list-entry
+change (only while the registry is non-empty); a scheduled delta matches queued entries against
+the registry; a scheduled sweep re-evaluates whole subjects; a finding and its outbox event are
+written in one transaction and leave on `openbank.sanctions.screening.event` as
+`MONITORED_SUBJECT_MATCHED`.
+
+| # | Threat | Mitigation | Residual risk |
+|---|---|---|---|
+| M1 | **Tipping-off (information disclosure)** — a customer, or a service facing one, learns that the customer matched a list | A finding is never returned over REST: the resource has no read operation, and a registration response carries the registration only (`SanctionsOngoingMonitoringIT` asserts the exact response fields). The event names the subject by reference and goes to the internal screening topic, which no customer-facing service consumes | The topic is shared: `audit-service` archives it, so the pair (subject reference, matched entry) is also stored there. Nothing enforces that a future consumer keeps it off a customer surface; ADR-0371 names a gate for that class of event, which does not cover this one yet |
+| M2 | **Personal data at rest** — the registry concentrates customer identity data in a service that did not hold a customer population before | Minimum fields: exactly what the CUSTOMER screening profile reads, no document identifiers, no contact data. Stored under the service's existing `restricted` classification and database encryption | Names and dates of birth are stored in clear in the column, as `sanctions_checks` already does; no field-level encryption (ADR-0189 position) |
+| M3 | **Erasure not honoured** — a subject is offboarded or erased and stays monitored | Deregistration issues a `DELETE`; findings go with it by `ON DELETE CASCADE`. It is idempotent and is not gated on the feature flag, so erasure works where monitoring is switched off (`SanctionsMonitoringDisabledIT`) | Events already published remain in the outbox until its retention purge and in the audit archive under its own retention. Deregistration is the caller's duty: nothing here learns of an erasure by itself |
+| M4 | **Monitoring evasion by deregistration (tampering)** — a caller withdraws a subject so that a later listing is never matched | The operation needs the same authorization as screening; each deregistration is logged with the owning service (no name) | `ownerService` is a path value, not derived from the token: the fleet's services share one client, so one internal caller can deregister another's subject. Same blast radius as S2 |
+| M5 | **Names in logs** — the registry's content leaks through log lines | Monitoring code logs the registry row id, the owning service and list-entry references only, never a subject's name or reference | Convention, checked by review; no gate inspects log arguments |
+| M6 | **A missed delta (silent false negative)** — a list change is never matched against the registry | The queue row commits in the transaction of the list change itself. A delta too large to match entry by entry is replaced, in one transaction, by a request to re-sweep every subject. The periodic sweep re-evaluates every subject through the live screen's own evaluation whatever the deltas did | Bounded by the sweep interval (default 30 days) for anything only the sweep can see, which includes jurisdiction reference data: a newly listed country reaches a registered subject at its next sweep, not immediately |
+| M7 | **Duplicate or replayed findings (DoS of the review queue)** | A finding is unique per subject, list entry and version of the entry's names (partial unique index); the version ignores alias order, so a feed that reorders names raises nothing | An entry whose names genuinely change raises a new finding for a subject already found against it |
+| M8 | **A clearance silences a true match** | Monitoring calls the live screen's own clearance rule: same subject reference, same attributes, unexpired, covering the exact entry identity. PEP and jurisdiction matches are never covered (`SanctionsOngoingMonitoringIT`) | The registry holds no document identifiers, so a clearance recorded on a screen that carried identifiers is not honoured here and the finding is raised: the safe direction |
+| M9 | **Resource exhaustion** — the delta scans the registry once per changed entry and shares the database with payment screening | Both paths are bounded per tick (entries per run, subjects per batch) and the delta falls back to the sweep above a backlog bound | No measurement at production scale exists; the cost figures in ADR-0376 come from a synthetic one-million-row table |
+| M10 | **A disabled feature read as a working one** | Registration is refused with 503 while disabled; a disabled run reports `DISABLED`, counted apart from `completed`; the registry gauges read NaN until a run has observed the registry | None known |
+
 ## 7. Change log
+
+- **2026-11-12** — **Ongoing monitoring of registered subjects (ADR-0376), shipped disabled.**
+  New store of personal data (`sanctions_monitored_subjects`, `sanctions_monitoring_findings`,
+  V23), two new inbound operations (`PUT`/`DELETE
+  /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}`) and one new outbound event
+  (`MONITORED_SUBJECT_MATCHED`). See section 6b for the threats: tipping-off (M1), the registry
+  as a personal-data store (M2), erasure (M3), evasion by deregistration (M4), missed deltas (M6)
+  and clearances (M8). With the flag off, which is the default, registration answers 503, no run
+  matches anything and the queue trigger writes nothing because the registry is empty.
 
 - **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
   review band for customer names (#15723).** V22 loads the EU list of high-risk third countries

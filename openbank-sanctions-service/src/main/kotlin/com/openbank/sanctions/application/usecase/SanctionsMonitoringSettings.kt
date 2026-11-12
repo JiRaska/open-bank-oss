@@ -19,7 +19,7 @@ import java.time.Duration
 class SanctionsMonitoringSettings(
     @ConfigProperty(name = "openbank.sanctions.monitoring.enabled", defaultValue = "false")
     val enabled: Boolean,
-    @ConfigProperty(name = "openbank.sanctions.monitoring.delta.max-entries-per-run", defaultValue = "20")
+    @ConfigProperty(name = "openbank.sanctions.monitoring.delta.max-entries-per-run", defaultValue = "5")
     val deltaMaxEntriesPerRun: Int,
     /** Above this backlog the delta is abandoned for a full re-sweep, which costs less. */
     @ConfigProperty(name = "openbank.sanctions.monitoring.delta.max-pending", defaultValue = "20000")
