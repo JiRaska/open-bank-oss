@@ -32,9 +32,13 @@ open class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
             TestInfrastructureEvidence.record("redpanda", kafka.dockerImageName, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(
-                    listOf(TOPIC, "openbank.kyc.events", "openbank.dlq.kyc.party-events-in").map {
-                        NewTopic(it, 1, 1)
-                    },
+                    listOf(
+                        TOPIC,
+                        "openbank.kyc.events",
+                        "openbank.dlq.kyc.party-events-in",
+                        SANCTIONS_TOPIC,
+                        "openbank.dlq.kyc.sanctions-list-changes",
+                    ).map { NewTopic(it, 1, 1) },
                 )
                     .all().get(20, TimeUnit.SECONDS)
             }
@@ -77,5 +81,6 @@ open class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
     companion object {
         const val TOPIC = "openbank.party.events"
         const val GROUP = "kyc-business-source-it"
+        const val SANCTIONS_TOPIC = "openbank.sanctions.screening.event"
     }
 }
