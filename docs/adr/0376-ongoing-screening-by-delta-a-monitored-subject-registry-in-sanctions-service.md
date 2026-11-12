@@ -2,7 +2,7 @@
 date: 2026-11-12
 decision-status: proposed
 delivery-status: partial
-followup: "none — the producer half is built and disabled; registering subjects and consuming the finding in kyc-service and kyb-service is a later slice with no issue filed yet"
+followup: "#15723 — the producer half is built and disabled; registering subjects and consuming the finding in kyc-service and kyb-service is a later slice of that issue"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -49,8 +49,12 @@ with the live screen's own engine, and publishes each match as a finding address
 service that owns the subject.**
 
 **D1 — A monitored-subject registry.** A caller registers a subject with
-`PUT /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}` and withdraws it with
-`DELETE`. The registry holds what the `CUSTOMER` screening profile reads (entity type, name,
+`PUT /api/v3/sanctions/monitored-subjects/{subjectRef}` and withdraws it with `DELETE`. The owner
+of a registration is the calling service itself: the client its service-account token was
+issued to, resolved by the service and never sent by the caller. A service therefore reads,
+replaces and deletes only the subjects it registered, the same reference under two services is
+two subjects, and a caller that is not a service under its own service account (a person, the
+fleet's shared client, an unverified principal) is refused. The registry holds what the `CUSTOMER` screening profile reads (entity type, name,
 aliases, date of birth, nationality, country) and nothing else: no document identifiers.
 `subjectRef` is the value the caller sends as `subjectId` on a live screen, so that a clearance
 recorded for the subject binds here too. Registration is idempotent; different attributes
@@ -63,6 +67,21 @@ registry is non-empty. "What changed" therefore has one definition for the chang
 ADR-0256 and for monitoring, including the journal's rule that a rewrite which only reorders
 names is not a change. A scheduled run matches a bounded batch of queued entries against the
 registry with the same function, operand order and `CUSTOMER` floor as the live search.
+
+**D2a — The delta match is index-driven, and the index only narrows.** The match is the reverse
+of the live screen: `word_similarity(subject name, entry text)` with the subject name as the
+needle, and pg_trgm indexes only the haystack, so no operator serves it directly (measured:
+`search_name <% $entry` is a sequential scan even with sequential scans disabled). What an index
+can serve is a necessary condition. A name with `k` distinct trigrams that scores `t` or more
+shares at least `ceil(t·k)` of them with the entry text, so its plain `similarity()` to that text
+is at least `ceil(t·k) / (k + q − ceil(t·k))`, `q` being the entry's trigram count. The bound
+depends on `k`, so each search name is stored as its own row with a size class of similar `k`,
+each class has a partial GIN trigram index, and the delta probes each class with
+`search_name % entry` under that class's `pg_trgm.similarity_threshold`, set for the transaction
+only. Every candidate is then scored by the same `word_similarity` expression a full scan uses,
+so the result is the full scan's result; a test compares the two on a varied synthetic registry
+and the measurement behind the figures below repeated the comparison at one million subjects
+(40 entry texts, 19,032 scored matches, no difference in either direction).
 
 **D3 — A bounded sweep is the safety net.** A second scheduled run re-evaluates a bounded batch
 of whole subjects through the function the live screen is built on: never-swept subjects first,
@@ -113,11 +132,24 @@ reports its own `DISABLED` outcome, and the liveness heartbeats are not register
   the thresholds and a second clearance rule in every caller, and the live screen and the
   monitoring would then disagree at the margins with nothing to notice. It also moves list
   content, including PEP entries, into every caller's event history.
-- **A reverse index instead of a scan.** Make the delta match index-driven. Considered and not
-  available with this engine: pg_trgm indexes the haystack of `word_similarity`, and in the
-  reverse match the subject name is the needle. A prefilter on shared trigrams is sound only at
-  thresholds too low to select anything. The delta therefore costs one pass over the registry
-  per changed entry, which D3's fallback bounds.
+- **A full scan of the registry per changed entry.** The form first built, on the grounds that
+  pg_trgm cannot index the needle. Rejected after measuring it:
+  7.3 s per entry on average on one million subjects (3.7 s for an entry with one name, 11.9 s
+  with five), so a feed with 5,000 changes a day costs a database core for ten hours. D2a
+  replaces it.
+- **Operator forms on the name column (`<%`, `%>` with `word_similarity_threshold`).** The
+  obvious index-driven form. Not available: `name <% entry` has the indexed column on the needle
+  side and is not an indexable clause, and `name %> entry` computes the opposite containment
+  (the entry inside the name), which is a different score and misses true matches.
+- **A prefix filter: index only each name's rarest trigrams and fetch every name sharing one.**
+  Sound, and measured: an entry text carries 20 to 100 trigrams, so between a quarter and a half
+  of the registry shared at least one with it and had to be scored. Slower than the scan.
+- **Counting shared trigrams in SQL over a GIN index on the trigram array.** Exact, one index.
+  Measured at 2.1 s per five-name entry on one million subjects: the index part was 0.15 s,
+  the rest fetching and aggregating some three million (name, trigram) hits. D2a leaves the
+  counting inside the GIN scan, which is what the `%` operator does.
+- **A separate table of (trigram, name) postings.** The same count from an index-only scan.
+  Rejected on size: 1.4 GB per million subjects against 68 MB for D2a.
 
 ## Consequences
 
@@ -133,13 +165,26 @@ reports its own `DISABLED` outcome, and the liveness heartbeats are not register
 - sanctions-service now holds a standing population of customer identity data, where it used to
   hold one row per screening request. The registry is a new personal-data store with its own
   erasure path (deregistration), and callers must keep it in step with their own records.
-- The delta is a sequential pass over the registry per changed entry. Measured on one million
-  synthetic single-name subjects (Postgres 18, one core, no parallel plan): about 7 seconds per
-  entry. A day with 500 changed entries is roughly an hour of one database core, on the database
-  that also serves payment screening.
-- The owner of a subject is declared by the caller in the path. The fleet's services share one
-  client, so the service cannot verify it, and one internal caller can deregister another's
-  subject.
+- The delta still costs work proportional to how common the entry's trigrams are in the
+  registry: the GIN scan walks the posting lists of every trigram of the entry text. Measured on
+  one million synthetic subjects (1.2 million names, Postgres 18.6, one core, no parallel plan):
+  0.3 s per entry on average against 7.3 s for the full scan, from about 0.05 s for an entry
+  with one name to about 0.6 s for one with five. A day with 5,000 changed entries is about
+  25 minutes of one database core at that size, on the database that also serves payment
+  screening. That is the capacity statement: the delta is sized for registries up to the low
+  millions and feeds up to the low tens of thousands of changes a day; beyond either, D3's
+  fallback (a re-sweep) is the cheaper path and takes over by its own bound.
+- The registry stores each search name twice (the array the exact score reads and one row per
+  name for the index) and carries fifteen partial GIN indexes: 68 MB of trigram indexes
+  and 157 MB of name rows with their two b-tree indexes per million subjects, on top of about
+  350 MB for the registry itself. Writing the name rows cost about 0.03 ms per subject, measured
+  as a bulk insert of 20,000 subjects into the full tables.
+- The numbers come from synthetic names, whose trigram distribution is not a real
+  population's. No measurement on production-shaped data exists.
+- A service can still withdraw or overwrite its own subjects, and the owner binding is as strong
+  as the realm's client separation: two services issued the same client are one owner. An
+  environment whose callers still authenticate through the fleet's shared client cannot register
+  at all.
 - A second trigger runs on list ingestion. With an empty registry it is one existence probe per
   journal row and no write.
 

@@ -228,7 +228,7 @@ Metrics (Prometheus names):
 | `openbank_sanctions_monitoring_findings_total{match_kind,detection}` | Findings written. A match already found, or covered by a clearance, is not counted |
 | `openbank_sanctions_monitoring_runs_total{path,outcome}` | Runs by outcome: `completed`, `resweep_requested`, `disabled`, `failed` |
 
-Sizing: the sweep covers `batch-size` subjects per minute, so a full cycle over N subjects takes N / (batch-size × 1440) days; keep that below `sweep.interval` or `sweep_lag_seconds` grows. One delta entry costs one pass over the registry.
+Sizing: the sweep covers `batch-size` subjects per minute, so a full cycle over N subjects takes N / (batch-size × 1440) days; keep that below `sweep.interval` or `sweep_lag_seconds` grows. One delta entry costs a probe of the registry's trigram indexes, not a pass over the registry: measured on one million synthetic subjects, 0.3 s on average (about 0.05 s for an entry with one name, about 0.6 s with five) against 7.3 s for a full scan. The cost grows with the registry and with how common the entry's trigrams are, so 5,000 changed entries a day are about 25 minutes of one database core at that size; the delta is sized for registries up to the low millions and feeds up to the low tens of thousands of changes a day. Above `delta.max-pending` the run requests a re-sweep instead. The figures are from synthetic names on one core; re-measure on real data before raising `delta.max-entries-per-run`.
 
 ### Sweep lag growing
 

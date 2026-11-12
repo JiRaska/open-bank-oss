@@ -178,7 +178,7 @@ Metriky (názvy v Prometheu):
 | `openbank_sanctions_monitoring_findings_total{match_kind,detection}` | Zapsané nálezy. Shoda už nalezená nebo krytá vyjasněním se nepočítá |
 | `openbank_sanctions_monitoring_runs_total{path,outcome}` | Běhy podle výsledku: `completed`, `resweep_requested`, `disabled`, `failed` |
 
-Dimenzování: sweep pokryje `batch-size` subjektů za minutu, celý cyklus přes N subjektů tedy trvá N / (batch-size × 1440) dní; tato hodnota má zůstat pod `sweep.interval`, jinak `sweep_lag_seconds` roste. Jedna položka delty stojí jeden průchod registrem.
+Dimenzování: sweep pokryje `batch-size` subjektů za minutu, celý cyklus přes N subjektů tedy trvá N / (batch-size × 1440) dní; tato hodnota má zůstat pod `sweep.interval`, jinak `sweep_lag_seconds` roste. Jedna položka delty stojí prohledání trigramových indexů registru, ne průchod registrem: změřeno na milionu syntetických subjektů průměrně 0,3 s (asi 0,05 s pro položku s jedním jménem, asi 0,6 s s pěti) proti 7,3 s při úplném průchodu. Cena roste s registrem a s tím, jak běžné jsou trigramy položky, takže 5 000 změněných položek denně je při této velikosti asi 25 minut jednoho databázového jádra; delta je dimenzována pro registry do nízkých milionů a zdroje do nízkých desítek tisíc změn denně. Nad `delta.max-pending` běh místo toho vyžádá nový sweep. Čísla pocházejí ze syntetických jmen na jednom jádru; před zvýšením `delta.max-entries-per-run` je třeba měření zopakovat na skutečných datech.
 
 ### Roste zpoždění sweepu
 
