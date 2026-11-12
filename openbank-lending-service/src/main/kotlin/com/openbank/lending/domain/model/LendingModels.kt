@@ -161,6 +161,8 @@ data class LoanApplication(
      */
     val signatureArtefactHash: String? = null,
     val catalogSnapshot: CatalogLoanSnapshot? = null,
+    /** Set on the successor of an overturned decline review ([DeclineReview]); null on every other row. */
+    val predecessorApplicationId: UUID? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */

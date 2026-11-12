@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.18.0...kyc-service-v0.18.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **kyc:** dispatch sanctions list-change events on the ce-type header ([#15901](https://github.com/JiRaska/open-bank-oss/issues/15901)) ([71b5570](https://github.com/JiRaska/open-bank-oss/commit/71b5570becfddffae4f53f0cebeeaf46a7bd7c25)), closes [#15900](https://github.com/JiRaska/open-bank-oss/issues/15900)
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.1...kyc-service-v0.18.0) (2026-11-12)
 
 
