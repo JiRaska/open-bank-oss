@@ -47,6 +47,8 @@ data class InitiateTransactionCommand(
     val rail: PaymentRail? = null,
     /** How the movement was instructed (ADR-0103 D2) — orthogonal to [rail]. */
     val instructionType: InstructionType? = null,
+    /** Set by trusted ingress or inherited from the transaction being reversed. */
+    val synthetic: Boolean = false,
 )
 
 data class GetTransactionQuery(val transactionId: UUID)
