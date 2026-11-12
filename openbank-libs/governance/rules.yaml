@@ -3471,11 +3471,14 @@ delegation_capability_enforcement:
         - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerDocumentResource.kt
       why: >
         The only object reader in the fleet: documentContent and sharedDocuments ask
-        grants.has(party, "DOCUMENT", id, "OBJECT_READ"). Note the grant it reads cannot currently
-        be MINTED — ResourceOwnershipClient answers UNVERIFIABLE for DOCUMENT and the offer path
-        fails closed on that (ADR-0375 D5, issue #3615 family). Enforcement is real; reachability
-        is not, which is why this registry records the enforcer and enforcement_reachability
-        records the caller.
+        grants.has(party, "DOCUMENT", id, "OBJECT_READ"). Until ADR-0375 D5 the grant it reads
+        could not be MINTED at all — ResourceOwnershipClient answered UNVERIFIABLE for DOCUMENT and
+        the offer path fails closed on that — so a built reader guarded a grant nobody could
+        create, with both halves green because each side mocked the other. D5 closed it:
+        document-service exposes GET /api/v1/documents/{id}/owner under its own OPA action
+        document.verifyOwnership, pinned to service-account-openbank-delegation and vetoed for
+        every other caller (measured with opa eval against the generated bundle), and the
+        DOCUMENT branch resolves through it.
     # --- unenforced: grantable today, honoured by nothing ------------------------------
     - resource_type: ACCOUNT
       capability: ACCOUNT_VIEW_DETAILS
@@ -3543,6 +3546,11 @@ delegation_capability_enforcement:
         (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
         both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
         DOCUMENT — see scan_limit above.
+        ADR-0375 D5 gave DOCUMENT an ownership oracle and deliberately did NOT give one to PAYMENT:
+        a payment id resolves in no single service — six rails own payments and nothing maps an id
+        to its rail — so there is no owner to ask. The honest fix is to remove this pair from
+        CAPABILITY_MATRIX, which is a behaviour change (it refuses offers the app makes today) and
+        belongs with the offer-time refusal, not here.
     - resource_type: STATEMENT
       capability: OBJECT_READ
       status: unenforced
@@ -3550,7 +3558,10 @@ delegation_capability_enforcement:
       shared_capability: true
       why: >
         As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
-        names both OBJECT_READ and STATEMENT.
+        names both OBJECT_READ and STATEMENT. It also has no oracle to build — measured
+        2026-11-12, every statement-service route is addressed by accountId and there is no
+        statement object carrying an id of its own, so a STATEMENT resourceId refers to nothing
+        the owning service can resolve. Remove from CAPABILITY_MATRIX with the refusal slice.
 
 readiness_attestations:
   principle: >
