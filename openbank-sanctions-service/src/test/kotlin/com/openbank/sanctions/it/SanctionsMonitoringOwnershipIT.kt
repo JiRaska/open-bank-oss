@@ -66,7 +66,7 @@ class SanctionsMonitoringOwnershipIT {
         RestAssured.given().delete("/api/v3/sanctions/monitored-subjects/$subjectRef")
 
     @Test
-    @AsKycService
+    @AsKybService
     fun `a caller deletes its own subject and never another caller's under the same reference`() {
         val subject = "${SUBJECT_PREFIX}shared-ref"
         db.plant(OWNER, subject)
@@ -79,7 +79,7 @@ class SanctionsMonitoringOwnershipIT {
     }
 
     @Test
-    @AsKycService
+    @AsKybService
     fun `deleting a reference only another caller registered removes nothing`() {
         val subject = "${SUBJECT_PREFIX}not-mine"
         db.plant(OTHER_OWNER, subject)

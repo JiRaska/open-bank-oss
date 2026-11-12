@@ -28,7 +28,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(value = SanctionsMonitoringFlagIT.MonitoringEnabled::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(PostgresTestResource::class)
-@AsKycService
+@AsKybService
 class SanctionsMonitoringFlagIT {
 
     class MonitoringEnabled : QuarkusTestResourceLifecycleManager {

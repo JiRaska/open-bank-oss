@@ -37,7 +37,9 @@ class MonitoringNameIndexTest {
 
     private fun assertClassKeepsEveryReachableName(sizeClass: Int, entry: Int, threshold: Double) {
         val probe = MonitoringNameIndex.probeThreshold(sizeClass, entry, threshold)?.toDouble()
-        val sizes = MonitoringNameIndex.smallest(sizeClass)..minOf(MonitoringNameIndex.largest(sizeClass), 400)
+        val smallest = MonitoringNameIndex.smallest(sizeClass)
+        // Every size of the small classes; the first few of the classes too large to enumerate.
+        val sizes = smallest..minOf(MonitoringNameIndex.largest(sizeClass), maxOf(400, smallest + 3))
         if (probe == null) {
             assertThat(sizes.minOf { MonitoringNameIndex.minShared(it, threshold) })
                 .describedAs("an unprobed class holds no name the entry could match")

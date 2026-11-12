@@ -146,7 +146,7 @@ class MonitoringDeltaIndexEquivalenceIT {
             c.prepareStatement(
                 "INSERT INTO sanctions_monitored_subjects " +
                     "(id, owner_service, subject_ref, entity_type, name, search_names, registered_at, updated_at) " +
-                    "VALUES (?, 'openbank-kyc', ?, 'INDIVIDUAL', ?, ?, now(), now())",
+                    "VALUES (?, 'openbank-kyb', ?, 'INDIVIDUAL', ?, ?, now(), now())",
             ).use { insert ->
                 repeat(SUBJECTS) { i ->
                     val searchNames = buildList {

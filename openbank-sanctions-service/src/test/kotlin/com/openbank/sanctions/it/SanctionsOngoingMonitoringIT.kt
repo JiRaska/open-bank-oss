@@ -60,7 +60,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@AsKycService
+@AsKybService
 class SanctionsOngoingMonitoringIT {
 
     @Inject

@@ -322,7 +322,7 @@ Available from API contract 3.3.0. Protected like `POST /api/v3/sanctions/screen
 PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-The owner of the registration is the calling service, identified by the client its service-account token was issued to (for example `openbank-kyc`); no request value names it, so a service registers, replaces and deletes only its own subjects. `subjectRef` is the value that service sends as `subjectId` when it screens the subject, and is scoped to the caller: the same reference under two callers is two subjects. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
+The owner of the registration is the calling service, identified by the client its service-account token was issued to (for example `openbank-kyb`); no request value names it, so a service registers, replaces and deletes only its own subjects. A service that still authenticates through the fleet's shared client `openbank-services` is refused and needs its own client first; kyc-service is in that position today. `subjectRef` is the value that service sends as `subjectId` when it screens the subject, and is scoped to the caller: the same reference under two callers is two subjects. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
 
 | Status | Meaning |
 |---|---|

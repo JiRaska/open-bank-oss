@@ -31,7 +31,7 @@ import org.eclipse.microprofile.jwt.JsonWebToken
     attributes = [SecurityAttribute(key = ServiceAccountTokenAugmentor.CLIENT, value = MonitoringFixture.OWNER)],
     augmentors = [ServiceAccountTokenAugmentor::class],
 )
-annotation class AsKycService
+annotation class AsKybService
 
 /** The fleet's shared client: a verified service-account token that identifies no single service. */
 @Retention(AnnotationRetention.RUNTIME)

@@ -29,13 +29,13 @@ class MonitoringCallerIdentityTest {
 
     @Test
     fun `the owner is the client a service-account token was issued to`() {
-        assertThat(MonitoringCallerIdentity.ownerOf(token("openbank-kyc", "service-account-openbank-kyc")))
-            .isEqualTo("openbank-kyc")
+        assertThat(MonitoringCallerIdentity.ownerOf(token("openbank-kyb", "service-account-openbank-kyb")))
+            .isEqualTo("openbank-kyb")
     }
 
     @Test
     fun `a username naming another client's service account does not make the caller that client`() {
-        refused(token("openbank-onboarding", "service-account-openbank-kyc"))
+        refused(token("openbank-lending", "service-account-openbank-kyb"))
     }
 
     @Test
@@ -45,8 +45,8 @@ class MonitoringCallerIdentityTest {
 
     @Test
     fun `a token without a subject or without the client it was issued to is refused`() {
-        refused(token("openbank-kyc", "service-account-openbank-kyc", subject = null))
-        refused(token(null, "service-account-openbank-kyc"))
+        refused(token("openbank-kyb", "service-account-openbank-kyb", subject = null))
+        refused(token(null, "service-account-openbank-kyb"))
     }
 
     @Test
@@ -56,7 +56,7 @@ class MonitoringCallerIdentityTest {
 
     @Test
     fun `a principal that is not a token, and no identity at all, are refused`() {
-        val named = mockk<Principal> { every { name } returns "service-account-openbank-kyc" }
+        val named = mockk<Principal> { every { name } returns "service-account-openbank-kyb" }
         refused(mockk { every { principal } returns named })
         refused(null)
     }

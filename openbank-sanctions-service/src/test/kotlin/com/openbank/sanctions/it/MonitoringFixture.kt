@@ -101,8 +101,8 @@ internal class MonitoringFixture(
         const val SOURCE_LIST = "SYNTHETIC_MONITORING"
 
         /** The client id of the service account the tests call as; it becomes the owner. */
-        const val OWNER = "openbank-kyc"
-        const val OTHER_OWNER = "openbank-onboarding"
+        const val OWNER = "openbank-kyb"
+        const val OTHER_OWNER = "openbank-lending"
         const val SHARED_CLIENT = "openbank-services"
         const val COUNTRY = "XM"
         const val LISTED = "Zorvath Quellinbrook"

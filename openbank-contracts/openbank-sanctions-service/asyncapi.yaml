@@ -381,7 +381,7 @@ components:
           format: uuid
         ownerService:
           type: string
-          description: The client id of the service that registered the subject (taken from its token, e.g. openbank-kyc); it should open the review case.
+          description: The client id of the service that registered the subject (taken from its token, e.g. openbank-kyb); it should open the review case.
         subjectRef:
           type: string
           description: The owning service's reference for the subject (for kyc-service, the party id).

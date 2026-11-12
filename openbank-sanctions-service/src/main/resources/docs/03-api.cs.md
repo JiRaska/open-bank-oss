@@ -265,7 +265,7 @@ Dostupné od verze API kontraktu 3.3.0. Chráněno stejně jako `POST /api/v3/sa
 PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-Vlastníkem registrace je volající služba, určená klientem, kterému byl vydán její service-account token (například `openbank-kyc`); žádná hodnota požadavku ho neurčuje, takže služba registruje, nahrazuje a maže jen své vlastní subjekty. `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu, a platí v rámci volajícího: stejná reference u dvou volajících jsou dva subjekty. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
+Vlastníkem registrace je volající služba, určená klientem, kterému byl vydán její service-account token (například `openbank-kyb`); žádná hodnota požadavku ho neurčuje, takže služba registruje, nahrazuje a maže jen své vlastní subjekty. Služba, která se dosud autentizuje sdíleným klientem flotily `openbank-services`, je odmítnuta a potřebuje nejprve vlastního klienta; v této situaci je dnes kyc-service. `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu, a platí v rámci volajícího: stejná reference u dvou volajících jsou dva subjekty. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
 
 | Stav | Význam |
 |---|---|

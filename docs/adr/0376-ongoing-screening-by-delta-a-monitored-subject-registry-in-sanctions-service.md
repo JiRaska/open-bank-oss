@@ -182,9 +182,11 @@ reports its own `DISABLED` outcome, and the liveness heartbeats are not register
 - The numbers come from synthetic names, whose trigram distribution is not a real
   population's. No measurement on production-shaped data exists.
 - A service can still withdraw or overwrite its own subjects, and the owner binding is as strong
-  as the realm's client separation: two services issued the same client are one owner. An
-  environment whose callers still authenticate through the fleet's shared client cannot register
-  at all.
+  as the realm's client separation: two services issued the same client are one owner. A caller
+  that still authenticates through the fleet's shared client cannot register at all. kyc-service
+  does today (its `application.yaml` names `openbank-services`), so the first consumer of this
+  ADR needs its own Keycloak client before it can register a subject; kyb-service already has
+  one.
 - A second trigger runs on list ingestion. With an empty registry it is one existence probe per
   journal row and no write.
 
