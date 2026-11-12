@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.46.0...lending-service-v0.47.0) (2026-11-12)
+
+
+### Features
+
+* **lending:** let a customer request human review of an engine decline ([#15786](https://github.com/JiRaska/open-bank-oss/issues/15786)) ([22e6a4e](https://github.com/JiRaska/open-bank-oss/commit/22e6a4ef36d5bab2f896902fc2253c3f401efbcb))
+
 ## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.45.0...lending-service-v0.46.0) (2026-11-12)
 
 

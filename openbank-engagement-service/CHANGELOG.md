@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.16.1...engagement-service-v0.16.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **engagement:** consult the live suppression list before promotional contact ([#15776](https://github.com/JiRaska/open-bank-oss/issues/15776)) ([25772c3](https://github.com/JiRaska/open-bank-oss/commit/25772c37a6cb2a2254e03dbdb0376af8f2014360))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.16.0...engagement-service-v0.16.1) (2026-11-12)
 
 
