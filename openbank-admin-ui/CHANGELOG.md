@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.12.0...admin-ui-v4.12.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **infra:** move Kubernetes label/annotation keys to the open-bank.tech domain ([#15706](https://github.com/JiRaska/open-bank-oss/issues/15706)) ([fa0151e](https://github.com/JiRaska/open-bank-oss/commit/fa0151eb6c26db8ccb9ea9bdb737c9adb7533a7f))
+
 ## [4.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.11.0...admin-ui-v4.12.0) (2026-11-12)
 
 
