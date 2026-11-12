@@ -6,6 +6,7 @@ package com.openbank.fx.infrastructure.client
 
 import com.openbank.fx.application.port.out.PartyNameUnavailableException
 import com.openbank.fx.application.port.out.ScreeningEntityType
+import com.openbank.fx.application.port.out.ScreeningSubject
 import io.mockk.every
 import io.mockk.mockk
 import io.smallrye.mutiny.Uni
@@ -26,7 +27,11 @@ class PartyNameAdapterTest {
     private val adapter = PartyNameAdapter(client).also { it.self = it }
     private val partyId: UUID = UUID.randomUUID()
 
-    private fun subject() = runBlocking { adapter.screeningSubject(partyId) }
+    // Block body on purpose: a helper, not a test, but the `= runBlocking {` shape is the one
+    // JUnit drops silently on a test function, and the fleet guard matches the shape.
+    private fun subject(): ScreeningSubject {
+        return runBlocking { adapter.screeningSubject(partyId) }
+    }
     private fun names() = subject().names
 
     @Test
