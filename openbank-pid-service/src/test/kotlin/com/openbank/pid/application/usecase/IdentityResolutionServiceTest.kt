@@ -266,6 +266,30 @@ class IdentityResolutionServiceTest {
     }
 
     @Test
+    fun `tier-1 collision honours a REJECT that survived the previous holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        // Someone registered the number again after the erasure, with a divergent birthdate.
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns
+            makeParty(birthdate = LocalDate.of(1985, 3, 4))
+        coEvery { adjudication.priorDecision("RN:$idx") } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
+        coVerify(exactly = 0) { adjudication.openOrReuse(any()) }
+    }
+
+    @Test
     fun `tier-1 — missing pepper falls through to tier-2 with warning`(): Unit = runBlocking {
         val svcNoPepper = IdentityResolutionService(repo, adjudication, Optional.empty())
         coEvery { repo.findCandidatesByMatchKey(any()) } returns emptyList()

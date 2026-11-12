@@ -184,19 +184,25 @@ class IdentityResolutionService(
     }
 
     /**
-     * GDPR Art. 17 (#15755): erasing the person who held an RČ deletes its blind index, so tier-1 can no
-     * longer reach an `RN:` REJECT decided against that number. The erasure re-keys such a decision
-     * to [ErasedIdentifierKey]; a tier-1 miss checks it so the fraud block still holds.
+     * GDPR Art. 17 (#15755): erasing the person who held an RČ deletes its blind index and re-keys any
+     * `RN:` REJECT decided against that number to [ErasedIdentifierKey]. The block must hold on BOTH
+     * tier-1 paths: here, on a miss (nobody holds the index any more), and in [adjudicate], on a
+     * collision (someone registered the number again), where it is treated exactly like a prior
+     * `RN:` REJECT.
      */
     private suspend fun erasedIdentifierBlock(blindIndex: String): ResolutionResult? {
-        val prior = adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(blindIndex)) ?: return null
-        if (prior.verdict != CaseVerdict.REJECT) return null
+        val prior = erasedIdentifierReject(blindIndex) ?: return null
         return ResolutionResult.NeedsManualVerification(
             caseId = prior.caseId,
             candidates = emptyList(),
             trigger = VerificationTrigger.RN_COLLISION,
         )
     }
+
+    /** A REJECT that survived the erasure of this index's previous holder, if any. */
+    private suspend fun erasedIdentifierReject(blindIndex: String): PriorAdjudication? =
+        adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(blindIndex))
+            ?.takeIf { it.verdict == CaseVerdict.REJECT }
 
     private suspend fun resolveTier2(command: ResolveIdentityCommand): ResolutionResult {
         val matchKey = MatchKey.of(
@@ -263,7 +269,8 @@ class IdentityResolutionService(
      *
      * First consults the adjudication cache: a prior DECIDED case for this dedup key deterministically
      * steers the result — LINK_TO_EXISTING → [ResolutionResult.MatchExisting], DISTINCT_NEW →
-     * [ResolutionResult.NoMatch], REJECT → stays blocked. Otherwise opens (or reuses) a durable case
+     * [ResolutionResult.NoMatch], REJECT → stays blocked. For an `RN:` key with no decision of its own, a
+     * REJECT retained under [ErasedIdentifierKey] (GDPR Art. 17, #15755) blocks the same way. Otherwise opens (or reuses) a durable case
      * and returns [ResolutionResult.NeedsManualVerification] carrying the real caseId.
      */
     private suspend fun adjudicate(
@@ -273,7 +280,10 @@ class IdentityResolutionService(
         trigger: VerificationTrigger,
         blindIndex: String?,
     ): ResolutionResult {
-        adjudication.priorDecision(dedupKey)?.let { prior ->
+        // An `RN:` decision first; with none, a REJECT that survived the previous holder's erasure
+        // (blindIndex is set only on the RN_COLLISION path) is honoured the same way.
+        val prior = adjudication.priorDecision(dedupKey) ?: blindIndex?.let { erasedIdentifierReject(it) }
+        prior?.let {
             return when (prior.verdict) {
                 CaseVerdict.LINK_TO_EXISTING -> ResolutionResult.MatchExisting(prior.linkPartyId!!)
                 CaseVerdict.DISTINCT_NEW -> ResolutionResult.NoMatch

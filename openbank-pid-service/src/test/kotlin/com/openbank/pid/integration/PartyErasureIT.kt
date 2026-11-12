@@ -717,6 +717,48 @@ class PartyErasureIT {
     }
 
     @Test
+    fun `a retained REJECT also blocks the collision path when the number is registered again after erasure`() {
+        val victim = UUID.randomUUID()
+        val rejected = UUID.randomUUID()
+        val newHolder = UUID.randomUUID()
+        val rc = "7605060023"
+        val blind = requireNotNull(resolver.computeBlindIndex(rc)) { "test pepper not applied" }
+        seedParty(victim, blind)
+        seedOpenOrDecidedCase(rejected, "RN:$blind", "RN_COLLISION", "DECIDED", "REJECT", listOf(victim), "Jiny", blind)
+        eraseAndAwait(victim)
+
+        // The freed number is registered to a new party whose birthdate diverges from the RČ, so the
+        // next resolve takes tier-1 HIT -> RN_COLLISION -> adjudicate, not the miss path.
+        val registered = io.restassured.RestAssured.given().contentType("application/json")
+            .body(
+                """{"partyId":"$newHolder","givenName":"Petr","familyName":"Jiny","birthdate":"1985-03-04",""" +
+                    """"birthNumberRaw":"$rc"}""",
+            )
+            .post("/api/v1/parties/register-identity").statusCode()
+        assertThat(registered).describedAs("register-identity of the freed number").isBetween(200, 299)
+        assertThat(
+            count("SELECT count(*) FROM party_external_ids WHERE party_id = ? AND id_type = 'BIRTH_NUMBER'", newHolder),
+        )
+            .isEqualTo(1)
+
+        val after = resolve(rc)
+        assertThat(after.jsonPath().getString("decision")).isEqualTo("NEEDS_MANUAL_VERIFICATION")
+        assertThat(after.jsonPath().getString("caseId"))
+            .describedAs("the retained REJECT blocks, exactly like a prior RN: REJECT").isEqualTo(rejected.toString())
+        assertThat(
+            jdbc { c ->
+                c.prepareStatement("SELECT count(*) FROM identity_verification_case WHERE dedup_key = ?").use { ps ->
+                    ps.setString(1, "RN:$blind")
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+            },
+        ).describedAs("no fresh case was opened around the block").isZero()
+    }
+
+    @Test
     fun `another person's case that lists the erased party only as a candidate is not touched`() {
         val family = uniqueFamily()
         val victim = UUID.randomUUID()

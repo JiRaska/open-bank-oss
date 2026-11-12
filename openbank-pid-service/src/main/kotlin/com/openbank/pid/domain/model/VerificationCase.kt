@@ -220,7 +220,8 @@ data class VerificationCase(
  * it under a fixed domain prefix. That cannot be joined with any stored blind index, and it cannot be
  * recomputed from an RČ without the pepper (the blind index is already pepper-keyed). It exists only
  * so the fraud block still fires when the same RČ is presented again: the resolver derives the same
- * key on a tier-1 miss and consults the adjudication cache with it.
+ * key on tier-1 (on a miss, and on a collision with a new holder of the number) and consults the
+ * adjudication cache with it.
  */
 object ErasedIdentifierKey {
     private const val PREFIX = "pid-erased-rn-reject:v1:"
