@@ -3525,17 +3525,34 @@ delegation_capability_enforcement:
       capability: CARD_VIEW_TRANSACTIONS
       status: unenforced
       issue: 3615
-      why: "CardDelegationIntent has VIEW and MANAGE_LIMITS only; this has no intent and no reader."
+      why: >
+        Still unenforced after the ADR-0375 D7 sweep, and for a different reason than its two
+        siblings: there is no route to gate. The customer edge exposes no per-card transaction
+        list, so unlike freeze and the channel toggles there is no existing call site being guarded
+        by the wrong capability. Enforcing it means building the route first, which is product work.
+        Not papered over with a CardDelegationIntent member either — the check endpoint that would
+        consume one has no production caller, so the member would be a dead branch.
     - resource_type: CARD
       capability: CARD_MANAGE_STATUS
-      status: unenforced
-      issue: 3615
-      why: "No CardDelegationIntent member; freeze/unfreeze on a shared card consults no grant."
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7 correction. freeze, unfreeze and block all run through cardAction, which was
+        gated on CAP_CARD_MANAGE_LIMITS — so the status capability was grantable and read by
+        nothing while a different authority stood in for it. Now gated on CAP_CARD_MANAGE_STATUS.
+        Both card role presets (Majitel karty, Drzitel dodatkove karty) grant all five card
+        capabilities, so no preset-based delegate loses anything; a hand-built grant carrying
+        limits ALONE loses freeze, which is the correction.
     - resource_type: CARD
       capability: CARD_MANAGE_CHANNELS
-      status: unenforced
-      issue: 3615
-      why: "No CardDelegationIntent member and no channel route consults a grant."
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7 correction. PUT /customer/v1/cards/{id}/controls toggles contactless, online,
+        ATM and abroad — channels, not limits — and was gated on CAP_CARD_MANAGE_LIMITS. Now gated
+        on CAP_CARD_MANAGE_CHANNELS. Same preset reasoning as CARD_MANAGE_STATUS.
     - resource_type: PAYMENT
       capability: OBJECT_READ
       status: unenforced

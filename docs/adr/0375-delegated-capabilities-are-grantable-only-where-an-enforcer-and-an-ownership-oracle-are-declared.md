@@ -172,13 +172,30 @@ atomic. Today's refusal therefore becomes a declared end state rather than a
 provisional gap, and the party-recipient and external-recipient halves of D7 converge
 on one mechanism instead of two.
 
-**D7 — Cards and disputes finish the vocabulary or shrink it.** Card controls stay in
-card-issuance; they are not payment-admission steps and D1 does not touch them.
-`CardDelegationIntent` either grows to cover `CARD_VIEW_TRANSACTIONS`,
-`CARD_MANAGE_STATUS` and `CARD_MANAGE_CHANNELS`, or those three leave
-`CAPABILITY_MATRIX`. Dispute-service reading the card projection is in scope for the
-same reason: a delegate who may see a card transaction and cannot dispute it is a
-capability with a cliff in it. D4 forces the choice to be made rather than deferred.
+**D7 — Cards: correct the gating first; only then ask whether to grow or shrink.** Card
+controls stay in card-issuance and at the edge; they are not payment-admission steps and
+D1 does not touch them. Applying D4's census to the three unenforced card capabilities
+found that two of them are not missing features at all — they are **existing routes
+guarded by the wrong capability**. `freeze`, `unfreeze` and `block` all run through
+`cardAction`, and `PUT /cards/{id}/controls` toggles contactless, online, ATM and abroad;
+all four were gated on `CARD_MANAGE_LIMITS`, so a vocabulary that distinguishes limits
+from status from channels collapsed to one capability at the only place that reads it.
+Those two are therefore corrected, not built: `CARD_MANAGE_STATUS` gates the status
+actions and `CARD_MANAGE_CHANNELS` the channel toggles. Both card role presets grant all
+five card capabilities, so no preset-based delegate loses anything; a hand-built grant
+carrying limits alone loses freeze, which is the correction rather than a regression.
+
+`CARD_VIEW_TRANSACTIONS` stays unenforced for a different reason, and the difference
+matters: there is no per-card transaction route at the edge, so there is no call site
+being guarded by the wrong capability. Enforcing it means building the route, which is
+product work, and it is not papered over with a `CardDelegationIntent` member either —
+the check endpoint that would consume one has no production caller, so the member would
+be a dead branch. Dispute-service reading the card projection belongs with that route.
+
+The general rule this yields: **before deciding whether an unenforced capability should
+be built or dropped, check whether its route already exists and is gated on a neighbour.**
+A census that skips that step proposes product work for what is actually a one-line
+correction.
 
 **D8 — ADR-0223 is unchanged, and this says why.** OPA keeps deciding channel and role
 policy; `@Authorize` still runs first. The Authority step answers a different question
