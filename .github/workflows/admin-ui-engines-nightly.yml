@@ -110,9 +110,16 @@ jobs:
           ]
           open(sys.argv[1], "w").write("\n".join(lines) + "\n")
           EOF
-          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
-          if [ -n "$existing" ]; then
+          # resolve-tracking-issue.sh pins the ONE open issue with this exact title (#5266): an
+          # ambiguous set or a failed API read exits non-zero instead of minting a duplicate.
+          status_file="${RUNNER_TEMP}/resolve-status"
+          existing=$(bash .github/scripts/resolve-tracking-issue.sh \
+            --title "$TITLE" \
+            --create-body-file "$body" \
+            --create-label bug --create-label triage \
+            --status-file "$status_file")
+          if [ "$(cat "$status_file")" = "existing" ]; then
             gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$body"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body-file "$body" --label bug --label triage
+            echo "Opened #${existing} with this text as its body."
           fi
