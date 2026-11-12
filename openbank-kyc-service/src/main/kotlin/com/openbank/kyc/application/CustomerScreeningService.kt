@@ -60,8 +60,10 @@ class CustomerScreeningService(
     private val log = Logger.getLogger(CustomerScreeningService::class.java)
 
     suspend fun screenOnOpen(case: KycCase, partyName: String): KycCase {
-        // An erased party (GDPR Art. 17) is not screened: its name is not sent to the provider,
-        // not kept for a retry, and no result is written to the retained record.
+        // An erased party (GDPR Art. 17) is not screened. This read is what keeps its name from
+        // being SENT; it does not protect the write that follows the provider's answer — an
+        // erasure can land while the provider is being asked. The write protects itself
+        // (KycCaseRepository.update), so there is deliberately no second check after the call.
         if (repo.isErased(case.id)) return case
         val result = try {
             screeningPort.screenCustomer(
@@ -76,10 +78,9 @@ class CustomerScreeningService(
             log.warnf(e, "Customer screening unavailable for KYC case %s — sanctions check stays PENDING", case.id)
             null
         }
-        // Erased while the provider was being asked: the answer names a match and must not be
-        // written into a record whose PII was just removed.
-        if (repo.isErased(case.id)) return case
-        val afterSanctions = applySanctions(case.id, result?.sanctions)
+        // Null: the case was erased after the read above (the write refused it). Nothing was
+        // stored and nothing follows — no name kept for a retry, no PEP result.
+        val afterSanctions = applySanctions(case.id, result?.sanctions) ?: return case
         keepOrForgetName(afterSanctions, partyName)
         val pep = afterSanctions.checks.firstOrNull { it.checkType == CheckType.PEP_SCREENING }
         if (pep == null || !pep.awaitsScreen(hasResult = result != null)) return afterSanctions
@@ -112,7 +113,8 @@ class CustomerScreeningService(
     private fun KycCheck.awaitsScreen(hasResult: Boolean): Boolean =
         status == CheckStatus.PENDING || (hasResult && result == KycService.PEP_UNAVAILABLE_RESULT)
 
-    private suspend fun applySanctions(caseId: UUID, outcome: SanctionsScreeningOutcome?): KycCase {
+    /** @return the case as it now stands, or null when the write was refused because it was erased. */
+    private suspend fun applySanctions(caseId: UUID, outcome: SanctionsScreeningOutcome?): KycCase? {
         val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
         val current = case.checks.firstOrNull { it.checkType == CheckType.SANCTIONS_SCREENING }
         if (current == null || current.status != CheckStatus.PENDING) return case

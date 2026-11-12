@@ -192,9 +192,8 @@ class KycService {
     suspend fun sandboxAutoApprove(caseId: UUID): KycCase {
         val case = repo.findById(caseId) ?: throw KycCaseNotFoundException(caseId)
         if (!autoApprove || case.status.isTerminal || !case.hasClearScreen()) return case
-        // An erased case is a retained record of a party that no longer exists here; approving
-        // it would publish an activation for that party.
-        if (repo.isErased(caseId)) return case
+        // No erasure pre-check here: the write itself refuses an erased case and stores no
+        // approval event (KycCaseRepository.update), which a read made now could not guarantee.
         val passedChecks = case.checks.map {
             if (it.status == CheckStatus.PASSED) {
                 it
@@ -209,7 +208,7 @@ class KycService {
             reviewedAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(cleared, KycEvents.caseApproved(cleared, Instant.now(clock)))
+        val saved = repo.update(cleared, KycEvents.caseApproved(cleared, Instant.now(clock))) ?: case
         return saved
     }
 
@@ -252,7 +251,8 @@ class KycService {
         } else {
             repo.update(updated)
         }
-        return saved
+        // Null: the case was erased and nothing was written. It is returned as it was read.
+        return saved ?: case
     }
 
     /**
@@ -311,7 +311,8 @@ class KycService {
         } else {
             repo.update(updated)
         }
-        return saved
+        // Null: the case was erased and nothing was written. It is returned as it was read.
+        return saved ?: case
     }
 
     private fun isPepHit(screeningStatus: PepScreeningStatus): Boolean =
@@ -407,7 +408,7 @@ class KycService {
             reviewedAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
+        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock))) ?: case
         metrics.kycVerdict(caseType(case.subjectType), "approved")
         return saved
     }
@@ -421,7 +422,7 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
+        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock))) ?: case
         metrics.kycVerdict(caseType(case.subjectType), "rejected")
         return saved
     }
@@ -454,7 +455,7 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock)))
+        val saved = repo.update(updated, KycEvents.caseApproved(updated, Instant.now(clock))) ?: case
         metrics.kycVerdict(caseType(case.subjectType), "approved")
         return saved
     }
@@ -487,7 +488,7 @@ class KycService {
             notes = reason,
             updatedAt = Instant.now(clock),
         )
-        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock)))
+        val saved = repo.update(updated, KycEvents.caseRejected(updated, Instant.now(clock))) ?: case
         metrics.kycVerdict(caseType(case.subjectType), "rejected")
         return saved
     }

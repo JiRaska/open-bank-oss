@@ -26,6 +26,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.LockModeType
 import jakarta.persistence.Table
 import org.jboss.logging.Logger
 import java.math.BigDecimal
@@ -211,7 +212,7 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
      */
     override suspend fun findExpirableOpenCases(threshold: Instant, limit: Int): List<KycCase> = Panache.withSession {
         find(
-            "status = ?1 and expiresAt is not null and expiresAt <= ?2 order by expiresAt asc",
+            "status = ?1 and erasedAt is null and expiresAt is not null and expiresAt <= ?2 order by expiresAt asc",
             KycCaseStatus.OPEN.name,
             threshold,
         ).page(0, limit).list()
@@ -223,32 +224,61 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
     override suspend fun countByStatus(status: KycCaseStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
 
-    override suspend fun update(case: KycCase): KycCase =
+    override suspend fun update(case: KycCase): KycCase? =
         Panache.withTransaction { applyUpdate(case) }.awaitSuspending()
 
-    /** Transactional outbox (issue #4007) — the UPDATE and the event row share one transaction. */
-    override suspend fun update(case: KycCase, event: KycEvent): KycCase = Panache.withTransaction {
-        applyUpdate(case).flatMap { updated ->
-            outboxRepository.persistInTransaction(event.toOutboxMessage(objectMapper)).replaceWith(updated)
+    /**
+     * Transactional outbox (issue #4007) — the UPDATE and the event row share one transaction.
+     * A skipped write stores no event: the outbox row is only ever written after [applyUpdate]
+     * reported that it wrote the case, in that same transaction.
+     */
+    override suspend fun update(case: KycCase, event: KycEvent): KycCase? = Panache.withTransaction {
+        applyUpdate(case).flatMap { written ->
+            if (written == null) {
+                Uni.createFrom().nullItem()
+            } else {
+                outboxRepository.persistInTransaction(event.toOutboxMessage(objectMapper)).replaceWith(written)
+            }
         }
     }.awaitSuspending()
 
-    private fun applyUpdate(case: KycCase): Uni<KycCase> = find("caseId", case.id).firstResult().map { e ->
-        e?.also {
-            it.status = case.status.name
-            it.riskLevel = case.riskLevel.name
-            it.assignedTo = case.assignedTo
-            it.checksJson = objectMapper.writeValueAsString(case.checks)
-            it.notes = case.notes
-            it.reviewedBy = case.reviewedBy
-            it.reviewedAt = case.reviewedAt
-            it.updatedAt = case.updatedAt
+    /**
+     * The ONE place every state change of a case is written, and the one place the erasure rule
+     * is enforced: approve, reject, check updates, PEP and sanctions screening results, the
+     * sandbox auto-approval, the AML-declaration escalation and the expiry sweep all come through
+     * here.
+     *
+     * `PESSIMISTIC_WRITE` (SELECT … FOR UPDATE) is what makes the rule hold rather than merely
+     * narrow the window. The entity is written with every mapped column, `erased_at` included, so
+     * a plain read followed by a flush would overwrite an erasure committed in between — and put
+     * the anonymised fields back. With the row locked, a concurrent erasure either committed
+     * before this read (and is seen here: nothing is written) or waits for this transaction and
+     * then anonymises what it wrote. [anonymizeByPartyId] takes the same lock.
+     *
+     * @return [case], or null when the row is erased or absent and nothing was written
+     */
+    private fun applyUpdate(case: KycCase): Uni<KycCase?> =
+        find("caseId", case.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().map { e ->
+            if (e == null || e.erasedAt != null) {
+                null
+            } else {
+                e.status = case.status.name
+                e.riskLevel = case.riskLevel.name
+                e.assignedTo = case.assignedTo
+                e.checksJson = objectMapper.writeValueAsString(case.checks)
+                e.notes = case.notes
+                e.reviewedBy = case.reviewedBy
+                e.reviewedAt = case.reviewedAt
+                e.updatedAt = case.updatedAt
+                case
+            }
         }
-    }.replaceWith(case)
 
     override suspend fun anonymizeByPartyId(partyId: UUID, now: Instant) {
         Panache.withTransaction {
-            find("partyId", partyId).list().map { cases ->
+            // Same row lock as applyUpdate: an in-flight state change finishes first and is then
+            // anonymised, instead of this erasure and that write overwriting each other.
+            find("partyId", partyId).withLock(LockModeType.PESSIMISTIC_WRITE).list().map { cases ->
                 cases.forEach { c ->
                     // V1 PII fields
                     c.assignedTo = null

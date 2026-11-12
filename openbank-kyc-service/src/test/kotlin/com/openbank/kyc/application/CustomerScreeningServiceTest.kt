@@ -280,4 +280,23 @@ class CustomerScreeningServiceTest {
         coVerify(exactly = 0) { unscreened.retainForRetry(any(), any(), any()) }
         coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `a write refused because the case was erased mid-screen ends the screen there`(): Unit = runBlocking {
+        val case = case()
+        stubRepo(case)
+        // Not erased when read; erased by the time the provider has answered and the write runs.
+        coEvery { repo.update(any()) } returns null
+        coEvery { repo.update(any(), any<KycEvent>()) } returns null
+        coEvery { port.screenCustomer(any()) } returns CustomerScreeningResult(
+            SanctionsScreeningOutcome(SanctionsScreeningStatus.MATCH, 0.97, "Synthetic Listed"),
+            clearPep,
+        )
+
+        val result = service.screenOnOpen(case, "Synthetic Listed")
+
+        assertThat(result).isEqualTo(case)
+        coVerify(exactly = 0) { unscreened.retainForRetry(any(), any(), any()) }
+        coVerify(exactly = 0) { kycService.applyPepScreeningResult(any(), any(), any(), any()) }
+    }
 }

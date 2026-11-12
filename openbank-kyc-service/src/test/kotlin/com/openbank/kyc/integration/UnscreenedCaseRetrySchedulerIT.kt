@@ -10,6 +10,7 @@ import com.openbank.kyc.application.port.out.CustomerScreeningPort
 import com.openbank.kyc.application.port.out.CustomerScreeningRequest
 import com.openbank.kyc.application.port.out.CustomerScreeningResult
 import com.openbank.kyc.application.port.out.CustomerScreeningUnavailableException
+import com.openbank.kyc.application.port.out.KycCaseRepository
 import com.openbank.kyc.application.port.out.PepScreeningResult
 import com.openbank.kyc.application.port.out.PepScreeningStatus
 import com.openbank.kyc.application.port.out.SanctionsScreeningOutcome
@@ -30,6 +31,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
@@ -82,6 +84,9 @@ class UnscreenedCaseRetrySchedulerIT {
     @Alternative
     @ApplicationScoped
     class SwitchableScreening : CustomerScreeningPort {
+        @Inject
+        lateinit var cases: KycCaseRepository
+
         private val up = AtomicBoolean(false)
         private val keys = ConcurrentHashMap<String, MutableList<String>>()
 
@@ -91,6 +96,16 @@ class UnscreenedCaseRetrySchedulerIT {
 
         override suspend fun screenCustomer(request: CustomerScreeningRequest): CustomerScreeningResult {
             keys.computeIfAbsent(request.name) { CopyOnWriteArrayList() }.add(request.idempotencyKey)
+            if (request.name == ERASED_MIDFLIGHT) {
+                // The hook: the party is erased by the real erasure path AFTER the service read the
+                // case and decided to screen it, and BEFORE it writes the answer. The provider
+                // then answers normally, so the service goes on to its write.
+                cases.anonymizeByPartyId(UUID.fromString(request.subjectId), Instant.now())
+                return CustomerScreeningResult(
+                    SanctionsScreeningOutcome(SanctionsScreeningStatus.MATCH, MATCH_SCORE, ERASED_MIDFLIGHT),
+                    PepScreeningResult(PepScreeningStatus.MATCH, MATCH_SCORE, ERASED_MIDFLIGHT),
+                )
+            }
             if (!up.get() || request.name in ALWAYS_DOWN) {
                 throw CustomerScreeningUnavailableException(IllegalStateException("stub outage"))
             }
@@ -315,7 +330,53 @@ class UnscreenedCaseRetrySchedulerIT {
         await("the closed case's name to be released", { retainedName(control) }) { it == null }
     }
 
+    private fun outboxRowsFor(caseId: UUID): Int = dataSource.connection.use { c ->
+        c.prepareStatement("SELECT COUNT(*) FROM kyc_outbox WHERE payload LIKE ?").use {
+            it.setString(1, "%$caseId%")
+            it.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
+            }
+        }
+    }
+
+    @Test
+    fun `an erasure landing between the service's read and its write is not overwritten`() {
+        val party = onboard(ERASED_MIDFLIGHT)
+
+        val stored = row(party)
+        val erasedAt = dataSource.connection.use { c ->
+            c.prepareStatement("SELECT erased_at FROM kyc_cases WHERE party_id = ?").use {
+                it.setObject(1, party)
+                it.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getTimestamp(1)
+                }
+            }
+        }
+        assertThat(erasedAt).describedAs("the hook erased the party mid-screen").isNotNull()
+        // The provider answered MATCH for both checks after the erasure. Nothing of that answer
+        // may reach the erased record: no settled check, no matched name, no raised risk tier.
+        val sanctions = stored.check("SANCTIONS_SCREENING")
+        assertThat(sanctions.path("status").asText()).isEqualTo("PENDING")
+        assertThat(sanctions.path("result").isNull).isTrue()
+        assertThat(stored.check("PEP_SCREENING").path("status").asText()).isEqualTo("PENDING")
+        assertThat(stored.checks.toString()).doesNotContain(ERASED_MIDFLIGHT)
+        assertThat(stored.riskLevel).isEqualTo("MEDIUM")
+        assertThat(stored.status).isEqualTo("OPEN")
+        assertThat(retainedName(party)).isNull()
+        // One outbox row only: the case-opened event written before the erasure. A skipped write
+        // stores no event.
+        assertThat(outboxRowsFor(stored.caseId)).isEqualTo(1)
+
+        // And the sweep leaves it alone: the open path's call is the only one ever made.
+        Thread.sleep(SETTLE_MILLIS)
+        assertThat(screening.keysFor(ERASED_MIDFLIGHT)).hasSize(1)
+        assertThat(outboxRowsFor(stored.caseId)).isEqualTo(1)
+    }
+
     private companion object {
+        const val ERASED_MIDFLIGHT = "Retry Midflight Person"
         const val GHOST = "Retry Ghost Person"
 
         // Explicit and far from the Hibernate sequence: the BIGSERIAL default would hand out an id

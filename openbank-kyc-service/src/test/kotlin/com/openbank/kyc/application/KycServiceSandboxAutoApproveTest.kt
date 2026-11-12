@@ -49,7 +49,6 @@ class KycServiceSandboxAutoApproveTest {
             it.adverseMediaSource = adverseMediaSource
             it.autoApprove = true
         }
-        coEvery { repo.isErased(any()) } returns false
     }
 
     private fun case(sanctions: CheckStatus, provider: String?, pep: CheckStatus? = null): KycCase {
@@ -134,15 +133,15 @@ class KycServiceSandboxAutoApproveTest {
     }
 
     @Test
-    fun `an erased case is never approved, even when it was screened clear`(): Unit = runBlocking {
+    fun `a write refused because the case was erased is not reported as an approval`(): Unit = runBlocking {
         val case = case(CheckStatus.PASSED, KycCase.CUSTOMER_SCREENING_PROVIDER, pep = CheckStatus.PASSED)
         coEvery { repo.findById(case.id) } returns case
-        coEvery { repo.isErased(case.id) } returns true
+        // The repository refuses the write (erased in the meantime) and stores no event.
+        coEvery { repo.update(any(), any()) } returns null
 
         val untouched = service.sandboxAutoApprove(case.id)
 
-        assertThat(untouched.status).isEqualTo(case.status)
-        coVerify(exactly = 0) { repo.update(any()) }
-        coVerify(exactly = 0) { repo.update(any(), any()) }
+        assertThat(untouched).isEqualTo(case)
+        assertThat(untouched.status).isNotEqualTo(KycCaseStatus.APPROVED)
     }
 }
