@@ -10,24 +10,24 @@ coroutines = "1.8.1"
 # (enforcedPlatform); this floors the modules that declare Jackson directly (libs-domain)
 # on the same version, closing GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm /
 # GHSA-rmj7-2vxq-3g9f / etc.
-jackson = "2.22.3"
+jackson = "2.23.0"
 # WebAuthn RP verification (ADR-0066 F2, customer-edge native passkey). Pinned to 0.28.x —
 # 0.31.x switched ObjectConverter to the Jackson 3 "tools.jackson" fork, which conflicts
 # with Quarkus 3.37's Jackson 2.x (jackson-databind/jackson-core, pinned above); 0.28.5
 # is the newest release still on classic com.fasterxml.jackson.
-webauthn4j = "0.28.5.RELEASE"
+webauthn4j = "0.32.0.RELEASE"
 # JUG — UUIDv7 (RFC 9562) generation for time-ordered identifiers (ADR-0106). FasterXML,
 # Apache-2.0, same org as Jackson (already a core dep). Vetted generator instead of a
 # hand-rolled one: intra-millisecond monotonicity (RFC 9562 §6.2) is subtle to get right.
-java-uuid-generator = "5.1.0"
+java-uuid-generator = "5.2.0"
 junit = "5.11.0"
 # 3.27.7 (issue #461): closes GHSA-rqfh-9r24-8c9r. Test-only dependency.
 assertj = "3.27.7"
 mockk = "1.13.12"
 kover = "0.9.9"
-wiremock = "3.9.2"
-avro = "1.11.3"
-apicurio-registry = "2.6.2.Final"
+wiremock = "3.13.2"
+avro = "1.12.2"
+apicurio-registry = "2.6.13.Final"
 # 2.0.5 = the line enforcedPlatform(libs.quarkus.bom) already resolves for org.testcontainers:testcontainers
 # in every Quarkus service. 1.20.4 negotiated Docker API 1.32, which Docker Engine 29 rejects
 # ("client version 1.32 is too old"), and the 2.x module artifacts are prefixed `testcontainers-`
@@ -41,7 +41,7 @@ testcontainers = "2.0.5"
 # Distinct from the tika-core pulled by the cyclonedx Gradle plugin's own SBOM
 # classpath (gradle/osv-scanner.toml) — that one is a separate, non-project-resolvable
 # occurrence and still needs a cyclonedx plugin version bump.
-pact = "4.7.3"
+pact = "4.7.7"
 # Static analysis (SAST gate — detekt for correctness rules, ktlint for formatting).
 # detekt 1.23.8 bundles its own kotlin-compiler-embeddable, so it parses sources
 # independently of the project Kotlin version (2.3.x here).
@@ -53,17 +53,17 @@ ktlint-plugin = "13.1.0"
 # adapter. 2.29.52 is a recent stable 2.x pin at time of writing — verify/bump via
 # Dependabot rather than treating it as hand-curated forever. S3Presigner ships inside
 # this same `s3` artifact in SDK v2, so no separate presigner module is needed.
-aws-sdk = "2.29.52"
+aws-sdk = "2.57.11"
 # Handlebars.java, Apache-2.0 (ADR-0162 D2): the logic-less template engine behind
 # openbank-document-service's TemplateRenderPort. No custom helpers are ever registered
 # (see HandlebarsTemplateRenderer) — that is what keeps it free of arbitrary code
 # execution, not the library version. 4.4.0 is a recent stable pin — verify/bump via
 # Dependabot rather than treating it as hand-curated forever.
-handlebars = "4.5.2"
+handlebars = "4.5.8"
 # Apache PDFBox, Apache-2.0 (ADR-0162 D4 phase 1): PAdES-B PDF signing in
 # PdfBoxPadesSealAdapter. 3.0.3 is the current stable 3.x line — PDDocument loading moved
 # to org.apache.pdfbox.Loader in 3.x (the 2.x `PDDocument.load(...)` statics were removed).
-pdfbox = "3.0.3"
+pdfbox = "3.0.8"
 # Bouncy Castle (bcprov/bcpkix jdk18on), Bouncy Castle License (MIT-style, permissive — NOT
 # GPL/AGPL, so it clears the dependency denylist) (ADR-0162 D4 phase 1): the CMS/PKCS7
 # detached-signature generator PdfBoxPadesSealAdapter uses to build the PAdES-B seal, and
@@ -171,7 +171,7 @@ bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref 
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-allopen = { id = "org.jetbrains.kotlin.plugin.allopen", version.ref = "kotlin" }
 quarkus = { id = "io.quarkus", version.ref = "quarkus-plugin" }
-jandex = { id = "org.kordamp.gradle.jandex", version = "2.0.0" }
+jandex = { id = "org.kordamp.gradle.jandex", version = "2.3.0" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 cyclonedx = { id = "org.cyclonedx.bom", version = "2.3.0" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
