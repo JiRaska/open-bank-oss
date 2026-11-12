@@ -230,6 +230,7 @@ RERUN_CONTEXT = "merge-train/rerun"              # App marker: this carrier's in
 RELEASED_CONTEXT = "merge-train/strict-released"  # App marker: this head's reservation timed out once (#14302)
 CARRIER_YIELD_CONTEXT = "merge-train/carrier-yielded"   # App marker: a green carrier waited one tick for this GREEN holder head
 DEFER_CONTEXT = "merge-train/strict-deferral"   # App marker: this running strict head yielded once to a carrier
+STRICT_READY_CONTEXT = "merge-train/strict-ready-hold"   # App marker: no carrier was built for one tick for this GREEN holder head (#15827)
 # Speculative stacking (ADR-0343 amendment 2026-11-09): while a strict holder H is reserved and its CI
 # runs on an up-to-date head h, the train carrier is published over h instead of over main, so the two
 # CIs run at once instead of one after the other. Build is unchanged (it builds over main, with main's
@@ -1429,11 +1430,18 @@ class Verified:
     dropped: list[int]
 
 
-def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: str,
+def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: str | None,
                         outputs: list[str]) -> Verified:
     """Re-derive the train execution-free and require the bundle to match it step by step.
     Returns publish's OWN commit chain (commit-tree over verified trees) — the bundle's commits are
-    never pushed. Raises Reject."""
+    never pushed. Raises Reject.
+
+    `bundle_tip=None` (#15827): re-derive the members' chain over `base` from their live heads alone,
+    with nothing taken from the bundle. Used only when a declared member left the batch after build,
+    so the bundle's per-member commits no longer line up; there is no regeneration commit (the caller
+    refuses that case), so every tree pushed is a merge-tree of live, re-verified heads."""
+    if bundle_tip is None:
+        return _rederive_train(git, base, members)
     if not SHA_RE.fullmatch(bundle_tip):
         raise Reject("bundle tip is not a full sha", member_fault=False)
     chain = git("rev-list", "--reverse", "--first-parent", f"{base}..{bundle_tip}").stdout.split()
@@ -1487,6 +1495,30 @@ def verify_bundle_train(git: Git, base: str, members: list[Member], bundle_tip: 
                     raise Reject(f"regeneration commit touches {path}, which is not a declared derived output")
         own = git("commit-tree", git.tree(regen), "-p", own, "-m", OWN_REGEN_MSG).stdout.strip()
         own_tree = git.tree(regen)
+    if not applied:
+        raise Reject("no member applied", member_fault=False)
+    extra = git.special_entries(own) - git.special_entries(base)
+    if extra:
+        raise Reject(f"train tree contains a symlink/gitlink main does not: {sorted(p for _, _, p in extra)[:3]}")
+    return Verified(own, own_tree, applied, dropped)
+
+
+def _rederive_train(git: Git, base: str, members: list[Member]) -> Verified:
+    """verify_bundle_train without a bundle: publish's own chain, merge-tree only, nothing executed."""
+    own, own_tree = base, git.tree(base)
+    applied: list[int] = []
+    dropped: list[int] = []
+    for m in members:
+        r = git("merge-tree", "--write-tree", own, m.head_sha, check=False)
+        if r.returncode not in (0, 1):
+            raise Reject(f"merge-tree failed for #{m.number}: rc={r.returncode}", member_fault=False)
+        tree = r.stdout.split()[0] if r.stdout.split() else ""
+        if r.returncode == 1 or tree == own_tree:
+            dropped.append(m.number)
+            continue
+        own = git("commit-tree", tree, "-p", own, "-m", own_member_message(m.number, m.head_sha)).stdout.strip()
+        own_tree = tree
+        applied.append(m.number)
     if not applied:
         raise Reject("no member applied", member_fault=False)
     extra = git.special_entries(own) - git.special_entries(base)
@@ -2419,12 +2451,16 @@ def write_manifest(path: str, batch: list[Member]) -> None:
 
 
 def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int | None],
-                   batch_size: int) -> list[Member]:
+                   batch_size: int, tolerate_moved: bool = False):
     """The batch build declared, admitted only member by member against LIVE data. The manifest is
     untrusted (build ran generators over PR data), so it can only SELECT: every entry must be a
     live train candidate at exactly its live head, and the selection obeys the same size cap as
     select_batch. Re-planning instead would reject a legitimate bundle whenever any candidate
-    changed state in the minutes between build and publish. Raises Reject."""
+    changed state in the minutes between build and publish. Raises Reject.
+
+    `tolerate_moved` (#15827): a declared member that is no longer a live candidate at its declared
+    head (a bot rewrote or closed it) is left OUT instead of rejecting the batch; returns
+    (batch, moved). Leaving a member out can only shrink the selection, never add to it."""
     lines = manifest_text.splitlines()
     if not lines:
         raise Reject("bundle carries no member manifest", member_fault=False)
@@ -2435,14 +2471,17 @@ def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int
         if not mm or int(mm.group(1)) in want:
             raise Reject("member manifest is malformed", member_fault=False)
         want[int(mm.group(1))] = mm.group(2)
-    for n, head in want.items():
-        if n not in live or live[n].head_sha != head:
-            raise Reject(f"declared member #{n} is no longer a live train candidate at that head — the next tick rebuilds",
-                         member_fault=False)
-    batch = [m for m in train if m.number in want]
-    if len(batch) > max(1, batch_size):
-        raise Reject(f"declared batch of {len(batch)} exceeds the batch size of {batch_size}", member_fault=False)
-    return batch
+    moved = [n for n, head in want.items() if n not in live or live[n].head_sha != head]
+    if moved and not tolerate_moved:
+        raise Reject(f"declared member #{moved[0]} is no longer a live train candidate at that head — the next tick rebuilds",
+                     member_fault=False)
+    if len(want) > max(1, batch_size):
+        raise Reject(f"declared batch of {len(want)} exceeds the batch size of {batch_size}", member_fault=False)
+    batch = [m for m in train if m.number in want and m.number not in moved]
+    if not batch:
+        raise Reject("no declared member is still a live train candidate at its head — the next tick rebuilds",
+                     member_fault=False)
+    return (batch, moved) if tolerate_moved else batch
 
 
 def live_base(gh, git) -> str:
@@ -2637,38 +2676,59 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         return "idle"
     manifest = os.path.join(bundle_dir, MANIFEST_FILE)
     try:
-        batch = declared_batch(pathlib.Path(manifest).read_text() if os.path.isfile(manifest) else "",
-                               train, sizes, batch_size)
+        batch, moved = declared_batch(pathlib.Path(manifest).read_text() if os.path.isfile(manifest) else "",
+                                      train, sizes, batch_size, tolerate_moved=True)
     except Reject as exc:
         log(f"::warning::train rejected: {exc}")
         return "rejected"
+    if moved:
+        log(f"::notice::declared member(s) {moved} no longer live train candidates at their declared heads — "
+            f"left out, the rest re-derived this tick (#15827)")
     log(f"publish: declared batch {[m.number for m in batch]}")
     outputs = derived_output_patterns(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
     if not outputs:
         log("::error::origin/main declares no DERIVED_OUTPUTS — refusing")
         return "rejected"
-    try:
-        if git("bundle", "verify", bundle, check=False).returncode != 0:
-            raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
-        git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
-        tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
-        v = verify_bundle_train(git, base, batch, tip, outputs)
-        live = {m.number: m for m in train}
-        cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
-        if len(v.applied) > cap:
-            raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
-    except Reject as exc:
-        log(f"::warning::train rejected: {exc}")
-        if exc.member_fault:
-            mark_unverifiable(gh, batch)
-        return "rejected"
-    for n in v.dropped:
-        gh.comment(n, DROP_MESSAGE)
-    heads = {m.number: m.head_sha for m in batch}
-    for n in v.applied:
-        if not live_source_intent(gh, n, heads[n]):
-            log(f"::notice::#{n} source intent or head changed — carrier not published")
+    live = {m.number: m for m in train}
+    rederive = bool(moved)
+    while True:
+        try:
+            if git("bundle", "verify", bundle, check=False).returncode != 0:
+                raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
+            git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
+            tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
+            if rederive and git("log", "-1", "--format=%s", tip, check=False).stdout.strip() == REGEN_COMMIT_SUBJECT:
+                # A regeneration commit was derived WITH the member that left; publish executes nothing, so
+                # it cannot re-derive one without it. The bundle is only a hint here: a bundle that hides
+                # its regeneration commit still contributes nothing to what is pushed below.
+                raise Reject("a member left the batch and the bundle carries a regeneration commit — "
+                             "the next tick rebuilds", member_fault=False)
+            v = verify_bundle_train(git, base, batch, None if rederive else tip, outputs)
+            cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
+            if len(v.applied) > cap:
+                raise Reject(f"train applies {len(v.applied)} member(s), over the bisect cap of {cap}", member_fault=False)
+        except Reject as exc:
+            log(f"::warning::train rejected: {exc}")
+            if exc.member_fault:
+                mark_unverifiable(gh, batch)
             return "rejected"
+        heads = {m.number: m.head_sha for m in batch}
+        gone = [n for n in v.applied if not live_source_intent(gh, n, heads[n])]
+        if not gone:
+            break
+        # #15827: one member moving (release-please rewrites its branch after every merge to main, deploy
+        # bots supersede and close) no longer discards the batch. It is left out and the rest is re-derived
+        # from live heads in this tick; every remaining member is re-read live again on the next pass.
+        log(f"::notice::#{', #'.join(map(str, gone))} source intent or head changed — left out, the rest re-derived")
+        batch = [m for m in batch if m.number not in gone]
+        rederive = True
+        if not batch:
+            log("::notice::no declared member is left — carrier not published")
+            return "rejected"
+    if not rederive:
+        # A re-derived train's drops may come only from a member having left, so no drop notice is sent.
+        for n in v.dropped:
+            gh.comment(n, DROP_MESSAGE)
     if stack:
         hn, hh = stack
         why = stack_target_problem(gh, git, base, hn, hh)
@@ -3146,13 +3206,37 @@ def mode_settle(gh, git, repo: str, shadow: bool, run_id: str = "", attempt: str
             f"over the same main during its CI (bounded deferral)")
         summary["in_flight"] = False
         summary["deferral_window"] = n
+    # Strict priority (#15827): a holder GREEN on a head that contains live main but not merged in this
+    # tick's strict_lane (a train in flight, merge refused, source intent re-read, main moved under the
+    # read) would be pushed behind main by the next carrier and restart its full CI. For ONE tick per
+    # holder head no carrier is built, so the holder merges next tick; the marker bounds the hold, so a
+    # holder that still cannot merge never stalls the fast lane twice.
+    train_open = next((p["number"] for p in gh.open_prs() if is_carrier(p, repo)), None)
+    ready = next((v for st, v in strict if v["number"] == holder and st == "green"), None)
+    # An open carrier already blocks every publish; the hold is for the NEXT carrier only.
+    if (ready is not None and not shadow and holder not in summary["merged"] and not summary["in_flight"]
+            and train_open is None and not strict_carrier_open
+            and git("merge-base", "--is-ancestor", gh.main_sha(), ready["head_sha"], check=False).returncode == 0):
+        if gh.app_statuses(ready["head_sha"]).get(STRICT_READY_CONTEXT, ("", ""))[0] != "success":
+            gh.post_status(ready["head_sha"], "success", f"no carrier built for one tick over main {base[:12]}",
+                           context=STRICT_READY_CONTEXT)
+            log(f"strict-lane #{holder} green and up to date but not merged this tick: no carrier is built this tick "
+                f"(strict priority, once per head)")
+            summary["in_flight"] = True
+            summary["strict_ready_hold"] = holder
+        else:
+            log(f"strict-lane #{holder} green and up to date, already held a tick for it — the fast lane proceeds")
     # Fast lane, from live data only — nothing here reads a stored classification. Held while main is
     # reserved for a strict-lane PR (or was just moved by one): GitHub auto-merge acts on this status,
-    # and a merge now would put the reserved head behind main again.
+    # and a merge now would put the reserved head behind main again. Held as well while a train carrier
+    # is open (#15827): a disjoint PR released by native auto-merge moves main under the carrier, and
+    # settle then rejects the green carrier as "main moved since publish" — the carrier always lost.
+    train_open = next((p["number"] for p in gh.open_prs() if is_carrier(p, repo)), None)   # re-read: may have changed
     hold = (f"main reserved for strict-lane #{holder}" if holder is not None
             else f"a strict carrier is open over main (#{summary.get('strict_carrier', '?')})" if strict_carrier_open
             else "strict-lane update-branch requested" if summary["updated"]
-            else "a strict-lane PR merged; main moved" if summary["strict"] else None)
+            else "a strict-lane PR merged; main moved" if summary["strict"]
+            else f"train carrier #{train_open} is in flight over main" if train_open is not None else None)
     for m in fast:
         if hold:
             log(f"#{m.number:>6} fast      held: {hold} — next tick")
@@ -5134,7 +5218,9 @@ def retry_planner_self_test(check) -> None:
 # first-parent lineage case: spawns=18,070 at 678 cases, measured on the merged tree; ceiling 18,500 (~2.4 %).
 # All three merged (#15430 over #15400 + #15374): spawns=19,251 at 696 cases, measured on the merged tree;
 # ceiling 19,700 (~2.3 %).
-SELF_TEST_SPAWN_CEILING = 19700
+# #15827 (moved member re-derived in publish, fast path held under a carrier, strict-ready hold): 12 cases,
+# ~6 more ticks: spawns=19,929 at 708 cases, measured locally on 2026-11-12; ceiling 20,400 (~2.4 %).
+SELF_TEST_SPAWN_CEILING = 20400
 
 # A green carrier and a green, up-to-date strict holder cannot both keep their verification: whichever
 # merges first moves main under the other. Strict first voids the carrier (rebuild ~50 min, measured
@@ -6422,13 +6508,23 @@ def self_test() -> int:
             mode_build(gh, Git(bdir), b, "o/r", out, 8)
             gh.prs[2]["auto_merge"] = None
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
-            check("race: a declared member that was disarmed after build is refused",
-                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), st)
+
+            def published_members():
+                c = [c for c in gh.carriers.values() if c["state"] == "open"]
+                return [n for n, _ in (parse_own_chain(gh.g, c[-1]["head"]["sha"]) or ("", []))[1]] if c else None
+            check("race (#15827): a declared member disarmed after build is left out, the rest is published",
+                  st == "published" and published_members() == [1], f"{st} {published_members()}")
+            for c in gh.carriers.values():
+                c["state"] = "closed"
             gh.prs[2]["auto_merge"] = {"x": 1}
-            # NEGATIVE: a manifest naming a PR that was never a candidate (forged by the build job).
+            # NEGATIVE: a manifest naming a PR that was never a candidate (forged by the build job). It can
+            # only shrink the selection: the forged entry never reaches the carrier.
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {gh.prs[1]['head']['sha']}\n2 {gh.prs[2]['head']['sha']}\n35 {gh.g('rev-parse', 'pW').stdout.strip()}\n")
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
-            check("manifest: a member that is not a live candidate is refused", st == "rejected", st)
+            check("manifest: a member that is not a live candidate never reaches the carrier",
+                  st == "published" and published_members() == [1, 2], f"{st} {published_members()}")
+            for c in gh.carriers.values():
+                c["state"] = "closed"
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {'0' * 40}\n")
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("manifest: a member at a head other than its live head is refused", st == "rejected", st)
@@ -6441,6 +6537,65 @@ def self_test() -> int:
             os.unlink(os.path.join(out, MANIFEST_FILE))
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("manifest: a bundle with no member manifest is refused", st == "rejected", st)
+            reset()
+
+            # #15827: a batch of THREE, one member's head moves between build and publish (release-please
+            # rewrites its branch after every merge to main). The other two are published THIS tick over
+            # a re-derived chain. Must-FAIL case: today's publish rejected the whole batch
+            # ("declared member #2 is no longer a live train candidate at that head").
+            def bot_rewrite(n):
+                ref = gh.prs[n]["head"]["ref"]
+                old = gh.prs[n]["head"]["sha"]
+                new = gh.g("commit-tree", f"{old}^{{tree}}", "-p", old, "-m", "bot rewrite").stdout.strip()
+                gh.g("branch", "-f", ref, new)
+                gh.prs[n]["head"]["sha"] = new
+                return old
+
+            for moved_at in ("before-plan", "at-intent"):
+                open_only("p1", "p2", "p4")
+                counter[0] += 1
+                bdir = clone("build")
+                b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+                out = os.path.join(root, f"bundle-{counter[0]}")
+                built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+                if moved_at == "before-plan":
+                    bot_rewrite(2)
+                    st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+                else:
+                    # The head moves after publish planned and verified: only live_source_intent sees it.
+                    real_intent = globals()["live_source_intent"]
+
+                    def racing_intent(g, n, head, _real=real_intent):
+                        if n == 2 and gh.prs[2]["head"]["sha"] == head:
+                            bot_rewrite(2)
+                        return _real(g, n, head)
+                    globals()["live_source_intent"] = racing_intent
+                    try:
+                        st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+                    finally:
+                        globals()["live_source_intent"] = real_intent
+                members = published_members()
+                check(f"#15827 ({moved_at}): batch of 3, one head moves between build and publish -> carrier of the other 2 published this tick",
+                      built == [1, 2, 4] and st == "published" and members == [1, 4], f"built={built} st={st} members={members}")
+                tipc = [c for c in gh.carriers.values() if c["state"] == "open"]
+                check(f"#15827 ({moved_at}): the re-derived carrier is the merge-tree of the two live heads, nothing of the moved one",
+                      bool(tipc) and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:docs/two.md", check=False).returncode != 0
+                      and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:docs/four.md", check=False).returncode == 0,
+                      str(tipc[-1]["head"]["sha"] if tipc else None))
+                reset()
+
+            # NEGATIVE (#15827): a member leaves a batch whose bundle carries a regeneration commit. That
+            # commit was derived WITH the member; publish runs nothing, so it is still rejected.
+            open_only("p1", "pR")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            bot_rewrite(1)
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("#15827: a member leaving a batch with a regeneration commit -> still rejected, nothing published",
+                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), f"built={built} st={st}")
             reset()
 
             # NEGATIVE: a symlink in the train tree.
@@ -7740,6 +7895,57 @@ def self_test() -> int:
             check("stacking (S10): MERGE_TRAIN_SPECULATIVE_STACK false -> the bounded deferral window as before",
                   "stack_window" not in s and s.get("deferral_window") == 35, f"{s}")
             gh.head_checks.clear()
+            reset()
+
+            # #15827 (b): the disjoint fast path never releases a PR while a train carrier is in flight.
+            # Measured 2026-11-12: #15817 was posted "fast lane: disjoint from main ... and the batch" at
+            # 10:45 under carrier #15834 (published 10:41), auto-merge merged it, and settle rejected the
+            # green carrier as "main moved since publish". Must-FAIL case: without the hold, 34 is posted.
+            open_only("p1")
+            _, st = tick()
+            gh.pending_shas.update(c["head"]["sha"] for c in gh.carriers.values() if c["state"] == "open")
+            open_only("pF")
+            s = settle_now()
+            check("#15827 (b): a disjoint fast-lane PR is held while a train carrier is in flight",
+                  st == "published" and s["fast"] == [] and 34 not in gh.merged
+                  and gh.app_statuses(gh.prs[34]["head"]["sha"]).get(STATUS_CONTEXT, ("",))[0] != "success",
+                  f"st={st} {s}")
+            gh.pending_shas.clear()
+            s = settle_now()                      # the carrier is green: it merges, nothing was moved under it
+            check("#15827 (b): the carrier then merges over the main it was published on",
+                  1 in gh.merged and not s["rejected"], f"{s} merged={gh.merged}")
+            s = settle_now()
+            check("#15827 (b): with no carrier open the fast-lane PR is released", 34 in s["fast"], str(s))
+            reset()
+
+            # #15827 (c): a strict holder GREEN on an up-to-date head that did not merge this tick (here: the
+            # merge is refused once) gets ONE tick in which no fast carrier is built, so the next carrier
+            # does not push it behind main and restart its full CI (#15747 was reset three times). Must-FAIL
+            # case: without the hold a carrier of #1 is published this tick.
+            open_only("pW")                       # strict-lane, up to date with main, green
+            open_only("p1")                       # a green train candidate
+            pw_head = gh.prs[35]["head"]["sha"]
+            gh.refuse_merge.add(35)
+            s, st = tick()
+            check("#15827 (c): green up-to-date strict holder + fast candidates -> no fast carrier published that tick",
+                  st == "in-flight" and s.get("strict_ready_hold") == 35
+                  and not any(c["state"] == "open" for c in gh.carriers.values()) and gh.merged == [],
+                  f"{s} st={st}")
+            gh.refuse_merge.discard(35)
+            s, st = tick()
+            check("#15827 (c): the holder merges next tick, on its own un-updated head",
+                  gh.merged[:1] == [35] and gh.updates == [] and gh.prs[35]["head"]["sha"] == pw_head,
+                  f"{s} st={st} merged={gh.merged} updates={gh.updates}")
+            reset()
+            # Bounded: a holder that still cannot merge holds the fast lane ONCE per head, never twice.
+            open_only("pW")
+            open_only("p1")
+            gh.refuse_merge.add(35)
+            tick()
+            s, st = tick()
+            check("#15827 (c): a holder already held for once does not stall the fast lane again",
+                  st == "published" and "strict_ready_hold" not in s, f"{s} st={st}")
+            gh.refuse_merge.discard(35)
             reset()
 
             # BOUNDED STRICT DEFERRAL (#13400): a strict reservation whose CI is still running yields
