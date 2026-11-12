@@ -122,6 +122,13 @@ Per-service path-scoped CI (buildují se jen změněné služby). Release osu vl
 
 Broker ověření FINREP odvozuje reportovaný měsíc z požadavků vybraného kontraktu a používá vlastní testovací databázi. Reset fixture odmítne cizí closed-period ID a ponechá zapnutý trigger neměnné evidence. Regresní testy pokrývají historický červen 2026 i současný červen 2000 v obou pořadích, včetně odmítnutí DELETE evidence. Produkční validace frozen evidence se nemění.
 
+## Povinný syntetický původ účetního zápisu
+
+`POST /api/v1/journals/synthetic` použije pravidla pro zaúčtování a vyžaduje ověřený syntetický
+původ. Bez potvrzení důvěryhodné identity služba vrátí HTTP 403 před zaúčtováním. Použití stejného
+idempotency klíče pro různé klasifikace původu vrací HTTP 409. Starší verze ledgeru syntetický
+endpoint neobsluhuje, takže požadavek workeru selže před zaúčtováním.
+
 ## Sdílené výchozí konfigurace
 
 Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.
