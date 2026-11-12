@@ -5,6 +5,7 @@
 package com.openbank.kyb.infrastructure.client
 
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningRequest
+import com.openbank.kyb.application.port.out.RelatedPartyScreeningResult
 import com.openbank.kyb.application.port.out.RelatedPartyScreeningUnavailableException
 import com.openbank.kyb.domain.model.ScreeningVerdict
 import io.mockk.every
@@ -32,7 +33,8 @@ class SanctionsRelatedPartyScreeningAdapterTest {
         every { client.screen(any()) } returns Uni.createFrom().item(response)
     }
 
-    private fun screen(request: RelatedPartyScreeningRequest = person) = runBlocking { adapter.screen(request) }
+    private fun screen(request: RelatedPartyScreeningRequest = person): RelatedPartyScreeningResult =
+        runBlocking { adapter.screen(request) }
 
     @Test
     fun `the request asks for the CUSTOMER profile and carries the subject and the idempotency key`() {
