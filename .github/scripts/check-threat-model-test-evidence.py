@@ -341,7 +341,7 @@ def git_ratchet_self_test(parse) -> int:
         git("branch", "pre4")
         git("rm", "-q", "m/src/test/kotlin/w/Existing.kt")
         (root / "m/src/test/kotlin/v").mkdir()
-        (root / "m/src/test/kotlin/v/Existing.kt").write_text("class Existing {}\n")
+        (root / "m/src/test/kotlin/v/Existing.kt").write_text("class Existing { fun other() = 1 }\n")
         git("add", "."); git("commit", "-qm", "re-add under same name")
         cases.append(("a class declared at the base is not new even when only one declaration remains",
                       added_test_classes("pre4", root), set()))
