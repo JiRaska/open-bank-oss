@@ -6,7 +6,7 @@
 //
 // Party lookup reuses the ADR-0228 entity-resolution facade (/api/entities/resolve) rather than
 // asking the operator for a UUID — ADR-0231 D3 bans raw-UUID navigation, and the facade already
-// resolves parties by business key through party-service's /api/v1/parties/search. This screen
+// resolves parties by name or UUID through party-service's /api/v1/parties/search. This screen
 // therefore never needs its own search endpoint; it consumes the shared one and renders results
 // as entity chips, so a party found here deep-links to the same /parties/{id} page as everywhere
 // else.
@@ -214,7 +214,7 @@ export default function DelegationsPage() {
       {/* ---- party lookup (ADR-0228 facade, never a raw UUID field) ---- */}
       <div id="delegation-party-search" className="card" style={{ padding: '16px', marginBottom: '20px', scrollMarginTop: 16 }}>
         <label htmlFor="party-search" style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '8px' }}>
-          {t('Najít stranu podle jména nebo obchodního klíče', 'Find a party by name or business key')}
+          {t('Najít stranu podle jména nebo UUID', 'Find a party by name or UUID')}
         </label>
         <div style={{ display: 'flex', gap: '8px' }}>
           <input
