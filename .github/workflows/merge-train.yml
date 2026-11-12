@@ -81,7 +81,12 @@ env:
   MERGE_TRAIN_STRICT_BATCH_CAP: "8"
   # Speculative stacking (ADR-0343 amendment 2026-11-09): the train carrier may be published over a
   # running strict holder's up-to-date head instead of over main. "false" is the rollback: bounded deferral as before.
-  MERGE_TRAIN_SPECULATIVE_STACK: "true"
+  # ROLLED BACK 2026-11-12 (#15772): a stacked carrier holds the holder PR's own commits between main
+  # and the member commits, and merge_train_carrier.carrier_members refuses any commit in main..carrier
+  # that is not the train's own. So gate security-checklist-money-path failed closed on every stacked
+  # carrier seen (#15695, #15769), the carrier went red, and its members were bisected for a fault that
+  # was the carrier's shape. Turn back on only together with a carrier resolver that knows the holder base.
+  MERGE_TRAIN_SPECULATIVE_STACK: "false"
 
 jobs:
   settle:

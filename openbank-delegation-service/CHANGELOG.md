@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.7...delegation-service-v0.24.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
+## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** bind approval replay to the frozen payment payload ([#15716](https://github.com/JiRaska/open-bank-oss/issues/15716)) ([ad63d63](https://github.com/JiRaska/open-bank-oss/commit/ad63d6306340cfff8c9be9350bfd6e3c399034f5))
+
 ## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
 
 

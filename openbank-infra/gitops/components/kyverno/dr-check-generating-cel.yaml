@@ -28,7 +28,7 @@ metadata:
   name: ledger-dr-check-network-isolation
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Isolate the DR restore check workload
     policies.kyverno.io/category: Disaster Recovery
@@ -87,7 +87,7 @@ metadata:
   name: ledger-dr-check-database-identity
   labels:
     app.kubernetes.io/part-of: kyverno-policies
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
   annotations:
     policies.kyverno.io/title: Random per-run reader credential for the DR restore check
     policies.kyverno.io/category: Disaster Recovery

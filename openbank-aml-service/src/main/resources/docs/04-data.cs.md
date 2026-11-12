@@ -103,3 +103,21 @@ Záznam případu je **restricted** (`dataClassification: restricted`). GDPR **p
 - **Upstream (topic):** kyc-service (triggers), sanctions-service (updates).
 - **Vlastněné schéma:** `aml_schema`. **Závislá schémata:** sepa_schema, domestic_schema, swift_schema, sepa_instant_schema.
 - `dataLineageRole: both` — služba je zároveň konzumentem i producentem compliance dat.
+
+## Příjem dat pro monitoring transakcí (ADR-0371, migrace V11)
+
+Monitoring po zaúčtování zaznamenává zaúčtované pohyby a počítá je po stranách. Nic z toho neleží na platební cestě.
+
+| Tabulka | Klíč | Účel |
+|---|---|---|
+| `aml_booked_movement` | `(journal_entry_id, account_id, currency)` | jedna zaúčtovaná změna jednoho klientského účtu v jedné měně z události `AccountBookedChanged`; klíč je obchodní klíč zaúčtování, takže znovu doručená nebo znovu vydaná událost nic nezmění |
+| `aml_movement_origin` | `transaction_id` | platební kanál (rail) původní transakce z `TransactionInitiated`; platí první zápis |
+| `aml_account_party` | `account_id` | účet → vlastnící strana, zapamatováno po odpovědi autority účtů |
+| `aml_movement_counter` | `(party_id, currency, direction, rail, scheme_revision, bucket_start, band_code)` | klouzavé počty |
+
+- Čítače částky nesčítají ani nepřevádějí a nikdy nepřekračují měnu; `currency` je součást klíče a pásmo částky patří jedné měně.
+- Šířka okna a pásma částek jsou **data** (`openbank.aml.monitoring.counter-scheme.resource`). Soubor v tomto repozitáři je syntetický; jeho pásma nic neznamenají. `scheme_revision` je součást klíče čítače, takže změněné pásmo zakládá nové čítače.
+- Každý pohyb se počítá v pásmu `ALL` a v každém pásmu, které jeho částku obsahuje.
+- Pohyb přiřadí straně a kanálu a započítá v jedné transakci úloha `aml-movement-attribution`. Zaúčtování bez události původní transakce se po `origin-grace` započítá s kanálem `NONE`. Pohyb, jehož účet nemá známou stranu, zůstává nezapočítaný a zkouší se znovu.
+- Známá omezení: storno účtuje ledger jako opačný pohyb a počítá se jako pohyb; atributy protistrany dnes nenese žádná událost.
+- Tabulky obsahují identifikátory stran a účtů a částky. Jsou to záznamy monitoringu se stejnou povinností uchování jako případy; lhůtu tento dokument neuvádí (ADR-0371).

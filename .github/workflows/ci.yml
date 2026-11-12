@@ -259,6 +259,7 @@ jobs:
         run: npm run test -- --reporter=default --reporter=junit --outputFile.junit=build/test-results/test/vitest.xml
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
+        # Coverage floors are enforced by the parallel `ui-coverage` job (ADR-0370 U3).
 
       - name: Build
         run: npm run build
@@ -305,6 +306,29 @@ jobs:
           OPENBANK_E2E_SERVER: "production"
           OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
+
+      # ADR-0370 U2: quarantined tests (e2e/flaky-quarantine.json) are excluded from the gating
+      # run above and run here, non-gating, so a fix can be seen before the entry expires.
+      - name: Quarantined E2E tests (non-gating)
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        continue-on-error: true
+        run: npx playwright test --pass-with-no-tests
+        env:
+          CI: "true"
+          NEXTAUTH_URL: "http://localhost:3001"
+          NEXTAUTH_SECRET: "ci-e2e-secret"
+          OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
+          OPENBANK_E2E_QUARANTINE: "only"
+          PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e-quarantine/playwright.xml"
+
+      # ADR-0370 U2: a test that passed only on retry is otherwise invisible behind `retries: 1`.
+      # Advisory until the flake rate has a measured baseline: warns and writes the step summary.
+      - name: E2E flake report
+        if: always() && steps.browser_e2e.outcome != 'skipped'
+        working-directory: ${{ github.workspace }}
+        run: python3 .github/scripts/report-admin-ui-e2e-flake.py openbank-admin-ui/build/test-results/e2e/playwright.xml
 
       # ADR-0359 visual regression lane: the key operator pages, light and dark, mocked APIs and a
       # frozen clock, compared against baselines committed under e2e-visual/__screenshots__. It
@@ -405,9 +429,35 @@ jobs:
   #   pull_request     — still a hard failure. A cancelled PR run has not built
   #                      anything, and letting it read green would be exactly the
   #                      vacuous green this repo works to avoid.
+  # ADR-0370 U3: the Vitest coverage floors in vitest.config.ts (global and per src/lib
+  # decision module). Until 2026-11-11 CI never ran with --coverage, so they were enforced
+  # nowhere. Measured on #15697, --coverage turned the 81 s unit step into 312 s; as its own
+  # job it runs beside ui-build (well over 15 min) and adds CPU, not PR wall time. The
+  # `Admin UI` verdict requires it.
+  ui-coverage:
+    name: Admin UI coverage
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Test with coverage floors
+        run: npm run test -- --coverage --coverage.reporter=text-summary
+
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build, ui-rbac-contract]
+    needs: [changes-ui, ui-build, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2
@@ -416,6 +466,7 @@ jobs:
         name: Check build result
         env:
           RESULT: ${{ needs.ui-build.result }}
+          COVERAGE_RESULT: ${{ needs.ui-coverage.result }}
           DETECTION_RESULT: ${{ needs.changes-ui.result }}
           UI_CHANGED: ${{ needs.changes-ui.outputs.changed }}
           RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
@@ -455,6 +506,14 @@ jobs:
           if [ "$UI_CHANGED" = "true" ] && [ "$RESULT" != "success" ]; then
             echo "::error::Admin UI changed but its build did not succeed ($RESULT)."
             exit 1
+          fi
+          if [ "$UI_CHANGED" = "true" ] && [ "$COVERAGE_RESULT" != "success" ]; then
+            if [ "$COVERAGE_RESULT" = "cancelled" ] && [ "$EVENT" = "push" ]; then
+              echo "::warning::Admin UI coverage was CANCELLED by a newer push to this ref (#2185)."
+            else
+              echo "::error::Admin UI changed but its coverage floors did not pass ($COVERAGE_RESULT, ADR-0370 U3)."
+              exit 1
+            fi
           fi
           echo "Admin UI: $RESULT (skipped = no UI changes in this PR)."
 
@@ -796,7 +855,7 @@ jobs:
   # Detection, cross-package guards and the golden-path suite remain merge-blocking.
   validate:
     name: Validate manifests
-    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-rbac-contract]
+    needs: [agent-admission, ruleset-evidence, gates, changes-ui, ui-build, ui-coverage, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-slim
     timeout-minutes: 2

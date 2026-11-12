@@ -195,7 +195,9 @@ class PartyRepositoryImpl(
         return Panache.withTransaction {
             find("id", partyId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { entity ->
                 if (entity == null) {
-                    Uni.createFrom().item(PartyAnonymisation.UNKNOWN)
+                    // A concurrent insert of the same id fails this persist on the primary key; the
+                    // consumer retries, and the retry finds that row and anonymises it.
+                    persist(tombstone(partyId, at)).replaceWith(PartyAnonymisation.TOMBSTONED)
                 } else {
                     // A repeat delivery re-runs the whole overwrite and the deletes (keeping the
                     // original erased_at / updated_at), so anything written after the first erase
@@ -246,6 +248,21 @@ class PartyRepositoryImpl(
             erasedAt = at
             updatedAt = at
         }
+    }
+
+    /**
+     * The erased marker for an id this service never held. Every column is a neutral sentinel: the
+     * PARTY_ERASED event carries no party type, so `party_type` is the NOT NULL placeholder
+     * NATURAL_PERSON, not a statement about the party.
+     */
+    private fun tombstone(partyId: UUID, at: OffsetDateTime) = PartyEntity().apply {
+        id = partyId
+        partyType = PartyType.NATURAL_PERSON.name
+        verificationSource = VerificationSource.API_UPLOAD.name
+        verifiedAt = at
+        kycLevel = KycLevel.NONE.name
+        createdAt = at
+        anonymise(at, first = true)
     }
 
     private companion object {
@@ -511,20 +528,38 @@ class PartyRelationshipRepositoryImpl(private val relRepo: PartyRelationshipRepo
     override suspend fun findByPartyId(partyId: UUID): List<PartyRelationship> =
         Panache.withSession { relRepo.find("partyId", partyId).list() }.awaitSuspending().map { it.toDomain() }
 
+    /**
+     * Both writes take `SELECT ... FOR UPDATE` on the owning party row and check `erased_at` under it
+     * in the writing transaction (GDPR Art. 17, #15755), the lock [PartyRepositoryImpl.anonymize]
+     * takes: a terminate racing an erase either commits first (and the erase then blanks its free-text
+     * reason) or waits and is refused. Lock order is party row, then relationship row, as in the erase.
+     */
     override suspend fun save(relationship: PartyRelationship): PartyRelationship {
-        Panache.withTransaction { relRepo.persist(relationship.toEntity()) }.awaitSuspending()
+        Panache.withTransaction {
+            lockLiveParty(relationship.partyId).flatMap { relRepo.persist(relationship.toEntity()) }
+        }.awaitSuspending()
         return Panache.withSession { relRepo.find("id", relationship.id).firstResult() }.awaitSuspending()!!.toDomain()
     }
 
     override suspend fun update(relationship: PartyRelationship): PartyRelationship = Panache.withTransaction {
-        relRepo.find("id", relationship.id).firstResult().map { existing ->
-            requireNotNull(existing) { "Relationship ${relationship.id} not found" }.also {
-                it.status = relationship.status.name
-                it.terminatedAt = relationship.terminatedAt
-                it.terminationReason = relationship.terminationReason
+        relRepo.find("id", relationship.id).firstResult().flatMap { found ->
+            val existing = requireNotNull(found) { "Relationship ${relationship.id} not found" }
+            lockLiveParty(existing.partyId).map {
+                existing.also {
+                    it.status = relationship.status.name
+                    it.terminatedAt = relationship.terminatedAt
+                    it.terminationReason = relationship.terminationReason
+                }
             }
         }
     }.awaitSuspending().toDomain()
+
+    private fun lockLiveParty(partyId: UUID): Uni<Void> = Panache.getSession().flatMap { session ->
+        session.find(PartyEntity::class.java, partyId, LockModeType.PESSIMISTIC_WRITE).map { party ->
+            if (party?.erasedAt != null) throw PartyErasedException("Party $partyId was erased")
+            party
+        }.replaceWithVoid()
+    }
 
     private fun PartyRelationshipEntity.toDomain() = PartyRelationship(
         id = id,
