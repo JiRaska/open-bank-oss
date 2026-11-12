@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: mcp-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-7e5b6d55@sha256:4703b928abbdd348b0496359b89c3c2a9874254c928eb062bab61aecc0d9d927
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-mcp-service:sandbox-548fa683@sha256:8411b6a3e12eb03c2e5176e68a9c1d9ff4c28ae83d8d868178f5b3819b60662a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

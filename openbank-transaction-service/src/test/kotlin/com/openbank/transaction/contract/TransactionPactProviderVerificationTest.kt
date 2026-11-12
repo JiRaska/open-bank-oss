@@ -8,6 +8,7 @@ import au.com.dius.pact.provider.PactVerifyProvider
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.MessageTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
+import au.com.dius.pact.provider.junit5.PactVerificationExtension
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
@@ -40,11 +41,15 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.extension.ExtensionContext
+import org.junit.jupiter.api.extension.TestTemplateInvocationContext
 import java.math.BigDecimal
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
+import java.util.stream.Stream
+import javax.sql.DataSource
 
 /**
  * Provider-side verification for BOTH contract kinds published against transaction-service:
@@ -71,7 +76,7 @@ import java.util.concurrent.TimeUnit
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-transaction-service")
-@PactBroker(enablePendingPacts = "true")
+@PactBroker(enablePendingPacts = "\${pactbroker.enablePending:true}")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class TransactionPactProviderVerificationTest {
@@ -85,6 +90,9 @@ class TransactionPactProviderVerificationTest {
 
     @Inject
     lateinit var transactionRepository: PanacheTransactionRepository
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     @Inject
     lateinit var vertx: Vertx
@@ -108,7 +116,7 @@ class TransactionPactProviderVerificationTest {
     }
 
     @TestTemplate
-    @ExtendWith(PactVerificationInvocationContextProvider::class)
+    @ExtendWith(TransactionPactConsumerScope::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // The four "missing or expired token" interactions expect 401, and the class-level
         // @TestSecurity authenticates EVERY replay as pact-verifier — so without clearing the test
@@ -155,10 +163,7 @@ class TransactionPactProviderVerificationTest {
 
     @State("a valid source account exists")
     fun stateValidSourceAccountExists() {
-        // Shared by domestic-payment, sepa-payment, and sepa-instant's consumer pacts (issue
-        // #468) — previously unhandled (pact-jvm silently skips a missing state, so this was a
-        // live gap, not a failure). No setup needed: initiateTransaction doesn't require the
-        // account to pre-exist in this test's Postgres, only that sourceAccountId parses as a UUID.
+        PactTransactionSeed.resetInitiationState(dataSource)
     }
 
     /**
@@ -286,5 +291,22 @@ class TransactionPactProviderVerificationTest {
         const val REFERENCE_NUMBER = "TXN-PARTY-PACT-001"
         const val DESCRIPTION = "pact portability fixture"
         const val IDEMPOTENCY_KEY = "pact-portability-001"
+    }
+}
+
+internal class TransactionPactConsumerScope : PactVerificationInvocationContextProvider() {
+    override fun provideTestTemplateInvocationContexts(
+        context: ExtensionContext,
+    ): Stream<TestTemplateInvocationContext> {
+        val contexts = super.provideTestTemplateInvocationContexts(context)
+        val consumer = System.getProperty("pactbroker.consumers") ?: return contexts
+        // Pact JVM publishes exceptions from an invoked test. Inspect all Pact
+        // contexts before JUnit starts any test, including against an older runtime.
+        val scoped = contexts.use { it.toList() }
+        val correctConsumer = scoped.all { it is PactVerificationExtension && it.pact.consumer.name == consumer }
+        check(scoped.isNotEmpty() && correctConsumer) {
+            "Pact Broker returned no verifiable interactions or interactions outside the requested consumer"
+        }
+        return scoped.stream()
     }
 }

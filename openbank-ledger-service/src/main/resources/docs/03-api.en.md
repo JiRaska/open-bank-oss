@@ -31,6 +31,8 @@ The role matrix is locked by `LedgerSecurityContractTest`.
 
 Query params: `fromDate` (default `2020-01-01`), `toDate` (default today), `limit` (default 20), `cursor`.
 Returns a `CursorPage<JournalEntryResponse>`: `{ data: [...], pagination: { nextCursor, hasMore } }`.
+Journals are ordered by entry date, creation timestamp, and journal ID, all descending. Use the returned cursor with
+the same date range. PostgreSQL limits each page before the service loads its journal lines.
 
 ### `GET /api/v1/journals/{journalId}` — get one entry
 
@@ -113,3 +115,10 @@ The call requires an `Idempotency-Key` header (1–128 characters of `[A-Za-z0-9
 The binding stores request/scope digests, result kind and an opaque source reference, not an independent financial response in Redis. An empty result retains only its original identifier, observation instant and database-view metadata. Expired bindings are removed on access and by minute maintenance; physical cleanup can lag while the service is stopped. Hashes and opaque identifiers are not asserted to be anonymous. These controls do not extend source-data retention or override legal holds.
 
 Coverage is **attached ledger journals only**, never proof of account lifetime, classified economic history or the absence of cash/card/transfer events. Direct balance mutations, detached source partitions, legacy missing origins and unverified origin assertions remain explicit limitations. Optional journal `origin` is an authenticated writer's raw assertion; its submitter is assigned by the ledger, not a request field. No EventKind or new posting authority is accepted.
+
+## Year-end result allocation (ADR-0096 D3)
+
+`GET /api/v1/ledger/close/{fiscalYear}/result-allocation` previews the closing legs that zero the year's income and expense accounts into retained earnings (6020); it is read-only and `posted` is always false. `POST` on the same path posts that closing journal dated the last day of the fiscal year through the ordinary posting path, so the day, period and fiscal-year locks apply. It is operator-only (`ledger.close.draft`), the maker step of the year close; the checker reviews it through the attestation, whose fresh-hash re-verification covers the closing journal.
+
+The POST takes no `Idempotency-Key`: it is carry-relative. A re-run over an unchanged ledger posts nothing (`posted=false`), and a later posting into the year leaves a residual that a re-run allocates. The journal's own idempotency key uses a reserved `year-end-result:` prefix that the generic posting API refuses. It is refused with 409 for a year that has not ended, an ATTESTED year close, or a non-CZK income or expense balance; no rate is invented. A DRAFT year close computed before the allocation must be refreshed before attestation.
+

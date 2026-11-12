@@ -28,7 +28,16 @@ class ReturnDataUnavailableException(message: String, cause: Throwable? = null) 
  * (ADR-0340 CRS/FATCA), the line-level legal artefact assembled from the same snapshot. Both come
  * from ONE fetch so the totals and the lines can never describe different source states.
  */
-data class ReturnAssemblyData(val values: Map<String, BigDecimal>, val lines: List<ReturnLine> = emptyList())
+data class ReturnAssemblyData(
+    val values: Map<String, BigDecimal>,
+    val lines: List<ReturnLine> = emptyList(),
+    /**
+     * Runs once the return has validated and been stored, with the stored revision. An artefact
+     * that must not exist without its attesting return (GSFT's personal-data archive) is written
+     * here, never during the fetch.
+     */
+    val onStored: (suspend (StatutoryReturn) -> Unit)? = null,
+)
 
 /**
  * Extraction seam for a return's datapoints (ADR-0336 D4).
