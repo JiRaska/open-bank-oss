@@ -159,38 +159,52 @@ class CustomerCreditJourneyResource(
     /**
      * The applicant's request for human review of a decision-engine decline (GDPR Art. 22(3),
      * EU AI Act Art. 86, EBA/GL/2020/06 par. 54). The party is the edge-vouched header, never a body
-     * field; a foreign application id reads as not found. Idempotent by construction (one review per
-     * application): a repeat answers 200 with the existing review, the first request 201. Refusals
-     * are 409 with a stable code: NOT_ENGINE_DECLINE, REVIEW_WINDOW_ELAPSED.
+     * field; a foreign application id reads as not found. One review per application, so a repeat
+     * answers 200 with the existing review and the first request 201; the `Idempotency-Key` is
+     * required like the neighbouring money-path POSTs and replays the stored answer for a retry.
+     * Refusals are 409 with a stable code: NOT_ENGINE_DECLINE, REVIEW_WINDOW_ELAPSED.
      */
     @POST
     @Path("/applications/{id}/decline-review")
     @Authorize(action = "lending.intake", resource = "")
     @Operation(summary = "Request human review of an engine decline of one of the caller's applications (edge only)")
-    fun requestDeclineReview(
+    suspend fun requestDeclineReview(
         @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
         @PathParam("id") id: String,
-    ): Uni<Response> {
-        if (!callerIsPermitted()) return Uni.createFrom().item(refusal())
-        val partyId = scopeOf(partyHeader) ?: return Uni.createFrom().item(badParty())
-        val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
-            ?: return Uni.createFrom().item(notFound())
-        return declineReviews.requestReview(applicationId, partyId)
-            .map { result ->
-                Response.status(
-                    if (result.created) HTTP_CREATED else HTTP_OK,
-                ).entity(result.review.toCustomerDto()).build()
-            }
-            .onFailure(DeclineReviewRefusedException::class.java).recoverWithItem { e ->
-                val refused = e as DeclineReviewRefusedException
-                if (refused.code == DeclineReviewRefusedException.NOT_FOUND) {
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        if (!callerIsPermitted()) return refusal()
+        val partyId = scopeOf(partyHeader) ?: return badParty()
+        // #8351 money-path POST: the replay key is REQUIRED; libs-runtime maps the
+        // IllegalArgumentException to 400.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        val applicationId = runCatching { UUID.fromString(id) }.getOrNull() ?: return notFound()
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/api/v1/lending/intake/applications/$id/decline-review",
+            null,
+        )
+        return idempotencyStore.submitOnce(
+            "lending:intake-decline-review:$applicationId:${identity.principal?.name.orEmpty()}:$idempotencyKey",
+            requestHash,
+            INTAKE_WITHDRAW_KEY_TTL_SECONDS,
+        ) {
+            try {
+                val result = declineReviews.requestReview(applicationId, partyId).awaitSuspending()
+                Response.status(if (result.created) HTTP_CREATED else HTTP_OK)
+                    .entity(objectMapper.writeValueAsString(result.review.toCustomerDto()))
+                    .type(MediaType.APPLICATION_JSON).build()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: DeclineReviewRefusedException) {
+                if (e.code == DeclineReviewRefusedException.NOT_FOUND) {
                     notFound()
                 } else {
-                    Response.status(
-                        HTTP_CONFLICT,
-                    ).entity(mapOf("error" to refused.code, "message" to refused.message)).build()
+                    Response.status(HTTP_CONFLICT).entity(mapOf("error" to e.code, "message" to e.message)).build()
                 }
             }
+        }
     }
 
     /**

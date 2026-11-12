@@ -139,6 +139,7 @@ class DeclineReviewIT {
 
     private fun customerRequest(party: String, applicationId: String) = Given {
         header("X-Customer-Party-Id", party)
+        header("Idempotency-Key", UUID.randomUUID().toString())
     } When {
         post("/api/v1/lending/intake/applications/$applicationId/decline-review")
     }

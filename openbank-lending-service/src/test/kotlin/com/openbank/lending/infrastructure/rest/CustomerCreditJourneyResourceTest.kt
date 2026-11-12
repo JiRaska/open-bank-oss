@@ -24,6 +24,7 @@ import com.openbank.libs.lending.origination.OriginationState
 import io.quarkus.security.identity.SecurityIdentity
 import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.smallrye.mutiny.Uni
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -421,8 +422,10 @@ class CustomerCreditJourneyResourceTest {
         principal: String = edge,
         header: String? = party.toString(),
         id: String = UUID.randomUUID().toString(),
-    ) = resource(emptyList(), principal = principal, declineReviews = uc).requestDeclineReview(header, id)
-        .await().indefinitely()
+        key: String? = "key-1",
+    ): Response = runBlocking {
+        resource(emptyList(), principal = principal, declineReviews = uc).requestDeclineReview(header, id, key)
+    }
 
     @Test
     fun `a first review request answers 201 and a repeat answers 200, exposing no reviewer text`() {
@@ -438,6 +441,8 @@ class CustomerCreditJourneyResourceTest {
         val uc = useCase(Uni.createFrom().item(reviewOf()))
         assertThat(requestReview(uc, principal = "some-operator").status).isEqualTo(403)
         assertThat(requestReview(uc, header = null).status).isEqualTo(400)
+        assertThatThrownBy { requestReview(uc, key = null) }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { requestReview(uc, key = " ") }.isInstanceOf(IllegalArgumentException::class.java)
         io.mockk.verify(exactly = 0) { uc.requestReview(any(), any()) }
     }
 

@@ -97,7 +97,7 @@ GDPR Art. 22(3), EU AI Act Art. 86 and EBA/GL/2020/06 par. 54: a customer whose 
 
 | Endpoint | Method | Caller | Notes |
 |---|---|---|---|
-| `/intake/applications/{id}/decline-review` | `POST` | customer-edge principal only (`lending.intake`) | The applicant (from `X-Customer-Party-Id`) asks. 201 first request, 200 repeat (same review), 404 not the caller's application, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/intake/applications/{id}/decline-review` | `POST` | customer-edge principal only (`lending.intake`) | The applicant (from `X-Customer-Party-Id`) asks; `Idempotency-Key` required. 201 first request, 200 repeat (same review), 404 not the caller's application, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
 | `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Reason mandatory (10-512 chars). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` |
 
 - **Only an engine decline is reviewable**: `DECLINED` with a stored engine outcome `DECLINE` and no recorded human decider. A decline a person made or confirmed is never looped back.

@@ -268,7 +268,8 @@ paths:
         party answers 404. Only an application DECLINED by the decision engine is reviewable (a
         decline already made by a human is not looped back) and only within
         `lending.decline-review.window-days` (default 30) of the engine decision. One review per
-        application: the first request answers 201, a repeat answers 200 with the same review.
+        application: the first request answers 201, a repeat answers 200 with the same review. The
+        Idempotency-Key is required (a keyed retry replays the stored answer).
         409 carries a stable code in `error`: NOT_ENGINE_DECLINE or REVIEW_WINDOW_ELAPSED.
         Only the configured customer-edge service principal may call it; any other caller is 403.
       parameters:
@@ -278,6 +279,7 @@ paths:
           required: true
           description: The applicant's party id, set by customer-edge from the customer JWT.
           schema: { type: string, format: uuid }
+        - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '200':
           description: The review that already exists for this application
