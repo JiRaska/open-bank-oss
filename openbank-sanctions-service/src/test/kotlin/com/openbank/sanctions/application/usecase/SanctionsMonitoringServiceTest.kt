@@ -40,14 +40,18 @@ class SanctionsMonitoringServiceTest {
 
     private val subjects = mockk<MonitoredSubjectRepository>(relaxed = true)
     private val work = mockk<MonitoringWorkRepository>(relaxed = true)
-    private val screening = mockk<SanctionsService>()
+    private val screening = mockk<MonitoringScreening>()
     private val importer = mockk<SanctionsImportService>()
     private val profiles = ScreeningProfileEvaluator(NoJurisdictions)
     private val metrics = mockk<SanctionsMonitoringMetricsPort>(relaxed = true)
     private val now = Instant.parse("2026-11-12T10:00:00Z")
 
     private fun service(enabled: Boolean = true, maxCandidates: Int = 2) = SanctionsMonitoringService(
-        subjects, work, screening, importer, profiles,
+        subjects,
+        work,
+        screening,
+        importer,
+        profiles,
         SanctionsMonitoringSettings(
             enabled = enabled,
             deltaMaxEntriesPerRun = 20,
@@ -69,12 +73,24 @@ class SanctionsMonitoringServiceTest {
     )
 
     private fun match(score: Double, kind: MatchKind = MatchKind.SANCTIONS) = SanctionsMatch(
-        listType = SanctionsListType.OFAC_SDN, matchType = MatchType.EXACT, matchScore = score,
-        matchedName = "Listed Person", matchedId = "ext-1", listEntryDate = null, programs = emptyList(), matchKind = kind,
+        listType = SanctionsListType.OFAC_SDN,
+        matchType = MatchType.EXACT,
+        matchScore = score,
+        matchedName = "Listed Person",
+        matchedId = "ext-1",
+        listEntryDate = null,
+        programs = emptyList(),
+        matchKind = kind,
     )
 
     private fun entry() = ListedEntry(
-        SanctionsListType.OFAC_SDN, "ext-1", "Listed Person", emptyList(), "listed person", true, "v-names",
+        SanctionsListType.OFAC_SDN,
+        "ext-1",
+        "Listed Person",
+        emptyList(),
+        "listed person",
+        true,
+        "v-names",
     )
 
     private fun change(active: Boolean = true) = PendingEntryChange(1, UUID.randomUUID(), "OFAC_SDN", "ext-1", active)

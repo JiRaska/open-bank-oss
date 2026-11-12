@@ -11,6 +11,7 @@ import com.openbank.sanctions.application.port.`in`.ReviewCommand
 import com.openbank.sanctions.application.port.`in`.SanctionsUseCase
 import com.openbank.sanctions.application.port.`in`.ScreenEntityCommand
 import com.openbank.sanctions.application.usecase.SanctionsMonitoringService
+import com.openbank.sanctions.application.usecase.SanctionsMonitoringSettings
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.MonitoringRunOutcome
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
@@ -25,7 +26,7 @@ import com.openbank.sanctions.it.MonitoringFixture.Companion.SOURCE_LIST
 import com.openbank.sanctions.it.MonitoringFixture.Companion.SUBJECT_PREFIX
 import com.openbank.sanctions.it.MonitoringFixture.Companion.UNLISTED
 import io.quarkus.test.common.QuarkusTestResource
-import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
@@ -35,6 +36,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -48,24 +50,19 @@ import javax.sql.DataSource
  * the scheduler is off under `%test`, so what these tests establish is the behaviour of a run,
  * not that the cron fires.
  *
- * The outbox dispatcher is off for this class because the same-transaction assertion compares
- * `xmin`, which a dispatcher's status update would replace.
+ * The flag is switched on by replacing the settings bean for each test, not by a test resource.
+ * A resource restarts the application, and in a restarted application Hibernate Reactive's
+ * Panache refuses a call made from a test-owned event loop (`Unknown service requested
+ * [ReactiveConnectionPool]`): this class failed that way when it ran after other test classes
+ * and passed when it ran alone. `SanctionsMonitoringFlagIT` covers the real configuration key.
+ *
+ * The scheduler being off also keeps the outbox dispatcher from updating rows, which the
+ * same-transaction assertion needs: it compares `xmin`, and an update would replace it.
  */
 @QuarkusTest
-@QuarkusTestResource(value = SanctionsOngoingMonitoringIT.MonitoringEnabled::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
 class SanctionsOngoingMonitoringIT {
-
-    class MonitoringEnabled : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = mapOf(
-            "openbank.sanctions.monitoring.enabled" to "true",
-            "openbank.outbox.dispatch-enabled" to "false",
-            "quarkus.kafka.devservices.enabled" to "false",
-        )
-
-        override fun stop() = Unit
-    }
 
     @Inject
     lateinit var monitoring: SanctionsMonitoringService
@@ -86,6 +83,18 @@ class SanctionsOngoingMonitoringIT {
 
     @BeforeEach
     fun setUp() {
+        QuarkusMock.installMockForType(
+            SanctionsMonitoringSettings(
+                enabled = true,
+                deltaMaxEntriesPerRun = 5,
+                deltaMaxPending = 20_000,
+                deltaMaxCandidatesPerEntry = 5_000,
+                sweepBatchSize = 25,
+                sweepInterval = Duration.ofDays(30),
+                claimLease = Duration.ofMinutes(15),
+            ),
+            SanctionsMonitoringSettings::class.java,
+        )
         db = MonitoringFixture(dataSource, entries)
         db.cleanUp()
     }
@@ -110,7 +119,13 @@ class SanctionsOngoingMonitoringIT {
 
     private fun sweep(): MonitoringRunOutcome = db.onEventLoop { monitoring.runSweep() }
 
-    private class Finding(val id: String, val kind: String, val entryRef: String, val detection: String, val at: Instant)
+    private class Finding(
+        val id: String,
+        val kind: String,
+        val entryRef: String,
+        val detection: String,
+        val at: Instant,
+    )
 
     private fun findings(subjectRef: String): List<Finding> = db.query(
         "SELECT f.id::text, f.match_kind, f.list_entry_ref, f.detection, f.detected_at " +
@@ -233,7 +248,9 @@ class SanctionsOngoingMonitoringIT {
         }
         assertThat(check.status).isEqualTo(SanctionsCheckStatus.HIT)
         db.onEventLoop {
-            screening.review(ReviewCommand(check.id, "analyst-1", "not the listed person", SanctionsCheckStatus.WHITELISTED))
+            screening.review(
+                ReviewCommand(check.id, "analyst-1", "not the listed person", SanctionsCheckStatus.WHITELISTED),
+            )
         }
         register(cleared, LISTED, country = COUNTRY)
         register(control, LISTED)
@@ -242,7 +259,11 @@ class SanctionsOngoingMonitoringIT {
         db.ingest("${ENTRY_PREFIX}cleared", LISTED, "Z. Quellinbrook")
         assertThat(delta()).isEqualTo(MonitoringRunOutcome.COMPLETED)
 
-        assertThat(findings(control).map { it.kind }).describedAs("control: the delta did match").containsExactly("SANCTIONS")
+        assertThat(
+            findings(control).map {
+                it.kind
+            },
+        ).describedAs("control: the delta did match").containsExactly("SANCTIONS")
         assertThat(findings(cleared)).describedAs("the clearance covers the name match").isEmpty()
 
         assertThat(sweep()).isEqualTo(MonitoringRunOutcome.COMPLETED)
@@ -333,7 +354,9 @@ class SanctionsOngoingMonitoringIT {
         assertThat(created.statusCode).isEqualTo(201)
         assertThat(created.jsonPath().getMap<String, Any>("").keys)
             .containsExactlyInAnyOrder("ownerService", "subjectRef", "registeredAt", "updatedAt")
-        assertThat(Instant.parse(created.jsonPath().getString("registeredAt"))).isBetween(before, Instant.now().plusSeconds(1))
+        assertThat(
+            Instant.parse(created.jsonPath().getString("registeredAt")),
+        ).isBetween(before, Instant.now().plusSeconds(1))
         sweep()
 
         val again = register(subject, UNLISTED)
@@ -345,7 +368,12 @@ class SanctionsOngoingMonitoringIT {
         val updated = register(subject, LISTED)
         assertThat(updated.statusCode).isEqualTo(200)
         assertThat(db.count("sanctions_monitored_subjects", "subject_ref = '$subject'")).isEqualTo(1)
-        assertThat(db.count("sanctions_monitored_subjects", "subject_ref = '$subject' AND name = '$LISTED' AND last_swept_at IS NULL"))
+        assertThat(
+            db.count(
+                "sanctions_monitored_subjects",
+                "subject_ref = '$subject' AND name = '$LISTED' AND last_swept_at IS NULL",
+            ),
+        )
             .describedAs("new attributes replace the old and are due for a baseline").isEqualTo(1)
     }
 
@@ -361,6 +389,9 @@ class SanctionsOngoingMonitoringIT {
             .body("""{"entityType":"INDIVIDUAL","name":"$UNLISTED"}""")
             .put("/api/v3/sanctions/monitored-subjects/Not_A_Service/$subject")
         assertThat(badOwner.statusCode).isEqualTo(400)
+        val noBody = RestAssured.given().contentType("application/json")
+            .put("/api/v3/sanctions/monitored-subjects/$OWNER/$subject")
+        assertThat(noBody.statusCode).isEqualTo(400)
 
         assertThat(db.count("sanctions_monitored_subjects")).isZero()
     }

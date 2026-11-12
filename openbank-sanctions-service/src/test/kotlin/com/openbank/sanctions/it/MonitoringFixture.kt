@@ -19,7 +19,10 @@ import javax.sql.DataSource
  * Shared plumbing of the ongoing-monitoring integration tests. Every name, reference and country
  * code here is invented; `XM` is a user-assigned ISO code that no real country holds.
  */
-internal class MonitoringFixture(private val dataSource: DataSource, private val entries: SanctionsEntryRepositoryImpl) {
+internal class MonitoringFixture(
+    private val dataSource: DataSource,
+    private val entries: SanctionsEntryRepositoryImpl,
+) {
 
     fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -28,20 +31,24 @@ internal class MonitoringFixture(private val dataSource: DataSource, private val
         dataSource.connection.use { c -> c.createStatement().use { it.execute(statement) } }
     }
 
-    fun <T> query(statement: String, read: (java.sql.ResultSet) -> T): List<T> =
-        dataSource.connection.use { c ->
-            c.createStatement().use { s ->
-                s.executeQuery(statement).use { rows ->
-                    generateSequence { if (rows.next()) read(rows) else null }.toList()
-                }
+    fun <T> query(statement: String, read: (java.sql.ResultSet) -> T): List<T> = dataSource.connection.use { c ->
+        c.createStatement().use { s ->
+            s.executeQuery(statement).use { rows ->
+                generateSequence { if (rows.next()) read(rows) else null }.toList()
             }
         }
+    }
 
     fun count(table: String, where: String = "TRUE"): Long =
         query("SELECT count(*) FROM $table WHERE $where") { it.getLong(1) }.single()
 
     /** Ingest one entry through the importer's own upsert, so the real triggers fire. */
-    fun ingest(externalId: String, name: String, vararg aliases: String, list: SanctionsListType = SanctionsListType.OFAC_SDN) {
+    fun ingest(
+        externalId: String,
+        name: String,
+        vararg aliases: String,
+        list: SanctionsListType = SanctionsListType.OFAC_SDN,
+    ) {
         val now = Instant.now()
         val written = onEventLoop {
             entries.upsertAll(

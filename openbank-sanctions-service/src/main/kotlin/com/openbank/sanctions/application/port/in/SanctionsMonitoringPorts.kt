@@ -2,6 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+// The package is the hexagonal `in` port, a Kotlin keyword; SanctionsPorts.kt carries the same name.
+@file:Suppress("ktlint:standard:package-name")
+
 package com.openbank.sanctions.application.port.`in`
 
 import com.openbank.sanctions.domain.model.EntityType

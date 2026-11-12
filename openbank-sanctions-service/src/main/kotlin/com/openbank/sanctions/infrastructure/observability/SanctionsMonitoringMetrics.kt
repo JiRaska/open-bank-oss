@@ -66,8 +66,10 @@ class SanctionsMonitoringMetrics(
     override fun findingRaised(finding: MonitoringFinding) {
         registry.counter(
             FINDINGS,
-            "match_kind", finding.matchKind.name.lowercase(Locale.ROOT),
-            "detection", finding.detection.name.lowercase(Locale.ROOT),
+            "match_kind",
+            finding.matchKind.name.lowercase(Locale.ROOT),
+            "detection",
+            finding.detection.name.lowercase(Locale.ROOT),
         ).increment()
     }
 

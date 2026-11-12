@@ -35,7 +35,7 @@ import java.util.UUID
  *  - [runDelta] matches each added or changed list entry against the registry. It is the
  *    reverse of the live screen (one entry, every subject) and computes the same
  *    `word_similarity(subject name, entry search text)` against the same CUSTOMER floor.
- *  - [runSweep] re-evaluates whole subjects through [SanctionsService.uncoveredMatches], the
+ *  - [runSweep] re-evaluates whole subjects through [MonitoringScreening.uncoveredMatches], the
  *    function the live screen itself is built on. It is the safety net: it catches what a delta
  *    missed, and it is the only path that sees jurisdiction reference data, which no feed ingests.
  *
@@ -49,7 +49,7 @@ import java.util.UUID
 class SanctionsMonitoringService(
     private val subjects: MonitoredSubjectRepository,
     private val work: MonitoringWorkRepository,
-    private val screening: SanctionsService,
+    private val screening: MonitoringScreening,
     private val importer: SanctionsImportService,
     private val profiles: ScreeningProfileEvaluator,
     private val settings: SanctionsMonitoringSettings,
@@ -65,7 +65,13 @@ class SanctionsMonitoringService(
         // Refused, not accepted-and-ignored: a registration nothing monitors would read as cover.
         if (!settings.enabled) throw SanctionsMonitoringDisabled()
         require(OWNER_SERVICE.matches(ownerService)) { "ownerService must match ${OWNER_SERVICE.pattern}" }
-        require(subjectRef.isNotBlank() && subjectRef.length <= MAX_REF_LENGTH && subjectRef.none { it.isISOControl() }) {
+        require(
+            subjectRef.isNotBlank() &&
+                subjectRef.length <= MAX_REF_LENGTH &&
+                subjectRef.none {
+                    it.isISOControl()
+                },
+        ) {
             "subjectRef must be 1 to $MAX_REF_LENGTH printable characters"
         }
         require(request.name.isNotBlank() && request.name.length <= MAX_NAME_LENGTH) {
@@ -171,11 +177,13 @@ class SanctionsMonitoringService(
     }
 
     /** Fully re-evaluate the next bounded batch of due subjects. */
-    @Suppress("TooGenericExceptionCaught") // one unreadable subject must not stop the batch; the run still reports FAILED
+    // One unreadable subject must not stop the batch; the run still reports FAILED.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun runSweep(): MonitoringRunOutcome {
         if (!settings.enabled) return MonitoringRunOutcome.DISABLED
         var failed = false
-        for (subject in subjects.claimDueForSweep(settings.sweepInterval, settings.claimLease, settings.sweepBatchSize)) {
+        val due = subjects.claimDueForSweep(settings.sweepInterval, settings.claimLease, settings.sweepBatchSize)
+        for (subject in due) {
             try {
                 sweep(subject)
                 subjects.markSwept(subject.id)
@@ -193,13 +201,15 @@ class SanctionsMonitoringService(
             if (subject.lastSweptAt == null) MonitoringDetection.BASELINE_SWEEP else MonitoringDetection.PERIODIC_SWEEP
         // uncoveredMatches has already applied the clearance rule to the whole match set.
         for (match in screening.uncoveredMatches(subject.toScreenCommand())) {
-            val version = if (match.matchKind == MatchKind.JURISDICTION) {
-                match.programs.firstOrNull() ?: continue
-            } else {
-                work.namesVersion(match.listType, matchIdentity(match).second) ?: continue
-            }
-            raise(subject, match, version, detection)
+            // No version means the entry stopped being active between the two reads: nothing to raise.
+            versionOf(match)?.let { raise(subject, match, it, detection) }
         }
+    }
+
+    private suspend fun versionOf(match: SanctionsMatch): String? = if (match.matchKind == MatchKind.JURISDICTION) {
+        match.programs.firstOrNull()
+    } else {
+        work.namesVersion(match.listType, matchIdentity(match).second)
     }
 
     private suspend fun raiseIfUncovered(

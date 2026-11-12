@@ -81,15 +81,17 @@ class MonitoringWorkRepositoryImpl(
 
     override suspend fun findEntry(entryId: UUID): ListedEntry? {
         val row = pool.preparedQuery(
-            "SELECT list_type, external_id, primary_name, programs, search_text, active, $NAMES_VERSION AS names_version " +
-                "FROM sanctions_entries WHERE id = $1",
+            "SELECT list_type, external_id, primary_name, programs, search_text, active, " +
+                "$NAMES_VERSION AS names_version FROM sanctions_entries WHERE id = $1",
         ).execute(Tuple.of(entryId)).awaitSuspending().firstOrNull() ?: return null
         val listType = SanctionsListType.entries.firstOrNull { it.name == row.getString("list_type") } ?: return null
         return ListedEntry(
             listType = listType,
             externalId = row.getString("external_id"),
             primaryName = row.getString("primary_name"),
-            programs = runCatching { mapper.readValue<List<String>>(row.getString("programs")) }.getOrDefault(emptyList()),
+            programs = runCatching {
+                mapper.readValue<List<String>>(row.getString("programs"))
+            }.getOrDefault(emptyList()),
             searchText = row.getString("search_text"),
             active = row.getBoolean("active"),
             namesVersion = row.getString("names_version"),
@@ -132,11 +134,10 @@ class MonitoringWorkRepositoryImpl(
         }
     }.awaitSuspending()
 
-    override suspend fun markDelisted(listType: String, listEntryRef: String): Int =
-        pool.preparedQuery(
-            "UPDATE sanctions_monitoring_findings SET delisted_at = clock_timestamp() " +
-                "WHERE list_type = $1 AND list_entry_ref = $2 AND delisted_at IS NULL",
-        ).execute(Tuple.of(listType, listEntryRef)).awaitSuspending().rowCount()
+    override suspend fun markDelisted(listType: String, listEntryRef: String): Int = pool.preparedQuery(
+        "UPDATE sanctions_monitoring_findings SET delisted_at = clock_timestamp() " +
+            "WHERE list_type = $1 AND list_entry_ref = $2 AND delisted_at IS NULL",
+    ).execute(Tuple.of(listType, listEntryRef)).awaitSuspending().rowCount()
 
     /**
      * The `MONITORED_SUBJECT_MATCHED` event, schema version 1.

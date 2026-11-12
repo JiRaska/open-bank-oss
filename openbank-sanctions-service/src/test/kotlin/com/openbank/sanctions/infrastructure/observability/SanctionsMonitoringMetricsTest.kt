@@ -55,7 +55,9 @@ class SanctionsMonitoringMetricsTest {
         metrics.runFinished("delta", MonitoringRunOutcome.DISABLED)
 
         assertThat(
-            registry.get(SanctionsMonitoringMetrics.RUNS).tags("path", "delta", "outcome", "disabled").counter().count(),
+            registry.get(
+                SanctionsMonitoringMetrics.RUNS,
+            ).tags("path", "delta", "outcome", "disabled").counter().count(),
         ).isEqualTo(1.0)
         assertThat(registry.find(SanctionsMonitoringMetrics.RUNS).tags("outcome", "completed").counter()).isNull()
     }
