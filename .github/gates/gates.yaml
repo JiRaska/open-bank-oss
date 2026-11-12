@@ -6766,6 +6766,34 @@ gates:
     selftest_inputs: [".github/scripts/check-container-listen-port-collisions.py"]
     run: |
       python3 .github/scripts/check-container-listen-port-collisions.py --root .
+  - id: delegation-capability-enforcement
+    name: "a grantable delegation capability has a declared enforcer (ADR-0375 D4)"
+    group: kotlin
+    mode: advisory
+    rationale: "CAPABILITY_MATRIX says what a grantor may be offered; nothing said what the platform will honour. Measured 2026-11-12, 9 of 18 capabilities had no production reference at all, so a grant promised what the bank then refused with nothing red anywhere. Advisory until the delegation-service offer-time refusal lands, so the registry and the refusal cannot disagree."
+    review_after: "2027-02-12"
+    verified: "2026-11-12 — falsified seven ways against the real tree (missing entry, enforced->unenforced with the enforcer still reading it, enforced_in not naming the capability, a pair the matrix forbids, the shared_capability opt-out removed, a stale opt-out, an unknown status); each produced findings rather than a traceback. Advisory because the matching offer-time refusal in delegation-service is not written yet; enforcing a registry the service does not honour would make the two drift. Flip to enforced in the PR that lands the refusal."
+    budget_seconds: 30
+    min_subjects: 15
+    selftest: python3 .github/scripts/check-delegation-capability-enforcement.py --self-test
+    selftest_expect: pass
+    selftest_inputs:
+      - ".github/scripts/check-delegation-capability-enforcement.py"
+      - "openbank-libs/governance/rules.yaml"
+    run: |
+      # The subject set is DERIVED from DelegationGrant.CAPABILITY_MATRIX, never hand-kept: a gate
+      # whose scope is a hand-maintained list of the thing it checks reads as PASSING when the list
+      # is short. Fails in both directions, so an `unenforced` entry can neither rot into permanent
+      # furniture nor be silently closed on the day its enforcement lands.
+      #
+      # Falsified against the REAL tree, seven ways, before wiring in: a missing entry for a
+      # grantable pair; an enforced pair flipped to unenforced while its enforcer still reads it;
+      # an enforced_in path that does not name the capability; an entry for a pair the matrix does
+      # not permit; the shared_capability opt-out removed; a stale shared_capability opt-out on a
+      # pair the scan CAN verify; and an unknown status. Each produces findings, not a traceback —
+      # the first run of these probes reported "rejected" on a YAML error in the fixture itself,
+      # which is why the output is read and not the exit code.
+      python3 .github/scripts/check-delegation-capability-enforcement.py --enforce
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

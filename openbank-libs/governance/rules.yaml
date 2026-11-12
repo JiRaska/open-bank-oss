@@ -262,6 +262,15 @@ change_requirements:
     # the declaration cannot outlive the debt. The baseline does not narrow what the gate LOOKS
     # AT — every service is compared every run — which is what separates it from the
     # pact-drift-check scope bug (#2284). #2314 closes when the file is empty.
+  delegation_capability_enforcement_declared:
+    detect: ["DelegationGrant.CAPABILITY_MATRIX pairs vs rules.yaml delegation_capability_enforcement.declared vs production Kotlin under openbank-*/src/main"]
+    require:
+      - "every (resourceType, capability) pair the matrix permits has a declared enforcer, measured in both directions (ADR-0375 D4)"
+      - "an `unenforced` pair that gains an enforcer fails, so a known gap cannot rot into furniture nor close in silence"
+    gate: delegation-capability-enforcement
+    enforced: advisory
+    target_enforce_date: "2027-02-12"   # ADR-0375 D4: enforce in the PR that lands delegation-service's offer-time refusal, so the registry and the refusal cannot disagree
+    ci_producer: ".github/scripts/check-delegation-capability-enforcement.py"
   close_participants_declared:
     detect: ["rules.yaml close_participants vs openbank-ledger-service application.yaml openbank.ledger.close.participants vs services constructing a CloseParticipationReporter in src/main"]
     require:
@@ -3363,11 +3372,185 @@ enforcement_reachability:
         - openbank-account-service/src/main/kotlin/com/openbank/account/application/port/in/AccountPorts.kt
       why: >
         ADR-0232 D3's amount-aware guard and the only enforcer of perTransactionLimit in
-        account-service. Measured 2026-08-03: every call site is in AuthorizationServiceDelegationTest.
-        The endpoint that looks like its front door, GET /api/v1/accounts/{id}/authorizations/check,
-        calls the amount-free isAuthorized instead, and no money-moving service reads a delegation
-        grant at all — so there is no debit for a limit check to attach to yet. Flip to `reachable`
-        when the delegated payment path lands (#3615), not before.
+        account-service. Re-measured 2026-11-12: every call site is still in
+        AuthorizationServiceDelegationTest, and the endpoint that looks like its front door,
+        GET /api/v1/accounts/{id}/authorizations/check, still calls the amount-free isAuthorized.
+        So `unreachable` stays correct.
+        CORRECTION to the 2026-08-03 reason, which said "no money-moving service reads a delegation
+        grant at all": that stopped being true when the delegated DOMESTIC payment path landed.
+        customer-edge's resolveDebitAuthority does read a grant and does enforce an amount — over
+        HTTP and over the ADR-0249 spend reservation, never through this symbol, which is why the
+        mechanical verdict did not move while its stated reason went stale. The remaining five
+        PaymentRail values read no grant. Flip to `reachable` only when a production Kotlin caller
+        exists (#3615); ADR-0375 D1 retires the symbol instead, by moving the check into the
+        ADR-0374 admission chain.
+
+delegation_capability_enforcement:
+  principle: >
+    DelegationGrant.CAPABILITY_MATRIX says what a grantor may be OFFERED. Until this registry
+    existed nothing said what the platform will actually HONOUR, and the two drifted in silence:
+    measured 2026-11-12, 9 of 18 DelegationCapability values had no production reference anywhere
+    outside delegation-service. A capability compiles, persists, publishes over the outbox and
+    renders on the grant screen whether or not one line of code reads it, so the failure is a
+    promise the bank then refuses — 403 on five of six payment rails — with nothing red anywhere.
+    The rule already existed by hand for exactly one field (DelegationService.rejectUnsupportedExposure
+    refuses an offer carrying `exposure`) and for one capability (ADR-0249 D5 refuses
+    ACCOUNT_INITIATE_PAYMENT with no ceiling). ADR-0375 D4 generalises it: an entry declares what
+    was MEASURED, the gate derives its subject set from the matrix rather than a hand-kept list,
+    and it fails in both directions — an `enforced` entry whose file stops naming the capability,
+    and an `unenforced` entry that quietly gains an enforcer.
+  adr: ADR-0375
+  gate: delegation-capability-enforcement
+  scan_limit: >
+    The evidence scan is capability-keyed while a subject is a (resource_type, capability) PAIR, so
+    an `unenforced` pair whose capability is enforced for ANOTHER resource type cannot be falsified
+    by scanning. Such an entry must carry `shared_capability: true`, which the gate prints on every
+    run so a green is never read as more than it is. A pair-aware scan requiring the enforcer to
+    also name its resource type was measured and rejected: DelegatedCardGrant.kt is the genuine
+    enforcer of CARD_VIEW and never names a standalone CARD token, so the rule would have cried
+    wolf about correct code.
+  declared:
+    # --- enforced: a production guard reads the capability -----------------------------
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_READ_BALANCES
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfies(READ_ONLY) reads READ_CAPABILITIES; account-service owns the resource."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_READ_TRANSACTIONS
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "Same READ_ONLY guard as ACCOUNT_READ_BALANCES."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_INITIATE_PAYMENT
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        DelegatedAccessGrant.satisfies(PAYMENT_ONLY) plus the edge's resolveDebitAuthority. Enforced
+        on the DOMESTIC rail only: the other five PaymentRail values answer
+        "Debtor account does not belong to caller" (fail-closed). ADR-0375 D1 moves this to the
+        ADR-0374 admission chain, which does not exist yet.
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_DEPOSIT
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(DEPOSIT)."
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_WITHDRAW
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(WITHDRAW); the SCA ceremony is sca-service's half."
+    - resource_type: SAVINGS_GOAL
+      capability: SAVINGS_PROPOSE_WITHDRAW
+      status: enforced
+      enforced_in:
+        - openbank-account-service/src/main/kotlin/com/openbank/account/domain/model/DelegatedAccessGrant.kt
+      why: "DelegatedAccessGrant.satisfiesSavings(PROPOSE_WITHDRAW) — the propose-only variant."
+    - resource_type: CARD
+      capability: CARD_VIEW
+      status: enforced
+      enforced_in:
+        - openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/DelegatedCardGrant.kt
+      why: "DelegatedCardGrant.satisfies(CardDelegationIntent.VIEW), via the CAP_CARD_VIEW constant."
+    - resource_type: CARD
+      capability: CARD_MANAGE_LIMITS
+      status: enforced
+      enforced_in:
+        - openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/domain/model/DelegatedCardGrant.kt
+      why: "DelegatedCardGrant.satisfies(CardDelegationIntent.MANAGE_LIMITS)."
+    - resource_type: DOCUMENT
+      capability: OBJECT_READ
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerDocumentResource.kt
+      why: >
+        The only object reader in the fleet: documentContent and sharedDocuments ask
+        grants.has(party, "DOCUMENT", id, "OBJECT_READ"). Note the grant it reads cannot currently
+        be MINTED — ResourceOwnershipClient answers UNVERIFIABLE for DOCUMENT and the offer path
+        fails closed on that (ADR-0375 D5, issue #3615 family). Enforcement is real; reachability
+        is not, which is why this registry records the enforcer and enforcement_reachability
+        records the caller.
+    # --- unenforced: grantable today, honoured by nothing ------------------------------
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_VIEW_DETAILS
+      status: unenforced
+      issue: 3615
+      why: "No production reference outside delegation-service. Measured 2026-11-12 (ADR-0375 D4)."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_DOWNLOAD_STATEMENTS
+      status: unenforced
+      issue: 3615
+      why: "No production reference; statement-service holds no delegation code at all."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_PROPOSE_PAYMENT
+      status: unenforced
+      issue: 3615
+      why: >
+        ADR-0232 D3's propose-only payment flow. The savings propose variant is enforced; the
+        payment one has no reader, so a propose-only payment grant authorises nothing.
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_MANAGE_BENEFICIARIES
+      status: unenforced
+      issue: 3615
+      why: "No production reference; no beneficiary route consults a grant."
+    - resource_type: ACCOUNT
+      capability: ACCOUNT_MANAGE_LIMITS
+      status: unenforced
+      issue: 3615
+      why: >
+        No production reference. ADR-0374 point 5 gives limits one model and one counter; this
+        capability's enforcer is that step, which does not exist yet.
+    - resource_type: ACCOUNT
+      capability: DELEGATION_MANAGE
+      status: unenforced
+      issue: 3615
+      why: >
+        Measured 2026-11-12: the ONLY two occurrences in the whole tree are the enum declaration
+        and this matrix entry — it is not enforced even inside delegation-service, which owns the
+        resource. ADR-0232 D5's retail-to-SME bridge ("the grantor-side actor must itself hold
+        delegation.manage on that entity") is implemented instead by GrantorAuthorityVerdict over
+        representation mandates, which never consults this capability. So a grant of
+        DELEGATION_MANAGE confers nothing, and the sub-delegation it appears to permit is in fact
+        governed by mandates alone.
+    - resource_type: CARD
+      capability: CARD_VIEW_TRANSACTIONS
+      status: unenforced
+      issue: 3615
+      why: "CardDelegationIntent has VIEW and MANAGE_LIMITS only; this has no intent and no reader."
+    - resource_type: CARD
+      capability: CARD_MANAGE_STATUS
+      status: unenforced
+      issue: 3615
+      why: "No CardDelegationIntent member; freeze/unfreeze on a shared card consults no grant."
+    - resource_type: CARD
+      capability: CARD_MANAGE_CHANNELS
+      status: unenforced
+      issue: 3615
+      why: "No CardDelegationIntent member and no channel route consults a grant."
+    - resource_type: PAYMENT
+      capability: OBJECT_READ
+      status: unenforced
+      issue: 3615
+      shared_capability: true
+      why: >
+        The matrix permits sharing a single payment; no route serves a shared payment to a grantee
+        (the edge's payment reads are owner-only IDOR guards). Measured: no production file names
+        both OBJECT_READ and PAYMENT. Scan-unverifiable because OBJECT_READ is enforced for
+        DOCUMENT — see scan_limit above.
+    - resource_type: STATEMENT
+      capability: OBJECT_READ
+      status: unenforced
+      issue: 3615
+      shared_capability: true
+      why: >
+        As PAYMENT/OBJECT_READ: statement-service has no delegation code, and no production file
+        names both OBJECT_READ and STATEMENT.
 
 readiness_attestations:
   principle: >
