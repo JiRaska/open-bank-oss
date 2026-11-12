@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.18.0...finrep-service-v0.19.0) (2026-11-12)
+
+
+### Features
+
+* **finrep:** observe staff reporting authorization in OPA ([#15623](https://github.com/JiRaska/open-bank-oss/issues/15623)) ([53786b0](https://github.com/JiRaska/open-bank-oss/commit/53786b0c2c79dd274be7fd2a5b257d29d6891a38)), closes [#15538](https://github.com/JiRaska/open-bank-oss/issues/15538)
+
+
+### Bug Fixes
+
+* **finrep:** correct COREP own-funds and label frozen evidence ([#15666](https://github.com/JiRaska/open-bank-oss/issues/15666)) ([0020a49](https://github.com/JiRaska/open-bank-oss/commit/0020a49ba357567bd827334076d4e6d396975d5b))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.7...finrep-service-v0.18.0) (2026-11-11)
+
+
+### Features
+
+* **finrep:** add supervisory return submission lifecycle with dry-run transport ([#15537](https://github.com/JiRaska/open-bank-oss/issues/15537)) ([f99faf2](https://github.com/JiRaska/open-bank-oss/commit/f99faf25327f8c04832297a94cf3fe8a0934cd37))
+
 ## [0.17.7](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.6...finrep-service-v0.17.7) (2026-10-30)
 
 

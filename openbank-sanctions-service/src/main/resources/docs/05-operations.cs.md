@@ -82,6 +82,26 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 3. Spusť manuální obnovu přes API: `POST /api/v1/sanctions/lists/{listType}/refresh`
 4. Pokud je zdrojová URL nedostupná, aktualizuj ji přes `PUT /api/v1/sanctions/lists/{id}`.
 
+### Stárnutí referenčních dat jurisdikcí
+
+`sanctions_jurisdictions` se přebírá z vydaných seznamů migrací, takže stárne bez jakékoli chyby.
+Viditelné to dělají tři metriky podle `source_list`
+(`prometheus-rules-sanctions-jurisdictions.yaml`):
+
+| Série | Význam |
+|---|---|
+| `openbank_sanctions_jurisdiction_rows` | aktivní řádky; `0` = očekávaný seznam, který není načten (`JurisdictionReferenceDataNotLoaded`, info) |
+| `openbank_sanctions_jurisdiction_publication_age_seconds` | stáří nejnovějšího načteného vydání |
+| `openbank_sanctions_jurisdiction_verification_age_seconds` | doba od posledního porovnání se zdrojem; nad 150 dní spustí `JurisdictionReferenceDataNotReverified` |
+
+Stáří se počítá z dat uložených v tabulce, ne od startu podu, takže je správné i na čerstvě
+spuštěném podu a alert restartem nezmizí. Jak jej uzavřít:
+
+1. Načti aktuální vydání přímo od vydavatele (nikdy zpaměti ani z druhotného shrnutí).
+2. Pokud se změnilo, přidej migraci, která vloží nové řádky s `version + 1` a novým
+   `published_on` a nahrazeným řádkům nastaví `active = false`.
+3. Pokud se nezměnilo, přidej migraci, která jen posune `verified_on` pro daný `source_list`.
+
 ### Velký backlog přezkumů POTENTIAL_HIT
 
 1. Zkontroluj frontu čekajících: `GET /api/v1/sanctions/pending`
@@ -116,6 +136,16 @@ sanctions nastavuje `openbank.warmup.protected-path: /api/v1/sanctions/pending`,
 ## Odmítnutí XML listiny
 
 Importy OFAC a EU FSF používají sdílený zabezpečený SAX parser `SecureXml`. Listina s DOCTYPE se odmítne, včetně externích DTD a deklarací entit. Při chybě parsování import ponechá dosavadní seznam a oznámí `FAILED_KEPT_EXISTING`; prošetřete zdrojovou listinu a nevypínejte ochranu parseru kvůli vynucení obnovy. Odmítnutí ověřují `SanctionsImportServiceTest` a `EuFsfSaxParserTest`.
+
+## Interní mTLS listener v produkci
+
+V produkci služba naslouchá na dvou portech. Nešifrovaný HTTP port (8123) se nemění a dál obsluhuje sondy i všechny stávající volající. Port 8443 je druhý listener pro volání mezi službami: TLS 1.3 s certifikátem z privátní CA platformy a klientský certifikát je povinný. Deployment připojuje certifikát, klíč a CA bundle do `/mnt/internal-tls` ze secretu `sanctions-service-internal-tls`; secret není volitelný, takže bez něj pod nenastartuje.
+
+Klientský certifikát je pouze autentizace transportu. API se na obou portech autentizuje OIDC bearer tokenem a požadavek na 8443 s platným certifikátem a bez tokenu dostane 401, stejně jako na nešifrovaném portu.
+
+`quarkus.http.ssl.client-auth` je pevně dané při sestavení image, v profilu `%prod` v `application.yaml`. Proměnná `QUARKUS_HTTP_SSL_CLIENT_AUTH` v deploymentu jen uvádí stejnou hodnotu a změnit ji nemůže. Lokální vývoj a testy běží bez tohoto listeneru, takže úspěšný lokální běh nedokazuje nasazený handshake.
+
+Pokud volání na 8443 po rolloutu selhávají, zkontrolujte společně: připojený secret a jeho platnost, zda volající předkládá certifikát ze stejné CA, síťovou politiku k portu 8443 a zda volající stále posílá bearer token.
 
 ## Sdílené výchozí konfigurace
 

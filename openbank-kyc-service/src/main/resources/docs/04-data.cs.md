@@ -33,6 +33,8 @@ PostgreSQL 16, databáze **`openbank_kyc`** (reaktivní PG klient + JDBC pro Fly
 | `screening_provider`, `screening_ref` | VARCHAR | poskytovatel screeningu + reference |
 | `next_review_date` | TIMESTAMPTZ | EBA periodická revize (HIGH 1r / MEDIUM 2r / LOW 3r) |
 | `escalated_to`, `escalated_at`, `escalation_reason` | | stopa eskalace |
+| `pending_screening_name` (V13) | TEXT | jméno strany, držené JEN po dobu, kdy je po výpadku `sanctions-service` třeba opakovat prověření zákazníka; maže se při uzavření kontroly, při uzavření případu a při výmazu podle GDPR. Není součástí API, událostí ani `checks_json` |
+| `screening_attempted_at` (V13) | TIMESTAMPTZ | poslední pokus o prověření; řadí opakovací úlohu (parciální index `idx_kyc_cases_screening_retry`) |
 
 Indexy: `idx_kyc_cases_party_id`, `idx_kyc_cases_status`, `idx_kyc_due_diligence`, parciální `idx_kyc_review_date`, parciální `idx_kyc_pep` a parciální unikátní index **`uq_kyc_cases_active_party`** (V5) vynucující nejvýše jeden aktivní případ na party.
 
@@ -49,6 +51,7 @@ Transakční outbox: `id`, `event_id` (UUID UNIQUE), `aggregate_id`, `event_type
 | V3 | `V3__create_kyc_outbox.sql` | tabulka transakčního outboxu |
 | V4 | `V4__hibernate_sequences.sql` | `kyc_cases_seq`, `kyc_outbox_seq` (Hibernate Reactive `INCREMENT BY 50`) |
 | V5 | `V5__unique_active_kyc_case_per_party.sql` | parciální unikátní index `uq_kyc_cases_active_party` (idempotence ADR-0068) |
+| V13 | `V13__kyc_unscreened_case_retry.sql` | `pending_screening_name`, `screening_attempted_at` + parciální index pro opakování prověření |
 
 Každá migrace nese rollback poznámku v souboru (např. `DROP SEQUENCE …`, `DROP INDEX uq_kyc_cases_active_party`). **Nikdy needituj aplikovanou migraci** (checksum mismatch) — viz GitOps poznámky repa.
 
