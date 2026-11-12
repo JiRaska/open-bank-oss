@@ -14,8 +14,9 @@ import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.quarkus.test.security.SecurityAttribute
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
@@ -183,8 +184,13 @@ class DeclineReviewIT {
     @TestSecurity(
         user = EDGE,
         roles = ["ROLE_OPERATOR"],
-        augmentors = [IntakeJwtIdentityAugmentor::class],
-        attributes = [SecurityAttribute(key = "money-wire-intake-fixture", value = "synthetic-jwt-only")],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "wire-it-customer-edge-subject"),
+            Claim(key = "azp", value = "openbank-customer-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
     )
     fun `3 - the customer asks - a repeat is the same review - a stranger and a human decline are refused`() {
         firstReview = customerRequest(PARTY_A, firstApp) Then {
@@ -216,8 +222,13 @@ class DeclineReviewIT {
     @TestSecurity(
         user = EDGE,
         roles = ["ROLE_OPERATOR"],
-        augmentors = [IntakeJwtIdentityAugmentor::class],
-        attributes = [SecurityAttribute(key = "money-wire-intake-fixture", value = "synthetic-jwt-only")],
+    )
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "wire-it-customer-edge-subject"),
+            Claim(key = "azp", value = "openbank-customer-edge"),
+            Claim(key = "preferred_username", value = EDGE),
+        ],
     )
     fun `4 - a repeat request still answers with the same review`() {
         customerRequest(PARTY_A, firstApp) Then {
