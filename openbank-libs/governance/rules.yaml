@@ -4673,6 +4673,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/AmlServiceClient.kt"
+      - "src/main/kotlin/com/openbank/fx/infrastructure/client/PartyServiceClient.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/FraudScoreClient.kt"
       - "src/main/kotlin/com/openbank/fx/infrastructure/client/SanctionsServiceClient.kt"
     pii:
