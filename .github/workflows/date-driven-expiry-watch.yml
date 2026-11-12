@@ -70,13 +70,13 @@ jobs:
           echo "code=$code" >> "$GITHUB_OUTPUT"
           case "$code" in
             0) ;;
-            2) echo "::warning::A CI credential is expired or expires within 7 days - owner must rotate it." ;;
+            2) echo "::error::A CI credential is unset, expired or expires within 7 days - owner must act."; exit 2 ;;
             3) echo "::error::A credential could not be probed - that is not a clean verdict."; exit 3 ;;
             *) exit "$code" ;;
           esac
 
       - name: Open or refresh the tracking issue
-        if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        if: ${{ always() && github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
         env:
           GH_TOKEN: ${{ github.token }}
           TITLE: "CI credential expired or expiring - owner rotation needed"
@@ -84,8 +84,8 @@ jobs:
         run: |
           body="$RUNNER_TEMP/issue-body.md"
           {
-            echo "The daily credential probe found a GitHub token that is expired (401) or expires within 7 days."
-            echo "Only the repository owner can rotate these. Update the named repository secret, then re-run the watch."
+            echo "The daily credential probe found a GitHub token that is unset, expired (401) or expires within 7 days."
+            echo "Only the repository owner can rotate these. Set or rotate the named repository secret, then re-run the watch."
             echo
             echo '```'
             cat "$RUNNER_TEMP/cred.txt"
@@ -98,8 +98,9 @@ jobs:
           issue=$(bash .github/scripts/resolve-tracking-issue.sh --title "$TITLE" \
             --create-body-file "$body" --create-label tech-debt --create-label "severity:high" \
             --status-file "$status_file")
+          # Refresh in place: a persisting finding rewrites the body, not one comment per day.
           if [ "$(cat "$status_file")" = "existing" ]; then
-            gh issue comment "$issue" -R "$GH_REPO" --body-file "$body"
+            gh issue edit "$issue" -R "$GH_REPO" --body-file "$body"
           fi
           echo "Tracking issue: #$issue"
 
@@ -161,7 +162,8 @@ jobs:
           issue=$(bash .github/scripts/resolve-tracking-issue.sh --title "$TITLE" \
             --create-body-file "$body" --create-label tech-debt --create-label "severity:high" \
             --status-file "$status_file")
+          # Refresh in place: a persisting finding rewrites the body, not one comment per day.
           if [ "$(cat "$status_file")" = "existing" ]; then
-            gh issue comment "$issue" -R "$GH_REPO" --body-file "$body"
+            gh issue edit "$issue" -R "$GH_REPO" --body-file "$body"
           fi
           echo "Tracking issue: #$issue"

@@ -16,7 +16,8 @@ WHAT IT DOES
     OK        200 and no expiry within the window (or no expiry at all)
     EXPIRING  200, but the expiry header falls within WARN_DAYS (default 7)
     INVALID   401 — expired or revoked; every workflow using it is already failing
-    UNSET     the secret is not configured; reported, not a finding (several are optional)
+    UNSET     a listed secret is not configured — a finding: the workflows that read it are
+              skipping or failing, and an unset secret must never read as a clean probe
     UNKNOWN   any other answer (network, 5xx, 403) — never read as OK
 
   Token values are never printed, logged or written anywhere; only names and verdicts.
@@ -86,14 +87,15 @@ def probe(token: str) -> tuple[int, str | None]:
         return e.code, e.headers.get(HEADER) if e.headers else None
 
 
-def run(names: list[str], warn_days: int) -> int:
+def run(names: list[str], warn_days: int, probe_fn=None) -> int:
+    probe_fn = probe_fn or probe
     now = datetime.now(timezone.utc)
     worst = 0
     for name in names:
         token = os.environ.get(name, "")
         if token:
             try:
-                status, hdr = probe(token)
+                status, hdr = probe_fn(token)
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 status, hdr = -1, None
                 verdict, why = "UNKNOWN", f"no answer: {type(e).__name__}"
@@ -102,7 +104,7 @@ def run(names: list[str], warn_days: int) -> int:
         else:
             verdict, why = classify(None, None, now, warn_days)
         print(f"{verdict:9} {name}: {why}")
-        if verdict in ("EXPIRING", "INVALID"):
+        if verdict in ("EXPIRING", "INVALID", "UNSET"):
             worst = 2
         elif verdict == "UNKNOWN" and worst == 0:
             worst = 3
@@ -169,6 +171,30 @@ def self_test() -> int:
         got, _ = classify(status, hdr, now, 7)
         if got != want:
             bad.append(f"{name}: got {got}, want {want}")
+    # Exit codes of a whole run. Known-negative: one healthy token exits 0. Known-positives:
+    # an UNSET listed secret and a 401 token must each exit 2 (never 0).
+    import contextlib, io
+    ok_probe = lambda _t: (200, "2027-06-01 00:00:00 UTC")
+    bad_probe = lambda _t: (401, None)
+    runs = [
+        ("healthy token exits 0", {"T_OK": "x"}, ["T_OK"], ok_probe, 0),
+        ("unset secret exits 2", {}, ["T_UNSET_ST"], ok_probe, 2),
+        ("401 token exits 2", {"T_BAD": "x"}, ["T_BAD"], bad_probe, 2),
+    ]
+    for name, env, names, fn, want in runs:
+        saved = {n: os.environ.pop(n, None) for n in names}
+        os.environ.update(env)
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                got = run(names, 7, fn)
+        finally:
+            for n, v in saved.items():
+                os.environ.pop(n, None)
+                if v is not None:
+                    os.environ[n] = v
+        if got != want:
+            bad.append(f"{name}: exit {got}, want {want}")
+
     # Coverage: a credential read by a workflow but missing from CREDENTIALS must be flagged,
     # and a complete declaration must pass.
     import tempfile
