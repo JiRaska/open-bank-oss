@@ -28,7 +28,7 @@
 |---|---|
 | Přístup (čl. 15) | `GET /api/v1/parties/{id}` vrátí záznam subjektu (šifrované rodné číslo se nevystavuje) |
 | Oprava (čl. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — vše audit-logováno přes události |
-| Výmaz (čl. 17) | **Omezeno** — AMLD 6 (10 let po ukončení vztahu) přebíjí výmaz pro identitní/KYC data |
+| Výmaz (čl. 17) | **Implementováno** — po `PARTY_ERASED` se všechny osobní sloupce a identifikátory (šifrované RČ, slepé indexy, čísla dokladů) anonymizují nebo smažou na místě; anonymizovaný zbytek řádku zůstává s razítkem `erased_at`. Samotný AML záznam drží kyc-service. Viz `04-data` (Výmaz) |
 | Omezení (čl. 18) | `PATCH /status` → `SUSPENDED`; vztahy lze ukončit |
 | Přenositelnost (čl. 20) | osobní data jsou strukturované JSON přes read API (dedikovaný export endpoint dnes není — TBD) |
 | Námitka (čl. 21) | N/A (v této službě není marketing/profilování) |
@@ -47,7 +47,7 @@
 
 | Záznam | Retence po skončení vztahu |
 |---|---|
-| Identita party + KYC/AML | 10 let (AMLD 6 čl. 40, český AML zákon) |
+| Identita party + KYC/AML | 10 let (AMLD 6 čl. 40, český AML zákon) — kromě `PARTY_ERASED`, kdy se osobní údaje anonymizují ihned a zůstává jen zbytek řádku |
 | Doklady totožnosti | dle retence AML zákona |
 | řádky `pid_outbox` SENT | jen provozní, prunable |
 
