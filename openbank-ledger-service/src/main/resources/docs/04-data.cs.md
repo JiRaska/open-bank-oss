@@ -26,7 +26,7 @@ Databáze vynucuje dva invarianty, které už drží doménový model, a to pro 
 
 Důsledky pro každého, kdo do těchto tabulek zapisuje přímo (migrace, fixtures, ruční session): nejdřív vlož doklad a všechny jeho řádky v **jedné transakci**, protože autocommit po jednotlivých příkazech selže; nespoléhej na `INSERT ... ON CONFLICT DO NOTHING` pro opakované vložení řádků (ochrana se spustí dřív, než se konflikt vyhodnotí), idempotentní seed řiď řádkem dokladu; zaúčtovaný doklad opravuj stornem, ne updatem.
 
-Limity: jde o ochranu proti chybám a nerevidovanému kódu. Superuser nebo vlastník tabulky může trigger vypnout či zrušit; `DETACH`/`DROP` partitionu a `TRUNCATE` jednoho partitionu trigger nespustí; runtime role může opravu deklarovat sama (je zalogována, ne nezávisle schválena). Cena je jedno dohledání dokladu na každý vložený řádek a jedna odložená kontrola na každý zapsaný řádek při commitu: lineární v počtu dokladů i v počtu řádků dokladu vkládaného příkaz po příkazu; široký doklad vložený jedním víceřádkovým příkazem se stále kontroluje jednou na řádek.
+Limity: jde o ochranu proti chybám a nerevidovanému kódu. Superuser nebo vlastník tabulky může trigger vypnout či zrušit; `DETACH`/`DROP` partitionu a `TRUNCATE` jednoho partitionu trigger nespustí; runtime role může opravu deklarovat sama (je zalogována, ne nezávisle schválena). Cena je jedno dohledání dokladu na doklad a jedna odložená kontrola na každý zapsaný řádek při commitu: lineární v počtu dokladů, kvadratická v počtu řádků jednoho dokladu, a proto smí mít zaúčtovaný doklad nejvýše `ledger_max_journal_lines()` řádků (500), pokud není deklarována oprava. Posting API tento limit zatím neuvádí; širší zápis je odmítnut při COMMITu.
 
 ### Partitioning
 

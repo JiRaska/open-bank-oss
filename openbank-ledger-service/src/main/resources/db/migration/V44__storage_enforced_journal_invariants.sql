@@ -15,21 +15,18 @@
 --    base_currency (not amount/currency_code, which is the instructed currency and legitimately
 --    differs across the legs of an FX posting). Deferred because the service inserts the journal
 --    row, already POSTED, before its lines.
---    Constraint triggers are row-level by definition and cannot use transition tables, so every
---    written line raises its own event. To keep a wide journal linear, a line's INSERT event hands
---    the check on when it can PROVE a later event of the same trigger will see the same journal:
---    it looks at the two heap slots a following insert normally lands in, and skips only if one
---    holds a line of the same journal written by this transaction under a later command id. That
---    line's event is queued behind this one, so whenever this one fires, that one fires after it.
---    The proof uses nothing a writer can set (tuple xmin, cmin and xmax, not a setting), and it
---    holds if constraints are forced early with SET CONSTRAINTS: the last line written always
---    checks. Where the proof is not available the full check runs: UPDATE and DELETE events,
---    lines of one multi-row statement (same command id, so that shape stays quadratic), a
---    successor placed elsewhere in the heap, and the first sixteen lines of any journal, for which
---    adding the lines up is cheaper than probing for a successor.
---    Skipping on "the journal row was written by this transaction" alone was tried and is NOT
---    sound: after SET CONSTRAINTS ALL IMMEDIATE the journal's own event has already fired, and a
---    line added afterwards would have been waved through.
+--    Constraint triggers are row-level by definition and cannot use transition tables, so the
+--    check runs once per row written and re-adds the journal each time: linear in journals,
+--    quadratic in the lines of ONE journal. That region is closed off by size instead of by
+--    cleverness: a posted journal may have at most ledger_max_journal_lines() lines (the one place
+--    the cap is defined), unless the transaction declares a repair. The widest journal the
+--    platform builds is a few dozen lines; at the cap the check costs a fraction of a second.
+--    Two shortcuts were built, measured and removed. A per-transaction "already checked" memo
+--    has nowhere to live but a setting any writer can forge. "Skip a line whose journal row this
+--    transaction wrote" let an unbalanced journal commit after SET CONSTRAINTS ALL IMMEDIATE,
+--    because the journal's own event had already fired. A third, handing the check to a
+--    provably later line found by heap position, was sound but tied a ledger invariant to tuple
+--    placement and made the ordinary two-line posting slower.
 --
 -- 2. APPEND-ONLY ONCE POSTED. Measured over src/main on the day this was written, the service
 --    issues exactly ONE update against these two tables and no delete:
@@ -63,7 +60,8 @@
 --    DISABLE TRIGGER, DROP TRIGGER) or session_replication_role = replica bypasses it. Tamper
 --    evidence for that case stays with the closed-period anchors.
 --  * Partition DETACH / DROP and TRUNCATE of a single partition fire no trigger on the parent.
---  * A wide journal inserted by ONE multi-row statement is still checked once per line.
+--  * The line cap is enforced here only. The posting API does not state it yet (adding maxItems
+--    is a breaking change to the published contract), so a wider posting is refused at COMMIT.
 --  * INSERT ... ON CONFLICT DO NOTHING into journal_lines does not make a replay harmless: BEFORE
 --    triggers fire before the conflict is resolved, so re-inserting the lines of a journal an
 --    earlier transaction posted is refused. Key an idempotent seed on the journal row instead.
@@ -87,7 +85,7 @@
 --   DROP FUNCTION enforce_journal_balance_from_line(), enforce_journal_balance_from_entry(),
 --     assert_posted_journal_balanced(UUID), guard_posted_journal_entry(),
 --     guard_posted_journal_line(), guard_journal_line_insert(), guard_journal_truncate(),
---     ledger_written_by_current_transaction(xid);
+--     ledger_written_by_current_transaction(xid), ledger_max_journal_lines();
 --   -- ledger_declare_repair / ledger_active_repair_reason / ledger_repair_audit may stay.
 
 CREATE TABLE ledger_repair_audit (
@@ -348,6 +346,10 @@ CREATE TRIGGER journal_lines_no_truncate
 -- Lines first, journal second: a well-formed set of lines needs no look at journal_entries at all,
 -- which is every posting the service makes. journal_lines has no entry_date, so the status lookup
 -- cannot prune partitions and is paid only on the way to a refusal (or for a PENDING draft).
+-- THE cap on the lines of one posted journal. Everything that needs the number calls this.
+-- Changing it is a new migration (CREATE OR REPLACE), which is the review it should get.
+CREATE FUNCTION ledger_max_journal_lines() RETURNS INTEGER LANGUAGE sql IMMUTABLE AS $$ SELECT 500 $$;
+
 CREATE FUNCTION assert_posted_journal_balanced(checked_journal_id UUID) RETURNS VOID LANGUAGE plpgsql AS $$
 DECLARE
     line_count BIGINT;
@@ -389,7 +391,8 @@ BEGIN
     ELSIF off_debits = off_credits THEN
         off_currency := NULL;
     END IF;
-    IF line_count >= 2 AND has_debit AND has_credit AND off_currency IS NULL THEN
+    IF line_count >= 2 AND has_debit AND has_credit AND off_currency IS NULL
+        AND line_count <= ledger_max_journal_lines() THEN
         RETURN;
     END IF;
     IF NOT EXISTS (SELECT 1 FROM journal_entries j WHERE j.id = checked_journal_id AND j.status <> 'PENDING') THEN
@@ -403,6 +406,16 @@ BEGIN
         RAISE EXCEPTION 'posted journal % needs both a debit and a credit line', checked_journal_id
             USING ERRCODE = '23514', CONSTRAINT = 'journal_has_two_sided_lines';
     END IF;
+    IF off_currency IS NULL THEN
+        -- Only the width is left. A declared repair may exceed it; nothing else may.
+        IF ledger_active_repair_reason() IS NOT NULL THEN
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'posted journal % has % lines, more than the % allowed in one journal',
+            checked_journal_id, line_count, ledger_max_journal_lines()
+            USING ERRCODE = '23514', CONSTRAINT = 'journal_line_count_within_cap',
+                  HINT = 'Split the posting into several journals (ADR-0372).';
+    END IF;
     RAISE EXCEPTION 'posted journal % is not balanced in %: debits=% credits=%',
         checked_journal_id, off_currency, off_debits, off_credits
         USING ERRCODE = '23514', CONSTRAINT = 'journal_balanced_per_currency';
@@ -410,50 +423,13 @@ END;
 $$;
 
 CREATE FUNCTION enforce_journal_balance_from_line() RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE
-    own_tid   TID;
-    own_cmin  BIGINT;
-    own_xmax  TEXT;
-    own_block BIGINT;
-    own_slot  INT;
 BEGIN
     IF TG_OP <> 'INSERT' THEN
         PERFORM assert_posted_journal_balanced(OLD.journal_id);
-        IF TG_OP = 'UPDATE' AND NEW.journal_id IS DISTINCT FROM OLD.journal_id THEN
-            PERFORM assert_posted_journal_balanced(NEW.journal_id);
-        END IF;
-        RETURN NULL;
     END IF;
-
-    -- Hand the check on only to a line whose own event is provably queued behind this one: same
-    -- journal, written by this transaction, under a LATER command id, never touched since (a set
-    -- xmax would make cmin a combo id). Looked for in the next slot of this page and the first of
-    -- the next page; anywhere else it is simply not found and the full check runs here.
-    -- Only worth trying past the first lines: a narrow journal is cheaper to add up than to probe.
-    -- sequence is caller-supplied and decides nothing but which of two sound paths runs.
-    IF NEW.sequence > 16 THEN
-        SELECT l.ctid, l.cmin::text::bigint, l.xmax::text INTO own_tid, own_cmin, own_xmax
-        FROM journal_lines l WHERE l.id = NEW.id;
+    IF TG_OP = 'INSERT' OR (TG_OP = 'UPDATE' AND NEW.journal_id IS DISTINCT FROM OLD.journal_id) THEN
+        PERFORM assert_posted_journal_balanced(NEW.journal_id);
     END IF;
-    IF own_xmax = '0' THEN
-        own_block := split_part(btrim(own_tid::text, '()'), ',', 1)::bigint;
-        own_slot  := split_part(btrim(own_tid::text, '()'), ',', 2)::int;
-        IF EXISTS (
-            SELECT 1 FROM journal_lines next_line
-            WHERE next_line.ctid = ANY (ARRAY[
-                      format('(%s,%s)', own_block, own_slot + 1)::tid,
-                      format('(%s,1)', own_block + 1)::tid])
-              AND next_line.journal_id = NEW.journal_id
-              AND next_line.xmax::text = '0'
-              AND next_line.cmin::text::bigint > own_cmin
-              AND (next_line.xmin = pg_current_xact_id()::xid
-                   OR ledger_written_by_current_transaction(next_line.xmin))
-        ) THEN
-            RETURN NULL;
-        END IF;
-    END IF;
-
-    PERFORM assert_posted_journal_balanced(NEW.journal_id);
     RETURN NULL;
 END;
 $$;

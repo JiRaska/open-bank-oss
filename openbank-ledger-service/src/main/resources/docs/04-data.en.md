@@ -26,7 +26,7 @@ The database enforces the two invariants the domain model already holds, for eve
 
 Consequences for anyone writing these tables directly (migrations, fixtures, operator sessions): insert the journal row first and all of its lines in **one transaction**, because statement-by-statement autocommit fails; do not rely on `INSERT ... ON CONFLICT DO NOTHING` to replay lines (the guard fires before the conflict is resolved), key an idempotent seed on the journal row; and correct a posted journal with a reversal, not an update.
 
-Limits: this guards against mistakes and unreviewed code. A superuser or the table owner can disable or drop a trigger; partition `DETACH`/`DROP` and a `TRUNCATE` of a single partition do not fire it; the runtime role can itself declare a repair (logged, not independently approved). The cost is one journal lookup per inserted line and one deferred check per written row at commit: linear in journals and in the lines of a journal inserted statement by statement; a wide journal inserted by one multi-row statement is still checked once per line.
+Limits: this guards against mistakes and unreviewed code. A superuser or the table owner can disable or drop a trigger; partition `DETACH`/`DROP` and a `TRUNCATE` of a single partition do not fire it; the runtime role can itself declare a repair (logged, not independently approved). The cost is one journal lookup per journal and one deferred check per written row at commit: linear in journals, quadratic in the lines of one journal, which is why a posted journal may hold at most `ledger_max_journal_lines()` lines (500) unless a repair is declared. The posting API does not state that cap yet; a wider posting is refused at COMMIT.
 
 ### Partitioning
 

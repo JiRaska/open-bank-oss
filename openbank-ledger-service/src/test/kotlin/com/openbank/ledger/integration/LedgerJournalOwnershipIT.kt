@@ -14,15 +14,15 @@ import java.util.UUID
 
 /**
  * ADR-0372, second half: a journal and all of its lines are written in one transaction, a posted
- * journal has at least two lines on both sides, and no ordering of statements inside a transaction
- * gets an unbalanced posted journal past the commit — including a wide journal, whose per-line
- * checks are handed from line to line rather than repeated.
+ * journal has at least two lines on both sides and no more than the capped number, and no ordering
+ * of statements inside a transaction gets an unbalanced posted journal past the commit.
  *
  * Plain JDBC, domain model bypassed, as in [LedgerStorageInvariantIT]. Run red first against the
  * migration as it stood before these rules: the late append, the line added to a journal just
  * marked REVERSED, the journal stripped of its lines and the journal with no or one-sided lines
- * were all accepted. The ordering and wide-journal tests were green there too — the earlier check
- * re-added every journal once per line — and are here to keep the faster check honest.
+ * were all accepted. The ordering tests were green there too and stay as regression guards: one
+ * shortcut for wide journals, skipping a line whose journal row the transaction wrote, committed
+ * an unbalanced journal in exactly the sequence the ordering test replays.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
@@ -194,7 +194,7 @@ class LedgerJournalOwnershipIT : LedgerStorageInvariantFixture() {
 
     @Test
     fun `a wide journal is checked as a whole, whichever line is wrong`() {
-        val width = 600
+        val width = 300
         listOf(1, width / 2, width).forEach { wrongLine ->
             val id = UUID.randomUUID()
             connection().use { c ->
@@ -204,6 +204,56 @@ class LedgerJournalOwnershipIT : LedgerStorageInvariantFixture() {
             }
             assertThat(count("journal_entries where id = ?", id)).isZero()
         }
+        // One multi-row statement, where all lines share a command id.
+        val bulk = UUID.randomUUID()
+        connection().use { c ->
+            c.autoCommit = false
+            c.insertJournal(bulk, "POSTED")
+            assertThat(c.insertLinesInOneStatement(bulk, width, wrongLine = 7)).isEqualTo(width)
+            assertThatThrownBy { c.commit() }.isBalanceViolation()
+        }
+        assertThat(count("journal_entries where id = ?", bulk)).isZero()
+    }
+
+    @Test
+    fun `a posted journal holds at most the capped number of lines unless a repair is declared`() {
+        // The cap is defined once, in the database; the test reads it rather than repeating it.
+        val cap = connection().use { c ->
+            c.createStatement().use { st ->
+                st.executeQuery("select ledger_max_journal_lines()").use { rows ->
+                    rows.next()
+                    rows.getInt(1)
+                }
+            }
+        }
+        val atCap = UUID.randomUUID()
+        connection().use { c ->
+            c.autoCommit = false
+            c.insertWideJournal(atCap, cap, wrongLine = null)
+            c.commit()
+        }
+        journals += atCap
+        assertThat(count("journal_lines where journal_id = ?", atCap)).isEqualTo(cap.toLong())
+
+        // Two more lines keep it balanced, so only the width is wrong.
+        val over = UUID.randomUUID()
+        connection().use { c ->
+            c.autoCommit = false
+            c.insertJournal(over, "POSTED")
+            c.insertLinesInOneStatement(over, cap + 2, wrongLine = null)
+            assertThatThrownBy { c.commit() }.isBalanceViolation("more than the $cap allowed")
+        }
+        assertThat(count("journal_entries where id = ?", over)).isZero()
+
+        connection().use { c ->
+            c.autoCommit = false
+            c.declareRepair("IT oversized journal ${UUID.randomUUID()}")
+            c.insertJournal(over, "POSTED")
+            c.insertLinesInOneStatement(over, cap + 2, wrongLine = null)
+            c.commit()
+        }
+        journals += over
+        assertThat(count("journal_lines where journal_id = ?", over)).isEqualTo(cap + 2L)
     }
 
     private fun Connection.insertWideJournal(id: UUID, width: Int, wrongLine: Int?) {
@@ -213,36 +263,18 @@ class LedgerJournalOwnershipIT : LedgerStorageInvariantFixture() {
         }
     }
 
-    @Test
-    fun `a wide journal inserted by one statement is checked too, and a balanced one commits`() {
-        val width = 600
-        // One multi-row statement, where all lines share a command id.
-        val bulk = UUID.randomUUID()
-        connection().use { c ->
-            c.autoCommit = false
-            c.insertJournal(bulk, "POSTED")
-            c.prepareStatement(
-                "insert into journal_lines (journal_id, gl_account_id, side, amount, currency_code, base_amount, " +
-                    "base_currency, sequence) select ?, case when g % 2 = 1 then ?::uuid else ?::uuid end, " +
-                    "case when g % 2 = 1 then 'D' else 'C' end, 1, 'CZK', " +
-                    "case when g = 7 then 2 else 1 end, 'CZK', g from generate_series(1, $width) g",
-            ).use {
-                it.setObject(1, bulk)
-                it.setString(2, debitAccount.toString())
-                it.setString(3, creditAccount.toString())
-                assertThat(it.executeUpdate()).isEqualTo(width)
-            }
-            assertThatThrownBy { c.commit() }.isBalanceViolation()
+    private fun Connection.insertLinesInOneStatement(journalId: UUID, width: Int, wrongLine: Int?): Int =
+        prepareStatement(
+            "insert into journal_lines (journal_id, gl_account_id, side, amount, currency_code, base_amount, " +
+                "base_currency, sequence) select ?, case when g % 2 = 1 then ?::uuid else ?::uuid end, " +
+                "case when g % 2 = 1 then 'D' else 'C' end, 1, 'CZK', " +
+                "case when g = ? then 2 else 1 end, 'CZK', g from generate_series(1, ?) g",
+        ).use {
+            it.setObject(1, journalId)
+            it.setString(2, debitAccount.toString())
+            it.setString(3, creditAccount.toString())
+            it.setInt(4, wrongLine ?: 0)
+            it.setInt(5, width)
+            it.executeUpdate()
         }
-        assertThat(count("journal_entries where id = ?", bulk)).isZero()
-
-        val balanced = UUID.randomUUID()
-        connection().use { c ->
-            c.autoCommit = false
-            c.insertWideJournal(balanced, width, wrongLine = null)
-            c.commit()
-        }
-        journals += balanced
-        assertThat(count("journal_lines where journal_id = ?", balanced)).isEqualTo(width.toLong())
-    }
 }
