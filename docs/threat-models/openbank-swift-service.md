@@ -330,3 +330,13 @@ The existing outbound pacs.009 trust boundary binds a pacs.002 submission result
 Operational logs retain failure classification and trusted stored transfer identifiers without raw dependency exception chains or XML validation diagnostics. The consumer's retry helper uses a redacted exception view and a canonical UUID key (or no key), while classification, attempts and the final nack receive the original failure. Gateway, lifecycle, consumer and Pact regressions verify the response binding, concurrent-state preservation and observable logging boundary. This is source-level control evidence, not a claim of deployed service or successful rollout. Rollback reverts the application changes while retaining existing transfer rows and schema; it must preserve the stored submission identity and payment lifecycle records.
 
 - **2026-11-01 — Shared unsettled-outcome vocabulary (#13669).** The five shared `outcome` label values of `openbank_payment_unsettled_total` (`mismatch`, `failed-replay`, `conflict`, `unexpected-status`, `transport-error`) now come from one `UnsettledOutcome` type in `openbank-client-transaction` instead of a per-service copy; SWIFT keeps its four re-drive/stored-data values as a separate extension type that cannot redefine the shared ones. **Threats addressed:** *repudiation / silent loss of alerting* — two copies of a closed label set could drift, renaming a series an alert selects on so the alert reads zero while bookings fail; one definition removes that drift path. Wire values are byte-identical, pinned by literal-label tests in the client module and the service. No behaviour, endpoint, permission, retry or data change; no new labels and no payment identities in labels. Rollback: revert the refactor; the series names do not change either way.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

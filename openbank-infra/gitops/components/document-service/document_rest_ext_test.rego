@@ -131,3 +131,39 @@ test_other_service_account_denied if {
 test_customer_token_denied if {
 	not decision(customer, "document.business-agreement.ensure").allow
 }
+
+# ADR-0375 D5 — document.verifyOwnership: only delegation-service's own NAMED m2m subject.
+ownership_reader := {
+	"service_account": true,
+	"client_id": "openbank-delegation",
+	"type": "HUMAN",
+	"id": "service-account-openbank-delegation",
+	"roles": ["ROLE_API"],
+}
+
+ownership_action := "document.verifyOwnership"
+
+test_allow_delegation_ownership_reader if {
+	rest.allow with input as {"principal": ownership_reader, "action": ownership_action}
+}
+
+test_ownership_reason_names_delegation if {
+	"service-delegation-document-ownership" in rest.allowed_reasons
+		with input as {"principal": ownership_reader, "action": ownership_action}
+}
+
+test_deny_shared_backend_ownership if {
+	not rest.allow with input as {"principal": shared_backend, "action": ownership_action}
+}
+
+test_deny_customer_edge_ownership if {
+	not rest.allow with input as {"principal": customer_edge, "action": ownership_action}
+}
+
+test_deny_human_operator_ownership if {
+	not rest.allow with input as {"principal": operator, "action": ownership_action}
+}
+
+test_deny_disclosure_exporter_ownership if {
+	not rest.allow with input as {"principal": disclosure_exporter, "action": ownership_action}
+}

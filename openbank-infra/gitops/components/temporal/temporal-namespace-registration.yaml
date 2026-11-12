@@ -37,7 +37,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: temporal
     app.kubernetes.io/component: namespace-registration
-    openbank.io/derived: gitops-manual
+    open-bank.tech/derived: gitops-manual
   annotations:
     # Runs after the Temporal server resources are synced. BeforeHookCreation keeps the
     # last run visible for debugging and recreates the Job on every sync — so this Job

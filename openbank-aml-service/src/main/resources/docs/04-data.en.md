@@ -103,3 +103,21 @@ The case record is **restricted** (`dataClassification: restricted`). GDPR **rig
 - **Upstream (topic):** kyc-service (triggers), sanctions-service (updates).
 - **Owned schema:** `aml_schema`. **Dependent schemas:** sepa_schema, domestic_schema, swift_schema, sepa_instant_schema.
 - `dataLineageRole: both` — the service is both a consumer and a producer of compliance data.
+
+## Transaction-monitoring intake (ADR-0371, migration V11)
+
+Post-booking monitoring records booked money movement and counts it per party. None of it is on a payment path.
+
+| Table | Key | Purpose |
+|---|---|---|
+| `aml_booked_movement` | `(journal_entry_id, account_id, currency)` | one booked change of one customer account in one currency, from the ledger's `AccountBookedChanged`; the key is the booking's business key, so a redelivered or re-emitted event is a no-op |
+| `aml_movement_origin` | `transaction_id` | rail of the originating transaction, from `TransactionInitiated`; first write wins |
+| `aml_account_party` | `account_id` | account → owning party, remembered after the account authority answered |
+| `aml_movement_counter` | `(party_id, currency, direction, rail, scheme_revision, bucket_start, band_code)` | rolling counts |
+
+- Counters never sum or convert amounts and never span currencies; `currency` is part of the key and an amount band belongs to one currency.
+- Bucket width and amount bands are **data** (`openbank.aml.monitoring.counter-scheme.resource`). The file in this repository is synthetic; its bands mean nothing. `scheme_revision` is part of the counter key, so a changed band starts new counters.
+- Every movement counts under band `ALL` plus each band that contains its amount.
+- A movement is attributed (party, rail) and counted in one transaction by the `aml-movement-attribution` sweep. A booking with no originating transaction event is counted under rail `NONE` after `origin-grace`. A movement whose account has no known party stays uncounted and is retried.
+- Known limits: a reversal is booked by the ledger as an opposite movement and counts as one; counterparty attributes are on no event today.
+- These tables hold party and account identifiers and amounts. They are monitoring records under the same retention duty as cases; the period is not asserted here (ADR-0371).
