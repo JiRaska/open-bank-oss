@@ -68,9 +68,6 @@ spec:
               kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: kyb
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: kyc
         - namespaceSelector:
             matchLabels:
