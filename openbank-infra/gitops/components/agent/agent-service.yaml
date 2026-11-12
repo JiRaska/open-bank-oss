@@ -10,8 +10,8 @@
 # (AGENT_POLICY_ENFORCEMENT=block, ADR-0080 P0): an in-process charter allow-list denies
 # non-charter capabilities locally. This Deployment ALSO runs an OPA sidecar serving the
 # agents.rego bundle over localhost:8181 — the Phase-2 external PDP (ADR-0031 D2). Either
-# way the gate fails *safe*: a PDP connectivity error degrades to advisory (audits, never
-# hard-blocks) so a dead/missing sidecar can't lock the assistant out.
+# way the gate fails *closed* in block mode: a PDP connectivity error denies every tool call
+# (outcome pdp_unavailable_denied), so a dead/missing sidecar halts tool calls while the pod stays Ready.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -95,9 +95,9 @@ spec:
                   optional: false
             # ADR-0080 P0 (pentest FIND-S4-05): enforce the policy gate. With the in-process
             # charter allow-list, a capability outside the ui-assistant charter (e.g. AML reads)
-            # is denied locally — block makes that DENY actually stop the call. Allowed tools whose
-            # only PDP is the (not-yet-deployed) OPA sidecar still proceed: a PDP connectivity error
-            # degrades to advisory, so block does not lock out the assistant.
+            # is denied locally — block makes that DENY actually stop the call. Every other tool needs an
+            # ALLOW from the OPA sidecar: a PDP connectivity error denies the call (fail closed), so a
+            # sidecar outage halts all tool calls while the pod stays Ready.
             - name: AGENT_POLICY_ENFORCEMENT
               value: block
             # ADR-0031 D9 phase 2: the scheduled compliance-officer oversight sweep. Proposal-only
@@ -232,7 +232,7 @@ spec:
               value: "0.1"
             # Policy decision point: the OPA sidecar in this pod (localhost:8181), serving
             # the agents.rego bundle (ADR-0031 D2). AGENT_POLICY_ENFORCEMENT=block is already
-            # set above (ADR-0080 P0); the gate degrades to advisory if this PDP is unreachable.
+            # set above (ADR-0080 P0); the gate fails closed (denies every tool call) if this PDP is unreachable.
             - name: QUARKUS_REST_CLIENT_OPA_URL
               value: http://localhost:8181
             # ADR-0031 D9 P2 (Refs #703): Kafka event trigger for compliance-officer sweep.
