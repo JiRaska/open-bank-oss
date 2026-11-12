@@ -7,14 +7,15 @@ package com.openbank.lending.infrastructure.rest
 import com.openbank.lending.application.usecase.DeclineReviewRefusedException
 import com.openbank.lending.application.usecase.DeclineReviewUseCase
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecision
 import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
-import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
@@ -48,13 +49,21 @@ class DeclineReviewResource(private val reviews: DeclineReviewUseCase, private v
     @Path("/{id}/decision")
     @Authorize(action = "lending.declineReview.decide", resource = "#id")
     @Operation(summary = "Confirm the engine decline or overturn it (reviewer != applicant; reason mandatory)")
-    fun decide(@PathParam("id") id: String, request: DeclineReviewDecisionBody?): Uni<Response> {
+    fun decide(
+        @PathParam("id") id: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: DeclineReviewDecisionBody?,
+    ): Uni<Response> {
+        // #8351 money-path POST: the key is REQUIRED (libs-runtime maps the IllegalArgumentException to
+        // 400). The decision itself is replay-safe: a conditional UPDATE claims the REQUESTED row, so a
+        // retry answers 409 REVIEW_ALREADY_DECIDED instead of deciding twice.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
         val reviewId = runCatching { UUID.fromString(id) }.getOrNull()
             ?: return Uni.createFrom().item(
                 Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to "NOT_FOUND")).build(),
             )
         requireNotNull(request) { "request body is required" }
-        val outcome = runCatching { DeclineReviewStatus.valueOf(request.outcome.orEmpty()) }.getOrNull()
+        val outcome = runCatching { DeclineReviewDecision.valueOf(request.outcome.orEmpty()) }.getOrNull()
         requireNotNull(outcome) { "outcome must be CONFIRMED or OVERTURNED" }
         val decision = DeclineReviewDecisionRequest(outcome, request.reason.orEmpty())
         return reviews.decide(reviewId, decision, identity.principal?.name.orEmpty())

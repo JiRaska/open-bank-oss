@@ -10,6 +10,7 @@ import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecision
 import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
 import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.domain.model.LoanApplication
@@ -134,10 +135,10 @@ class DeclineReviewService(
             if (original == null) {
                 refused(DeclineReviewRefusedException.NOT_FOUND, "declined application not found")
             } else {
-                val overturn = request.outcome == DeclineReviewStatus.OVERTURNED
+                val overturn = request.outcome == DeclineReviewDecision.OVERTURNED
                 val successor = if (overturn) successorOf(original, reviewer) else null
                 val decided = review.copy(
-                    status = request.outcome,
+                    status = request.outcome.toStatus(),
                     reviewedBy = reviewer,
                     reviewedAt = OffsetDateTime.now(clock),
                     reviewReason = request.reason.trim(),

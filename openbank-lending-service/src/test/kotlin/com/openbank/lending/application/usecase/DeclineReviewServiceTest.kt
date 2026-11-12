@@ -10,6 +10,7 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecision
 import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
 import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.domain.model.LoanApplication
@@ -217,7 +218,7 @@ class DeclineReviewServiceTest {
         reviews.claimDecision(any(), any(), any(), any(), any(), any())
     } returns Uni.createFrom().item(rows)
 
-    private fun decide(review: DeclineReview, outcome: DeclineReviewStatus, reviewer: String = "reviewer-1") =
+    private fun decide(review: DeclineReview, outcome: DeclineReviewDecision, reviewer: String = "reviewer-1") =
         service.decide(
             review.id,
             DeclineReviewDecisionRequest(outcome, "income documents were not in the file"),
@@ -231,7 +232,7 @@ class DeclineReviewServiceTest {
         val review = pendingReview(app)
         claims()
 
-        val decided = decide(review, DeclineReviewStatus.CONFIRMED)
+        val decided = decide(review, DeclineReviewDecision.CONFIRMED)
 
         assertThat(decided.status).isEqualTo(DeclineReviewStatus.CONFIRMED)
         assertThat(decided.successorApplicationId).isNull()
@@ -245,7 +246,7 @@ class DeclineReviewServiceTest {
         val review = pendingReview(app)
         claims()
 
-        val decided = decide(review, DeclineReviewStatus.OVERTURNED, reviewer = "reviewer-7")
+        val decided = decide(review, DeclineReviewDecision.OVERTURNED, reviewer = "reviewer-7")
 
         val successor = saved.single()
         assertThat(decided.successorApplicationId).isEqualTo(successor.id.value)
@@ -267,7 +268,7 @@ class DeclineReviewServiceTest {
         val review = pendingReview(app)
         claims()
 
-        decide(review, DeclineReviewStatus.OVERTURNED)
+        decide(review, DeclineReviewDecision.OVERTURNED)
 
         assertThat(emitted).allSatisfy { assertThat(it.payload).doesNotContain("income documents") }
     }
@@ -277,7 +278,7 @@ class DeclineReviewServiceTest {
         val app = declined().also(::stubApp)
         val review = pendingReview(app)
 
-        assertThat(refusalCode { decide(review, DeclineReviewStatus.OVERTURNED, reviewer = party.toString()) })
+        assertThat(refusalCode { decide(review, DeclineReviewDecision.OVERTURNED, reviewer = party.toString()) })
             .isEqualTo(DeclineReviewRefusedException.SELF_REVIEW)
         assertThat(saved).isEmpty()
     }
@@ -288,7 +289,7 @@ class DeclineReviewServiceTest {
         val review = pendingReview(app)
         claims(rows = 0)
 
-        assertThat(refusalCode { decide(review, DeclineReviewStatus.OVERTURNED) })
+        assertThat(refusalCode { decide(review, DeclineReviewDecision.OVERTURNED) })
             .isEqualTo(DeclineReviewRefusedException.ALREADY_DECIDED)
         // The successor is written before the claim (foreign key), so it is the failed transaction
         // that removes it again. That rollback is NOT exercised here (mocks) nor in the IT.
@@ -301,21 +302,19 @@ class DeclineReviewServiceTest {
         val decidedReview = pendingReview(app).copy(status = DeclineReviewStatus.CONFIRMED).also {
             every { reviews.loadById(it.id) } returns Uni.createFrom().item(it)
         }
-        assertThat(refusalCode { decide(decidedReview, DeclineReviewStatus.OVERTURNED) })
+        assertThat(refusalCode { decide(decidedReview, DeclineReviewDecision.OVERTURNED) })
             .isEqualTo(DeclineReviewRefusedException.ALREADY_DECIDED)
 
         val unknown = pendingReview(app).also { every { reviews.loadById(it.id) } returns Uni.createFrom().nullItem() }
-        assertThat(refusalCode { decide(unknown, DeclineReviewStatus.CONFIRMED) })
+        assertThat(refusalCode { decide(unknown, DeclineReviewDecision.CONFIRMED) })
             .isEqualTo(DeclineReviewRefusedException.NOT_FOUND)
     }
 
     @Test
     fun `a decision needs a real reason and a decided outcome - impossible to overturn without a recorded reason`() {
-        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.OVERTURNED, "   short ") }
+        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewDecision.OVERTURNED, "   short ") }
             .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.OVERTURNED, "") }
-            .isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.REQUESTED, "a perfectly good reason") }
+        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewDecision.OVERTURNED, "") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
 

@@ -10,6 +10,18 @@ import java.util.UUID
 /** Where a customer-requested review of an engine decline stands. Its own enum: no boolean carries it. */
 enum class DeclineReviewStatus { REQUESTED, CONFIRMED, OVERTURNED }
 
+/** What a reviewer may decide: exactly the two decided states, so REQUESTED is unrepresentable as a decision. */
+enum class DeclineReviewDecision {
+    CONFIRMED,
+    OVERTURNED,
+    ;
+
+    fun toStatus(): DeclineReviewStatus = when (this) {
+        CONFIRMED -> DeclineReviewStatus.CONFIRMED
+        OVERTURNED -> DeclineReviewStatus.OVERTURNED
+    }
+}
+
 /**
  * A customer's request for human review of a decision-engine decline (GDPR Art. 22(3), EU AI Act
  * Art. 86, EBA/GL/2020/06 par. 54). One per application. The engine's outcome, reason codes and policy
@@ -34,9 +46,8 @@ data class DeclineReview(
 )
 
 /** The reviewer's decision. [reason] is mandatory (see [MIN_REASON_LENGTH]) and never leaves the service in events. */
-data class DeclineReviewDecisionRequest(val outcome: DeclineReviewStatus, val reason: String) {
+data class DeclineReviewDecisionRequest(val outcome: DeclineReviewDecision, val reason: String) {
     init {
-        require(outcome != DeclineReviewStatus.REQUESTED) { "outcome must be CONFIRMED or OVERTURNED" }
         require(reason.trim().length >= MIN_REASON_LENGTH) {
             "review reason must be at least $MIN_REASON_LENGTH characters"
         }

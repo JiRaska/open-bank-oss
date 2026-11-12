@@ -146,8 +146,14 @@ class DeclineReviewIT {
         post("/api/v1/lending/intake/applications/$applicationId/decline-review")
     }
 
-    private fun decideReview(reviewId: String, outcome: String, reason: String = REASON) = Given {
+    private fun decideReview(
+        reviewId: String,
+        outcome: String,
+        reason: String = REASON,
+        idempotencyKey: String? = UUID.randomUUID().toString(),
+    ) = Given {
         contentType("application/json")
+        idempotencyKey?.let { header("Idempotency-Key", it) }
         body("""{"outcome":"$outcome","reason":"$reason"}""")
     } When {
         post("/api/v1/lending/decline-reviews/$reviewId/decision")
@@ -237,6 +243,7 @@ class DeclineReviewIT {
     fun `5 - a reason is mandatory - confirming keeps the application declined and is final`() {
         decideReview(confirmedReview, "CONFIRMED", reason = "short") Then { statusCode(400) }
         decideReview(confirmedReview, "REQUESTED") Then { statusCode(400) }
+        decideReview(confirmedReview, "CONFIRMED", idempotencyKey = null) Then { statusCode(400) }
 
         decideReview(confirmedReview, "CONFIRMED") Then {
             statusCode(200)
