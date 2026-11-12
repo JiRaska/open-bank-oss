@@ -28,7 +28,7 @@
 |---|---|
 | Access (Art. 15) | `GET /api/v1/parties/{id}` returns the subject's record (encrypted birth number is not exposed) |
 | Rectification (Art. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — all audit-logged via events |
-| Erasure (Art. 17) | **Implemented** — on `PARTY_ERASED` every personal column and identifier (encrypted RČ, blind indices, document numbers) is anonymised or deleted in place; the anonymised shell row is kept under an `erased_at` stamp. The AML record itself is retained by kyc-service. See `04-data` (Erasure) |
+| Erasure (Art. 17) | **Partial** — on `PARTY_ERASED` the party's personal columns and identifiers (encrypted RČ, blind indices, document numbers) are anonymised or deleted in place, the anonymised shell row is kept under an `erased_at` stamp, and verification cases are anonymised when linked to the party or attributable to it by its RČ blind index or (under a namesake rule) its match key. Known gaps: no backfill of erasures published before the consumer's first poll, name-keyed cases that cannot be attributed safely are left, no metric or alert on the outcome. The AML record itself is retained by kyc-service. See `04-data` (Erasure) |
 | Restriction (Art. 18) | `PATCH /status` → `SUSPENDED`; relationships can be terminated |
 | Portability (Art. 20) | personal data is structured JSON via the read API (no dedicated export endpoint today — TBD) |
 | Object (Art. 21) | N/A (no marketing/profiling processing in this service) |

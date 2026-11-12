@@ -88,10 +88,25 @@ pid-service konzumuje `PARTY_ERASED` z `openbank.party.events` party-service (ka
 | `gender`, `birthplace`, `nationalities`, `email`, `phone`, `data_box_id`, adresní sloupce, `rob_synced_at`, `case_metadata` | NULL / prázdné |
 | `party_relationships.termination_reason` (volný text) | NULL |
 | `parties.status` | `TERMINATED`; nastaveno `erased_at` |
-| řádky `identity_verification_case`, na které byla party navázána (`first_link_party_id` / `final_link_party_id`) | jméno, datum narození, místo narození, národnosti, `blind_index`, `first_notes` vymazány; `dedup_key` nahrazen `ERASED:<id případu>`; nastaveno `erased_at`. Případy, kde byla party jen kandidát, popisují někoho jiného a zůstávají |
+| řádky `identity_verification_case`, na které byla party navázána (`first_link_party_id` / `final_link_party_id`) | jméno, datum narození, místo narození, národnosti, `blind_index`, `first_notes` vymazány; `dedup_key` nahrazen `ERASED:<id případu>`; nastaveno `erased_at` |
+| nenavázané případy `RN:`, jejichž `blind_index` je slepý index RČ party (otevřené, čekající, REJECT) | anonymizovány jako výše: žadatel předložil identifikátor vymazané osoby a žádné rozhodnutí neříká, že šlo o někoho jiného |
+| nenavázané případy `RN:` s tímto indexem rozhodnuté DISTINCT_NEW | odstraněn jen `blind_index` a `dedup_key` (identifikátor vymazané osoby); snímek žadatele zůstává, protože čtyři oči rozhodly, že jde o jinou osobu se stejným identifikátorem |
+| nenavázané případy `NK:` / `PK:`, jejichž klíč se rovná match key party (otevřené, čekající, REJECT, DISTINCT_NEW) | anonymizovány jako výše **jen když** party není kandidátem případu **a** každá další živá party se stejným match key kandidátem je; jinak ponechány (viz Nepokryto) |
+| pid pro vymazané id nemá řádek | zapíše se **tombstone** (sentinel jméno/datum narození, `status = TERMINATED`, `erased_at`, zástupný `party_type = NATURAL_PERSON`, žádné osobní údaje), takže pozdější register-identity pro toto id je odmítnuto |
 | `kyc_level`, `pep_flag`, `sanctions_flag`, časová razítka, jména operátorů | ponecháno: po anonymizaci řádku už nejsou přiřaditelné osobě |
 
-Výmaz je idempotentní: `erased_at` je značka a nikdy se nepřepisuje, opakované doručení znovu provede celé přepsání a mazání, takže cokoli zapsané po prvním výmazu se opět vyčistí. Zápisy do vymazané party (register-identity, úpravy kontaktu/KYC/stavu, připojení externího id, vztahy, navázání verifikačního případu) jsou odmítnuty s 409 (`PartyErasedException`, záchytná kontrola uvnitř zápisové transakce repozitáře). Selhání se opakují a poté jdou do DLQ. Nepokryto: krátkodobé tabulky EUDI nabídek/prezentací jsou klíčované jednorázovými kódy, ne party id, a samy expirují; `pid_outbox` nemá v kódu zapisovatele. Plánované fyzické smazání zbytků po retenční době (jako retenční scheduler kyc-service) je sledovaný navazující úkol; zbytek neobsahuje osobní údaje.
+Výmaz je idempotentní: `erased_at` je značka a nikdy se nepřepisuje, opakované doručení znovu provede celé přepsání a mazání, takže cokoli zapsané po prvním výmazu se opět vyčistí. Klíče, podle kterých se hledají nenavázané případy (slepý index RČ, match key), se čtou dřív, než je krok party smaže; krok nenavázaných případů běží před krokem party a znovu po něm.
+
+Zápisy do vymazané party jsou odmítnuty s 409 (`PartyErasedException`). Úpravy party (kontakt, sync, KYC, stav, přechod případu, připojení externího id), přidání/ukončení vztahu a navázání verifikačního případu kontrolují `erased_at` pod `SELECT ... FOR UPDATE` na řádku party uvnitř zápisové transakce, tedy pod zámkem, který bere výmaz. register-identity a navázání důkazu k případu ho kontrolují jen čtením (navázání důkazu v pid nic neukládá; loguje a publikuje událost). Selhání se opakují a poté jdou do DLQ.
+
+**Nepokryto** (známé mezery, sledované pod #15755):
+
+- **Žádný backfill.** Konzumentská skupina začíná na nejnovějším offsetu, takže `PARTY_ERASED` publikované před prvním pollem konzumenta se zde nikdy neprovede. Srovnání s vymazanými party v party-service je navazující úkol.
+- **Žádná metrika ani alert na výsledek výmazu**; ukazuje ho jen řádek logu (party id, výsledek, počet případů) a DLQ.
+- **Případy podle jména, které nelze bezpečně přiřadit, zůstávají**: když match key sdílí živý jmenovec, který není kandidátem (mohl by být žadatelem), nebo když uložené atributy party už nedávají klíč, se kterým byl případ otevřen (např. místo narození uložené jinak než ve snímku žadatele). Zbytkové riziko opačným směrem: žadatel, který se nikdy nestal party a jehož jmenovec byl později registrován cestou mimo resolution a je jedinou živou party s tímto klíčem, o tento případ přijde, když je jmenovec vymazán.
+- **Opakování po potvrzení kroku party** už klíče nepřečte, takže nenavázaný případ otevřený mezi oběma kroky doručení, které pak selhalo, se znovu nenajde.
+- Krátkodobé tabulky EUDI nabídek/prezentací jsou klíčované jednorázovými kódy, ne party id, a samy expirují; `pid_outbox` nemá v kódu zapisovatele.
+- Plánované fyzické smazání zbytků po retenční době (jako retenční scheduler kyc-service) je navazující úkol; zbytek neobsahuje osobní údaje.
 
 ## Lineage (`governance.yaml`)
 

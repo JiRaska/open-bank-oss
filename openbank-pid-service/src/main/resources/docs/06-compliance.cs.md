@@ -28,7 +28,7 @@
 |---|---|
 | Přístup (čl. 15) | `GET /api/v1/parties/{id}` vrátí záznam subjektu (šifrované rodné číslo se nevystavuje) |
 | Oprava (čl. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — vše audit-logováno přes události |
-| Výmaz (čl. 17) | **Implementováno** — po `PARTY_ERASED` se všechny osobní sloupce a identifikátory (šifrované RČ, slepé indexy, čísla dokladů) anonymizují nebo smažou na místě; anonymizovaný zbytek řádku zůstává s razítkem `erased_at`. Samotný AML záznam drží kyc-service. Viz `04-data` (Výmaz) |
+| Výmaz (čl. 17) | **Částečně** — po `PARTY_ERASED` se osobní sloupce a identifikátory party (šifrované RČ, slepé indexy, čísla dokladů) anonymizují nebo smažou na místě, anonymizovaný zbytek řádku zůstává s razítkem `erased_at` a verifikační případy se anonymizují, pokud jsou na party navázané nebo jí přiřaditelné slepým indexem RČ či (podle pravidla jmenovců) match key. Známé mezery: žádný backfill výmazů publikovaných před prvním pollem konzumenta, případy podle jména, které nelze bezpečně přiřadit, zůstávají, žádná metrika ani alert na výsledek. Samotný AML záznam drží kyc-service. Viz `04-data` (Výmaz) |
 | Omezení (čl. 18) | `PATCH /status` → `SUSPENDED`; vztahy lze ukončit |
 | Přenositelnost (čl. 20) | osobní data jsou strukturované JSON přes read API (dedikovaný export endpoint dnes není — TBD) |
 | Námitka (čl. 21) | N/A (v této službě není marketing/profilování) |

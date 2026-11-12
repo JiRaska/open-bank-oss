@@ -4,8 +4,11 @@
 
 package com.openbank.pid.infrastructure.persistence.repository
 
+import com.openbank.libs.identity.MatchKey
+import com.openbank.pid.application.port.out.ApplicantCaseKeys
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import com.openbank.pid.application.usecase.PartyErasedException
+import com.openbank.pid.domain.model.CaseVerdict
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
 import com.openbank.pid.infrastructure.persistence.entity.PartyEntity
@@ -26,6 +29,7 @@ import java.util.UUID
  * request-scoped auto-session is not propagated across the coroutine (mirrors PartyRepositoryImpl).
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // the port plus the small private steps of the GDPR erasure queries
 class VerificationCaseRepositoryImpl :
     VerificationCaseRepository,
     PanacheRepository<VerificationCaseEntity> {
@@ -107,17 +111,84 @@ class VerificationCaseRepositoryImpl :
     }
 
     override suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int = Panache.withTransaction {
-        update(
-            "applicantGivenName = ?2, applicantFamilyName = ?2, applicantBirthdate = ?3, " +
-                "applicantBirthplace = null, applicantNationalities = '', blindIndex = null, " +
-                "dedupKey = concat('ERASED:', cast(id as string)), firstNotes = null, erasedAt = ?4 " +
-                "where (firstLinkPartyId = ?1 or finalLinkPartyId = ?1) and erasedAt is null",
-            partyId,
-            ERASED,
-            ERASED_BIRTHDATE,
-            erasedAt,
-        )
+        anonymiseWhere("(firstLinkPartyId = ?4 or finalLinkPartyId = ?4)", erasedAt, partyId)
     }.awaitSuspending()
+
+    override suspend fun anonymizeApplicantCases(keys: ApplicantCaseKeys, erasedAt: Instant): Int =
+        Panache.withTransaction {
+            byBlindIndex(keys.birthNumberBlindIndex, erasedAt).flatMap { blind ->
+                byNameKey(keys, erasedAt).map { named -> blind + named }
+            }
+        }.awaitSuspending()
+
+    /** `RN:` cases carrying the erased person's RČ blind index (rule in the port KDoc). */
+    private fun byBlindIndex(blindIndex: String?, erasedAt: Instant): Uni<Int> {
+        if (blindIndex == null) return Uni.createFrom().item(0)
+        return anonymiseWhere(
+            "blindIndex = ?4 and not (status = ?5 and coalesce(finalVerdict, '') = ?6)",
+            erasedAt,
+            blindIndex,
+            VerificationCaseStatus.DECIDED.name,
+            CaseVerdict.DISTINCT_NEW.name,
+        ).flatMap { full ->
+            // What is left with this index is DISTINCT_NEW: a decided different person. Remove only
+            // the erased person's identifier; erased_at stays null because the applicant is kept.
+            update(
+                "blindIndex = null, dedupKey = concat('ERASED:', cast(id as string)) " +
+                    "where blindIndex = ?1 and erasedAt is null",
+                blindIndex,
+            ).map { stripped -> full + stripped }
+        }
+    }
+
+    /** `NK:`/`PK:` cases whose applicant can only be the erased person (rule in the port KDoc). */
+    private fun byNameKey(keys: ApplicantCaseKeys, erasedAt: Instant): Uni<Int> =
+        find("dedupKey in ?1 and erasedAt is null", listOf("NK:${keys.matchKey}", "PK:${keys.matchKey}")).list()
+            .flatMap { cases ->
+                if (cases.isEmpty()) {
+                    Uni.createFrom().item(0)
+                } else {
+                    liveNamesakes(keys).flatMap { namesakes ->
+                        val eligible = cases.filter { case ->
+                            val candidates = case.candidatePartyIds.split(',').filter { it.isNotBlank() }
+                                .map(UUID::fromString).toSet()
+                            keys.partyId !in candidates && candidates.containsAll(namesakes)
+                        }.map { it.id }
+                        if (eligible.isEmpty()) {
+                            Uni.createFrom().item(0)
+                        } else {
+                            anonymiseWhere("id in ?4", erasedAt, eligible)
+                        }
+                    }
+                }
+            }
+
+    /**
+     * Every live (not erased) party other than the erased one whose stored attributes produce the
+     * same match key. Selected by exact birthdate and compared on the normalised key in memory, so a
+     * namesake spelled with diacritics is still found (a `LOWER(family_name)` filter would miss it).
+     */
+    private fun liveNamesakes(keys: ApplicantCaseKeys): Uni<Set<UUID>> = Panache.getSession().flatMap { session ->
+        session.createSelectionQuery(
+            "from PartyEntity where birthdate = :birthdate and erasedAt is null and id <> :self",
+            PartyEntity::class.java,
+        ).setParameter("birthdate", keys.birthdate).setParameter("self", keys.partyId).resultList
+    }.map { parties ->
+        parties.filter { MatchKey.of(it.familyName, it.givenName, it.birthdate, it.birthplace) == keys.matchKey }
+            .map { it.id }.toSet()
+    }
+
+    /** The full anonymisation of a case row; [condition] uses ?4 onwards for [params]. */
+    private fun anonymiseWhere(condition: String, erasedAt: Instant, vararg params: Any): Uni<Int> = update(
+        "applicantGivenName = ?1, applicantFamilyName = ?1, applicantBirthdate = ?2, " +
+            "applicantBirthplace = null, applicantNationalities = '', blindIndex = null, " +
+            "dedupKey = concat('ERASED:', cast(id as string)), firstNotes = null, erasedAt = ?3 " +
+            "where $condition and erasedAt is null",
+        ERASED,
+        ERASED_BIRTHDATE,
+        erasedAt,
+        *params,
+    )
 
     private companion object {
         const val ERASED = "GDPR_ERASED"

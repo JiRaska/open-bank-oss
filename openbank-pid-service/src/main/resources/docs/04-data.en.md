@@ -89,10 +89,25 @@ pid-service consumes `PARTY_ERASED` from party-service's `openbank.party.events`
 | `gender`, `birthplace`, `nationalities`, `email`, `phone`, `data_box_id`, address columns, `rob_synced_at`, `case_metadata` | NULL / empty |
 | `party_relationships.termination_reason` (free text) | NULL |
 | `parties.status` | `TERMINATED`; `erased_at` stamped |
-| `identity_verification_case` rows the party was linked to (`first_link_party_id` / `final_link_party_id`) | applicant name, birthdate, birthplace, nationalities, `blind_index`, `first_notes` blanked; `dedup_key` replaced by `ERASED:<case id>`; `erased_at` stamped. Cases where the party was only a candidate describe someone else and are untouched |
+| `identity_verification_case` rows the party was linked to (`first_link_party_id` / `final_link_party_id`) | applicant name, birthdate, birthplace, nationalities, `blind_index`, `first_notes` blanked; `dedup_key` replaced by `ERASED:<case id>`; `erased_at` stamped |
+| unlinked `RN:` cases whose `blind_index` is the party's RČ blind index (open, awaiting, REJECT) | anonymised as above: the applicant presented the erased person's national identifier and no decision says it was someone else |
+| unlinked `RN:` cases with that blind index decided DISTINCT_NEW | only `blind_index` and `dedup_key` removed (the erased person's identifier); the applicant snapshot is kept, because four eyes decided it is a different person sharing the identifier |
+| unlinked `NK:` / `PK:` cases whose key equals the party's match key (open, awaiting, REJECT, DISTINCT_NEW) | anonymised as above **only when** the party is not one of the case's candidates **and** every other live party with the same match key is a candidate; otherwise left (see Not covered) |
+| no pid row for the erased id | a **tombstone** row is written (sentinel name/birthdate, `status = TERMINATED`, `erased_at`, placeholder `party_type = NATURAL_PERSON`, no personal data), so a later register-identity for the id is refused |
 | `kyc_level`, `pep_flag`, `sanctions_flag`, timestamps, operator names on cases | kept: no longer attributable to a person once the row above is anonymised |
 
-The erase is idempotent: `erased_at` is the marker and is never overwritten, and a re-delivery re-runs the full overwrite and deletes, so anything written to the row after the first erase is cleaned again. Writes to an erased party (register-identity, contact/KYC/status updates, external-id link, relationships, linking a verification case to it) are refused with 409 (`PartyErasedException`, backstopped inside the repository's write transaction). Failures are retried then dead-lettered. Not covered, and why: the short-TTL EUDI offer/presentation tables are keyed by single-use codes, not by party id, and expire by themselves; `pid_outbox` has no writer in the current code. A scheduled hard-delete of shell rows after the retention period (as kyc-service's retention scheduler does for its cases) is a tracked follow-up; the shell holds no personal data.
+The erase is idempotent: `erased_at` is the marker and is never overwritten, and a re-delivery re-runs the full overwrite and deletes, so anything written to the row after the first erase is cleaned again. The keys that find unlinked cases (RČ blind index, match key) are read before the party step deletes them; the unlinked-case step runs before the party step and again after it.
+
+Writes to an erased party are refused with 409 (`PartyErasedException`). Party updates (contact, sync, KYC, status, case transition, external-id link), relationship add/terminate and linking a verification case check `erased_at` under `SELECT ... FOR UPDATE` on the party row inside the writing transaction, the lock the erase takes. register-identity and case-evidence linking check it on a read only (evidence linking stores nothing in pid; it logs and publishes an event). Failures are retried then dead-lettered.
+
+**Not covered** (known gaps, tracked under #15755):
+
+- **No backfill.** The consumer group starts at the latest offset, so a `PARTY_ERASED` published before the consumer first polled is never applied here. Reconciling against party-service's erased parties is a follow-up.
+- **No metric or alert on the erasure outcome**; only the log line (party id, outcome, case count) and the DLQ show it.
+- **Name-keyed cases that cannot be attributed safely are left**: when a live namesake who is not a candidate shares the match key (it could be the applicant), or when the party's stored attributes no longer give the key the case was opened with (e.g. a birthplace stored differently from the applicant snapshot). The residual risk in the other direction: an applicant who never became a party, whose namesake was later registered by a path that bypasses resolution and is the only live party with that key, loses that case when the namesake is erased.
+- **A retry after the party step committed** can no longer read the keys, so an unlinked case opened between the two unlinked-case steps of a delivery that then failed is not found again.
+- The short-TTL EUDI offer/presentation tables are keyed by single-use codes, not by party id, and expire by themselves; `pid_outbox` has no writer in the current code.
+- A scheduled hard-delete of shell rows after the retention period (as kyc-service's retention scheduler does for its cases) is a follow-up; the shell holds no personal data.
 
 ## Lineage (`governance.yaml`)
 
