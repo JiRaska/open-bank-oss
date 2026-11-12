@@ -21,8 +21,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0099"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0099"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -31,14 +31,14 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0099"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0099"
   annotations:
     # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 2 * * 0' plus slack.
     openbank.tech/max-success-age-seconds: "1296000"
     # Describe what this Job does for the audit trail and runbook readers.
-    openbank.io/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
-    openbank.io/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"
+    open-bank.tech/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
+    open-bank.tech/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"
 spec:
   # Sunday 02:00 UTC — outside banking hours, within PCI DSS 90-day window.
   schedule: "0 2 * * 0"
@@ -61,7 +61,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/part-of: openbao
-            openbank.io/plane: platform
+            open-bank.tech/plane: platform
         spec:
           serviceAccountName: openbao-db-admin
           restartPolicy: OnFailure

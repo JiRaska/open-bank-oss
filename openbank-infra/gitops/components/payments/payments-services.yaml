@@ -804,7 +804,7 @@ metadata:
   name: domestic-payment
   namespace: payments
   annotations:
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
@@ -1876,7 +1876,7 @@ metadata:
   name: standing-order-service
   namespace: payments
   annotations:
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments

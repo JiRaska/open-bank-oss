@@ -22,7 +22,7 @@ kind: Rollout
 metadata:
   name: customer-edge
   annotations:
-    openbank.io/service-dependencies: communication/communication-service
+    open-bank.tech/service-dependencies: communication/communication-service
   namespace: customer-edge
   labels:
     app.kubernetes.io/name: customer-edge

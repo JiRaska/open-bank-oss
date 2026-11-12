@@ -27,8 +27,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0031"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0031"
 data:
   configure.sh: |
     #!/bin/sh
@@ -120,8 +120,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0031"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0031"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -130,13 +130,13 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0031"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0031"
   annotations:
     # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '15 2 * * 0' plus slack.
     openbank.tech/max-success-age-seconds: "1296000"
-    openbank.io/description: "ADR-0031 D3b: re-asserts the OpenBao agent-identity PKI config weekly"
-    openbank.io/runbook: "docs/runbooks/0007-openbao-agent-identity.md"
+    open-bank.tech/description: "ADR-0031 D3b: re-asserts the OpenBao agent-identity PKI config weekly"
+    open-bank.tech/runbook: "docs/runbooks/0007-openbao-agent-identity.md"
 spec:
   # Sunday 02:15 UTC — staggered after the db-rotation sync (02:00), outside banking hours.
   schedule: "15 2 * * 0"
@@ -154,7 +154,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/part-of: openbao
-            openbank.io/plane: platform
+            open-bank.tech/plane: platform
         spec:
           serviceAccountName: openbao-agent-identity-admin
           restartPolicy: OnFailure
