@@ -111,21 +111,49 @@ def blames_row(finding: tuple, rows: set[tuple[str, str]]) -> bool:
                for row, mitigation in rows)
 
 
+def _declaring_files(ref: str, root: pathlib.Path, comp: str, cls: str, run=subprocess.run) -> set[str]:
+    """Files under `<comp>/src/test` at `ref` that DECLARE class/object `cls` (a mention is not a declaration)."""
+    decl = re.compile(rf"^[ \t]*(?:(?:public|internal|private|protected|abstract|open|final|data|sealed|static)\s+)*"
+                      rf"(?:class|object)\s+{re.escape(cls)}\b", re.M)
+    listed = run(["git", "-C", str(root), "grep", "-l", "-w", "-F", "-e", cls, ref, "--", f"{comp}/src/test"],
+                 capture_output=True, text=True, timeout=60)
+    if listed.returncode not in (0, 1):
+        raise subprocess.SubprocessError(listed.stderr)
+    out = set()
+    for line in listed.stdout.splitlines():
+        path = line.split(":", 1)[1] if ":" in line else line
+        text = run(["git", "-C", str(root), "show", f"{ref}:{path}"], capture_output=True, text=True,
+                   timeout=60, check=True).stdout
+        if decl.search(text):
+            out.add(path)
+    return out
+
+
 def added_test_classes(base: str, root: pathlib.Path, run=subprocess.run) -> set[tuple[str, str]]:
-    """(component, class) for test sources this diff ADDS under `<component>/src/test/`; empty when unknown."""
+    """(component, class) for classes that are truly NEW in this diff: a file under `<component>/src/test/`
+    is added, no file in that component declared the class at the merge-base, and at HEAD exactly one file
+    declares it (an added one). A second file reusing an existing class's name must not launder its result."""
     if not base:
         return set()
     try:
         diff = run(["git", "-C", str(root), "diff", "--name-only", "--diff-filter=A", f"{base}...HEAD"],
                    capture_output=True, text=True, timeout=60, check=True).stdout
+        point = run(["git", "-C", str(root), "merge-base", base, "HEAD"],
+                    capture_output=True, text=True, timeout=60, check=True).stdout.strip()
+        added: dict[tuple[str, str], set[str]] = {}
+        for line in diff.splitlines():
+            m = re.fullmatch(r"([^/]+)/src/test/(?:.+/)?([^/]+)\.(?:kt|java)", line.strip())
+            if m:
+                added.setdefault((m.group(1), m.group(2)), set()).add(line.strip())
+        out = set()
+        for (comp, cls), files in added.items():
+            if _declaring_files(point, root, comp, cls, run):
+                continue
+            if len(heads := _declaring_files("HEAD", root, comp, cls, run)) == 1 and heads <= files:
+                out.add((comp, cls))
+        return out
     except (OSError, subprocess.SubprocessError):
         return set()
-    out = set()
-    for line in diff.splitlines():
-        m = re.fullmatch(r"([^/]+)/src/test/(?:.+/)?([^/]+)\.(?:kt|java)", line.strip())
-        if m:
-            out.add((m.group(1), m.group(2)))
-    return out
 
 
 def is_pending_new_test(finding: tuple, added: set[tuple[str, str]]) -> bool:
@@ -286,13 +314,27 @@ def git_ratchet_self_test(parse) -> int:
         new_model.write_text(table + "| T1 | Replay | `RedTest` asserts it |\n")
         git("add", "."); git("commit", "-qm", "model")
         cases.append(("every row of a new model is touched", touched_rows("base", root, parse)["n"], {("T1", "`RedTest` asserts it")}))
-        for rel in ("m/src/test/kotlin/x/AddedIT.kt", "m/src/main/kotlin/x/NotATest.kt", "m/src/test/kotlin/x/Sub/AddedAlso.java",
-                    "m/src/test/kotlin/x/Existing.kt"):
+        git("branch", "pre")
+        files = {"m/src/test/kotlin/x/AddedIT.kt": "class AddedIT {}\n",
+                 "m/src/main/kotlin/x/NotATest.kt": "class NotATest {}\n",
+                 "m/src/test/kotlin/x/Sub/Dup.kt": "class Dup {}\n",
+                 "m/src/test/kotlin/y/Dup.kt": "internal class Dup {}\n",
+                 "m/src/test/kotlin/x/Mention.kt": "class Other { val a = ReusedIT() }\n"}
+        for rel, body in files.items():
             (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            (root / rel).write_text("x\n")
+            (root / rel).write_text(body)
         git("add", "."); git("commit", "-qm", "tests")
-        cases.append(("only src/test sources are added classes, matched by file name",
-                      added_test_classes("base", root), {("m", "AddedIT"), ("m", "AddedAlso"), ("m", "Existing")}))
+        cases.append(("single new class passes; main source, duplicate declarations excluded",
+                      added_test_classes("pre", root), {("m", "AddedIT")}))
+        (root / "m/src/test/kotlin/z").mkdir()
+        (root / "m/src/test/kotlin/z/Existing.kt").write_text("class Existing {}\n")
+        git("add", "."); git("commit", "-qm", "existing")
+        git("branch", "pre2")
+        (root / "m/src/test/kotlin/w").mkdir()
+        (root / "m/src/test/kotlin/w/Existing.kt").write_text("class Existing {}\n")
+        git("add", "."); git("commit", "-qm", "reuse name")
+        cases.append(("an added file reusing an existing class name is not new",
+                      added_test_classes("pre2", root), set()))
         cases.append(("no base knows no added tests", added_test_classes("", root), set()))
     bad = [name for name, got, want in cases if got != want]
     print(f"git ratchet self-test: {len(cases)} cases, failed={bad}")
