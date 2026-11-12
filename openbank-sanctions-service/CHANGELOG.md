@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.5...sanctions-service-v0.18.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **sanctions:** unwrap legacy jsonb string payloads so check list reads again ([#15606](https://github.com/JiRaska/open-bank-oss/issues/15606)) ([c15d88f](https://github.com/JiRaska/open-bank-oss/commit/c15d88f8fc990629a103d02ed25e7a0a3483513c))
+
 ## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.4...sanctions-service-v0.18.5) (2026-11-07)
 
 
