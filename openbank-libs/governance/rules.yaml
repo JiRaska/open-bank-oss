@@ -524,7 +524,7 @@ change_requirements:
     applies_to: "every CNPG Cluster manifest under openbank-infra/gitops"
     requires:
       - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
-         openbank.io/backup-exempt-reason with a non-empty reason"
+         open-bank.tech/backup-exempt-reason with a non-empty reason"
     gate: cnpg-backup-declared-gate
     # GRADUATED EARLY, 13 days before its 2026-09-15 date, because the same PR made the gate
     # able to fail at all. It carried `mode: enforced` from the day it was added (#4993) while

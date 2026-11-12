@@ -1113,7 +1113,7 @@ gates:
   # long-lived credential with no expiry anywhere in the system that serves it. The
   # weekly credential-inventory lane lists them; this gate stops the list from growing:
   # a NEW ExternalSecret manifest referencing a static path must carry
-  # `openbank.io/rotation-deadline: YYYY-MM-DD` (future, valid date). Dynamic
+  # `open-bank.tech/rotation-deadline: YYYY-MM-DD` (future, valid date). Dynamic
   # `database/creds/…` references are exempt by construction. Diff-scoped, PR-only.
   - id: credential-deadline-ratchet
     name: "new static ExternalSecret must declare a rotation deadline (ADR-0279 #18, enforced)"
@@ -1806,7 +1806,7 @@ gates:
   # unblock. That question is now answered (backed up, same #863 pattern as the rest of the
   # fleet), the gitops-visible count is 0, and an advisory gate that has correctly named the same
   # cluster since 2026-08-16 with nothing happening is a finding nobody is required to read. The
-  # exemption remains an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`),
+  # exemption remains an ANNOTATION ON THE CLUSTER (`open-bank.tech/backup-exempt-reason`),
   # deliberately not a list kept beside the manifests: a separate list drifts from what it
   # describes and nothing notices, which is the defect this repo keeps re-finding. So a future
   # genuinely-disposable database is still one annotation away from green, and that annotation

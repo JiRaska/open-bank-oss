@@ -4,4 +4,4 @@ metadata:
   name: control-liveness-sentinel
   labels:
     app.kubernetes.io/part-of: openbank
-    openbank.io/component: control-liveness-sentinel
+    open-bank.tech/component: control-liveness-sentinel

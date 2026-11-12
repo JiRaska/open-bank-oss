@@ -11,7 +11,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "-3"
   name: incentive
   labels:
-    openbank.io/plane: app
+    open-bank.tech/plane: app
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
