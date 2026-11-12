@@ -18,6 +18,8 @@ openbank-infra/scripts/build-push-service.sh ledger-service
 
 The build uses the `openbank.quarkus-service` convention plugin (ADR-0049 D1). Kover floor is enforced at **40%** lines (`koverVerify` wired into `check`); money-path target is 70%. Provider-side Pact verification runs against the shared `pacts/` dir (ADR-0063).
 
+The standard Gradle `test` task caps its JVM heap at 3 GiB, with a 2 GiB cap for specialized test tasks.
+
 ## Endpoints
 
 | Path | Port | Purpose |
@@ -123,6 +125,14 @@ Per-service path-scoped CI (only changed services build). Release axis is owned 
 ### FINREP Pact fixture
 
 Broker FINREP verification derives the reporting month from the selected contract requests and uses a dedicated test database. Fixture reset refuses foreign closed-period IDs and retains the immutable evidence trigger. Regression tests cover historical June 2026 and current June 2000 fixtures in both replay orders, including rejection of evidence DELETE. Production frozen-evidence validation is unchanged.
+
+## Required synthetic journal origin
+
+`POST /api/v1/journals/synthetic` applies the journal posting rules and requires a verified
+synthetic origin. A caller without the trusted workload assertion receives HTTP 403 before
+posting. Reusing an idempotency key across origin classifications returns HTTP 409. An older
+ledger image has no synthetic posting route, so the transaction worker's synthetic request fails
+before booking.
 
 ## Shared configuration defaults
 

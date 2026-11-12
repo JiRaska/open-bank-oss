@@ -186,6 +186,13 @@ allowed_reasons contains "service-tax-reporting-account-read" if {
 	input.action == "account.list"
 }
 
+allowed_reasons contains "service-gsft-deposit-roster" if {
+	input.principal.type == "HUMAN"
+	not input.principal.service_account == null
+	machine_named("service-account-openbank-tax-reporting")
+	input.action == "account.gsft.roster"
+}
+
 # ADR-0335 D2 — declared callers of the ownership projection. pension-service's own client (`openbank-pension`, ROLE_API only) verifies that a
 # payout/own-account IBAN belongs to the participant and is active. It gets the ownership
 # projection (AccountOwnershipResource: the answer is exactly {owned, active}, identical for an

@@ -10,7 +10,7 @@
 | **UN Security Council Resolutions** | UN consolidated sanctions | `UN_CONSOLIDATED` list always enabled |
 | **AMLD 6 (EU 2018/1673)** | Enhanced AML obligations; 10-year record retention | All `SanctionsCheck` records retained 10 years; GDPR erasure overridden |
 | **PSD2 (EU 2015/2366)** | Execution of payment transactions | Sanctions check is a mandatory gate before payment execution (ADR-0032) |
-| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | `FATF_HIGH_RISK` list flags transfers to/from high-risk countries |
+| **FATF Recommendations** | High-risk jurisdictions enhanced due diligence | A screen carrying `country` or `bankIdentifier` is matched against the jurisdiction reference data (versioned, maintained by reviewed migration; loaded with the EU list of high-risk third countries, Delegated Regulation (EU) 2016/1675 — the FATF lists themselves are not loaded yet; the age of each list is a metric with an alert) |
 | **Act No. 1/2023 Coll.** | Czech national sanctions list kept by MZV | `CNB_DOMESTIC` list (imported from `cz_national_sanctions`) |
 | **Regulation No. 210/2008 Coll.** | Czech anti-terrorism designations; a separate legal regime from the national sanctions list | `CZ_TERRORISTS` list imported from official e-Sbírka SPARQL open data, never the commercially licensed OpenSanctions mirror |
 | **GDPR (EU 2016/679)** | PII in screening requests (name, DoB, identifiers) | PII masked in logs; Art. 6(1)(c) legal obligation basis; erasure overridden by AMLD |

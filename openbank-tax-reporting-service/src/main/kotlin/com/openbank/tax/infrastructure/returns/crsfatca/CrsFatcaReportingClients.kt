@@ -59,6 +59,14 @@ interface AccountReportingClient {
         @QueryParam("limit") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): CursorPage<AccountSummaryDto>
+
+    @GET
+    @Path("/reporting/deposits")
+    suspend fun depositRoster(
+        @QueryParam("asOf") relevantDay: LocalDate,
+        @QueryParam("limit") limit: Int,
+        @QueryParam("cursor") cursor: String?,
+    ): CursorPage<DepositRosterAccountDto>
 }
 
 /** balance-service's `GET /api/v1/balances/{accountId}/{currency}` (statement point-in-time read). */
@@ -104,6 +112,15 @@ data class AccountSummaryDto(
     val closedAt: Instant?,
     /** CURRENT/SAVINGS/TERM_DEPOSIT/NOSTRO/GL_*; the GSFT roster keeps deposit types only. */
     val accountType: String? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class DepositRosterAccountDto(
+    val id: UUID,
+    val accountNumber: String,
+    val partyId: UUID,
+    val currencyCode: String,
+    val accountType: String?,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

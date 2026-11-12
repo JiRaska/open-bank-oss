@@ -201,7 +201,10 @@ class AccountPactFolderProviderVerificationTest {
         // ADR-0340 B1 (mirror of the party twin): the CRS/FATCA roster replay must present the
         // verified service-account-openbank-tax-reporting identity — rego admits account.list
         // for that principal only, so the class-level pact-verifier identity would answer 403.
-        if (context != null && context.interaction.description.contains("CRS FATCA")) {
+        // The GSFT deposit roster (#15356) is the same caller, and its resource additionally
+        // requires that verified service-account name.
+        val description = context?.interaction?.description.orEmpty()
+        if (description.contains("CRS FATCA") || description.contains("GSFT deposit roster as of")) {
             testIdentityAssociation.setTestIdentity(taxReportingIdentity())
         }
         context?.verifyInteraction()
