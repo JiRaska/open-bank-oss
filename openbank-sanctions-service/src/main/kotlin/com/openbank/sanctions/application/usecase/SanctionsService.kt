@@ -91,22 +91,102 @@ class SanctionsService(
         }
 
         val hits = matchMap.values.sortedByDescending { it.score }.map { m ->
-            SanctionsMatch(
-                listType = m.entry.listType,
-                matchType = when {
-                    m.score >= 0.95 -> MatchType.EXACT
-                    m.score >= 0.80 -> MatchType.FUZZY
-                    else -> MatchType.PHONETIC
-                },
-                matchScore = m.score,
-                matchedName = m.entry.primaryName,
-                matchedId = m.entry.externalId,
-                listEntryDate = null,
-                programs = m.entry.programs,
-            )
+            nameMatch(m.entry.listType, m.entry.externalId, m.entry.primaryName, m.entry.programs, m.score)
         }
         return profiles.statusOf(hits) to hits
     }
+
+    private fun nameMatch(
+        listType: SanctionsListType,
+        externalId: String?,
+        primaryName: String,
+        programs: List<String>,
+        score: Double,
+    ) = SanctionsMatch(
+        listType = listType,
+        matchType = when {
+            score >= 0.95 -> MatchType.EXACT
+            score >= 0.80 -> MatchType.FUZZY
+            else -> MatchType.PHONETIC
+        },
+        matchScore = score,
+        matchedName = primaryName,
+        matchedId = externalId,
+        listEntryDate = null,
+        programs = programs,
+    )
+
+    /**
+     * Everything [screen] decides before it stores a check: the matches, how they split into
+     * jurisdiction and clearable name matches, and the clearance covering the latter, if any.
+     * Ongoing monitoring (ADR-0376) evaluates a subject through this same function, so the two
+     * cannot drift apart on thresholds, lists or what a clearance covers.
+     */
+    internal class Evaluation(
+        val profile: ScreeningProfile?,
+        val country: String?,
+        val bankIdentifier: String?,
+        val targetLists: List<SanctionsListType>,
+        val outcome: ScreeningProfileEvaluator.Outcome,
+        val jurisdiction: List<SanctionsMatch>,
+        val clearable: List<SanctionsMatch>,
+        val nameClearance: SanctionsCheck?,
+        val checkedAt: Instant,
+    )
+
+    internal suspend fun evaluate(cmd: ScreenEntityCommand): Evaluation {
+        val profile = profiles.parseProfile(cmd.profile)
+        val country = profiles.parseCountry(cmd.country)
+        val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
+        val targetLists = resolveTargetLists(cmd, profile)
+        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
+        val outcome = profiles.combine(
+            profile,
+            nameStatus,
+            nameMatches,
+            profiles.screenJurisdictions(country, bankIdentifier, targetLists),
+        )
+        val checkedAt = Instant.now(clock)
+        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
+        // A jurisdiction match is a fact about the country, with no identity to be mistaken
+        // about, so no clearance ever covers it: the name matches may be cleared, and the status
+        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
+        val (jurisdiction, clearable) = outcome.matches.filterNot { it.matchKind == MatchKind.PEP }
+            .partition { it.matchKind == MatchKind.JURISDICTION }
+        val nameClearance = if (outcome.status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
+            null
+        } else {
+            findCoveringClearance(cmd, clearable, checkedAt)
+        }
+        return Evaluation(
+            profile, country, bankIdentifier, targetLists, outcome, jurisdiction, clearable, nameClearance, checkedAt,
+        )
+    }
+
+    /**
+     * The matches a fresh CUSTOMER screen of [cmd] would report that no clearance covers:
+     * jurisdiction and PEP matches always, name matches unless a clearance covers them all.
+     */
+    internal suspend fun uncoveredMatches(cmd: ScreenEntityCommand): List<SanctionsMatch> {
+        val evaluation = evaluate(cmd)
+        val pep = evaluation.outcome.matches.filter { it.matchKind == MatchKind.PEP }
+        val names = if (evaluation.nameClearance == null) evaluation.clearable else emptyList()
+        return evaluation.jurisdiction + names + pep
+    }
+
+    /** One list entry as the CUSTOMER profile would report it for a subject scoring [score]. */
+    internal fun customerMatch(
+        listType: SanctionsListType,
+        externalId: String?,
+        primaryName: String,
+        programs: List<String>,
+        score: Double,
+    ): SanctionsMatch =
+        nameMatch(listType, externalId, primaryName, programs, score).copy(matchKind = MatchKind.ofList(listType))
+
+    /** Whether an unexpired clearance of the same subject covers [match], by [screen]'s own rule. */
+    internal suspend fun isCleared(cmd: ScreenEntityCommand, match: SanctionsMatch): Boolean =
+        findCoveringClearance(cmd, listOf(match), Instant.now(clock)) != null
 
     override suspend fun screen(cmd: ScreenEntityCommand): SanctionsCheck {
         // #7867: reject a null JSON array element with a 400 (IllegalArgumentException) before
@@ -121,31 +201,17 @@ class SanctionsService(
             requireNotNull(listType) { "listTypes[$index] must not be null" }
         }
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
-        val profile = profiles.parseProfile(cmd.profile)
-        val country = profiles.parseCountry(cmd.country)
-        val bankIdentifier = profiles.parseBankIdentifier(cmd.bankIdentifier)
-        val targetLists = resolveTargetLists(cmd, profile)
-        val (nameStatus, nameMatches) = performScreening(cmd, targetLists, profiles.nameSearchFloor(profile))
-        val outcome = profiles.combine(
-            profile,
-            nameStatus,
-            nameMatches,
-            profiles.screenJurisdictions(country, bankIdentifier, targetLists),
-        )
+        val evaluation = evaluate(cmd)
+        val profile = evaluation.profile
+        val country = evaluation.country
+        val bankIdentifier = evaluation.bankIdentifier
+        val targetLists = evaluation.targetLists
+        val outcome = evaluation.outcome
         val status = outcome.status
         val matches = outcome.matches
-        val checkedAt = Instant.now(clock)
-        // A clearance dismisses a NAME false positive ("this subject is not the listed person").
-        // A jurisdiction match is a fact about the country, with no identity to be mistaken
-        // about, so no clearance ever covers it: the name matches may be cleared, and the status
-        // is then whatever the jurisdiction matches alone make it — never WHITELISTED.
-        val (jurisdiction, clearable) = matches.filterNot { it.matchKind == MatchKind.PEP }
-            .partition { it.matchKind == MatchKind.JURISDICTION }
-        val nameClearance = if (status == SanctionsCheckStatus.CLEAR || clearable.isEmpty()) {
-            null
-        } else {
-            findCoveringClearance(cmd, clearable, checkedAt)
-        }
+        val checkedAt = evaluation.checkedAt
+        val jurisdiction = evaluation.jurisdiction
+        val nameClearance = evaluation.nameClearance
         val clearance = nameClearance.takeIf { jurisdiction.isEmpty() }
         val namesCleared = nameClearance != null && clearance == null
         val check = SanctionsCheck(
@@ -274,5 +340,5 @@ class SanctionsService(
     override suspend fun listChecks() = repo.listChecks()
 }
 
-private fun matchIdentity(match: SanctionsMatch): Pair<SanctionsListType, String> =
+internal fun matchIdentity(match: SanctionsMatch): Pair<SanctionsListType, String> =
     match.listType to (match.matchedId?.let { "id:$it" } ?: "name:${match.matchedName}")
