@@ -31,7 +31,7 @@ metadata:
   namespace: accounts
   labels:
     app.kubernetes.io/part-of: accounts
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -137,7 +137,7 @@ metadata:
   namespace: accounts
   labels:
     app.kubernetes.io/part-of: accounts
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -205,7 +205,7 @@ metadata:
   namespace: accounts
   labels:
     app.kubernetes.io/part-of: accounts
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

@@ -31,7 +31,7 @@ metadata:
   namespace: lending
   labels:
     app.kubernetes.io/part-of: lending
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -81,7 +81,7 @@ metadata:
   namespace: lending
   labels:
     app.kubernetes.io/part-of: lending
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

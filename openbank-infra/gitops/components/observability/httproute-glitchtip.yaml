@@ -46,7 +46,7 @@
 #                              exceed 60 s end to end where nginx's per-read timer would not fire
 #   controller HSTS / nosniff / hide-headers X-Powered-By
 #                           -> ResponseHeaderModifier below
-#   openbank.io/ungated-machine-callers (ADR-0234) -> carried onto the route (Kyverno
+#   open-bank.tech/ungated-machine-callers (ADR-0234) -> carried onto the route (Kyverno
 #                              require-gated-or-declared-tool-httproute-cel)
 ---
 apiVersion: cert-manager.io/v1
@@ -92,7 +92,7 @@ metadata:
   namespace: observability
   annotations:
     # ADR-0234 declaration carried over from apps/glitchtip.yaml.
-    openbank.io/ungated-machine-callers: >-
+    open-bank.tech/ungated-machine-callers: >-
       SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
       (org-token-authenticated); neither can follow a login redirect.
 spec:
