@@ -566,7 +566,7 @@ Celkem povinností: **70**.
 - **Druh / kanál:** event · formulář ÚOOÚ / datová schránka
 - **Osobní údaje:** yes
 - **Pokrytí:** `missing` — chybí; sleduje #15756
-- **Poznámka:** Interim runbook docs/runbooks/0035-personal-data-breach-notification.md a rejstřík docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
+- **Poznámka:** Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
 ## AML a mezinárodní sankce
 

@@ -61,7 +61,8 @@ uses. There is no separate, unaudited incident log.
 alteration, loss), also start the personal-data-breach path in
 [`docs/runbooks/0035-personal-data-breach-notification.md`](../runbooks/0035-personal-data-breach-notification.md):
 GDPR Art. 33 gives 72 hours from awareness to notify the supervisory authority, and the breach is
-recorded in the interim register whether or not it is notified. This is independent of the DORA
+recorded in the breach register (kept outside this public repository; the repository holds
+only its template) whether or not it is notified. This is independent of the DORA
 major-incident clock above.
 
 ---

@@ -59,7 +59,8 @@ notification must be immediate.
 ## Procedure
 
 1. **T=0 first signal.** Record the timestamp and source. Declare an incident per
-   `docs/bcp/incident-response.md` and tick "personal data involved?".
+   `docs/bcp/incident-response.md` and answer its "Personal data involved?" question in the
+   incident record.
 2. **Contain** (stop the bleeding before measuring it): revoke the leaked credential or object
    access, disable the faulty route or flag, stop the prompt path to the LLM provider, rotate keys
    per runbook 0012 where key material is involved. Preserve evidence first where containment
@@ -144,9 +145,10 @@ points (b), (c) and (d) above.
 ## Breach register (Art. 33(5))
 
 Every breach is recorded, notified or not, with the facts, effects and remedial action, so the
-authority can verify compliance. Interim register: `docs/compliance/personal-data-breach-register.md`.
-It must contain no personal data: identifiers of events and counts only. An operating institution
-keeps its own register under its own controls; this one is the platform's interim record.
+authority can verify compliance. The register itself is kept outside this public repository, in
+an access-controlled store held by the controller of the deployment: a public entry would disclose
+a breach before it is fixed or notified. `docs/compliance/personal-data-breach-register.md` is only
+the template of the columns an entry needs. Never commit an entry to this repository.
 
 ## Other clocks that may run for the same event
 
@@ -160,7 +162,8 @@ keeps its own register under its own controls; this one is the platform's interi
 
 One event can start several clocks with different start times. Use one incident ID, keep a
 separate decision and timestamps per regime, and never let one regime's report stand in for the
-other. See runbooks 0017 and 0018 for the CRA procedure and its exercise.
+other. See `0017-cra-article-14-reporting.md` and `0018-cra-art14-tabletop-exercise.md` for the
+CRA procedure and its exercise.
 
 ## Exercise
 
