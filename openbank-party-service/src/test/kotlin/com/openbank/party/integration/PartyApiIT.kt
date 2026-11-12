@@ -4,6 +4,7 @@
 
 package com.openbank.party.integration
 
+import com.openbank.libs.security.PiiMask
 import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -171,6 +172,9 @@ class PartyApiIT {
         Given { this } When { get("/api/v1/parties/$id") } Then {
             statusCode(200)
             body("id", equalTo(id))
+            body("legalName", equalTo("Jan Novak"))
+            body("piiMasked", equalTo(true))
+            body("piiRevealAllowed", equalTo(false))
         }
         Given { queryParam("q", "Jan") } When { get("/api/v1/parties/search") } Then { statusCode(403) }
         Given { this } When { get("/api/v1/parties") } Then { statusCode(403) }
@@ -193,7 +197,7 @@ class PartyApiIT {
         } Then {
             statusCode(200)
             body("id", equalTo(id))
-            body("email", equalTo(uniqueEmail))
+            body("email", equalTo(PiiMask.email(uniqueEmail)))
         }
     }
 
@@ -216,7 +220,7 @@ class PartyApiIT {
             patch("/api/v1/parties/$id")
         } Then {
             statusCode(200)
-            body("phone", equalTo("+420999888777"))
+            body("phone", equalTo(PiiMask.phone("+420999888777")))
         }
     }
 
@@ -511,7 +515,7 @@ class PartyApiIT {
 
     @Test
     @Order(21)
-    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
     @OidcSecurity(
         claims = [
             Claim(key = "azp", value = "openbank-admin-ui"),
@@ -539,7 +543,7 @@ class PartyApiIT {
             Claim(key = "preferred_username", value = "00000000-0000-0000-0000-000000000099"),
         ],
     )
-    fun `GET search finds a party by email, phone and registration-number fragments (ADR-0228)`() {
+    fun `GET search does not match protected contact or registration keys for an operator`() {
         val marker = UUID.randomUUID().toString().take(8)
         val email = "ops.$marker@openbank.test"
         val phone = "+420777${(100000..999999).random()}"
@@ -552,26 +556,15 @@ class PartyApiIT {
             )
         } When { post("/api/v1/parties") } Then { statusCode(201) }
 
-        listOf(email, marker).forEach { q ->
-            Given { queryParam("q", q) } When {
-                get("/api/v1/parties/search")
-            } Then {
+        Given { queryParam("q", marker) } When { get("/api/v1/parties/search") } Then {
+            statusCode(200)
+            body("data[0].legalName", equalTo("Searchco $marker"))
+        }
+        for (protectedQuery in listOf(email, phone, regNo)) {
+            Given { queryParam("q", protectedQuery) } When { get("/api/v1/parties/search") } Then {
                 statusCode(200)
-                body("data[0].legalName", equalTo("Searchco $marker"))
+                body("data.size()", equalTo(0))
             }
-        }
-        // The same fragment matches via phone and via registration number (the OR covers both).
-        Given { queryParam("q", phone) } When {
-            get("/api/v1/parties/search")
-        } Then {
-            statusCode(200)
-            body("data[0].legalName", equalTo("Searchco $marker"))
-        }
-        Given { queryParam("q", regNo) } When {
-            get("/api/v1/parties/search")
-        } Then {
-            statusCode(200)
-            body("data[0].legalName", equalTo("Searchco $marker"))
         }
     }
 

@@ -183,7 +183,9 @@ class ApprovalGroupService(
 
     private suspend fun requireManagementAuthority(ownerPartyId: UUID, actorPartyId: UUID) {
         when (authorityClient.authorityFor(ownerPartyId, actorPartyId).verdict) {
-            GrantorAuthorityVerdict.AUTHORIZED -> Unit
+            GrantorAuthorityVerdict.AUTHORIZED,
+            GrantorAuthorityVerdict.MANDATE_ONLY,
+            -> Unit
             GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
                 "actor $actorPartyId has no active authority for approval-group owner $ownerPartyId",
             )
