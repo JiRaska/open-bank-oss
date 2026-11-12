@@ -5017,6 +5017,9 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/entity/SanctionsCheckEntity.kt"
       - "src/main/resources/db/migration/V1__create_sanctions.sql"
       - "src/main/resources/db/migration/V5__create_sanctions_entries.sql"
+      - "src/main/kotlin/com/openbank/sanctions/application/port/in/SanctionsMonitoringPorts.kt"
+      - "src/main/kotlin/com/openbank/sanctions/domain/model/SanctionsMonitoring.kt"
+      - "src/main/resources/db/migration/V23__ongoing_monitoring.sql"
     cardholder: []
   openbank-psd2-service:
     auth_crypto_payment:
