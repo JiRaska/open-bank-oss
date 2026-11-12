@@ -70,9 +70,28 @@ Dle `governance.yaml`: `dataClassification: restricted`, `retentionPolicy: 10 le
 | Stav záznamu | Retence |
 |---|---|
 | Party s aktivním vztahem | trvale |
-| `status = TERMINATED` / `DECEASED` | drženo 10 let (AMLD 6 čl. 40 — přebíjí výmaz dle GDPR) |
+| `status = TERMINATED` / `DECEASED` | drženo 10 let (AMLD 6 čl. 40) |
+| Party vymazaná událostí `PARTY_ERASED` | osobní sloupce anonymizovány **okamžitě**; anonymizovaný zbytek řádku zůstává s razítkem `erased_at` (viz Výmaz) |
 | řádek `pid_outbox` `status = SENT` | prune po potvrzení odeslání (provozní; ne zákonný důkaz) |
 | Audit důkazy (události) | drží `audit-service` po zákonnou dobu |
+
+## Výmaz (GDPR čl. 17, ADR-0118)
+
+pid-service konzumuje `PARTY_ERASED` z `openbank.party.events` party-service (kanál `party-events-in`, konzument `PartyErasureConsumer`, DLQ `openbank.dlq.pid.party-events-in`). Řídí se pravidlem kyc-service a party-service: **anonymizovat na místě hned, zbytek řádku ponechat s razítkem `erased_at`** — identifikační data zde jsou odvozeným indexem, autoritativní AML záznam se drží jinde.
+
+| Data | Akce |
+|---|---|
+| `parties.birth_number_encrypted` | NULL |
+| `party_external_ids` (slepé indexy RČ a EUDI, BankID/Keycloak sub, ROB AIFO, IČO, čísla pasů/OP) | **řádky smazány** |
+| `party_id_documents` | **řádky smazány** |
+| `given_name`, `family_name` | `GDPR_ERASED`; `birthdate` = 1900-01-01 (sentinel pro NOT NULL) |
+| `gender`, `birthplace`, `nationalities`, `email`, `phone`, `data_box_id`, adresní sloupce, `rob_synced_at`, `case_metadata` | NULL / prázdné |
+| `party_relationships.termination_reason` (volný text) | NULL |
+| `parties.status` | `TERMINATED`; nastaveno `erased_at` |
+| řádky `identity_verification_case`, na které byla party navázána (`first_link_party_id` / `final_link_party_id`) | jméno, datum narození, místo narození, národnosti, `blind_index`, `first_notes` vymazány; `dedup_key` nahrazen `ERASED:<id případu>`; nastaveno `erased_at`. Případy, kde byla party jen kandidát, popisují někoho jiného a zůstávají |
+| `kyc_level`, `pep_flag`, `sanctions_flag`, časová razítka, jména operátorů | ponecháno: po anonymizaci řádku už nejsou přiřaditelné osobě |
+
+Výmaz je idempotentní: `erased_at` je značka a nikdy se nepřepisuje, opakované doručení znovu provede celé přepsání a mazání, takže cokoli zapsané po prvním výmazu se opět vyčistí. Zápisy do vymazané party (register-identity, úpravy kontaktu/KYC/stavu, připojení externího id, vztahy, navázání verifikačního případu) jsou odmítnuty s 409 (`PartyErasedException`, záchytná kontrola uvnitř zápisové transakce repozitáře). Selhání se opakují a poté jdou do DLQ. Nepokryto: krátkodobé tabulky EUDI nabídek/prezentací jsou klíčované jednorázovými kódy, ne party id, a samy expirují; `pid_outbox` nemá v kódu zapisovatele. Plánované fyzické smazání zbytků po retenční době (jako retenční scheduler kyc-service) je sledovaný navazující úkol; zbytek neobsahuje osobní údaje.
 
 ## Lineage (`governance.yaml`)
 
