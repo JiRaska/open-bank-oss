@@ -9,7 +9,7 @@
 // display documentation from their running build. All service HTTP calls are
 // intercepted via page.route() — no live services required.
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 // The console gates every route on an Auth.js session (src/proxy.ts); there is no

@@ -27,7 +27,7 @@ graph LR
   classDef svc fill:#dbeafe,stroke:#2563eb
 ```
 
-All outbound calls to platform services authenticate as the service (`openbank-services` client credentials via `quarkus-oidc-client`), because card-processing asks about a card the caller does not own.
+The card issuance client uses dedicated `openbank-card-processing` credentials for issuer card reads and authorization decisions. Other outbound clients use the default service credentials. Verify the dedicated issuer client and its secret before advancing the sandbox image pin.
 
 ## C4 — Container
 

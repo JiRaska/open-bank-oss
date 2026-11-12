@@ -33,6 +33,12 @@ export const policySchema = z.object({
     rules: z.array(z.object({ id: z.string(), attribute: z.string(), operator: z.string(), threshold: z.number().finite().nullable(), values: z.array(z.string()), band: nullableText, detail: z.string() })),
   })),
 })
+export const czPolicyRevisionSchema = z.object({
+  id: z.uuid(), revision: z.number().int(), effectiveFrom: z.iso.date(), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  state: z.enum(['PROPOSED', 'EXECUTED', 'REJECTED']), proposedBy: z.string(), policyJson: z.string(),
+})
+export const czPolicyRevisionListSchema = z.array(czPolicyRevisionSchema)
+export type CzPolicyRevision = z.infer<typeof czPolicyRevisionSchema>
 export const portfolioSummarySchema = z.array(z.object({
   currency: z.string().regex(/^[A-Z]{3}$/), asOf: z.iso.date(), loans: number.int(), unassessed: number.int(), stale: number.int(), demonstration: number.int(), pending: number.int(),
   outstanding: number, ecl: number, stage23Outstanding: number, over90Outstanding: number,

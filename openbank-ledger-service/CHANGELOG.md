@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.44.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.44.0...ledger-service-v1.44.1) (2026-11-12)
+
+
+### Performance
+
+* **ledger:** page journal history in PostgreSQL ([#15618](https://github.com/JiRaska/open-bank-oss/issues/15618)) ([ffa69d0](https://github.com/JiRaska/open-bank-oss/commit/ffa69d093f4083242e5a19b60a68ada789cc1e11))
+
 ## [1.44.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.43.0...ledger-service-v1.44.0) (2026-11-12)
 
 

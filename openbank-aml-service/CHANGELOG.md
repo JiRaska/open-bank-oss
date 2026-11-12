@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.1...aml-service-v0.15.0) (2026-11-12)
+
+
+### Features
+
+* **aml:** record booked movements and count them per party (ADR-0371 slice 1) ([#15740](https://github.com/JiRaska/open-bank-oss/issues/15740)) ([c521c8e](https://github.com/JiRaska/open-bank-oss/commit/c521c8e53af07ffc55a926278fcdfa9ec7cfd8a9))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.14.0...aml-service-v0.14.1) (2026-11-09)
 
 
