@@ -24,6 +24,11 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Operations
 | `GET /cards/{id}/secure-details` | `ROLE_OPERATOR`, and only customer-edge's own service account (no staff access) |
 | `GET /cards/party/{partyId}/entitlements` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN` |
 
+The verified `openbank-card-processing` issuer client can read a card by ID and obtain an authorization decision.
+Customer-edge may cancel its customer's card or change that card's channel controls and spending limits. Staff
+and compliance permissions follow the endpoint roles. Confirm the named issuer credential and the advisory
+decisions before enabling policy enforcement in the sandbox.
+
 ## Idempotence
 
 Card issue requires the header:

@@ -78,6 +78,17 @@ Přesná čísla latence SLO jsou TBD do změření v sandboxu; downstream volá
 ### Zúčtování z rails nemá Kafka cestu
 - Zúčtování z platebních rails se k této službě dostává pouze přes REST (`SettlementAdapter` v sepa-payment volá transaction-service, ADR-0108). Dřívější consumer `payment.scheme-accepted`, jeho kanál, topic, DLQ a msg-override ConfigMap byly 2026-10-17 odstraněny, protože do topicu nikdy žádná služba nepublikovala. Chybí-li zúčtování, hledej v REST klientovi volající rail a v rozhodnutí OIDC/OPA, ne v Kafka lagu nebo DLQ.
 
+### Původ syntetického převodu
+
+Při zadání transakce se ověřený syntetický původ uloží do transakce i outboxu. Worker jej načte
+před výběrem účetního endpointu a přenese do událostí o dokončení, selhání a reverzaci. Použití
+stejného idempotency klíče pro syntetický a běžný původ vrací HTTP 409. Starší transakce mají běžný
+původ.
+
+Před zapnutím syntetického převodu ověřte, že všichni workeři načtou nový sloupec a účetní služba
+obsluhuje syntetický endpoint pro důvěryhodnou identitu transaction-service. Při rollbacku zastavte
+zadávání syntetických transakcí a dokončete běžící syntetická workflow kompatibilním workerem.
+
 ## Deploy
 
 GitOps přes ArgoCD (sandbox sleduje deploy branch). U konfliktů image-tagů v gitops manifestech ber `--ours` (čerstvě sestavený tag), nikdy slepě `--theirs`. Ruleset ověřených podpisů vyžaduje, aby commit email odpovídal registrovanému GPG klíči.

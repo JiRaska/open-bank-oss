@@ -31,6 +31,7 @@ import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.SchemaValidationResult
 import com.openbank.productcatalog.domain.catalog.SchemaViolation
+import com.openbank.productcatalog.domain.catalog.catalogPrincipalKey
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
 import com.openbank.productcatalog.infrastructure.catalog.toPlainTree
 import jakarta.enterprise.context.ApplicationScoped
@@ -300,11 +301,11 @@ class GenericCatalogService(
         if (policy.role(role) == null) {
             throw CatalogConflictException("approval role $role is not declared by the revision's schema")
         }
-        requireApprovable(draft, policy)
+        policy.requireApprovable(draft)
         require(issuer.isNotBlank() && subject.isNotBlank()) { "authenticated approver is required" }
         require(actorName.isNotBlank() && reason.isNotBlank()) { "approver and reason are required" }
         require(reason.length <= MAX_APPROVAL_REASON_LENGTH) { "approval reason is too long" }
-        if (draft.makerId == subject || draft.makerId == actorName) {
+        if (draft.makerId in setOf(subject, actorName, catalogPrincipalKey(issuer, subject))) {
             throw CatalogForbiddenException("maker cannot approve their own revision")
         }
         validateOrThrow(draft.schemaRef, draft.content.attributes)
@@ -326,18 +327,6 @@ class GenericCatalogService(
     /** The approval policy of the revision's exact schema version, or null when it has none. */
     suspend fun approvalPolicy(revision: ProductRevision): RevisionApprovalPolicy? =
         findSchema(revision.schemaRef).approvalPolicy
-
-    private fun requireApprovable(draft: ProductRevision, policy: RevisionApprovalPolicy) {
-        if (policy.requireEffectiveFrom && draft.effectiveFrom == null) {
-            throw CatalogConflictException("approval requires an explicit effectiveFrom")
-        }
-        val attributes = catalogJson.toContentNode(draft.content).path("attributes")
-        policy.requiredAttributes.forEach { (name, expected) ->
-            if (attributes.path(name).asText() != expected) {
-                throw CatalogConflictException("approval requires attribute $name = $expected")
-            }
-        }
-    }
 
     suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =
         repository.findPublished(offeringId, effectiveAt)

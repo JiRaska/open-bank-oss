@@ -81,5 +81,23 @@ class PendingNotificationGaugeTest {
         assertThat(channelCount("EMAIL")).isEqualTo(4.0)
         assertThat(channelCount("PUSH")).isEqualTo(2.0)
         assertThat(channelCount("INBOX")).isEqualTo(0.0)
+        assertThat(channelCount("OTHER")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `rows of a retired channel are counted under OTHER so the breakdown sums to the total`(): Unit = runBlocking {
+        // Sandbox 2026-11-10: total 6, per-channel sum 1 — five IN_APP rows (#2372) had no series.
+        every { repository.countStalePendingByChannel(any()) } returns
+            Uni.createFrom().item(mapOf("PUSH" to 1L, "IN_APP" to 5L, "SMS" to 2L))
+        val gauge = PendingNotificationGauge(repository, registry, Clock.systemUTC(), domainMetrics())
+        gauge.register()
+
+        gauge.refresh()
+
+        assertThat(staleCount()).isEqualTo(8.0)
+        assertThat(channelCount("OTHER")).isEqualTo(7.0)
+        assertThat(channelCount("PUSH")).isEqualTo(1.0)
+        val sum = listOf("EMAIL", "PUSH", "INBOX", "OTHER").sumOf { channelCount(it) ?: 0.0 }
+        assertThat(sum).isEqualTo(staleCount())
     }
 }

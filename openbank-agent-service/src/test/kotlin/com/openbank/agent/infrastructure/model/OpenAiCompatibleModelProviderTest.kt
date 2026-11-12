@@ -70,6 +70,15 @@ class OpenAiCompatibleModelProviderTest {
     }
 
     @Test
+    fun `endUserId is sent as the OpenAI user field and omitted when absent`() {
+        val base = ModelRequest(model = model.id, messages = listOf(ChatMessage(ChatRole.USER, "hi")))
+
+        assertThat(provider.buildRequestBody(model, base.copy(endUserId = "ui-assistant")).get("user").asText())
+            .isEqualTo("ui-assistant")
+        assertThat(provider.buildRequestBody(model, base).has("user")).isFalse()
+    }
+
+    @Test
     fun `assistant tool-call turn serialises arguments as a JSON string and null content`() {
         val args = mapper.readTree("""{"accountId":"acct-7"}""")
         val request = ModelRequest(

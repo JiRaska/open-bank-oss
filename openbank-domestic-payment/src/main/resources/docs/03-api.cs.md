@@ -194,3 +194,14 @@ Události jsou **append-only**; opravy se dělají novou status-changed událost
 - **Verze API v URL** (`/api/v1/...`). Breaking změna jde do `/api/v2/...`; bump klasifikuj z OpenAPI diffu (`oasdiff`), ne z typu commitu (ADR-0048).
 - **Evoluce událostí:** aditivní (nová volitelná pole) na existujícím topicu; breaking změna znamená nový topic.
 - **OpenAPI diff** je v CI hlídán proti `main`.
+
+## Dohledání zákaznického platebního příkazu
+
+`POST /api/v1/domestic-payments/submissions/lookup` smí volat pouze ověřený servisní
+účet customer-edge. Původní klíč předá v hlavičce `Idempotency-Key`. Tělo JSON obsahuje
+`debtorAccountId` a `customerSubmissionScope` vytvořený službou customer-edge.
+Postgres uloží tuto vazbu spolu s původní platbou.
+
+Odpověď se neukládá do mezipaměti. `FOUND` vrátí `paymentId` a aktuální `status`.
+Při chybějícím záznamu, rozdílném účtu nebo chybějící vazbě na zákazníka vrátí
+`UNKNOWN`. Nejdříve nasaďte tuto službu, potom customer-edge.
