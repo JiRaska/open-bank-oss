@@ -321,3 +321,24 @@ authz:
       # gate off, reading green about a control that was not there.
       screening:
         enabled: true
+"%prod":
+  quarkus:
+    # The sanctions-service rest-client uses a named TLS bucket over sanctions-service's
+    # private-CA mTLS listener (8443, client auth REQUIRED), the same shape as every other new
+    # east-west edge (#15723). Local/test fixtures speak plain HTTP, so this stays under %prod:
+    # the client certificate (kyb-internal-tls, mounted at /mnt/sanctions-tls) only exists in the
+    # cluster. The certificate is transport authentication; the OIDC bearer stays the identity.
+    tls:
+      sanctions-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/sanctions-tls/tls.crt
+              key: /mnt/sanctions-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/sanctions-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      sanctions-service:
+        tls-configuration-name: sanctions-authority
