@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "4.11.0",
+  "version": "4.12.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -97,6 +97,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^6.2.1",
     "@vitest/coverage-v8": "^5.1.0",
+    "ajv": "8.17.1",
     "autoprefixer": "10.6.2",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.5",

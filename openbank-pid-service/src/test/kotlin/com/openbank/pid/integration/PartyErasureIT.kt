@@ -4,6 +4,7 @@
 
 package com.openbank.pid.integration
 
+import com.openbank.libs.identity.MatchKey
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
@@ -32,12 +33,18 @@ import java.util.UUID
 @QuarkusTestResource(PartyErasureIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
 @TestSecurity(user = "operator@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
+@Suppress("LargeClass") // one real boot + Postgres + consumer shared by every erasure scenario
 class PartyErasureIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in") +
-                InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out")
+                InMemoryConnector.switchOutgoingChannelsToInMemory("party-events-out", "pid-events-out") +
+                // A real pepper, so tier-1 RČ resolution runs (the REJECT-block test needs it).
+                mapOf(
+                    "openbank.pid.birth-number-pepper" to
+                        "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+                )
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -52,6 +59,12 @@ class PartyErasureIT {
     @Inject
     lateinit var repository: com.openbank.pid.infrastructure.persistence.repository.VerificationCaseRepositoryImpl
 
+    @Inject
+    lateinit var partyService: com.openbank.pid.application.usecase.PartyService
+
+    @Inject
+    lateinit var resolver: com.openbank.pid.application.usecase.IdentityResolutionService
+
     private fun <T> onEventLoop(block: suspend () -> T): T = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
         io.smallrye.mutiny.coroutines.uni(
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
@@ -65,18 +78,21 @@ class PartyErasureIT {
 
     private fun <T> jdbc(block: (Connection) -> T): T = dataSource.connection.use(block)
 
-    private fun seedParty(id: UUID, blindIndex: String) = jdbc { c ->
+    private fun seedParty(id: UUID, blindIndex: String, family: String = "Novakova") = jdbc { c ->
         c.prepareStatement(
             """INSERT INTO parties (id, party_type, status, given_name, family_name, birthdate,
                  birth_number_encrypted, gender, birthplace, nationalities, verification_source, verified_at,
                  email, phone, data_box_id, kyc_level, permanent_address_street, permanent_address_city,
-                 case_metadata, created_at, updated_at)
-               VALUES (?, 'NATURAL_PERSON', 'ACTIVE', 'Jana', 'Novakova', DATE '1985-03-04',
+                 case_metadata, case_id, case_type, case_status, case_last_actor, case_last_reason_code,
+                 case_last_transition_at, created_at, updated_at)
+               VALUES (?, 'NATURAL_PERSON', 'ACTIVE', 'Jana', ?, DATE '1985-03-04',
                  'CIPHERTEXT-OF-RC', 'FEMALE', 'Brno', ARRAY['CZ'], 'BANKID', now(),
                  'jana@example.test', '+420000000000', 'abc1234', 'BASIC', 'Hlavni', 'Brno',
-                 '{"note":"free text"}', now(), now())""",
+                 '{"note":"free text"}', gen_random_uuid(), 'PID_VERIFICATION', 'OPEN', 'pid:bankid:api',
+                 'CREATED', now(), now(), now())""",
         ).use { ps ->
             ps.setObject(1, id)
+            ps.setString(2, family)
             ps.executeUpdate()
         }
         c.prepareStatement(
@@ -266,6 +282,20 @@ class PartyErasureIT {
 
         assertThat(await { party(barrier).erasedAt != null })
             .describedAs("an unknown party must not wedge the channel").isTrue()
+
+        // The id is tombstoned: a shell with no personal data, so a later registration is refused.
+        val tombstone = party(unknown)
+        assertThat(tombstone.erasedAt).isNotNull()
+        assertThat(tombstone.given).isEqualTo("GDPR_ERASED")
+        assertThat(tombstone.encrypted).isNull()
+        assertThat(
+            send(
+                "POST",
+                "/api/v1/parties/register-identity",
+                """{"partyId":"$unknown","givenName":"Jana","familyName":"Novakova","birthdate":"1985-03-04"}""",
+            ),
+        ).isEqualTo(409)
+        assertThat(party(unknown).given).isEqualTo("GDPR_ERASED")
     }
 
     private fun eraseAndAwait(id: UUID) {
@@ -526,9 +556,334 @@ class PartyErasureIT {
             .isInstanceOf(com.openbank.pid.application.usecase.PartyErasedException::class.java)
     }
 
+    // ── Unlinked cases of the erased person (#15755 review follow-up) ──────────────────────────────
+
+    /** A family name no other test uses, so each test's namesake set is its own. */
+    private fun uniqueFamily() = "Kral" + UUID.randomUUID().toString().filter { it.isLetter() }.take(LETTERS)
+
+    /** The `NK:` body the resolver builds for a party seeded by [seedParty] with [family]. */
+    private fun nameKey(family: String) = MatchKey.of(family, "Jana", java.time.LocalDate.of(1985, 3, 4), "Brno")
+
+    @Suppress("LongParameterList") // one row's distinguishing columns
+    private fun seedOpenOrDecidedCase(
+        id: UUID,
+        dedupKey: String,
+        trigger: String,
+        status: String,
+        verdict: String?,
+        candidates: List<UUID>,
+        family: String,
+        blindIndex: String? = null,
+    ) = jdbc { c ->
+        c.prepareStatement(
+            """INSERT INTO identity_verification_case (id, dedup_key, trigger, status, applicant_given_name,
+                 applicant_family_name, applicant_birthdate, applicant_birthplace, applicant_nationalities,
+                 blind_index, candidate_party_ids, first_verdict, final_verdict, first_notes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 'Jana', ?, DATE '1985-03-04', 'Brno', 'CZ', ?, ?, ?, ?, 'operator note',
+                 now(), now())""",
+        ).use { ps ->
+            ps.setObject(1, id)
+            ps.setString(2, dedupKey)
+            ps.setString(3, trigger)
+            ps.setString(4, status)
+            ps.setString(5, family)
+            ps.setString(6, blindIndex)
+            ps.setString(7, candidates.joinToString(","))
+            ps.setString(8, verdict)
+            ps.setString(9, verdict?.takeIf { status == "DECIDED" })
+            ps.executeUpdate()
+        }
+    }
+
+    private data class CaseRow(val family: String, val blindIndex: String?, val dedupKey: String, val erasedAt: String?)
+
+    private fun case(id: UUID): CaseRow = jdbc { c ->
+        c.prepareStatement(
+            "SELECT applicant_family_name, blind_index, dedup_key, erased_at::text FROM identity_verification_case " +
+                "WHERE id = ?",
+        ).use { ps ->
+            ps.setObject(1, id)
+            ps.executeQuery().use { rs ->
+                check(rs.next()) { "case $id missing" }
+                CaseRow(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4))
+            }
+        }
+    }
+
+    @Test
+    fun `an unlinked name-keyed case is not touched, even where the erased party is the only possible applicant`() {
+        val family = uniqueFamily()
+        val victim = UUID.randomUUID()
+        val namesake = UUID.randomUUID()
+        val distinctNew = UUID.randomUUID()
+        val open = UUID.randomUUID()
+        seedParty(namesake, "blind-namesake-$namesake", family)
+        seedParty(victim, "blind-victim-$victim", family)
+        // Nothing stored ties these cases to the victim: the applicant may be the victim or a namesake
+        // who never became a party. Inferring it from the candidate list is over-erasure.
+        seedOpenOrDecidedCase(
+            distinctNew,
+            "NK:${nameKey(family)}",
+            "NAMESAKE_CANDIDATE",
+            "DECIDED",
+            "DISTINCT_NEW",
+            listOf(namesake),
+            family,
+        )
+        seedOpenOrDecidedCase(
+            open,
+            "PK:${nameKey(family)}",
+            "PROBABILISTIC_CANDIDATE",
+            "OPEN",
+            null,
+            listOf(namesake),
+            family,
+        )
+        val before = listOf(case(distinctNew), case(open))
+
+        eraseAndAwait(victim)
+
+        assertThat(listOf(case(distinctNew), case(open))).isEqualTo(before)
+    }
+
+    @Test
+    fun `an RN_COLLISION case of another applicant keeps that applicant while the erased identifier is gone`() {
+        val victim = UUID.randomUUID()
+        val openByRc = UUID.randomUUID()
+        val distinctByRc = UUID.randomUUID()
+        val blind = "blind-victim-$victim"
+        seedParty(victim, blind)
+        seedOpenOrDecidedCase(openByRc, "RN:$blind", "RN_COLLISION", "OPEN", null, listOf(victim), "Jiny", blind)
+        seedOpenOrDecidedCase(
+            distinctByRc,
+            "RN:$blind",
+            "RN_COLLISION",
+            "DECIDED",
+            "DISTINCT_NEW",
+            listOf(victim),
+            "Jiny",
+            blind,
+        )
+
+        eraseAndAwait(victim)
+
+        for (id in listOf(openByRc, distinctByRc)) {
+            val row = case(id)
+            assertThat(row.blindIndex).describedAs("erased identifier on case $id").isNull()
+            assertThat(row.dedupKey).describedAs("opaque key on case $id").isEqualTo("ERASED:$id")
+            assertThat(row.family).describedAs("the other applicant's snapshot on case $id").isEqualTo("Jiny")
+            assertThat(row.erasedAt).isNull()
+        }
+    }
+
+    private fun resolve(rc: String): io.restassured.response.Response = io.restassured.RestAssured.given()
+        .contentType("application/json")
+        .body("""{"givenName":"Petr","familyName":"Jiny","birthdate":"1990-01-01","birthNumberRaw":"$rc"}""")
+        .post("/api/v1/parties/resolve")
+
+    @Test
+    fun `a REJECT decided against the erased person's RČ keeps its decision and still blocks after erasure`() {
+        val victim = UUID.randomUUID()
+        val rejected = UUID.randomUUID()
+        val rc = "7605060001"
+        val blind = requireNotNull(resolver.computeBlindIndex(rc)) { "test pepper not applied" }
+        seedParty(victim, blind)
+        // Another applicant presented the victim's number with divergent data; four eyes rejected it.
+        seedOpenOrDecidedCase(rejected, "RN:$blind", "RN_COLLISION", "DECIDED", "REJECT", listOf(victim), "Jiny", blind)
+        assertThat(resolve(rc).jsonPath().getString("caseId")).describedAs("blocked before erasure")
+            .isEqualTo(rejected.toString())
+
+        eraseAndAwait(victim)
+
+        val row = case(rejected)
+        assertThat(row.blindIndex).describedAs("the erased identifier").isNull()
+        assertThat(row.dedupKey).isEqualTo(com.openbank.pid.domain.model.ErasedIdentifierKey.rejectBlock(blind))
+        assertThat(row.family).describedAs("the rejected applicant's snapshot is fraud evidence").isEqualTo("Jiny")
+        val after = resolve(rc)
+        assertThat(after.statusCode()).isEqualTo(200)
+        assertThat(after.jsonPath().getString("decision")).isEqualTo("NEEDS_MANUAL_VERIFICATION")
+        assertThat(
+            after.jsonPath().getString("caseId"),
+        ).describedAs("the REJECT still blocks").isEqualTo(rejected.toString())
+        assertThat(resolve("7605060012").jsonPath().getString("decision"))
+            .describedAs("control: an unrelated RČ is not blocked").isEqualTo("NO_MATCH")
+        assertThat(
+            count(
+                "SELECT count(*) FROM identity_verification_case WHERE final_verdict = 'REJECT' AND id = ?",
+                rejected,
+            ),
+        )
+            .isEqualTo(1)
+    }
+
+    @Test
+    fun `a retained REJECT also blocks the collision path when the number is registered again after erasure`() {
+        val victim = UUID.randomUUID()
+        val rejected = UUID.randomUUID()
+        val newHolder = UUID.randomUUID()
+        val rc = "7605060023"
+        val blind = requireNotNull(resolver.computeBlindIndex(rc)) { "test pepper not applied" }
+        seedParty(victim, blind)
+        seedOpenOrDecidedCase(rejected, "RN:$blind", "RN_COLLISION", "DECIDED", "REJECT", listOf(victim), "Jiny", blind)
+        eraseAndAwait(victim)
+
+        // The freed number is registered to a new party whose birthdate diverges from the RČ, so the
+        // next resolve takes tier-1 HIT -> RN_COLLISION -> adjudicate, not the miss path.
+        val registered = io.restassured.RestAssured.given().contentType("application/json")
+            .body(
+                """{"partyId":"$newHolder","givenName":"Petr","familyName":"Jiny","birthdate":"1985-03-04",""" +
+                    """"birthNumberRaw":"$rc"}""",
+            )
+            .post("/api/v1/parties/register-identity").statusCode()
+        assertThat(registered).describedAs("register-identity of the freed number").isBetween(200, 299)
+        assertThat(
+            count("SELECT count(*) FROM party_external_ids WHERE party_id = ? AND id_type = 'BIRTH_NUMBER'", newHolder),
+        )
+            .isEqualTo(1)
+
+        val after = resolve(rc)
+        assertThat(after.jsonPath().getString("decision")).isEqualTo("NEEDS_MANUAL_VERIFICATION")
+        assertThat(after.jsonPath().getString("caseId"))
+            .describedAs("the retained REJECT blocks, exactly like a prior RN: REJECT").isEqualTo(rejected.toString())
+        assertThat(
+            jdbc { c ->
+                c.prepareStatement("SELECT count(*) FROM identity_verification_case WHERE dedup_key = ?").use { ps ->
+                    ps.setString(1, "RN:$blind")
+                    ps.executeQuery().use { rs ->
+                        rs.next()
+                        rs.getInt(1)
+                    }
+                }
+            },
+        ).describedAs("no fresh case was opened around the block").isZero()
+    }
+
+    @Test
+    fun `another person's case that lists the erased party only as a candidate is not touched`() {
+        val family = uniqueFamily()
+        val victim = UUID.randomUUID()
+        val otherApplicantCase = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim", family)
+        // Someone else, with the same name key, was compared against the victim and decided distinct.
+        seedOpenOrDecidedCase(
+            otherApplicantCase,
+            "NK:${nameKey(family)}",
+            "NAMESAKE_CANDIDATE",
+            "DECIDED",
+            "DISTINCT_NEW",
+            listOf(victim),
+            family,
+        )
+
+        // And an ambiguous one: a live namesake who is NOT a candidate could be that case's applicant.
+        val family2 = uniqueFamily()
+        val victim2 = UUID.randomUUID()
+        val candidate2 = UUID.randomUUID()
+        val liveNamesake2 = UUID.randomUUID()
+        val ambiguousCase = UUID.randomUUID()
+        seedParty(candidate2, "blind-candidate-$candidate2", family2)
+        seedParty(victim2, "blind-victim-$victim2", family2)
+        seedParty(liveNamesake2, "blind-namesake-$liveNamesake2", family2)
+        seedOpenOrDecidedCase(
+            ambiguousCase,
+            "NK:${nameKey(family2)}",
+            "NAMESAKE_CANDIDATE",
+            "DECIDED",
+            "DISTINCT_NEW",
+            listOf(candidate2),
+            family2,
+        )
+        val before = case(otherApplicantCase)
+        val ambiguousBefore = case(ambiguousCase)
+
+        eraseAndAwait(victim)
+        eraseAndAwait(victim2)
+
+        assertThat(case(otherApplicantCase)).describedAs("the erased party was only a candidate").isEqualTo(before)
+        assertThat(case(ambiguousCase)).describedAs("a live namesake could be the applicant").isEqualTo(ambiguousBefore)
+    }
+
+    @Test
+    fun `linking case evidence to an erased party is refused and publishes no event`() {
+        val victim = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        eraseAndAwait(victim)
+        val sink = connector.sink<String>("party-events-out")
+        sink.clear()
+
+        val thrown = runCatching {
+            onEventLoop {
+                partyService.linkCaseEvidence(
+                    com.openbank.pid.application.port.`in`.LinkCaseEvidenceCommand(
+                        partyId = victim,
+                        evidenceRef = "evidence-after-erasure",
+                        actor = "pid-reviewer",
+                    ),
+                )
+            }
+        }.exceptionOrNull()
+
+        assertThat(thrown).describedAs("409 PartyErasedException")
+            .isInstanceOf(com.openbank.pid.application.usecase.PartyErasedException::class.java)
+        assertThat(sink.received().map { it.payload }.filter { it.contains(victim.toString()) })
+            .describedAs("no party event for the erased party").isEmpty()
+    }
+
+    @Test
+    fun `a relationship terminate blocks behind the erase that holds the row lock and is then refused`() {
+        val victim = UUID.randomUUID()
+        val relationship = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        jdbc { c ->
+            c.prepareStatement(
+                "INSERT INTO party_relationships (id, party_id, role, status, onboarding_channel) " +
+                    "VALUES (?, ?, 'CUSTOMER', 'ACTIVE', 'API')",
+            ).use { ps ->
+                ps.setObject(1, relationship)
+                ps.setObject(2, victim)
+                ps.executeUpdate()
+            }
+        }
+        val lock = RowLock(victim)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val write = executor.submit<Int> {
+                io.restassured.RestAssured.given().contentType("application/json")
+                    .body("""{"reason":"free text written after the erase"}""")
+                    .request("DELETE", "/api/v1/parties/$victim/relationships/$relationship").statusCode()
+            }
+            assertThat(await { anyoneWaitingOnLock() })
+                .describedAs("the terminate must block on the party row lock").isTrue()
+
+            lock.inLockedTransaction { c ->
+                c.prepareStatement("UPDATE parties SET erased_at = now() WHERE id = ?").use { ps ->
+                    ps.setObject(1, victim)
+                    ps.executeUpdate()
+                }
+            }
+            lock.release()
+
+            assertThat(write.get(WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(409)
+            assertThat(
+                count(
+                    "SELECT count(*) FROM party_relationships WHERE party_id = ? AND termination_reason IS NOT NULL " +
+                        "AND status = 'ACTIVE'",
+                    victim,
+                ),
+            ).isZero()
+            assertThat(
+                count("SELECT count(*) FROM party_relationships WHERE party_id = ? AND status = 'ACTIVE'", victim),
+            )
+                .describedAs("the refused terminate wrote nothing").isEqualTo(1)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
     private companion object {
         const val ATTEMPTS = 100
         const val POLL_MILLIS = 100L
         const val WAIT_SECONDS = 30L
+        const val LETTERS = 8
     }
 }

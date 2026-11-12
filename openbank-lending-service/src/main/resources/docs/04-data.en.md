@@ -43,7 +43,7 @@ Monetary amounts are `NUMERIC(20,2)` with a separate `CHAR(3)` ISO-4217 `currenc
 | **V4** | `V4__loan_provisioning.sql` | Adds `loan_provisioning` (IFRS 9 stage/ECL history) + `idx_loan_provisioning_loan_period` (ADR-0028 Phase 3). Rollback: `DROP TABLE loan_provisioning;` |
 | **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Points `lending_outbox.id`'s default at `lending_outbox_seq` — native inserts (`loan.interest_accrued`) drew ids from the BIGSERIAL sequence starting at 1 and collided with the Panache entity path's pooled ids (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
 | **V32** | `V32__loan_decline_review.sql` | Adds `loan_decline_review` (CHECK constraints: decided ⇒ reviewer + reason ≥ 10 chars; successor ⇔ `OVERTURNED`). Rollback: `DROP TABLE loan_decline_review;` — only before the first review is written |
-| **V33** | `V33__loan_application_predecessor.sql` | Adds `loan_application.predecessor_application_id` (back link from a decline-review successor). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
+| **V34** | `V34__loan_application_predecessor.sql` | Adds `loan_application.predecessor_application_id` (back link from a decline-review successor). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
 
 **Rule (CLAUDE.md):** never edit a migration after it is applied to a live DB — add a new versioned migration. `validate-on-migrate` is off; use `QUARKUS_FLYWAY_REPAIR_AT_START` only as a transient recovery measure.
 

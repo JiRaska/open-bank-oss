@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.12.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.11.0...admin-ui-v4.12.0) (2026-11-12)
+
+
+### Features
+
+* **card-issuance,card-processing:** scope issuer operations to named callers ([#15626](https://github.com/JiRaska/open-bank-oss/issues/15626)) ([ecdbbd0](https://github.com/JiRaska/open-bank-oss/commit/ecdbbd0cd4eb6a486cff3effbb4d08b59dde8890))
+
 ## [4.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.2...admin-ui-v4.11.0) (2026-11-12)
 
 

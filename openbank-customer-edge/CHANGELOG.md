@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.8.0...customer-edge-v1.9.0) (2026-11-12)
+
+
+### Features
+
+* **domestic-payment,customer-edge:** look up domestic payments after a timeout ([#15609](https://github.com/JiRaska/open-bank-oss/issues/15609)) ([f93e072](https://github.com/JiRaska/open-bank-oss/commit/f93e072a5a3ec1f978206eae789f7b0530a88a69))
+
 ## [1.8.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.7.0...customer-edge-v1.8.0) (2026-11-08)
 
 

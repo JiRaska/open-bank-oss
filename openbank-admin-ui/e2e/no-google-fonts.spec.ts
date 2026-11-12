@@ -8,7 +8,7 @@
 // fonts.googleapis.com/fonts.gstatic.com, not that nothing ends up requesting them (e.g. a
 // browser-default DNS prefetch, or a stylesheet computed at runtime).
 
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const GOOGLE_FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com']

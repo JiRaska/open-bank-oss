@@ -43,7 +43,7 @@ Peněžní částky jsou `NUMERIC(20,2)` se samostatnou `CHAR(3)` ISO-4217 `curr
 | **V4** | `V4__loan_provisioning.sql` | Přidá `loan_provisioning` (historie IFRS 9 stage/ECL) + `idx_loan_provisioning_loan_period` (ADR-0028 Fáze 3). Rollback: `DROP TABLE loan_provisioning;` |
 | **V29** | `V29__lending_outbox_id_sequence_alignment.sql` | Přesměruje default `lending_outbox.id` na `lending_outbox_seq` — nativní inserty (`loan.interest_accrued`) braly id z BIGSERIAL sekvence od 1 a kolidovaly s poolovanými id z Panache entity cesty (23505). Rollback: `ALTER TABLE lending_outbox ALTER COLUMN id SET DEFAULT nextval('lending_outbox_id_seq');` |
 | **V32** | `V32__loan_decline_review.sql` | Přidá `loan_decline_review` (CHECK: rozhodnuto ⇒ posuzovatel + důvod ≥ 10 znaků; nástupce ⇔ `OVERTURNED`). Rollback: `DROP TABLE loan_decline_review;` — jen před prvním zapsaným přezkumem |
-| **V33** | `V33__loan_application_predecessor.sql` | Přidá `loan_application.predecessor_application_id` (zpětný odkaz z nástupce přezkumu). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
+| **V34** | `V34__loan_application_predecessor.sql` | Přidá `loan_application.predecessor_application_id` (zpětný odkaz z nástupce přezkumu). Rollback: `ALTER TABLE loan_application DROP COLUMN predecessor_application_id;` |
 
 **Pravidlo (CLAUDE.md):** nikdy needituj migraci po jejím nasazení do živé DB — přidej novou verzovanou migraci. `validate-on-migrate` je vypnuto; `QUARKUS_FLYWAY_REPAIR_AT_START` použij jen jako dočasné zotavovací opatření.
 
