@@ -27,11 +27,7 @@ class PartyNameAdapterTest {
     private val adapter = PartyNameAdapter(client).also { it.self = it }
     private val partyId: UUID = UUID.randomUUID()
 
-    // Block body on purpose: a helper, not a test, but the `= runBlocking {` shape is the one
-    // JUnit drops silently on a test function, and the fleet guard matches the shape.
-    private fun subject(): ScreeningSubject {
-        return runBlocking { adapter.screeningSubject(partyId) }
-    }
+    private fun subject(): ScreeningSubject = runBlocking { adapter.screeningSubject(partyId) }
     private fun names() = subject().names
 
     @Test
