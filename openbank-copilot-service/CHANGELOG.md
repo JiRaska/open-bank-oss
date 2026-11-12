@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.8...copilot-service-v0.18.0) (2026-11-12)
+
+
+### Features
+
+* **copilot:** mark assistant replies as AI-generated ([#15766](https://github.com/JiRaska/open-bank-oss/issues/15766)) ([d547c6c](https://github.com/JiRaska/open-bank-oss/commit/d547c6c408e3e93cfab9b688952e7f58eeae2109))
+
 ## [0.17.8](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.7...copilot-service-v0.17.8) (2026-11-03)
 
 
