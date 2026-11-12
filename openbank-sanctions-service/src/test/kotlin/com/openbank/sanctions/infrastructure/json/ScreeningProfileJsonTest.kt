@@ -8,7 +8,6 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.MatchKind
 import com.openbank.sanctions.domain.model.MatchType
-import com.openbank.sanctions.domain.model.PepStatus
 import com.openbank.sanctions.domain.model.SanctionsCheck
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
@@ -54,7 +53,7 @@ class ScreeningProfileJsonTest {
             profile = ScreeningProfile.CUSTOMER,
             country = "XE",
             bankIdentifier = "TESTXEAA",
-            pepStatus = PepStatus.CLEAR,
+            pepStatus = SanctionsCheckStatus.CLEAR,
             matches = listOf(match.copy(matchKind = MatchKind.SANCTIONS)),
         )
 

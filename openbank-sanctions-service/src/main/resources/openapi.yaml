@@ -18,7 +18,9 @@ info:
   # 3.1.0 -> 3.2.0 (#15723): ADDITIVE on /api/v3 only. The screen request gains optional `profile`
   # (PAYMENT | CUSTOMER), `country` and `bankIdentifier`; the result gains optional `profile`,
   # `country`, `bankIdentifier`, `pepStatus` and, per match, `matchKind`. A request without any of
-  # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400).
+  # them behaves and answers exactly as before. /api/v1 is frozen and rejects the new inputs (400);
+  # its request schema names the three fields only to say so, because the shared request type
+  # parses them and a parsed field that is not published is a contract gap.
   version: 3.2.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
   # required the whole external-feed fan-out to finish inside the request, which was the defect.
@@ -656,6 +658,20 @@ components:
               - FATF_HIGH_RISK
               - PEP_GLOBAL
               - CNB_DOMESTIC
+        profile:
+          type: string
+          description: >-
+            Not accepted on /api/v1. The request body is parsed by the same type as
+            /api/v3/sanctions/screen, so the field is recognised — and any value is rejected with
+            400 instead of being silently ignored. Use /api/v3/sanctions/screen.
+        country:
+          type: string
+          description: >-
+            Not accepted on /api/v1: any value is rejected with 400. Use /api/v3/sanctions/screen.
+        bankIdentifier:
+          type: string
+          description: >-
+            Not accepted on /api/v1: any value is rejected with 400. Use /api/v3/sanctions/screen.
 
     ScreenEntityCommandV3:
       type: object
@@ -931,10 +947,12 @@ components:
           description: BIC the screen was asked about, upper-cased. Absent when none was supplied.
         pepStatus:
           type: string
-          enum: [CLEAR, HIT, POTENTIAL_HIT]
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
           description: >-
             PEP outcome of a CUSTOMER-profile screen, reported apart from `status`. Absent for any
-            other profile and for profile-less checks.
+            other profile and for profile-less checks. It shares the vocabulary of `status`, but
+            only CLEAR, POTENTIAL_HIT and HIT are ever produced: a PEP match is not whitelisted or
+            escalated the way a sanctions hit is.
 
     SanctionsMatchV3:
       type: object

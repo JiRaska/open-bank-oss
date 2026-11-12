@@ -8,7 +8,6 @@ import com.openbank.sanctions.application.port.out.SanctionsJurisdictionReposito
 import com.openbank.sanctions.domain.model.JurisdictionMeasure
 import com.openbank.sanctions.domain.model.MatchKind
 import com.openbank.sanctions.domain.model.MatchType
-import com.openbank.sanctions.domain.model.PepStatus
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.SanctionsMatch
@@ -27,12 +26,6 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
         matches.any { it.matchScore >= HIT_THRESHOLD } -> SanctionsCheckStatus.HIT
         matches.any { it.matchScore >= POTENTIAL_HIT_THRESHOLD } -> SanctionsCheckStatus.POTENTIAL_HIT
         else -> SanctionsCheckStatus.CLEAR
-    }
-
-    private fun pepStatusOf(matches: List<SanctionsMatch>): PepStatus = when (statusOf(matches)) {
-        SanctionsCheckStatus.HIT -> PepStatus.HIT
-        SanctionsCheckStatus.POTENTIAL_HIT -> PepStatus.POTENTIAL_HIT
-        else -> PepStatus.CLEAR
     }
 
     /**
@@ -103,7 +96,7 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
 
     class Outcome(
         val status: SanctionsCheckStatus,
-        val pepStatus: PepStatus?,
+        val pepStatus: SanctionsCheckStatus?,
         val matches: List<SanctionsMatch>,
         val overallScore: Double,
     )
@@ -134,7 +127,7 @@ class ScreeningProfileEvaluator(private val jurisdictionRepo: SanctionsJurisdict
         val decidingAll = jurisdictionMatches + deciding
         return Outcome(
             status = statusOf(decidingAll),
-            pepStatus = if (profile == ScreeningProfile.CUSTOMER) pepStatusOf(pep) else null,
+            pepStatus = if (profile == ScreeningProfile.CUSTOMER) statusOf(pep) else null,
             matches = (decidingAll + pep).sortedByDescending { it.matchScore },
             overallScore = decidingAll.maxOfOrNull { it.matchScore } ?: 0.0,
         )

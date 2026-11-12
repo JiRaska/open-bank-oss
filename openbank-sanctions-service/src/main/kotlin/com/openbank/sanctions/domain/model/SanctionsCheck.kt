@@ -70,9 +70,6 @@ enum class ScreeningProfile(val lists: List<SanctionsListType>) {
     CUSTOMER(PAYMENT.lists + SanctionsListType.PEP_GLOBAL),
 }
 
-/** PEP outcome of a CUSTOMER-profile screen. A PEP is never whitelisted or escalated as a sanctions hit is. */
-enum class PepStatus { CLEAR, POTENTIAL_HIT, HIT }
-
 /** How a listed jurisdiction is treated: an embargo blocks, a high-risk listing goes to review. */
 enum class JurisdictionMeasure { EMBARGO, HIGH_RISK }
 
@@ -138,9 +135,25 @@ data class SanctionsCheck(
     val country: String? = null,
     /** BIC of the counterparty's bank, when the caller supplied one. */
     val bankIdentifier: String? = null,
-    /** PEP outcome of a CUSTOMER-profile screen, reported apart from [status]; null otherwise. */
-    val pepStatus: PepStatus? = null,
+    /**
+     * PEP outcome of a CUSTOMER-profile screen, reported apart from [status]; null otherwise.
+     * It reuses the shared status vocabulary but only ever takes one of [PEP_STATUSES]: a PEP
+     * match is not whitelisted or escalated the way a sanctions hit is.
+     */
+    val pepStatus: SanctionsCheckStatus? = null,
 ) {
+    init {
+        require(pepStatus == null || pepStatus in PEP_STATUSES) {
+            "pepStatus must be one of $PEP_STATUSES, was $pepStatus"
+        }
+    }
+
     fun isHighRisk() = status == SanctionsCheckStatus.HIT ||
         (status == SanctionsCheckStatus.POTENTIAL_HIT && overallScore > ScreeningPolicy.POTENTIAL_HIT_BLOCK_THRESHOLD)
+
+    companion object {
+        /** The only outcomes a PEP screen has. */
+        val PEP_STATUSES =
+            setOf(SanctionsCheckStatus.CLEAR, SanctionsCheckStatus.POTENTIAL_HIT, SanctionsCheckStatus.HIT)
+    }
 }

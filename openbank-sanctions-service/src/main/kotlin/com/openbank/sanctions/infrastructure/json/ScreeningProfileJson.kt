@@ -7,8 +7,8 @@ package com.openbank.sanctions.infrastructure.json
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.sanctions.domain.model.MatchKind
-import com.openbank.sanctions.domain.model.PepStatus
 import com.openbank.sanctions.domain.model.SanctionsCheck
+import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.SanctionsMatch
 import com.openbank.sanctions.domain.model.ScreeningProfile
 import io.quarkus.jackson.ObjectMapperCustomizer
@@ -33,7 +33,7 @@ internal abstract class SanctionsCheckAbsentFields {
     abstract val bankIdentifier: String?
 
     @get:JsonInclude(JsonInclude.Include.NON_NULL)
-    abstract val pepStatus: PepStatus?
+    abstract val pepStatus: SanctionsCheckStatus?
 }
 
 @Suppress("unused") // read reflectively by Jackson as a mix-in

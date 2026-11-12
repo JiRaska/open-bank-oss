@@ -5,7 +5,6 @@
 package com.openbank.sanctions.infrastructure.persistence.entity
 
 import com.openbank.sanctions.domain.model.EntityType
-import com.openbank.sanctions.domain.model.PepStatus
 import com.openbank.sanctions.domain.model.SanctionsCheckStatus
 import com.openbank.sanctions.domain.model.ScreeningProfile
 import jakarta.persistence.Column
@@ -93,5 +92,5 @@ class SanctionsCheckEntity {
 
     @field:Column(name = "pep_status")
     @field:Enumerated(EnumType.STRING)
-    var pepStatus: PepStatus? = null
+    var pepStatus: SanctionsCheckStatus? = null
 }
