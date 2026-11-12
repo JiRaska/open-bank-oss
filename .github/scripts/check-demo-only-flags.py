@@ -1,40 +1,81 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-"""Demo-only switches that disable a regulatory control may be true only where rules.yaml allows.
+"""Demo-only switches that disable a control may be true only where rules.yaml allows.
 
 WHY
 ---
-Three switches turn a regulatory control into a no-op: OPENBANK_AML_AUTO_CLEAR (AML alerts clear
-without an analyst), OPENBANK_KYC_AUTO_APPROVE (KYC approves without review) and
-LENDING_RISK_ALLOW_DEMONSTRATION_MODEL (placeholder risk parameters). All three are `true` in the
-only deployed environment (the sandbox) and every manifest comment says "MUST be false in
-production". Nothing enforced it: a future production profile could copy the sandbox manifest and
-the control would be off with no signal. Prose is not a control; this is one.
+Some switches turn a control into a no-op: OPENBANK_AML_AUTO_CLEAR (AML alerts clear without an
+analyst), OPENBANK_KYC_AUTO_APPROVE (KYC approves without review),
+LENDING_RISK_ALLOW_DEMONSTRATION_MODEL (placeholder risk parameters) and the others in
+`rules.yaml: demo_only_flags.flags`. The first three are `true` in the only deployed environment
+(the sandbox) and every manifest comment says "MUST be false in production". Nothing enforced it.
+
+THE REGISTRY IS CURATED AND PARTIAL
+-----------------------------------
+The flag list is a hand-kept set of switches somebody found and judged to weaken a control. The
+gate does NOT discover demo/stub switches: one that is not listed is not checked. Adding a flag is
+a review decision. (Judged and left out on purpose: QUARKUS_MAILER_MOCK, an environment fact whose
+effect is recorded honestly as SUPPRESSED/mailer_mocked; the KYB single-member auto-confirm, a
+designed-on rule with an audit trail, default true.)
 
 THE ENVIRONMENT MECHANISM
 -------------------------
-The gitops tree has no per-environment overlay: `openbank-infra/gitops/` IS the sandbox cluster
-(its README: "ArgoCD app-of-apps for the sandbox EKS cluster"), and the kustomize overlays are
-`k8s/overlays/{sandbox,local}`. So the environment of a manifest is derived from its PATH, using
-the `environments:` map in `rules.yaml: demo_only_flags`. A file under a scanned root that matches
-no declared environment is `unclassified` and is NOT permitted - a new `gitops-prod/` tree or
-`overlays/production/` therefore fails until somebody declares it, which is the point.
+The gitops tree has no per-environment overlay: `openbank-infra/gitops/` IS the sandbox cluster, and
+the kustomize overlays are `k8s/overlays/{sandbox,local}`. The environment of a file is derived from
+its PATH (`environments:` in the rules entry), in this order:
+  1. a path with a non-sandbox TOKEN in any segment (prod, production, prd, live, staging, stage,
+     uat, preprod; a segment is split at - _ .) is non-sandbox and permitted nowhere, even under a
+     permitted root (`openbank-infra/gitops/environments/production/`, `values-prod.yaml`);
+  2. else a declared environment's path prefix;
+  3. else `unclassified`, which is not permitted either.
+So a new tree fails until somebody declares it. This is a path heuristic, not knowledge of where a
+file is deployed: a production environment whose path carries none of the tokens and that sits under
+a permitted root is classified sandbox (see Known limits).
 
 WHAT IT CHECKS (one finding class per letter)
 ---------------------------------------------
-  A  a registered flag is truthy (or has an unresolvable source: valueFrom / template) in a
-     manifest whose environment is not on the flag's `permitted_environments`
+  A  a registered flag (under its manifest env var, the env var derived from the property, or the
+     property itself) is truthy, or has an unresolvable source (valueFrom / template), in a file
+     whose environment is not on the flag's `permitted_environments`
   B  the flag's code default is not false: `application.yaml`, else the `@ConfigProperty`
      `defaultValue`; an absent default is also a finding (nothing proves fail-closed)
-  C  the registered flag no longer exists in the owning service's `src/main` (stale entry), or
-     its env var does not map to its config property
+  C  the registered flag no longer exists in the owning service's `src/main` (stale entry), or its
+     env var neither maps to the property nor is routed into it by a `${ENV:...}` in the yaml
   D  a profile other than `permitted_profiles` (`%prod`, `application-prod.yaml`, ...) sets it true
 
-Manifests are parsed with the YAML loader and walked structurally (`env:` lists of
-`{name, value}`, ConfigMap `data:` maps, compose `environment:` maps and `NAME=value` lists,
-kustomize patch values), so a comment that names the flag is not a hit and a nested Rollout is
-not missed. A file the loader cannot parse (a template) falls back to a text scan.
+WHAT IT SCANS
+-------------
+Every yaml/yml/properties/tf/tfvars file, `.env*`, `Dockerfile*` and bare `Kustomization` in the repo
+outside `.git`, `node_modules`, build output and `src/test/` trees. Files are parsed with the YAML
+loader and walked: `env:` lists of `{name, value}`, ConfigMap `data:` maps, compose `environment:`,
+kustomize patch values (including inline `patchesStrategicMerge` entries), and option strings are
+tokenised (`JAVA_OPTS: "-Xmx1g -Dopenbank.x=true"`). A string value under a `*.yaml` / `*.yml` /
+`*.properties` / `*.env` / `*.conf` key (`application.yaml: |`, `override.properties: |`) is parsed as
+that config. `envFrom: configMapRef` is resolved against ConfigMaps (and kustomize
+`configMapGenerator` entries, their `literals`, `envs` and `files`) defined in the repo, and the
+referenced content is judged in the environment of the referrer as well. A file that does not parse
+falls back to a text scan.
+
+KNOWN LIMITS (not closed; each is a way to miss a flag)
+-------------------------------------------------------
+  - The registry is curated and partial (above).
+  - Environment is a path heuristic. A production tree under a permitted root with no non-sandbox
+    token in its path is read as sandbox.
+  - Helm charts are not rendered: `{{ }}` templates are unresolved, and a value injected from a
+    values file the chart does not name in a way this scan can see is not followed.
+  - `kustomize build` is not run: patches that need rendering, remote bases, `replacements`,
+    `vars`, components and `images`-style transformers are not applied.
+  - `envFrom` / `configMapKeyRef` / `secretRef` naming an object that is not in this repo (or a
+    Secret, or a name built by a generator suffix) cannot be resolved and is not guessed; the run
+    prints a NOTE with the count of ConfigMap names it could not follow.
+  - A flag set at runtime (kubectl, operator, ArgoCD parameter override, Terraform variable fed
+    from outside the repo, a secret store) is invisible.
+  - `src/test/` trees are not scanned (not deployed); a manifest placed there is not checked.
+  - A kustomization whose patch is JSON6902 touching `env`/`envFrom` is refused outside permitted
+    environments because the flag cannot be attributed, not because it was shown to be true.
+  - Base64 `binaryData`, and config embedded in a string under a key without a config-file suffix,
+    are not decoded or parsed.
 
 Exit: 0 clean, 1 findings, 2 the check could not run (registry malformed, PyYAML missing).
 Run:  python3 .github/scripts/check-demo-only-flags.py [--root .] [--self-test|--selftest]
@@ -42,6 +83,7 @@ Run:  python3 .github/scripts/check-demo-only-flags.py [--root .] [--self-test|-
 import argparse
 import os
 import re
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -62,6 +104,13 @@ UNATTRIBUTED_PATCH = "<index-based env patch>"
 ENV_PATH_RE = re.compile(r"/env(From)?(/(\d+|-))?(/|$)")
 OP_TEXT_RE = re.compile(r"""["']?\bop\b["']?\s*:""")
 TEMPLATE_RE = re.compile(r"\$\{|\{\{")
+# Path TOKENS (a path segment split on - _ .) that name a non-sandbox environment. A path carrying
+# one is never sandbox and never permitted, wherever it sits (rules.yaml: demo_only_flags.non_sandbox_path_tokens
+# overrides this default).
+DEFAULT_NON_SANDBOX_TOKENS = ("prod", "production", "prd", "live", "staging", "stage", "uat", "preprod")
+KUSTOMIZATION_NAMES = ("kustomization.yaml", "kustomization.yml", "kustomization")
+CONFIG_PAYLOAD_KEY_RE = re.compile(r"\.(ya?ml|properties|env|conf)$", re.I)
+ENVFROM_REF = "<envFrom/configMapKeyRef>"
 
 
 class RegistryError(Exception):
@@ -91,6 +140,9 @@ def validate_registry(reg) -> dict:
         paths = (cfg or {}).get("paths")
         if not isinstance(paths, list) or not paths or not all(isinstance(p, str) and p for p in paths):
             raise RegistryError(f"environment {name!r} needs a non-empty paths: list of path prefixes")
+    tokens = reg.get("non_sandbox_path_tokens", list(DEFAULT_NON_SANDBOX_TOKENS))
+    if not isinstance(tokens, list) or not tokens or not all(isinstance(t, str) and t for t in tokens):
+        raise RegistryError("demo_only_flags.non_sandbox_path_tokens must be a non-empty list of strings")
     flags = reg.get("flags")
     if not isinstance(flags, list) or not flags:
         raise RegistryError("demo_only_flags.flags must be a non-empty list")
@@ -108,7 +160,16 @@ def validate_registry(reg) -> dict:
     return reg
 
 
-def classify(rel: str, envs: dict) -> str:
+def path_tokens(rel: str) -> set:
+    return {t for seg in rel.lower().split("/") for t in re.split(r"[-_.]", seg) if t}
+
+
+def classify(rel: str, envs: dict, non_sandbox=DEFAULT_NON_SANDBOX_TOKENS) -> str:
+    """Environment of a path. A path with a non-sandbox token (prod, uat, ...) in ANY segment is
+    `non-sandbox:<token>` and permitted nowhere, even inside a declared environment's root."""
+    hit = sorted(path_tokens(rel) & set(non_sandbox))
+    if hit:
+        return f"non-sandbox:{hit[0]}"
     for name, cfg in envs.items():
         if any(rel.startswith(p) for p in cfg["paths"]):
             return name
@@ -117,18 +178,19 @@ def classify(rel: str, envs: dict) -> str:
 
 # ------------------------------------------------------------------ manifest scan
 def iter_scan_files(root: Path):
+    """Every manifest-shaped file in the repo (yaml/yml/json/properties/tf/tfvars, `.env*`,
+    `Dockerfile*`, a bare `Kustomization`), outside SKIP_DIRS and `src/test/` trees. The environment
+    of each is decided by classify(); nothing outside a declared environment is permitted."""
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
         rel_dir = Path(dirpath).relative_to(root).as_posix()
-        top = rel_dir.split("/")[0]
+        if "/src/test/" in f"/{rel_dir}/" or rel_dir.endswith("/src/test"):
+            dirnames[:] = []
+            continue
         for fn in filenames:
             rel = (Path(rel_dir) / fn).as_posix() if rel_dir != "." else fn
             low = fn.lower()
-            infra = top == "openbank-infra"
-            compose = "compose" in low and low.endswith(MANIFEST_EXT)
-            envfile = low.startswith(".env") or low.startswith("dockerfile")
-            if not (infra or compose or envfile):
-                continue
+            envfile = low.startswith(".env") or low.startswith("dockerfile") or low in KUSTOMIZATION_NAMES
             if low.endswith(MANIFEST_EXT) or low.endswith(TEXT_EXT) or envfile:
                 yield rel
 
@@ -150,33 +212,86 @@ def embedded(text, names, props, hits, path, force):
             hits.append((UNATTRIBUTED_PATCH, None, "unparsable"))
 
 
-def referenced_patch_files(root: Path, rel: str):
-    """Files a kustomization references as patches (patches / patchesJson6902 `path:`, and
-    patchesStrategicMerge file entries), any extension, inside or outside the scanned roots."""
-    out = []
+def option_tokens(text: str):
+    """Split an option/command string ("-Xmx1g -Dopenbank.x=true", `export A=b`, a shell line) into
+    tokens, tolerating unbalanced quotes. A -D / -- prefix is stripped from each token."""
+    try:
+        toks = shlex.split(text, posix=True)
+    except ValueError:
+        toks = text.split()
+    for t in toks:
+        yield re.sub(r"^(-D|--)", "", t)
+
+
+def properties_hits(text, names, props, hits, kind):
+    """`key=value` / `key: value` lines of a properties-style payload; a `%profile.` prefix is
+    stripped (a manifest that sets `%prod.x=true` sets it for that profile, which D/A both refuse)."""
+    for line in text.splitlines():
+        m = re.match(r"\s*(?:export\s+)?(?:%[A-Za-z0-9_,\-]+\.)?([A-Za-z0-9_.\-]+)\s*[=:]\s*(.*?)\s*$", line)
+        if m and not line.lstrip().startswith("#") and m.group(1) in names | props:
+            hits.append((m.group(1), m.group(2).strip("\"'"), kind))
+
+
+def embedded_config(key, text, names, props, hits, path):
+    """A string value that is itself an application config (`application.yaml: |`,
+    `override.properties: |`, a `.env` payload)."""
+    if key.lower().endswith((".yaml", ".yml")):
+        try:
+            docs = gatelib.loads_all(text)
+        except Exception:
+            properties_hits(text, names, props, hits, "embedded")  # unparsable: still read as lines
+            return
+        for doc in docs:
+            if isinstance(doc, dict):
+                for fk, fv in flatten(doc).items():
+                    bare = split_profile(fk)[1]
+                    if bare in names | props and not isinstance(fv, (dict, list)):
+                        hits.append((bare, fv, "embedded"))
+                walk(doc, names, props, hits, path)
+    else:
+        properties_hits(text, names, props, hits, "embedded")
+
+
+def kustomization_refs(root: Path, rel: str):
+    """What a kustomization points at: ({path: mode}, [generated ConfigMap names]). Mode `patch`
+    (patches / patchesJson6902 / patchesStrategicMerge file entries) or `env` (configMapGenerator /
+    secretGenerator `envs:` and `files:`), any extension, inside or outside the scanned set."""
+    out: dict = {}
+    gens: list = []
     try:
         docs = gatelib.loads_all(gatelib.read_text(root / rel, errors="replace"))
     except Exception:
-        return out
+        return out, gens
     base = (root / rel).parent
     root_r = root.resolve()
+
+    def add(ref, mode):
+        if isinstance(ref, str) and "\n" not in ref and ref.strip():
+            f = (base / ref.strip().split("=", 1)[-1]).resolve()  # `files:` may be `key=path`
+            try:
+                r = f.relative_to(root_r).as_posix()
+            except ValueError:
+                return
+            if f.is_file():
+                out[r] = mode
+
     for doc in docs:
         if not isinstance(doc, dict):
             continue
-        refs = []
         for key in ("patches", "patchesJson6902", "patchesStrategicMerge"):
             for ent in doc.get(key) or []:
-                refs.append(ent.get("path") if isinstance(ent, dict) else ent)
-        for ref in refs:
-            if isinstance(ref, str) and "\n" not in ref and ref.strip():
-                f = (base / ref.strip()).resolve()
-                try:
-                    r = f.relative_to(root_r).as_posix()
-                except ValueError:
+                add(ent.get("path") if isinstance(ent, dict) else ent, "patch")
+        for gkey in ("configMapGenerator", "secretGenerator"):
+            for g in doc.get(gkey) or []:
+                if not isinstance(g, dict):
                     continue
-                if f.is_file():
-                    out.append(r)
-    return out
+                if gkey == "configMapGenerator" and isinstance(g.get("name"), str):
+                    gens.append(g["name"])
+                for ekey in ("envs", "env", "files"):
+                    val = g.get(ekey)
+                    for ref in ([val] if isinstance(val, str) else val or []):
+                        add(ref, "env")
+    return out, gens
 
 
 def walk(node, names, props, hits, path=""):
@@ -200,6 +315,17 @@ def walk(node, names, props, hits, path=""):
                 hits.append((k, v, "map"))
             if k == "patch" and isinstance(v, str):
                 embedded(v, names, props, hits, path, force=True)
+            if k == "patchesStrategicMerge" and isinstance(v, list):
+                for ent in v:  # an inline entry is patch CONTENT, a path entry is one line
+                    if isinstance(ent, str) and "\n" in ent:
+                        embedded(ent, names, props, hits, path, force=False)
+            if isinstance(k, str) and isinstance(v, str) and CONFIG_PAYLOAD_KEY_RE.search(k):
+                embedded_config(k, v, names, props, hits, path)
+            if k == "envFrom" and isinstance(v, list):
+                for ent in v:
+                    ref = ent.get("configMapRef") if isinstance(ent, dict) else None
+                    if isinstance(ref, dict) and isinstance(ref.get("name"), str):
+                        hits.append((ENVFROM_REF, ref["name"], "envFrom"))
             walk(v, names, props, hits, f"{path}/{k}")
     elif isinstance(node, list):
         for v in node:
@@ -207,35 +333,43 @@ def walk(node, names, props, hits, path=""):
     elif isinstance(node, str):
         if "/env/" in node or OP_TEXT_RE.search(node):
             embedded(node, names, props, hits, path, force=False)
-        for m in re.finditer(r"(?:^|[\s\-D])([A-Za-z0-9_.\-]+)=(\S*)", node):
-            if m.group(1) in names | props:
+        for tok in option_tokens(node):
+            m = re.fullmatch(r"([A-Za-z0-9_.\-]+)=(.*)", tok, re.S)
+            if m and m.group(1) in names | props:
                 hits.append((m.group(1), m.group(2), "assign"))
 
 
-def scan_file(path: Path, names: set, props: set, referenced: bool = False):
-    """Return (hits, parsed_ok). A hit is (name, value, kind). A file reached through a
-    kustomization reference is always parsed and walked, and failing to parse is a hit."""
+def scan_file(path: Path, names: set, props: set, mode: str = ""):
+    """Return (hits, docs or None when not parsed). A hit is (name, value, kind). A file reached through a
+    kustomization `patch` reference is always parsed and walked, and failing to parse is a hit; an
+    `env` reference (configMapGenerator envs/files) is read as NAME=value lines."""
     text = gatelib.read_text(path, errors="replace")
     hits: list = []
-    parsed = False
+    docs = None
     suffix = path.suffix.lower()
-    if referenced or suffix in MANIFEST_EXT or suffix == ".json":
+    if mode == "env":
+        properties_hits(text, names, props, hits, "envfile")
+        return hits, None
+    if mode == "patch" or suffix in MANIFEST_EXT or path.name.lower() == "kustomization":
         # No raw-text prefilter: escaped text ("\\u0043LEAR") defeats a substring check.
         try:
-            for doc in gatelib.loads_all(text):
+            docs = gatelib.loads_all(text)
+            for doc in docs:
                 walk(doc, names, props, hits)
-            parsed = True
         except Exception:
-            parsed = False
-            if referenced:
+            docs = None
+            if mode == "patch":
                 hits.append((UNATTRIBUTED_PATCH, None, "unparsable"))
-    if not parsed:
+    if docs is None:
+        dflag = r"(?:(?<![A-Za-z0-9_.\-])|(?<=-D))"
         for n in names | props:
-            for m in re.finditer(rf"(?<![A-Za-z0-9_.\-]){re.escape(n)}\s*[=:]\s*[\"']?([^\s\"'#]*)", text):
+            for m in re.finditer(rf"{dflag}{re.escape(n)}\s*[=:]\s*[\"']?([^\s\"'#]*)", text):
                 hits.append((n, m.group(1), "text"))
             for m in re.finditer(rf"name:\s*[\"']?{re.escape(n)}[\"']?\s*\n\s*value:\s*[\"']?([^\s\"'#]*)", text):
                 hits.append((n, m.group(1), "text"))
-    return hits, parsed
+            for m in re.finditer(rf"^\s*ENV\s+{re.escape(n)}\s+[\"']?([^\s\"'#]*)", text, re.M):
+                hits.append((n, m.group(1), "text"))
+    return hits, docs
 
 
 def bad_in_env(value, kind) -> str | None:
@@ -315,8 +449,7 @@ def code_findings(root: Path, flag: dict, permitted_profiles: set):
     name, svc, prop = flag["env_var"], flag["service"], flag["config_property"]
     svc_dir = root / svc
     res = svc_dir / "src/main/resources"
-    if env_name(prop) != name:
-        f.append(("C", f"{name}: env var does not map to config property {prop} (expected {env_name(prop)})"))
+    alias_ok = env_name(prop) == name
     yaml_files = sorted(res.glob("application*.yaml")) + sorted(res.glob("application*.yml")) if res.is_dir() else []
     base_has = False
     base_default = None
@@ -331,6 +464,8 @@ def code_findings(root: Path, flag: dict, permitted_profiles: set):
             continue
         for profiles, raw in settings:
             exists = True
+            if isinstance(raw, str) and re.search(r"\$\{" + re.escape(name) + r"[:}]", raw):
+                alias_ok = True  # the yaml routes this env var into the property
             profs = profiles or ([file_profile] if file_profile else [])
             has, val = default_of(raw)
             if not profs:
@@ -350,6 +485,9 @@ def code_findings(root: Path, flag: dict, permitted_profiles: set):
                 for prof in profs:
                     if prof not in permitted_profiles and truthy(m.group(2)):
                         f.append(("D", f"{name}: profile %{prof} in {pf.relative_to(root)} sets {prop}={m.group(2).strip()}"))
+    if not alias_ok:
+        f.append(("C", f"{name}: env var does not map to config property {prop} (expected {env_name(prop)} "
+                       f"or a `${{{name}:...}}` reference in {svc}'s application yaml)"))
     anns = annotation_defaults(svc_dir, prop) if svc_dir.is_dir() else []
     if anns:
         exists = True
@@ -383,30 +521,59 @@ def check(root: Path, reg: dict):
     envs = reg["environments"]
     permitted_profiles = set(reg.get("permitted_profiles") or ["dev", "test"])
     flags = reg["flags"]
-    names = {f["env_var"] for f in flags}
+    # A flag is reachable under its manifest env var AND under the env var Quarkus derives from
+    # the property name, so both are watched.
+    names = {f["env_var"] for f in flags} | {env_name(f["config_property"]) for f in flags}
     props = {f["config_property"] for f in flags}
     by_name = {}
     for f in flags:
         by_name[f["env_var"]] = f
+        by_name[env_name(f["config_property"])] = f
         by_name[f["config_property"]] = f
     findings = []
     subjects = 0
+    non_sandbox = tuple(reg.get("non_sandbox_path_tokens") or DEFAULT_NON_SANDBOX_TOKENS)
     # contexts[rel] = every path whose environment must permit what the file does: the file
-    # itself and, for a referenced patch, the kustomization that applies it.
+    # itself and, for a referenced patch / generator input / ConfigMap, whatever applies or
+    # mounts it. A sandbox ConfigMap pulled in by a non-sandbox workload is judged in BOTH.
     contexts: dict = {}
     for rel in iter_scan_files(root):
         contexts.setdefault(rel, {rel})
-    referenced = set()
-    for rel in [r for r in contexts if Path(r).name.lower() in ("kustomization.yaml", "kustomization.yml")]:
-        for ref in referenced_patch_files(root, rel):
+    modes: dict = {}
+    cm_files: dict = {}  # ConfigMap name -> files that define its content
+    for rel in [r for r in contexts if Path(r).name.lower() in KUSTOMIZATION_NAMES]:
+        refs, gens = kustomization_refs(root, rel)
+        for ref, mode in refs.items():
             contexts.setdefault(ref, {ref}).add(rel)
-            referenced.add(ref)
-    for rel, ctx in sorted(contexts.items()):
+            modes[ref] = mode
+            for g in gens:
+                if mode == "env":
+                    cm_files.setdefault(g, set()).add(ref)
+        for g in gens:
+            cm_files.setdefault(g, set()).add(rel)  # literals live in the kustomization itself
+    unresolved_cm = set()
+    file_hits: dict = {}
+    for rel in sorted(contexts):
         subjects += 1
-        hits, _ = scan_file(root / rel, names, props, referenced=rel in referenced)
+        file_hits[rel], docs = scan_file(root / rel, names, props, mode=modes.get(rel, ""))
+        for doc in docs or []:
+            if isinstance(doc, dict) and doc.get("kind") == "ConfigMap":
+                n = (doc.get("metadata") or {}).get("name")
+                if isinstance(n, str):
+                    cm_files.setdefault(n, set()).add(rel)
+    for rel, hits in file_hits.items():
+        for nm, val, kind in hits:
+            if nm == ENVFROM_REF:
+                if val in cm_files:
+                    for cm_rel in cm_files[val]:
+                        contexts[cm_rel].add(rel)
+                else:
+                    unresolved_cm.add(val)
+    for rel, ctx in sorted(contexts.items()):
+        hits = [h for h in file_hits[rel] if h[0] != ENVFROM_REF]
         if not hits:
             continue
-        env_of = {c: classify(c, envs) for c in sorted(ctx)}
+        env_of = {c: classify(c, envs, non_sandbox) for c in sorted(ctx)}
         label = ", ".join(f"{c} -> {e!r}" for c, e in env_of.items())
         for nm, val, kind in hits:
             if nm == UNATTRIBUTED_PATCH:
@@ -423,6 +590,10 @@ def check(root: Path, reg: dict):
             if why:
                 findings.append(("A", f"{flag['env_var']}: {rel} ({label}) {why}; permitted only in "
                                       f"{flag['permitted_environments']}"))
+    if unresolved_cm:
+        # Not a finding: the object is not in this repo, so what it sets cannot be shown either way.
+        print(f"NOTE demo-only-flags: {len(unresolved_cm)} envFrom ConfigMap name(s) not defined in the "
+              "repo were not followed (known limit)")
     for flag in flags:
         subjects += 1
         findings.extend(code_findings(root, flag, permitted_profiles))
@@ -462,8 +633,12 @@ def _fixture(kt=KT, yaml_text="quarkus:\n  application:\n    name: x\n", manifes
     return root
 
 
-def _classes(root):
-    return sorted({c for c, _ in check(root, REG)[0]})
+def _classes(root, reg=None):
+    return sorted({c for c, _ in check(root, reg or REG)[0]})
+
+
+REG_ALIAS = dict(REG, flags=[dict(REG["flags"][0], env_var="X_ALIAS_FLAG")])
+ALIAS_YAML = "openbank:\n  x:\n    auto-clear: ${X_ALIAS_FLAG:false}\n"
 
 
 def self_test() -> int:
@@ -550,12 +725,75 @@ def self_test() -> int:
         ("A+: item4 referenced file that does not parse",
          _fixture(manifests={"openbank-infra/gitops-prod/kustomization.yaml": "patches:\n  - path: bad.json\n",
                              "openbank-infra/gitops-prod/bad.json": "[{ not: valid: json"}), ["A"]),
+        # ---- review round 2026-11-12: each case below must FAIL against the previous gate ----
+        ("A+: R1 true under a future permitted-root production tree",
+         _fixture(manifests={"openbank-infra/gitops/environments/production/x.yaml": ROLLOUT % "true"}), ["A"]),
+        ("A+: R1 true under a segment-named uat dir inside a permitted root",
+         _fixture(manifests={"openbank-infra/k8s/overlays/sandbox/uat/x.yaml": ROLLOUT % "true"}), ["A"]),
+        ("A+: R1 values-prod.yaml inside the sandbox tree",
+         _fixture(manifests={"openbank-infra/gitops/components/x/values-prod.yaml": ROLLOUT % "true"}), ["A"]),
+        ("A-: R1 products/ is not the segment prod",
+         _fixture(manifests={"openbank-infra/gitops/components/products/x.yaml": ROLLOUT % "true"}), []),
+        ("A+: R1 a directory merely named overlays/sandbox outside the permitted root",
+         _fixture(manifests={"deploy/overlays/sandbox/x.yaml": ROLLOUT % "true"}), ["A"]),
+        ("A+: R2 deploy/ manifest outside openbank-infra",
+         _fixture(manifests={"deploy/x.yaml": ROLLOUT % "true"}), ["A"]),
+        ("A+: R2 Helm values file in charts/",
+         _fixture(manifests={"charts/app/values.yaml": "env:\n  OPENBANK_X_AUTO_CLEAR: \"true\"\n"}), ["A"]),
+        ("A+: R2 workflow env block",
+         _fixture(manifests={".github/workflows/e2e.yml":
+                             "jobs:\n  j:\n    env:\n      OPENBANK_X_AUTO_CLEAR: true\n"}), ["A"]),
+        ("A-: R2 src/test fixture is not a deployment",
+         _fixture(manifests={"openbank-x-service/src/test/resources/c.yaml": ROLLOUT % "true"}), []),
+        ("A+: R3 -D inside JAVA_OPTS string",
+         _fixture(manifests={"deploy/x.yaml": "env:\n  - name: JAVA_OPTS\n    value: \"-Xmx1g -Dopenbank.x.auto-clear=true\"\n"}), ["A"]),
+        ("A-: R3 -D inside JAVA_OPTS string set false",
+         _fixture(manifests={"deploy/x.yaml": "env:\n  - name: JAVA_OPTS\n    value: \"-Xmx1g -Dopenbank.x.auto-clear=false\"\n"}), []),
+        ("A+: R3 Dockerfile ENV with -D",
+         _fixture(manifests={"openbank-infra/docker/Dockerfile.x": 'FROM scratch\nENV JAVA_OPTS="-Xmx1g -Dopenbank.x.auto-clear=true"\n'}), ["A"]),
+        ("A+: R4 ConfigMap application.yaml payload",
+         _fixture(manifests={"deploy/cm.yaml": "kind: ConfigMap\ndata:\n  application.yaml: |\n    openbank:\n      x:\n        auto-clear: true\n"}), ["A"]),
+        ("A+: R4 ConfigMap override.properties payload",
+         _fixture(manifests={"deploy/cm.yaml": "kind: ConfigMap\ndata:\n  override.properties: |\n    config_ordinal=500\n    openbank.x.auto-clear=true\n"}), ["A"]),
+        ("A+: R4 ConfigMap application.properties payload with %prod prefix",
+         _fixture(manifests={"deploy/cm.yaml": "kind: ConfigMap\ndata:\n  application.properties: |\n    %prod.openbank.x.auto-clear=true\n"}), ["A"]),
+        ("A-: R4 ConfigMap payload sets false",
+         _fixture(manifests={"deploy/cm.yaml": "kind: ConfigMap\ndata:\n  override.properties: |\n    openbank.x.auto-clear=false\n"}), []),
+        ("A+: R4 envFrom a sandbox ConfigMap that carries the flag, from a deploy/ workload",
+         _fixture(manifests={"openbank-infra/gitops/cm.yaml": "kind: ConfigMap\nmetadata: {name: c}\ndata:\n  OPENBANK_X_AUTO_CLEAR: \"true\"\n",
+                             "deploy/app.yaml": "kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: a\n          envFrom:\n            - configMapRef: {name: c}\n"}), ["A"]),
+        ("A-: R4 envFrom the same ConfigMap from a sandbox workload",
+         _fixture(manifests={"openbank-infra/gitops/cm.yaml": "kind: ConfigMap\nmetadata: {name: c}\ndata:\n  OPENBANK_X_AUTO_CLEAR: \"true\"\n",
+                             "openbank-infra/gitops/app.yaml": "kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: a\n          envFrom:\n            - configMapRef: {name: c}\n"}), []),
+        ("A-: R4 envFrom a ConfigMap that is not in the repo is left alone (known limit, not guessed)",
+         _fixture(manifests={"deploy/app.yaml": "kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: a\n          envFrom:\n            - configMapRef: {name: not-here}\n"}), []),
+        ("A+: R4 configMapGenerator envs file",
+         _fixture(manifests={"deploy/kustomization.yaml": "configMapGenerator:\n  - name: g\n    envs: [flags.env]\n",
+                             "deploy/flags.env": "OPENBANK_X_AUTO_CLEAR=true\n"}), ["A"]),
+        ("A+: R4 configMapGenerator literals",
+         _fixture(manifests={"deploy/kustomization.yaml": "configMapGenerator:\n  - name: g\n    literals:\n      - OPENBANK_X_AUTO_CLEAR=true\n"}), ["A"]),
+        ("A-: R4 configMapGenerator envs file in the sandbox tree",
+         _fixture(manifests={"openbank-infra/gitops/kustomization.yaml": "configMapGenerator:\n  - name: g\n    envs: [flags.env]\n",
+                             "openbank-infra/gitops/flags.env": "OPENBANK_X_AUTO_CLEAR=true\n"}), []),
+        ("A+: R4 inline patchesStrategicMerge entry",
+         _fixture(manifests={"deploy/kustomization.yaml": "patchesStrategicMerge:\n  - |-\n    kind: Rollout\n    spec:\n      template:\n        spec:\n          containers:\n            - name: a\n              env:\n                - name: OPENBANK_X_AUTO_CLEAR\n                  value: \"true\"\n"}), ["A"]),
+        ("A+: R4 kustomization file named `Kustomization` (no extension)",
+         _fixture(manifests={"deploy/Kustomization": "patchesStrategicMerge:\n  - p.txt\n", "deploy/p.txt": ROLLOUT % "true"}), ["A"]),
         ("D-: %dev sets true", _fixture(yaml_text="'%dev':\n  openbank:\n    x:\n      auto-clear: true\n"), []),
         ("D-: %prod sets false", _fixture(yaml_text="'%prod':\n  openbank:\n    x:\n      auto-clear: false\n"), []),
     ]
     bad = 0
-    for label, root, want in cases:
-        got = _classes(root)
+    alias_ro = ROLLOUT.replace("OPENBANK_X_AUTO_CLEAR", "%s")
+    cases += [  # (label, root, want, registry): a flag whose manifest env var is an alias of the property
+        ("A+: R5 alias env var true outside the sandbox", _fixture(yaml_text=ALIAS_YAML, manifests={"deploy/x.yaml": alias_ro % ("X_ALIAS_FLAG", "true")}), ["A"], REG_ALIAS),
+        ("A+: R5 canonical env var of an aliased flag true outside the sandbox",
+         _fixture(yaml_text=ALIAS_YAML, manifests={"deploy/x.yaml": ROLLOUT % "true"}), ["A"], REG_ALIAS),
+        ("A-: R5 alias env var true in the sandbox", _fixture(yaml_text=ALIAS_YAML, manifests={sand: alias_ro % ("X_ALIAS_FLAG", "true")}), [], REG_ALIAS),
+        ("C+: R5 alias env var that the yaml never reads", _fixture(), ["C"], REG_ALIAS),
+    ]
+    for case in cases:
+        label, root, want = case[:3]
+        got = _classes(root, case[3] if len(case) > 3 else None)
         ok = got == want
         bad += not ok
         print(f"  {'ok  ' if ok else 'FAIL'} {label}: got {got} want {want}")

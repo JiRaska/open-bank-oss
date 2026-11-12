@@ -535,8 +535,8 @@ spec:
             # application.yaml's `http://localhost:8133` — nothing listens there, the adapter is
             # fail-open, and every scoring call logged "shadow ALLOW / Connection refused" and
             # moved on. `fraud_scores` held 0 rows fleet-wide as a result. Behaviour-neutral to
-            # wire: the verdict is only logged (`SEPA` rail) and never acted on. SEPA fraud
-            # enforcement is not implemented and no switch for it exists (tracked in #15724).
+            # wire: the verdict is only logged (`SEPA` rail), never acted on, until
+            # SEPA_FRAUD_ENFORCEMENT_ENABLED flips — which is a separate runbook-gated change.
             - name: FRAUD_SERVICE_URL
               value: http://fraud-service.fraud.svc:8133
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
