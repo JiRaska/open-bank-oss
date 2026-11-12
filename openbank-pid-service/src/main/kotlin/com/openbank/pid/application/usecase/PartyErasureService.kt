@@ -37,8 +37,12 @@ class PartyErasureService(
 
     override suspend fun erase(partyId: UUID): ErasureOutcome {
         val now = clock.instant()
-        val anonymisedCases = cases.anonymizeLinkedTo(partyId, now)
+        // Party first: it takes the row lock and commits erased_at, after which no case can be linked
+        // to this party (the link is checked under the same lock). Cases run second, so every link
+        // that committed before the party step is cleaned here, and a repeat delivery re-cleans any
+        // linked case that is still not anonymised.
         val party = parties.anonymize(partyId, now)
+        val anonymisedCases = cases.anonymizeLinkedTo(partyId, now)
         val outcome = when {
             party == PartyAnonymisation.FIRST || anonymisedCases > 0 -> ErasureOutcome.ERASED
             party == PartyAnonymisation.REPEAT -> ErasureOutcome.REPEATED

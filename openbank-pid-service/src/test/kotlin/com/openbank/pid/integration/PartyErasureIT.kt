@@ -335,8 +335,105 @@ class PartyErasureIT {
         assertThat(count("SELECT count(*) FROM party_external_ids WHERE party_id = ?", victim)).isZero()
     }
 
+    /** Holds `SELECT ... FOR UPDATE` on the party row from a separate JDBC connection until [release]. */
+    private inner class RowLock(id: UUID) {
+        private val connection = dataSource.connection.also { it.autoCommit = false }
+
+        init {
+            connection.prepareStatement("SELECT 1 FROM parties WHERE id = ? FOR UPDATE").use { ps ->
+                ps.setObject(1, id)
+                ps.executeQuery().close()
+            }
+        }
+
+        fun <T> inLockedTransaction(block: (Connection) -> T): T = block(connection)
+
+        fun release() {
+            connection.commit()
+            connection.close()
+        }
+    }
+
+    /** True once some backend is waiting on a lock — the deterministic "it is blocked" signal, no sleep. */
+    private fun anyoneWaitingOnLock(): Boolean = jdbc { c ->
+        c.prepareStatement(
+            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()",
+        ).use { ps ->
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1) > 0
+            }
+        }
+    }
+
+    @Test
+    fun `a write blocks behind the erase that holds the row lock and is then refused`() {
+        val victim = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        val lock = RowLock(victim)
+        val executor = java.util.concurrent.Executors.newSingleThreadExecutor()
+        try {
+            val write = executor.submit<Int> {
+                io.restassured.RestAssured.given().contentType("application/json")
+                    .body("""{"email":"racer@example.test"}""")
+                    .request("PATCH", "/api/v1/parties/$victim/contact").statusCode()
+            }
+            assertThat(await { anyoneWaitingOnLock() })
+                .describedAs("the write must block on the party row lock, not read-then-write around it").isTrue()
+            assertThat(write.isDone).isFalse()
+
+            // The erase "commits" while the write waits.
+            lock.inLockedTransaction { c ->
+                c.prepareStatement(
+                    "UPDATE parties SET erased_at = now(), email = NULL, given_name = 'GDPR_ERASED' WHERE id = ?",
+                ).use { ps ->
+                    ps.setObject(1, victim)
+                    ps.executeUpdate()
+                }
+            }
+            lock.release()
+
+            assertThat(write.get(WAIT_SECONDS, java.util.concurrent.TimeUnit.SECONDS))
+                .describedAs("the write that waited must see erased_at under the lock").isEqualTo(409)
+            assertThat(party(victim).email).isNull()
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `an erase blocks behind a write holding the row lock and then cleans what the write stored`() {
+        val victim = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        val lock = RowLock(victim)
+
+        source().send(erased(victim))
+        assertThat(await { anyoneWaitingOnLock() }).describedAs("the erase must wait for the row lock").isTrue()
+        assertThat(party(victim).erasedAt).isNull()
+
+        // The write "commits" while the erase waits.
+        lock.inLockedTransaction { c ->
+            c.prepareStatement("UPDATE parties SET email = 'written@example.test' WHERE id = ?").use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+            c.prepareStatement(
+                "INSERT INTO party_external_ids (party_id, id_type, id_value) VALUES (?, 'KEYCLOAK_ID', 'written')",
+            ).use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+        }
+        lock.release()
+
+        assertThat(await { party(victim).erasedAt != null }).isTrue()
+        assertThat(party(victim).email).describedAs("the erase must clean the write it waited for").isNull()
+        assertThat(count("SELECT count(*) FROM party_external_ids WHERE party_id = ?", victim)).isZero()
+    }
+
     private companion object {
         const val ATTEMPTS = 100
         const val POLL_MILLIS = 100L
+        const val WAIT_SECONDS = 30L
     }
 }

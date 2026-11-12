@@ -23,6 +23,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.time.Instant
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -145,35 +146,42 @@ class PartyRepositoryImpl(
         return findById(party.id)!!
     }
 
+    /**
+     * The parent update and every child write run in ONE transaction that first takes
+     * `SELECT ... FOR UPDATE` on the party row and checks `erased_at` under that lock (GDPR Art. 17,
+     * #15755). [anonymize] takes the same lock, so a write and an erasure serialise: either the
+     * write commits first and the erase then cleans it, or the erase commits first and the write is
+     * refused. The child steps are chained inside the one `withTransaction` (not nested ones, which
+     * would merely join it).
+     */
     override suspend fun update(party: Party): Party {
         Panache.withTransaction {
-            find("id", party.id).firstResult().map { existing ->
+            find("id", party.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { existing ->
                 requireNotNull(existing) { "Party ${party.id} not found" }.apply {
-                    // GDPR Art. 17 (#15755): the backstop for every party write path, checked on the
-                    // row inside the writing transaction so it cannot race a concurrent erase.
                     if (erasedAt != null) throw PartyErasedException("Party ${party.id} was erased")
                     applyUpdate(party)
                 }
+                party.externalIds.fold(Uni.createFrom().voidItem()) { chain, extId ->
+                    chain.flatMap {
+                        extIdRepo.find("partyId = ?1 AND idType = ?2", party.id, extId.type.name).firstResult()
+                            .flatMap { exists ->
+                                if (exists == null) {
+                                    extIdRepo.persist(
+                                        PartyExternalIdEntity().also {
+                                            it.partyId = party.id
+                                            it.idType = extId.type.name
+                                            it.idValue = extId.value
+                                            it.verifiedAt = extId.verifiedAt
+                                        },
+                                    ).replaceWithVoid()
+                                } else {
+                                    Uni.createFrom().voidItem()
+                                }
+                            }
+                    }
+                }
             }
         }.awaitSuspending()
-
-        party.externalIds.forEach { extId ->
-            val exists = Panache.withSession {
-                extIdRepo.find("partyId = ?1 AND idType = ?2", party.id, extId.type.name).firstResult()
-            }.awaitSuspending()
-            if (exists == null) {
-                Panache.withTransaction {
-                    extIdRepo.persist(
-                        PartyExternalIdEntity().also {
-                            it.partyId = party.id
-                            it.idType = extId.type.name
-                            it.idValue = extId.value
-                            it.verifiedAt = extId.verifiedAt
-                        },
-                    )
-                }.awaitSuspending()
-            }
-        }
 
         return findById(party.id)!!
     }
@@ -185,7 +193,7 @@ class PartyRepositoryImpl(
     override suspend fun anonymize(partyId: UUID, erasedAt: Instant): PartyAnonymisation {
         val at = erasedAt.atOffset(ZoneOffset.UTC)
         return Panache.withTransaction {
-            find("id", partyId).firstResult().flatMap { entity ->
+            find("id", partyId).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { entity ->
                 if (entity == null) {
                     Uni.createFrom().item(PartyAnonymisation.UNKNOWN)
                 } else {

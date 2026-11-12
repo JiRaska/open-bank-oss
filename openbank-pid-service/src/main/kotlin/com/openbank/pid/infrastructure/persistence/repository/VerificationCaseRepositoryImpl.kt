@@ -8,11 +8,14 @@ import com.openbank.pid.application.port.out.VerificationCaseRepository
 import com.openbank.pid.application.usecase.PartyErasedException
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
+import com.openbank.pid.infrastructure.persistence.entity.PartyEntity
 import com.openbank.pid.infrastructure.persistence.entity.VerificationCaseEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -54,26 +57,47 @@ class VerificationCaseRepositoryImpl :
 
     override suspend fun update(case: VerificationCase): VerificationCase {
         Panache.withTransaction {
-            find("id", case.id).firstResult().map { existing ->
-                requireNotNull(existing) { "verification case ${case.id} not found" }.apply {
-                    // GDPR Art. 17 (#15755): an erased case is closed history; no step may write to it.
-                    if (erasedAt != null) throw PartyErasedException("verification case ${case.id} was erased")
-                    status = case.status.name
-                    firstApprover = case.firstApprover
-                    firstVerdict = case.firstVerdict?.name
-                    firstLinkPartyId = case.firstLinkPartyId
-                    firstNotes = case.firstNotes
-                    firstAt = case.firstAt
-                    secondApprover = case.secondApprover
-                    secondAt = case.secondAt
-                    finalVerdict = case.finalVerdict?.name
-                    finalLinkPartyId = case.finalLinkPartyId
-                    decidedAt = case.decidedAt
-                    updatedAt = case.updatedAt
-                }
+            find("id", case.id).firstResult().flatMap { existing ->
+                val current = requireNotNull(existing) { "verification case ${case.id} not found" }
+                // GDPR Art. 17 (#15755): an erased case is closed history; no step may write to it.
+                if (current.erasedAt != null) throw PartyErasedException("verification case ${case.id} was erased")
+                // A newly chosen link target is locked (FOR UPDATE) and checked in THIS transaction, so
+                // it cannot be erased between the check and the write (PartyRepositoryImpl.anonymize
+                // takes the same lock).
+                val newTargets = listOfNotNull(case.firstLinkPartyId, case.finalLinkPartyId)
+                    .distinct()
+                    .filter { it != current.firstLinkPartyId && it != current.finalLinkPartyId }
+                lockLiveTargets(newTargets).map { applyDecision(current, case) }
             }
         }.awaitSuspending()
         return case
+    }
+
+    private fun applyDecision(current: VerificationCaseEntity, case: VerificationCase) = current.apply {
+        status = case.status.name
+        firstApprover = case.firstApprover
+        firstVerdict = case.firstVerdict?.name
+        firstLinkPartyId = case.firstLinkPartyId
+        firstNotes = case.firstNotes
+        firstAt = case.firstAt
+        secondApprover = case.secondApprover
+        secondAt = case.secondAt
+        finalVerdict = case.finalVerdict?.name
+        finalLinkPartyId = case.finalLinkPartyId
+        decidedAt = case.decidedAt
+        updatedAt = case.updatedAt
+    }
+
+    /** Locks each party row (FOR UPDATE) in order and fails if any was erased. */
+    private fun lockLiveTargets(ids: List<UUID>): Uni<Void> = Panache.getSession().flatMap { session ->
+        ids.fold(Uni.createFrom().voidItem()) { chain, id ->
+            chain.flatMap {
+                session.find(PartyEntity::class.java, id, LockModeType.PESSIMISTIC_WRITE).map { party ->
+                    if (party?.erasedAt != null) throw PartyErasedException("Link target party $id was erased")
+                    party
+                }.replaceWithVoid()
+            }
+        }
     }
 
     override suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int = Panache.withTransaction {
