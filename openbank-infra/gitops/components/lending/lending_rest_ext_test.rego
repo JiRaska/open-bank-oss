@@ -299,6 +299,33 @@ test_treasury_roles_denied_backfill if {
 	}
 }
 
+# --- human review of an engine decline: a person's decision, never a machine's ---
+
+credit_risk := {"service_account": false, "type": "HUMAN", "id": "u-cr", "roles": ["ROLE_CREDIT_RISK"]}
+
+credit_risk_machine := {"service_account": true, "client_id": "openbank-services", "type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_CREDIT_RISK"]}
+
+test_credit_risk_human_decides_decline_review if {
+	rest.allow with input as {"principal": credit_risk, "action": "lending.declineReview.decide"}
+	rest.allow with input as {"principal": credit_risk, "action": "lending.declineReview.read"}
+}
+
+test_machine_with_credit_risk_role_denied_decline_review if {
+	not rest.allow with input as {"principal": credit_risk_machine, "action": "lending.declineReview.decide"}
+	not rest.allow with input as {"principal": credit_risk_machine, "action": "lending.declineReview.read"}
+}
+
+test_edge_denied_decline_review_decision if {
+	not rest.allow with input as {"principal": edge, "action": "lending.declineReview.decide"}
+		with data.rules as rules_mock
+	not rest.allow with input as {"principal": edge, "action": "lending.declineReview.read"}
+		with data.rules as rules_mock
+}
+
+test_edge_may_still_request_review_via_intake_identity if {
+	rest.allow with input as {"principal": edge, "action": "lending.intake"}
+}
+
 test_czech_policy_is_scoped_to_human_credit_risk_staff if {
 	actor := {"type": "HUMAN", "id": "test-credit-risk", "service_account": false, "roles": ["ROLE_CREDIT_RISK"]}
 	every action in {"lending.policy.propose", "lending.policy.read", "lending.policy.decide"} {
