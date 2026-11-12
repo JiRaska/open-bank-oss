@@ -780,7 +780,8 @@ def resolve_reconcile_service_source(
 
 
 def resolve_reconcile_service_sources(
-    services: list[str], tip_sha: str, repository: str, token: str, api_url: str
+    services: list[str], tip_sha: str, repository: str, token: str, api_url: str,
+    *, unresolved: list[str] | None = None,
 ) -> dict[str, dict[str, str | int]]:
     """Resolve exact historical Sources CI/Pact versions for a batch of services.
 
@@ -789,6 +790,10 @@ def resolve_reconcile_service_sources(
     have an exact Pact version, and be tree-equivalent to the built image. Jobs are fetched
     once per candidate run for the entire pending service batch. A bad/incomplete candidate
     is skipped; API failures and inconsistent pagination are refusals.
+
+    With `unresolved` (a list to fill), a service for which the whole history holds no such
+    source is appended there instead of failing the batch: its absence is a fact about that
+    service only, and the caller refuses it individually. Systemic failures still raise.
     """
     if (
         not isinstance(services, list)
@@ -874,6 +879,9 @@ def resolve_reconcile_service_sources(
                 pending.remove(service)
             if not pending:
                 return resolved
+    if unresolved is not None:
+        unresolved.extend(sorted(pending))
+        return resolved
     missing = ", ".join(sorted(pending))
     raise VerificationError(
         f"no successful main Services CI build+contract with exact Pact versions and "
@@ -882,6 +890,22 @@ def resolve_reconcile_service_sources(
 
 
 def main() -> int:
+    if len(sys.argv) == 4 and sys.argv[1] == "--resolve-reconcile-sources-partial":
+        unresolved: list[str] = []
+        try:
+            resolved = resolve_reconcile_service_sources(
+                json.loads(sys.argv[2]),
+                sys.argv[3],
+                os.environ.get("GITHUB_REPOSITORY", ""),
+                os.environ.get("GH_TOKEN", ""),
+                os.environ.get("GITHUB_API_URL", "https://api.github.com"),
+                unresolved=unresolved,
+            )
+        except (json.JSONDecodeError, VerificationError) as exc:
+            print(f"::error::reconcile source refused: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps({"resolved": resolved, "unresolved": unresolved}, sort_keys=True))
+        return 0
     if len(sys.argv) == 3 and sys.argv[1] == "--verify-services":
         try:
             candidates = json.loads(sys.argv[2])

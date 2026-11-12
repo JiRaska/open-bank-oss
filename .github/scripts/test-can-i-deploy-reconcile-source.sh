@@ -17,7 +17,7 @@ export REAL_PYTHON="$real_python"
 cat > "$tmp/bin/python3" <<'STUB'
 #!/usr/bin/env bash
 if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
-  if [ "${2:-}" = "--resolve-reconcile-sources" ]; then
+  if [ "${2:-}" = "--resolve-reconcile-sources" ] || [ "${2:-}" = "--resolve-reconcile-sources-partial" ]; then
     echo "$*" >> "$SERVICE_CI_LOG"
     if [ -z "${GH_TOKEN:-}" ] || [ "${RESOLVER_MODE:-failure}" != "success" ] || \
        [ -z "${RESOLVER_SHA:-}" ]; then
@@ -25,7 +25,13 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
       exit 1
     fi
     resolved='{}'
+    unresolved='[]'
     for svc in $(jq -r '.[]' <<< "${3:?}"); do
+      if [ "${2}" = "--resolve-reconcile-sources-partial" ] && \
+         jq -e --arg svc "$svc" 'index($svc) != null' >/dev/null <<< "${RESOLVER_UNRESOLVED:-[]}"; then
+        unresolved="$(jq -cn --argjson old "$unresolved" --arg svc "$svc" '$old + [$svc]')"
+        continue
+      fi
       exact="$(EVENT_NAME=push PACT_WAIT_PER_SERVICE_SECONDS=0 \
         bash .github/scripts/probe-pact-version.sh "$svc" "$RESOLVER_SHA")"
       if [ "$exact" != "yes" ]; then
@@ -36,13 +42,17 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
         --arg sha "$RESOLVER_SHA" \
         '$old + {($svc): {sha: $sha, run_id: "fixture-run", attempt: 2}}')"
     done
-    printf '%s\n' "$resolved"
+    if [ "${2}" = "--resolve-reconcile-sources-partial" ]; then
+      jq -cn --argjson r "$resolved" --argjson u "$unresolved" '{resolved: $r, unresolved: $u}'
+    else
+      printf '%s\n' "$resolved"
+    fi
     exit 0
   fi
   if [ "${2:-}" = "--verify-services" ]; then
     # Batch form: same per-service rules as the single form below, one call per gate run.
     echo "--verify-services" >> "$SERVICE_CI_BATCH_LOG"
-    if [ -z "${GH_TOKEN:-}" ] || [ "${SERVICE_CI_MODE:-success}" != "success" ]; then
+    if [ -z "${GH_TOKEN:-}" ] || { [ "${SERVICE_CI_MODE:-success}" != "success" ] && [ "${SERVICE_CI_MODE}" != "fail-one" ]; }; then
       echo "::error::exact-main Services CI evidence is unavailable" >&2
       exit 1
     fi
@@ -50,6 +60,8 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
     for svc in $(jq -r 'keys[]' <<< "${3:?}"); do
       sha="$(jq -r --arg svc "$svc" '.[$svc]' <<< "$3")"
       echo ".github/scripts/verify-successful-service-ci.py $svc $sha" >> "$SERVICE_CI_LOG"
+      # fail-one: exactly this service has no exact Services CI proof; its peers do.
+      if [ "${SERVICE_CI_MODE}" = "fail-one" ] && [ "$svc" = "${SERVICE_CI_FAIL_SERVICE:-}" ]; then continue; fi
       if [ -n "${SERVICE_CI_FAIL_SHA:-}" ] && [ "$sha" = "$SERVICE_CI_FAIL_SHA" ]; then continue; fi
       if [ -n "${SERVICE_CI_EXPECTED_SOURCE:-}" ] && [ "$sha" != "$SERVICE_CI_EXPECTED_SOURCE" ]; then continue; fi
       proven="$(jq -cn --argjson old "$proven" --arg svc "$svc" --arg sha "$sha" \
@@ -63,7 +75,11 @@ if [ "${1:-}" = ".github/scripts/verify-successful-service-ci.py" ]; then
     echo "::error::GitHub token is unavailable" >&2
     exit 1
   fi
-  if [ "${SERVICE_CI_MODE:-success}" != "success" ]; then
+  if [ "${SERVICE_CI_MODE:-success}" = "fail-one" ] && [ "${2:-}" = "${SERVICE_CI_FAIL_SERVICE:-}" ]; then
+    echo "::error::no successful exact-main Services CI attempt proves ${2} build and contract" >&2
+    exit 1
+  fi
+  if [ "${SERVICE_CI_MODE:-success}" != "success" ] && [ "${SERVICE_CI_MODE}" != "fail-one" ]; then
     echo "::error::exact-main Services CI evidence is unavailable" >&2
     exit 1
   fi
@@ -434,10 +450,23 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
     exit 1
   fi
   if ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
-     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--resolve-reconcile-sources-partial [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: positive gate did not carry the exact equivalent Pact/CI SHA through" >&2
     cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/positive-log" >&2
+    exit 1
+  fi
+
+  # A service whose whole history holds no proven source is refused individually through the
+  # partial resolver; alone in the batch, that still empties the deployment set.
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$PACT_CLI_LOG"
+  if RESOLVER_UNRESOLVED='["openbank-demo-service"]' PACT_CLI_MODE=success \
+     bash .github/scripts/can-i-deploy-gate.sh >"$tmp/unresolved-log" 2>&1 || \
+     ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT" || \
+     ! grep -q 'no successful exact-main Services CI build+contract with an exact' "$tmp/unresolved-log" || \
+     grep -q -- '--pacticipant openbank-demo-service' "$PACT_CLI_LOG"; then
+    echo "FAIL: an unresolved historical source was not refused individually before Pact" >&2
+    cat "$GITHUB_OUTPUT" "$tmp/unresolved-log" >&2
     exit 1
   fi
 
@@ -490,7 +519,7 @@ printf 'class Example\n' > "$positive/openbank-demo-service/src/main/Example.kt"
   if ! BROKER_MODE=verified SERVICE_CI_FAIL_SHA="$CURRENT_SHA" SERVICE_CI_EXPECTED_SOURCE="" \
      RESOLVER_MODE=success RESOLVER_SHA="$OLDER_SHA" PACT_CLI_MODE=success \
      bash .github/scripts/can-i-deploy-gate.sh >"$tmp/tip-without-ci-log" 2>&1 || \
-     ! grep -F -- "--resolve-reconcile-sources [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
+     ! grep -F -- "--resolve-reconcile-sources-partial [\"openbank-demo-service\"] $CURRENT_SHA" "$SERVICE_CI_LOG" >/dev/null || \
      ! grep -F -- "--pacticipant openbank-demo-service --version $OLDER_SHA" "$PACT_CLI_LOG" >/dev/null || \
      ! grep -q '^deployable=\["openbank-demo-service"\]$' "$GITHUB_OUTPUT"; then
     echo "FAIL: Pact at current SHA without exact Services CI did not fall back to the historical source" >&2
@@ -698,3 +727,47 @@ if ! bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/exact-counterpart-
   exit 1
 fi
 echo "PASS: exact and proven-equivalent sources keep the existing counterpart policy"
+
+# One member with no successful exact-main Services CI proof is refused ALONE; its fully proven
+# peer still deploys (2026-11-09: two unproven services emptied a 12-service reconcile). An
+# explicitly atomic co-deploy set still refuses as a whole.
+run_unproven_member_case() {
+  local atomic="$1"
+  export SERVICES='["openbank-good-service","openbank-bad-service"]' BROKER_MODE=verified
+  export RECONCILE_SOURCE_REQUIRED=true INPUT_CODEPLOY="$atomic" INPUT_CODEPLOY_PACT_VERSIONS='{}'
+  export EVENT_NAME=schedule GITHUB_EVENT_NAME=schedule GITHUB_SHA="$sha" GITHUB_REF=refs/heads/main
+  [ "$atomic" != true ] || export EVENT_NAME=workflow_dispatch GITHUB_EVENT_NAME=workflow_dispatch
+  export GH_TOKEN=fixture SERVICE_CI_MODE=fail-one SERVICE_CI_FAIL_SERVICE=openbank-bad-service
+  # No exact Services CI for bad-service routes it to the historical resolver (#15454), which
+  # finds no proven source either: only then is it refused, and refused alone.
+  export RESOLVER_MODE=success RESOLVER_SHA="$sha" RESOLVER_UNRESOLVED='["openbank-bad-service"]'
+  export SERVICE_CI_EXPECTED_SOURCE="$sha" PACT_CLI_MODE=success
+  export IMAGE_TAGS='{"openbank-good-service":"sandbox-01234567","openbank-bad-service":"sandbox-01234567"}'
+  export IMAGE_DIGESTS='{"openbank-good-service":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","openbank-bad-service":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
+  export BUILD_IMAGE_TAG=sandbox-01234567 PACT_WAIT_PER_SERVICE_SECONDS=0 PACT_WAIT_BUDGET_SECONDS=0
+  : > "$GITHUB_OUTPUT"; : > "$GITHUB_STEP_SUMMARY"; : > "$SERVICE_CI_LOG"; : > "$PACT_CLI_LOG"
+  if bash "$root/.github/scripts/can-i-deploy-gate.sh" >"$tmp/unproven-log" 2>&1; then
+    echo "FAIL: a refused member must leave the gate visibly unsuccessful" >&2
+    cat "$tmp/unproven-log" >&2; exit 1
+  fi
+  if grep -q -- '--pacticipant openbank-bad-service' "$PACT_CLI_LOG"; then
+    echo "FAIL: Pact CLI was asked about a service without Services CI proof" >&2; exit 1
+  fi
+  if [ "$atomic" = true ]; then
+    if ! grep -q '^deployable=\[\]$' "$GITHUB_OUTPUT"; then
+      echo "FAIL: atomic co-deploy set deployed without proof for every member" >&2
+      cat "$GITHUB_OUTPUT" "$tmp/unproven-log" >&2; exit 1
+    fi
+  elif ! grep -q '^deployable=\["openbank-good-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -q '^blocked=\["openbank-bad-service"\]$' "$GITHUB_OUTPUT" || \
+       ! grep -q 'no successful exact-main Services CI build+contract' "$tmp/unproven-log"; then
+    echo "FAIL: one unproven member starved its proven peer or lost its refusal" >&2
+    cat "$GITHUB_OUTPUT" "$PACT_CLI_LOG" "$SERVICE_CI_LOG" "$tmp/unproven-log" >&2; exit 1
+  fi
+  if ! grep -F -- '--resolve-reconcile-sources-partial ["openbank-bad-service"]' "$SERVICE_CI_LOG" >/dev/null; then
+    echo "FAIL: the unproven member was refused without consulting the historical resolver" >&2; exit 1
+  fi
+  echo "PASS: unproven member refused alone / atomic=$atomic"
+}
+run_unproven_member_case false
+run_unproven_member_case true

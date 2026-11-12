@@ -43,10 +43,14 @@ jq '[.[][] | ([.labels[].name] | index("merge-priority:repair") != null) as $rep
 # otherwise freeze its whole kind: the flush defers to it and supersede lets it ride (#14498).
 # Mark it `stuck` so the flush disarms it and lets the newest PR of that kind carry its pins.
 # A query error fails loudly (set -e): guessing "not stuck" would restore the freeze silently.
-for n in $(jq -r '.[] | select(.armed) | .number' "$out/prs.json"); do
+# Every deploy PR is classified, not only armed ones: an unarmed stuck PR used to be re-armed by
+# this flush and disarmed by the next, forever (#15411). A `conflicted` one is closed instead.
+for n in $(jq -r '.[] | select(.repair_priority | not) | .number' "$out/prs.json"); do
   view=$(gh pr view "$n" --repo "$repo" --json mergeStateStatus,statusCheckRollup)
   stuck=$(python3 .github/scripts/deploy-window.py stuck <<< "$view")
-  jq --argjson n "$n" --argjson stuck "$stuck" 'map(if .number == $n then .stuck = $stuck else . end)' \
+  conflicted=$(python3 .github/scripts/deploy-window.py stuck --conflicted <<< "$view")
+  jq --argjson n "$n" --argjson stuck "$stuck" --argjson conflicted "$conflicted" \
+    'map(if .number == $n then .stuck = $stuck | .conflicted = $conflicted else . end)' \
     "$out/prs.json" > "$out/prs.json.tmp" && mv "$out/prs.json.tmp" "$out/prs.json"
 done
 jq -e 'type == "array"' "$out/commits.json" "$out/prs.json" >/dev/null

@@ -78,7 +78,7 @@ source_not_evaluated=0
 
 refuse_reconcile_source() {
   local svc="$1"
-  local why="Broker has no Pacticipant and no verified Pact source"
+  local why="${2:-Broker has no Pacticipant and no verified Pact source}"
   echo "::error::reconcile source refused for ${svc}: ${why}"
   reconcile_source_blocked=1
   reconcile_blocked="$(jq -cn --argjson old "$reconcile_blocked" --arg svc "$svc" '$old + [$svc] | unique')"
@@ -187,11 +187,27 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
     done
   fi
   if [ "$source_failure" -eq 0 ] && [ "$(jq -r 'length' <<< "$historical_services")" -gt 0 ]; then
-    historical_source_map="$(python3 .github/scripts/verify-successful-service-ci.py \
-      --resolve-reconcile-sources "$historical_services" "$GITHUB_SHA")" || {
+    # A service whose history holds no proven source is refused ALONE (2026-11-09: two such
+    # services emptied a 12-service reconcile). Only a systemic resolver failure stays batch-wide.
+    historical_resolution="$(python3 .github/scripts/verify-successful-service-ci.py \
+      --resolve-reconcile-sources-partial "$historical_services" "$GITHUB_SHA")" || {
       echo "::error::reconcile source refused: no verified historical Services CI source for every requested service"
       source_failure=1
     }
+    if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
+      type == "object" and (.resolved | type == "object") and (.unresolved | type == "array") and
+      ((.resolved | keys) + .unresolved | sort) == ($services | sort)
+    ' >/dev/null <<< "$historical_resolution"; then
+      echo "::error::reconcile source refused: historical source resolver returned incomplete or malformed evidence"
+      source_failure=1
+    fi
+    if [ "$source_failure" -eq 0 ]; then
+      for svc in $(jq -r '.unresolved[]' <<< "$historical_resolution"); do
+        refuse_reconcile_source "$svc" "no successful exact-main Services CI build+contract with an exact, tree-equivalent Pact source"
+      done
+      historical_source_map="$(jq -c '.resolved' <<< "$historical_resolution")"
+      historical_services="$(jq -c 'keys' <<< "$historical_source_map")"
+    fi
     if [ "$source_failure" -eq 0 ] && ! jq -e --argjson services "$historical_services" '
       type == "object" and (keys | sort) == ($services | sort) and
       all(.[]; type == "object" and
@@ -266,7 +282,8 @@ if [ "${RECONCILE_SOURCE_REQUIRED:-false}" = "true" ]; then
       fi
       if [ "$source_ci_verified" != true ] \
          && ! python3 .github/scripts/verify-successful-service-ci.py "$svc" "$source_sha"; then
-        source_failure=1
+        # Unproven build evidence for THIS service says nothing about its peers' own proofs.
+        refuse_reconcile_source "$svc" "no successful exact-main Services CI build+contract for source ${source_sha}"
         continue
       fi
       reconcile_present="$(jq -cn --argjson old "$reconcile_present" --arg svc "$svc" \
