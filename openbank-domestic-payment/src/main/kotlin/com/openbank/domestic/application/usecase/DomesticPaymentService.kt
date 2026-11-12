@@ -192,6 +192,7 @@ class DomesticPaymentService(
             actorScope = "$DELEGATED_ACTOR_SCOPE_PREFIX:${snapshot.granteePartyId}",
             delegationId = snapshot.delegationId,
             reservationId = snapshot.reservationId,
+            customerSubmissionScope = null,
         )
         return createPaymentInternal(
             command = trustedCommand,
@@ -215,7 +216,7 @@ class DomesticPaymentService(
         val requestFingerprint = DomesticPaymentRequestFingerprint.sha256(normalized)
 
         paymentRepository.findByIdempotencyKey(normalized.idempotencyKey)?.let { existing ->
-            verifyReplay(existing, requestFingerprint)
+            verifyReplay(existing, requestFingerprint, normalized.customerSubmissionScope)
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(existing, replayed = true))
         }
 
@@ -262,7 +263,7 @@ class DomesticPaymentService(
         // no duplicate outbox entry exists. It is still a replay only when the durable fingerprints
         // match; a different or legacy-null binding fails closed.
         if (received.id != payment.id) {
-            verifyReplay(received, requestFingerprint)
+            verifyReplay(received, requestFingerprint, normalized.customerSubmissionScope)
             return DelegatedDomesticPaymentResult.Accepted(CreateDomesticPaymentResult(received, replayed = true))
         }
 
@@ -297,8 +298,8 @@ class DomesticPaymentService(
     private fun DelegatedDomesticPaymentResult.acceptedOrNull(): CreateDomesticPaymentResult? =
         (this as? DelegatedDomesticPaymentResult.Accepted)?.result
 
-    private fun verifyReplay(existing: DomesticPayment, requestFingerprint: String) {
-        if (existing.requestFingerprint != requestFingerprint) {
+    private fun verifyReplay(existing: DomesticPayment, requestFingerprint: String, scope: String?) {
+        if (existing.requestFingerprint != requestFingerprint || existing.customerSubmissionScope != scope) {
             throw DomesticPaymentIdempotencyConflictException()
         }
     }
@@ -334,6 +335,7 @@ class DomesticPaymentService(
             endToEndId = command.endToEndId ?: generateEndToEndId(command.priority),
             initiatedByPartyId = command.actorId,
             requestFingerprint = requestFingerprint,
+            customerSubmissionScope = command.customerSubmissionScope,
             delegationId = command.delegationId,
             reservationId = command.reservationId,
             rejectReason = null,
@@ -347,6 +349,12 @@ class DomesticPaymentService(
 
     override suspend fun getPayment(paymentId: UUID): DomesticPayment =
         paymentRepository.findById(paymentId) ?: throw DomesticPaymentNotFoundException(paymentId)
+
+    override suspend fun findCustomerSubmission(
+        idempotencyKey: String,
+        debtorAccountId: UUID,
+        scope: String,
+    ): DomesticPayment? = paymentRepository.findCustomerSubmission(idempotencyKey, debtorAccountId, scope)
 
     override suspend fun listPayments(query: ListDomesticPaymentsQuery): List<DomesticPayment> = paymentRepository.list(
         status = query.status,

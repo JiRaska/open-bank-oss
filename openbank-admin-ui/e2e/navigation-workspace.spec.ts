@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import AxeBuilder from '@axe-core/playwright'
 import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator, signInWithRoles } from './helpers/auth'

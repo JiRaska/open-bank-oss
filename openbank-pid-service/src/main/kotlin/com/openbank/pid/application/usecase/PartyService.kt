@@ -458,6 +458,7 @@ class PartyService(
 
     override suspend fun addRelationship(command: AddRelationshipCommand): PartyRelationship {
         val party = getById(command.partyId)
+        if (party.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         val now = OffsetDateTime.now(clock)
 
         val existing = party.relationships.firstOrNull {
@@ -500,6 +501,7 @@ class PartyService(
         if (relationship.partyId != command.partyId) {
             throw IllegalArgumentException("Relationship does not belong to party ${command.partyId}")
         }
+        if (getById(command.partyId).erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
 
         val now = OffsetDateTime.now(clock)
         val updated = relationship.copy(
@@ -550,3 +552,10 @@ class PartyAlreadyExistsException(message: String) : com.openbank.libs.domain.er
 class RelationshipAlreadyExistsException(message: String) :
     com.openbank.libs.domain.error.ResourceConflictException(message)
 class InvalidPartyCaseTransitionException(message: String) : RuntimeException(message)
+
+/**
+ * GDPR Art. 17 (#15755): a write targeted a party (or a record of a party) whose personal data was erased.
+ * 409 via libs-runtime's shared ResourceConflictException mapper, like PartyAlreadyExistsException;
+ * the message carries no personal data.
+ */
+class PartyErasedException(message: String) : com.openbank.libs.domain.error.ResourceConflictException(message)

@@ -66,6 +66,8 @@ class IdentityRegistrationService(
 
         val indices = Indices(blindIndex, eudiIndex)
         val existing = partyRepository.findById(command.partyId)
+        // GDPR Art. 17 (#15755): an erased id must not be re-populated.
+        if (existing?.erasedAt != null) throw PartyErasedException("Party ${command.partyId} was erased")
         return if (existing == null) {
             partyRepository.save(newIndexParty(command, indices, now))
         } else {
