@@ -2802,7 +2802,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-27e19a17@sha256:990e5171ac7b29b34936437fbfe027490309829abdaf837b5f921cfb57b5f495
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-379e548b@sha256:82c3e9479f7b37bb18420d15b33fde67a22abe52c3c37c4e5b9babee7f06d3b5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
