@@ -493,137 +493,17 @@ jobs:
     timeout-minutes: 65
     permissions:
       actions: read
+      contents: read  # load the read-only receipt action; no App credentials
     outputs:
       snapshot: ${{ steps.read.outputs.snapshot }}
     steps:
       # This job holds only GITHUB_TOKEN with Actions:read. The privileged producer
       # runs separately from main; neither App key nor installation token enters CI.
-      - name: Locate successful evidence from the trusted collector
-        id: locate
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          script: |
-            const path = '.github/workflows/ruleset-bypass-evidence.yml';
-            const name = `ruleset-bypass-${process.env.GITHUB_RUN_ID}-a${process.env.GITHUB_RUN_ATTEMPT}`;
-            // GITHUB_TOKEN quota is 1000/h per REPOSITORY, shared by every job. A proven
-            // exhaustion may extend the wait to the hourly reset, never past the hard cap.
-            const started = Date.now();
-            const hardCap = started + 62 * 60 * 1000;
-            let deadline = started + 30 * 60 * 1000;
-            const exhausted = () => new Error('No trusted ruleset evidence for this CI attempt; NOT_EVALUATED');
-            const pause = async milliseconds => {
-              const remaining = deadline - Date.now();
-              if (remaining <= 0) throw exhausted();
-              await new Promise(resolve => setTimeout(resolve, Math.min(milliseconds, remaining)));
-              if (Date.now() >= deadline) throw exhausted();
-            };
-            // Retry only a proven primary quota exhaustion. Permission denial stays an error.
-            const read = async request => {
-              let quotaRetries = 0;
-              while (Date.now() < deadline) {
-                try {
-                  const response = await request(Math.max(1, Math.min(15000, deadline - Date.now())));
-                  if (Date.now() >= deadline) throw exhausted();
-                  return response;
-                } catch (error) {
-                  const headers = error.response?.headers || {};
-                  const reset = Number(headers['x-ratelimit-reset']);
-                  if (error.status !== 403 || headers['x-ratelimit-remaining'] !== '0' ||
-                      !Number.isFinite(reset) || reset <= 0 || quotaRetries++ >= 3) throw error;
-                  const resume = Math.max(Date.now() + 1000, reset * 1000 + 1000);
-                  if (resume > hardCap) throw exhausted();
-                  deadline = Math.min(hardCap, Math.max(deadline, resume + 60 * 1000));
-                  await pause(resume - Date.now());
-                }
-              }
-              throw exhausted();
-            };
-            let workflow;
-            let artifactCache;
-            let poll = 0;
-            while (Date.now() < deadline) {
-              if (!workflow) {
-                ({data: workflow} = await read(timeout => github.rest.actions.getWorkflow({
-                  ...context.repo, workflow_id: 'ruleset-bypass-evidence.yml', request: {timeout}
-                })));
-              }
-              // Keep the existing exact-name, first-page (100) scope. Cache only this
-              // receiver invocation's valid response, never a snapshot or producer verdict.
-              const query = {...context.repo, name, per_page: 100};
-              const key = JSON.stringify([query.owner, query.repo, query.name, query.per_page]);
-              let response;
-              try {
-                response = await read(timeout => github.rest.actions.listArtifactsForRepo({
-                  ...query,
-                  ...(artifactCache?.key === key ? {headers: {'if-none-match': artifactCache.etag}} : {}),
-                  request: {timeout}
-                }));
-              } catch (error) {
-                if (error.status !== 304) throw error;
-                response = {status: 304};
-              }
-              if (Date.now() >= deadline) throw exhausted();
-              let data;
-              if (response.status === 304) {
-                if (!artifactCache || artifactCache.key !== key) {
-                  throw new Error('Conditional artifact response has no matching body; NOT_EVALUATED');
-                }
-                data = artifactCache.data;
-              } else {
-                data = response.data;
-                if (response.status !== 200 || !data || !Array.isArray(data.artifacts)) {
-                  throw new Error('Invalid artifact-list response; NOT_EVALUATED');
-                }
-                const etag = response.headers?.etag;
-                artifactCache = typeof etag === 'string' && etag.trim() ? {key, etag, data} : undefined;
-              }
-              for (const artifact of data.artifacts) {
-                if (artifact.name !== name || artifact.expired || !artifact.workflow_run) continue;
-                const {data: run} = await read(timeout => github.rest.actions.getWorkflowRun({
-                  ...context.repo, run_id: artifact.workflow_run.id, request: {timeout}
-                }));
-                if (run.workflow_id !== workflow.id || run.path !== path ||
-                    run.event !== 'workflow_run' || run.status !== 'completed' ||
-                    run.conclusion !== 'success') continue;
-                core.setOutput('artifact-id', String(artifact.id));
-                core.setOutput('run-id', String(run.id));
-                core.setOutput('run-attempt', String(run.run_attempt));
-                return;
-              }
-              await pause([5000, 10000, 20000, 30000][poll++] || 60000);
-            }
-            throw exhausted();
-      - name: Download data from the verified collector run
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ steps.locate.outputs.run-id }}
-          artifact-ids: ${{ steps.locate.outputs.artifact-id }}
-          merge-multiple: true
-          path: ${{ runner.temp }}/ruleset-evidence
-      - name: Bind evidence to this CI attempt and its producer
+          persist-credentials: false
+      - uses: ./.github/actions/receive-ruleset-evidence
         id: read
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        env:
-          SOURCE_RUN_ID: ${{ steps.locate.outputs.run-id }}
-          SOURCE_RUN_ATTEMPT: ${{ steps.locate.outputs.run-attempt }}
-        with:
-          script: |
-            const fs = require('fs');
-            const file = `${process.env.RUNNER_TEMP}/ruleset-evidence/snapshot.json`;
-            if (fs.statSync(file).size > 256 * 1024) throw new Error('Oversized ruleset evidence');
-            const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
-            const expected = {
-              version: 1, repository: `${context.repo.owner}/${context.repo.repo}`,
-              run_id: process.env.GITHUB_RUN_ID, run_attempt: process.env.GITHUB_RUN_ATTEMPT,
-              source_run_id: process.env.SOURCE_RUN_ID,
-              source_run_attempt: process.env.SOURCE_RUN_ATTEMPT
-            };
-            for (const [key, value] of Object.entries(expected)) {
-              if (snapshot[key] !== value) throw new Error(`Evidence binding mismatch: ${key}`);
-            }
-            core.setOutput('snapshot', JSON.stringify(snapshot));
 
   gates:
     name: gates (${{ matrix.slug }})
@@ -696,6 +576,14 @@ jobs:
       - name: gh-call-counter install
         continue-on-error: true
         run: bash .github/scripts/gh-call-counter.sh install
+
+      # A failed-job rerun preserves successful dependency outputs. Its snapshot
+      # belongs to the previous attempt and must never be relabelled or accepted.
+      # Only the consuming shard receives the new attempt's trusted artifact;
+      # the other shards and the privileged collector remain unchanged.
+      - uses: ./.github/actions/receive-ruleset-evidence
+        id: current-evidence
+        if: github.run_attempt > 1 && matrix.slug == 'lint-supplychain-security'
 
       - name: Install strace (self-test input tracing)
         run: |
@@ -864,6 +752,7 @@ jobs:
 
       - name: Run gates
         env:
+          RULESET_BYPASS_SNAPSHOT: ${{ steps.current-evidence.outputs.snapshot || needs.ruleset-evidence.outputs.snapshot }}
           OB_ARTIFACT_CACHE: ${{ runner.temp }}/ob-artifacts
         run: |
           # matrix.group is a space-separated SET of manifest groups; --group is repeatable.

@@ -81,7 +81,7 @@ class PolicyDecisionPointAdapterTest {
     }
 
     @Test
-    fun `an unreachable sidecar fails closed AND sets pdpError so BLOCK can fall back to advisory`() {
+    fun `an unreachable sidecar fails closed AND sets pdpError so the gate can tell an outage from a policy deny`() {
         val client = mockk<OpaClient>()
         every { client.decision(any()) } throws IOException("connection refused")
 
