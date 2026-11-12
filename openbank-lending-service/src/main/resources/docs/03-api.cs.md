@@ -90,3 +90,18 @@ tělo neobsahuje identitu navrhovatele, schvalovatele ani čerpajícího. Mapov�
 ## Verzování
 
 URL cesta `/api/v1/...`; hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`. Verze OpenAPI kontraktu (`info.version`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt`.
+
+## Lidské přezkoumání zamítnutí enginem
+
+GDPR čl. 22 odst. 3, nařízení o AI čl. 86 a EBA/GL/2020/06 bod 54: zákazník, jehož žádost rozhodovací engine zamítl, může požádat o posouzení člověkem. Zamítnutá žádost zůstává `DECLINED` (koncový stav, ADR-0211 D1); přezkum je samostatný záznam.
+
+| Endpoint | Metoda | Volající | Poznámky |
+|---|---|---|---|
+| `/intake/applications/{id}/decline-review` | `POST` | pouze principál customer-edge (`lending.intake`) | Žadatel (z `X-Customer-Party-Id`) žádá; povinný `Idempotency-Key`. 201 první žádost, 200 opakování (tentýž přezkum), 404 cizí žádost, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (lidé) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Důvod povinný (10-512 znaků). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` |
+
+- **Přezkoumat lze jen zamítnutí enginem**: `DECLINED` s uloženým výsledkem enginu `DECLINE` a bez zaznamenaného lidského rozhodovatele. Zamítnutí učiněné nebo potvrzené člověkem se nevrací.
+- **Nejvýše jednou na žádost** (unikátní ve schématu); opakování vrátí existující přezkum. Lhůta je `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **výchozí 30**) od času vyhodnocení enginem.
+- **Důvody enginu se uchovají pro posuzovatele**: kódy důvodů, verze politik a čas rozhodnutí se uloží do přezkumu při podání; posuzovatel není vázán výsledkem enginu.
+- **Událost** (outbox, `schemaVersion` 1, jen identifikátory a strojové kódy): `credit.decline_review.requested`.
+- **Zákazník zatím nedosáhne**: route v customer-edge je navazující práce a rozhodnutí personálu (potvrzení, nebo přehodnocení do nástupnické žádosti, která vstoupí do čtyř očí) přijde samostatnou změnou; do té doby zůstává přezkum ve stavu `REQUESTED`.

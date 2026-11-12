@@ -12,6 +12,7 @@ import com.openbank.ledger.domain.model.ParticipationOutcome
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -32,6 +33,7 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.sql.DriverManager
 import java.time.Instant
 import java.time.LocalDate
@@ -57,6 +59,7 @@ class CloseReadinessIT {
             "openbank.ledger.close.participants-mode" to "shadow",
             "openbank.ledger.day-lock.mode" to "shadow",
             "authz.enforce" to "false",
+            "openbank.synthetic.trusted-principals" to SYNTHETIC_CLOSE_PRINCIPAL,
         )
     }
 
@@ -111,6 +114,34 @@ class CloseReadinessIT {
 
         postJournal(day)
 
+        given().get(READINESS).then().statusCode(200)
+            .body("eligibleForEnforcement", equalTo(false))
+            .body("days[0].blockers", hasItem("JOURNALS_CHANGED_AFTER_CLOSE"))
+        assertThat(storedEvidence(day)).isEqualTo(original)
+    }
+
+    @Test
+    @TestSecurity(user = SYNTHETIC_CLOSE_PRINCIPAL, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-synthetic-close-fixture"),
+            Claim(key = "preferred_username", value = SYNTHETIC_CLOSE_PRINCIPAL),
+            Claim(key = "sub", value = "isolated-synthetic-close-subject"),
+        ],
+    )
+    fun `late synthetic posting invalidates month evidence without entering real reporting`() {
+        closeMonth(omitFirstBilling = false)
+        val day = month.atDay(1)
+        val original = storedEvidence(day)
+        given().get(READINESS).then().statusCode(200).body("eligibleForEnforcement", equalTo(true))
+        val realDebit = trialBalanceDebit(day)
+        val syntheticDebit = trialBalanceDebit(day, "SYNTHETIC_ONLY")
+
+        val id = UUID.fromString(postJournal(day, synthetic = true))
+
+        assertThat(readScalar("SELECT synthetic::text FROM journal_entries WHERE id = '$id'").toBoolean()).isTrue()
+        assertThat(trialBalanceDebit(day)).isEqualByComparingTo(realDebit)
+        assertThat(trialBalanceDebit(day, "SYNTHETIC_ONLY") - syntheticDebit).isEqualByComparingTo("10.00")
         given().get(READINESS).then().statusCode(200)
             .body("eligibleForEnforcement", equalTo(false))
             .body("days[0].blockers", hasItem("JOURNALS_CHANGED_AFTER_CLOSE"))
@@ -327,7 +358,7 @@ class CloseReadinessIT {
         }
     }
 
-    private fun postJournal(date: LocalDate): String {
+    private fun postJournal(date: LocalDate, synthetic: Boolean = false): String {
         val transaction = UUID.randomUUID()
         fun line(code: String, side: String) = mapOf(
             "glAccountId" to readScalar("SELECT id FROM gl_accounts WHERE code = '$code'"),
@@ -337,7 +368,11 @@ class CloseReadinessIT {
             "baseAmount" to "10.00",
             "baseCurrencyCode" to "CZK",
         )
-        return given().contentType("application/json").body(
+        val request = given().contentType("application/json")
+        if (synthetic) {
+            request.header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
+        }
+        return request.body(
             mapOf(
                 "idempotencyKey" to "close-readiness-$transaction",
                 "transactionId" to transaction,
@@ -347,6 +382,15 @@ class CloseReadinessIT {
                 "lines" to listOf(line("1100", "DEBIT"), line("4003", "CREDIT")),
             ),
         ).post("/api/v1/journals").then().statusCode(201).extract().path("id")
+    }
+
+    private fun trialBalanceDebit(asOf: LocalDate, scope: String? = null): BigDecimal {
+        val request = given().queryParam("asOf", asOf.toString())
+        if (scope != null) request.queryParam("scope", scope)
+        val report = request.get("/api/v1/journals/trial-balance").then().statusCode(200)
+            .body("scope", equalTo(scope ?: "REAL_ONLY")).extract().jsonPath()
+        return report.getString("lines.find { it.code == '1100' && it.currency == 'CZK' }.totalDebit")
+            ?.toBigDecimal() ?: BigDecimal.ZERO
     }
 
     private fun storedEvidence(date: LocalDate): String = readScalar(
@@ -379,6 +423,7 @@ class CloseReadinessIT {
     }
 
     private companion object {
+        const val SYNTHETIC_CLOSE_PRINCIPAL = "service-account-openbank-synthetic-close-fixture"
         const val DAYS = "/api/v1/ledger/accounting-days"
         const val READINESS = "/api/v1/ledger/close-readiness"
     }

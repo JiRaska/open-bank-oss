@@ -40,6 +40,8 @@ Management endpoints are on the dedicated management port **8085** (`quarkus.man
 | `OPA_PATH` | `/v1/data/openbank/rest/allow` | OPA decision path |
 | `AUTHZ_ENFORCE` | `false` | advisory vs enforce authz |
 | `openbank.kyc.auto-approve` | `false` | **sandbox-only** straight-through approval; MUST stay false in prod |
+| `KYC_SCREENING_RETRY_ENABLED` | `true` | retry of the customer screen for cases opened during a `sanctions-service` outage; `false` stops the retries, not the backlog metric |
+| `KYC_SCREENING_RETRY_INTERVAL` / `_MIN_AGE` / `_BATCH_SIZE` | `1m` / `PT2M` / `50` | sweep cadence, wait after the last attempt, cases per run |
 
 Datasource: `postgresql://…/openbank_kyc`. Kafka bootstrap: `localhost:29092` (overridden per environment). Standard security response headers are set in `application.yaml` (HSTS, CSP `default-src 'self'`, X-Frame-Options DENY, etc.).
 
@@ -73,6 +75,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 - **Cases not auto-opening** — verify the `party-events-in` consumer is joined to group `kyc-service-party` and that `PARTY_CREATED` is flowing on `openbank.party.events`. `openCaseForParty` is idempotent; safe to replay the topic.
 - **Duplicate-case error on insert** — expected under replay/scale-out; `uq_kyc_cases_active_party` rejects the loser and the code re-reads. No action unless errors persist for distinct parties.
 - **Flyway checksum mismatch on startup** — never rewrite an applied migration; set `QUARKUS_FLYWAY_REPAIR_AT_START=true` in GitOps env, then remove once settled.
+- **Cases left unscreened** — `openbank_kyc_sanctions_unscreened_cases{service="kyc"}` counts in-flight cases whose sanctions check is `PENDING` and was never screened; `openbank_kyc_sanctions_unscreened_oldest_age_seconds` is the age of the oldest (both read NaN until the first measurement after start). A number that does not fall while `sanctions-service` is healthy means the sweep is not running (heartbeat `kyc-unscreened-case-retry`, `WorkflowLivenessStale`), is disabled, or holds no name for those cases — `SELECT case_id FROM kyc_cases WHERE pending_screening_name IS NULL AND status NOT IN ('APPROVED','REJECTED','EXPIRED')` lists candidates for a reviewer. The log line `kyc.unscreened-case.retry attempted=… settled=… failed=…` reports each run; it never contains a name.
 - **Sandbox auto-approve in prod** — if cases approve with reviewer `sandbox-auto-approval` in a non-sandbox environment, `openbank.kyc.auto-approve` is mis-set; flip to `false` immediately (compliance incident, four-eyes bypass).
 
 ## Observability

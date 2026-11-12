@@ -264,6 +264,11 @@ lending:
     max-amount: ${LENDING_INTAKE_MAX_AMOUNT:1000000}
     min-term-months: ${LENDING_INTAKE_MIN_TERM_MONTHS:6}
     max-term-months: ${LENDING_INTAKE_MAX_TERM_MONTHS:120}
+  # Customer-requested human review of a decision-engine decline (GDPR Art. 22(3), EU AI Act Art. 86).
+  # window-days: how long after the engine's decline the customer may still ask. Default 30 days; the
+  # window is measured from the engine evaluation time, not from the request.
+  decline-review:
+    window-days: ${LENDING_DECLINE_REVIEW_WINDOW_DAYS:30}
   origination:
     # Sandbox straight-through (ADR-0211 D5, ADR-0116 pattern): a submitted application is driven to
     # READY_TO_DISBURSE by the 'sandbox-auto-approval' actor so sandbox e2e runs without an operator.

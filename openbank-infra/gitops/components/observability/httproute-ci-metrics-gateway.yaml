@@ -1,0 +1,129 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ci-metrics.open-bank.tech on the shared Gateway (ADR-0324): the public edge of the CI metrics
+# gateway collector (apps/ci-metrics-gateway.yaml; threat model
+# docs/threat-models/ci-metrics-ingest.md). The receiver's own bearer-token auth gates every
+# request; this file carries the edge controls. There is no nginx Ingress for this host.
+#
+# DNS: external-dns publishes ci-metrics.open-bank.tech from this route (gateway-httproute
+# source, routes attached to envoy-gateway-system/edge only). No manual DNS step.
+#
+# ORDER (the Phase-1 RefNotPermitted lesson, see envoy-gateway/gateway.yaml): this file, with
+# the Certificate and the ReferenceGrant, must be synced BEFORE the Gateway's `https-ci-metrics`
+# listener is merged, or the listener names a Secret it is not yet allowed to read. Land the
+# listener in a LATER change.
+#
+# TLS: its own Certificate (cert-manager here runs without Gateway API support, so the Gateway
+# shim annotation would do nothing). Not SPKI-pinned: the only client is a CI runner, so a fresh
+# key on renewal is harmless.
+#
+# Edge controls:
+#   path allow-list      -> one Exact match, /v1/metrics; everything else is a 404 at the edge
+#   body cap             -> requestBuffer.limit 64Ki: a larger body is a 413 (the collector
+#                           also caps max_request_body_size at 64 KiB)
+#   rate limit           -> local limit PER CLIENT IP (sourceCIDR Distinct), 5 requests/second,
+#                           like rum-gateway. Possible because the Gateway's Service runs
+#                           externalTrafficPolicy: Local, so Envoy sees the real client address.
+#                           The bucket is per proxy replica (3 replicas), so the effective
+#                           ceiling per address is up to 3x; a push is a handful of requests.
+#   HSTS / nosniff       -> ResponseHeaderModifier below (and the Gateway-wide policy)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ci-metrics-edge-tls
+  namespace: observability
+spec:
+  secretName: ci-metrics-edge-tls
+  dnsNames:
+    - ci-metrics.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: ci-metrics-edge-gateway-tls
+  namespace: observability
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: ci-metrics-edge-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: ci-metrics-gateway
+  namespace: observability
+  annotations:
+    # ADR-0234: every HTTPRoute in `observability` is extAuth-gated or declares why not
+    # (Kyverno require-gated-or-declared-tool-httproute-cel). The bearer-token check on the
+    # OTLP receiver and the per-client rate limit are this host's controls.
+    openbank.io/ungated-machine-callers: >-
+      OTLP/HTTP metric export from CI runners; no browser session exists to
+      authenticate against, and the receiver requires a bearer token.
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-ci-metrics
+  hostnames:
+    - ci-metrics.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1/metrics
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: ci-metrics-gateway
+          port: 4318
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: ci-metrics-gateway
+  namespace: observability
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: ci-metrics-gateway
+  requestBuffer:
+    limit: 64Ki
+  timeout:
+    http:
+      requestTimeout: 30s
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling for a noisy client to exhaust.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 5
+            unit: Second
