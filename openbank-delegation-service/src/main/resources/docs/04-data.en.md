@@ -19,3 +19,28 @@ organization delegation requires explicit sole signing authority with a quorum
 of one. A joint mandate or incomplete representation evidence needs a separate
 statutory signing workflow. Employee approval groups retain their own
 management and operation rules.
+
+## Resource-ownership reads, per resource type (ADR-0375 D5)
+
+A grant is authority in itself once a product service projects it, so before an offer is minted this
+service asks the service that OWNS the resource whether the grantor really owns it. The answer is
+fail-closed in both failing directions: `NOT_OWNED` refuses, and so does `UNVERIFIABLE` — a lookup
+that could not be performed is not permission.
+
+| resource type | asked of | status |
+|---|---|---|
+| `ACCOUNT`, `SAVINGS_GOAL` | account-service (a savings goal is keyed on its owning account, ADR-0153) | resolved |
+| `CARD` | card-issuance-service | resolved |
+| `DOCUMENT` | document-service `GET /api/v1/documents/{id}/owner`, action `document.verifyOwnership` | resolved (ADR-0375 D5) |
+| `PAYMENT`, `STATEMENT` | nothing — see below | always `UNVERIFIABLE`, so every such offer is refused |
+
+The document read uses the NAMED `m2m` OIDC client, so it authenticates as
+`service-account-openbank-delegation` (ROLE_API only) and not as the shared `openbank-services`
+identity, which document-service refuses for that action. `M2mOidcClientIdentityWiringTest` pins the
+client selection.
+
+`PAYMENT` and `STATEMENT` are refused by measurement, not because the work is unfinished.
+statement-service is addressed by `accountId` and holds no statement object with an id of its own,
+so a `STATEMENT` resource id refers to nothing its owning service can resolve. A payment id resolves
+in no single service: six rails own payments and nothing maps an id to its rail. Neither type has an
+owner to ask, so both stay refused until those pairs leave the capability matrix.
