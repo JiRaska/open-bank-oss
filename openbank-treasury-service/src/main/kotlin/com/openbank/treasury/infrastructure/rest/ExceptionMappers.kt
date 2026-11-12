@@ -99,6 +99,10 @@ class ExceptionMappers {
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 
     @ServerExceptionMapper
+    fun nostroBreakNotFound(e: com.openbank.treasury.application.port.out.NostroBreakNotFoundException): Response =
+        error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
+
+    @ServerExceptionMapper
     fun nostroAccountNotFound(e: NostroAccountNotFoundException): Response =
         error(Response.Status.NOT_FOUND.statusCode, "NOT_FOUND", e.message)
 

@@ -19,6 +19,18 @@ enum class BreakSide {
     LEDGER,
 }
 
+/** How a break was resolved: a later reconciliation [MATCHED] it, or a person closed it ([MANUAL]). */
+enum class BreakResolutionKind {
+    /** A later reconciliation no longer observed it — the item matched. */
+    MATCHED,
+
+    /** A senior treasury approver closed it with a recorded reason, after investigating it. */
+    MANUAL,
+}
+
+/** One four-eyes step of a manual break resolution, as recorded in the append-only history. */
+enum class ResolutionStep { PROPOSED, APPROVED, REJECTED }
+
 /**
  * A reconciliation break (ADR-0315 D7): an item left unmatched by [NostroMatcher], persisted so it
  * carries an AGE. [firstSeenOn] is the day a reconciliation first observed it; [resolvedOn] the
@@ -46,6 +58,16 @@ data class NostroBreak(
     val firstSeenOn: LocalDate,
     val resolvedOn: LocalDate? = null,
     val alertedAt: Instant? = null,
+    val resolutionKind: BreakResolutionKind? = if (resolvedOn == null) null else BreakResolutionKind.MATCHED,
+    /** The proposed (and, once approved, the final) reason for a manual resolution. */
+    val resolutionReason: String? = null,
+    /** Who APPROVED a manual resolution — never the proposer. */
+    val resolvedBy: String? = null,
+    /** Who PROPOSED the manual resolution, and when; kept after approval as its first pair of eyes. */
+    val proposedBy: String? = null,
+    val proposedAt: Instant? = null,
+    /** The stored row's version this copy was read at; every write is conditional on it. */
+    val version: Long = 0,
 ) {
     init {
         require(amount.signum() > 0) { "a break amount is positive; its direction is ourSide" }
@@ -56,9 +78,89 @@ data class NostroBreak(
             "a ledger break names its ledger line, and only a ledger break"
         }
         require(resolvedOn == null || !resolvedOn.isBefore(firstSeenOn)) { "a break cannot resolve before it was seen" }
+        require(resolutionKind == null || resolvedOn != null) { "only a resolved break has a resolution kind" }
+        require((proposedBy == null) == (proposedAt == null) && (proposedBy == null) == (resolutionReason == null)) {
+            "a resolution proposal names its proposer, time and reason together"
+        }
+        require((resolutionKind == BreakResolutionKind.MANUAL) == (resolvedBy != null)) {
+            "a manual resolution, and only one, names its approver"
+        }
+        require(resolutionKind != BreakResolutionKind.MANUAL || (proposedBy != null && proposedBy != resolvedBy)) {
+            "a manual resolution is approved by someone other than its proposer"
+        }
     }
 
     val open: Boolean get() = resolvedOn == null
+
+    val manuallyResolved: Boolean get() = resolutionKind == BreakResolutionKind.MANUAL
+
+    /** An OPEN break with a resolution proposal awaiting a second person. */
+    val resolutionProposed: Boolean get() = open && proposedBy != null
+
+    /**
+     * First pair of eyes: a person who has investigated an OPEN break proposes closing it with a
+     * reason. The break stays open — it keeps ageing and alerting — until a DIFFERENT person approves.
+     *
+     * @throws IllegalArgumentException the reason is not [MIN_REASON_LENGTH]..[MAX_REASON_LENGTH] characters (trimmed)
+     * @throws IllegalStateException the break is resolved, or already has a pending proposal (409)
+     * @throws ActorNotPermittedException the actor is not a person
+     */
+    fun proposeResolution(reason: String, actor: Actor, at: Instant): NostroBreak {
+        val text = normalizeReason(reason)
+        requireHuman(actor)
+        check(open) { "nostro break $id is already resolved" }
+        check(proposedBy == null) { "nostro break $id already has a resolution proposal awaiting approval" }
+        return copy(resolutionReason = text, proposedBy = actor.id, proposedAt = at)
+    }
+
+    /**
+     * Second pair of eyes: closes the break as MANUAL. Never a posting — the item stays unmatched in
+     * the reconciliation; only the break stops ageing and alerting.
+     *
+     * @throws FourEyesViolationException the approver is the proposer (422)
+     * @throws IllegalStateException the break is resolved, has no pending proposal, or its proposal is
+     *   not the one read at [proposalRead] (409)
+     */
+    fun approveResolution(actor: Actor, today: LocalDate, proposalRead: Instant): NostroBreak {
+        requireHuman(actor)
+        check(open) { "nostro break $id is already resolved" }
+        val proposer = checkNotNull(proposedBy) { "nostro break $id has no resolution proposal to approve" }
+        // The approver approves the proposal they READ (its time identifies its reason): one rejected
+        // and re-proposed in between is a different proposal, and is a conflict, never approved blind.
+        check(proposedAt == proposalRead) { "the resolution proposal of nostro break $id changed since it was read" }
+        if (actor.id == proposer) {
+            throw FourEyesViolationException("the proposer of a nostro break resolution may not approve it")
+        }
+        return copy(
+            resolvedOn = maxOf(today, firstSeenOn),
+            resolutionKind = BreakResolutionKind.MANUAL,
+            resolvedBy = actor.id,
+        )
+    }
+
+    /** Refuses a pending proposal with a reason (kept in the history); the break stays open, proposal cleared. */
+    fun rejectResolution(reason: String, actor: Actor): NostroBreak {
+        normalizeReason(reason)
+        requireHuman(actor)
+        check(open) { "nostro break $id is already resolved" }
+        checkNotNull(proposedBy) { "nostro break $id has no resolution proposal to reject" }
+        return clearProposal()
+    }
+
+    private fun requireHuman(actor: Actor) {
+        if (actor.type != ActorType.HUMAN) {
+            throw ActorNotPermittedException("only a person may resolve a nostro break, not ${actor.type}")
+        }
+    }
+
+    private fun clearProposal() = copy(resolutionReason = null, proposedBy = null, proposedAt = null)
+
+    /** Open again: every resolution and proposal field cleared together, so the invariants still hold. */
+    fun reopen(): NostroBreak = copy(resolvedOn = null, resolutionKind = null, resolvedBy = null).clearProposal()
+
+    /** Resolved by a later MATCH; a pending manual proposal is moot and is cleared. */
+    fun matched(today: LocalDate): NostroBreak =
+        copy(resolvedOn = maxOf(today, firstSeenOn), resolutionKind = BreakResolutionKind.MATCHED).clearProposal()
 
     /** Business days from [firstSeenOn] to [today] (or to [resolvedOn] once resolved). */
     fun ageBusinessDays(today: LocalDate): Int = BusinessDays.between(firstSeenOn, resolvedOn ?: today)
@@ -67,6 +169,18 @@ data class NostroBreak(
         fun statementKey(statementUuid: UUID, sequence: Int) = "STMT:$statementUuid:$sequence"
 
         fun ledgerKey(lineId: UUID) = "LEDGER:$lineId"
+
+        const val MIN_REASON_LENGTH = 10
+        const val MAX_REASON_LENGTH = 500
+
+        /** Trimmed, and long enough to say something an auditor can check, short enough to be one note. */
+        fun normalizeReason(reason: String): String {
+            val text = reason.trim()
+            require(text.length in MIN_REASON_LENGTH..MAX_REASON_LENGTH) {
+                "reason must be $MIN_REASON_LENGTH to $MAX_REASON_LENGTH characters, was ${text.length}"
+            }
+            return text
+        }
     }
 }
 
@@ -118,6 +232,12 @@ data class BreakChanges(
  * statement, and ledger breaks on the same GL booked inside the statement's period. An open break
  * in that scope that the reconciliation no longer lists is RESOLVED (it matched); one outside the
  * scope is left alone, since this reconciliation read no ledger lines for its day.
+ *
+ * A break a later reconciliation lists again is REOPENED when it had been resolved by a MATCH (the
+ * match went away — e.g. the ledger line was reversed). A MANUALLY resolved break is NOT reopened by
+ * being listed again: the item it describes is the same unmatched item the person investigated
+ * (a statement line is immutable and is listed on every pass for 31 days), so re-observing it carries
+ * no new information, and reopening on it would undo every manual resolution within the hour.
  */
 object NostroBreakBook {
 
@@ -133,12 +253,14 @@ object NostroBreakBook {
         val stored = existing.associateBy { it.breakKey }
 
         val opened = current.values.filter { it.breakKey !in stored }
-        val reopened = stored.values.filter { !it.open && it.breakKey in current }.map { it.copy(resolvedOn = null) }
+        val reopened = stored.values
+            .filter { !it.open && !it.manuallyResolved && it.breakKey in current }
+            .map { it.reopen() }
         val resolved = stored.values
             .filter {
                 it.open && it.breakKey !in current && inScope(it, reconciliation.glCode, statementUuid, statement)
             }
-            .map { it.copy(resolvedOn = maxOf(today, it.firstSeenOn)) }
+            .map { it.matched(today) }
         return BreakChanges(opened, resolved, reopened)
     }
 

@@ -196,6 +196,25 @@ date, and both balances are compared by value date too.
   - a movement the correspondent booked on a day other than the value date the bank recorded.
     That line is also unmatched.
 
+## Closing a nostro break that will never match (ADR-0369, #14770)
+
+A STATEMENT-side break is in scope only for its own statement, and a statement never changes, so
+reconciliation cannot close it. After investigation it is closed by a four-eyes manual resolution:
+
+1. `POST /api/v1/treasury/nostro/{account}/breaks/{breakId}/resolution` with `{"reason": "..."}`
+   (10-500 characters) and an `Idempotency-Key`, by `ROLE_TREASURY_APPROVER`. The break stays open
+   and still counts in `openbank_treasury_nostro_breaks_aged` until approval.
+2. `POST .../resolution/approve` with `{"proposedAt": "..."}` (the proposal you read) and an
+   `Idempotency-Key`, by a DIFFERENT person holding `ROLE_TREASURY_SENIOR_APPROVER`. The proposer,
+   or one person holding both roles, gets 422 `FOUR_EYES_VIOLATION`. A proposal that changed since
+   you read it is 409. `POST .../resolution/reject` with a reason clears a proposal instead.
+
+Agents and service accounts are refused at every step. Every step is appended to
+`nostro_break_resolution_history`. Nothing is posted. A manually closed break stays closed when the
+sweep observes it again (the sweep re-reads old statements hourly); a break closed by a match still
+reopens. Read the result with `GET .../breaks?includeResolved=true` (`resolutionKind`, `resolvedBy`,
+`resolutionReason`, `proposedBy`).
+
 ## Daily close source evidence
 
 Completion compares persisted accrual receipts, durable deal journals and committed lifecycle

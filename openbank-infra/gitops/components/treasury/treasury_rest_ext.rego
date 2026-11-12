@@ -29,6 +29,9 @@
 #   treasury.marketdata.approve               — ROLE_TREASURY_APPROVER or ROLE_TREASURY_SENIOR_APPROVER
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
 #                                               balance; it is still back-office evidence, #10896)
+#   treasury.nostro.break.propose-resolution  — ROLE_TREASURY_APPROVER (four-eyes step 1, ADR-0315 D7)
+#   treasury.nostro.break.approve-resolution, .reject-resolution — ROLE_TREASURY_SENIOR_APPROVER
+#                                               (step 2; the domain refuses the proposer, #14770)
 #   treasury.portfolio.inspect                — treasury dealers, approvers and admins, and
 #                                               tax-reporting's OWN client (ADR-0337 amendment)
 #   treasury.portfolio.upload                 — ROLE_TREASURY_APPROVER (the custodian's semt.002)
@@ -163,6 +166,23 @@ allowed_reasons contains "treasury-nostro-upload" if {
 	treasury_staff
 	"ROLE_TREASURY_APPROVER" in input.principal.roles
 	input.action == "treasury.nostro.upload"
+}
+
+# ADR-0315 D7 (#14770): an investigated nostro break that will never match is closed by FOUR EYES.
+# An approver PROPOSES with a reason; the break stays open. A SENIOR approver approves or rejects —
+# closing a break silences the aged-break alert, the control that surfaces it, so the deciding step
+# takes the senior role. Distinct people are enforced in the domain and the database
+# (nostro_breaks_four_eyes): this file only decides who may attempt each step. Nothing is posted.
+allowed_reasons contains "treasury-nostro-break-propose-resolution" if {
+	treasury_staff
+	"ROLE_TREASURY_APPROVER" in input.principal.roles
+	input.action == "treasury.nostro.break.propose-resolution"
+}
+
+allowed_reasons contains "treasury-nostro-break-decide-resolution" if {
+	treasury_staff
+	"ROLE_TREASURY_SENIOR_APPROVER" in input.principal.roles
+	input.action in {"treasury.nostro.break.approve-resolution", "treasury.nostro.break.reject-resolution"}
 }
 
 # ADR-0344 D3/D4/D10: back office and the reference editor PROPOSE; the approver DECIDES. No role

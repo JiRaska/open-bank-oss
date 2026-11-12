@@ -68,7 +68,11 @@ info:
   # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
   #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
   # 1.26.0: correction — validation 400s from libs-runtime use ProblemDetail, not Error (#12078).
-  version: 1.26.0
+  # 1.27.0: additive — four-eyes manual resolution of a nostro break (ADR-0315 D7, ADR-0369):
+  #         POST /nostro/{account}/breaks/{breakId}/resolution (propose), .../resolution/approve and
+  #         .../resolution/reject; NostroBreak gains resolutionKind, resolutionReason, resolvedBy,
+  #         proposedBy and proposedAt.
+  version: 1.27.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -722,6 +726,218 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           description: Not a configured nostro account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/nostro/{account}/breaks/{breakId}/resolution:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: proposeNostroBreakResolution
+      summary: Propose closing an open nostro break with a reason (four-eyes step 1, audited)
+      description: |
+        ADR-0315 D7, ADR-0369. An approver who has investigated an OPEN break that will never match
+        proposes closing it with a reason (10 to 500 characters after trimming). The break stays
+        OPEN — it keeps ageing and counting as aged — until a different senior approver approves.
+        Nothing is ever posted. Every step is recorded in an append-only history.
+      parameters:
+        - name: account
+          in: path
+          required: true
+          description: The nostro IBAN (spaces ignored)
+          schema:
+            type: string
+        - name: breakId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per step decision, stable across retries (1..128 characters). A
+            replay of the same request answers the stored outcome (200); the same key on a
+            different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NostroBreakResolutionRequest'
+      responses:
+        '200':
+          description: The break after this step
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroBreak'
+        '400':
+          description: >-
+            Missing or invalid reason; missing or invalid Idempotency-Key; or the Idempotency-Key
+            was already used for a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401': { description: Unauthenticated }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not a configured nostro account, or no such break on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: The break is already resolved, or already has a pending proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/nostro/{account}/breaks/{breakId}/resolution/approve:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: approveNostroBreakResolution
+      summary: Approve a proposed nostro break resolution (four-eyes step 2; a different person)
+      description: |
+        Names the proposal it approves by its `proposedAt`; a proposal rejected and replaced since
+        it was read is a 409. A senior approver who did not propose it closes the break as MANUAL (the proposer is
+        refused with 422, even holding both roles). A manually resolved break is not reopened by a
+        later reconciliation listing the same unmatched item. Nothing is posted.
+      parameters:
+        - name: account
+          in: path
+          required: true
+          description: The nostro IBAN (spaces ignored)
+          schema:
+            type: string
+        - name: breakId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per step decision, stable across retries (1..128 characters). A
+            replay of the same request answers the stored outcome (200); the same key on a
+            different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposedAt]
+              properties:
+                proposedAt:
+                  type: string
+                  format: date-time
+                  description: The proposedAt of the proposal the approver read
+      responses:
+        '200':
+          description: The break after this step
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroBreak'
+        '400':
+          description: >-
+            Missing or invalid reason; missing or invalid Idempotency-Key; or the Idempotency-Key
+            was already used for a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401': { description: Unauthenticated }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not a configured nostro account, or no such break on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No pending proposal, the proposal changed since it was read, or the break is already resolved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: FOUR_EYES_VIOLATION — the approver proposed this resolution
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/treasury/nostro/{account}/breaks/{breakId}/resolution/reject:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: rejectNostroBreakResolution
+      summary: Reject a proposed nostro break resolution with a reason
+      description: A senior approver refuses the proposal; it is cleared and the break stays open.
+      parameters:
+        - name: account
+          in: path
+          required: true
+          description: The nostro IBAN (spaces ignored)
+          schema:
+            type: string
+        - name: breakId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: |
+            Client-generated, one per step decision, stable across retries (1..128 characters). A
+            replay of the same request answers the stored outcome (200); the same key on a
+            different request is 400.
+          schema: { type: string, minLength: 1, maxLength: 128 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NostroBreakResolutionRequest'
+      responses:
+        '200':
+          description: The break after this step
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroBreak'
+        '400':
+          description: >-
+            Missing or invalid reason; missing or invalid Idempotency-Key; or the Idempotency-Key
+            was already used for a different request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        '401': { description: Unauthenticated }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not a configured nostro account, or no such break on this account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: No pending proposal, or the break is already resolved
           content:
             application/json:
               schema:
@@ -2308,6 +2524,23 @@ components:
         ageBusinessDays: {type: integer, description: Business days from firstSeenOn to today (or to resolvedOn)}
         aged: {type: boolean, description: Open and over both alert thresholds}
         alertedAt: {type: [string, 'null'], format: date-time}
+        resolutionKind:
+          type: [string, 'null']
+          enum: [MATCHED, MANUAL, null]
+          description: MATCHED (a later reconciliation matched it) or MANUAL (a person closed it); null while open
+        resolutionReason: {type: [string, 'null'], description: The reason of a pending or approved manual resolution}
+        resolvedBy: {type: [string, 'null'], description: Who approved a MANUAL resolution (never the proposer)}
+        proposedBy: {type: [string, 'null'], description: Who proposed the manual resolution}
+        proposedAt: {type: [string, 'null'], format: date-time}
+    NostroBreakResolutionRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 10
+          maxLength: 500
+          description: Why the break should be closed, or why the proposal is rejected (trimmed; 10 to 500 characters)
     NostroBreakList:
       type: object
       required: [iban, alertAgeDays, alertMinAmount, breaks]
