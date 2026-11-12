@@ -64,15 +64,6 @@ deploy_holds:
         reason: "Default-on catalog rate sync and V19/V20 account revision pinning require an owner-approved first deployment."
         release_condition: "The owner approves the exact interest image and deployment window after accepting V19/V20 backfill semantics, verifying catalog access, and defining rollback that preserves account revision pins."
       approved_image: 'openbank-interest-service:sandbox-3b1311c5@sha256:27175d95e406371ea8f4a5e6ac8f3c9227502e654ead140943f4600cc44fe2fb'
-    openbank-ledger-service:
-      all_of:
-      - issue: '#13167'
-        reason: 'Day-close participation V33 and its API require owner-controlled first image delivery.'
-        release_condition: 'The owner approves the exact ledger image and deployment window, accepts V33 schema and audit-history retention, and verifies ledger-interest participant API and authorization compatibility. Bank participation remains shadow and pension-company participation remains off; enforcement, replay and financial operations require separate approval.'
-      - issue: '#11503'
-        reason: 'Staged release wave 2b after wave 1 healthy. Replaces the inherited #12948 hold, which recorded no reason; money-path images are released in waves of at most 12, matching one reconcile tick.'
-        release_condition: 'Wave 1 (non-money-path) has deployed and stayed healthy for 24h: Argo Synced/Healthy, no new restarts or 5xx alerts on the released services. Wave 2a has then met the same condition. Remove the wave 2b entries in one reviewed change.'
-      approved_image: 'openbank-ledger-service:sandbox-9e765663@sha256:f5c33998e39b07fa1b067b1993a338971cccc4dca1461af2a6636d11efae7083'
     openbank-lending-service:
       all_of:
       - issue: '#11503'
@@ -2731,7 +2722,17 @@ ci_runners:
       # workflow_dispatch: PRs, train carriers and main pushes always build hosted.
       # Availability: a job routed here has no hosted fallback once queued, so the
       # variable is the kill switch — empty it when the Mac is down.
+      # Second, separate use: merge-train.yml `settle` and `publish` route here when the repo
+      # variable MERGE_TRAIN_RUNNER names this label (never on pull_request_target). They run
+      # main's code only, never PR code, and carry the GitOps/branch-updater App keys in a fresh
+      # per-job container. Purpose: priority capacity for the train, whose ticks queued 3-14 min
+      # behind non-required PR jobs on the hosted cap (2026-11-11). `build` (PR heads) stays hosted.
+      # Trust boundary: because App keys now reach this host, EVERY route here requires
+      # github.ref == refs/heads/main (and, for _service-ci, no inputs.ref override); a branch
+      # dispatch builds hosted. A privileged dind build must never run branch code beside the keys.
+      allowed_refs: [refs/heads/main]
       routing_variable: MINI_RUNNER_SERVICES
+      train_routing_variable: MERGE_TRAIN_RUNNER
       fork_prs: never
       ephemeral_per_job: true             # fresh runner + docker-in-docker container per job, removed after
   spot:
@@ -4749,6 +4750,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/lending/application/usecase/CzCreditPolicyActivationService.kt"
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
@@ -4756,6 +4758,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/rest/CzCreditPolicyResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4893,7 +4896,7 @@ catalog_kernel_neutrality:
     - RelationshipKind     # offering graph edge semantics
     - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
-  vocabulary_not_industry: [legacy, product, instrument, term]
+  vocabulary_not_industry: [legacy, product, instrument, term, count]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
   # only place new vocabulary may land. Removal follows the v1 sunset in the ADR-0257 amendment.
   legacy_v1_frozen_enums:

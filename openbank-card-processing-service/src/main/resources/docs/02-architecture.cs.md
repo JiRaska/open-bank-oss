@@ -27,7 +27,7 @@ graph LR
   classDef svc fill:#dbeafe,stroke:#2563eb
 ```
 
-Všechna odchozí volání platformních služeb se autentizují jako služba (client credentials `openbank-services` přes `quarkus-oidc-client`), protože card-processing se ptá na kartu, kterou volající nevlastní.
+Klient služby card-issuance používá vlastní identitu `openbank-card-processing` pro čtení karty a rozhodnutí o autorizaci. Ostatní odchozí klienti používají výchozí identitu služby. Před nasazením nového obrazu v sandboxu ověřte klienta i jeho přihlašovací údaj.
 
 ## C4 — Kontejner
 
