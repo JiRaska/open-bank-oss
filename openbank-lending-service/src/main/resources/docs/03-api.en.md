@@ -109,3 +109,25 @@ GDPR Art. 22(3), EU AI Act Art. 86 and EBA/GL/2020/06 par. 54: a customer whose 
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.
+
+## Czech consumer credit policy revisions
+
+`GET /api/v1/lending/risk/policy?asOf=YYYY-MM-DD` returns the applicable Czech consumer credit
+policy as of the requested day in Europe/Prague. Versions 1 and 2 are the starter rules.
+Credit-risk staff use the risk console or `POST /api/v1/lending/risk/policy/proposals` to submit a complete set with one
+revision number and future effective date. Submit all four table kinds and retain the adverse
+bureau exclusion and both affordability limits. The pinned compliance pack adds its statutory
+checks during evaluation. The proposal validates each operand against the inputs that origination supplies.
+
+A second staff member reviews the stored content and hash before posting an explicit decision to
+`/api/v1/lending/risk/policy/proposals/{id}/decide`. Approval takes effect on the proposed day
+and the database verifies that the day is still in the future when committing the decision.
+Both POSTs require `Idempotency-Key`. Repeat the same key and request after an interrupted response.
+The original response can be replayed by the same staff subject after approval, rejection or the
+policy's effective date. The command receipt and revision commit in the same transaction. A
+new proposal with identical pending or approved content returns `CREDIT_POLICY_DUPLICATE_CONTENT`.
+Rejection preserves the original evidence and allows a fresh proposal with the same content.
+The engine records the selected table versions with the application decision. Other jurisdictions
+and products use their starter policies. Preserve the revisions and their command receipts during a service rollback.
+Once an approved version is in effect, coordinate any rollback with Credit Risk because reverting
+the reader would also revert the policy applied to new applications.
