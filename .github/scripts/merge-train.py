@@ -2472,6 +2472,14 @@ def declared_batch(manifest_text: str, train: list[Member], sizes: dict[int, int
             raise Reject("member manifest is malformed", member_fault=False)
         want[int(mm.group(1))] = mm.group(2)
     moved = [n for n, head in want.items() if n not in live or live[n].head_sha != head]
+    for n in moved:
+        if n not in live:
+            # Closed or disarmed since build — or never a candidate at all (a tampered manifest). The
+            # selection only shrinks either way, but the second must stay visible.
+            log(f"::warning::declared member #{n} is not a live train candidate at all (closed, disarmed, or never "
+                f"one — check the build manifest)")
+        else:
+            log(f"::notice::declared member #{n} moved: declared head {want[n][:12]}, live {live[n].head_sha[:12]}")
     if moved and not tolerate_moved:
         raise Reject(f"declared member #{moved[0]} is no longer a live train candidate at that head — the next tick rebuilds",
                      member_fault=False)
@@ -2691,18 +2699,30 @@ def mode_publish(gh, git, repo: str, bundle_dir: str, run_id: str, attempt: str,
         return "rejected"
     live = {m.number: m for m in train}
     rederive = bool(moved)
+    declared_n = len(batch) + len(moved)
+    inputs = regen_inventory_fragments(git("show", f"{base}:{REGEN_INVENTORY}", check=False).stdout)
     while True:
         try:
             if git("bundle", "verify", bundle, check=False).returncode != 0:
                 raise Reject("bundle does not verify against this clone (stale base or corrupt)", member_fault=False)
             git("fetch", "-q", bundle, f"+{BUNDLE_REF}:refs/merge-train/bundle")
             tip = git("rev-parse", "refs/merge-train/bundle").stdout.strip()
-            if rederive and git("log", "-1", "--format=%s", tip, check=False).stdout.strip() == REGEN_COMMIT_SUBJECT:
-                # A regeneration commit was derived WITH the member that left; publish executes nothing, so
-                # it cannot re-derive one without it. The bundle is only a hint here: a bundle that hides
-                # its regeneration commit still contributes nothing to what is pushed below.
-                raise Reject("a member left the batch and the bundle carries a regeneration commit — "
-                             "the next tick rebuilds", member_fault=False)
+            if rederive:
+                # Publish executes nothing, so a re-derived train can carry no regeneration commit. Decided
+                # from main's inventory, never from the (untrusted) bundle: a remaining member touching a
+                # declared generator INPUT may need one — whether or not the original batch did — so the
+                # next tick rebuilds instead (a carrier missing it would fail derived-drift and could blame
+                # an innocent member). Belt: a bundle chain longer than its declared members carries an
+                # extra commit, which can only be a regeneration commit.
+                touching = [m.number for m in batch
+                            if any(frag in f for f in changed_paths(git, f"{base}...{m.head_sha}") for frag in inputs)]
+                chain_len = len(git("rev-list", "--first-parent", f"{base}..{tip}", check=False).stdout.split())
+                if touching or chain_len > declared_n or (
+                        git("log", "-1", "--format=%s", tip, check=False).stdout.strip() == REGEN_COMMIT_SUBJECT):
+                    why = (f"remaining member(s) {touching} touch generator inputs" if touching
+                           else "the bundle carries a regeneration commit")
+                    raise Reject(f"a member left the batch and {why}; publish cannot regenerate — the next tick rebuilds",
+                                 member_fault=False)
             v = verify_bundle_train(git, base, batch, None if rederive else tip, outputs)
             cap = batch_cap([live[n] for n in v.applied if n in live], sizes, batch_size)
             if len(v.applied) > cap:
@@ -4864,6 +4884,10 @@ def _synthetic_origin(root: str) -> None:
     pr("p2", {"docs/two.md": "2\n"})
     pr("p3", {"bad.txt": "x\n"})
     pr("p4", {"docs/four.md": "4\n"})
+    # Train members (protected build-logic/) that touch NO generator input: a re-derived train may carry them.
+    pr("pE1", {"build-logic/e1.txt": "1\n"})
+    pr("pE2", {"build-logic/e2.txt": "2\n"})
+    pr("pE3", {"build-logic/e3.txt": "3\n"})
     pr("pR", {"services/r.txt": "r\n", "count.txt": "2\n"})
     pr("pL", {"docs/l.md": "l\n"}, link=("docs-link", "/etc/passwd"))
     pr("pG", {SYN_GENERATOR: "import os,pathlib\npathlib.Path('leaked.txt').write_text(os.environ.get('GH_TOKEN','none'))\n"})
@@ -5934,7 +5958,8 @@ def self_test() -> int:
             base0 = gh.main_sha()
             numbers = {"pA": 11, "pB": 12, "p1": 1, "p2": 2, "p3": 3, "p4": 4, "pR": 21, "pL": 31, "pG": 32, "pW": 35, "pD": 41,
                        "pX": 33, "pF": 34, "pW2": 36, "pS": 37, "pN": 51, "pY": 52, "pQ": 53, "pV": 61, "pT": 62, "pK": 38, "pM": 39,
-                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92}
+                       "pJ1": 81, "pJ2": 82, "pGY": 83, "pGA": 84, "pPc": 85, "pPR": 86, "pPx": 87, "pP1": 88, "pPbad": 89, "pP2": 90, "pRG": 91, "pFoo": 92,
+                       "pE1": 93, "pE2": 94, "pE3": 95}
             probe = os.path.join(root, "probe.json")
             counter = [0]
 
@@ -6512,8 +6537,9 @@ def self_test() -> int:
             def published_members():
                 c = [c for c in gh.carriers.values() if c["state"] == "open"]
                 return [n for n, _ in (parse_own_chain(gh.g, c[-1]["head"]["sha"]) or ("", []))[1]] if c else None
-            check("race (#15827): a declared member disarmed after build is left out, the rest is published",
-                  st == "published" and published_members() == [1], f"{st} {published_members()}")
+            check("race (#15827): a declared member disarmed after build is left out; the rest touches generator "
+                  "inputs (docs/), so it is refused rather than published without regeneration",
+                  st == "rejected" and published_members() is None, f"{st} {published_members()}")
             for c in gh.carriers.values():
                 c["state"] = "closed"
             gh.prs[2]["auto_merge"] = {"x": 1}
@@ -6522,7 +6548,7 @@ def self_test() -> int:
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {gh.prs[1]['head']['sha']}\n2 {gh.prs[2]['head']['sha']}\n35 {gh.g('rev-parse', 'pW').stdout.strip()}\n")
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("manifest: a member that is not a live candidate never reaches the carrier",
-                  st == "published" and published_members() == [1, 2], f"{st} {published_members()}")
+                  st == "rejected" and published_members() is None, f"{st} {published_members()}")
             for c in gh.carriers.values():
                 c["state"] = "closed"
             pathlib.Path(out, MANIFEST_FILE).write_text(f"1 {'0' * 40}\n")
@@ -6552,22 +6578,22 @@ def self_test() -> int:
                 return old
 
             for moved_at in ("before-plan", "at-intent"):
-                open_only("p1", "p2", "p4")
+                open_only("pE1", "pE2", "pE3")
                 counter[0] += 1
                 bdir = clone("build")
                 b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
                 out = os.path.join(root, f"bundle-{counter[0]}")
                 built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
                 if moved_at == "before-plan":
-                    bot_rewrite(2)
+                    bot_rewrite(94)
                     st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
                 else:
                     # The head moves after publish planned and verified: only live_source_intent sees it.
                     real_intent = globals()["live_source_intent"]
 
                     def racing_intent(g, n, head, _real=real_intent):
-                        if n == 2 and gh.prs[2]["head"]["sha"] == head:
-                            bot_rewrite(2)
+                        if n == 94 and gh.prs[94]["head"]["sha"] == head:
+                            bot_rewrite(94)
                         return _real(g, n, head)
                     globals()["live_source_intent"] = racing_intent
                     try:
@@ -6576,11 +6602,11 @@ def self_test() -> int:
                         globals()["live_source_intent"] = real_intent
                 members = published_members()
                 check(f"#15827 ({moved_at}): batch of 3, one head moves between build and publish -> carrier of the other 2 published this tick",
-                      built == [1, 2, 4] and st == "published" and members == [1, 4], f"built={built} st={st} members={members}")
+                      built == [93, 94, 95] and st == "published" and members == [93, 95], f"built={built} st={st} members={members}")
                 tipc = [c for c in gh.carriers.values() if c["state"] == "open"]
                 check(f"#15827 ({moved_at}): the re-derived carrier is the merge-tree of the two live heads, nothing of the moved one",
-                      bool(tipc) and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:docs/two.md", check=False).returncode != 0
-                      and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:docs/four.md", check=False).returncode == 0,
+                      bool(tipc) and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:build-logic/e2.txt", check=False).returncode != 0
+                      and gh.g("cat-file", "-e", f"{tipc[-1]['head']['sha']}:build-logic/e3.txt", check=False).returncode == 0,
                       str(tipc[-1]["head"]["sha"] if tipc else None))
                 reset()
 
@@ -6595,6 +6621,20 @@ def self_test() -> int:
             bot_rewrite(1)
             st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
             check("#15827: a member leaving a batch with a regeneration commit -> still rejected, nothing published",
+                  st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), f"built={built} st={st}")
+            reset()
+
+            # NEGATIVE (review of #15882): the member that leaves touches no generator input, but the two that
+            # REMAIN do (their union needs regeneration). Never published without it, whatever the bundle says.
+            open_only("pE1", "p1", "pR")
+            counter[0] += 1
+            bdir = clone("build")
+            b = TrainBuilder(bdir, regen_commands=(f"{sys.executable} -I {SYN_GENERATOR}",), overlay_roots=(".github/scripts",))
+            out = os.path.join(root, f"bundle-{counter[0]}")
+            built = mode_build(gh, Git(bdir), b, "o/r", out, 8)
+            bot_rewrite(93)
+            st = mode_publish(gh, Git(clone("publish")), "o/r", out, str(counter[0]), "1", 8)
+            check("#15827: remaining members touching generator inputs -> not published without regeneration",
                   st == "rejected" and not any(c["state"] == "open" for c in gh.carriers.values()), f"built={built} st={st}")
             reset()
 
