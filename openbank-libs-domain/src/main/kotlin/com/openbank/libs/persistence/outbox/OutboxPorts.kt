@@ -115,6 +115,24 @@ interface OutboxRepositoryV2 :
     suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
 }
 
+/** A token is minted on each claim, independently of worker clocks or database timestamp precision. */
+data class OutboxClaim(val entry: OutboxEntry, val token: UUID)
+
+/**
+ * Opt-in extension of V2 that makes acknowledgements conditional on the current claim.
+ * A stale sender can still publish a duplicate. The fence prevents its late acknowledgement
+ * from advancing or reopening the row, while consumers still deduplicate by event ID.
+ */
+interface ClaimFencedOutboxRepositoryV2 : OutboxRepositoryV2 {
+    suspend fun claimWithTokens(limit: Int, staleAfter: Duration = Duration.ofMinutes(2)): List<OutboxClaim>
+
+    /** Event IDs for which the SENT transition was committed. A replaced claim is omitted. */
+    suspend fun markClaimsSent(claims: List<OutboxClaim>, sentAt: Instant = Instant.now()): Set<UUID>
+
+    /** Persisted failure status, or null if the claim has already been replaced or acknowledged. */
+    suspend fun markClaimFailed(claim: OutboxClaim, error: String, failedAt: Instant = Instant.now()): OutboxStatus?
+}
+
 /**
  * Retention of SENT outbox rows (ADR-0327 D8, extended to v1 outboxes by ADR-0329).
  *
