@@ -6,7 +6,7 @@
 // of the operating system that renders the browser: authoring canvas + app preview in Studio, then
 // outcome + attention evidence in the detail.
 
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Page } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 const CAMPAIGN_ID = '019fb94e-d0da-7f5d-b0f0-81efc5ddb808'

@@ -4,6 +4,8 @@
 
 package com.openbank.tax.infrastructure.returns.gsft
 
+import com.openbank.libs.api.pagination.CursorPage
+import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.tax.application.port.out.CeuRegisterRepository
 import com.openbank.tax.application.port.out.GsftDataGap
 import com.openbank.tax.application.port.out.ReturnDataUnavailableException
@@ -11,10 +13,9 @@ import com.openbank.tax.domain.ceu.RegisterFact
 import com.openbank.tax.domain.gsft.DepositAccount
 import com.openbank.tax.domain.gsft.Depositor
 import com.openbank.tax.domain.gsft.Holding
-import com.openbank.tax.infrastructure.returns.crsfatca.AccountPage
-import com.openbank.tax.infrastructure.returns.crsfatca.AccountSummaryDto
 import com.openbank.tax.infrastructure.returns.crsfatca.BalanceReportingClient
 import com.openbank.tax.infrastructure.returns.crsfatca.CrsFatcaReportingSources
+import com.openbank.tax.infrastructure.returns.crsfatca.DepositRosterAccountDto
 import com.openbank.tax.infrastructure.returns.crsfatca.RestCrsFatcaReportingSources
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -46,17 +47,8 @@ class GsftSnapshotAdapterTest {
     private val botAcc = UUID.fromString("00000000-0000-0000-0000-000000000003")
     private val gl = UUID.fromString("00000000-0000-0000-0000-000000000004")
 
-    private fun account(id: UUID, party: UUID, iban: String, ccy: String, type: String?) = AccountSummaryDto(
-        id = id,
-        accountNumber = iban,
-        partyId = party,
-        productId = UUID.randomUUID(),
-        currencyCode = ccy,
-        status = "ACTIVE",
-        openedAt = Instant.parse("2026-01-01T00:00:00Z"),
-        closedAt = null,
-        accountType = type,
-    )
+    private fun account(id: UUID, party: UUID, iban: String, ccy: String, type: String?) =
+        DepositRosterAccountDto(id, iban, party, ccy, type)
 
     private fun opened(id: UUID, ccy: String, synthetic: Boolean) = RegisterFact.AccountOpened(
         eventId = UUID.randomUUID(),
@@ -69,19 +61,19 @@ class GsftSnapshotAdapterTest {
     )
 
     private fun stubRoster() {
-        coEvery { sources.activeAccounts(200, null) } returns AccountPage(
+        coEvery { sources.depositRoster(day, 200, null) } returns CursorPage(
             listOf(
                 account(aCzk, alice, "CZ6508000000192000145399", "CZK", "CURRENT"),
                 account(gl, bank, "CZ0000000000000000000001", "CZK", "GL_LIABILITY"),
             ),
-            "c1",
+            PageInfo(limit = 200, hasNextPage = true, nextCursor = "c1"),
         )
-        coEvery { sources.activeAccounts(200, "c1") } returns AccountPage(
+        coEvery { sources.depositRoster(day, 200, "c1") } returns CursorPage(
             listOf(
                 account(aEur, alice, "CZ6508000000192000145400", "EUR", "TERM_DEPOSIT"),
                 account(botAcc, bot, "CZ6508000000192000145401", "CZK", "SAVINGS"),
             ),
-            null,
+            PageInfo(limit = 200, hasNextPage = false, nextCursor = null),
         )
         coEvery { sources.bookedBalanceStrict(aCzk, "CZK", day) } returns BigDecimal("1500.25")
         coEvery { sources.bookedBalanceStrict(aEur, "EUR", day) } returns BigDecimal("200.00")
@@ -138,7 +130,6 @@ class GsftSnapshotAdapterTest {
         assertThat(snapshot.rates).isNull()
         // Literal on purpose: an entries-based expectation moves with the enum and could not fail.
         assertThat(snapshot.gaps).containsExactlyInAnyOrder(
-            GsftDataGap.ROSTER_ACTIVE_ONLY_CURRENT,
             GsftDataGap.JOINT_HOLDERS,
             GsftDataGap.ACCRUED_INTEREST,
             GsftDataGap.DEPOSITOR_IDENTITY,
@@ -166,15 +157,47 @@ class GsftSnapshotAdapterTest {
 
     @Test
     fun `an account with no account type fails the snapshot instead of being guessed`() {
-        coEvery { sources.activeAccounts(200, null) } returns AccountPage(
+        coEvery { sources.depositRoster(day, 200, null) } returns CursorPage(
             listOf(account(aCzk, alice, "CZ6508000000192000145399", "CZK", null)),
-            null,
+            PageInfo(limit = 200, hasNextPage = false, nextCursor = null),
         )
         coEvery { register.syntheticParties(now) } returns emptySet()
 
         assertThatThrownBy { runBlocking { adapter.snapshot(day) } }
             .isInstanceOf(ReturnDataUnavailableException::class.java)
             .hasMessageContaining(aCzk.toString())
+    }
+
+    @Test
+    fun `a repeated provider continuation refuses a partial roster`() {
+        val page = CursorPage<DepositRosterAccountDto>(
+            data = emptyList(),
+            pagination = PageInfo(limit = 200, hasNextPage = true, nextCursor = "duplicate"),
+        )
+        coEvery { sources.depositRoster(day, 200, null) } returns page
+        coEvery { sources.depositRoster(day, 200, "duplicate") } returns page
+
+        assertThatThrownBy { runBlocking { adapter.snapshot(day) } }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+            .hasMessageContaining("invalid deposit roster continuation")
+    }
+
+    @Test
+    fun `a duplicate account across pages refuses the roster before reading balances`() {
+        val entry = account(aCzk, alice, "CZ6508000000192000145399", "CZK", "CURRENT")
+        coEvery { sources.depositRoster(day, 200, null) } returns CursorPage(
+            listOf(entry),
+            PageInfo(limit = 200, hasNextPage = true, nextCursor = "next"),
+        )
+        coEvery { sources.depositRoster(day, 200, "next") } returns CursorPage(
+            listOf(entry),
+            PageInfo(limit = 200, hasNextPage = false, nextCursor = null),
+        )
+
+        assertThatThrownBy { runBlocking { adapter.snapshot(day) } }
+            .isInstanceOf(ReturnDataUnavailableException::class.java)
+            .hasMessageContaining("duplicate account")
+        coVerify(exactly = 0) { sources.bookedBalanceStrict(any(), any(), any()) }
     }
 
     @Test

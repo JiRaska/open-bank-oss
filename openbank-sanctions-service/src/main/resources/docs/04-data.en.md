@@ -69,6 +69,35 @@ Flyway, immutable historical scripts, forward-only:
 
 > Migrations are immutable after apply. Never alter a migration that has been applied to a production DB.
 
+## Jurisdiction reference data
+
+`sanctions_jurisdictions` (V21) holds embargoed and high-risk countries: `list_type`,
+`source_list`, `country_code`, `measure` (`EMBARGO` | `HIGH_RISK`), `version`, `source_ref`,
+`published_on`, `verified_on`, `active`. `list_type` is the screening-list slot a row is consulted
+under; `source_list` is the publication it was copied from.
+
+No source the service imports publishes these as a machine-readable feed — the `FATF_HIGH_RISK`
+import is skipped as not entity based — so the rows are **versioned reference data**. They change
+only through a reviewed Flyway migration: a new publication adds rows with a higher `version` and
+retires the rows it supersedes (`active = false`), so the history stays in the table. A partial
+unique index allows one active row per (list, publication, country). There is no endpoint that
+writes this table: which countries are listed is a compliance decision recorded in the migration
+that adds them.
+
+| `source_list` | Loaded | Source |
+|---|---|---|
+| `EU_HIGH_RISK_THIRD_COUNTRIES` | V22 — 26 countries, all `HIGH_RISK` | Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29; compared with EUR-Lex on 2026-11-11 |
+| `FATF_CALL_FOR_ACTION` | not loaded | the publisher's site could not be retrieved; no row is written from memory |
+| `FATF_INCREASED_MONITORING` | not loaded | as above |
+
+No row carries `EMBARGO`: the EU regulation requires enhanced due diligence, not a prohibition,
+and no source loaded so far states a country embargo.
+
+**Ageing.** These lists change several times a year and nothing imports them, so each row carries
+the date of its publication (`published_on`) and the date it was last compared with the source
+(`verified_on`). A re-verification that finds the source unchanged is still a migration — it
+moves `verified_on`. The service publishes the age of both per `source_list`; see `05-operations`.
+
 ## Indexes
 
 - `sanctions_checks(idempotency_key)` — UNIQUE, deduplication at insert
@@ -86,6 +115,8 @@ Flyway, immutable historical scripts, forward-only:
 - `identifiers` — `{"passport": "123456", "taxId": "CZ..."}`
 - `matches` — array of `SanctionsMatch` objects (see domain model)
 - `checked_lists` — `["OFAC_SDN", "EU_CONSOLIDATED", ...]`
+
+Each of these columns holds an array or object, never a JSONB string. Older rows stored the JSON text wrapped as a JSONB string (`"[\"OFAC_SDN\"]"`); reading through `::text` then returned a quoted string Jackson could not bind, and `GET /api/v1/sanctions` answered 400. Migration V20 unwraps those values; `SanctionsLegacyJsonbStringIT` guards it.
 
 ## Retention
 
