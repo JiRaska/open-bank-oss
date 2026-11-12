@@ -12,8 +12,10 @@ import com.openbank.libs.domain.case.CaseStatus
 import com.openbank.libs.domain.case.CaseType
 import com.openbank.libs.identity.MatchKey
 import com.openbank.pid.application.port.`in`.PartySearchQuery
+import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRelationshipRepository
 import com.openbank.pid.application.port.out.PartyRepository
+import com.openbank.pid.application.usecase.PartyErasedException
 import com.openbank.pid.domain.model.*
 import com.openbank.pid.infrastructure.persistence.entity.*
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -146,7 +148,12 @@ class PartyRepositoryImpl(
     override suspend fun update(party: Party): Party {
         Panache.withTransaction {
             find("id", party.id).firstResult().map { existing ->
-                requireNotNull(existing) { "Party ${party.id} not found" }.apply { applyUpdate(party) }
+                requireNotNull(existing) { "Party ${party.id} not found" }.apply {
+                    // GDPR Art. 17 (#15755): the backstop for every party write path, checked on the
+                    // row inside the writing transaction so it cannot race a concurrent erase.
+                    if (erasedAt != null) throw PartyErasedException("Party ${party.id} was erased")
+                    applyUpdate(party)
+                }
             }
         }.awaitSuspending()
 
@@ -175,21 +182,25 @@ class PartyRepositoryImpl(
         extIdRepo.count("idType = ?1 AND idValue = ?2", type.name, value)
     }.awaitSuspending() > 0
 
-    override suspend fun anonymize(partyId: UUID, erasedAt: Instant): Boolean {
+    override suspend fun anonymize(partyId: UUID, erasedAt: Instant): PartyAnonymisation {
         val at = erasedAt.atOffset(ZoneOffset.UTC)
         return Panache.withTransaction {
             find("id", partyId).firstResult().flatMap { entity ->
-                if (entity == null || entity.erasedAt != null) {
-                    Uni.createFrom().item(false)
+                if (entity == null) {
+                    Uni.createFrom().item(PartyAnonymisation.UNKNOWN)
                 } else {
-                    entity.anonymise(at)
+                    // A repeat delivery re-runs the whole overwrite and the deletes (keeping the
+                    // original erased_at / updated_at), so anything written after the first erase
+                    // is cleaned. Unchanged values make no UPDATE, so an untouched row stays untouched.
+                    val first = entity.erasedAt == null
+                    entity.anonymise(at, first)
                     // The external ids carry the RČ and EUDI blind indices (dedup keys) and the
                     // other national identifiers; ID documents carry document numbers. Neither
                     // has a reason to survive the person, so they are deleted, not blanked.
                     extIdRepo.delete("partyId", partyId)
                         .flatMap { docRepo.delete("partyId", partyId) }
                         .flatMap { relRepo.update("terminationReason = null where partyId = ?1", partyId) }
-                        .replaceWith(true)
+                        .replaceWith(if (first) PartyAnonymisation.FIRST else PartyAnonymisation.REPEAT)
                 }
             }
         }.awaitSuspending()
@@ -201,7 +212,7 @@ class PartyRepositoryImpl(
      * be recovered from the shell. Status becomes TERMINATED: an erased party is no longer usable
      * and must never come back as ACTIVE.
      */
-    private fun PartyEntity.anonymise(at: OffsetDateTime) {
+    private fun PartyEntity.anonymise(at: OffsetDateTime, first: Boolean) {
         givenName = ERASED
         familyName = ERASED
         birthdate = ERASED_BIRTHDATE
@@ -223,8 +234,10 @@ class PartyRepositoryImpl(
         robSyncedAt = null
         caseMetadata = null
         status = PartyStatus.TERMINATED.name
-        erasedAt = at
-        updatedAt = at
+        if (first) {
+            erasedAt = at
+            updatedAt = at
+        }
     }
 
     private companion object {
@@ -394,7 +407,7 @@ class PartyRepositoryImpl(
         ),
         relationships = relationships.map { it.toDomain() },
         caseLifecycle = caseLifecycle(),
-        createdAt = createdAt, updatedAt = updatedAt, version = version,
+        createdAt = createdAt, updatedAt = updatedAt, version = version, erasedAt = erasedAt,
     )
 
     private fun Party.toEntity() = PartyEntity().also {

@@ -33,9 +33,11 @@ interface UpdatePartyUseCase {
 }
 
 /** GDPR Art. 17 (#15755, ADR-0118): erase a party's personal data on the party-service erasure event. */
+enum class ErasureOutcome { ERASED, REPEATED, UNKNOWN }
+
 interface ErasePartyUseCase {
-    /** Idempotent. @return `true` if this call erased anything, `false` for a re-delivery or an unknown party. */
-    suspend fun erase(partyId: UUID): Boolean
+    /** Idempotent; a repeat delivery re-cleans the row. */
+    suspend fun erase(partyId: UUID): ErasureOutcome
 }
 
 interface ManageRelationshipUseCase {

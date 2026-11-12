@@ -9,6 +9,7 @@ import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import io.smallrye.reactive.messaging.memory.InMemorySource
 import jakarta.enterprise.inject.Any
@@ -30,6 +31,7 @@ import java.util.UUID
 @QuarkusTest
 @QuarkusTestResource(PartyErasureIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(PostgresTestResource::class)
+@TestSecurity(user = "operator@openbank.test", roles = ["ROLE_OPERATOR", "ROLE_API"])
 class PartyErasureIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -85,7 +87,7 @@ class PartyErasureIT {
         }
         c.prepareStatement(
             """INSERT INTO party_relationships (id, party_id, role, status, onboarding_channel, termination_reason)
-               VALUES (?, ?, 'CUSTOMER', 'TERMINATED', 'WEB', 'customer said something personal')""",
+               VALUES (?, ?, 'CUSTOMER', 'TERMINATED', 'API', 'customer said something personal')""",
         ).use { ps ->
             ps.setObject(1, UUID.randomUUID())
             ps.setObject(2, id)
@@ -253,6 +255,84 @@ class PartyErasureIT {
 
         assertThat(await { party(barrier).erasedAt != null })
             .describedAs("an unknown party must not wedge the channel").isTrue()
+    }
+
+    private fun eraseAndAwait(id: UUID) {
+        source().send(erased(id))
+        assertThat(await { party(id).erasedAt != null }).describedAs("party never erased").isTrue()
+    }
+
+    private fun send(method: String, path: String, json: String): Int {
+        val response = io.restassured.RestAssured.given()
+            .contentType("application/json")
+            .body(json)
+            .request(method, path)
+        check(response.statusCode() == 409) { "$method $path -> ${response.statusCode()} ${response.body.asString()}" }
+        return response.statusCode()
+    }
+
+    @Test
+    fun `writes to an erased party are refused with 409 and the row stays anonymised`() {
+        val victim = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        eraseAndAwait(victim)
+        val after = party(victim)
+
+        assertThat(
+            send(
+                "POST",
+                "/api/v1/parties/register-identity",
+                """{"partyId":"$victim","givenName":"Jana","familyName":"Novakova","birthdate":"1985-03-04"}""",
+            ),
+        ).describedAs("register-identity").isEqualTo(409)
+        assertThat(send("PATCH", "/api/v1/parties/$victim/contact", """{"email":"back@example.test"}"""))
+            .describedAs("update contact").isEqualTo(409)
+        assertThat(
+            send("POST", "/api/v1/parties/$victim/external-ids", """{"type":"KEYCLOAK_ID","value":"kc-new-$victim"}"""),
+        ).describedAs("link external id").isEqualTo(409)
+
+        assertThat(party(victim)).describedAs("the refused writes must leave the row untouched").isEqualTo(after)
+        assertThat(count("SELECT count(*) FROM party_external_ids WHERE party_id = ?", victim)).isZero()
+    }
+
+    @Test
+    fun `a redelivery re-cleans a write that slipped in after the first erase and keeps the original stamp`() {
+        val victim = UUID.randomUUID()
+        val barrier = UUID.randomUUID()
+        seedParty(barrier, "blind-barrier-$barrier")
+        seedParty(victim, "blind-victim-$victim")
+        eraseAndAwait(victim)
+        val first = party(victim)
+
+        // Simulate a write that bypassed the guard (a racing transaction, a manual fix).
+        jdbc { c ->
+            c.prepareStatement(
+                "UPDATE parties SET email = 'slipped@example.test', given_name = 'Jana', " +
+                    "birth_number_encrypted = 'SLIPPED' WHERE id = ?",
+            ).use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+            c.prepareStatement(
+                "INSERT INTO party_external_ids (party_id, id_type, id_value) VALUES (?, 'KEYCLOAK_ID', 'slipped')",
+            ).use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+        }
+        assertThat(party(victim).email).isEqualTo("slipped@example.test")
+
+        val source = source()
+        source.send(erased(victim))
+        source.send(erased(barrier))
+        assertThat(await { party(barrier).erasedAt != null }).isTrue()
+
+        val after = party(victim)
+        assertThat(after.email).isNull()
+        assertThat(after.given).isEqualTo("GDPR_ERASED")
+        assertThat(after.encrypted).isNull()
+        assertThat(after.erasedAt).describedAs("original erased_at kept").isEqualTo(first.erasedAt)
+        assertThat(count("SELECT count(*) FROM party_external_ids WHERE party_id = ?", victim)).isZero()
     }
 
     private companion object {

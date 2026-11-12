@@ -6,6 +6,7 @@ package com.openbank.pid.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.pid.application.port.`in`.ErasePartyUseCase
+import com.openbank.pid.application.port.`in`.ErasureOutcome
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -22,7 +23,7 @@ class PartyErasureConsumerTest {
 
     @Test
     fun `PARTY_ERASED erases the party`(): Unit = runBlocking {
-        coEvery { erasure.erase(partyId) } returns true
+        coEvery { erasure.erase(partyId) } returns ErasureOutcome.ERASED
 
         consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId","erasedAt":"2026-11-12T10:00:00Z"}""")
 

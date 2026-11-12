@@ -51,11 +51,14 @@ interface PartyRepository {
      * indices) and ID-document numbers. The shell row (id, type, timestamps) stays, stamped
      * `erased_at`, as the idempotency marker and retention clock.
      *
-     * @return `true` when this call erased the party, `false` when it was already erased or is
-     *   unknown to this service (both are a no-op, so a re-delivered event is safe).
+     * A repeat call on an already-erased row re-runs the overwrite and the deletes (original
+     * `erased_at` kept) so a write that slipped in after the first erase is cleaned.
      */
-    suspend fun anonymize(partyId: UUID, erasedAt: Instant): Boolean
+    suspend fun anonymize(partyId: UUID, erasedAt: Instant): PartyAnonymisation
 }
+
+/** Result of [PartyRepository.anonymize]. */
+enum class PartyAnonymisation { FIRST, REPEAT, UNKNOWN }
 
 /** Outbound persistence port for party relationships. */
 interface PartyRelationshipRepository {

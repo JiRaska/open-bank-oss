@@ -4,6 +4,8 @@
 
 package com.openbank.pid.application.usecase
 
+import com.openbank.pid.application.port.`in`.ErasureOutcome
+import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import io.mockk.coEvery
@@ -28,20 +30,29 @@ class PartyErasureServiceTest {
     @Test
     fun `erases the party row and the linked cases with one shared timestamp`(): Unit = runBlocking {
         coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 2
-        coEvery { parties.anonymize(partyId, now) } returns true
+        coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.FIRST
 
-        assertThat(service.erase(partyId)).isTrue()
+        assertThat(service.erase(partyId)).isEqualTo(ErasureOutcome.ERASED)
 
         coVerify(exactly = 1) { parties.anonymize(partyId, now) }
         coVerify(exactly = 1) { cases.anonymizeLinkedTo(partyId, now) }
     }
 
     @Test
-    fun `a re-delivery that finds everything erased reports no change`(): Unit = runBlocking {
-        coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 0
-        coEvery { parties.anonymize(partyId, now) } returns false
+    fun `a re-delivery that finds everything erased reports REPEATED, and an unknown party UNKNOWN`(): Unit =
+        runBlocking {
+            coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 0
+            coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.REPEAT
 
-        assertThat(service.erase(partyId)).isFalse()
+            assertThat(service.erase(partyId)).isEqualTo(ErasureOutcome.REPEATED)
+        }
+
+    @Test
+    fun `an unknown party reports UNKNOWN`(): Unit = runBlocking {
+        coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 0
+        coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.UNKNOWN
+
+        assertThat(service.erase(partyId)).isEqualTo(ErasureOutcome.UNKNOWN)
     }
 
     @Test
@@ -50,9 +61,9 @@ class PartyErasureServiceTest {
             // First delivery erased the party row and died before the cases step; the retry finds
             // the row already erased (false) but must still anonymise the cases.
             coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 1
-            coEvery { parties.anonymize(partyId, now) } returns false
+            coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.REPEAT
 
-            assertThat(service.erase(partyId)).isTrue()
+            assertThat(service.erase(partyId)).isEqualTo(ErasureOutcome.ERASED)
             coVerify(exactly = 1) { cases.anonymizeLinkedTo(partyId, now) }
         }
 }

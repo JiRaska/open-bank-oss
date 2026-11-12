@@ -5,6 +5,7 @@
 package com.openbank.pid.infrastructure.persistence.repository
 
 import com.openbank.pid.application.port.out.VerificationCaseRepository
+import com.openbank.pid.application.usecase.PartyErasedException
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
 import com.openbank.pid.infrastructure.persistence.entity.VerificationCaseEntity
@@ -55,6 +56,8 @@ class VerificationCaseRepositoryImpl :
         Panache.withTransaction {
             find("id", case.id).firstResult().map { existing ->
                 requireNotNull(existing) { "verification case ${case.id} not found" }.apply {
+                    // GDPR Art. 17 (#15755): an erased case is closed history; no step may write to it.
+                    if (erasedAt != null) throw PartyErasedException("verification case ${case.id} was erased")
                     status = case.status.name
                     firstApprover = case.firstApprover
                     firstVerdict = case.firstVerdict?.name

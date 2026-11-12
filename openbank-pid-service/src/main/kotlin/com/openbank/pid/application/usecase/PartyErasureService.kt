@@ -5,6 +5,8 @@
 package com.openbank.pid.application.usecase
 
 import com.openbank.pid.application.port.`in`.ErasePartyUseCase
+import com.openbank.pid.application.port.`in`.ErasureOutcome
+import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import jakarta.enterprise.context.ApplicationScoped
@@ -19,8 +21,9 @@ import java.util.UUID
  * (the AML record-keeping clock, ADR-0118 section 5), never keep a personal column. What pid holds
  * per party and what happens to it: see `docs/04-data` (Erasure).
  *
- * Both steps are idempotent and BOTH always run, so a delivery that failed between them is
- * completed by the retry — the first step's "already erased" must not skip the second.
+ * Both steps always run, and a repeat delivery re-cleans an already-erased row (a write that
+ * slipped in after the first erase is removed), so a delivery that failed between the steps, or a
+ * late write, is repaired by the retry.
  * Nothing personal is logged: the party id is the only value written.
  */
 @ApplicationScoped
@@ -32,21 +35,22 @@ class PartyErasureService(
 
     private val log = Logger.getLogger(PartyErasureService::class.java)
 
-    override suspend fun erase(partyId: UUID): Boolean {
+    override suspend fun erase(partyId: UUID): ErasureOutcome {
         val now = clock.instant()
         val anonymisedCases = cases.anonymizeLinkedTo(partyId, now)
-        val anonymisedParty = parties.anonymize(partyId, now)
-        val erased = anonymisedParty || anonymisedCases > 0
-        if (erased) {
-            log.infof(
-                "GDPR Art. 17: erased identity data of party %s (party row: %s, verification cases: %d)",
-                partyId,
-                anonymisedParty,
-                anonymisedCases,
-            )
-        } else {
-            log.debugf("GDPR Art. 17: party %s already erased or unknown to pid-service, nothing to do", partyId)
+        val party = parties.anonymize(partyId, now)
+        val outcome = when {
+            party == PartyAnonymisation.FIRST || anonymisedCases > 0 -> ErasureOutcome.ERASED
+            party == PartyAnonymisation.REPEAT -> ErasureOutcome.REPEATED
+            else -> ErasureOutcome.UNKNOWN
         }
-        return erased
+        log.infof(
+            "GDPR Art. 17: party %s erasure outcome %s (party row: %s, verification cases: %d)",
+            partyId,
+            outcome,
+            party,
+            anonymisedCases,
+        )
+        return outcome
     }
 }
