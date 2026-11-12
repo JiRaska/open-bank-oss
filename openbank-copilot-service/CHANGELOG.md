@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.18.0...copilot-service-v0.18.1) (2026-11-12)
+
+
+### Bug Fixes
+
+* **copilot:** mark the chat stream as AI-generated on every outcome ([#15814](https://github.com/JiRaska/open-bank-oss/issues/15814)) ([51cb0ce](https://github.com/JiRaska/open-bank-oss/commit/51cb0cec22217bf5585c7eb8cac221b1dca874d5)), closes [#15758](https://github.com/JiRaska/open-bank-oss/issues/15758)
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.8...copilot-service-v0.18.0) (2026-11-12)
 
 
