@@ -99,7 +99,7 @@ pressure. Runbooks live under `docs/runbooks/key-ceremonies/`:
 - **Keycloak realm signing-key renewal**: manual. The ADR-0099 Tier 2 OIDC rotator was
   withdrawn by ADR-0177 and removed, so there is no automated cadence to coordinate with.
   Static OIDC client secrets are rotated by hand, by each ExternalSecret's
-  `openbank.io/rotation-deadline`.
+  `open-bank.tech/rotation-deadline`.
 - **cert-manager PKI rotation** — automatic; this runbook covers the manual-intervention path if
   automatic renewal fails.
 

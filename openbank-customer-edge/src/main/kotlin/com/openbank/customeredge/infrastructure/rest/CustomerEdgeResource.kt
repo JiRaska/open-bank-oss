@@ -4457,8 +4457,10 @@ class CustomerEdgeResource(
     /**
      * Freeze (temporarily suspend) a card the caller controls — the reversible self-service lock.
      *
-     * Open to a delegate holding `CARD_MANAGE_LIMITS` (ADR-0249 D2): freezing is one of the controls
-     * a real disponent expects, it is reversible, and it can only ever REDUCE what the card may do.
+     * Open to a delegate holding `CARD_MANAGE_STATUS` (ADR-0249 D2, corrected by ADR-0375 D7):
+     * freezing is one of the controls a real disponent expects, it is reversible, and it can only
+     * ever REDUCE what the card may do. It used to be gated on `CARD_MANAGE_LIMITS`, which is a
+     * different authority — the status capability existed and nothing read it.
      */
     @POST
     @Path("/cards/{id}/freeze")
@@ -4501,7 +4503,7 @@ class CustomerEdgeResource(
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
     private fun cardAction(id: UUID, action: String): Response {
         val customer = customer()
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_STATUS)) {
             return forbidden("Card does not belong to caller")
         }
         return upstream.post(
@@ -4695,7 +4697,7 @@ class CustomerEdgeResource(
                 "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
                 "CARD_CONTROLS_INVALID",
             )
-        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_CHANNELS)) {
             return forbidden("Card does not belong to caller")
         }
         val resp = upstream.put(
@@ -6023,6 +6025,16 @@ class CustomerEdgeResource(
          */
         internal const val CAP_CARD_VIEW = "CARD_VIEW"
         internal const val CAP_CARD_MANAGE_LIMITS = "CARD_MANAGE_LIMITS"
+
+        // ADR-0375 D7. These two were grantable and read by nothing: freeze/unfreeze/block and the
+        // channel toggles were all gated on CAP_CARD_MANAGE_LIMITS, so a vocabulary that
+        // distinguishes limits from status from channels was collapsed to one capability at the
+        // only place that checks it. Both card role presets grant all five card capabilities, so
+        // correcting the gating takes nothing away from a preset-based delegate; what it does take
+        // away is freeze and channel control from a hand-built grant carrying limits ALONE, which
+        // is the point — a limit is not a status and not a channel.
+        internal const val CAP_CARD_MANAGE_STATUS = "CARD_MANAGE_STATUS"
+        internal const val CAP_CARD_MANAGE_CHANNELS = "CARD_MANAGE_CHANNELS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this
