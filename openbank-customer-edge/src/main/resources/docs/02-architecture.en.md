@@ -162,3 +162,23 @@ so a preset-based delegate is unaffected; a hand-built limits-only grant is the 
 
 There is no per-card transaction route here, which is why `CARD_VIEW_TRANSACTIONS` still has no
 enforcer — it has nothing to gate rather than the wrong gate.
+
+### Account reads follow the same rule (ADR-0375 D7)
+
+| read | capability asked |
+|---|---|
+| `GET /accounts/{id}` — the account record | `ACCOUNT_VIEW_DETAILS` |
+| `GET /balances/{id}` | `ACCOUNT_READ_BALANCES` |
+| `GET /accounts/{id}/transactions` | `ACCOUNT_READ_TRANSACTIONS` |
+| `GET /statements/{id}` and the single-statement render | `ACCOUNT_DOWNLOAD_STATEMENTS` |
+
+The detail read asked for `ACCOUNT_READ_BALANCES` until 2026-11-12, so the account record was
+reachable on the balances authority. Both statement routes asked ownership alone, so a delegate
+holding the statements capability was refused every time they used it; they now share one
+`mayReadStatements` helper, because the list and the render are the same authority and two copies
+of that test are two things that drift.
+
+Note the asymmetry with the card correction: **this one is not free.** The `Účetní` and `Pokladník`
+presets grant `ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS` — which is exactly why they
+could drill into the record. The preset catalog is corrected forward by a migration; grants already
+minted keep what they were given and lose the drill-down until the grantor re-shares.

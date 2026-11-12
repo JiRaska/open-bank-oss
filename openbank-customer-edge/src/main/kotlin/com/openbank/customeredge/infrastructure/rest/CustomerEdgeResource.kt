@@ -334,10 +334,21 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Read one of the caller's OWN accounts. account-service scopes by id only (the X-Customer-Party-Id
-     * header is advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
-     * statements reads. [fetchAccount] already returns the body, so we serve it rather than re-fetching.
-     * A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an existence oracle.
+     * Read one of the caller's OWN accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_VIEW_DETAILS`. account-service scopes by id only (the X-Customer-Party-Id header is
+     * advisory there), so ownership is enforced HERE — same IDOR guard as the transactions /
+     * statements reads. [fetchAccount] already returns the body, so we serve it rather than
+     * re-fetching. A non-owned (or non-existent) id returns 403, deliberately not 404, to avoid an
+     * existence oracle.
+     *
+     * ADR-0375 D7: this asked for `ACCOUNT_READ_BALANCES` until 2026-11-12, so the detail record was
+     * reachable with the balances authority and `ACCOUNT_VIEW_DETAILS` was read by nothing. Balances
+     * have their own route; this one serves the account record, so it asks for the capability that
+     * names it. Consequence worth knowing: the `Účetní` and `Pokladník` presets granted
+     * READ_BALANCES WITHOUT VIEW_DETAILS, which is why they could drill in at all — the presets are
+     * corrected forward by a migration, and a grant already minted from the old preset keeps exactly
+     * what it was given (grants are immutable snapshots by design) and loses this drill-down until
+     * the grantor re-shares.
      */
     @GET
     @Path("/accounts/{accountId}")
@@ -348,7 +359,7 @@ class CustomerEdgeResource(
         val accountJson = fetchAccount(accountId, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString() &&
-            !hasGrant(customer.partyId, "ACCOUNT", accountId, "ACCOUNT_READ_BALANCES")
+            !hasGrant(customer.partyId, "ACCOUNT", accountId, CAP_ACCOUNT_VIEW_DETAILS)
         ) {
             return forbidden("Account does not belong to caller")
         }
@@ -2885,15 +2896,26 @@ class CustomerEdgeResource(
     @Blocking
     fun listStatements(@PathParam("accountId") accountId: UUID): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         return upstream.get("$statementServiceUrl/api/v1/statements/$accountId", customer.partyId.toString())
     }
 
     /**
+     * ADR-0375 D7. Owner, or a delegate holding `ACCOUNT_DOWNLOAD_STATEMENTS`. Both statement routes
+     * go through this one helper on purpose: the list and the render are the same authority, and two
+     * copies of an ownership-or-grant test are two things that drift. Before this, both asked
+     * `ownsAccount` alone — so the capability was grantable, three presets handed it out, and a
+     * delegate who had been given it was refused every time they used it.
+     */
+    private fun mayReadStatements(accountId: UUID, partyId: UUID): Boolean = ownsAccount(accountId, partyId) ||
+        hasGrant(partyId, "ACCOUNT", accountId, CAP_ACCOUNT_DOWNLOAD_STATEMENTS)
+
+    /**
      * Render a single closed statement on demand as a document (camt.053 XML / MT940 / PDF text) for
-     * one of the caller's OWN accounts. statement-service holds only the period-close record and
+     * one of the caller's own accounts, or one shared with them by a grant carrying
+     * `ACCOUNT_DOWNLOAD_STATEMENTS`. statement-service holds only the period-close record and
      * renders the document deterministically on demand (ADR-0035) — nothing is stored. Ownership is
      * enforced HERE (same IDOR guard as the list). The currency and format are validated against
      * fixed allow-lists before building the upstream URL (deny-by-default; no arbitrary passthrough),
@@ -2911,7 +2933,7 @@ class CustomerEdgeResource(
         @QueryParam("format") format: String?,
     ): Response {
         val customer = customer()
-        if (!ownsAccount(accountId, customer.partyId)) {
+        if (!mayReadStatements(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
         val ccy = CurrencyCode.parse(currency)?.value ?: return badRequest("Invalid currency")
@@ -6035,6 +6057,12 @@ class CustomerEdgeResource(
         // is the point — a limit is not a status and not a channel.
         internal const val CAP_CARD_MANAGE_STATUS = "CARD_MANAGE_STATUS"
         internal const val CAP_CARD_MANAGE_CHANNELS = "CARD_MANAGE_CHANNELS"
+
+        // ADR-0375 D7, account side. Same shape as the card correction: the account DETAIL read
+        // asked for the BALANCES capability, and the statement reads asked for ownership alone, so
+        // two more capabilities the vocabulary offers were grantable and read by nothing.
+        internal const val CAP_ACCOUNT_VIEW_DETAILS = "ACCOUNT_VIEW_DETAILS"
+        internal const val CAP_ACCOUNT_DOWNLOAD_STATEMENTS = "ACCOUNT_DOWNLOAD_STATEMENTS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this

@@ -46,6 +46,7 @@ class DelegatedReadTest {
         balanceServiceUrl = "http://balance"
         transactionServiceUrl = "http://tx"
         delegationServiceUrl = "http://delegation"
+        statementServiceUrl = "http://statement"
     }
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
@@ -147,6 +148,68 @@ class DelegatedReadTest {
                 match { it.contains("ACCOUNT_READ_TRANSACTIONS") },
             )
         }
+    }
+
+    @Test
+    fun `the account detail asks for the details capability, not the balances one`() {
+        val grantee = UUID.randomUUID()
+        val owner = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, owner)
+        every { upstream.post(match { it.contains("/delegations/check") }, any(), any()) } returns granted(false)
+
+        assertThat(resourceFor(upstream, grantee).getAccount(acct).status).isEqualTo(403)
+
+        // ADR-0375 D7: this route served the account RECORD while asking for the BALANCES
+        // capability, so ACCOUNT_VIEW_DETAILS was grantable and read by nothing. Balances have
+        // their own route; asserting which capability was asked for is the only thing that tells
+        // the two apart.
+        verify {
+            upstream.post(
+                match { it.contains("/delegations/check") },
+                any(),
+                match { it.contains("ACCOUNT_VIEW_DETAILS") && !it.contains("ACCOUNT_READ_BALANCES") },
+            )
+        }
+    }
+
+    @Test
+    fun `a grantee holding ACCOUNT_DOWNLOAD_STATEMENTS can list the statements of a shared account`() {
+        val grantee = UUID.randomUUID()
+        val owner = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, owner)
+        every { upstream.post(match { it.contains("/delegations/check") }, any(), any()) } returns granted(true)
+        every { upstream.get(match { it.contains("/api/v1/statements/$acct") }, any()) } returns
+            Response.ok("[]").build()
+
+        assertThat(resourceFor(upstream, grantee).listStatements(acct).status).isEqualTo(200)
+
+        // Before ADR-0375 D7 both statement routes asked ownsAccount alone, so three presets handed
+        // this capability out and every delegate who used it was refused.
+        verify {
+            upstream.post(
+                match { it.contains("/delegations/check") },
+                any(),
+                match { it.contains("ACCOUNT_DOWNLOAD_STATEMENTS") },
+            )
+        }
+    }
+
+    @Test
+    fun `rendering a statement is the same authority as listing them`() {
+        val grantee = UUID.randomUUID()
+        val owner = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(match { it.contains("/accounts/$acct") }, any()) } returns accountJson(acct, owner)
+        every { upstream.post(match { it.contains("/delegations/check") }, any(), any()) } returns granted(false)
+
+        // The list and the render go through one helper on purpose; this is the assertion that
+        // keeps them from drifting apart into two different answers.
+        assertThat(resourceFor(upstream, grantee).renderStatement(acct, "CZK", 1L, null).status).isEqualTo(403)
     }
 
     @Test
