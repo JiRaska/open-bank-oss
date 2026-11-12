@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.7...delegation-service-v0.24.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
 ## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
 
 
