@@ -570,7 +570,8 @@ Celkem povinností: **70**.
 - **Lhůta:** Do 72 hodin od zjištění. *(EU text, neověřeno znovu)*
 - **Druh / kanál:** event · formulář ÚOOÚ / datová schránka
 - **Osobní údaje:** yes
-- **Pokrytí:** `missing` — chybí
+- **Pokrytí:** `missing` — chybí; sleduje #15756
+- **Poznámka:** Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
 ## AML a mezinárodní sankce
 

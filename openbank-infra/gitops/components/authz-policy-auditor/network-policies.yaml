@@ -31,7 +31,7 @@ metadata:
   namespace: authz-policy-auditor
   labels:
     app.kubernetes.io/part-of: authz-policy-auditor
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:

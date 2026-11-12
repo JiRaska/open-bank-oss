@@ -30,7 +30,7 @@ metadata:
   name: openbank-money-path-canary
   labels:
     app.kubernetes.io/part-of: argo-rollouts
-    openbank.io/plane: platform
+    open-bank.tech/plane: platform
 spec:
   args:
     - name: namespace

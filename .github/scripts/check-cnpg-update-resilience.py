@@ -89,7 +89,7 @@ IMAGE_RX = re.compile(r'"image":\s*"([^"]+)"')
 # annotation (with a reason) and is excused the affinity checks ONLY -- never instances >= 2 or
 # switchover. It is stale the moment the affinity is present, so the excuse cannot outlive the
 # wave that removes it. Valid on any cluster since rule 5 extended the affinity fleet-wide.
-PENDING_ANN = "openbank.io/affinity-rollout-pending"
+PENDING_ANN = "open-bank.tech/affinity-rollout-pending"
 
 # Money-path services that genuinely own no database. Reason required; an entry for a service
 # that does resolve to a cluster, or that is no longer money-path, is a stale finding.
@@ -477,20 +477,20 @@ def self_test() -> int:
             {"db.yaml": good["db.yaml"]}, "cannot be derived"),
         "pending annotation on a cluster that already has the affinity": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA).replace(
-                "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+                "  namespace: st\n", "  namespace: st\n  annotations:\n    open-bank.tech/affinity-rollout-pending: wave\n", 1)},
             "already has the affinity"),
         "pending annotation does not excuse a single instance": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=1, extra="  primaryUpdateMethod: switchover\n").replace(
-                "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+                "  namespace: st\n", "  namespace: st\n  annotations:\n    open-bank.tech/affinity-rollout-pending: wave\n", 1)},
             "instances=1"),
         "money-path cluster with PDB disabled": (
             {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA + "  enablePDB: false\n")},
             "enablePDB"),
     }
     deferred = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
-        "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)
+        "  namespace: st\n", "  namespace: st\n  annotations:\n    open-bank.tech/affinity-rollout-pending: wave\n", 1)
         + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
-        "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)}
+        "  namespace: st\n", "  namespace: st\n  annotations:\n    open-bank.tech/affinity-rollout-pending: wave\n", 1)}
     if run(deferred):
         print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
     cases["non-money-path HA cluster with only preferred anti-affinity"] = (
@@ -500,7 +500,7 @@ def self_test() -> int:
     cases["pending annotation on a non-money-path cluster that already has the affinity"] = (
         {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA) + "---\n"
          + _CLUSTER.format(name="other-db", inst=2, extra=_HA).replace(
-             "  name: other-db\n", "  name: other-db\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+             "  name: other-db\n", "  name: other-db\n  annotations:\n    open-bank.tech/affinity-rollout-pending: wave\n", 1)},
         "st/other-db (instances=2) carries")
     cases["single-instance platform database (the temporal-db shape)"] = (
         {**good, "wf.yaml": _WF.format(inst=1, extra=_HA)}, "wf/wf-db (platform dependency) has instances=1")

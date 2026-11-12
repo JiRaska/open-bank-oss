@@ -92,16 +92,29 @@ class PanacheJournalRepository(
         limit: Int,
         afterId: UUID?,
     ): List<JournalEntry> = Panache.withSession {
-        find("entryDate >= ?1 and entryDate <= ?2 order by entryDate desc, createdAt desc", from, to).list()
-            .flatMap { all ->
-                val startIdx = if (afterId != null) {
-                    val i = all.indexOfFirst { it.id == afterId }
-                    if (i >= 0) i + 1 else 0
-                } else {
-                    0
-                }
-                attachLines(all.drop(startIdx).take(limit))
+        val dateRange = "entryDate >= ?1 and entryDate <= ?2"
+        val order = "order by entryDate desc, createdAt desc, id desc"
+        val cursor = if (afterId == null) {
+            Uni.createFrom().nullItem<JournalEntryEntity>()
+        } else {
+            find("$dateRange and id = ?3 $order", from, to, afterId).firstResult()
+        }
+        cursor.flatMap { anchor ->
+            val page = if (anchor == null) {
+                // A cursor whose journal is no longer in this range still starts at page one.
+                find("$dateRange $order", from, to)
+            } else {
+                find(
+                    "$dateRange and (entryDate, createdAt, id) < (?3, ?4, ?5) $order",
+                    from,
+                    to,
+                    anchor.entryDate,
+                    anchor.createdAt,
+                    anchor.id,
+                )
             }
+            page.range(0, limit - 1).list().flatMap { entries -> attachLines(entries) }
+        }
     }.awaitSuspending()
 
     override suspend fun findByIdempotencyKey(idempotencyKey: String): JournalEntry? {

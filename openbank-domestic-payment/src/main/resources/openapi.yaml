@@ -11,7 +11,7 @@ info:
   # ADR-0227 D1: additive projection fields (summary, domain, amount, currency, riskClass,
   # payloadRef — all optional) on ApprovalResponse; no breaking change.
   # 1.12.0 -> 1.13.0: additive durable company-scoped business payment batch drafts.
-  version: 1.13.0
+  version: 1.14.0
   description: >-
     Czech domestic payment lifecycle (CZ-specific rails, SIPO). On create, debtor and creditor names
     are synchronously screened against the sanctions lists (ADR-0032): a clean payment is returned
@@ -110,6 +110,47 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DomesticPaymentResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/domestic-payments/submissions/lookup:
+    post:
+      tags: [Domestic Payments]
+      summary: Look up a customer payment submission
+      description: >-
+        Read-only endpoint for the verified customer-edge workload. Matches the original key,
+        debit account and stored customer submission scope. A missing or mismatched record
+        returns UNKNOWN and makes no claim about whether a payment was made.
+      operationId: lookupDomesticPaymentSubmission
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, customerSubmissionScope]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                customerSubmissionScope: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Current durable state, or UNKNOWN when the exact submission cannot be established
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: [no-store]}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomesticPaymentSubmission'
+        '400':
+          description: Malformed lookup
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -515,6 +556,23 @@ components:
           items: {$ref: '#/components/schemas/BusinessPaymentBatchDraft'}
         page: {type: integer, minimum: 0, maximum: 1000}
         size: {type: integer, minimum: 1, maximum: 20}
+    DomesticPaymentSubmission:
+      oneOf:
+        - type: object
+          required: [outcome]
+          properties:
+            outcome: {type: string, enum: [UNKNOWN]}
+          additionalProperties: false
+        - type: object
+          required: [outcome, paymentId, status]
+          properties:
+            outcome: {type: string, enum: [FOUND]}
+            paymentId: {type: string, format: uuid}
+            status:
+              type: string
+              enum: [RECEIVED, VALIDATED, SENT_TO_CLEARING, SETTLED, REJECTED, RETURNED, CANCELLED]
+          additionalProperties: false
+
     CreateDomesticPaymentRequest:
       type: object
       # Property names and optionality mirror the DTO the resource deserializes into
@@ -526,6 +584,10 @@ components:
       required: [debtorAccountId, debtorAccountNumber, debtorBankCode, debtorName,
                  creditorAccountNumber, creditorBankCode, creditorName, amount, currency, priority]
       properties:
+        customerSubmissionScope:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Optional correlation binding accepted only from the verified customer-edge workload.
         debtorAccountId:
           type: string
           format: uuid

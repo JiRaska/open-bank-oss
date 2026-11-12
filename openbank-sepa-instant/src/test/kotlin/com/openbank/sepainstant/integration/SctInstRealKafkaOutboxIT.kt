@@ -4,6 +4,8 @@
 package com.openbank.sepainstant.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.synthetic.SyntheticTaint
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import com.openbank.sepainstant.application.port.out.SctInstPaymentRepository
 import com.openbank.sepainstant.domain.event.SctInstPaymentSettled
@@ -13,6 +15,8 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.quarkus.vertx.VertxContextSupport
 import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
@@ -25,6 +29,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.apache.kafka.clients.consumer.KafkaConsumer
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.OffsetDateTime
@@ -59,12 +64,19 @@ class SctInstRealKafkaOutboxIT {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "openbank.sct-inst.scheme-submission.enabled" to "false",
             "openbank.outbox.dispatch-enabled" to "true",
+            "openbank.synthetic.trusted-principals" to SYNTHETIC_ACTOR,
             // The test drives the real dispatcher; the scheduler must not claim first.
             "openbank.outbox.initial-delay" to "1h",
         )
     }
 
-    private data class OutboxRow(val eventId: UUID, val eventType: String, val status: String, val payload: String)
+    private data class OutboxRow(
+        val eventId: UUID,
+        val eventType: String,
+        val status: String,
+        val payload: String,
+        val synthetic: Boolean,
+    )
 
     @Suppress("LongMethod")
     @Test
@@ -76,31 +88,16 @@ class SctInstRealKafkaOutboxIT {
                 String::class.java,
             ),
         ).isEqualTo("smallrye-kafka")
-        val key = UUID.randomUUID().toString()
-        val paymentId = UUID.fromString(
-            given().contentType(ContentType.JSON)
-                .header("Idempotency-Key", key)
-                .body(
-                    """{"idempotencyKey":"$key","debtorAccountId":"${UUID.randomUUID()}","debtorIban":"CZ6508000000192000145399","debtorName":"Test Debtor","creditorIban":"DE89370400440532013000","creditorName":"Test Creditor","creditorBic":"COBADEFFXXX","amount":99.99,"currency":"EUR","endToEndId":"E2E-$key"}""",
-                )
-                .`when`().post("/api/v1/sepa-instant")
-                .then().statusCode(201).extract().path<String>("paymentId"),
-        )
-
-        val now = OffsetDateTime.now(ZoneOffset.UTC)
-        onEventLoop {
-            val processing = requireNotNull(repository.findByPaymentId(paymentId).awaitSuspending())
-            assertThat(processing.status).isEqualTo(SctInstStatus.PROCESSING)
-            repository.updateWithEvent(
-                processing.copy(status = SctInstStatus.SETTLED, settledAt = now),
-                SctInstStatus.PROCESSING,
-                SctInstPaymentSettled(paymentId = paymentId, settledAt = now, occurredAt = now),
-            ).awaitSuspending()
-        }
+        val paymentId = submitClaimingSynthetic()
+        assertThat(paymentOrigin(paymentId)).isFalse()
+        markLegacyOriginUnknown(paymentId)
+        settle(paymentId, suppliedSynthetic = true)
+        assertThat(paymentOrigin(paymentId)).isNull()
 
         val pending = rows(paymentId)
         assertThat(pending.map { it.eventType }).containsExactly("SctInstPaymentSubmitted", "SctInstPaymentSettled")
         assertThat(pending.map { it.status }).containsOnly("PENDING")
+        assertThat(pending.map { it.synthetic }).containsOnly(false)
 
         consumer().use { consumer ->
             consumer.subscribe(listOf(TOPIC))
@@ -113,6 +110,7 @@ class SctInstRealKafkaOutboxIT {
             assertThat(delivered[1].offset()).isGreaterThan(delivered[0].offset())
             delivered.zip(pending).forEach { (record, row) ->
                 assertThat(record.value()).isEqualTo(row.payload)
+                assertThat(record.headers().lastHeader(OutboxKafkaHeaders.HEADER_SYNTHETIC)).isNull()
                 assertThat(record.headers().lastHeader("ce-id").value().toString(Charsets.UTF_8))
                     .isEqualTo(row.eventId.toString())
             }
@@ -132,6 +130,7 @@ class SctInstRealKafkaOutboxIT {
             tick()
             val replay = awaitRecords(consumer, paymentId, 1).single()
             assertThat(replay.value()).isEqualTo(delivered[0].value())
+            assertThat(replay.headers().lastHeader(OutboxKafkaHeaders.HEADER_SYNTHETIC)).isNull()
             assertThat(replay.key()).isEqualTo(delivered[0].key())
             assertThat(replay.headers().lastHeader("ce-id").value().toString(Charsets.UTF_8))
                 .isEqualTo(pending[0].eventId.toString())
@@ -139,9 +138,108 @@ class SctInstRealKafkaOutboxIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = SYNTHETIC_ACTOR, roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "azp", value = "openbank-sepa-instant-fixture"),
+            Claim(key = "preferred_username", value = SYNTHETIC_ACTOR),
+            Claim(key = "sub", value = "isolated-sepa-instant-fixture-subject"),
+        ],
+    )
+    fun `trusted synthetic origin survives later unmarked transitions through Kafka`() {
+        val paymentId = submitClaimingSynthetic()
+        assertThat(paymentOrigin(paymentId)).isTrue()
+        assertThat(rows(paymentId).single().synthetic).isTrue()
+        settle(paymentId, suppliedSynthetic = false)
+
+        given().contentType(ContentType.JSON)
+            .body("""{"reason":"Isolated fixture recall"}""")
+            .post("/api/v1/sepa-instant/$paymentId/recall")
+            .then().statusCode(200).body("status", equalTo("RECALLED"))
+
+        assertThat(paymentOrigin(paymentId)).isTrue()
+        val pending = rows(paymentId)
+        assertThat(pending.map { it.eventType })
+            .containsExactly("SctInstPaymentSubmitted", "SctInstPaymentSettled", "SctInstPaymentRecalled")
+        assertThat(pending.map { it.synthetic }).containsOnly(true)
+        assertThat(pending.map { it.status }).containsOnly("PENDING")
+
+        consumer().use { consumer ->
+            consumer.subscribe(listOf(TOPIC))
+            tick()
+            awaitRecords(consumer, paymentId, pending.size).zip(pending).forEach { (record, row) ->
+                assertThat(record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_ID)?.value()?.decodeToString())
+                    .isEqualTo(row.eventId.toString())
+                assertThat(record.headers().lastHeader(OutboxKafkaHeaders.HEADER_SYNTHETIC)?.value()?.decodeToString())
+                    .isEqualTo(SyntheticTaint.TRUE_VALUE)
+            }
+        }
+        awaitSent(paymentId)
+    }
+
+    private fun submitClaimingSynthetic(): UUID {
+        val key = UUID.randomUUID().toString()
+        return UUID.fromString(
+            given().contentType(ContentType.JSON)
+                .header("Idempotency-Key", key)
+                .header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.TRUE_VALUE)
+                .body(
+                    """
+                    {
+                      "idempotencyKey": "$key",
+                      "debtorAccountId": "${UUID.randomUUID()}",
+                      "debtorIban": "CZ6508000000192000145399",
+                      "debtorName": "Test Debtor",
+                      "creditorIban": "DE89370400440532013000",
+                      "creditorName": "Test Creditor",
+                      "creditorBic": "COBADEFFXXX",
+                      "amount": 99.99,
+                      "currency": "EUR",
+                      "endToEndId": "E2E-$key"
+                    }
+                    """.trimIndent(),
+                )
+                .`when`().post("/api/v1/sepa-instant")
+                .then().statusCode(201).extract().path<String>("paymentId"),
+        )
+    }
+
+    private fun settle(paymentId: UUID, suppliedSynthetic: Boolean) {
+        val now = OffsetDateTime.now(ZoneOffset.UTC)
+        onEventLoop {
+            val processing = requireNotNull(repository.findByPaymentId(paymentId).awaitSuspending())
+            assertThat(processing.status).isEqualTo(SctInstStatus.PROCESSING)
+            repository.updateWithEvent(
+                processing.copy(status = SctInstStatus.SETTLED, settledAt = now, synthetic = suppliedSynthetic),
+                SctInstStatus.PROCESSING,
+                SctInstPaymentSettled(paymentId = paymentId, settledAt = now, occurredAt = now),
+            ).awaitSuspending()
+        }
+    }
+
+    private fun paymentOrigin(paymentId: UUID): Boolean? = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT synthetic FROM sct_inst_payments WHERE payment_id = ?").use { query ->
+            query.setObject(1, paymentId)
+            query.executeQuery().use { rows ->
+                check(rows.next())
+                rows.getObject(1, Boolean::class.javaObjectType)
+            }
+        }
+    }
+
+    private fun markLegacyOriginUnknown(paymentId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("UPDATE sct_inst_payments SET synthetic = NULL WHERE payment_id = ?").use {
+                it.setObject(1, paymentId)
+                assertThat(it.executeUpdate()).isEqualTo(1)
+            }
+        }
+    }
+
     private fun rows(paymentId: UUID): List<OutboxRow> = dataSource.connection.use { connection ->
         connection.prepareStatement(
-            "SELECT event_id, event_type, status, payload FROM sct_inst_outbox " +
+            "SELECT event_id, event_type, status, payload, synthetic FROM sct_inst_outbox " +
                 "WHERE aggregate_id = ? ORDER BY created_at, id",
         ).use { query ->
             query.setObject(1, paymentId)
@@ -154,6 +252,7 @@ class SctInstRealKafkaOutboxIT {
                                 result.getString(2),
                                 result.getString(3),
                                 result.getString(4),
+                                result.getBoolean(5),
                             ),
                         )
                     }
@@ -213,6 +312,7 @@ class SctInstRealKafkaOutboxIT {
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     private companion object {
+        const val SYNTHETIC_ACTOR = "service-account-openbank-sepa-instant-fixture"
         const val TOPIC = "openbank.sepa.instant.events"
     }
 }

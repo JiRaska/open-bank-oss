@@ -26,8 +26,9 @@ import java.time.LocalDate
  *   r020_c010 — COMMON EQUITY TIER 1 (CET1) CAPITAL
  *   r030_c010 — Capital instruments eligible as CET1 Capital
  *   r130_c010 — Retained earnings
- *   r160_c010 — Other reserves
- *   r300_c010 — (-) Total deductions from CET1
+ *   r160_c010 — Profit or loss attributable to owners of the parent (source gap)
+ *   r200_c010 — Other reserves
+ *   r300_c010 — (-) Goodwill (source gap)
  *   r530_c010 — ADDITIONAL TIER 1 (AT1) CAPITAL
  *   r750_c010 — TIER 2 CAPITAL
  *
@@ -40,11 +41,23 @@ object C0100Mapper {
         "The trial balance contains no recognised regulatory-capital source account " +
             "(6000-6060). No own-funds value was inferred from assets minus liabilities."
 
+    private const val REPORTING_CURRENCY = "CZK"
+    private const val CURRENCY_GAP_REASON = "The own-funds preview requires capital amounts in CZK."
+    private const val PROFIT_GAP_REASON =
+        "The prudential source for profit or loss attributable to the parent is unavailable."
+    private const val GOODWILL_GAP_REASON =
+        "GL 6040 combines regulatory deductions. Goodwill requires a separate source."
+
     private val capitalCodes = setOf("6000", "6010", "6020", "6030", "6040", "6050", "6060")
 
     fun map(lines: List<TrialBalanceLineDto>, asOf: LocalDate): CorepTemplate {
         val capitalLines = lines.filter { it.accountType == "EQUITY" && it.code in capitalCodes }
-        val hasRealCapitalData = capitalLines.isNotEmpty()
+        val sourceGap = when {
+            capitalLines.isEmpty() -> GAP_REASON
+            capitalLines.none { it.currency == REPORTING_CURRENCY } ||
+                capitalLines.any { it.currency != REPORTING_CURRENCY && it.net.signum() != 0 } -> CURRENCY_GAP_REASON
+            else -> null
+        }
 
         fun creditBalance(vararg codes: String): BigDecimal = capitalLines
             .filter { it.code in codes }
@@ -64,33 +77,19 @@ object C0100Mapper {
         val tier2 = creditBalance("6060")
         val ownFunds = tier1.add(tier2)
 
-        fun capitalCell(rowRef: String, label: String, value: BigDecimal): CorepCell = if (hasRealCapitalData) {
-            CorepCell(
-                rowRef = rowRef,
-                colRef = "c010",
-                label = label,
-                value = value,
-                isDataGap = false,
-            )
-        } else {
-            CorepCell(
-                rowRef = rowRef,
-                colRef = "c010",
-                label = label,
-                value = BigDecimal.ZERO,
-                isDataGap = true,
-                gapReason = GAP_REASON,
-            )
-        }
+        fun capitalCell(rowRef: String, label: String, value: BigDecimal): CorepCell =
+            sourceGap?.let { gapCell(rowRef, label, it) }
+                ?: CorepCell(rowRef = rowRef, colRef = "c010", label = label, value = value)
 
         val cells = listOf(
             capitalCell("r010", "OWN FUNDS", ownFunds),
             capitalCell("r015", "TIER 1 CAPITAL", tier1),
             capitalCell("r020", "COMMON EQUITY TIER 1 (CET1) CAPITAL", cet1),
-            capitalCell("r030", "Capital instruments eligible as CET1 Capital", instruments),
+            capitalCell("r030", "Capital instruments and share premium eligible as CET1 Capital", instruments),
             capitalCell("r130", "Retained earnings", retainedEarnings),
-            capitalCell("r160", "Other reserves", otherReserves),
-            capitalCell("r300", "(-) Total deductions from CET1", deductions),
+            gapCell("r160", "Profit or loss attributable to owners of the parent", PROFIT_GAP_REASON),
+            capitalCell("r200", "Other reserves", otherReserves),
+            gapCell("r300", "(-) Goodwill", GOODWILL_GAP_REASON),
             capitalCell("r530", "ADDITIONAL TIER 1 (AT1) CAPITAL", at1),
             capitalCell("r750", "TIER 2 CAPITAL", tier2),
         )
@@ -101,4 +100,13 @@ object C0100Mapper {
             cells = cells,
         )
     }
+
+    private fun gapCell(rowRef: String, label: String, reason: String) = CorepCell(
+        rowRef = rowRef,
+        colRef = "c010",
+        label = label,
+        value = BigDecimal.ZERO,
+        isDataGap = true,
+        gapReason = reason,
+    )
 }

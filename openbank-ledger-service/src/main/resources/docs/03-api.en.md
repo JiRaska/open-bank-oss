@@ -31,6 +31,8 @@ The role matrix is locked by `LedgerSecurityContractTest`.
 
 Query params: `fromDate` (default `2020-01-01`), `toDate` (default today), `limit` (default 20), `cursor`.
 Returns a `CursorPage<JournalEntryResponse>`: `{ data: [...], pagination: { nextCursor, hasMore } }`.
+Journals are ordered by entry date, creation timestamp, and journal ID, all descending. Use the returned cursor with
+the same date range. PostgreSQL limits each page before the service loads its journal lines.
 
 ### `GET /api/v1/journals/{journalId}` — get one entry
 
