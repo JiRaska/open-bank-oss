@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.sanctions.application.port.`in`.MonitoredSubjectRegistration
 import com.openbank.sanctions.application.port.`in`.MonitoredSubjectRequest
 import com.openbank.sanctions.application.port.`in`.SanctionsMonitoringUseCase
@@ -25,7 +26,6 @@ import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 
 /**
  * Ongoing monitoring of registered subjects (ADR-0376, refining ADR-0256 D3).
@@ -91,7 +91,7 @@ class SanctionsMonitoringService(
         val now = Instant.now(clock)
         val stored = subjects.upsert(
             MonitoredSubject(
-                id = UUID.randomUUID(),
+                id = Ids.newId(),
                 ownerService = ownerService,
                 subjectRef = subjectRef,
                 entityType = request.entityType,
@@ -234,7 +234,7 @@ class SanctionsMonitoringService(
         val status = profiles.statusOf(listOf(match))
         if (status == SanctionsCheckStatus.CLEAR) return
         val finding = MonitoringFinding(
-            id = UUID.randomUUID(),
+            id = Ids.newId(),
             subjectId = subject.id,
             ownerService = subject.ownerService,
             subjectRef = subject.subjectRef,
