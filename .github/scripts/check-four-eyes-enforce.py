@@ -30,8 +30,9 @@ module is on `rules.yaml: four_eyes_enforcement.allowlist` with a live `expires`
 An entry within WARN_DAYS of expiry prints a `::warning::` (never fails); expiry itself fails. The
 exceptions are staggered in waves so one date never reddens every open PR at once.
 A gitops manifest that mentions `kind:` and fails to parse is a hard failure (it could hide a workload).
-`@Authorize` is matched with `action = "..."` anywhere in the argument list; `action = CONSTANT` is
-fail-closed (the gate cannot tell which action it is) — write a literal.
+`@Authorize` arguments are split at top level (strings opaque); `action` may be named at any position
+or positional-first. Anything but one plain string literal (constant, `$` template, `+`, call, or no
+action argument) is an error naming file:line — fail closed, never a skip.
 The application.yaml default is deliberately NOT consulted: communication-service defaults to true,
 and a code default is exactly what a later edit can flip with no manifest diff to review.
 
@@ -58,7 +59,6 @@ ENV_NAME = "AUTHZ_FOUR_EYES_ENFORCE"
 MAX_HORIZON_DAYS = 120
 WARN_DAYS = 14
 AUTHORIZE_OPEN = re.compile(r"@Authorize\(")
-ACTION_ARG = re.compile(r'(?:^|[,(\s])action\s*=\s*(?:"([^"]+)"|([A-Za-z_][\w.]*))')
 
 
 def load_rules(root: pathlib.Path) -> dict:
@@ -85,24 +85,59 @@ def is_four_eyes(action: str, rules: dict, scopes: set[str]) -> bool:
         action.endswith(f".{v}") for v in (fe.get("verbs") or []))
 
 
-def _annotation_args(text: str, start: int) -> str:
-    """The argument text of the annotation whose '(' is at start-1 (balanced parens, strings skipped)."""
-    depth, i, in_str = 1, start, False
-    while i < len(text) and depth:
+def _split_args(text: str, start: int) -> list[str]:
+    """Top-level arguments (original text) of the annotation whose '(' is at start-1.
+
+    Parens/brackets/braces nest; string literals (plain and triple-quoted) are opaque, so a comma,
+    `action =` or paren inside a string or a nested call never counts as a top-level argument.
+    """
+    args: list[str] = []
+    depth, i, begin = 1, start, start
+    while i < len(text):
         ch = text[i]
-        if in_str:
-            if ch == "\\":
-                i += 1
-            elif ch == '"':
-                in_str = False
-        elif ch == '"':
-            in_str = True
-        elif ch == "(":
+        if text.startswith('"""', i):
+            end = text.find('"""', i + 3)
+            i = len(text) if end < 0 else end + 3
+            continue
+        if ch == '"':
+            i += 1
+            while i < len(text) and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif ch in "([{":
             depth += 1
-        elif ch == ")":
+        elif ch in ")]}":
             depth -= 1
+            if depth == 0:
+                break
+        elif ch == "," and depth == 1:
+            args.append(text[begin:i])
+            begin = i + 1
         i += 1
-    return text[start:i - 1]
+    args.append(text[begin:i])
+    return [a for a in (x.strip() for x in args) if a]
+
+
+NAMED_ARG = re.compile(r"([A-Za-z_]\w*)\s*=(?!=)\s*(.*)", re.S)
+PLAIN_STRING = re.compile(r'"[^"$\\\n]*"')
+
+
+def action_literal(args: list[str]) -> tuple[str | None, str]:
+    """(literal action or None, reason). `action` is Authorize's first parameter, so it may be
+    positional (first argument, unnamed) or named at any position. Exactly one plain string literal."""
+    value = None
+    for idx, arg in enumerate(args):
+        m = NAMED_ARG.fullmatch(arg)
+        if m and m.group(1) == "action":
+            value = m.group(2).strip()
+            break
+        if idx == 0 and not m:
+            value = arg
+            break
+    if value is None:
+        return None, "no `action` argument found"
+    if PLAIN_STRING.fullmatch(value):
+        return value[1:-1], ""
+    return None, f"cannot classify the non-literal action `{value[:60]}`"
 
 
 def four_eyes_owners(root: pathlib.Path, rules: dict) -> tuple[dict[str, set[str]], list[str]]:
@@ -120,16 +155,15 @@ def four_eyes_owners(root: pathlib.Path, rules: dict) -> tuple[dict[str, set[str
             for m in AUTHORIZE_OPEN.finditer(text):
                 line_start = text.rfind("\n", 0, m.start()) + 1
                 prefix = text[line_start:m.start()].strip()
-                if prefix.startswith(("*", "//")) or "`" in prefix:
+                if prefix.startswith(("*", "//", "/*")) or "`" in prefix:
                     continue  # KDoc / comment prose that quotes an annotation
-                arg = ACTION_ARG.search(_annotation_args(text, m.end()))
-                if arg is None:
-                    continue
-                if arg.group(2):
-                    errors.append(f"{module.name}: {kt.relative_to(root)} declares @Authorize(action = {arg.group(2)}) — the gate "
-                                  f"cannot classify a non-literal action; write the action as a string literal")
-                elif is_four_eyes(arg.group(1), rules, scopes):
-                    owners.setdefault(module.name, set()).add(arg.group(1))
+                action, why = action_literal(_split_args(text, m.end()))
+                if action is None:
+                    line_no = text.count("\n", 0, m.start()) + 1
+                    errors.append(f"{module.name}: {kt.relative_to(root)}:{line_no} @Authorize — {why}; the gate cannot "
+                                  f"classify it, write the action as a single plain string literal")
+                elif is_four_eyes(action, rules, scopes):
+                    owners.setdefault(module.name, set()).add(action)
     return owners, errors
 
 
@@ -343,7 +377,21 @@ def self_test() -> int:
           want_subjects=4)
     # 14. `action = CONSTANT` fails closed instead of being silently ignored.
     check("constant action fails closed", tree("", all_on, extra_src='@Authorize(action = ACTION_X)\n'),
-          ["cannot classify a non-literal action"])
+          ["cannot classify the non-literal action"])
+    # 15. Positional action (Authorize.action is the first parameter) is a subject.
+    check("positional action is a subject", tree("", all_on, extra_src='@Authorize("opsmessage.compose")\n'),
+          ["openbank-billing-service: owns four-eyes action(s) [opsmessage.compose] but no gitops workload"], want_subjects=4)
+    # 16. A site with no recognisable action argument is an error naming file:line, never a skip.
+    check("no action argument fails closed", tree("", all_on, extra_src='@Authorize(resource = "#id")\n'),
+          ["R.kt:3 @Authorize — no `action` argument found"])
+    # 17. `action =` inside another argument's string must not be taken for the real one.
+    check("action inside a string is ignored",
+          tree("", all_on, extra_src='@Authorize(resource = "x action = ACTION_Y", action = "opsmessage.compose")\n'),
+          ["openbank-billing-service: owns four-eyes action(s) [opsmessage.compose] but no gitops workload"], want_subjects=4)
+    # 18. A literal that is not exactly one plain string (template / concatenation / call) fails closed.
+    for shape in ('"ledger.$verb"', '"ledger." + VERB', '"ledger.reverse".trim()', '"ledger.${v}"'):
+        check(f"non-plain literal {shape} fails closed", tree("", all_on, extra_src=f"@Authorize(action = {shape})\n"),
+              ["cannot classify the non-literal action"])
 
     if fails:
         for f in fails:
@@ -352,7 +400,7 @@ def self_test() -> int:
         return 1
     print("self-test ok: four-eyes-enforce gate is falsifiable (missing env, false, expired, stale x2, "
           "far-future, no expiry, no workload, partial workloads, expiry warning window, unparseable manifest, "
-          "action not first, constant action, plus positive controls)")
+          "action not first, constant action, positional action, missing action, action inside string, template/concat/call literals, plus positive controls)")
     return 0
 
 
