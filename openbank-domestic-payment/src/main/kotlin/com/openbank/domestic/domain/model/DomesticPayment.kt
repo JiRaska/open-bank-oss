@@ -93,6 +93,8 @@ data class DomesticPayment(
     val reservationId: UUID? = null,
     /** Database-backed ordering token for replay-safe downstream lifecycle projections. */
     val aggregateRevision: Long = 1,
+    /** Absent when no authenticated customer scope was captured at submission. */
+    val customerSubmissionScope: String? = null,
 ) {
     /** ISO 4217 code of [amount], the spelling every outbound contract and the column carry. */
     val currency: String get() = amount.currency.code
