@@ -35,8 +35,9 @@ Threat modeling is per-service and CI-enforced, not a one-off document:
   service, each with data-flow diagram, trust-boundary inventory, and mitigations.
 - For every **money-path service** (the list is machine-readable in
   [`rules.yaml: money_path_services`](../openbank-libs/governance/rules.yaml)) a threat
-  model is **required by CI** before changes merge (ADR-0030); such PRs additionally
-  need two approvals.
+  model is **required by CI** before changes merge (ADR-0030). A two-approval rule is a stated
+  goal for such PRs, not an enforced control: the project has a single maintainer (see
+  [GOVERNANCE.md](../GOVERNANCE.md)).
 - Platform-level threat actors considered: external customers (PSU), third-party
   providers (TPP, PSD2 surface), operators, **AI agents** (first-class, least-privileged
   principal type — ADR-0034), inbound clearing counterparties (untrusted ISO 20022 XML),
@@ -89,7 +90,7 @@ The platform's trust boundaries, each with its enforcement mechanism:
 | Secret leakage | Gitleaks CI gate + GitHub push protection; secrets live in AWS Secrets Manager / OpenBao, never in the repo |
 | Weak cryptography | No home-grown crypto: OIDC/JWT via Keycloak (RS256), cosign/KMS (ECDSA P-256, SHA-256) for signing, GPG-signed commits; no SHA-1/CBC-mode dependence in project defaults |
 | Regression of fixed bugs | Ratchet-only coverage rule (coverage may never drop, rule #5); Pact contract tests broker-verified in CI; mutation testing lane (pitest) |
-| Unreviewed changes | PR-only merges to `main` (ruleset), Conventional-Commit-driven release notes, independent LLM reviewer + human review, 2 approvals on money path |
+| Unreviewed changes | PR-only merges to `main` (ruleset), Conventional-Commit-driven release notes, independent LLM reviewer + maintainer review; the 2-approval goal on money-path changes is not enforced (single maintainer, `rules.yaml` `aspirational_not_enforced`) |
 
 ## 6. Residual risks and roadmap
 

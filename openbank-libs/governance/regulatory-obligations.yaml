@@ -18,7 +18,11 @@
 #     cited source), `known-eu` (well-established EU text, not re-checked), `unverified` (a lead,
 #     not a fact). Never upgrade a value without checking the source.
 #   - `coverage.status` describes `origin/main`, not open PRs:
-#       filed-return   a backend computes the return and it appears in the regulatory catalogue
+#       filed-return   a backend computes the return, it appears in the regulatory catalogue and a
+#                      real filing document and transport exist
+#       computed-preview  a backend computes the figures and the catalogue shows them, but nothing
+#                      builds a filing document and the only transport is a dry-run one: a
+#                      preview, not a fileable return
 #       bff-only       the catalogue offers it, but the figures are computed in the admin-ui BFF
 #                      (declared debt, ADR-0367 decision 2)
 #       data-only      a backend computes the underlying data or metric, but no return exists
@@ -38,7 +42,7 @@
 
 schema_version: 1
 
-statuses: [filed-return, bff-only, data-only, missing, external, conditional]
+statuses: [filed-return, computed-preview, bff-only, data-only, missing, external, conditional]
 kinds: [periodic-aggregate, granular-feed, event, register, disclosure]
 confidences: [verified, known-eu, unverified]
 
@@ -242,7 +246,8 @@ obligations:
     transport: SDAT (XBRL-CSV)
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-corep-own-funds
     area: prudential
     name: { cs: COREP – kapitál a kapitálové požadavky, en: COREP own funds and requirements }
@@ -257,7 +262,8 @@ obligations:
     transport: SDAT
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-capital], services: [openbank-finrep-service], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-capital], services: [openbank-finrep-service], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-lcr
     area: prudential
     name: { cs: Ukazatel krytí likviditou (LCR), en: Liquidity Coverage Ratio }
@@ -272,7 +278,8 @@ obligations:
     transport: SDAT
     personal_data: "no"
     applicability: always
-    coverage: { status: filed-return, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: null }
+    coverage: { status: computed-preview, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: "#5914" }
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-nsfr
     area: prudential
     name: { cs: Ukazatel čistého stabilního financování (NSFR), en: Net Stable Funding Ratio }
@@ -715,7 +722,8 @@ obligations:
     transport: formulář ÚOOÚ / datová schránka
     personal_data: "yes"
     applicability: always
-    coverage: { status: missing, reports: [], services: [], tracking: null }
+    coverage: { status: missing, reports: [], services: [], tracking: "#15756" }
+    note: Interim runbook docs/runbooks/0035-personal-data-breach-notification.md; skutečný rejstřík se vede mimo veřejné repo, v repu je jen šablona docs/compliance/personal-data-breach-register.md; workflow v kódu zatím neexistuje.
 
   # ── AML and sanctions ─────────────────────────────────────────────────────────────────────
   - id: fau-suspicious-transaction

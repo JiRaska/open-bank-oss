@@ -7,28 +7,21 @@ package com.openbank.lending.integration
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
-import io.mockk.mockk
-import io.quarkus.security.identity.AuthenticationRequestContext
-import io.quarkus.security.identity.SecurityIdentity
-import io.quarkus.security.identity.SecurityIdentityAugmentor
-import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.quarkus.test.security.SecurityAttribute
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
-import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
-import jakarta.enterprise.context.ApplicationScoped
 import org.assertj.core.api.Assertions.assertThat
-import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.Test
 import org.yaml.snakeyaml.Yaml
 import java.time.LocalDate
@@ -151,11 +144,13 @@ class MoneyWireShapeIT {
     }
 
     @Test
-    @TestSecurity(
-        user = "service-account-openbank-customer-edge",
-        roles = ["ROLE_OPERATOR"],
-        augmentors = [IntakeJwtIdentityAugmentor::class],
-        attributes = [SecurityAttribute(key = "money-wire-intake-fixture", value = "synthetic-jwt-only")],
+    @TestSecurity(user = "service-account-openbank-customer-edge", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "wire-it-customer-edge-subject"),
+            Claim(key = "azp", value = "openbank-customer-edge"),
+            Claim(key = "preferred_username", value = "service-account-openbank-customer-edge"),
+        ],
     )
     fun `customer intake returns the same documented application Money response`() {
         val body = Given {
@@ -225,61 +220,23 @@ class MoneyWireShapeIT {
     }
 
     @Test
-    fun `intake JWT fixture cannot replace authenticated JWT anonymous or unmarked identities`() {
-        val augmentor = IntakeJwtIdentityAugmentor()
-        val context = mockk<AuthenticationRequestContext>()
-        val marker = "money-wire-intake-fixture"
-        val markerValue = "synthetic-jwt-only"
-        val name = "service-account-openbank-customer-edge"
-        val anonymous = QuarkusSecurityIdentity.builder().setAnonymous(true).addAttribute(marker, markerValue).build()
-        val unmarked = QuarkusSecurityIdentity.builder().setPrincipal { name }.build()
-        val existingJwt = object : JsonWebToken {
-            override fun getName(): String = name
-            override fun getClaimNames(): Set<String> = setOf("sub")
-
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : Any?> getClaim(claimName: String): T = "existing-subject" as T
+    @TestSecurity(user = "service-account-openbank-customer-edge", roles = ["ROLE_OPERATOR"])
+    @OidcSecurity(
+        claims = [
+            Claim(key = "sub", value = "wire-it-other-client-subject"),
+            Claim(key = "azp", value = "wire-it-other-client"),
+            Claim(key = "preferred_username", value = "service-account-openbank-customer-edge"),
+        ],
+    )
+    fun `matching account name without the customer edge client cannot submit intake`() {
+        Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            body("""{"amount":10000.00,"termMonths":12}""")
+        } When {
+            post("/api/v1/lending/intake/applications")
+        } Then {
+            statusCode(403)
         }
-        val authenticated = QuarkusSecurityIdentity.builder().setPrincipal(existingJwt)
-            .addAttribute(marker, markerValue).build()
-        listOf(anonymous, unmarked, authenticated).forEach { identity ->
-            assertThat(augmentor.augment(identity, context).await().indefinitely()).isSameAs(identity)
-        }
-        val synthetic = QuarkusSecurityIdentity.builder().setPrincipal { name }
-            .addRole("ROLE_OPERATOR").addAttribute(marker, markerValue).build()
-        val result = augmentor.augment(synthetic, context).await().indefinitely()
-        assertThat(result.roles).containsExactly("ROLE_OPERATOR")
-        val principal = result.principal as JsonWebToken
-        assertThat(principal.subject).isEqualTo("wire-it-customer-edge-subject")
-        assertThat(principal.getClaim<String>("azp")).isEqualTo("openbank-customer-edge")
-        assertThat(principal.getClaim<String>("preferred_username")).isEqualTo(name)
-    }
-}
-
-/** Supplies only the synthetic intake test identity; production authentication is unchanged. */
-@ApplicationScoped
-class IntakeJwtIdentityAugmentor : SecurityIdentityAugmentor {
-    override fun augment(identity: SecurityIdentity, context: AuthenticationRequestContext): Uni<SecurityIdentity> {
-        if (identity.isAnonymous || identity.principal is JsonWebToken) {
-            return Uni.createFrom().item(identity)
-        }
-        if (identity.getAttribute<String>("money-wire-intake-fixture") != "synthetic-jwt-only" ||
-            identity.principal.name != "service-account-openbank-customer-edge"
-        ) {
-            return Uni.createFrom().item(identity)
-        }
-        val claims = mapOf(
-            "sub" to "wire-it-customer-edge-subject",
-            "azp" to "openbank-customer-edge",
-            "preferred_username" to "service-account-openbank-customer-edge",
-        )
-        val jwt = object : JsonWebToken {
-            override fun getName(): String = claims.getValue("preferred_username")
-            override fun getClaimNames(): Set<String> = claims.keys
-
-            @Suppress("UNCHECKED_CAST")
-            override fun <T : Any?> getClaim(claimName: String): T = claims[claimName] as T
-        }
-        return Uni.createFrom().item(QuarkusSecurityIdentity.builder(identity).setPrincipal(jwt).build())
     }
 }

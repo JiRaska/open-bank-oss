@@ -89,6 +89,10 @@ class VerificationCaseEntity : PanacheEntityBase {
     @Column(name = "decided_at")
     var decidedAt: Instant? = null
 
+    /** GDPR Art. 17 (#15755): set once the applicant data of a case linked to an erased party is anonymised. */
+    @Column(name = "erased_at")
+    var erasedAt: Instant? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

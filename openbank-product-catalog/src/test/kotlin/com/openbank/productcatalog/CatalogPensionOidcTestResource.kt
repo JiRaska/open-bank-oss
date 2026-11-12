@@ -27,6 +27,8 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         val realm = testRealm(secret)
         val keycloak = GenericContainer(DockerImageName.parse(upstreamImage()))
             .withExposedPorts(8080)
+            .withEnv("KC_BOOTSTRAP_ADMIN_USERNAME", "synthetic-test-admin")
+            .withEnv("KC_BOOTSTRAP_ADMIN_PASSWORD", secret)
             .withCommand("start-dev", "--import-realm")
             .withCopyToContainer(
                 Transferable.of(ObjectMapper().writeValueAsBytes(realm)),
@@ -54,10 +56,13 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
     private fun testRealm(secret: String) = mapOf(
         "realm" to REALM,
         "enabled" to true,
+        "editUsernameAllowed" to true,
         "roles" to mapOf(
             "realm" to listOf(
                 mapOf("name" to "ROLE_API"),
                 mapOf("name" to "ROLE_OPERATOR"),
+                mapOf("name" to "ROLE_COMPLIANCE"),
+                mapOf("name" to "ROLE_RISK"),
                 mapOf("name" to "ROLE_PENSION_LEGAL_COUNSEL"),
                 mapOf("name" to "ROLE_PENSION_PRODUCT_OWNER"),
             ),
@@ -80,6 +85,9 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
             humanUser("legal-reviewer", secret, "ROLE_PENSION_LEGAL_COUNSEL"),
             humanUser("product-reviewer", secret, "ROLE_PENSION_PRODUCT_OWNER"),
             humanUser("catalog-checker", secret, "ROLE_OPERATOR"),
+            humanUser("aml-maker", secret, "ROLE_COMPLIANCE"),
+            humanUser("aml-reviewer", secret, "ROLE_COMPLIANCE"),
+            humanUser("fraud-reviewer", secret, "ROLE_RISK"),
         ),
     )
 
@@ -133,8 +141,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
                 ),
             ),
         ),
-    ) + listOf("catalog:read", "catalog:publish", "pension:legal-approve", "pension:product-approve")
-        .map { mapOf("name" to it, "protocol" to "openid-connect") }
+    ) + OPTIONAL_SCOPES.map { mapOf("name" to it, "protocol" to "openid-connect") }
 
     override fun stop() {
         container?.let {
@@ -177,12 +184,7 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
         "directAccessGrantsEnabled" to true,
         "serviceAccountsEnabled" to false,
         "defaultClientScopes" to listOf("basic", "profile", "roles"),
-        "optionalClientScopes" to listOf(
-            "catalog:read",
-            "catalog:publish",
-            "pension:legal-approve",
-            "pension:product-approve",
-        ),
+        "optionalClientScopes" to OPTIONAL_SCOPES,
     )
 
     private fun humanUser(username: String, password: String, role: String) = mapOf(
@@ -199,5 +201,14 @@ class CatalogPensionOidcTestResource : QuarkusTestResourceLifecycleManager {
 
     private companion object {
         const val REALM = "catalog-pension-oidc-proof"
+        val OPTIONAL_SCOPES = listOf(
+            "catalog:read",
+            "catalog:author",
+            "catalog:publish",
+            "pension:legal-approve",
+            "pension:product-approve",
+            "fincrime:aml-shadow-approve",
+            "fincrime:fraud-shadow-approve",
+        )
     }
 }
