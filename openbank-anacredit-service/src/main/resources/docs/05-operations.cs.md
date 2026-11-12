@@ -117,3 +117,18 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 ## Sdílené závislosti sestavení
 
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
+
+## Podklady o životním cyklu úvěrů (#9890)
+
+Stávající konzument událostí Lending ukládá události `loan.exposure_fact` ve verzi 1 do tabulky
+`loan_exposure_facts`. Zpráva se ukládá jako JSONB spolu s ID události, zdrojovým identifikátorem
+z Lending, ID úvěru a okamžikem účinnosti. Opakované doručení stejné zprávy je možné i při změně
+pořadí událostí. Rozporný obsah nebo opětovné použití identifikátoru se předá do stávajícího
+dead-letter tématu. Konzument AnaCredit musí být připravený před zveřejněním těchto událostí.
+Starší verze potvrzuje příjem neznámých typů a posouvá offset. Při návratu k předchozí verzi
+ponechte tabulku přidanou migrací V3. Před použitím údajů ve výkazu ověřte dobu výpadku či provozu
+starší verze proti uchovaným událostem Lending.
+
+Výkaz nadále vychází ze stávající evidence expozic. #9890 sleduje historické pokrytí a kontrolu
+počtů k referenčnímu dni, klasifikaci dlužníka, přepočet kurzem k referenčnímu dni a regulatorní
+údaje o prodlení a selhání, které jsou potřeba pro sestavení řádků výkazu.

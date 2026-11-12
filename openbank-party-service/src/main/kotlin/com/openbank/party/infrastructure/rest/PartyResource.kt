@@ -43,6 +43,7 @@ import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.FormParam
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -88,6 +89,8 @@ class PartyResource {
         get() = if (jwtInstance.isResolvable) jwtInstance.get() else null
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
+
+    @Inject lateinit var piiRevealAudit: PartyPiiRevealAudit
 
     @Inject @io.quarkus.arc.Unremovable
     lateinit var securityIdentity: SecurityIdentity
@@ -176,8 +179,11 @@ class PartyResource {
         // surfaces the resolved variant in a response header so the flip is observable via curl,
         // without changing the response body or any business logic. Flag-as-code: party-list-enriched.
         val listMode = if (flags.enabledSuspending("party-list-enriched")) "enriched" else "standard"
-        return Response.ok(partyUseCase.listParties(page, size.coerceIn(1, 100), status))
+        val access = PartyDirectoryAccess(securityIdentity)
+        val result = partyUseCase.listParties(page, size.coerceIn(1, 100), status)
+        return Response.ok(if (access.machine) result else access.maskList(result))
             .header("X-Party-List-Mode", listMode)
+            .header("Cache-Control", "no-store")
             .build()
     }
 
@@ -193,10 +199,18 @@ class PartyResource {
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): Response {
-        val page = partyUseCase.searchParties(SearchPartiesQuery(q, limit, cursor))
-        return Response.ok(
-            mapOf("data" to page.data.map { it.toSimpleResponse() }, "pagination" to page.pagination),
-        ).build()
+        val access = PartyDirectoryAccess(securityIdentity)
+        if (!access.machine && !access.canSearchNames) {
+            throw ForbiddenException("Party search requires staff directory access")
+        }
+        val page = partyUseCase.searchParties(SearchPartiesQuery(q, limit, cursor, namesOnly = !access.machine))
+        val rows = page.data.map { party ->
+            val summary = party.toSimpleResponse()
+            if (access.machine) summary else access.maskSummary(summary)
+        }
+        return Response.ok(mapOf("data" to rows, "pagination" to page.pagination))
+            .header("Cache-Control", "no-store")
+            .build()
     }
 
     @POST
@@ -220,7 +234,7 @@ class PartyResource {
             "only ROLE_ADMIN may create a synthetic party"
         }
         val party = partyUseCase.createParty(req.toCommand(idempotencyKey, classification))
-        return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
+        return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(directoryDetail(party)).build()
     }
 
     /**
@@ -257,7 +271,25 @@ class PartyResource {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_RISK", "ROLE_API")
     @Operation(summary = "Get party by ID")
     suspend fun getParty(@PathParam("id") id: UUID): Response =
-        Response.ok(partyUseCase.getParty(id).toResponse()).build()
+        Response.ok(directoryDetail(partyUseCase.getParty(id)))
+            .header("Cache-Control", "no-store")
+            .build()
+
+    @POST
+    @Path("/{id}/pii-reveal")
+    @RolesAllowed("ROLE_ADMIN", "ROLE_KYC")
+    @Authorize(action = "party.pii.reveal")
+    @Operation(summary = "Reveal an individual party record to authorized staff and record the reason")
+    suspend fun revealPartyPii(@PathParam("id") id: UUID, request: PartyPiiRevealRequest?): Response {
+        val actor = PartyDirectoryAccess(securityIdentity).revealActor
+            ?: throw ForbiddenException("Party PII reveal requires an authorized staff session")
+        val reason = requireNotNull(request?.reason) { "A reveal reason is required" }
+        val detail = partyUseCase.getParty(id).toResponse()
+        piiRevealAudit.record(id, actor, reason)
+        return Response.ok(detail)
+            .header("Cache-Control", "no-store")
+            .build()
+    }
 
     @PATCH
     @Path("/{id}")
@@ -277,7 +309,7 @@ class PartyResource {
                 nationality = req.nationality,
             ),
         )
-        return Response.ok(party.toResponse()).build()
+        return Response.ok(directoryDetail(party)).build()
     }
 
     /**
@@ -316,7 +348,7 @@ class PartyResource {
                 ),
             ),
         )
-        return Response.ok(party.toResponse()).build()
+        return Response.ok(directoryDetail(party)).build()
     }
 
     @POST
@@ -348,7 +380,7 @@ class PartyResource {
     @Operation(summary = "Update KYC status (called by kyc-service)")
     suspend fun updateKycStatus(@PathParam("id") id: UUID, req: KycStatusRequest): Response {
         val party = partyUseCase.updateKycStatus(id, KycStatus.valueOf(req.kycStatus))
-        return Response.ok(party.toResponse()).build()
+        return Response.ok(directoryDetail(party)).build()
     }
 
     @DELETE
@@ -477,7 +509,13 @@ class PartyResource {
                 ),
             ),
         )
-        return Response.ok(merged.toResponse()).build()
+        return Response.ok(directoryDetail(merged)).build()
+    }
+
+    private fun directoryDetail(party: Party): Map<String, Any?> {
+        val access = PartyDirectoryAccess(securityIdentity)
+        val detail = party.toResponse()
+        return if (access.machine) detail else access.maskDetail(detail)
     }
 
     private suspend fun auditGdpr(
@@ -687,7 +725,11 @@ class PartyResource {
                         ),
                     ).build()
             }
-        return Response.ok(party.toSimpleResponse()).build()
+        val access = PartyDirectoryAccess(securityIdentity)
+        val summary = party.toSimpleResponse()
+        return Response.ok(if (access.machine) summary else access.maskSummary(summary))
+            .header("Cache-Control", "no-store")
+            .build()
     }
 
     companion object {

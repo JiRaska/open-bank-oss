@@ -12,17 +12,33 @@ The REST contract is described in [`openapi.yaml`](../openapi.yaml) (`info.versi
 
 All endpoints require a **Keycloak Bearer token** (realm `openbank`). Per-endpoint roles (`@RolesAllowed`):
 
-In production, `/api/*` selects the bearer authentication mechanism on both the HTTP and mTLS listeners. A trusted client certificate is required to establish the TLS connection on port 8443, but it does not identify an API caller by itself: a certificate without a bearer receives 401. A client needs both its certificate and a valid bearer on that listener; the existing HTTP listener still requires the bearer. This prevents a workload holding a trusted transport certificate from gaining an API identity without a token (#12511). `PartyListenerAuthParityIT` checks both listeners using real HTTP requests. This mechanism selection does not change the OPA advisory setting or the per-endpoint role checks below.
+In production, `/api/*` selects the bearer authentication mechanism on both the HTTP and mTLS listeners. A trusted client certificate is required to establish the TLS connection on port 8443, but it does not identify an API caller by itself: a certificate without a bearer receives 401. A client needs both its certificate and a valid bearer on that listener; the existing HTTP listener still requires the bearer. This prevents a workload holding a trusted transport certificate from gaining an API identity without a token (#12511). `PartyListenerAuthParityIT` checks both listeners using real HTTP requests. This mechanism selection does not change the per-endpoint role and policy checks below.
 
 | Endpoint | Roles |
 |---|---|
-| `GET /parties`, `GET /parties/search`, `GET /parties/{id}`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
+| `GET /parties`, `GET /parties/{id}/documents` | `ROLE_VIEWER`, `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC`, `ROLE_API` |
+| `GET /parties/search` | Verified service account, or `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC` |
+| `GET /parties/{id}` | Same roles as list, plus `ROLE_RISK` for obligor name |
+| `POST /parties/{id}/pii-reveal` | Interactive `ROLE_ADMIN` or `ROLE_KYC`, with `party.pii.reveal` authorization |
 | `POST /parties`, `POST /parties/{id}/documents` | `ROLE_OPERATOR`, `ROLE_ADMIN`, `ROLE_KYC` |
 | `PATCH /parties/{id}` | `ROLE_OPERATOR`, `ROLE_ADMIN` (+ `@Authorize(action="party.update")` via OPA, advisory) |
 | `PUT /parties/{id}/kyc-status` | `ROLE_ADMIN`, `ROLE_KYC` |
 | `DELETE /parties/{id}` | `ROLE_ADMIN` |
 
-OPA authorization (ADR-0034) runs in **advisory mode** (`authz.enforce=false`): `@Authorize`-annotated denies are logged at WARN but the request proceeds. The flip to enforce is a later phase.
+OPA authorization (ADR-0034) checks the action declared by `@Authorize`. The sandbox uses `AUTHZ_ENFORCE=true`.
+
+### Staff directory and personal data
+
+The directory masks contact details and withholds other personal fields. Viewers see name
+initials and use the paginated list. Operators, admins and KYC staff can search legal and trading
+names. Contact and identifier fields do not participate in staff search. A risk officer can see
+the obligor's legal name on a single party record. Verified service-account calls retain their
+existing profile contract.
+
+A permitted staff member can submit `POST /parties/{id}/pii-reveal` with a reason of `KYC_REVIEW`,
+`CUSTOMER_SUPPORT` or `DATA_CORRECTION`. The service waits for `openbank.party.audit` to acknowledge a disclosure record before returning the full response.
+The record contains the party ID, staff subject, reason and timestamp. Only audit-service reads that topic. Directory
+and reveal responses carry `Cache-Control: no-store`.
 
 ## Idempotency & de-duplication
 
@@ -59,7 +75,7 @@ Location: /api/v1/parties/{uuid}
 
 {
   "id": "…", "partyType": "INDIVIDUAL", "status": "PENDING_KYC",
-  "legalName": "Jan Novák", "email": "jan.novak@example.com",
+  "legalName": "Jan Novák", "email": "j*******k@example.com",
   "kycStatus": "NOT_STARTED", "createdAt": "…", "updatedAt": "…"
 }
 ```
