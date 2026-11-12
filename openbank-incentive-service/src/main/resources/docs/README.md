@@ -27,3 +27,7 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 ## Test profile configuration
 
 `application.yaml` carries a `%test`-profile `code-pepper` so `@QuarkusTest` classes can boot without the production secret. It is a throwaway value that never applies outside the test profile; deployed environments supply `PROMO_CODE_PEPPER`.
+
+## Datasource password default
+
+The deployed default for `quarkus.datasource.password` is a non-working sentinel, so a pod whose database Secret failed to mount fails authentication instead of booting on a credential baked into the image. The local-only password used by the dev compose stack and the test containers is set in the `%dev,test` profile block. The `appyaml-secret-literals` gate enforces this shape.

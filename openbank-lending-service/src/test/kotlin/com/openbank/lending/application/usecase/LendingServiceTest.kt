@@ -733,7 +733,8 @@ class LendingServiceTest {
         // bank, and nothing for the customer, who ended up owing a loan they never received.
         verify(exactly = 1) { borrowerAccounts.findCurrentAccount(partyId, "EUR") }
         verify(exactly = 1) { borrowerCredit.credit(any(), borrowerAccountId, eur("12000.00")) }
-        verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 3) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 1) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     /**
@@ -763,6 +764,7 @@ class LendingServiceTest {
         // "loan.disbursed" — is conditional on the borrower actually getting paid.
         verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
         verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+        verify(exactly = 0) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     /** The transaction-service credit call itself failing must surface, not be swallowed. */
@@ -786,6 +788,7 @@ class LendingServiceTest {
         // and specifically no "loan.disbursed" — that event is the promise the money moved.
         verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
         verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+        verify(exactly = 0) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     @Test
@@ -1231,7 +1234,8 @@ class LendingServiceTest {
         assertThat(postingSlot.captured.amount).isEqualTo(eur("11053.81"))
         assertThat(postingSlot.captured.kind).isEqualTo(PostingKind.WRITE_OFF)
         verify(exactly = 1) { ledger.post(any()) }
-        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 1) { events.emit(match { it.eventType == "loan.written_off" }) }
+        verify(exactly = 1) { events.emit(match { it.eventType == LOAN_EXPOSURE_FACT_EVENT }) }
     }
 
     @Test
@@ -2793,10 +2797,16 @@ class LendingServiceTest {
         every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
 
-        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+        val updated = service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
 
         assertThat(occurredAtOf(emitted.single { it.eventType == "loan.rescheduled" }))
             .isEqualTo(expectedEventTime)
+        val payload = emitted.single { it.eventType == LOAN_EXPOSURE_FACT_EVENT }.payload
+        val fact = com.fasterxml.jackson.databind.ObjectMapper().readTree(payload)
+        assertThat(fact.path("kind").asText()).isEqualTo("RESCHEDULED")
+        assertThat(fact.path("effectiveAt").asText()).isEqualTo(expectedEventTime.toString())
+        assertThat(fact.path("loanStatus").asText()).isEqualTo(updated.status.name)
+        assertThat(fact.path("scheduleVersion").asLong()).isEqualTo(updated.version.toLong())
     }
 
     @Test
