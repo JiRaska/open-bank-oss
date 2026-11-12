@@ -53,19 +53,27 @@ permissions:
   contents: read
 
 concurrency:
-  # One fleet-lint per ref; a newer main push supersedes an in-flight one.
-  # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
-  # ref-keyed group made every new commit cancel the previous commit's run. Bot commits
-  # (auto-deploy pin bumps, release-please) land every few minutes, so a main run rarely
-  # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
-  # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
-  # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
-  # stops the job being created at all (#3082).
+  # Main pushes share ONE lane and are never cancelled once started: GitHub keeps one running
+  # and one pending run per group, and a newer push replaces only the PENDING one. So a burst
+  # of N commits landing within minutes costs two fleet runs (the first commit and the newest)
+  # instead of N. Measured 2026-11-11 over 30 commits in 10 landing batches: this job is the
+  # single largest hosted-minute line on main, ~25 min per commit, and five commits landing in
+  # five minutes held five hosted slots for the same fleet compile.
+  #
+  # This is NOT the shape issue #3390 removed. There the group was ref-keyed WITH
+  # cancel-in-progress, so every bot commit killed the RUNNING run and 9 of 11 never finished.
+  # Here cancel-in-progress stays false for main pushes: every run that starts finishes, and
+  # the newest commit is always either running or next. Only a run that never started is
+  # dropped, and its tree is contained in the commit that replaced it.
+  #
+  # Safe for this workflow only because nothing consumes its verdict per commit: it is not a
+  # required context, not a deploy input, and main-red-watch reads a cancelled run as
+  # not-a-verdict (never as green). Workflows with a per-commit consumer must keep the sha in
+  # their main-push group; check-main-push-concurrency.py holds both lists.
   # A scheduled run must not share a lane with a manual dispatch: both fall to the
   # 'ci' key otherwise, so a workflow_dispatch cancels an in-flight nightly. Same
   # separation services-ci.yml already makes for the nightly fleet build.
-  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
+  group: fleet-lint-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main-push' || 'ci') }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:

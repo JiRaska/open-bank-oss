@@ -21,7 +21,7 @@
 //
 // All BFF traffic is intercepted with page.route(); no live services required.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import AxeBuilder from '@axe-core/playwright'
 import { signInAsOperator } from './helpers/auth'
 

@@ -4750,6 +4750,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*LedgerClient*.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
       - "src/main/kotlin/**/*PaymentConfirmation*.kt"
+      - "src/main/kotlin/com/openbank/lending/application/usecase/CzCreditPolicyActivationService.kt"
       - "src/main/kotlin/com/openbank/lending/application/usecase/LedgerBackfillPlanner.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
@@ -4757,6 +4758,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerCloseParticipationClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/rest/CzCreditPolicyResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
@@ -4894,7 +4896,7 @@ catalog_kernel_neutrality:
     - RelationshipKind     # offering graph edge semantics
     - PriceRole            # what a price component is (FEE/RATE/LIMIT/THRESHOLD, #13230); the kernel branches on it (a FEE must be an AMOUNT)
   # Words that occur in pack type names but are generic catalog/kernel language.
-  vocabulary_not_industry: [legacy, product, instrument, term]
+  vocabulary_not_industry: [legacy, product, instrument, term, count]
   # The /api/v1 banking compatibility vocabulary (ADR-0257 D3). Frozen: a pack schema is the
   # only place new vocabulary may land. Removal follows the v1 sunset in the ADR-0257 amendment.
   legacy_v1_frozen_enums:

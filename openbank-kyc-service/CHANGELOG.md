@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.1...kyc-service-v0.18.0) (2026-11-12)
+
+
+### Features
+
+* **kyc:** screen new customers automatically and gate sandbox auto-approval on it ([#15736](https://github.com/JiRaska/open-bank-oss/issues/15736)) ([08d28df](https://github.com/JiRaska/open-bank-oss/commit/08d28df4ea0530c9c7ad6c8e66fd3a7f96551b7f))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.17.0...kyc-service-v0.17.1) (2026-10-26)
 
 
