@@ -9,6 +9,7 @@ import com.openbank.pid.application.port.`in`.PartySearchQuery
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Party
 import com.openbank.pid.domain.model.PartyRelationship
+import java.time.Instant
 import java.util.UUID
 
 /** Outbound persistence port for the party aggregate. */
@@ -42,6 +43,34 @@ interface PartyRepository {
     suspend fun update(party: Party): Party
 
     suspend fun existsByExternalId(type: ExternalIdType, value: String): Boolean
+
+    /**
+     * GDPR Art. 17 (#15755, ADR-0118): irreversibly anonymise every personal column of the party
+     * in ONE transaction — the encrypted national identifier, name, birthdate, contact, address,
+     * free-text case metadata — and delete its external ids (which include the RČ and EUDI blind
+     * indices) and ID-document numbers. The shell row (id, type, timestamps) stays, stamped
+     * `erased_at`, as the idempotency marker and retention clock.
+     *
+     * A repeat call on an already-erased row re-runs the overwrite and the deletes (original
+     * `erased_at` kept) so a write that slipped in after the first erase is cleaned.
+     *
+     * An id this service holds no row for gets a TOMBSTONE: a shell row with no personal data
+     * (sentinel name/birthdate, status TERMINATED, `erased_at` stamped), so a later
+     * register-identity for the same id is refused instead of storing the person again.
+     */
+    suspend fun anonymize(partyId: UUID, erasedAt: Instant): PartyAnonymisation
+}
+
+/** Result of [PartyRepository.anonymize]. */
+enum class PartyAnonymisation {
+    /** The row held personal data and was anonymised now. */
+    FIRST,
+
+    /** The row was already erased; the overwrite and deletes were re-run. */
+    REPEAT,
+
+    /** No row existed; an erased tombstone row was written. */
+    TOMBSTONED,
 }
 
 /** Outbound persistence port for party relationships. */

@@ -5,6 +5,7 @@
 package com.openbank.engagement.contract
 
 import au.com.dius.pact.consumer.MockServer
+import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonArray
 import au.com.dius.pact.consumer.dsl.LambdaDsl.newJsonBody
 import au.com.dius.pact.consumer.dsl.PactDslWithProvider
 import au.com.dius.pact.consumer.junit5.PactConsumerTestExt
@@ -81,5 +82,74 @@ class EngagementToConsentPactConsumerTest {
             .extract().jsonPath().getBoolean("granted")
 
         assertThat(granted).isTrue()
+    }
+
+    // --- GET /api/v1/suppressions/party/{partyId} (ADR-0219 D3, GDPR Art. 21) ---
+    // Reuses the provider state and seeded party campaign-service's pact already pins: the read is
+    // identical, only the consumer differs. The path is a literal, as above.
+    private val suppressedPartyId = "c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1"
+
+    @Pact(consumer = "openbank-engagement-service", provider = "openbank-consent-service")
+    fun activeSuppressionsPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("an ALL-scope suppression is active for the pact suppressed party")
+        .uponReceiving("GET the active suppressions for a party before a promotional impression")
+        .path("/api/v1/suppressions/party/$suppressedPartyId")
+        .method("GET")
+        .willRespondWith()
+        .status(200)
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(
+            newJsonArray { a ->
+                a.`object` { s ->
+                    s.uuid("id")
+                    s.uuid("partyId")
+                    // Pinned by value: `scope` decides how the gate reads `value`.
+                    s.stringValue("scope", "ALL")
+                    s.nullValue("value")
+                    s.stringType("reason", "CUSTOMER_OPTOUT")
+                    s.stringType("source", "preference-centre")
+                    s.stringType("createdBy", "pact-operator")
+                    s.stringType("createdAt", "2026-01-15T10:00:00Z")
+                }
+            }.build(),
+        )
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "activeSuppressionsPact")
+    fun `listActive returns the suppression entries the promotional gate reads`(mockServer: MockServer) {
+        val body = given()
+            .baseUri(mockServer.getUrl())
+            .get("/api/v1/suppressions/party/$suppressedPartyId")
+            .then()
+            .statusCode(200)
+            .extract().jsonPath()
+
+        assertThat(body.getList<Any>("")).hasSize(1)
+        assertThat(body.getString("[0].scope")).isEqualTo("ALL")
+        assertThat(body.getString("[0].reason")).isNotBlank()
+        assertThat(body.getString("[0].source")).isNotBlank()
+    }
+
+    // Refusal half (ADR-0279 #3): with no M2M identity the list is refused with 401, never served.
+    // Replayed by consent-service's ConsentNegativeAuthProviderVerificationTest.
+    @Pact(consumer = "openbank-engagement-service", provider = "openbank-consent-service")
+    fun activeSuppressionsUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("GET the active suppressions for a party with no M2M identity is refused")
+        .path("/api/v1/suppressions/party/$suppressedPartyId")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "activeSuppressionsUnauthenticatedPact")
+    fun `a suppression read with no identity is refused with 401, never answered`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get("/api/v1/suppressions/party/$suppressedPartyId")
+            .then()
+            .statusCode(401)
     }
 }

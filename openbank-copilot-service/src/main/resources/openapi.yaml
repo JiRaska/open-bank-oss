@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.5.0"
+  version: "1.7.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -95,6 +95,21 @@ paths:
       responses:
         "200":
           description: Stream of text token events (text/event-stream)
+          headers:
+            X-AI-Generated:
+              description: >
+                Always `true`, on every outcome of this stream (normal reply, refusal, disabled
+                message, error fallback, empty stream). Machine-readable AI-generated marker
+                (EU AI Act Art. 50(1)); it is a header so the event body stays unchanged.
+              schema:
+                type: string
+                enum: ["true"]
+            X-AI-Disclosure:
+              description: >
+                Short Czech disclosure text, UTF-8 percent-encoded (RFC 3986) so the header value is
+                ASCII-safe; decode before display. Same text as `ChatReply.disclosure`.
+              schema:
+                type: string
           content:
             text/event-stream:
               schema:
@@ -205,10 +220,18 @@ components:
             `message` and is never treated as instructions.
     ChatReply:
       type: object
-      required: [conversationId, reply]
+      required: [conversationId, reply, aiGenerated, disclosure]
       properties:
         conversationId:
           type: string
+        aiGenerated:
+          type: boolean
+          description: |
+            Always true. Every reply (answers, refusals, error fallbacks) is AI-generated; clients
+            must make that visible to the customer (EU AI Act Art. 50(1)).
+        disclosure:
+          type: string
+          description: Short Czech disclosure text stating the reply was produced by an AI assistant.
         reply:
           type: string
           description: Narrated reply; any figures are rendered from tool results, not generated.

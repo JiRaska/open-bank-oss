@@ -14,6 +14,7 @@ import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.CaseVerdict
 import com.openbank.pid.domain.model.ContactAttributes
 import com.openbank.pid.domain.model.CoreAttributes
+import com.openbank.pid.domain.model.ErasedIdentifierKey
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Gender
 import com.openbank.pid.domain.model.KycAttributes
@@ -241,6 +242,51 @@ class IdentityResolutionServiceTest {
 
         assertThat(result).isEqualTo(ResolutionResult.NoMatch)
         coVerify(exactly = 1) { repo.findCandidatesByMatchKey(any()) }
+    }
+
+    @Test
+    fun `tier-1 miss still blocks an RČ whose REJECT survived the holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat(result).isInstanceOf(ResolutionResult.NeedsManualVerification::class.java)
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
+    }
+
+    @Test
+    fun `tier-1 collision honours a REJECT that survived the previous holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        // Someone registered the number again after the erasure, with a divergent birthdate.
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns
+            makeParty(birthdate = LocalDate.of(1985, 3, 4))
+        coEvery { adjudication.priorDecision("RN:$idx") } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
+        coVerify(exactly = 0) { adjudication.openOrReuse(any()) }
     }
 
     @Test

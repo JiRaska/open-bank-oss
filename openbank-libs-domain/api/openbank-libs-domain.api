@@ -3073,6 +3073,25 @@ public final class com/openbank/libs/persistence/lock/ClusterLockKey {
 	public final fun of (Ljava/lang/String;)J
 }
 
+public abstract interface class com/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2 : com/openbank/libs/persistence/outbox/OutboxRepositoryV2 {
+	public abstract fun claimWithTokens (ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun claimWithTokens$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;ILjava/time/Duration;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun markClaimFailed (Lcom/openbank/libs/persistence/outbox/OutboxClaim;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun markClaimFailed$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;Lcom/openbank/libs/persistence/outbox/OutboxClaim;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public abstract fun markClaimsSent (Ljava/util/List;Ljava/time/Instant;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun markClaimsSent$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;Ljava/util/List;Ljava/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
+public final class com/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2$DefaultImpls {
+	public static fun claimProcessable (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;ILjava/time/Duration;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static synthetic fun claimWithTokens$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;ILjava/time/Duration;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static fun countProcessable (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;
+	public static fun getRetentionLabel (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;)Ljava/lang/String;
+	public static fun getSentRetentionExempt (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;)Z
+	public static synthetic fun markClaimFailed$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;Lcom/openbank/libs/persistence/outbox/OutboxClaim;Ljava/lang/String;Ljava/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+	public static synthetic fun markClaimsSent$default (Lcom/openbank/libs/persistence/outbox/ClaimFencedOutboxRepositoryV2;Ljava/util/List;Ljava/time/Instant;Lkotlin/coroutines/Continuation;ILjava/lang/Object;)Ljava/lang/Object;
+}
+
 public final class com/openbank/libs/persistence/outbox/OutboxBackoff {
 	public static final field INSTANCE Lcom/openbank/libs/persistence/outbox/OutboxBackoff;
 	public static final field JITTER_FRACTION D
@@ -3083,6 +3102,19 @@ public final class com/openbank/libs/persistence/outbox/OutboxBackoff {
 	public final fun getMAX_DELAY ()Ljava/time/Duration;
 	public final fun nextAttemptAt (ILjava/time/Instant;Lkotlin/random/Random;)Ljava/time/Instant;
 	public static synthetic fun nextAttemptAt$default (Lcom/openbank/libs/persistence/outbox/OutboxBackoff;ILjava/time/Instant;Lkotlin/random/Random;ILjava/lang/Object;)Ljava/time/Instant;
+}
+
+public final class com/openbank/libs/persistence/outbox/OutboxClaim {
+	public fun <init> (Lcom/openbank/libs/persistence/outbox/OutboxEntry;Ljava/util/UUID;)V
+	public final fun component1 ()Lcom/openbank/libs/persistence/outbox/OutboxEntry;
+	public final fun component2 ()Ljava/util/UUID;
+	public final fun copy (Lcom/openbank/libs/persistence/outbox/OutboxEntry;Ljava/util/UUID;)Lcom/openbank/libs/persistence/outbox/OutboxClaim;
+	public static synthetic fun copy$default (Lcom/openbank/libs/persistence/outbox/OutboxClaim;Lcom/openbank/libs/persistence/outbox/OutboxEntry;Ljava/util/UUID;ILjava/lang/Object;)Lcom/openbank/libs/persistence/outbox/OutboxClaim;
+	public fun equals (Ljava/lang/Object;)Z
+	public final fun getEntry ()Lcom/openbank/libs/persistence/outbox/OutboxEntry;
+	public final fun getToken ()Ljava/util/UUID;
+	public fun hashCode ()I
+	public fun toString ()Ljava/lang/String;
 }
 
 public final class com/openbank/libs/persistence/outbox/OutboxDispatch {
