@@ -3482,14 +3482,29 @@ delegation_capability_enforcement:
     # --- unenforced: grantable today, honoured by nothing ------------------------------
     - resource_type: ACCOUNT
       capability: ACCOUNT_VIEW_DETAILS
-      status: unenforced
-      issue: 3615
-      why: "No production reference outside delegation-service. Measured 2026-11-12 (ADR-0375 D4)."
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7 correction, the account twin of the card one. GET /customer/v1/accounts/{id}
+        serves the account record and asked for ACCOUNT_READ_BALANCES, so the detail was reachable
+        on the balances authority and this capability was read by nothing. Balances have their own
+        route. Blast radius, unlike the card case, is NOT zero: the Ucetni and Pokladnik presets
+        grant READ_BALANCES without VIEW_DETAILS, which is why they could drill in at all. V33
+        corrects the presets forward; grants already minted keep what they were given, by design,
+        and lose the drill-down until the grantor re-shares.
     - resource_type: ACCOUNT
       capability: ACCOUNT_DOWNLOAD_STATEMENTS
-      status: unenforced
-      issue: 3615
-      why: "No production reference; statement-service holds no delegation code at all."
+      status: enforced
+      enforced_in:
+        - openbank-customer-edge/src/main/kotlin/com/openbank/customeredge/infrastructure/rest/CustomerEdgeResource.kt
+      why: >
+        ADR-0375 D7. Both statement routes (the period-close list and the on-demand render) asked
+        ownsAccount alone, so three presets handed this capability out and a delegate holding it was
+        refused every time they used it. Both now go through one mayReadStatements helper — owner OR
+        the grant — because two copies of an ownership-or-grant test are two things that drift.
+        statement-service itself still holds no delegation code; the edge is the enforcement point,
+        as it is for every other account-scoped read.
     - resource_type: ACCOUNT
       capability: ACCOUNT_PROPOSE_PAYMENT
       status: unenforced
@@ -3514,6 +3529,12 @@ delegation_capability_enforcement:
       status: unenforced
       issue: 3615
       why: >
+        Already excluded from the preset picker by hand: admin-ui's isAssignablePresetCapability
+        drops it, with a comment stating this ADR's rule a year early — "no grant-consuming service
+        authorizes a delegate to create another grant, so presenting it as assignable would promise
+        recursive authority that the platform does not enforce". That is the honest end state until
+        sub-delegation exists; the registry records it so the exclusion is declared in one place
+        rather than living only in a UI helper.
         Measured 2026-11-12: the ONLY two occurrences in the whole tree are the enum declaration
         and this matrix entry — it is not enforced even inside delegation-service, which owns the
         resource. ADR-0232 D5's retail-to-SME bridge ("the grantor-side actor must itself hold

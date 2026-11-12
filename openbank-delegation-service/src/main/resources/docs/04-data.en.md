@@ -44,3 +44,16 @@ statement-service is addressed by `accountId` and holds no statement object with
 so a `STATEMENT` resource id refers to nothing its owning service can resolve. A payment id resolves
 in no single service: six rails own payments and nothing maps an id to its rail. Neither type has an
 owner to ask, so both stay refused until those pairs leave the capability matrix.
+
+### Preset catalog corrections are forward migrations (ADR-0375 D7)
+
+The role-preset catalog is seeded by migration, and a preset can be wrong in a way nothing notices
+while the enforcement around it is also wrong. `Účetní` and `Pokladník` grant
+`ACCOUNT_READ_BALANCES` without `ACCOUNT_VIEW_DETAILS`; that was invisible for as long as the edge's
+account-detail read asked for the balances capability. V33 adds the missing capability to both
+presets.
+
+It touches the CATALOG only. Grants already minted are immutable snapshots — a grant carries what
+the grantor agreed to at the time, and widening one afterwards would be this service editing
+somebody's mandate. An existing grantee of those two roles keeps balances and transactions and
+loses the account-detail drill-down until the grantor re-shares from the corrected preset.
