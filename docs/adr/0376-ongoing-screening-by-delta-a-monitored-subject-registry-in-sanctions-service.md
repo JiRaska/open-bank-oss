@@ -224,7 +224,7 @@ git grep -l 'MONITORED_SUBJECT_MATCHED' -- 'openbank-*/src/main' ':!openbank-san
 
 ## Compliance impact
 
-- PCI DSS: not applicable — no cardholder data; the registry holds names and dates of birth.
+- PCI DSS: not applicable — no payment card data; the registry holds names and dates of birth.
 - DORA:    not applicable — no new third-party ICT dependency; the work stays inside one service
   and its own database.
 - GDPR:    a new store of personal data in sanctions-service. Data minimisation: only the
