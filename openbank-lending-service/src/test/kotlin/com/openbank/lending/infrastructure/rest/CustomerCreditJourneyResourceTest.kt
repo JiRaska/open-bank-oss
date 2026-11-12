@@ -110,7 +110,16 @@ class CustomerCreditJourneyResourceTest {
         who: SecurityIdentity = identity(principal),
         config: CustomerIntakeConfig = config(),
         apply: com.openbank.lending.application.port.`in`.ApplyForLoanUseCase = withdrawAlwaysSucceeds(),
-    ) = CustomerCreditJourneyResource(StubRepository(rows), apply, config, who, FakeIdempotencyStore(), ObjectMapper())
+        declineReviews: com.openbank.lending.application.usecase.DeclineReviewUseCase = io.mockk.mockk(),
+    ) = CustomerCreditJourneyResource(
+        StubRepository(rows),
+        apply,
+        config,
+        who,
+        FakeIdempotencyStore(),
+        ObjectMapper(),
+        declineReviews,
+    )
 
     /** The withdraw leg's happy path: records the command, answers with the withdrawn application. */
     private fun withdrawAlwaysSucceeds(): com.openbank.lending.application.port.`in`.ApplyForLoanUseCase =
@@ -381,5 +390,77 @@ class CustomerCreditJourneyResourceTest {
             ).build(),
         ).list(party.toString()).await().indefinitely().status
         assertThat(status).isEqualTo(403)
+    }
+
+    // --- decline review (request leg) ---------------------------------------------------------------
+
+    private fun reviewOf(created: Boolean = true): com.openbank.lending.application.usecase.DeclineReviewResult {
+        val at = OffsetDateTime.parse("2026-08-02T10:00:00Z")
+        return com.openbank.lending.application.usecase.DeclineReviewResult(
+            com.openbank.lending.domain.model.DeclineReview(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                party,
+                at,
+                "DECLINE",
+                "AFFORDABILITY_FAILED:r1",
+                "A=1",
+                at,
+            ),
+            created,
+        )
+    }
+
+    private fun useCase(answer: Uni<com.openbank.lending.application.usecase.DeclineReviewResult>) =
+        io.mockk.mockk<com.openbank.lending.application.usecase.DeclineReviewUseCase>().also {
+            io.mockk.every { it.requestReview(any(), any()) } returns answer
+        }
+
+    private fun requestReview(
+        uc: com.openbank.lending.application.usecase.DeclineReviewUseCase,
+        principal: String = edge,
+        header: String? = party.toString(),
+        id: String = UUID.randomUUID().toString(),
+    ) = resource(emptyList(), principal = principal, declineReviews = uc).requestDeclineReview(header, id)
+        .await().indefinitely()
+
+    @Test
+    fun `a first review request answers 201 and a repeat answers 200, exposing no reviewer text`() {
+        val created = requestReview(useCase(Uni.createFrom().item(reviewOf(created = true))))
+        assertThat(created.status).isEqualTo(201)
+        assertThat(created.entity.toString()).doesNotContain("reviewReason", "reviewedBy", "AFFORDABILITY")
+
+        assertThat(requestReview(useCase(Uni.createFrom().item(reviewOf(created = false)))).status).isEqualTo(200)
+    }
+
+    @Test
+    fun `review requests are edge only and need a party header`() {
+        val uc = useCase(Uni.createFrom().item(reviewOf()))
+        assertThat(requestReview(uc, principal = "some-operator").status).isEqualTo(403)
+        assertThat(requestReview(uc, header = null).status).isEqualTo(400)
+        io.mockk.verify(exactly = 0) { uc.requestReview(any(), any()) }
+    }
+
+    @Test
+    fun `review refusals map to 404 for not found and 409 with a stable code otherwise`() {
+        val notFound = useCase(
+            Uni.createFrom().failure(
+                com.openbank.lending.application.usecase.DeclineReviewRefusedException(
+                    "NOT_FOUND",
+                    "application not found",
+                ),
+            ),
+        )
+        assertThat(requestReview(notFound).status).isEqualTo(404)
+
+        val human = useCase(
+            Uni.createFrom().failure(
+                com.openbank.lending.application.usecase.DeclineReviewRefusedException("NOT_ENGINE_DECLINE", "x"),
+            ),
+        )
+        val response = requestReview(human)
+        assertThat(response.status).isEqualTo(409)
+        assertThat((response.entity as Map<*, *>)["error"]).isEqualTo("NOT_ENGINE_DECLINE")
+        assertThat(requestReview(human, id = "not-a-uuid").status).isEqualTo(404)
     }
 }

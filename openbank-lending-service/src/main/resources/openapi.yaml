@@ -36,7 +36,10 @@ info:
   # was cut; the api-contract gate requires a fresh MINOR on live main.
   # 1.39.0 -> 1.40.0 (#10558): correct the documented existing Money response shape;
   # requests retain their accepted forms and runtime serialization is unchanged.
-  version: 1.40.0
+  # 1.40.0 -> 1.41.0: additive — customer-requested human review of an engine decline (GDPR Art.
+  # 22(3), EU AI Act Art. 86): POST /intake/applications/{id}/decline-review (customer-edge only) and
+  # the DeclineReview schema. 1.40.0 is what live origin/main holds.
+  version: 1.41.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -253,6 +256,48 @@ paths:
         '409':
           $ref: '#/components/responses/IdempotencyConflict'
         '422': { description: The current state no longer permits withdrawal }
+
+  /api/v1/lending/intake/applications/{id}/decline-review:
+    post:
+      tags: [Lending]
+      operationId: requestCustomerDeclineReview
+      summary: Request human review of an engine decline of one of the caller's applications (customer-edge only)
+      description: >-
+        GDPR Art. 22(3) / EU AI Act Art. 86. The party id is taken from the X-Customer-Party-Id
+        header set by customer-edge from the customer JWT; an application belonging to another
+        party answers 404. Only an application DECLINED by the decision engine is reviewable (a
+        decline already made by a human is not looped back) and only within
+        `lending.decline-review.window-days` (default 30) of the engine decision. One review per
+        application: the first request answers 201, a repeat answers 200 with the same review.
+        409 carries a stable code in `error`: NOT_ENGINE_DECLINE or REVIEW_WINDOW_ELAPSED.
+        Only the configured customer-edge service principal may call it; any other caller is 403.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The review that already exists for this application
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclineReview'
+        '201':
+          description: Review requested
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeclineReview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/lending/intake/financial-health:
     get:
@@ -2305,6 +2350,17 @@ components:
       properties:
         approve: { type: boolean }
         reason: { type: string, nullable: true }
+    DeclineReview:
+      type: object
+      description: >-
+        What the customer sees of a review: where it stands. The engine's reason codes are already
+        on the application journey; the reviewer's reason is an internal note and is not exposed.
+      required: [id, applicationId, status, requestedAt]
+      properties:
+        id: { type: string, format: uuid }
+        applicationId: { type: string, format: uuid }
+        status: { type: string, enum: [REQUESTED, CONFIRMED, OVERTURNED] }
+        requestedAt: { type: string, format: date-time }
     WithdrawApplicationRequest:
       type: object
       required: [reason]

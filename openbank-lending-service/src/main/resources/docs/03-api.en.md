@@ -91,6 +91,21 @@ their bodies contain no proposer, checker or disburser identity. Status mapping 
 
 `/api/v1/...` URL path; `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`. The OpenAPI contract version (`info.version`) is the API-contract axis (ADR-0048), independent of the release `version.txt`.
 
+## Human review of an engine decline
+
+GDPR Art. 22(3), EU AI Act Art. 86 and EBA/GL/2020/06 par. 54: a customer whose application the decision engine declined can ask for a person to look at it. A declined application stays `DECLINED` (terminal, ADR-0211 D1); the review is its own record.
+
+| Endpoint | Method | Caller | Notes |
+|---|---|---|---|
+| `/intake/applications/{id}/decline-review` | `POST` | customer-edge principal only (`lending.intake`) | The applicant (from `X-Customer-Party-Id`) asks. 201 first request, 200 repeat (same review), 404 not the caller's application, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (humans) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Reason mandatory (10-512 chars). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` |
+
+- **Only an engine decline is reviewable**: `DECLINED` with a stored engine outcome `DECLINE` and no recorded human decider. A decline a person made or confirmed is never looped back.
+- **At most once per application** (unique in the schema); a repeat returns the existing review. The window is `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **default 30**), counted from the engine's evaluation time.
+- **The engine's reasons are kept for the reviewer**: reason codes, policy versions and decision time are snapshotted on the review when it is requested; a reviewer is not bound by the engine outcome.
+- **Event** (outbox, `schemaVersion` 1, identifiers and machine codes only): `credit.decline_review.requested`.
+- **Not yet reachable by a customer**: the customer-edge proxy route is a follow-up, and the staff decision (confirm, or overturn into a successor application that enters four-eyes) arrives in a separate change; until then a requested review stays `REQUESTED`.
+
 ## Customer-edge caller identity
 
 Customer intake, quote, credit journey and financial-health routes bind their configured customer-edge workload to the verified JWT client id (`azp`), subject and matching Keycloak service-account username. A username or role alone cannot authorize an M2M request; missing caller configuration fails closed.

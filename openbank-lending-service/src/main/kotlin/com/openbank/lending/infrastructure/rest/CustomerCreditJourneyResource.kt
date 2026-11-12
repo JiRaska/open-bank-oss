@@ -6,6 +6,8 @@ package com.openbank.lending.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.LoanApplicationRepository
+import com.openbank.lending.application.usecase.DeclineReviewRefusedException
+import com.openbank.lending.application.usecase.DeclineReviewUseCase
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.WithdrawApplicationRequest
 import com.openbank.lending.infrastructure.intake.CustomerIntakeConfig
@@ -66,6 +68,7 @@ class CustomerCreditJourneyResource(
     private val identity: SecurityIdentity,
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
+    private val declineReviews: DeclineReviewUseCase,
 ) {
     @GET
     @Path("/applications")
@@ -154,6 +157,43 @@ class CustomerCreditJourneyResource(
     }
 
     /**
+     * The applicant's request for human review of a decision-engine decline (GDPR Art. 22(3),
+     * EU AI Act Art. 86, EBA/GL/2020/06 par. 54). The party is the edge-vouched header, never a body
+     * field; a foreign application id reads as not found. Idempotent by construction (one review per
+     * application): a repeat answers 200 with the existing review, the first request 201. Refusals
+     * are 409 with a stable code: NOT_ENGINE_DECLINE, REVIEW_WINDOW_ELAPSED.
+     */
+    @POST
+    @Path("/applications/{id}/decline-review")
+    @Authorize(action = "lending.intake", resource = "")
+    @Operation(summary = "Request human review of an engine decline of one of the caller's applications (edge only)")
+    fun requestDeclineReview(
+        @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
+        @PathParam("id") id: String,
+    ): Uni<Response> {
+        if (!callerIsPermitted()) return Uni.createFrom().item(refusal())
+        val partyId = scopeOf(partyHeader) ?: return Uni.createFrom().item(badParty())
+        val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
+            ?: return Uni.createFrom().item(notFound())
+        return declineReviews.requestReview(applicationId, partyId)
+            .map { result ->
+                Response.status(
+                    if (result.created) HTTP_CREATED else HTTP_OK,
+                ).entity(result.review.toCustomerDto()).build()
+            }
+            .onFailure(DeclineReviewRefusedException::class.java).recoverWithItem { e ->
+                val refused = e as DeclineReviewRefusedException
+                if (refused.code == DeclineReviewRefusedException.NOT_FOUND) {
+                    notFound()
+                } else {
+                    Response.status(
+                        HTTP_CONFLICT,
+                    ).entity(mapOf("error" to refused.code, "message" to refused.message)).build()
+                }
+            }
+    }
+
+    /**
      * Whether this CALLER may use the endpoint at all. Deliberately takes no request data: the
      * decision rests only on the authenticated principal and on configuration.
      *
@@ -194,7 +234,10 @@ class CustomerCreditJourneyResource(
 
     companion object {
         private val ZERO_UUID = UUID(0, 0)
+        private const val HTTP_OK = 200
+        private const val HTTP_CREATED = 201
         private const val HTTP_BAD_REQUEST = 400
+        private const val HTTP_CONFLICT = 409
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_UNPROCESSABLE = 422
@@ -219,6 +262,20 @@ data class CustomerCreditJourneyDto(
     val outcomeReasonCode: String?,
     val submittedAt: String,
 )
+
+/**
+ * What the customer sees of a review: where it stands and nothing the reviewer wrote. The reviewer's
+ * reason is an officer's internal note and is deliberately not exposed (see [decisionOutcomeReasonCode]).
+ */
+data class CustomerDeclineReviewDto(
+    val id: String,
+    val applicationId: String,
+    val status: String,
+    val requestedAt: String,
+)
+
+private fun com.openbank.lending.domain.model.DeclineReview.toCustomerDto() =
+    CustomerDeclineReviewDto(id.toString(), applicationId.toString(), status.name, requestedAt.toInstant().toString())
 
 data class CustomerCreditStepDto(val code: String, val status: String)
 
