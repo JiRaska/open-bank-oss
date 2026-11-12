@@ -25,7 +25,9 @@ Measured on `origin/main` f0216a5686:
 
 - `openbank-aml-service/src/main/kotlin` holds 23 files: the `AmlCase` aggregate, onboarding
   screening, one `PartyEventConsumer`, an outbox. `ScreeningType.TRANSACTION_MONITORING`
-  exists as an enum value with no producer.
+  has no producer inside the service: four rails (domestic, SEPA, SEPA instant, FX) open such
+  cases through `POST /api/v1/aml/cases` from their own pre-execution checks, each with its own
+  adapter, and those cases are decided by one analyst.
 - The service consumes one topic, `openbank.party.events`. No money-movement event reaches it.
 - `docs/compliance/regulatory-obligations.md` rates the suspicious-transaction report
   (zákon č. 253/2008 Sb. § 18) as `bff-only`: a catalogue row computed in admin-ui.
@@ -69,6 +71,10 @@ suspicious-transaction report.
    with the pack hash, scenario code and the counter snapshot as evidence. One open case
    exists per party, scenario and window; a repeat hit appends evidence. A missing
    evaluation is recorded as its own outcome, never as a clear.
+   Cases opened by the pack evaluation are told apart from rail-opened ones by a reserved
+   idempotency-key prefix the create endpoint refuses from callers. Rail-opened cases keep
+   their current flow until ADR-0374 replaces the per-rail adapters with the admission
+   chain's held-payment case; from then on both origins follow points 5 to 7.
 
 5. **Decisions are four-eyes on the authenticated principal.** `decidedBy` is taken from the
    authenticated caller and never from a request body. Clearing or reporting a monitoring
@@ -165,9 +171,8 @@ Not implemented in this revision:
 
 ```bash
 ls openbank-libs/governance/returns/fau-suspicious-transaction.yaml
-grep -c 'TRANSACTION_MONITORING' openbank-aml-service/src/main/kotlin -r    # > 1: a producer exists
 grep -n 'id: aml-no-customer-surface' -A4 .github/gates/gates.yaml | grep 'mode: enforced'
-./gradlew :openbank-aml-service:test --tests '*TransactionMonitoringIT' --tests '*SuspiciousTransactionReportIT'
+./gradlew :openbank-aml-service:test --tests '*TransactionMonitoring*IT' --tests '*SuspiciousTransactionReportIT'
 ```
 
 The ITs must drive real HTTP and a real database and prove: a booked movement series opens

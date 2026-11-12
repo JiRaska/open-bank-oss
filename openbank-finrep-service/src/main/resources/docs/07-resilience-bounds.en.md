@@ -26,3 +26,16 @@ healthy DB). These bounds make the pool discard suspect connections on its own.
 This service does not use a reactive datasource pool.
 
 
+
+## Advisory authorization for regulatory reporting
+
+The FINREP template, COREP template, reporting period list and XBRL-CSV preflight
+routes send their authorization decisions to the local OPA sidecar. The policy
+allows verified human operators and administrators. The existing JWT role gate
+continues to decide HTTP access while `authz.enforce` is false. The application
+records advisory decisions in `openbank.authz.decisions`. The default OPA request
+timeout is 500 ms.
+
+The ledger and risk-engine calls keep their respective outbound identities
+`openbank-services` and `openbank-finrep`. Those grants are evaluated by the
+upstream services.

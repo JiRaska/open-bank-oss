@@ -298,3 +298,11 @@ test_treasury_roles_denied_backfill if {
 			with data.rules as rules_mock
 	}
 }
+
+test_czech_policy_is_scoped_to_human_credit_risk_staff if {
+	actor := {"type": "HUMAN", "id": "test-credit-risk", "service_account": false, "roles": ["ROLE_CREDIT_RISK"]}
+	every action in {"lending.policy.propose", "lending.policy.read", "lending.policy.decide"} {
+		"credit-risk-cz-policy" in rest.allowed_reasons with input as {"principal": actor, "action": action}
+		not "credit-risk-cz-policy" in rest.allowed_reasons with input as {"principal": object.union(actor, {"service_account": true}), "action": action}
+	}
+}
