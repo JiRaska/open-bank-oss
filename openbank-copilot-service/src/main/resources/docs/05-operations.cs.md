@@ -38,3 +38,10 @@ Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTT
 Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí každá Quarkus služba: Quarkus BOM, quarkus-kotlin, RESTEasy Reactive s Jacksonem, SmallRye Health a OpenAPI, OIDC, registr Micrometer Prometheus a config-yaml a testovací knihovny quarkus-junit5, AssertJ a REST Assured. Deklaruje je konvenční plugin `openbank.quarkus-service` v `build-logic`. Výsledná classpath je beze změny. `build.gradle.kts` uvádí jen to, co služba přidává navíc.
 
 `CopilotErrorBodySpecConformanceIT` ověřuje, že chybové odpovědi 501, 403, 404 a 422 odpovídají schématu chybového těla v `openapi.yaml` (#14525). Autentizované případy používají `@TestSecurity`, proto modul nese `quarkus-test-security` jen jako testovací závislost; dodávaná služba se nemění.
+
+## Označení odpovědi jako vygenerované AI (EU AI Act čl. 50 odst. 1)
+
+Každá `ChatReply` z `POST /api/v1/copilot/chat` (odpovědi, odmítnutí i záložní chybové odpovědi) nese
+`aiGenerated: true` a krátký český text `disclosure` (API kontrakt 1.6.0, aditivní). Klient musí označení
+zákazníkovi zobrazit. Zatím nehotovo: pravidlo v systémovém promptu, že se asistent na dotaz přizná k AI
+(vyžaduje novou verzi promptu a živé přenahrání evalů), a zobrazení označení v mobilní aplikaci.

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.2...party-service-v0.30.0) (2026-11-12)
+
+
+### Features
+
+* **party,admin-ui,audit:** mask backoffice profiles and audit full access ([#15617](https://github.com/JiRaska/open-bank-oss/issues/15617)) ([548fa68](https://github.com/JiRaska/open-bank-oss/commit/548fa683b80260e3a82e57053c4600732faa00d7))
+
 ## [0.29.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.29.1...party-service-v0.29.2) (2026-11-06)
 
 

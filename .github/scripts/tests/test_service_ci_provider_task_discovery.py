@@ -9,6 +9,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 SERVICE = "openbank-ci-harness"
+TRANSACTION = "openbank-transaction-service"
 
 
 class ProviderTaskDiscoveryTests(unittest.TestCase):
@@ -113,6 +114,9 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             "PACT_BROKER_PASSWORD": "",
             "BRANCH": "harness-branch",
         }
+        self.run_shell(self.helper_stage_run, trusted, env)
+        staged = dict(line.split("=", 1) for line in Path(env["GITHUB_ENV"]).read_text().splitlines())
+        env["SERVICE_CI_HELPERS"] = staged["SERVICE_CI_HELPERS"]
         return trusted, runner_temp, historical, calls, env
 
     def run_shell(self, body, cwd, env, *, expect=0):
@@ -125,9 +129,6 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
         return result
 
     def run_workflow_helper_sequence(self, root, runner_temp, historical, env):
-        self.run_shell(self.helper_stage_run, root / "trusted", env)
-        staged = dict(line.split("=", 1) for line in Path(env["GITHUB_ENV"]).read_text().splitlines())
-        env["SERVICE_CI_HELPERS"] = staged["SERVICE_CI_HELPERS"]
         stage_body = self.stage_run
         warmup_body = self.warmup_run.replace("${{ inputs.service }}", SERVICE).replace(
             "/tmp/gradle-warmup.log", "$RUNNER_TEMP/gradle-warmup.log"
@@ -203,9 +204,8 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertEqual((root / "github-output").read_text(), "available=true\n")
             self.assertEqual(len(calls.read_text().splitlines()), 1)
 
-            provider_run = self.provider_run.replace("${{ inputs.service }}", SERVICE)
             env["PACT_PROVIDER_VERSION"] = "fixture-provider-version"
-            self.run_shell(provider_run, historical, env)
+            self.run_shell(self.provider_run, historical, env)
             invocations = calls.read_text().splitlines()
             self.assertEqual(len(invocations), 2)
             provider_call = invocations[-1]
@@ -213,6 +213,7 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.assertIn("-Dpactbroker.url=", provider_call)
             self.assertIn("-Dpactbroker.auth.username=", provider_call)
             self.assertIn("-Dpactbroker.auth.password=", provider_call)
+            self.assertIn("-Dpactbroker.enablePending=true", provider_call)
             self.assertIn("-Dpact.verifier.publishResults=true", provider_call)
             self.assertIn("-Dpact.provider.version=fixture-provider-version", provider_call)
             self.assertNotIn("-Dpact.filter.consumers=", provider_call)
@@ -232,14 +233,16 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             self.run_workflow_helper_sequence(root, root / "runner-temp", historical, env)
             env["PACT_PROVIDER_VERSION"] = "fixture-provider-version"
             env["PACT_CONSUMER"] = "openbank-agent-service"
-            self.run_shell(self.provider_run.replace("${{ inputs.service }}", SERVICE), historical, env)
+            self.run_shell(self.provider_run, historical, env)
             call = calls.read_text().splitlines()[-1]
+            self.assertIn("-Dpactbroker.enablePending=true", call)
             self.assertIn("-Dpact.filter.consumers=openbank-agent-service", call)
-            self.assertNotIn("pactbroker.consumers", call)
             guard = root / "runner-temp/pact-consumer-scope.init.gradle"
             self.assertIn(f"--init-script {guard}", call)
             guard_source = guard.read_text()
             self.assertIn("gradle.projectsEvaluated", guard_source)
+            # The guard must skip included builds (build-logic), or project(":<svc>") throws there.
+            self.assertLess(guard_source.index("if (gradle.parent != null)"), guard_source.index("gradle.projectsEvaluated"))
             self.assertIn('provider.tasks.named("providerPactTest").get()', guard_source)
             self.assertIn('task.systemProperties["pact.filter.consumers"]', guard_source)
             self.assertIn('System.getenv("PACT_CONSUMER")', guard_source)
@@ -247,6 +250,57 @@ class ProviderTaskDiscoveryTests(unittest.TestCase):
             keys = re.findall(r"-D((?:pact|pactbroker)[\w.]*)=", call)
             self.assertTrue(keys)
             self.assertEqual(sorted(set(keys) - forwarded), [], "passed but never forwarded to the test JVM")
+
+    @staticmethod
+    def write_transaction_scope_fixture(historical):
+        fixture = historical / TRANSACTION / "src/test/kotlin/com/openbank/transaction/contract"
+        fixture.mkdir(parents=True)
+        (fixture / "TransactionPactProviderVerificationTest.kt").write_text(
+            "    @ExtendWith(TransactionPactConsumerScope::class)\n"
+        )
+
+    def test_scoped_replay_requires_fresh_success_for_the_requested_consumer(self):
+        for report, expected in (("none", 1), ("foreign", 1), ("skip", 1), ("success", 0)):
+            with self.subTest(report=report), tempfile.TemporaryDirectory() as tmp:
+                _, runner_temp, historical, calls, env = self.make_workspaces(tmp)
+                self.write_transaction_scope_fixture(historical)
+                env.update(SERVICE=TRANSACTION, PACT_CONSUMER="openbank-sepa-payment", SCOPED_REPORT=report)
+                # A success from an earlier attempt must never make a no-op run green.
+                reports = historical / TRANSACTION / "build/test-results/providerPactTest"
+                reports.mkdir(parents=True)
+                (reports / "prior.xml").write_text(
+                    f'<testsuite><testcase name="Pact between openbank-sepa-payment (sha) and {TRANSACTION}'
+                    ' - previous interaction"/></testsuite>'
+                )
+                self.run_shell(self.provider_run, historical, env,
+                               expect=expected)
+                self.assertFalse((reports / "prior.xml").exists())
+                self.assertIn("-Dpactbroker.enablePending=false", calls.read_text())
+                self.assertNotIn("-Dpact.filter.consumers=", calls.read_text())
+                init_script = (runner_temp / "pact-consumer-scope.init.gradle").read_text()
+                self.assertLess(init_script.index("if (gradle.parent != null)"),
+                                init_script.index("gradle.projectsEvaluated"))
+                self.assertIn('task.filter.setIncludePatterns("com.openbank.transaction.contract.', init_script)
+                self.assertIn('"pactbroker.consumers": consumer', init_script)
+                self.assertIn('"pactbroker.consumerversionselectors.rawjson"', init_script)
+                self.assertIn('[[consumer: consumer, mainBranch: true]]', init_script)
+                self.assertIn('"pactbroker.includeWipPactsSince": ""', init_script)
+
+    def test_scoped_transaction_replay_requires_reviewed_provider_fixture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, _, historical, calls, env = self.make_workspaces(tmp)
+            env.update(SERVICE=TRANSACTION, PACT_CONSUMER="openbank-sepa-payment")
+            result = self.run_shell(self.provider_run, historical,
+                                    env, expect=1)
+            self.assertIn("requires the reviewed consumer-scope fixture overlay", result.stdout)
+            self.assertFalse(calls.exists())
+
+    def test_malformed_scope_is_refused_before_gradle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, _, historical, calls, env = self.make_workspaces(tmp)
+            env["PACT_CONSUMER"] = "openbank-agent-service,openbank-sdd-service"
+            self.run_shell(self.provider_run, historical, env, expect=1)
+            self.assertFalse(calls.exists())
 
     def test_missing_fixture_bundle_refuses_unsafe_provider_paths_without_writes(self):
         helper = ROOT / ".github/scripts/prove-pact-provider-version.sh"
@@ -402,6 +456,17 @@ if [ "$is_warmup" = true ]; then
   esac
 else
   emit_tasks "$DISCOVERY_MODE"
+  if [[ " $* " == *":providerPactTest "* && -n "${PACT_CONSUMER:-}" ]]; then
+    if [ "${SCOPED_REPORT:-success}" = none ]; then exit 0; fi
+    consumer="$PACT_CONSUMER"
+    outcome=''
+    if [ "${SCOPED_REPORT:-}" = foreign ]; then consumer=openbank-unrequested; fi
+    if [ "${SCOPED_REPORT:-}" = skip ]; then outcome='<skipped/>'; fi
+    dir="$SERVICE/build/test-results/providerPactTest"
+    mkdir -p "$dir"
+    printf '<testsuite><testcase name="Pact between %s (sha) and %s - current interaction">%s</testcase></testsuite>\n' \
+      "$consumer" "$SERVICE" "$outcome" > "$dir/provider.xml"
+  fi
 fi
 '''
 

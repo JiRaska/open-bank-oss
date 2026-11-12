@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.11.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.2...admin-ui-v4.11.0) (2026-11-12)
+
+
+### Features
+
+* **admin-ui:** read-only CEU daily overview on the statutory returns page ([#15307](https://github.com/JiRaska/open-bank-oss/issues/15307)) ([29b3709](https://github.com/JiRaska/open-bank-oss/commit/29b3709d60fa89ba52c3df5bfebc058b10e7acc8)), closes [#15292](https://github.com/JiRaska/open-bank-oss/issues/15292)
+* **infra:** authenticated OTLP ingest for CI quality metrics ([#15676](https://github.com/JiRaska/open-bank-oss/issues/15676)) ([320fe24](https://github.com/JiRaska/open-bank-oss/commit/320fe24af4e6bc304e5e676b0564c4bf3f8aac28))
+* **party,admin-ui,audit:** mask backoffice profiles and audit full access ([#15617](https://github.com/JiRaska/open-bank-oss/issues/15617)) ([548fa68](https://github.com/JiRaska/open-bank-oss/commit/548fa683b80260e3a82e57053c4600732faa00d7))
+
 ## [4.10.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v4.10.1...admin-ui-v4.10.2) (2026-11-10)
 
 

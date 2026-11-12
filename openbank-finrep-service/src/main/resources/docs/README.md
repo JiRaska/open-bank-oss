@@ -21,7 +21,16 @@ The frozen closing balance sums hash-verified `FROZEN`/`LINES_V1` monthly eviden
 
 F02.00 follows a separate, calendar-year-to-date flow source: `GET /api/v1/ledger/periods/MONTH/{asOf}/frozen-year-to-date-trial-balance` for frozen evidence and `/year-to-date-trial-balance` for live preview. Both cover income and expense movements from January 1 of the reporting year through `asOf`, so a report never inherits a prior year's flows. The frozen route sums hash-verified monthly evidence for every month of the year and is refused when any month's evidence is missing or does not match the journal. A cumulative closing balance must not be substituted for this flow source.
 
-Use `LIVE_PREVIEW` to inspect current books; it does not establish frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+FINREP responses identify the ledger source mode in `sourceEvidence`. Use `LIVE_PREVIEW` to inspect
+current books and `FROZEN` for frozen reporting evidence. Follow upstream close and reconciliation failures before retrying a refused frozen report.
+
+## COREP own-funds preview
+
+In the EBA 4.2 C 01.00 template, row r0200 carries other reserves from GL 6030. The aggregate
+regulatory deductions in GL 6040 affect the CET1 preview subtotal. The r0300 goodwill cell and the
+r0160 profit or loss attributable to owners of the parent cell require separate prudential source
+amounts. Both remain flagged data gaps. Capital amounts require CZK evidence before the preview
+can state a value. [EBA Reporting Framework 4.2](https://www.eba.europa.eu/risk-and-data-analysis/reporting-frameworks/reporting-framework-42)
 
 ## GL classification
 
@@ -64,3 +73,9 @@ This service's `application.yaml` does not declare the management interface (`qu
 ## Shared build dependencies
 
 This service's `build.gradle.kts` does not list the dependencies every Quarkus service shares: the Quarkus BOM, quarkus-kotlin, RESTEasy Reactive with Jackson, SmallRye Health and OpenAPI, OIDC, the Micrometer Prometheus registry and config-yaml, plus the quarkus-junit5, AssertJ and REST Assured test libraries. The `openbank.quarkus-service` convention plugin in `build-logic` declares them. The resolved classpath is unchanged. `build.gradle.kts` lists only what this service adds.
+
+## Supervisory submission lifecycle
+
+`/api/v1/finrep/submissions` tracks one submission per template, reference period and revision: DRAFT, PACKAGED, SUBMITTING (an exclusive claim held while the transport is called, so concurrent submits transmit once), SUBMITTED, then ACKNOWLEDGED or REJECTED. Opening the same revision twice returns the existing submission. Packaging re-runs the XBRL-CSV preflight and answers 409 while any blocker remains; the stored package is a hashed manifest of identity and framework versions, not an XBRL-CSV archive.
+
+Every submit is recorded as an attempt. No supervisory transmission channel is configured, so the default transport transmits nothing and records `DRY_RUN`, which leaves the submission PACKAGED. Only a `SUBMITTED` transport outcome reaches SUBMITTED, and only a SUBMITTED return can have an acknowledgement recorded. A transport error, a cancelled request or a claim older than `openbank.finrep.submission.claim-lease` (default 15 minutes) leaves the return in OUTCOME_UNKNOWN. It may have been delivered, so it is not resubmitted; an ADMIN resolves it with `POST /api/v1/finrep/submissions/{id}/reconcile` after checking with the supervisor. Submissions and attempts live in the service's own Postgres database (`finrep-db`).
