@@ -48,8 +48,8 @@ jobs:
     name: ${{ inputs.service }} (build)
     runs-on: ${{ inputs.service == 'openbank-context-service' && github.event_name == 'push' && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'ubuntu-24.04-arm' || (contains(fromJSON(vars.MINI_RUNNER_SERVICES || '[]'), inputs.service)
-      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'openbank-mini' || 'ubuntu-latest')
-      }}
+      && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+      && inputs.ref == '' && 'openbank-mini' || 'ubuntu-latest') }}
     timeout-minutes: 45
     environment: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       && inputs.ref == '' && 'gradle-cache-writer' || '' }}
