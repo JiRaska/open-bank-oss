@@ -100,6 +100,7 @@ class PartyRepositoryImpl(
         limit: Int,
         afterId: UUID?,
         birthDates: List<String>,
+        namesOnly: Boolean,
     ): List<Party> = Panache.withSession {
         // Every word must match somewhere (AND), each word anywhere in a name/contact field (OR),
         // accent- and case-insensitively: "novak jan" finds "Jan Novák". The term is folded the
@@ -109,12 +110,17 @@ class PartyRepositoryImpl(
         var predicate = words.withIndex().joinToString(" and ", prefix = "(", postfix = ") ") { (i, word) ->
             val n = "w$i"
             params[n] = "%$word%"
-            "(cast(function('party_fold', legalName) as String) like :$n escape '\\' " +
-                "or cast(function('party_fold', tradingName) as String) like :$n escape '\\' " +
-                "or lower(email) like :$n escape '\\' or lower(phone) like :$n escape '\\' " +
-                "or lower(registrationNumber) like :$n escape '\\')"
+            val names = "cast(function('party_fold', legalName) as String) like :$n escape '\\' " +
+                "or cast(function('party_fold', tradingName) as String) like :$n escape '\\'"
+            val contactAndRegistry = if (namesOnly) {
+                ""
+            } else {
+                " or lower(email) like :$n escape '\\' or lower(phone) like :$n escape '\\' " +
+                    "or lower(registrationNumber) like :$n escape '\\'"
+            }
+            "($names$contactAndRegistry)"
         }
-        if (birthDates.isNotEmpty()) {
+        if (!namesOnly && birthDates.isNotEmpty()) {
             params["birthDates"] = birthDates
             predicate += "and dateOfBirth in :birthDates "
         }

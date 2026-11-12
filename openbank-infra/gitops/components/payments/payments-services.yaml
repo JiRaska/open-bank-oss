@@ -1243,7 +1243,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-27e19a17@sha256:386fd84e975aacb0d110eacb1d81553696bd826f4fbd835771593ffab5cf9876
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-548fa683@sha256:64ae71d35f702e3d6e7fe84de2026c254f105ea0a9abfefb48dd3d5bceb0c471
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1582,7 +1582,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-27e19a17@sha256:2087084325734f10bc745454009923618fb6360642477bf84619e998f33b15d0
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-548fa683@sha256:c7b9dd80cfba44398edcec7b264fd3eddb104c67f7dff8e0c431e63c9bf4ce4a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1913,7 +1913,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-27e19a17@sha256:1edac71257c3f8ffb023df45e0257ea285b8a4dfffdc25927983c6d2ff036639
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-548fa683@sha256:6940c8de068209a2cc3ed258d722591eb4e0f92c53695de42caa19f9deda7332
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2217,7 +2217,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "66b2eea0be0cbd61"
+        openbank.tech/policy-checksum: "65b90f58ac072e92"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2228,7 +2228,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-27e19a17@sha256:99e6f8390d415c9a1396cd592dd60019ef913f255ac6243458a9d1320fa2ef1e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-548fa683@sha256:a276e0d9b99af5b11eff6a2fcd87dd52fe3d5e438f8c212e3932c8979bfc52b7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2598,6 +2598,13 @@ spec:
                 secretKeyRef:
                   name: card-processing-service-oidc
                   key: OIDC_CLIENT_SECRET
+            - name: OIDC_ISSUER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: card-processing-service-issuer-oidc
+                  key: OIDC_ISSUER_CLIENT_SECRET
+                  # Verify the new credential before advancing the card-processing image pin.
+                  optional: true
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -2795,7 +2802,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-27e19a17@sha256:990e5171ac7b29b34936437fbfe027490309829abdaf837b5f921cfb57b5f495
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-379e548b@sha256:82c3e9479f7b37bb18420d15b33fde67a22abe52c3c37c4e5b9babee7f06d3b5
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3142,7 +3149,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-27e19a17@sha256:aaf2e3ae49265419cbb3a22fc2536bf1506300ce374d9ad17c307a7679521561
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-548fa683@sha256:e0cab235d523b51f087517b1b841b26998689f91b9ed0d98930c762d2883795f
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3261,7 +3268,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-27e19a17@sha256:72e841c9f8fe817ad5c26e7b004d018016028cc2a3cf2363d9b90e5415d04d06
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-548fa683@sha256:c939b2edbe5a3e007eac84ea74b16afc506027432371826db34d09b7d6e65d1c
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3589,7 +3596,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-27e19a17@sha256:ba8af8afd3ec3e88b9f8ebff2edc3c62acdd0effd2df1232db452aae70ec6161
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-548fa683@sha256:c4597f02fbb1ecaedf1a4d85ffa54963c7b09f2fa3aa66e1c848c18384c3ed49
 
           imagePullPolicy: IfNotPresent
           ports:
