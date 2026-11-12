@@ -145,7 +145,9 @@ class AllowanceDeliveryRetentionIT {
     fun `actual V30 upgrades a populated V29 database without fabricating purged deliveries`() {
         sql(
             // Reconstruct the actual V29 fixture, including removal of later additive observations.
-            "DROP TABLE loan_decline_review; " +
+            "ALTER TABLE loan_application DROP COLUMN predecessor_application_id; " +
+                "DELETE FROM flyway_schema_history WHERE version = '33'; " +
+                "DROP TABLE loan_decline_review; " +
                 "DELETE FROM flyway_schema_history WHERE version = '32'; " +
                 "DROP TABLE lending_close_required_job; " +
                 "DELETE FROM flyway_schema_history WHERE version = '31'; " +

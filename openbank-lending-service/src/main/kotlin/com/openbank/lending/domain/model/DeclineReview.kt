@@ -32,3 +32,19 @@ data class DeclineReview(
     val reviewReason: String? = null,
     val successorApplicationId: UUID? = null,
 )
+
+/** The reviewer's decision. [reason] is mandatory (see [MIN_REASON_LENGTH]) and never leaves the service in events. */
+data class DeclineReviewDecisionRequest(val outcome: DeclineReviewStatus, val reason: String) {
+    init {
+        require(outcome != DeclineReviewStatus.REQUESTED) { "outcome must be CONFIRMED or OVERTURNED" }
+        require(reason.trim().length >= MIN_REASON_LENGTH) {
+            "review reason must be at least $MIN_REASON_LENGTH characters"
+        }
+        require(reason.length <= MAX_REASON_LENGTH) { "review reason must be at most $MAX_REASON_LENGTH characters" }
+    }
+
+    companion object {
+        const val MIN_REASON_LENGTH = 10
+        const val MAX_REASON_LENGTH = 512
+    }
+}

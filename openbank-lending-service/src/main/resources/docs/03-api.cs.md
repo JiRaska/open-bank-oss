@@ -98,10 +98,12 @@ GDPR čl. 22 odst. 3, nařízení o AI čl. 86 a EBA/GL/2020/06 bod 54: zákazn�
 | Endpoint | Metoda | Volající | Poznámky |
 |---|---|---|---|
 | `/intake/applications/{id}/decline-review` | `POST` | pouze principál customer-edge (`lending.intake`) | Žadatel (z `X-Customer-Party-Id`) žádá; povinný `Idempotency-Key`. 201 první žádost, 200 opakování (tentýž přezkum), 404 cizí žádost, 409 `NOT_ENGINE_DECLINE` / `REVIEW_WINDOW_ELAPSED` |
+| `/decline-reviews` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (lidé) | Čekající přezkumy od nejstaršího, s důvody a verzemi politik zaznamenanými enginem |
 | `/decline-reviews/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` (lidé) | `{outcome: CONFIRMED\|OVERTURNED, reason}`. Důvod povinný (10-512 znaků). 409 `REVIEW_ALREADY_DECIDED` / `SELF_REVIEW` |
 
 - **Přezkoumat lze jen zamítnutí enginem**: `DECLINED` s uloženým výsledkem enginu `DECLINE` a bez zaznamenaného lidského rozhodovatele. Zamítnutí učiněné nebo potvrzené člověkem se nevrací.
 - **Nejvýše jednou na žádost** (unikátní ve schématu); opakování vrátí existující přezkum. Lhůta je `lending.decline-review.window-days` (env `LENDING_DECLINE_REVIEW_WINDOW_DAYS`, **výchozí 30**) od času vyhodnocení enginem.
-- **Důvody enginu se uchovají pro posuzovatele**: kódy důvodů, verze politik a čas rozhodnutí se uloží do přezkumu při podání; posuzovatel není vázán výsledkem enginu.
-- **Událost** (outbox, `schemaVersion` 1, jen identifikátory a strojové kódy): `credit.decline_review.requested`.
-- **Zákazník zatím nedosáhne**: route v customer-edge je navazující práce a rozhodnutí personálu (potvrzení, nebo přehodnocení do nástupnické žádosti, která vstoupí do čtyř očí) přijde samostatnou změnou; do té doby zůstává přezkum ve stavu `REQUESTED`.
+- **Posuzovatel není vázán výsledkem enginu**, ale vidí ho: důvody a verze politik se uloží do přezkumu při podání. Posuzovatel je subjekt JWT a nesmí být žadatel.
+- **CONFIRMED** zaznamená lidské rozhodnutí, nic jiného se nemění. **OVERTURNED** zamítnutou žádost neoživí: otevře *nástupnickou* žádost ve `FOUR_EYES` (přenesená fakta, bez důkazů enginu), propojenou oběma směry (`loan_decline_review.successor_application_id`, `loan_application.predecessor_application_id`), posuzovatel je zapsán jako navrhovatel. Úvěrové rozhodnutí pak činí stávající čtyři oči, jejichž schvalovatel se musí lišit od navrhovatele, takže posuzovatel schvalovat nemůže.
+- **Události** (outbox, `schemaVersion` 1, jen identifikátory a strojové kódy, nikdy volný text posuzovatele): `credit.decline_review.requested`, `.confirmed`, `.overturned`; přehodnocení navíc vydá `credit.application.transition` pro nástupce.
+- **Zákazník zatím nedosáhne**: route v customer-edge a obrazovka v admin-ui jsou navazující práce.

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "5db76527e617f801"
+    openbank.tech/policy-checksum: "6b61fbf49adf1115"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -838,6 +838,9 @@ data:
     #   lending.compliance.propose  — propose a jurisdictional compliance pack (maker, ADR-0212 D4)
     #   lending.compliance.decide   — approve/reject a pack activation (checker, must differ from maker)
     #   lending.compliance.read     — list pending proposals / active packs
+    #   lending.declineReview.read   — list pending customer-requested reviews of engine declines
+    #   lending.declineReview.decide — confirm or overturn one (human reviewer != applicant; mandatory
+    #                                 reason; the customer's own request rides lending.intake)
     #   lending.read                — get application/loan/schedule/collateral/IFRS-9 snapshot (#id)
     #   lending.list                — list a party's applications/loans
     #   lending.disburse            — disburse an approved application (books the loan)
@@ -918,6 +921,9 @@ data:
     		"lending.writeoff",
     		"lending.collateralRegister",
     		"lending.collateralDecide",
+    		# Human review of an engine decline (GDPR Art. 22(3)); reviewer != applicant in the service.
+    		"lending.declineReview.read",
+    		"lending.declineReview.decide",
     		# ADR-0314 D4 loan-book read (LoanBookResource admits ROLE_CREDIT_RISK).
     		"lending.book.read",
     		"lending.approval.read",
@@ -1048,6 +1054,16 @@ data:
     		# ROLE_OPERATOR to any `*.read` (ADR-0314 D4).
     		"lending.book.read",
     	}
+    }
+
+    # Human review of an engine decline is a decision by a PERSON. Not in rules.yaml's role_action_matrix
+    # on purpose (matrix-allows would be the only path that could reach a machine, and it already excludes
+    # them); this veto closes the remaining ones - operator-lending-write also excludes machines, and the
+    # credit-risk desk above does not test for one, so a service account holding ROLE_CREDIT_RISK would
+    # otherwise reach it. Covers every machine, the edge included.
+    prohibited if {
+    	input.action in {"lending.declineReview.read", "lending.declineReview.decide"}
+    	principal_is_machine
     }
 
     # #10746: the ledger backfill re-posts GL history for loans whose journals never reached the ledger.

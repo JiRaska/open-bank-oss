@@ -10,7 +10,10 @@ import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
+import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.origination.OriginationState
 import io.mockk.every
@@ -18,6 +21,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -36,6 +40,7 @@ class DeclineReviewServiceTest {
     private val reviews = mockk<DeclineReviewRepository>()
     private val events = mockk<LoanEventEmitter>()
     private val emitted = mutableListOf<LendingOutboxMessage>()
+    private val saved = mutableListOf<LoanApplication>()
     private val party = UUID.randomUUID()
     private val config = DeclineReviewConfig(WINDOW_DAYS)
 
@@ -43,13 +48,17 @@ class DeclineReviewServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DeclineReviewService(applications, reviews, events, clock, config)
+        service = DeclineReviewService(applications, reviews, events, clock, config, NoOpOriginationWorkflowPort())
         every { applications.withLocked<Any>(any(), any()) } answers {
             applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<Any>>())
         }
         every { events.emit(any<LendingOutboxMessage>()) } answers {
             emitted += firstArg<LendingOutboxMessage>()
             Uni.createFrom().item(Unit)
+        }
+        every { applications.save(any()) } answers {
+            saved += firstArg<LoanApplication>()
+            Uni.createFrom().item(firstArg<LoanApplication>())
         }
         every { reviews.insert(any()) } answers { Uni.createFrom().item(firstArg<DeclineReview>()) }
         every { reviews.loadByApplication(any()) } returns Uni.createFrom().nullItem()
@@ -107,7 +116,7 @@ class DeclineReviewServiceTest {
         val result = request(app)
 
         assertThat(result.created).isTrue()
-        assertThat(result.review.status).isEqualTo(com.openbank.lending.domain.model.DeclineReviewStatus.REQUESTED)
+        assertThat(result.review.status).isEqualTo(DeclineReviewStatus.REQUESTED)
         assertThat(result.review.engineReasons).isEqualTo("AFFORDABILITY_FAILED:starter-aff-dsti")
         assertThat(result.review.policyVersions).isEqualTo("ELIGIBILITY=1,AFFORDABILITY=1")
         assertThat(result.review.engineOutcome).isEqualTo("DECLINE")
@@ -189,6 +198,125 @@ class DeclineReviewServiceTest {
         assertThat(result.review).isEqualTo(existing)
         verify(exactly = 0) { reviews.insert(any()) }
         assertThat(emitted).isEmpty()
+    }
+
+    // --- decision -------------------------------------------------------------------------------------
+
+    private fun pendingReview(app: LoanApplication) = DeclineReview(
+        UUID.randomUUID(),
+        app.id.value,
+        app.partyId,
+        OffsetDateTime.ofInstant(now, ZoneOffset.UTC),
+        "DECLINE",
+        app.decisionReasons,
+        app.policyVersions,
+        app.decidedEngineAt!!,
+    ).also { every { reviews.loadById(it.id) } returns Uni.createFrom().item(it) }
+
+    private fun claims(rows: Int = 1) = every {
+        reviews.claimDecision(any(), any(), any(), any(), any(), any())
+    } returns Uni.createFrom().item(rows)
+
+    private fun decide(review: DeclineReview, outcome: DeclineReviewStatus, reviewer: String = "reviewer-1") =
+        service.decide(
+            review.id,
+            DeclineReviewDecisionRequest(outcome, "income documents were not in the file"),
+            reviewer,
+        )
+            .await().indefinitely()
+
+    @Test
+    fun `confirm records the human decision, creates no successor and emits one confirmed event`() {
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        val decided = decide(review, DeclineReviewStatus.CONFIRMED)
+
+        assertThat(decided.status).isEqualTo(DeclineReviewStatus.CONFIRMED)
+        assertThat(decided.successorApplicationId).isNull()
+        assertThat(saved).isEmpty()
+        assertThat(emitted.map { it.eventType }).containsExactly("credit.decline_review.confirmed")
+    }
+
+    @Test
+    fun `overturn opens a linked successor in FOUR_EYES proposed by the reviewer, without the engine evidence`() {
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        val decided = decide(review, DeclineReviewStatus.OVERTURNED, reviewer = "reviewer-7")
+
+        val successor = saved.single()
+        assertThat(decided.successorApplicationId).isEqualTo(successor.id.value)
+        assertThat(successor.id).isNotEqualTo(app.id)
+        assertThat(successor.status).isEqualTo(OriginationState.FOUR_EYES)
+        assertThat(successor.proposedBy).isEqualTo("reviewer-7")
+        assertThat(successor.decidedBy).isNull()
+        assertThat(successor.predecessorApplicationId).isEqualTo(app.id.value)
+        assertThat(successor.partyId).isEqualTo(app.partyId)
+        assertThat(successor.decisionOutcome).isNull()
+        assertThat(successor.decisionInputHash).isNull()
+        assertThat(emitted.map { it.eventType })
+            .containsExactly("credit.decline_review.overturned", "credit.application.transition")
+    }
+
+    @Test
+    fun `the reviewer's free text never reaches an event`() {
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+        claims()
+
+        decide(review, DeclineReviewStatus.OVERTURNED)
+
+        assertThat(emitted).allSatisfy { assertThat(it.payload).doesNotContain("income documents") }
+    }
+
+    @Test
+    fun `the applicant cannot review their own decline`() {
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+
+        assertThat(refusalCode { decide(review, DeclineReviewStatus.OVERTURNED, reviewer = party.toString()) })
+            .isEqualTo(DeclineReviewRefusedException.SELF_REVIEW)
+        assertThat(saved).isEmpty()
+    }
+
+    @Test
+    fun `a review decided in the meantime loses the claim and writes no event`() {
+        val app = declined().also(::stubApp)
+        val review = pendingReview(app)
+        claims(rows = 0)
+
+        assertThat(refusalCode { decide(review, DeclineReviewStatus.OVERTURNED) })
+            .isEqualTo(DeclineReviewRefusedException.ALREADY_DECIDED)
+        // The successor is written before the claim (foreign key), so it is the failed transaction
+        // that removes it again. That rollback is NOT exercised here (mocks) nor in the IT.
+        assertThat(emitted).isEmpty()
+    }
+
+    @Test
+    fun `an already decided or unknown review is refused`() {
+        val app = declined().also(::stubApp)
+        val decidedReview = pendingReview(app).copy(status = DeclineReviewStatus.CONFIRMED).also {
+            every { reviews.loadById(it.id) } returns Uni.createFrom().item(it)
+        }
+        assertThat(refusalCode { decide(decidedReview, DeclineReviewStatus.OVERTURNED) })
+            .isEqualTo(DeclineReviewRefusedException.ALREADY_DECIDED)
+
+        val unknown = pendingReview(app).also { every { reviews.loadById(it.id) } returns Uni.createFrom().nullItem() }
+        assertThat(refusalCode { decide(unknown, DeclineReviewStatus.CONFIRMED) })
+            .isEqualTo(DeclineReviewRefusedException.NOT_FOUND)
+    }
+
+    @Test
+    fun `a decision needs a real reason and a decided outcome - impossible to overturn without a recorded reason`() {
+        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.OVERTURNED, "   short ") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.OVERTURNED, "") }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { DeclineReviewDecisionRequest(DeclineReviewStatus.REQUESTED, "a perfectly good reason") }
+            .isInstanceOf(IllegalArgumentException::class.java)
     }
 
     private companion object {

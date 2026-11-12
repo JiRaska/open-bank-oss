@@ -18,5 +18,11 @@ class DeclineReviewRefusedException(val code: String, message: String) : Illegal
 
         /** The bounded window after the decline has elapsed. */
         const val WINDOW_ELAPSED: String = "REVIEW_WINDOW_ELAPSED"
+
+        /** The review already has a decision. */
+        const val ALREADY_DECIDED: String = "REVIEW_ALREADY_DECIDED"
+
+        /** The reviewer is the applicant. */
+        const val SELF_REVIEW: String = "SELF_REVIEW"
     }
 }

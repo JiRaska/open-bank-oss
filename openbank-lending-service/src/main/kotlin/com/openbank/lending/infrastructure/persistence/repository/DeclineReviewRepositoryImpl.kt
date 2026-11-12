@@ -6,12 +6,15 @@ package com.openbank.lending.infrastructure.persistence.repository
 
 import com.openbank.lending.application.port.out.DeclineReviewRepository
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.infrastructure.persistence.entity.DeclineReviewEntity
+import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepositoryBase
 import io.quarkus.hibernate.reactive.panache.common.WithSession
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
@@ -32,8 +35,42 @@ class DeclineReviewRepositoryImpl :
     }
 
     @WithSession
+    override fun loadById(id: UUID): Uni<DeclineReview?> =
+        find("id", id).firstResult<DeclineReviewEntity>().map { it?.let(::toDomain) }
+
+    @WithSession
     override fun loadByApplication(applicationId: UUID): Uni<DeclineReview?> =
         find("applicationId", applicationId).firstResult<DeclineReviewEntity>().map { it?.let(::toDomain) }
+
+    @WithSession
+    override fun listPending(limit: Int): Uni<List<DeclineReview>> =
+        find("status = ?1 order by requestedAt, id", DeclineReviewStatus.REQUESTED)
+            .page<DeclineReviewEntity>(0, limit).list<DeclineReviewEntity>().map { rows -> rows.map(::toDomain) }
+
+    @WithTransaction
+    override fun claimDecision(
+        id: UUID,
+        to: DeclineReviewStatus,
+        reviewedBy: String,
+        reviewedAt: OffsetDateTime,
+        reason: String,
+        successorApplicationId: UUID?,
+    ): Uni<Int> = Panache.getSession().flatMap { session ->
+        // Flush first: the caller has just persisted the successor application in this same
+        // transaction, and Hibernate does not auto-flush it before an UPDATE on another table, so the
+        // foreign key on successor_application_id would otherwise see a row that is not there yet.
+        session.flush().flatMap {
+            session.createMutationQuery(CLAIM_HQL)
+                .setParameter("to", to)
+                .setParameter("by", reviewedBy)
+                .setParameter("at", reviewedAt)
+                .setParameter("reason", reason)
+                .setParameter("successor", successorApplicationId)
+                .setParameter("id", id)
+                .setParameter("from", DeclineReviewStatus.REQUESTED)
+                .executeUpdate()
+        }
+    }
 
     private fun toEntity(r: DeclineReview) = DeclineReviewEntity().also {
         it.id = r.id
@@ -66,4 +103,12 @@ class DeclineReviewRepositoryImpl :
         reviewReason = e.reviewReason,
         successorApplicationId = e.successorApplicationId,
     )
+
+    private companion object {
+        /** The `and status = :from` is the whole point: without it this is a blind overwrite. */
+        const val CLAIM_HQL =
+            "update DeclineReviewEntity set status = :to, reviewedBy = :by, reviewedAt = :at, " +
+                "reviewReason = :reason, successorApplicationId = :successor " +
+                "where id = :id and status = :from"
+    }
 }

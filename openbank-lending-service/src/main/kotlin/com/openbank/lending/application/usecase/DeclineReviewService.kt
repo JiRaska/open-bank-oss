@@ -5,15 +5,24 @@
 package com.openbank.lending.application.usecase
 
 import com.openbank.lending.application.port.out.DeclineReviewRepository
+import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
+import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.domain.model.DeclineReview
+import com.openbank.lending.domain.model.DeclineReviewDecisionRequest
+import com.openbank.lending.domain.model.DeclineReviewStatus
 import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
+import com.openbank.libs.lending.origination.OriginationActorKind
 import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.libs.lending.origination.OriginationStateMachine
+import com.openbank.libs.lending.origination.OriginationTransition
+import com.openbank.libs.lending.origination.OriginationTransitionResult
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -22,21 +31,27 @@ import java.util.UUID
  * Customer-requested human review of a decision-engine decline.
  *
  * The declined application stays DECLINED, which is terminal in the shared origination graph
- * (ADR-0211 D1) — nothing here touches that graph. The review is its own record, one per application.
- * This slice records the request, with the engine's reasons and policy versions snapshotted for the
- * reviewer; the staff decision follows separately.
+ * (ADR-0211 D1) — nothing here touches that graph. The review is its own record. OVERTURNED opens a
+ * SUCCESSOR application that enters FOUR_EYES with the reviewer recorded as proposer, so the existing
+ * four-eyes `decide` (approver != proposer) still makes the credit decision; the reviewer cannot also
+ * approve it, and the engine outcome binds neither of them. CONFIRMED just records the human decision.
  *
- * Events carry identifiers and machine codes only.
+ * Events carry identifiers and machine codes only; the reviewer's free-text reason stays in the
+ * review row and is never published.
  */
 @ApplicationScoped
+@Suppress("LongParameterList")
 class DeclineReviewService(
     private val applications: LoanApplicationRepository,
     private val reviews: DeclineReviewRepository,
     private val events: LoanEventEmitter,
     private val clock: Clock,
     private val config: DeclineReviewConfig,
+    private val workflowPort: OriginationWorkflowPort,
 ) : DeclineReviewUseCase {
 
+    private val machine = OriginationStateMachine()
+    private val log = Logger.getLogger(DeclineReviewService::class.java)
     private val eventsOf = DeclineReviewEvents(clock)
 
     /**
@@ -89,10 +104,139 @@ class DeclineReviewService(
     private fun isEngineDecline(a: LoanApplication): Boolean =
         a.status == OriginationState.DECLINED && a.decidedBy == null && a.decisionOutcome == ENGINE_DECLINE
 
+    override fun listPending(limit: Int): Uni<List<DeclineReview>> = reviews.listPending(limit.coerceIn(1, MAX_LIST))
+
+    override fun decide(reviewId: UUID, request: DeclineReviewDecisionRequest, reviewer: String): Uni<DeclineReview> {
+        require(reviewer.isNotBlank()) { "Reviewer identity is required" }
+        return reviews.loadById(reviewId).flatMap { review ->
+            when {
+                review == null -> refused(DeclineReviewRefusedException.NOT_FOUND, "review not found")
+                review.status != DeclineReviewStatus.REQUESTED ->
+                    refused(DeclineReviewRefusedException.ALREADY_DECIDED, "review already decided")
+                reviewer == review.partyId.toString() ->
+                    refused(DeclineReviewRefusedException.SELF_REVIEW, "the applicant cannot review their own decline")
+                // Timers are armed only after the transaction has committed the successor.
+                else -> decideLocked(review, request, reviewer).call { d ->
+                    d.successorApplicationId?.let { armFourEyesTimer(LoanApplicationId(it)) }
+                        ?: Uni.createFrom().item(Unit)
+                }
+            }
+        }
+    }
+
+    /**
+     * Claim the decision, write the successor (OVERTURNED only) and the events in ONE transaction,
+     * under the declined application's lock: a decided review without its successor, or an announced
+     * overturn that was rolled back, must not exist.
+     */
+    private fun decideLocked(review: DeclineReview, request: DeclineReviewDecisionRequest, reviewer: String) =
+        applications.withLocked(LoanApplicationId(review.applicationId)) { original ->
+            if (original == null) {
+                refused(DeclineReviewRefusedException.NOT_FOUND, "declined application not found")
+            } else {
+                val overturn = request.outcome == DeclineReviewStatus.OVERTURNED
+                val successor = if (overturn) successorOf(original, reviewer) else null
+                val decided = review.copy(
+                    status = request.outcome,
+                    reviewedBy = reviewer,
+                    reviewedAt = OffsetDateTime.now(clock),
+                    reviewReason = request.reason.trim(),
+                    successorApplicationId = successor?.id?.value,
+                )
+                // Successor first: the review row's successor_application_id is a foreign key, so the
+                // claim can only name a row that already exists. A lost claim fails the whole
+                // transaction, which takes the successor back out with it.
+                (successor?.let { applications.save(it).replaceWithVoid() } ?: Uni.createFrom().voidItem())
+                    .flatMap {
+                        reviews.claimDecision(
+                            decided.id,
+                            decided.status,
+                            reviewer,
+                            checkNotNull(decided.reviewedAt),
+                            checkNotNull(decided.reviewReason),
+                            decided.successorApplicationId,
+                        )
+                    }
+                    .flatMap { claimed ->
+                        if (claimed == 0) {
+                            refused<DeclineReview>(
+                                DeclineReviewRefusedException.ALREADY_DECIDED,
+                                "review already decided",
+                            )
+                        } else {
+                            emitAll(
+                                listOfNotNull(
+                                    eventsOf.decidedEvent(decided, reviewer),
+                                    successor?.let { eventsOf.successorEntryEvent(it, reviewer) },
+                                ),
+                            ).replaceWith(decided)
+                        }
+                    }
+            }
+        }
+
+    private fun emitAll(messages: List<LendingOutboxMessage>): Uni<Unit> =
+        messages.fold(Uni.createFrom().item(Unit)) { acc, m -> acc.flatMap { events.emit(m) } }
+
+    /**
+     * The successor is the declined application's facts carried forward, with NO engine evidence copied
+     * (the review row holds that snapshot) and the reviewer as proposer. The entry edge is checked
+     * against the shared state machine (DECISION_PENDING -> FOUR_EYES is the edge the flow normally
+     * takes) rather than asserted, so a change to the graph surfaces here.
+     */
+    private fun successorOf(original: LoanApplication, reviewer: String): LoanApplication {
+        val entry = machine.apply(
+            OriginationTransition(
+                applicationId = original.id.value.toString(),
+                from = OriginationState.DECISION_PENDING,
+                to = OriginationState.FOUR_EYES,
+                actor = reviewer,
+                actorKind = OriginationActorKind.HUMAN,
+                reason = "decline review overturned",
+                occurredAt = clock.instant(),
+                packVersion = original.packVersion?.toString(),
+            ),
+        )
+        check(entry is OriginationTransitionResult.Applied) { "successor entry refused by the state machine" }
+        return original.copy(
+            id = LoanApplicationId.random(),
+            status = entry.newState,
+            proposedBy = reviewer,
+            decidedBy = null,
+            decisionReason = null,
+            decidedAt = null,
+            createdAt = OffsetDateTime.now(clock),
+            decisionOutcome = null,
+            decisionPriceBand = null,
+            decisionReasons = null,
+            decisionMatchedRules = null,
+            policyVersions = null,
+            decisionInputHash = null,
+            decidedEngineAt = null,
+            decisionDsti = null,
+            decisionDti = null,
+            signatureArtefactHash = null,
+            predecessorApplicationId = original.id.value,
+        )
+    }
+
+    private fun armFourEyesTimer(successorId: LoanApplicationId): Uni<Unit> =
+        workflowPort.stateEntered(successorId, OriginationState.FOUR_EYES, null).replaceWith(Unit)
+            // The decision is already committed; a timer that did not arm costs the SLA escalation, not
+            // the review. Logged without the cause's message, which can carry payload values.
+            .onFailure().recoverWithItem { e ->
+                log.errorf(
+                    "four-eyes timer NOT armed for successor %s, cause=%s",
+                    successorId.value,
+                    e.javaClass.simpleName,
+                )
+            }
+
     private fun <T> refused(code: String, message: String): Uni<T> =
         Uni.createFrom().failure(DeclineReviewRefusedException(code, message))
 
-    private companion object {
-        const val ENGINE_DECLINE = "DECLINE"
+    companion object {
+        private const val ENGINE_DECLINE = "DECLINE"
+        private const val MAX_LIST = 100
     }
 }
