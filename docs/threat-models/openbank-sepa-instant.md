@@ -78,6 +78,12 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 5. Residual risks / assumptions
 
+Synthetic payment origin comes from the authenticated shared ingress filter and is immutable after
+creation. Later transitions derive their Kafka taint from the locked payment row, independent of
+the transition caller. Legacy rows retain unknown provenance and do not acquire a synthetic
+marker. The migration preserves existing rows, and rollback to an older artifact requires pausing
+synthetic submissions and transitions before that artifact can emit events.
+
 - **Irrevocability** ⇒ pre-send fraud checks + SCA are the key controls; post-hoc recall is best-effort.
 - Idempotency-key mandatory (instant retries must not double-send).
 - **Four-eyes `PendingApproval` records are TTL-bounded (Redis), not a permanent audit

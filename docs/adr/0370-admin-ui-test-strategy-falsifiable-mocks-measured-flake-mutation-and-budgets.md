@@ -1,7 +1,8 @@
 ---
 date: 2026-11-11
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#15685 — U1 mock-contract guard is built; U2–U8 are not"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

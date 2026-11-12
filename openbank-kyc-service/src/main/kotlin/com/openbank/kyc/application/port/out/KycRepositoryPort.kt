@@ -89,13 +89,29 @@ interface KycCaseRepository {
     /** Count cases in a given [status]. Used for funnel KPI tiles (ADR-0068). */
     suspend fun countByStatus(status: KycCaseStatus): Long
 
-    suspend fun update(case: KycCase): KycCase
-
-    /** Transactional-outbox counterpart of [update] — see [save] with a [KycEvent]. */
-    suspend fun update(case: KycCase, event: KycEvent): KycCase
+    /**
+     * Writes [case] over its stored row — unless that row was erased (GDPR Art. 17) or is gone.
+     *
+     * The condition is enforced AT THE WRITE: the row is locked and its erasure mark read inside
+     * the transaction that writes, so an erasure that lands after the caller read the case cannot
+     * be overwritten. A caller's own earlier "is it erased?" read proves nothing by the time it
+     * writes.
+     *
+     * @return [case] when it was written; **null when nothing was written**. A null is not an
+     *   error and must not be retried: the record is erased and is to be left alone.
+     */
+    suspend fun update(case: KycCase): KycCase?
 
     /**
-     * OPEN cases whose `expires_at` is at or before [threshold], oldest first, capped at [limit].
+     * Transactional-outbox counterpart of [update] — see [save] with a [KycEvent]. When the write
+     * is skipped (null), [event] is NOT stored: an erased case publishes nothing.
+     */
+    suspend fun update(case: KycCase, event: KycEvent): KycCase?
+
+    /**
+     * OPEN, un-erased cases whose `expires_at` is at or before [threshold], oldest first, capped
+     * at [limit]. An erased case cannot be written ([update] skips it), so returning it would only
+     * fill the batch with rows the sweep can never expire.
      *
      * Deliberately OPEN only, not every non-terminal status (#8548). A case in `UNDER_REVIEW` has
      * its mandatory checks recorded and is waiting on a four-eyes decision — expiring it from a
@@ -108,6 +124,13 @@ interface KycCaseRepository {
     suspend fun findExpirableOpenCases(threshold: Instant, limit: Int): List<KycCase>
 
     suspend fun anonymizeByPartyId(partyId: UUID, now: Instant)
+
+    /**
+     * True when the PII of [caseId] was erased (GDPR Art. 17). An erased case is a retained
+     * record, not a live one: no screen result may be written to it and it is never approved.
+     * False for an unknown id.
+     */
+    suspend fun isErased(caseId: UUID): Boolean
 
     /**
      * Distinct party ids with a **non-terminal** KYC case (the ADR-0256 re-screening candidate
