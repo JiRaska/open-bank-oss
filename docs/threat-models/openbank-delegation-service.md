@@ -117,7 +117,7 @@ and require a human operator plus OPA; client applications do not receive a bank
 ## Outbound authentication (added 2026-08-06)
 
 Every REST client this service owns — sca-service, pid-service, party-service, account-service,
-card-issuance —
+card-issuance, document-service —
 carries the shared `openbank-services` client-credentials token via
 `OidcClientRequestReactiveFilter`. Before the outbound-authentication fix, the original four called
 out with **no Authorization header**
@@ -142,6 +142,40 @@ bundle, not introduced here. It is why the callee-side rules gate on action, not
 
 No test could see this: every test mocks the client interface, so nothing exercises the wire. The
 gap closes only with a consumer pact or a run against a deployed stack.
+
+### Document ownership read (added 2026-11-12, ADR-0375 D5)
+
+A sixth outbound edge: `DocumentOwnershipRestClient` calls document-service
+`GET /api/v1/documents/{id}/owner` before an OBJECT_READ grant over a document is minted. It is the
+narrowest of the six and deliberately does NOT ride the shared identity above.
+
+- **Principal.** The NAMED `m2m` oidc-client (`openbank-delegation`, ROLE_API only), so the callee
+  sees `service-account-openbank-delegation` rather than the fleet-wide subject. document-service's
+  OPA extension pins `document.verifyOwnership` to that exact subject and **vetoes every other
+  caller explicitly** — the veto is load-bearing, because base `rest.rego` grants the customer edge
+  the whole `document.` family. Measured with `opa eval` against the generated bundle, not read off
+  the rego: the allow fires for that subject with reason `service-delegation-document-ownership`,
+  while the shared subject, the edge and `document.read` all resolve false.
+- **Why not `document.read`.** That action returns the whole metadata record and is granted to other
+  subjects. The authority needed to MINT a delegation must not also be able to read the document the
+  delegation is over, so the new action answers only who owns it.
+- **Information disclosure.** The response is `{id, partyId}`. A 404 covers both an unknown document
+  and one with no owner recorded, so the boundary does not leak document existence to a caller that
+  guesses ids.
+- **What this closes.** Before it, this client answered `UNVERIFIABLE` for every object resource
+  type and the offer path refuses on that, so NO object grant could be minted at all — while
+  customer-edge's reader for a document grant was already built. Both sides' tests were green
+  because each mocked the other. T1 (a grant naming a stranger's resource) is now actually enforced
+  for DOCUMENT instead of being enforced by universal refusal.
+- **Residual, unchanged in kind.** As with the five clients above, no test exercises the wire: the
+  tests mock the client interface. The `opa eval` probe covers the authorization half — the half
+  that was wrong — not the transport half. A missing filter would surface as `UNVERIFIABLE`, i.e.
+  as the fail-closed verdict naming the check rather than the cause, exactly as recorded above.
+- **PAYMENT and STATEMENT still answer `UNVERIFIABLE`, and by measurement rather than omission.**
+  statement-service is addressed by `accountId` and holds no statement object with an id of its own;
+  a payment id resolves in no single service, since six rails own payments and nothing maps an id to
+  its rail. Neither has an owner to ask, so both remain refused at the writer until those pairs
+  leave `CAPABILITY_MATRIX`.
 
 ## Out of scope (tracked as follow-ups)
 
@@ -194,6 +228,17 @@ gap closes only with a consumer pact or a run against a deployed stack.
   management applies its own current-mandate checks.
 
 ## Change log
+
+- **2026-11-12** — **Document ownership read added as a sixth outbound edge** (ADR-0375 D5).
+  `DocumentOwnershipRestClient` reads `GET /api/v1/documents/{id}/owner` on the NAMED `m2m`
+  principal (`service-account-openbank-delegation`, ROLE_API), under document-service's own OPA
+  action `document.verifyOwnership`, which is pinned to that subject and vetoed for every other
+  caller. New outbound network path and new privilege, both narrow: the response carries only
+  `{id, partyId}`, and the action deliberately excludes `document.read`. Elevation of privilege is
+  bounded by the callee-side pin rather than by this service's own restraint. What it closes: the
+  DOCUMENT branch previously returned `UNVERIFIABLE`, which the offer path refuses, so no object
+  grant of any type could be minted while a reader for one was already deployed. Rollback: revert
+  the branch; the service returns to refusing every object grant, which is fail-closed.
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `delegation_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
