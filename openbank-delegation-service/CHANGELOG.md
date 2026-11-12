@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** bind approval replay to the frozen payment payload ([#15716](https://github.com/JiRaska/open-bank-oss/issues/15716)) ([ad63d63](https://github.com/JiRaska/open-bank-oss/commit/ad63d6306340cfff8c9be9350bfd6e3c399034f5))
+
 ## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
 
 
