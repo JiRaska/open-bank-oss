@@ -28,7 +28,7 @@
 |---|---|
 | Access (Art. 15) | `GET /api/v1/parties/{id}` returns the subject's record (encrypted birth number is not exposed) |
 | Rectification (Art. 16) | `PATCH /contact`, `/sync/bankid`, `/sync/rob` — all audit-logged via events |
-| Erasure (Art. 17) | **Restricted** — AMLD 6 (10 years after relationship termination) overrides erasure for identity/KYC data |
+| Erasure (Art. 17) | **Implemented** — on `PARTY_ERASED` every personal column and identifier (encrypted RČ, blind indices, document numbers) is anonymised or deleted in place; the anonymised shell row is kept under an `erased_at` stamp. The AML record itself is retained by kyc-service. See `04-data` (Erasure) |
 | Restriction (Art. 18) | `PATCH /status` → `SUSPENDED`; relationships can be terminated |
 | Portability (Art. 20) | personal data is structured JSON via the read API (no dedicated export endpoint today — TBD) |
 | Object (Art. 21) | N/A (no marketing/profiling processing in this service) |
@@ -47,7 +47,7 @@ The Czech birth number is a sensitive national identifier. It is stored **only**
 
 | Record | Retention after relationship end |
 |---|---|
-| Party identity + KYC/AML | 10 years (AMLD 6 Art. 40, Czech AML Act) |
+| Party identity + KYC/AML | 10 years (AMLD 6 Art. 40, Czech AML Act) — except after `PARTY_ERASED`, where personal data is anonymised at once and only the shell remains |
 | ID documents | per AML Act retention |
 | `pid_outbox` SENT rows | operational only, prunable |
 

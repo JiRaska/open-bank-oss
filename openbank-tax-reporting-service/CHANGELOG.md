@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.53.0...tax-reporting-service-v0.54.0) (2026-11-12)
+
+
+### Features
+
+* **account:** serve the GSFT deposit roster as of a Czech date ([#15652](https://github.com/JiRaska/open-bank-oss/issues/15652)) ([c68575d](https://github.com/JiRaska/open-bank-oss/commit/c68575daf7fe2e346e97951c22e2ac4fdbc04340))
+
 ## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.52.0...tax-reporting-service-v0.53.0) (2026-11-11)
 
 

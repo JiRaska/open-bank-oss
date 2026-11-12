@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "b4f3765afd5e3344"
+        openbank.tech/policy-checksum: "46bdb7f79e3acbf2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: account-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-e8e3b10a@sha256:746044aa78965d0c5164219ef285bc3dc9405c8ce195a1871207879c0a093fe9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-account-service:sandbox-c68575da@sha256:dd10af350af8b95d0b4f3b1802f2a0bbb69360b4dec3df618e5dea4aef3d3493
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -7,7 +7,7 @@ openapi: "3.1.0"
 
 info:
   title: OpenBank Copilot Service API
-  version: "1.5.0"
+  version: "1.6.0"
   description: |
     Customer-facing AI assistant (mobile copilot), per ADR-0089.
 
@@ -205,10 +205,18 @@ components:
             `message` and is never treated as instructions.
     ChatReply:
       type: object
-      required: [conversationId, reply]
+      required: [conversationId, reply, aiGenerated, disclosure]
       properties:
         conversationId:
           type: string
+        aiGenerated:
+          type: boolean
+          description: |
+            Always true. Every reply (answers, refusals, error fallbacks) is AI-generated; clients
+            must make that visible to the customer (EU AI Act Art. 50(1)).
+        disclosure:
+          type: string
+          description: Short Czech disclosure text stating the reply was produced by an AI assistant.
         reply:
           type: string
           description: Narrated reply; any figures are rendered from tool results, not generated.

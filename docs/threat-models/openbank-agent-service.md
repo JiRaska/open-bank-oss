@@ -139,8 +139,11 @@ browser-provider hiding and the unchanged client-credentials fallback.
   protected by the per-event hash chain + externally-signed anchors (ADR-0086 / ADR-0031 D5, #2383).
 - **T-T2 — policy bypass.** The in-process charter allow-list (ADR-0080) denies out-of-charter
   capabilities *before* the PDP, so a compromised/unreachable OPA sidecar cannot widen privilege
-  (fail-closed; `block` mode keeps blocking). PDP connectivity errors degrade to advisory only for
-  *non-charter-denied* tools, logged at WARN.
+  (fail-closed; `block` mode keeps blocking). In `block` mode a PDP connectivity error is now
+  DENIED for every tool (#15758; previously it degraded to advisory with a WARN), reported as its
+  own `pdp_unavailable_denied` outcome on `openbank.agent.policy.gate.decisions`. In `advisory`
+  mode the call still proceeds. **Residual:** an OPA outage halts all agent tool calls in `block`
+  mode (availability traded for integrity).
 
 ### Repudiation
 
@@ -266,6 +269,9 @@ browser-provider hiding and the unchanged client-credentials fallback.
   yet — that is a separate, later decision (registry entry + ADR-0148 evals), not this change.
 
 ## 4. Change log
+
+- **2026-11-11 (#15758 item 5):** `AgentPolicyGate` fails closed when the policy decision point errors in
+  `block` mode (EU AI Act Art. 14). New outcome `pdp_unavailable_denied`. Rollback: revert the commit.
 
 - **2026-10-16 (#12883):** ADR-0031 phase 3 merge-evidence ingest. New inbound trust boundary (g):
   GitHub Actions `record-agent-merge` → `POST /api/v1/agent-merge-records` with a per-run
