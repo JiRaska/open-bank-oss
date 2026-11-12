@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.43.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.42.0...ledger-service-v1.43.0) (2026-11-11)
+
+
+### Features
+
+* **ledger:** allocate the fiscal-year result to retained earnings (ADR-0096 D3) ([#15548](https://github.com/JiRaska/open-bank-oss/issues/15548)) ([51115c7](https://github.com/JiRaska/open-bank-oss/commit/51115c7d62374060125157f942f553a5206e42e7))
+
 ## [1.42.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.41.0...ledger-service-v1.42.0) (2026-11-09)
 
 
