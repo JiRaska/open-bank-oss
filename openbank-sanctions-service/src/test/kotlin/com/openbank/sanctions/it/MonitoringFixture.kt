@@ -69,6 +69,18 @@ internal class MonitoringFixture(
         lastIngestWrote = written
     }
 
+    /** A registry row as registration writes it, for an owner the test does not call as. */
+    fun plant(owner: String, subjectRef: String, name: String = UNLISTED) {
+        sql(
+            "WITH s AS (INSERT INTO sanctions_monitored_subjects " +
+                "(id, owner_service, subject_ref, entity_type, name, search_names, registered_at, updated_at) " +
+                "VALUES (gen_random_uuid(), '$owner', '$subjectRef', 'INDIVIDUAL', '$name', " +
+                "ARRAY[lower('$name')], now(), now()) RETURNING id, search_names) " +
+                "INSERT INTO sanctions_monitored_subject_names (subject_id, search_name) " +
+                "SELECT s.id, n FROM s CROSS JOIN unnest(s.search_names) AS n",
+        )
+    }
+
     var lastIngestWrote: Int = -1
         private set
 
@@ -87,7 +99,11 @@ internal class MonitoringFixture(
         const val ENTRY_PREFIX = "monitoring-it-"
         const val SUBJECT_PREFIX = "monitoring-it-subject-"
         const val SOURCE_LIST = "SYNTHETIC_MONITORING"
-        const val OWNER = "kyc-service"
+
+        /** The client id of the service account the tests call as; it becomes the owner. */
+        const val OWNER = "openbank-kyc"
+        const val OTHER_OWNER = "openbank-onboarding"
+        const val SHARED_CLIENT = "openbank-services"
         const val COUNTRY = "XM"
         const val LISTED = "Zorvath Quellinbrook"
         const val OTHER_LISTED = "Brindlemoor Ashquith"

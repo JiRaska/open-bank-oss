@@ -25,6 +25,7 @@ data class MonitoredSubjectRequest(
 
 /** What a caller learns about its registration. It never says whether anything matched. */
 data class MonitoredSubjectRegistration(
+    /** The caller's own client id, as resolved from its token. */
     val ownerService: String,
     val subjectRef: String,
     val registeredAt: Instant,
@@ -33,6 +34,10 @@ data class MonitoredSubjectRegistration(
     val created: Boolean,
 )
 
+/**
+ * `ownerService` is always the caller's own verified client id, resolved from its token by the
+ * REST adapter; it is never a value the caller sends.
+ */
 interface SanctionsMonitoringUseCase {
     /** Idempotent: registering the same attributes again changes nothing; new attributes replace the old. */
     suspend fun register(

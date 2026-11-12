@@ -28,7 +28,6 @@ import com.openbank.sanctions.it.MonitoringFixture.Companion.UNLISTED
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
 import jakarta.inject.Inject
@@ -61,7 +60,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+@AsKycService
 class SanctionsOngoingMonitoringIT {
 
     @Inject
@@ -110,10 +109,15 @@ class SanctionsOngoingMonitoringIT {
                 """{"entityType":"INDIVIDUAL","name":"$name","aliases":$aliases""" +
                     (country?.let { ""","country":"$it"""" } ?: "") + "}",
             )
-            .put("/api/v3/sanctions/monitored-subjects/$OWNER/$subjectRef")
+            .put("/api/v3/sanctions/monitored-subjects/$subjectRef")
 
     private fun deregister(subjectRef: String): Response =
-        RestAssured.given().delete("/api/v3/sanctions/monitored-subjects/$OWNER/$subjectRef")
+        RestAssured.given().delete("/api/v3/sanctions/monitored-subjects/$subjectRef")
+
+    private fun indexedNames(subjectRef: String): List<String> = db.query(
+        "SELECT n.search_name FROM sanctions_monitored_subject_names n " +
+            "JOIN sanctions_monitored_subjects s ON s.id = n.subject_id WHERE s.subject_ref = '$subjectRef'",
+    ) { it.getString(1) }
 
     private fun delta(): MonitoringRunOutcome = db.onEventLoop { monitoring.runDelta() }
 
@@ -354,6 +358,10 @@ class SanctionsOngoingMonitoringIT {
         assertThat(created.statusCode).isEqualTo(201)
         assertThat(created.jsonPath().getMap<String, Any>("").keys)
             .containsExactlyInAnyOrder("ownerService", "subjectRef", "registeredAt", "updatedAt")
+        assertThat(created.jsonPath().getString("ownerService"))
+            .describedAs("the owner is the caller's own client, read from its token").isEqualTo(OWNER)
+        assertThat(indexedNames(subject)).describedAs("one indexed name per search name")
+            .containsExactly(UNLISTED.lowercase())
         assertThat(
             Instant.parse(created.jsonPath().getString("registeredAt")),
         ).isBetween(before, Instant.now().plusSeconds(1))
@@ -375,6 +383,8 @@ class SanctionsOngoingMonitoringIT {
             ),
         )
             .describedAs("new attributes replace the old and are due for a baseline").isEqualTo(1)
+        assertThat(indexedNames(subject)).describedAs("the indexed names are replaced with the attributes")
+            .containsExactly(LISTED.lowercase())
     }
 
     @Test
@@ -385,12 +395,8 @@ class SanctionsOngoingMonitoringIT {
         assertThat(register(subject, UNLISTED, country = "XYZ").statusCode).isEqualTo(400)
         // A NUL arrives escaped inside JSON; only the decoded value shows it.
         assertThat(register(subject, "Nul\\u0000Byte").statusCode).isEqualTo(400)
-        val badOwner = RestAssured.given().contentType("application/json")
-            .body("""{"entityType":"INDIVIDUAL","name":"$UNLISTED"}""")
-            .put("/api/v3/sanctions/monitored-subjects/Not_A_Service/$subject")
-        assertThat(badOwner.statusCode).isEqualTo(400)
         val noBody = RestAssured.given().contentType("application/json")
-            .put("/api/v3/sanctions/monitored-subjects/$OWNER/$subject")
+            .put("/api/v3/sanctions/monitored-subjects/$subject")
         assertThat(noBody.statusCode).isEqualTo(400)
 
         assertThat(db.count("sanctions_monitored_subjects")).isZero()

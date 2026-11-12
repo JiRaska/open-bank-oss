@@ -262,16 +262,17 @@ Dostupné od verze API kontraktu 3.3.0. Chráněno stejně jako `POST /api/v3/sa
 ### Registrace nebo aktualizace sledovaného subjektu
 
 ```
-PUT /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-`ownerService` je registrující služba (například `kyc-service`); `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
+Vlastníkem registrace je volající služba, určená klientem, kterému byl vydán její service-account token (například `openbank-kyc`); žádná hodnota požadavku ho neurčuje, takže služba registruje, nahrazuje a maže jen své vlastní subjekty. `subjectRef` je hodnota, kterou tato služba posílá jako `subjectId` při kontrole subjektu, a platí v rámci volajícího: stejná reference u dvou volajících jsou dva subjekty. Tělo nese `entityType`, `name` a volitelně `aliases`, `dateOfBirth`, `nationality`, `country`: stejné hodnoty jako při živé kontrole subjektu a žádné identifikátory dokladů.
 
 | Stav | Význam |
 |---|---|
 | 201 | Subjekt je nově sledován |
 | 200 | Už byl registrován; stejné atributy nic nemění, jiné nahradí uložené |
 | 400 | Neplatná hodnota v cestě nebo v těle (prázdné jméno, alias `null`, neplatný formát země, znak NUL) |
+| 403 | Volající není služba pod vlastním service accountem: token osoby, sdílený klient flotily, nebo žádný ověřený token |
 | 503 | Monitoring není v tomto prostředí zapnut; nic nebylo uloženo |
 
 Odpověď popisuje registraci (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). Nikdy neříká, zda subjekt něčemu odpovídá.
@@ -279,10 +280,10 @@ Odpověď popisuje registraci (`ownerService`, `subjectRef`, `registeredAt`, `up
 ### Odregistrace sledovaného subjektu
 
 ```
-DELETE /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-Smaže řádek registru i jeho nálezy. Vždy 204, ať subjekt registrován byl, nebo ne, a funguje i při vypnutém monitoringu. Volá se při ukončení vztahu a při výmazu.
+Smaže řádek registru volajícího i jeho nálezy. 204, ať volající subjekt registrován měl, nebo ne, a funguje i při vypnutém monitoringu; 403 jako u registrace. Subjektu, který pod stejnou referencí registrovala jiná služba, se nedotkne. Volá se při ukončení vztahu a při výmazu.
 
 ### Událost nálezu
 

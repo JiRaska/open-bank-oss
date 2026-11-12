@@ -14,7 +14,6 @@ import com.openbank.sanctions.it.MonitoringFixture.Companion.OWNER
 import com.openbank.sanctions.it.MonitoringFixture.Companion.SUBJECT_PREFIX
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -32,7 +31,7 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+@AsKycService
 class SanctionsMonitoringDisabledIT {
 
     @Inject
@@ -55,12 +54,7 @@ class SanctionsMonitoringDisabledIT {
     @AfterEach
     fun tearDown() = db.cleanUp()
 
-    private fun plant(subjectRef: String) = db.sql(
-        "INSERT INTO sanctions_monitored_subjects " +
-            "(id, owner_service, subject_ref, entity_type, name, search_names, registered_at, updated_at) " +
-            "VALUES (gen_random_uuid(), '$OWNER', '$subjectRef', 'INDIVIDUAL', '$LISTED', " +
-            "ARRAY[lower('$LISTED')], now(), now())",
-    )
+    private fun plant(subjectRef: String) = db.plant(OWNER, subjectRef, LISTED)
 
     @Test
     fun `with the flag off a registered subject matching an ingested entry raises no finding`() {
@@ -80,7 +74,7 @@ class SanctionsMonitoringDisabledIT {
     fun `with the flag off registration is refused with 503 and stores nothing`() {
         val response = RestAssured.given().contentType("application/json")
             .body("""{"entityType":"INDIVIDUAL","name":"$LISTED"}""")
-            .put("/api/v3/sanctions/monitored-subjects/$OWNER/${SUBJECT_PREFIX}refused")
+            .put("/api/v3/sanctions/monitored-subjects/${SUBJECT_PREFIX}refused")
 
         assertThat(response.statusCode).isEqualTo(503)
         assertThat(db.count("sanctions_monitored_subjects")).isZero()
@@ -90,7 +84,7 @@ class SanctionsMonitoringDisabledIT {
     fun `with the flag off deregistration still deletes`() {
         plant("${SUBJECT_PREFIX}erase")
 
-        val response = RestAssured.given().delete("/api/v3/sanctions/monitored-subjects/$OWNER/${SUBJECT_PREFIX}erase")
+        val response = RestAssured.given().delete("/api/v3/sanctions/monitored-subjects/${SUBJECT_PREFIX}erase")
 
         assertThat(response.statusCode).isEqualTo(204)
         assertThat(db.count("sanctions_monitored_subjects")).isZero()

@@ -319,16 +319,17 @@ Available from API contract 3.3.0. Protected like `POST /api/v3/sanctions/screen
 ### Register or update a monitored subject
 
 ```
-PUT /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+PUT /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-`ownerService` is the registering service (for example `kyc-service`); `subjectRef` is the value that service sends as `subjectId` when it screens the subject. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
+The owner of the registration is the calling service, identified by the client its service-account token was issued to (for example `openbank-kyc`); no request value names it, so a service registers, replaces and deletes only its own subjects. `subjectRef` is the value that service sends as `subjectId` when it screens the subject, and is scoped to the caller: the same reference under two callers is two subjects. The body carries `entityType`, `name` and optionally `aliases`, `dateOfBirth`, `nationality`, `country`: the same values as on the subject's live screen, and no document identifiers.
 
 | Status | Meaning |
 |---|---|
 | 201 | The subject is now monitored |
 | 200 | It was already registered; identical attributes change nothing, different ones replace the stored ones |
 | 400 | Invalid path value or body (blank name, `null` alias, unknown country format, NUL character) |
+| 403 | The caller is not a service under its own service account: a person's token, the fleet's shared client, or no verified token |
 | 503 | Monitoring is not enabled in this environment; nothing was stored |
 
 The response describes the registration (`ownerService`, `subjectRef`, `registeredAt`, `updatedAt`). It never says whether the subject matches anything.
@@ -336,10 +337,10 @@ The response describes the registration (`ownerService`, `subjectRef`, `register
 ### Deregister a monitored subject
 
 ```
-DELETE /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}
+DELETE /api/v3/sanctions/monitored-subjects/{subjectRef}
 ```
 
-Deletes the registry row and its findings. Always 204, whether or not the subject was registered, and it works while monitoring is disabled. Call it on offboarding and on erasure.
+Deletes the caller's registry row and its findings. 204 whether or not the caller had registered the subject, and it works while monitoring is disabled; 403 as for registration. A subject another service registered under the same reference is not touched. Call it on offboarding and on erasure.
 
 ### Finding event
 

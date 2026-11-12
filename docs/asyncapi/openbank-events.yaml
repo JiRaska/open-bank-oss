@@ -1190,7 +1190,7 @@ components:
           description: Deduplicate on this.
         ownerService:
           type: string
-          description: The service that registered the subject; only it acts on the finding.
+          description: The client id of the service that registered the subject (taken from its token); only it acts on the finding.
         subjectRef:
           type: string
           description: The owning service's reference for the subject. No customer name is carried.

@@ -6,13 +6,11 @@ package com.openbank.sanctions.it
 
 import com.openbank.libs.testing.containers.PostgresTestResource
 import com.openbank.sanctions.application.usecase.SanctionsMonitoringSettings
-import com.openbank.sanctions.it.MonitoringFixture.Companion.OWNER
 import com.openbank.sanctions.it.MonitoringFixture.Companion.SUBJECT_PREFIX
 import com.openbank.sanctions.it.MonitoringFixture.Companion.UNLISTED
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -30,7 +28,7 @@ import javax.sql.DataSource
 @QuarkusTest
 @QuarkusTestResource(value = SanctionsMonitoringFlagIT.MonitoringEnabled::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(PostgresTestResource::class)
-@TestSecurity(user = "service-account-openbank-services", roles = ["ROLE_API"])
+@AsKycService
 class SanctionsMonitoringFlagIT {
 
     class MonitoringEnabled : QuarkusTestResourceLifecycleManager {
@@ -53,7 +51,7 @@ class SanctionsMonitoringFlagIT {
 
             val response = RestAssured.given().contentType("application/json")
                 .body("""{"entityType":"INDIVIDUAL","name":"$UNLISTED"}""")
-                .put("/api/v3/sanctions/monitored-subjects/$OWNER/$subject")
+                .put("/api/v3/sanctions/monitored-subjects/$subject")
 
             assertThat(response.statusCode).isEqualTo(201)
         } finally {

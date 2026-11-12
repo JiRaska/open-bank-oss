@@ -22,8 +22,9 @@ info:
   # its request schema names the three fields only to say so, because the shared request type
   # parses them and a parsed field that is not published is a contract gap.
   # 3.2.0 -> 3.3.0 (ADR-0376): ADDITIVE. PUT and DELETE
-  # /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef} register a subject for ongoing
-  # monitoring and withdraw it. No existing operation, schema or response changes. Registration
+  # /api/v3/sanctions/monitored-subjects/{subjectRef} register a subject for ongoing monitoring
+  # and withdraw it. The owner of a registration is the calling service, taken from its token and
+  # from no request value. No existing operation, schema or response changes. Registration
   # answers 503 while `openbank.sanctions.monitoring.enabled` is false, which is the default.
   version: 3.3.0
   # 1.4.0 -> 2.0.0 (#9048, ADR-0048): POST /lists/refresh-all could not keep answering 200 — that
@@ -201,21 +202,15 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
 
-  /api/v3/sanctions/monitored-subjects/{ownerService}/{subjectRef}:
+  /api/v3/sanctions/monitored-subjects/{subjectRef}:
     parameters:
-      - name: ownerService
-        in: path
-        required: true
-        description: The service that owns the subject and receives its findings, e.g. `kyc-service`.
-        schema:
-          type: string
-          pattern: '^[a-z][a-z0-9-]{1,62}$'
       - name: subjectRef
         in: path
         required: true
         description: >-
-          The owning service's stable reference for the subject — the value it sends as `subjectId`
+          The calling service's stable reference for the subject — the value it sends as `subjectId`
           when it screens the subject, so that an analyst's clearance is honoured by monitoring.
+          References are scoped to the caller: the same value under two callers is two subjects.
         schema:
           type: string
           minLength: 1
@@ -227,7 +222,8 @@ paths:
         Idempotent. Registering the same attributes again changes nothing; different attributes
         replace the stored ones and the subject is evaluated afresh. The response describes the
         registration only: whether the subject matches anything is never returned over REST, it is
-        published to the owning service as a `MONITORED_SUBJECT_MATCHED` event.
+        published to the owning service as a `MONITORED_SUBJECT_MATCHED` event. The owner is the
+        calling service itself, identified by the client its token was issued to.
       operationId: registerMonitoredSubject
       requestBody:
         required: true
@@ -250,6 +246,11 @@ paths:
                 $ref: '#/components/schemas/MonitoredSubjectRegistration'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '403':
+          description: >-
+            The caller is not a service calling under its own service account (a person's token,
+            a token of the fleet's shared client, or no verified token). Nothing was read or
+            written.
         '503':
           description: Ongoing monitoring is not enabled in this environment; nothing was stored
           content:
@@ -261,11 +262,18 @@ paths:
       summary: Stop monitoring a subject and delete what is stored about it
       description: >-
         Deletes the registry row and every finding recorded for it. Idempotent: the answer is 204
-        whether or not the subject was registered. Works while monitoring is disabled.
+        whether or not the calling service had registered the subject. A caller deletes only its
+        own registration; a subject another service registered under the same reference is not
+        touched. Works while monitoring is disabled.
       operationId: deregisterMonitoredSubject
       responses:
         '204':
-          description: The subject is not monitored and nothing about it is stored
+          description: The caller has no subject under this reference and nothing about one is stored
+        '403':
+          description: >-
+            The caller is not a service calling under its own service account (a person's token,
+            a token of the fleet's shared client, or no verified token). Nothing was read or
+            written.
 
   /api/v3/sanctions/review:
     post:
@@ -858,6 +866,7 @@ components:
       properties:
         ownerService:
           type: string
+          description: The calling service's own client id, as read from its token.
         subjectRef:
           type: string
         registeredAt:

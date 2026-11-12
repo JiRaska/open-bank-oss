@@ -66,7 +66,7 @@ class SanctionsMonitoringServiceTest {
     )
 
     private fun subject(swept: Instant? = null) = MonitoredSubject(
-        id = UUID.randomUUID(), ownerService = "kyc-service", subjectRef = "party-1",
+        id = UUID.randomUUID(), ownerService = "openbank-kyc", subjectRef = "party-1",
         entityType = EntityType.INDIVIDUAL, name = "Zorvath Quellinbrook", aliases = emptyList(),
         dateOfBirth = null, nationality = null, country = null,
         registeredAt = now, updatedAt = now, lastSweptAt = swept,
@@ -111,7 +111,7 @@ class SanctionsMonitoringServiceTest {
         assertThatThrownBy {
             runBlocking {
                 service(enabled = false)
-                    .register("kyc-service", "party-1", MonitoredSubjectRequest(EntityType.INDIVIDUAL, "Any Name"))
+                    .register("openbank-kyc", "party-1", MonitoredSubjectRequest(EntityType.INDIVIDUAL, "Any Name"))
             }
         }.isInstanceOf(SanctionsMonitoringDisabled::class.java)
         coVerify(exactly = 0) { subjects.upsert(any(), any()) }
@@ -119,9 +119,9 @@ class SanctionsMonitoringServiceTest {
 
     @Test
     fun `deregistration works while disabled`(): Unit = runBlocking {
-        coEvery { subjects.delete("kyc-service", "party-1") } returns true
+        coEvery { subjects.delete("openbank-kyc", "party-1") } returns true
 
-        assertThat(service(enabled = false).deregister("kyc-service", "party-1")).isTrue()
+        assertThat(service(enabled = false).deregister("openbank-kyc", "party-1")).isTrue()
     }
 
     @Test
