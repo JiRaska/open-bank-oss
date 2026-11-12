@@ -4,6 +4,7 @@
 
 package com.openbank.pid.domain.model
 
+import java.security.MessageDigest
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -210,5 +211,22 @@ data class VerificationCase(
             createdAt = now,
             updatedAt = now,
         )
+    }
+}
+
+/**
+ * GDPR Art. 17 (#15755): the dedup key a REJECT-decided `RN:` case keeps once the person who held
+ * that RČ is erased. The blind index itself is removed from the case; what remains is a SHA-256 of
+ * it under a fixed domain prefix. That cannot be joined with any stored blind index, and it cannot be
+ * recomputed from an RČ without the pepper (the blind index is already pepper-keyed). It exists only
+ * so the fraud block still fires when the same RČ is presented again: the resolver derives the same
+ * key on a tier-1 miss and consults the adjudication cache with it.
+ */
+object ErasedIdentifierKey {
+    private const val PREFIX = "pid-erased-rn-reject:v1:"
+
+    fun rejectBlock(blindIndex: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest((PREFIX + blindIndex).toByteArray(Charsets.UTF_8))
+        return "RNX:" + digest.joinToString("") { "%02x".format(it) }
     }
 }

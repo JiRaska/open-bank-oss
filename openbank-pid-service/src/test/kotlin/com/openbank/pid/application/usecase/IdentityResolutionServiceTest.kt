@@ -14,6 +14,7 @@ import com.openbank.pid.domain.model.AmlRiskScore
 import com.openbank.pid.domain.model.CaseVerdict
 import com.openbank.pid.domain.model.ContactAttributes
 import com.openbank.pid.domain.model.CoreAttributes
+import com.openbank.pid.domain.model.ErasedIdentifierKey
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Gender
 import com.openbank.pid.domain.model.KycAttributes
@@ -241,6 +242,27 @@ class IdentityResolutionServiceTest {
 
         assertThat(result).isEqualTo(ResolutionResult.NoMatch)
         coVerify(exactly = 1) { repo.findCandidatesByMatchKey(any()) }
+    }
+
+    @Test
+    fun `tier-1 miss still blocks an RČ whose REJECT survived the holder's erasure`(): Unit = runBlocking {
+        val idx = blindIndexOf(validRc)
+        val rejected = UUID.randomUUID()
+        coEvery { repo.findByExternalId(ExternalIdType.BIRTH_NUMBER, idx) } returns null
+        coEvery { adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(idx)) } returns
+            PriorAdjudication(caseId = rejected, verdict = CaseVerdict.REJECT, linkPartyId = null)
+
+        val result = svc.resolve(
+            ResolveIdentityCommand(
+                givenName = "Jan",
+                familyName = "Novak",
+                birthdate = validRcBirthdate,
+                birthNumberRaw = validRc,
+            ),
+        )
+
+        assertThat(result).isInstanceOf(ResolutionResult.NeedsManualVerification::class.java)
+        assertThat((result as ResolutionResult.NeedsManualVerification).caseId).isEqualTo(rejected)
     }
 
     @Test

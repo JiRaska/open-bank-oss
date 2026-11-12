@@ -5,7 +5,6 @@
 package com.openbank.pid.application.usecase
 
 import com.openbank.pid.application.port.`in`.ErasureOutcome
-import com.openbank.pid.application.port.out.ApplicantCaseKeys
 import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.application.port.out.VerificationCaseRepository
@@ -22,7 +21,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
-import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
@@ -41,12 +39,6 @@ class PartyErasureServiceTest {
             ExternalId(ExternalIdType.KEYCLOAK_ID, "kc", null),
             ExternalId(ExternalIdType.BIRTH_NUMBER, "blind-1", null),
         )
-        every { coreAttributes } returns mockk {
-            every { familyName } returns "Nováková"
-            every { givenName } returns "Jana"
-            every { birthdate } returns LocalDate.of(1985, 3, 4)
-            every { birthplace } returns "Brno"
-        }
     }
 
     @Test
@@ -59,14 +51,13 @@ class PartyErasureServiceTest {
 
         coVerify(exactly = 1) { parties.anonymize(partyId, now) }
         coVerify(exactly = 1) { cases.anonymizeLinkedTo(partyId, now) }
-        coVerify(exactly = 0) { cases.anonymizeApplicantCases(any(), any()) }
+        coVerify(exactly = 0) { cases.removeErasedIdentifier(any()) }
     }
 
     @Test
-    fun `unlinked cases are found by the keys read before the party step deletes them`(): Unit = runBlocking {
-        val expected = ApplicantCaseKeys(partyId, "blind-1", "novakova|jana|1985-03-04|brno", LocalDate.of(1985, 3, 4))
+    fun `the RČ index is read before the party step deletes it and removed from unlinked cases`(): Unit = runBlocking {
         coEvery { parties.findById(partyId) } returns liveParty()
-        coEvery { cases.anonymizeApplicantCases(expected, now) } returnsMany listOf(2, 0)
+        coEvery { cases.removeErasedIdentifier("blind-1") } returnsMany listOf(2, 0)
         coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.FIRST
         coEvery { cases.anonymizeLinkedTo(partyId, now) } returns 0
 
@@ -74,10 +65,10 @@ class PartyErasureServiceTest {
 
         coVerifyOrder {
             parties.findById(partyId)
-            cases.anonymizeApplicantCases(expected, now)
+            cases.removeErasedIdentifier("blind-1")
             parties.anonymize(partyId, now)
             cases.anonymizeLinkedTo(partyId, now)
-            cases.anonymizeApplicantCases(expected, now)
+            cases.removeErasedIdentifier("blind-1")
         }
     }
 
@@ -88,7 +79,7 @@ class PartyErasureServiceTest {
         coEvery { parties.anonymize(partyId, now) } returns PartyAnonymisation.REPEAT
 
         assertThat(service.erase(partyId)).isEqualTo(ErasureOutcome.REPEATED)
-        coVerify(exactly = 0) { cases.anonymizeApplicantCases(any(), any()) }
+        coVerify(exactly = 0) { cases.removeErasedIdentifier(any()) }
     }
 
     @Test

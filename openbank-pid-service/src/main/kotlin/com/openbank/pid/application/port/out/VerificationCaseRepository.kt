@@ -7,7 +7,6 @@ package com.openbank.pid.application.port.out
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
 import java.time.Instant
-import java.time.LocalDate
 import java.util.UUID
 
 /** Outbound persistence port for four-eyes identity-verification cases (ADR-0072 §1). */
@@ -37,35 +36,18 @@ interface VerificationCaseRepository {
     suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int
 
     /**
-     * GDPR Art. 17 (#15755): the cases that are the erased person's own but carry no link to them —
-     * open and awaiting cases, rejected ones and DISTINCT_NEW decisions, found by the keys the
-     * resolver built them from. Must be called while [ApplicantCaseKeys] can still be read from
-     * the party, i.e. before its external ids are deleted. Idempotent (`erased_at is null`).
+     * GDPR Art. 17 (#15755): remove the erased person's RČ blind index from every not-yet-erased case
+     * that carries it (`RN:` cases, in which that person is by construction the sole candidate).
+     * Must run while the index can still be read from the party, i.e. before its external ids are
+     * deleted. Idempotent: a stripped case no longer carries the index.
      *
-     * The rules, and why each is safe (a case describing a different person must survive):
-     * - **RČ blind index** (`RN:` cases): `blind_index` equal to the party's BIRTH_NUMBER index is
-     *   the erased person's national identifier. Anonymised in full unless the case was DECIDED
-     *   DISTINCT_NEW — that decision says the applicant is someone else sharing the identifier, so
-     *   only the identifier (`blind_index`, `dedup_key`) is removed and the applicant is kept.
-     * - **Name key** (`NK:` / `PK:` cases): the key is shared with every namesake, so a case is
-     *   anonymised only when the erased party is NOT one of its candidates (a candidate is the person
-     *   the applicant was compared against, not the applicant) and EVERY other live party holding the
-     *   same key is a candidate — otherwise a live namesake could be the applicant and the case is left.
+     * The applicant snapshot is KEPT: an unlinked `RN:` case is not positively the erased person (the
+     * attributes diverged, which is why the case exists, and it may be another applicant using that
+     * person's number). A REJECT decision stays effective under [com.openbank.pid.domain.model.ErasedIdentifierKey];
+     * every other case gets the opaque `ERASED:<case id>`. Linked cases are fully anonymised by
+     * [anonymizeLinkedTo].
      *
      * @return the number of cases changed by this call.
      */
-    suspend fun anonymizeApplicantCases(keys: ApplicantCaseKeys, erasedAt: Instant): Int
+    suspend fun removeErasedIdentifier(blindIndex: String): Int
 }
-
-/**
- * What identifies an erased party's own verification cases, read from the party before its data is
- * anonymised. [birthNumberBlindIndex] is its BIRTH_NUMBER external id; [matchKey] is
- * `MatchKey.of(family, given, birthdate, birthplace)` over its stored attributes (the `NK:`/`PK:`
- * dedup-key body), with [birthdate] for the namesake lookup.
- */
-data class ApplicantCaseKeys(
-    val partyId: UUID,
-    val birthNumberBlindIndex: String?,
-    val matchKey: String,
-    val birthdate: LocalDate,
-)

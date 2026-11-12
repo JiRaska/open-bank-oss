@@ -14,6 +14,7 @@ import com.openbank.pid.domain.identity.MatchBand
 import com.openbank.pid.domain.identity.ProbabilisticMatcher
 import com.openbank.pid.domain.model.ApplicantSnapshot
 import com.openbank.pid.domain.model.CaseVerdict
+import com.openbank.pid.domain.model.ErasedIdentifierKey
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Gender
 import com.openbank.pid.domain.model.Party
@@ -153,7 +154,8 @@ class IdentityResolutionService(
         val blindIndex = BlindIndex.compute(pepperBytes, rc.canonical)
 
         val match = partyRepository.findByExternalId(ExternalIdType.BIRTH_NUMBER, blindIndex)
-            ?: return ResolutionResult.NoMatch // conclusive: no party with this RČ — tier-2 not needed
+            // conclusive: no party with this RČ, tier-2 not needed, unless a REJECT survived its erasure
+            ?: return erasedIdentifierBlock(blindIndex) ?: ResolutionResult.NoMatch
 
         // ── Attribute cross-check (collision adjudication, ADR-0072 §1) ──────────
         // The RČ-derived birthdate and gender must match the stored party. A mismatch
@@ -179,6 +181,21 @@ class IdentityResolutionService(
                 blindIndex = blindIndex,
             )
         }
+    }
+
+    /**
+     * GDPR Art. 17 (#15755): erasing the person who held an RČ deletes its blind index, so tier-1 can no
+     * longer reach an `RN:` REJECT decided against that number. The erasure re-keys such a decision
+     * to [ErasedIdentifierKey]; a tier-1 miss checks it so the fraud block still holds.
+     */
+    private suspend fun erasedIdentifierBlock(blindIndex: String): ResolutionResult? {
+        val prior = adjudication.priorDecision(ErasedIdentifierKey.rejectBlock(blindIndex)) ?: return null
+        if (prior.verdict != CaseVerdict.REJECT) return null
+        return ResolutionResult.NeedsManualVerification(
+            caseId = prior.caseId,
+            candidates = emptyList(),
+            trigger = VerificationTrigger.RN_COLLISION,
+        )
     }
 
     private suspend fun resolveTier2(command: ResolveIdentityCommand): ResolutionResult {

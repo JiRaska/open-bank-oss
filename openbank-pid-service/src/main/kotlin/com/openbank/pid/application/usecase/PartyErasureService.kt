@@ -4,10 +4,8 @@
 
 package com.openbank.pid.application.usecase
 
-import com.openbank.libs.identity.MatchKey
 import com.openbank.pid.application.port.`in`.ErasePartyUseCase
 import com.openbank.pid.application.port.`in`.ErasureOutcome
-import com.openbank.pid.application.port.out.ApplicantCaseKeys
 import com.openbank.pid.application.port.out.PartyAnonymisation
 import com.openbank.pid.application.port.out.PartyRepository
 import com.openbank.pid.application.port.out.VerificationCaseRepository
@@ -25,10 +23,13 @@ import java.util.UUID
  * per party, what happens to it and what is NOT covered: see `docs/04-data` (Erasure).
  *
  * Every step runs on every delivery and each is idempotent, so a delivery that failed between
- * steps, or a late write, is repaired by the retry. One exception: the keys that find the person's
- * UNLINKED verification cases (RČ blind index, match key) are deleted by the party step, so they
- * are read first and the unlinked-case step runs before the party step (and once more after it,
- * for a case opened in between). A retry after the party step committed can no longer find them.
+ * steps, or a late write, is repaired by the retry. One exception: the party's RČ blind index, which
+ * finds the UNLINKED `RN:` cases carrying it, is deleted by the party step, so it is read first and
+ * removed from those cases before the party step (and once more after it, for a case opened in
+ * between). A retry after the party step committed can no longer read it.
+ *
+ * Unlinked cases are never fully anonymised: nothing stored ties their applicant positively to this
+ * party, so only the erased person's identifier is removed (see `docs/04-data`, Not covered).
  * Nothing personal is logged: the party id is the only value written.
  */
 @ApplicationScoped
@@ -42,15 +43,15 @@ class PartyErasureService(
 
     override suspend fun erase(partyId: UUID): ErasureOutcome {
         val now = clock.instant()
-        val keys = applicantKeys(partyId)
-        val unlinkedBefore = keys?.let { cases.anonymizeApplicantCases(it, now) } ?: 0
+        val blindIndex = birthNumberBlindIndex(partyId)
+        val unlinkedBefore = blindIndex?.let { cases.removeErasedIdentifier(it) } ?: 0
         // Party next: it takes the row lock and commits erased_at, after which no case can be linked
         // to this party (the link is checked under the same lock). Linked cases run after it, so every
         // link that committed before the party step is cleaned here, and a repeat delivery re-cleans
         // any linked case that is still not anonymised.
         val party = parties.anonymize(partyId, now)
         val linked = cases.anonymizeLinkedTo(partyId, now)
-        val unlinkedAfter = keys?.let { cases.anonymizeApplicantCases(it, now) } ?: 0
+        val unlinkedAfter = blindIndex?.let { cases.removeErasedIdentifier(it) } ?: 0
         val anonymisedCases = unlinkedBefore + linked + unlinkedAfter
         val outcome = when {
             party == PartyAnonymisation.FIRST || anonymisedCases > 0 -> ErasureOutcome.ERASED
@@ -67,15 +68,8 @@ class PartyErasureService(
         return outcome
     }
 
-    /** Null when the party is absent or already erased (its identifying attributes are gone). */
-    private suspend fun applicantKeys(partyId: UUID): ApplicantCaseKeys? {
-        val party = parties.findById(partyId)?.takeIf { it.erasedAt == null } ?: return null
-        val core = party.coreAttributes
-        return ApplicantCaseKeys(
-            partyId = partyId,
-            birthNumberBlindIndex = party.externalIds.firstOrNull { it.type == ExternalIdType.BIRTH_NUMBER }?.value,
-            matchKey = MatchKey.of(core.familyName, core.givenName, core.birthdate, core.birthplace),
-            birthdate = core.birthdate,
-        )
-    }
+    /** Null when the party is absent, already erased (its external ids are gone) or holds no RČ index. */
+    private suspend fun birthNumberBlindIndex(partyId: UUID): String? =
+        parties.findById(partyId)?.takeIf { it.erasedAt == null }
+            ?.externalIds?.firstOrNull { it.type == ExternalIdType.BIRTH_NUMBER }?.value
 }
