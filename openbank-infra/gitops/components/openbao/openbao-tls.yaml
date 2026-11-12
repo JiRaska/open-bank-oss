@@ -20,8 +20,8 @@ metadata:
   namespace: vault
   labels:
     app.kubernetes.io/part-of: openbao
-    openbank.io/plane: platform
-    openbank.io/adr: "0352"
+    open-bank.tech/plane: platform
+    open-bank.tech/adr: "0352"
   annotations:
     argocd.argoproj.io/sync-wave: "-1"
 spec:

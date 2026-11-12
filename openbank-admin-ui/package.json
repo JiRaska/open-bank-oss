@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "4.12.0",
+  "version": "4.12.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -101,6 +101,7 @@
     "autoprefixer": "10.6.2",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.5",
+    "fast-check": "4.1.1",
     "jsdom": "^31.0.0",
     "postcss": "8.5.32",
     "tailwindcss": "4.3.3",

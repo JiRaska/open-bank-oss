@@ -31,7 +31,7 @@ metadata:
   namespace: ledger
   labels:
     app.kubernetes.io/part-of: ledger
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
@@ -102,7 +102,7 @@ metadata:
   namespace: ledger
   labels:
     app.kubernetes.io/part-of: ledger
-    openbank.io/derived: gen-network-policies
+    open-bank.tech/derived: gen-network-policies
 spec:
   podSelector:
     matchLabels:
