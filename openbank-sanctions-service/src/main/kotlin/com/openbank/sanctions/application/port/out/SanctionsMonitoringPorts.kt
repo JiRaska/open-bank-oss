@@ -23,11 +23,15 @@ interface MonitoredSubjectRepository {
     /** Insert, or replace the attributes; a replacement makes the subject due for a baseline sweep. */
     suspend fun upsert(subject: MonitoredSubject, searchNames: List<String>): MonitoredSubjectUpsert
 
+    /** Deletes the subject [ownerService] registered under [subjectRef], and no other owner's. */
     suspend fun delete(ownerService: String, subjectRef: String): Boolean
 
     /**
      * Subjects whose names match [entrySearchText] at [threshold] or above, by the same
      * `word_similarity(name, search_text)` the live screen computes. At most [limit] rows.
+     *
+     * An implementation may narrow the candidates through an index, but the answer is the one a
+     * pass over the whole registry gives: every row returned carries the exact score.
      */
     suspend fun findMatching(entrySearchText: String, threshold: Double, limit: Int): List<MonitoredSubjectCandidate>
 

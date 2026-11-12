@@ -15,6 +15,7 @@ import com.openbank.sanctions.domain.model.MonitoredSubject
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Row
+import io.vertx.mutiny.sqlclient.SqlConnection
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
@@ -27,6 +28,10 @@ import io.vertx.sqlclient.Tuple as CoreTuple
  *
  * PgPool rather than Panache for the reason [SanctionsEntryRepositoryImpl] gives: the match is a
  * native pg_trgm query whose score column has to be read off the row.
+ *
+ * A subject's names are stored twice on purpose: `search_names` on the registry row is what the
+ * exact score reads, and one row per name in `sanctions_monitored_subject_names` is what the
+ * delta's trigram indexes cover ([MonitoringNameIndex]). One statement writes both.
  *
  * Sweep timing uses the database clock throughout (`clock_timestamp()`), so the instant a
  * subject was swept and the instant a re-sweep was requested are comparable whatever the pods'
@@ -72,11 +77,56 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
         entrySearchText: String,
         threshold: Double,
         limit: Int,
+    ): List<MonitoredSubjectCandidate> {
+        if (limit <= 0) return emptyList()
+        val conn = pool.connection.awaitSuspending()
+        try {
+            // One transaction: `set_config(.., true)` is SET LOCAL, so a probe threshold cannot
+            // leak to the next borrower of the pooled connection.
+            val tx = conn.begin().awaitSuspending()
+            val found = probeSizeClasses(conn, entrySearchText, threshold, limit)
+            tx.commit().awaitSuspending()
+            return found
+        } finally {
+            // Closing a connection with an open transaction rolls it back; nothing here writes.
+            conn.close().awaitSuspending()
+        }
+    }
+
+    private suspend fun probeSizeClasses(
+        conn: SqlConnection,
+        entrySearchText: String,
+        threshold: Double,
+        limit: Int,
+    ): List<MonitoredSubjectCandidate> {
+        val entryTrigrams = conn.preparedQuery("SELECT cardinality(show_trgm($1)) AS trigrams")
+            .execute(Tuple.of(entrySearchText)).awaitSuspending().first().getInteger("trigrams")
+        // A text without a trigram scores 0 against every name.
+        if (entryTrigrams == 0) return emptyList()
+        val probes = MonitoringNameIndex.CLASSES.mapNotNull { sizeClass ->
+            MonitoringNameIndex.probeThreshold(sizeClass, entryTrigrams, threshold)?.let { sizeClass to it }
+        }
+        val found = LinkedHashMap<UUID, MonitoredSubjectCandidate>()
+        for ((sizeClass, probe) in probes) {
+            if (found.size >= limit) break
+            conn.preparedQuery(PROBE_GUC_SQL).execute(Tuple.of(probe.toPlainString())).awaitSuspending()
+            // toFloat(): the live search binds its threshold as a float4 too, so the boundary agrees.
+            conn.preparedQuery(matchSql(sizeClass))
+                .execute(Tuple.of(entrySearchText, threshold.toFloat(), limit)).awaitSuspending()
+                // A subject with names in two classes is found in both, with the same score.
+                .forEach { found.putIfAbsent(it.getUUID("id"), it.toCandidate()) }
+        }
+        return found.values.take(limit)
+    }
+
+    /** The same answer as [findMatching] by one pass over the registry: what the index must agree with. */
+    internal suspend fun findMatchingByFullScan(
+        entrySearchText: String,
+        threshold: Double,
+        limit: Int,
     ): List<MonitoredSubjectCandidate> =
-        // toFloat(): the live search binds its threshold as a float4 too, so the boundary agrees.
-        pool.preparedQuery(MATCH_SQL).execute(Tuple.of(entrySearchText, threshold.toFloat(), limit))
-            .awaitSuspending()
-            .map { MonitoredSubjectCandidate(it.toSubject(), it.getDouble("match_score") ?: 0.0) }
+        pool.preparedQuery(FULL_SCAN_SQL).execute(Tuple.of(entrySearchText, threshold.toFloat(), limit))
+            .awaitSuspending().map { it.toCandidate() }
 
     override suspend fun claimDueForSweep(interval: Duration, lease: Duration, limit: Int): List<MonitoredSubject> {
         if (limit <= 0) return emptyList()
@@ -104,6 +154,8 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
         return MonitoringRegistryStats(row.getLong("subjects"), row.getDouble("oldest_age").toLong())
     }
 
+    private fun Row.toCandidate() = MonitoredSubjectCandidate(toSubject(), getDouble("match_score") ?: 0.0)
+
     private fun Row.toSubject() = MonitoredSubject(
         id = getUUID("id"),
         ownerService = getString("owner_service"),
@@ -126,42 +178,76 @@ class MonitoredSubjectRepositoryImpl(private val pool: PgPool) : MonitoredSubjec
 
         // The WHERE on the conflict arm is what makes registration idempotent: the same attributes
         // write nothing, so they neither move updated_at nor force a new baseline sweep.
+        // The names rows are replaced in the same statement, so the index the delta reads can
+        // never describe other names than the row the exact score reads. An unchanged
+        // registration returns no row from `written` and therefore touches no name either.
         val UPSERT_SQL = """
-            INSERT INTO sanctions_monitored_subjects AS s
-                (id, owner_service, subject_ref, entity_type, name, aliases_json, search_names,
-                 date_of_birth, nationality, country, registered_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
-            ON CONFLICT (owner_service, subject_ref) DO UPDATE SET
-                entity_type = EXCLUDED.entity_type,
-                name = EXCLUDED.name,
-                aliases_json = EXCLUDED.aliases_json,
-                search_names = EXCLUDED.search_names,
-                date_of_birth = EXCLUDED.date_of_birth,
-                nationality = EXCLUDED.nationality,
-                country = EXCLUDED.country,
-                updated_at = EXCLUDED.updated_at,
-                last_swept_at = NULL,
-                sweep_claimed_at = NULL
-            WHERE (s.entity_type, s.name, s.aliases_json, s.search_names, s.date_of_birth, s.nationality, s.country)
-                  IS DISTINCT FROM
-                  (EXCLUDED.entity_type, EXCLUDED.name, EXCLUDED.aliases_json, EXCLUDED.search_names,
-                   EXCLUDED.date_of_birth, EXCLUDED.nationality, EXCLUDED.country)
-            RETURNING $COLUMNS, (xmax = 0) AS created
+            WITH written AS (
+                INSERT INTO sanctions_monitored_subjects AS s
+                    (id, owner_service, subject_ref, entity_type, name, aliases_json, search_names,
+                     date_of_birth, nationality, country, registered_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11)
+                ON CONFLICT (owner_service, subject_ref) DO UPDATE SET
+                    entity_type = EXCLUDED.entity_type,
+                    name = EXCLUDED.name,
+                    aliases_json = EXCLUDED.aliases_json,
+                    search_names = EXCLUDED.search_names,
+                    date_of_birth = EXCLUDED.date_of_birth,
+                    nationality = EXCLUDED.nationality,
+                    country = EXCLUDED.country,
+                    updated_at = EXCLUDED.updated_at,
+                    last_swept_at = NULL,
+                    sweep_claimed_at = NULL
+                WHERE (s.entity_type, s.name, s.aliases_json, s.search_names, s.date_of_birth, s.nationality, s.country)
+                      IS DISTINCT FROM
+                      (EXCLUDED.entity_type, EXCLUDED.name, EXCLUDED.aliases_json, EXCLUDED.search_names,
+                       EXCLUDED.date_of_birth, EXCLUDED.nationality, EXCLUDED.country)
+                RETURNING $COLUMNS, (xmax = 0) AS created
+            ), replaced AS (
+                DELETE FROM sanctions_monitored_subject_names n USING written w WHERE n.subject_id = w.id
+            ), indexed AS (
+                INSERT INTO sanctions_monitored_subject_names (subject_id, search_name)
+                SELECT w.id, n FROM written w CROSS JOIN unnest($7::text[]) AS n
+            )
+            SELECT * FROM written
         """.trimIndent()
 
-        // The reverse of SanctionsEntryRepositoryImpl.search: there one name is matched against
-        // every entry, here one entry against every subject, with the same function and operand
-        // order. No index serves it (the indexable side of word_similarity is the haystack, and
-        // here the haystack is the constant), so this is one pass over the registry per entry.
-        // No ORDER BY: with one, the planner walks the primary key to feed the LIMIT and reads the
-        // heap in random order, which measured 9.7 s per entry on a million rows.
-        val MATCH_SQL = """
-            SELECT $COLUMNS, m.match_score
-            FROM sanctions_monitored_subjects s
+        const val PROBE_GUC_SQL = "SELECT set_config('pg_trgm.similarity_threshold', $1, true)"
+
+        // The exact score: the reverse of SanctionsEntryRepositoryImpl.search. There one name is
+        // matched against every entry, here one entry against every subject, with the same
+        // function and operand order.
+        const val EXACT_SCORE = """
             CROSS JOIN LATERAL (
                 SELECT max(word_similarity(n, $1)) AS match_score FROM unnest(s.search_names) AS n
             ) m
+        """
+
+        // No ORDER BY: with one, the planner walks the primary key to feed the LIMIT and reads the
+        // heap in random order, which measured 9.7 s per entry on a million rows.
+        val FULL_SCAN_SQL = """
+            SELECT $COLUMNS, m.match_score
+            FROM sanctions_monitored_subjects s
+            $EXACT_SCORE
             WHERE m.match_score >= $2
+            LIMIT $3
+        """.trimIndent()
+
+        // `%` is what the partial index of the class serves; its cutoff is the session GUC set by
+        // PROBE_GUC_SQL just before. The class is a literal so that the planner can prove the
+        // index predicate. `%` only narrows: the exact score decides, exactly as in FULL_SCAN_SQL.
+        // The candidates are handed over as an array and not joined: the planner cannot estimate
+        // `%`, and with a join it read the whole registry to hash it (100 ms per probe on a
+        // million rows) where the array is a handful of primary-key lookups.
+        fun matchSql(sizeClass: Int) = """
+            SELECT $COLUMNS, m.match_score
+            FROM sanctions_monitored_subjects s
+            $EXACT_SCORE
+            WHERE s.id = ANY (ARRAY(
+                    SELECT n.subject_id
+                    FROM sanctions_monitored_subject_names n
+                    WHERE n.size_class = $sizeClass AND n.search_name % $1))
+              AND m.match_score >= $2
             LIMIT $3
         """.trimIndent()
 

@@ -34,7 +34,8 @@ import java.time.Instant
  *
  *  - [runDelta] matches each added or changed list entry against the registry. It is the
  *    reverse of the live screen (one entry, every subject) and computes the same
- *    `word_similarity(subject name, entry search text)` against the same CUSTOMER floor.
+ *    `word_similarity(subject name, entry search text)` against the same CUSTOMER floor. The
+ *    registry's trigram indexes narrow the candidates; the exact score decides.
  *  - [runSweep] re-evaluates whole subjects through [MonitoringScreening.uncoveredMatches], the
  *    function the live screen itself is built on. It is the safety net: it catches what a delta
  *    missed, and it is the only path that sees jurisdiction reference data, which no feed ingests.
@@ -88,6 +89,10 @@ class SanctionsMonitoringService(
         val searchNames = (listOf(request.name) + aliases).map(importer::normalizeForSearch)
             .filter { it.isNotEmpty() }.distinct()
         require(searchNames.isNotEmpty()) { "name must contain at least one searchable character" }
+        // Normalisation can lengthen a name (a decomposed syllable block); the names index bounds it.
+        require(searchNames.all { it.length <= MAX_SEARCH_NAME_LENGTH }) {
+            "name and aliases must each normalise to at most $MAX_SEARCH_NAME_LENGTH characters"
+        }
         val now = Instant.now(clock)
         val stored = subjects.upsert(
             MonitoredSubject(
@@ -269,5 +274,8 @@ class SanctionsMonitoringService(
         private const val MAX_REF_LENGTH = 255
         private const val MAX_NAME_LENGTH = 500
         private const val MAX_ALIASES = 50
+
+        /** The CHECK on `sanctions_monitored_subject_names.search_name` (V23). */
+        private const val MAX_SEARCH_NAME_LENGTH = 2000
     }
 }

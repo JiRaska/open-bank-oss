@@ -4,7 +4,7 @@
 -- 1. sanctions_monitored_subjects is the registry: one row per subject a caller asked this
 --    service to keep watching. It holds exactly the attributes the CUSTOMER screening profile
 --    reads (names, date of birth, nationality, country) and no document identifiers. It is
---    personal data: deregistration DELETEs the row, and the findings below go with it.
+--    personal data: deregistration DELETEs the row, and its names (5) and findings (3) go with it.
 --    search_names is the names in the normal form the similarity search receives.
 --
 -- 2. sanctions_monitoring_pending is the delta queue. It is fed by a trigger on
@@ -21,16 +21,30 @@
 -- 4. sanctions_monitoring_state holds the instant a full re-sweep was last requested (the
 --    fallback when a delta is too large to match entry by entry).
 --
+-- 5. sanctions_monitored_subject_names holds one row per search name of a subject and exists
+--    only to index the delta match. The delta is the reverse of the live screen: one list entry
+--    against every subject, scored by word_similarity(subject name, entry text). pg_trgm can
+--    index only the haystack of that function and here the haystack is the constant, so no
+--    operator serves it directly. What can be indexed is a necessary condition. A name with k
+--    distinct trigrams that scores t or more shares at least ceil(t * k) of them with the entry
+--    text, hence its plain similarity() to that text is at least
+--    ceil(t * k) / (k + q - ceil(t * k)), q being the entry's trigram count. That bound depends
+--    on k, so the names are split into size classes of similar k, each with its own partial GIN
+--    index, and the delta probes each class with `search_name % entry` under the class's own
+--    pg_trgm.similarity_threshold. The probe only narrows the candidates: every candidate is
+--    then scored by the same word_similarity expression a full scan would use, so the result is
+--    the one a full scan gives. The class bounds below are mirrored by MonitoringNameIndex.kt.
+--    The CHECK on the name length is what bounds the last class.
+--
 -- Indexes: the sweep reads never-swept subjects through a partial index and stale ones through
 -- (last_swept_at, id), so an idle tick touches a handful of index entries whatever the registry
--- size. The delta match scans the registry once per changed entry; no pg_trgm index can serve
--- it, because the subject name is the needle of word_similarity and only the haystack is
--- indexable.
+-- size. The delta match reads the per-class trigram indexes of the names table.
 --
 -- Rollback: set openbank.sanctions.monitoring.enabled=false, roll back to code that does not
 -- read these tables, then DROP TRIGGER sanctions_monitoring_delta ON sanctions_change_journal;
 -- DROP FUNCTION sanctions_monitoring_enqueue(); DROP TABLE sanctions_monitoring_findings,
--- sanctions_monitoring_pending, sanctions_monitoring_state, sanctions_monitored_subjects.
+-- sanctions_monitoring_pending, sanctions_monitoring_state, sanctions_monitored_subject_names,
+-- sanctions_monitored_subjects.
 -- No existing table, column or row is changed, so the previous release keeps working against
 -- the migrated schema.
 
@@ -59,6 +73,33 @@ CREATE INDEX idx_sanctions_monitored_unswept
 CREATE INDEX idx_sanctions_monitored_swept
     ON sanctions_monitored_subjects (last_swept_at, id)
     WHERE last_swept_at IS NOT NULL;
+
+CREATE TABLE sanctions_monitored_subject_names (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    subject_id UUID NOT NULL REFERENCES sanctions_monitored_subjects (id) ON DELETE CASCADE,
+    search_name TEXT NOT NULL CHECK (char_length(search_name) <= 2000),
+    trigram_count INTEGER GENERATED ALWAYS AS (cardinality(show_trgm(search_name))) STORED,
+    size_class SMALLINT GENERATED ALWAYS AS (
+        width_bucket(cardinality(show_trgm(search_name)),
+                     ARRAY[1, 3, 5, 7, 10, 14, 20, 29, 43, 64, 96, 192, 384, 768, 1536])
+    ) STORED
+);
+
+CREATE INDEX idx_sanctions_monitored_name_subject
+    ON sanctions_monitored_subject_names (subject_id);
+
+-- One partial trigram index per size class 1..15. Class 0 is a name without a single trigram,
+-- which no entry can match, so it is not indexed.
+DO $$
+BEGIN
+    FOR class IN 1..15 LOOP
+        EXECUTE format(
+            'CREATE INDEX idx_sanctions_monitored_name_trgm_c%1$s
+                 ON sanctions_monitored_subject_names USING gin (search_name gin_trgm_ops)
+                 WHERE size_class = %1$s', class);
+    END LOOP;
+END;
+$$;
 
 CREATE TABLE sanctions_monitoring_pending (
     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
