@@ -67,7 +67,7 @@ spec:
           # src/main (this merge itself, first) triggers auto-deploy to build a real image and
           # open a gitops PR replacing this with the actual sha. Until then, Kyverno's
           # cosign-signature/SBOM-attestation admission policies reject a tag nothing ever pushed.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-27e19a17@sha256:035738e0571b739e531867e86191c343ebdf523d2cce6c30f6a6e26170a4652d
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-engagement-service:sandbox-548fa683@sha256:d5d3337598f00d80f87eb1094d55fef9ece35eb1ceae4409f21fb7153325015d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
