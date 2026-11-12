@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.persistence.entity
 
 import com.openbank.lending.domain.model.DeclineReviewStatus
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -20,13 +21,13 @@ import java.util.UUID
 class DeclineReviewEntity : PanacheEntityBase() {
     @Id
     @Column(name = "id", columnDefinition = "uuid")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "application_id", columnDefinition = "uuid")
-    var applicationId: UUID = UUID.randomUUID()
+    var applicationId: UUID = Ids.newId()
 
     @Column(name = "party_id", columnDefinition = "uuid")
-    var partyId: UUID = UUID.randomUUID()
+    var partyId: UUID = Ids.newId()
 
     @Column(name = "requested_at")
     var requestedAt: OffsetDateTime = OffsetDateTime.MIN

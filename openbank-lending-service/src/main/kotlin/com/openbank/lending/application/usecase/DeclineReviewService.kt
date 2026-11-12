@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanEventEmitter
 import com.openbank.lending.domain.model.DeclineReview
 import com.openbank.lending.domain.model.LoanApplication
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.lending.origination.OriginationState
 import io.smallrye.mutiny.Uni
@@ -69,7 +70,7 @@ class DeclineReviewService(
                 refused(DeclineReviewRefusedException.WINDOW_ELAPSED, "the review window has elapsed")
             else -> {
                 val review = DeclineReview(
-                    id = UUID.randomUUID(),
+                    id = Ids.newId(),
                     applicationId = application.id.value,
                     partyId = application.partyId,
                     requestedAt = now,
