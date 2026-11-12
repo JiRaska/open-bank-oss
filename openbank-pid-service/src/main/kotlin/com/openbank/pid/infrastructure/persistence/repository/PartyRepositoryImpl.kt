@@ -18,9 +18,13 @@ import com.openbank.pid.domain.model.*
 import com.openbank.pid.infrastructure.persistence.entity.*
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
 import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 @ApplicationScoped
@@ -170,6 +174,63 @@ class PartyRepositoryImpl(
     override suspend fun existsByExternalId(type: ExternalIdType, value: String): Boolean = Panache.withSession {
         extIdRepo.count("idType = ?1 AND idValue = ?2", type.name, value)
     }.awaitSuspending() > 0
+
+    override suspend fun anonymize(partyId: UUID, erasedAt: Instant): Boolean {
+        val at = erasedAt.atOffset(ZoneOffset.UTC)
+        return Panache.withTransaction {
+            find("id", partyId).firstResult().flatMap { entity ->
+                if (entity == null || entity.erasedAt != null) {
+                    Uni.createFrom().item(false)
+                } else {
+                    entity.anonymise(at)
+                    // The external ids carry the RČ and EUDI blind indices (dedup keys) and the
+                    // other national identifiers; ID documents carry document numbers. Neither
+                    // has a reason to survive the person, so they are deleted, not blanked.
+                    extIdRepo.delete("partyId", partyId)
+                        .flatMap { docRepo.delete("partyId", partyId) }
+                        .flatMap { relRepo.update("terminationReason = null where partyId = ?1", partyId) }
+                        .replaceWith(true)
+                }
+            }
+        }.awaitSuspending()
+    }
+
+    /**
+     * Overwrites every personal column. NOT NULL columns get a neutral sentinel (`GDPR_ERASED`,
+     * 1900-01-01) rather than a value derived from the old one, so nothing about the person can
+     * be recovered from the shell. Status becomes TERMINATED: an erased party is no longer usable
+     * and must never come back as ACTIVE.
+     */
+    private fun PartyEntity.anonymise(at: OffsetDateTime) {
+        givenName = ERASED
+        familyName = ERASED
+        birthdate = ERASED_BIRTHDATE
+        birthNumberEncrypted = null
+        gender = null
+        birthplace = null
+        nationalities = emptyArray()
+        email = null
+        emailVerifiedAt = null
+        phone = null
+        phoneVerifiedAt = null
+        dataBoxId = null
+        permanentAddressStreet = null
+        permanentAddressHouseNumber = null
+        permanentAddressCity = null
+        permanentAddressPostalCode = null
+        permanentAddressCountry = null
+        permanentAddressRuianCode = null
+        robSyncedAt = null
+        caseMetadata = null
+        status = PartyStatus.TERMINATED.name
+        erasedAt = at
+        updatedAt = at
+    }
+
+    private companion object {
+        const val ERASED = "GDPR_ERASED"
+        val ERASED_BIRTHDATE: LocalDate = LocalDate.of(1900, 1, 1)
+    }
 
     override suspend fun findCandidatesByMatchKey(matchKey: String): List<Party> {
         // The match key is "familyNorm|givenNorm|birthdate|birthplaceNorm" (see MatchKey.of).

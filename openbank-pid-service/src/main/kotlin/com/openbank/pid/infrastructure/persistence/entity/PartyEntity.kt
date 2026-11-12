@@ -135,6 +135,10 @@ class PartyEntity : PanacheEntityBase {
     @Column(name = "case_metadata", columnDefinition = "TEXT")
     var caseMetadata: String? = null
 
+    /** GDPR Art. 17 (#15755): set once the row's personal data has been anonymised in place. */
+    @Column(name = "erased_at")
+    var erasedAt: OffsetDateTime? = null
+
     @Column(name = "created_at", nullable = false, updatable = false)
     lateinit var createdAt: OffsetDateTime
 

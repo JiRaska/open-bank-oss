@@ -9,6 +9,7 @@ import com.openbank.pid.application.port.`in`.PartySearchQuery
 import com.openbank.pid.domain.model.ExternalIdType
 import com.openbank.pid.domain.model.Party
 import com.openbank.pid.domain.model.PartyRelationship
+import java.time.Instant
 import java.util.UUID
 
 /** Outbound persistence port for the party aggregate. */
@@ -42,6 +43,18 @@ interface PartyRepository {
     suspend fun update(party: Party): Party
 
     suspend fun existsByExternalId(type: ExternalIdType, value: String): Boolean
+
+    /**
+     * GDPR Art. 17 (#15755, ADR-0118): irreversibly anonymise every personal column of the party
+     * in ONE transaction — the encrypted national identifier, name, birthdate, contact, address,
+     * free-text case metadata — and delete its external ids (which include the RČ and EUDI blind
+     * indices) and ID-document numbers. The shell row (id, type, timestamps) stays, stamped
+     * `erased_at`, as the idempotency marker and retention clock.
+     *
+     * @return `true` when this call erased the party, `false` when it was already erased or is
+     *   unknown to this service (both are a no-op, so a re-delivered event is safe).
+     */
+    suspend fun anonymize(partyId: UUID, erasedAt: Instant): Boolean
 }
 
 /** Outbound persistence port for party relationships. */

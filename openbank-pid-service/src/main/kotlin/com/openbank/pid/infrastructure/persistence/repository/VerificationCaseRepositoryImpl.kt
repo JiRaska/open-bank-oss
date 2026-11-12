@@ -12,6 +12,8 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -69,5 +71,23 @@ class VerificationCaseRepositoryImpl :
             }
         }.awaitSuspending()
         return case
+    }
+
+    override suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int = Panache.withTransaction {
+        update(
+            "applicantGivenName = ?2, applicantFamilyName = ?2, applicantBirthdate = ?3, " +
+                "applicantBirthplace = null, applicantNationalities = '', blindIndex = null, " +
+                "dedupKey = concat('ERASED:', cast(id as string)), firstNotes = null, erasedAt = ?4 " +
+                "where (firstLinkPartyId = ?1 or finalLinkPartyId = ?1) and erasedAt is null",
+            partyId,
+            ERASED,
+            ERASED_BIRTHDATE,
+            erasedAt,
+        )
+    }.awaitSuspending()
+
+    private companion object {
+        const val ERASED = "GDPR_ERASED"
+        val ERASED_BIRTHDATE: LocalDate = LocalDate.of(1900, 1, 1)
     }
 }
