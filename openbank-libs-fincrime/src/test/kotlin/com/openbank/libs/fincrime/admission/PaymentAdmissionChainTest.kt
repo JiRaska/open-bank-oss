@@ -77,9 +77,13 @@ class PaymentAdmissionChainTest {
         ).admit("payment")
 
         assertThat(result.decision).isEqualTo(AdmissionDecision.REJECT)
-        assertThat(calls).containsExactly(AdmissionStep.STANDING)
-        assertThat(result.steps.drop(1).map { it.outcome }).containsOnly(StepOutcome.NotReached)
-        assertThat(result.steps.drop(1).map { it.effective }).containsOnlyNulls()
+        // Keyed on the enum, not on index 1: the property is that every step AFTER the one that
+        // rejected was never reached, and an assertion written against a position silently weakens
+        // the moment a step is inserted ahead of it (ADR-0375 D1 inserted AUTHORITY).
+        val after = AdmissionStep.STANDING.ordinal + 1
+        assertThat(calls).containsExactly(AdmissionStep.AUTHORITY, AdmissionStep.STANDING)
+        assertThat(result.steps.drop(after).map { it.outcome }).containsOnly(StepOutcome.NotReached)
+        assertThat(result.steps.drop(after).map { it.effective }).containsOnlyNulls()
     }
 
     @Test
@@ -126,7 +130,7 @@ class PaymentAdmissionChainTest {
         ).admit("payment")
 
         assertThat(result.decision).isEqualTo(AdmissionDecision.REJECT)
-        assertThat(calls).containsExactly(AdmissionStep.STANDING, AdmissionStep.LIMITS)
+        assertThat(calls).containsExactly(AdmissionStep.AUTHORITY, AdmissionStep.STANDING, AdmissionStep.LIMITS)
     }
 
     @Test
@@ -167,7 +171,7 @@ class PaymentAdmissionChainTest {
     fun `one deciding control is enough for the unbound rest not to hold`(): Unit = runBlocking {
         val builder = PaymentAdmissionChain.Builder<String>(budget, UnavailablePolicy.HOLD)
             .check(AdmissionStep.STANDING) { _, _ -> decided(AdmissionDecision.ALLOW) }
-        AdmissionStep.entries.drop(1).forEach { builder.unbound(it, notBound) }
+        AdmissionStep.entries.filter { it != AdmissionStep.STANDING }.forEach { builder.unbound(it, notBound) }
 
         assertThat(builder.build().admit("payment").decision).isEqualTo(AdmissionDecision.ALLOW)
     }
@@ -199,13 +203,12 @@ class PaymentAdmissionChainTest {
         }
         chain(AdmissionStep.entries.associateWith { spend }, ticker = { now }).admit("payment")
 
-        assertThat(seen).containsExactly(
-            Duration.ofMillis(100),
-            Duration.ofMillis(90),
-            Duration.ofMillis(80),
-            Duration.ofMillis(70),
-            Duration.ofMillis(60),
-            Duration.ofMillis(50),
+        // Derived from the step count, not spelled out: each check is told the budget minus the
+        // 10 ms every earlier check spent. A hardcoded list asserts the arithmetic AND the number
+        // of steps in one breath, so inserting a step reads as an arithmetic failure (ADR-0375 D1
+        // inserted AUTHORITY and this test reported "0.04S was not expected").
+        assertThat(seen).containsExactlyElementsOf(
+            AdmissionStep.entries.indices.map { Duration.ofMillis(100 - 10L * it) },
         )
     }
 
@@ -227,7 +230,12 @@ class PaymentAdmissionChainTest {
         assertThat(result[AdmissionStep.SANCTIONS].outcome)
             .isEqualTo(StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED))
         // With the budget gone the remaining controls are not called at all.
-        assertThat(calls).containsExactly(AdmissionStep.STANDING, AdmissionStep.LIMITS, AdmissionStep.SANCTIONS)
+        assertThat(calls).containsExactly(
+            AdmissionStep.AUTHORITY,
+            AdmissionStep.STANDING,
+            AdmissionStep.LIMITS,
+            AdmissionStep.SANCTIONS,
+        )
         assertThat(result[AdmissionStep.FRAUD].outcome)
             .isEqualTo(StepOutcome.Unavailable(UnavailableCause.BUDGET_EXCEEDED))
         assertThat(result.decision).isEqualTo(AdmissionDecision.HOLD)
