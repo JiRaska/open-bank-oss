@@ -163,6 +163,12 @@ spec:
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
+            namespace: finrep
+            cluster: finrep-db
+            origin: manifest
+        - record: openbank:cnpg_cluster_expected
+          expr: vector(1)
+          labels:
             namespace: flaky-test-hunter
             cluster: flakytest-db
             origin: manifest
@@ -591,6 +597,11 @@ spec:
           labels:
             namespace: finops-agent
             cluster: finops-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: finrep
+            cluster: finrep-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:

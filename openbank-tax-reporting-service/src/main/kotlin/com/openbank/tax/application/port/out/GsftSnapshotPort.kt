@@ -54,7 +54,7 @@ data class GsftSnapshot(
 
 /** A field of the GSFT delivery with no verified upstream source (gsft-depositor-data.md, "Data sourcing"). */
 enum class GsftDataGap {
-    /** Roster is account-service's CURRENT ACTIVE list: dormant/frozen deposits and day-D state are missing. */
+    /** Historical snapshot marker for packages built before the date-bound deposit roster. */
     ROSTER_ACTIVE_ONLY_CURRENT,
 
     /** account-service carries one partyId per account: joint holders and shares are unknown. */
