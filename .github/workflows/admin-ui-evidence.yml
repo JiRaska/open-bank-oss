@@ -91,9 +91,9 @@ jobs:
           fi
           # test-intelligence costs ~220-260 GITHUB_TOKEN REST requests per collection; on every main
           # CI completion that was ~1k/h of the shared 5000/h quota whose exhaustion fails required
-          # checks on unrelated PRs (#15483). A workflow_run collects it at most once per 55 min;
-          # cron and dispatch are not throttled. The probe fails open (collects) on any error.
-          if [ "$EVENT_NAME" = workflow_run ] && jq -e 'index("test-intelligence")' <<< "$datasets" >/dev/null \
+          # checks on unrelated PRs (#15483). Automated triggers share a 55-minute freshness window.
+          # Dispatch can still force collection or rollback. An unavailable probe leaves collection enabled.
+          if [ "$EVENT_NAME" != workflow_dispatch ] && jq -e 'index("test-intelligence")' <<< "$datasets" >/dev/null \
             && python3 .github/scripts/test-intelligence-recently-published.py "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"; then
             datasets="$(jq -c 'map(select(. != "test-intelligence"))' <<< "$datasets")"
           fi
@@ -136,24 +136,43 @@ jobs:
           # saw. Full history, no blobs, only for the dataset that needs it.
           fetch-depth: ${{ matrix.dataset == 'test-intelligence' && '0' || '1' }}
           filter: ${{ matrix.dataset == 'test-intelligence' && 'blob:none' || '' }}
+      # The matrix lane may have waited behind another publisher since authorize-source.
+      - name: Check whether the queued dataset still needs collection
+        id: collection-source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          latest_main="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          if [ "$latest_main" != "$EVIDENCE_CODE_SHA" ]; then
+            echo 'Evidence source was superseded before collection.'
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          elif [ "$DATASET" = test-intelligence ] && [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] \
+            && python3 .github/scripts/test-intelligence-recently-published.py "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"; then
+            echo 'needed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'needed=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.collection-source.outputs.needed == 'true'
         with:
           node-version: "26"
       - name: Require provisioned evidence destination
+        if: steps.collection-source.outputs.needed == 'true'
         run: |
           test -n "$EVIDENCE_BUCKET" && test -n "$EVIDENCE_ROLE" && test -n "$EVIDENCE_REGION" || {
             echo '::error::Configure ADMIN_UI_EVIDENCE_BUCKET, ADMIN_UI_EVIDENCE_WRITER_ROLE_ARN and ADMIN_UI_EVIDENCE_REGION after reviewed infrastructure provisioning.'
             exit 1
           }
       - name: Install locked source collector dependencies
-        if: matrix.dataset == 'test-intelligence' || matrix.dataset == 'content'
+        if: steps.collection-source.outputs.needed == 'true' && (matrix.dataset == 'test-intelligence' || matrix.dataset == 'content')
         run: npm ci --omit=dev --ignore-scripts --no-audit --no-fund
         working-directory: openbank-admin-ui
       - name: Test the closed evidence dataset registry
-        if: matrix.dataset == 'content'
+        if: steps.collection-source.outputs.needed == 'true' && matrix.dataset == 'content'
         run: node --test .github/scripts/test-publish-admin-ui-evidence.mjs openbank-admin-ui/scripts/collect-admin-ui-content.test.mjs
       - name: Collect selected dataset
-        if: env.ROLLBACK_SNAPSHOT == ''
+        if: steps.collection-source.outputs.needed == 'true' && env.ROLLBACK_SNAPSHOT == ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -204,6 +223,7 @@ jobs:
           esac
       - name: Recheck source is still current main before obtaining publisher credentials
         id: source
+        if: steps.collection-source.outputs.needed == 'true'
         run: |
           set -euo pipefail
           latest_main="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"

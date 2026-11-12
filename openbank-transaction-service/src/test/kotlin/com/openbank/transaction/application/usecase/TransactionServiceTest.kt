@@ -5,6 +5,7 @@
 package com.openbank.transaction.application.usecase
 
 import com.openbank.libs.api.pagination.CursorEncoder
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.payment.InstructionType
 import com.openbank.libs.domain.payment.PaymentRail
@@ -35,6 +36,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.math.BigDecimal
 import java.sql.SQLException
 import java.time.Clock
@@ -112,6 +115,28 @@ class TransactionServiceTest {
 
         assertThat(result).isEqualTo(existing)
         coVerify(exactly = 0) { transactionRepository.save(any(), any()) }
+        verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = [false, true])
+    fun `existing and concurrent replays cannot cross synthetic origins`(synthetic: Boolean): Unit = runBlocking {
+        val command = initiateCommand().copy(synthetic = synthetic)
+        val existing = transaction(idempotencyKey = command.idempotencyKey).copy(synthetic = !synthetic)
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany
+            listOf(existing, null, existing)
+        val conflict = SQLException(
+            "duplicate key violates unique constraint \"pk_transaction_idempotency_keys\"",
+            "23505",
+        )
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        coEvery { transactionRepository.save(any(), any()) } throws PersistenceException(conflict)
+
+        repeat(2) {
+            val failure = runCatching { service.initiateTransaction(command) }.exceptionOrNull()
+            assertThat(failure).isInstanceOf(ResourceConflictException::class.java)
+        }
+        coVerify(exactly = 1) { transactionRepository.save(any(), any()) }
         verify(exactly = 0) { workflowClient.newWorkflowStub(any<Class<*>>(), any<WorkflowOptions>()) }
     }
 
@@ -540,11 +565,12 @@ class TransactionServiceTest {
         )
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns existing
+        coEvery { transactionRepository.findById(command.originalTransactionId) } returns null
 
         val result = service.reverseTransaction(command)
 
         assertThat(result).isEqualTo(existing)
-        coVerify(exactly = 0) { transactionRepository.findById(any()) }
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
     }
 
     @Test

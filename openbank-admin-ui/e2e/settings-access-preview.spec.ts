@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { waitForSettledShell } from './helpers/shell'
 import { signInAsOperator } from './helpers/auth'
 import { PERMISSIONS, ROLES } from '../src/lib/auth/roles'

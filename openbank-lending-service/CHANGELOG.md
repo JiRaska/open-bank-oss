@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.45.0...lending-service-v0.46.0) (2026-11-12)
+
+
+### Features
+
+* **lending,anacredit:** retain dated loan exposure lifecycle facts ([#15658](https://github.com/JiRaska/open-bank-oss/issues/15658)) ([2cd9dec](https://github.com/JiRaska/open-bank-oss/commit/2cd9decb7442f0d3c9fb3987f43bf4fe90ab6c1e))
+
 ## [0.45.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.44.4...lending-service-v0.45.0) (2026-11-09)
 
 
