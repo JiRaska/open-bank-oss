@@ -7612,6 +7612,22 @@ gates:
     run: |
       python3 .github/scripts/check-admin-ui-flake-quarantine.py
 
+  - id: admin-ui-module-coverage-ratchet
+    name: "Admin UI Vitest coverage floors only go up (ADR-0370 U3, enforced)"
+    group: supplychain
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: "Vitest enforces the floors in vitest.config.ts but cannot see a PR lowering or deleting one; a lowered floor needs a coverage-floor-lowered trailer naming the issue that owns the debt."
+    review_after: "2027-05-31"
+    min_subjects: 50  # 72 floors (4 global + 17 modules x 4) on 2026-11-11
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-admin-ui-module-coverage-ratchet.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-admin-ui-module-coverage-ratchet.py", ".github/scripts/check-coverage-floor-ratchet.py"]
+    run: |
+      python3 .github/scripts/check-admin-ui-module-coverage-ratchet.py --base "${PR_DIFF_BASE}" --body="${PR_BODY:-}"
+
   - id: admin-ui-request-trace-fixtures
     name: "Admin UI request tracing preserves sends, outputs, and diagnostic privacy"
     group: supplychain

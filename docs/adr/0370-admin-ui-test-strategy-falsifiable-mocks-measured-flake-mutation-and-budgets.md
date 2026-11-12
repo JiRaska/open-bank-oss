@@ -2,7 +2,7 @@
 date: 2026-11-11
 decision-status: proposed
 delivery-status: partial
-followup: "#15685 — U1 mock contract and U2 flake quarantine are built; U3–U8 are not"
+followup: "#15685 — U1 mock contract, U2 flake quarantine and U3 coverage ratchet are built; U4–U8 are not"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
