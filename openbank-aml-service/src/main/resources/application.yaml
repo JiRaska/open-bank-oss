@@ -305,6 +305,20 @@ openbank:
         batch-limit: 200
         # How long a booked movement waits for its originating event before it is counted without a rail.
         origin-grace: PT5M
+      # ADR-0371 slice 2: the ADR-0354 count pack evaluated over the counters. The pack, its
+      # vocabularies and its features are DATA; the files named here are synthetic.
+      pack:
+        resource: aml/monitoring-pack.synthetic.json
+        reasons-resource: aml/monitoring-reasons.synthetic.json
+        severities-resource: aml/monitoring-severities.synthetic.json
+        features-resource: aml/monitoring-count-features.synthetic.json
+      evaluation:
+        enabled: ${AML_MONITORING_EVALUATION_ENABLED:true}
+        cron: "0 3/15 * * * ?"
+        page-size: 200
+        # SHADOW unless true: a hit is recorded and nothing else happens. Turning this on is a
+        # rollout decision (ADR-0371 §9), not a tuning knob.
+        open-cases: ${AML_MONITORING_OPEN_CASES:false}
   outbox:
     dispatch-enabled: true
   rate-limit:

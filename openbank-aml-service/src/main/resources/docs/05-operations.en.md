@@ -138,3 +138,9 @@ This service's `build.gradle.kts` does not list the dependencies every Quarkus s
 - `openbank.aml.monitoring.attribution.*`: `enabled`, `interval`, `initial-delay`, `batch-limit`, `origin-grace`.
 - Metrics: `openbank_aml_monitoring_booked_movements_total{outcome}`, `openbank_aml_monitoring_transaction_origins_total{outcome}`, `openbank_aml_monitoring_movements_uncounted`, `openbank_aml_monitoring_movements_oldest_uncounted_age_seconds`, and the workflow-liveness gauges for `aml-movement-attribution`.
 - A growing `movements_uncounted` with a live sweep means accounts are not resolving to a party: check the account authority, then the rows with `last_attempt_at` set and `counted_at` null.
+
+## Transaction-monitoring evaluation (ADR-0371)
+
+- `openbank.aml.monitoring.evaluation.*`: `enabled`, `cron`, `page-size`, `open-cases` (default `false` = SHADOW).
+- Metrics: `openbank_aml_monitoring_evaluations_total{outcome}`, `openbank_aml_monitoring_hits_total{scenario}`, `openbank_aml_monitoring_cases_opened_total{scenario}`, `openbank_aml_monitoring_cases_oldest_undecided_age_seconds`, and the workflow-liveness gauges for `aml-monitoring-evaluation`.
+- Liveness is recorded only by a tick that reached every active party. A stale gauge while movements are being counted means evaluation is not running.
