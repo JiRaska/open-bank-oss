@@ -830,6 +830,11 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ### Synthetic taint request carrier (#4348, #14058, #14059)
 
+- **Required-origin posting (#7284):** `POST /api/v1/journals/synthetic` applies the existing
+  ledger.create policy and checks the trusted taint before opening a journal write. Existing
+  ledger images reject this path. The ledger binds idempotent replay to the journal's stored
+  classification, including a request that lost a concurrent duplicate race. The route requires
+  the existing authenticated workload allowlist.
 - **Classification integrity:** a false synthetic flag can include canary activity in real-only
   ledger views; an unjustified true flag can exclude real activity. Fail-to-real rejects untrusted
   self-exclusion but is not a universally safe accounting fallback for a trusted canary.

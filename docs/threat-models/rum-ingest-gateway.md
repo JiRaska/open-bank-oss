@@ -121,6 +121,7 @@ hardened boundary; everything before storage happens here), **TB-3** gateway↔i
 | `party_id` **dropped** (not trusted from span attrs); trusted JWT-claim binding | 🔲 follow-up (O6) |
 | Sampling (battery/data budget) | 🔨 built (probabilistic 25%) |
 | Dedicated, isolated gateway deployment (not the internal collector) | 🔨 built |
+| Only the authenticated OTLP/HTTP receiver listens: the chart's default OTLP gRPC (:4317, no auth attached), jaeger/zipkin/self-scrape receivers, debug exporter and default logs/metrics pipelines are nulled out in the values | 🔨 built — checked with `helm template` and a local collector run (before: :4317 + :4318 listen; after: :4318 only) |
 | NetworkPolicy: egress restricted to DNS / Tempo / Keycloak-JWKS only | 🔨 built — verify JWKS egress path |
 | Pod hardening: non-root, read-only rootfs, dropped caps (PSS restricted) | 🔨 built |
 | Consent: RUM off by default; consent scope wired (server-side check) | 🔲 follow-up (O4, pre-GA blocker) |
