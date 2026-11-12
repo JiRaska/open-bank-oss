@@ -442,6 +442,48 @@ class OutboxDispatchTest {
     }
 
     @Test
+    fun `fenced v2 emits outcomes only for the committed success and failure`() {
+        val staleSent = OutboxClaim(entry("stale-sent"), UUID.randomUUID())
+        val ownedSent = OutboxClaim(entry("owned-sent"), UUID.randomUUID())
+        val staleFailed = OutboxClaim(entry("stale-failed"), UUID.randomUUID())
+        val ownedFailed = OutboxClaim(entry("owned-failed"), UUID.randomUUID())
+        val legacy = FakeRepoV2(emptyList())
+        val repo = object : ClaimFencedOutboxRepositoryV2, OutboxRepositoryV2 by legacy {
+            override suspend fun claimWithTokens(limit: Int, staleAfter: Duration): List<OutboxClaim> =
+                listOf(staleSent, ownedSent, staleFailed, ownedFailed)
+
+            override suspend fun markClaimsSent(claims: List<OutboxClaim>, sentAt: Instant): Set<UUID> {
+                assertThat(claims).containsExactly(staleSent, ownedSent)
+                return setOf(ownedSent.entry.eventId)
+            }
+
+            override suspend fun markClaimFailed(claim: OutboxClaim, error: String, failedAt: Instant): OutboxStatus? {
+                assertThat(error).isEqualTo("publish failed")
+                return when (claim) {
+                    staleFailed -> null
+                    ownedFailed -> OutboxStatus.DEAD
+                    else -> error("Unexpected failure acknowledgement")
+                }
+            }
+        }
+
+        val failedIds = setOf(staleFailed.entry.eventId, ownedFailed.entry.eventId)
+        val result = runBlocking {
+            OutboxDispatch.dispatchOnce(repo) { published ->
+                if (published.eventId in failedIds) error("publish failed")
+            }
+        }
+
+        assertThat(result.outcomes).containsExactly(
+            OutboxDispatchOutcome.Dispatched(ownedSent.entry),
+            OutboxDispatchOutcome.Failed(ownedFailed.entry, terminal = true),
+        )
+        assertThat(legacy.claims.get()).isZero()
+        assertThat(legacy.sentBatches).isEmpty()
+        assertThat(legacy.failed).isEmpty()
+    }
+
+    @Test
     fun `v2 path publishes a batch concurrently, bounded by the semaphore, with ONE markSentBatch`() {
         val rows = (1..40).map { entry("v2.$it") }
         val repo = FakeRepoV2(rows)

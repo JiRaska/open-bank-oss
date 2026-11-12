@@ -879,3 +879,34 @@ fingerprint and retry scenarios remain in the same suite. Execution results belo
 exact-head AML Services CI evidence, not the domestic-payment test envelope or this prose.
 This prevents new squatting through this boundary; it does not attest historical case ownership,
 perform remediation or enable fraud enforcement. Hold timeout remains fail closed.
+
+### Customer submission lookup (issue #12317)
+
+- **Spoofing and disclosure.** Only the verified customer-edge service account may assert the
+  submission scope or query it. Customer-edge derives the digest from the authenticated human,
+  effective party, debit account and the actual delegation grant. It revalidates the business
+  context and owner/grant for each lookup. The provider checks the account, key and scope in one
+  query and returns only the identifier and lifecycle state. Key stays in the request header, and
+  the response is non-cacheable. Missing, legacy, foreign and unverifiable submissions all yield
+  `UNKNOWN` on the customer route.
+- **Integrity and replay.** The new scope is immutable and written in the original payment
+  transaction. Both the initial key lookup and unique-constraint race winner compare the existing
+  payload fingerprint and scope. A mismatch, including scoped versus unscoped, cannot replay or
+  create a second payment. No status read changes the payment or consumes SCA.
+- **Deployment and rollback.** Deploy domestic-payment (including the additive nullable column)
+  ahead of customer-edge. Legacy submissions have no proven customer binding. For rollback,
+  revert customer-edge first and preserve the new column. Existing scoped rows stay protected
+  against unscoped replay even with older provider code, because the persisted request fingerprint
+  includes the scope. Co-signature approval requests use a
+  different rail key, and a pre-persistence refusal has no durable receipt. Lookup leaves both
+  outcomes unresolved for the original key.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

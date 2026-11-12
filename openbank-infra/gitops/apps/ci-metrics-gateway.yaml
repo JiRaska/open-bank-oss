@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CI quality metrics — authenticated OTLP/HTTP ingest gateway.
+# Threat model: docs/threat-models/ci-metrics-ingest.md
+#
+# GitHub Actions in JiRaska/openbank-app (its scripts/ci-quality-metrics.py; stale-ref-ok: lives in the app repo) push OTLP/HTTP
+# JSON gauges (`ci.tests.*`, `ci.gate.outcome`, `ci.job.duration`, `ci.run.wallclock`,
+# `ci.flaky.tests`, and later `ci.benchmark.*`, `ci.fuzz.*`, `ci.journey.*`) here. They are
+# remote-written into the sandbox Prometheus (enableRemoteWriteReceiver: true) and shown on the
+# "OpenBank - CI quality" Grafana dashboard + prometheus-rules-ci-quality.yaml alerts.
+#
+# DEDICATED collector, deliberately NOT the customer RUM gateway (rum-gateway.yaml): different
+# sender (a CI runner, not a customer device), different credential (static bearer token, not
+# customer OIDC), different sink (Prometheus, not Tempo) -> separate blast radius and limits.
+# Modelled on rum-gateway: same chart/version, PSS-restricted pod, observability nodepool,
+# memory_limiter + batch, OTLP/HTTP only (gRPC off), default-deny NetworkPolicy (networkpolicy-ci-metrics-gateway.yaml); the edge controls (TLS, body
+# cap, per-client rate limit, path allow-list) live in the HTTPRoute file, not in this chart's values.
+#
+# Hostname: a NEW host, ci-metrics.open-bank.tech, on the shared Envoy Gateway (ADR-0324):
+# components/observability/httproute-ci-metrics-gateway.yaml (Certificate, ReferenceGrant, route,
+# BackendTrafficPolicy) + the `https-ci-metrics` listener in envoy-gateway/gateway.yaml. DNS needs
+# no manual step: external-dns publishes the record from the route (gateway-httproute source) and
+# cert-manager issues the Certificate. Reusing rum.open-bank.tech with another path was rejected:
+# that host's Secret is SPKI-pinned by the mobile app and its route is customer-facing, so a
+# CI-side change could affect customer RUM for no saving.
+#
+# Auth: `bearertokenauth` on the receiver. The token is read from a file mounted from the
+# Secret `ci-metrics-ingest` (ExternalSecret externalsecret-ci-metrics-ingest.yaml <- Vault
+# key `ci-metrics-ingest`, property `TOKEN`). The same value must be the GitHub secret
+# CI_METRICS_TOKEN in JiRaska/openbank-app. The file is re-read by the extension, so a rotation
+# (Vault -> ESO refresh -> kubelet projection) needs no rollout.
+#
+# Cardinality/PII guard (a leaked or abused token can only write bounded `ci_*` gauges):
+#   1. filter/ci   drops every resource whose service.name != openbank-app-ci, every metric
+#                  not named ci.<lowercase/digit/_/.>, and every non-gauge metric.
+#   2. transform/ci keeps ONLY the allow-listed attribute keys (resource + datapoint), drops
+#                  scope attributes and metric descriptions, and caps value length at 80.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ci-metrics-gateway
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+    chart: opentelemetry-collector
+    targetRevision: 0.175.0
+    helm:
+      valuesObject:
+        fullnameOverride: ci-metrics-gateway
+        mode: deployment
+        replicaCount: 1
+        image:
+          repository: docker.io/otel/opentelemetry-collector-contrib
+        # PSS restricted: non-root, read-only rootfs, no caps (same as rum-gateway).
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        podSecurityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          fsGroup: 10001
+        # Bearer token file (Secret from the ExternalSecret). Read-only, owned by the pod group.
+        extraVolumes:
+          - name: ci-metrics-token
+            secret:
+              secretName: ci-metrics-ingest
+              defaultMode: 0440
+        extraVolumeMounts:
+          - name: ci-metrics-token
+            mountPath: /etc/ci-metrics
+            readOnly: true
+        # OTLP/HTTP only; gRPC and every other receiver port is off.
+        ports:
+          metrics:
+            enabled: true
+          otlp:
+            enabled: false
+          otlp-http:
+            enabled: true
+            containerPort: 4318
+            servicePort: 4318
+            protocol: TCP
+          jaeger-compact: { enabled: false }
+          jaeger-thrift: { enabled: false }
+          jaeger-grpc: { enabled: false }
+          zipkin: { enabled: false }
+        serviceMonitor:
+          enabled: true
+        config:
+          extensions:
+            # Drives the chart's liveness/readiness probes (a custom `extensions:` replaces the default).
+            health_check:
+              endpoint: 0.0.0.0:13133
+            # S1: static bearer token read from a file (never inlined in git or env).
+            bearertokenauth:
+              scheme: Bearer
+              filename: /etc/ci-metrics/TOKEN
+          # The chart's default config is MERGED with this block, so the unused receivers, the
+          # unauthenticated OTLP gRPC listener, the debug exporter and the default traces/logs
+          # pipelines must be nulled out explicitly (verified in the helm render + local run).
+          receivers:
+            jaeger: null
+            zipkin: null
+            prometheus: null
+            otlp:
+              protocols:
+                grpc: null
+                http:
+                  endpoint: 0.0.0.0:4318
+                  auth:
+                    authenticator: bearertokenauth
+                  # D3: cap decoded message size .
+                  max_request_body_size: 65536
+          processors:
+            # Shed load rather than OOM.
+            memory_limiter:
+              check_interval: 1s
+              limit_percentage: 80
+              spike_limit_percentage: 25
+            # T1/D2: drop anything that is not the CI exporter's own `ci.*` gauges. error_mode
+            # propagate = fail closed (a statement error rejects the batch instead of passing data).
+            filter/ci:
+              error_mode: propagate
+              metrics:
+                metric:
+                  - 'resource.attributes["service.name"] != "openbank-app-ci"'
+                  - 'not IsMatch(name, "^ci\\.[a-z0-9_.]{1,64}$")'
+                  - 'type != METRIC_DATA_TYPE_GAUGE'
+            # T1/I1/D2: attribute allow-list + length cap. keep_keys drops every other key, so
+            # nothing client-chosen can add a label or smuggle PII; truncate bounds each value.
+            transform/ci:
+              error_mode: propagate
+              metric_statements:
+                - context: resource
+                  statements:
+                    - keep_keys(attributes, ["service.name", "repo", "workflow", "branch", "branch_class", "sha", "event", "suite", "ci_job", "conclusion", "gate", "metric", "target", "flow", "platform"])
+                    - truncate_all(attributes, 80)
+                - context: scope
+                  statements:
+                    - set(name, "openbank-app.ci-quality")
+                    - set(version, "")
+                    - keep_keys(attributes, [])
+                - context: metric
+                  statements:
+                    - set(description, "")
+                - context: datapoint
+                  statements:
+                    - keep_keys(attributes, ["repo", "workflow", "branch", "branch_class", "sha", "event", "suite", "ci_job", "conclusion", "gate", "metric", "target", "flow", "platform"])
+                    - truncate_all(attributes, 80)
+            batch:
+              send_batch_size: 256
+              timeout: 5s
+          exporters:
+            debug: null
+            # TB-3: in-cluster remote-write into the sandbox Prometheus
+            # (enableRemoteWriteReceiver: true in kube-prometheus-stack.yaml).
+            # resource_to_telemetry_conversion copies the resource attributes (repo, workflow,
+            # branch, sha, event, service.name) onto every series as labels.
+            prometheusremotewrite:
+              endpoint: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+              resource_to_telemetry_conversion:
+                enabled: true
+              target_info:
+                enabled: false
+              retry_on_failure:
+                enabled: true
+                max_elapsed_time: 60s
+          service:
+            extensions: [health_check, bearertokenauth]
+            pipelines:
+              traces: null
+              logs: null
+              metrics:
+                receivers: [otlp]
+                processors: [memory_limiter, filter/ci, transform/ci, batch]
+                exporters: [prometheusremotewrite]
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        nodeSelector:
+          workload: observability
+        tolerations:
+          - key: workload
+            operator: Equal
+            value: observability
+            effect: NoSchedule
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

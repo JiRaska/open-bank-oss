@@ -9,7 +9,7 @@ metadata:
   annotations:
     # All cross-namespace AML callers declare their target port; keep HTTP 8117
     # available to admin-ui and security-scanner while pinning migrated callers to 8443.
-    openbank.io/port-scoped-ingress: "true"
+    open-bank.tech/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aml-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-27e19a17@sha256:4f11381a3d1d1ea29f6a2ce958792a669964967567a4322050292a28961b11e5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-229a1a2c@sha256:c757557ea3878dc23b69ec26f8c7e95fd60e761b6e1e1fa78458f3a4d4bfafcf
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
