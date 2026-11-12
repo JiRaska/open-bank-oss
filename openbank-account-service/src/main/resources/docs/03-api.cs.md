@@ -89,6 +89,30 @@ Idempotency-Key: ...
 
 Reasons: `AML_HOLD`, `COURT_ORDER`, `FRAUD_INVESTIGATION`, `CUSTOMER_REQUEST`.
 
+### Způsobilost účtu (standing)
+
+Každá odpověď, která vrací účet, nese `standing`: odpověď na otázku, zda z účtu smí peníze odejít
+nebo na něj přijít (ADR-0374 D4). Platební služby čtou tuto hodnotu spolu s účtem a nevykládají si
+samy `status`.
+
+```json
+"standing": { "mayDebit": false, "mayCredit": false, "reason": "ACCOUNT_FROZEN" }
+```
+
+| `status` | `mayDebit` | `mayCredit` | `reason` |
+|---|---|---|---|
+| `ACTIVE` | true | true | null |
+| `DORMANT` | false | true | `ACCOUNT_DORMANT` |
+| `PENDING_ACTIVATION` | false | false | `ACCOUNT_PENDING_ACTIVATION` |
+| `FROZEN` | false | false | `ACCOUNT_FROZEN` |
+| `CLOSED` | false | false | `ACCOUNT_CLOSED` |
+
+**Stav klienta.** Když party-service ohlásí klienta jako `SUSPENDED` nebo `CLOSED`, zmrazí se
+všechny jeho účty ve stavu `ACTIVE`. Jakmile je klient znovu `ACTIVE`, tato zmrazení se zruší.
+Zmrazení zadané přes `POST .../freeze` událost klienta nikdy nezruší a zmrazí-li operátor účet
+zmrazený kvůli klientovi, přebírá zmrazení operátor. `reason` je v obou případech
+`ACCOUNT_FROZEN`. Při zmrazení kvůli stavu klienta se zákazníkovi neposílá žádné oznámení.
+
 ### Authorizations
 
 ```http
