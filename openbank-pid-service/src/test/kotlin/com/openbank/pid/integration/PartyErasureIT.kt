@@ -49,6 +49,17 @@ class PartyErasureIT {
     @Inject
     lateinit var dataSource: AgroalDataSource
 
+    @Inject
+    lateinit var repository: com.openbank.pid.infrastructure.persistence.repository.VerificationCaseRepositoryImpl
+
+    private fun <T> onEventLoop(block: suspend () -> T): T = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
+        io.smallrye.mutiny.coroutines.uni(
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined),
+        ) {
+            block()
+        }
+    }
+
     private fun source(): InMemorySource<String> =
         connector.source<String>("party-events-in").also { it.runOnVertxContext(true) }
 
@@ -429,6 +440,55 @@ class PartyErasureIT {
         assertThat(await { party(victim).erasedAt != null }).isTrue()
         assertThat(party(victim).email).describedAs("the erase must clean the write it waited for").isNull()
         assertThat(count("SELECT count(*) FROM party_external_ids WHERE party_id = ?", victim)).isZero()
+    }
+
+    @Test
+    fun `updating a case whose already-linked party was erased is refused`() {
+        val victim = UUID.randomUUID()
+        val caseId = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        seedCase(caseId, null, "blind-case-$caseId")
+        jdbc { c ->
+            c.prepareStatement(
+                "UPDATE identity_verification_case SET status = 'AWAITING_SECOND_APPROVAL', first_approver = 'op-1', " +
+                    "first_verdict = 'LINK_TO_EXISTING', first_link_party_id = ?, final_link_party_id = NULL, " +
+                    "first_at = now() WHERE id = ?",
+            ).use { ps ->
+                ps.setObject(1, victim)
+                ps.setObject(2, caseId)
+                ps.executeUpdate()
+            }
+            // The linked party is erased AFTER the link; the case row itself is not yet anonymised.
+            c.prepareStatement("UPDATE parties SET erased_at = now() WHERE id = ?").use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+        }
+
+        val thrown = runCatching {
+            onEventLoop {
+                val case = repository.findById(caseId)!!
+                repository.update(
+                    case.copy(
+                        status = com.openbank.pid.domain.model.VerificationCaseStatus.DECIDED,
+                        secondApprover = "op-2",
+                        secondAt = java.time.Instant.now(),
+                        finalVerdict = com.openbank.pid.domain.model.CaseVerdict.LINK_TO_EXISTING,
+                        finalLinkPartyId = victim,
+                        decidedAt = java.time.Instant.now(),
+                    ),
+                )
+            }
+        }.exceptionOrNull()
+
+        assertThat(thrown).describedAs("an already-linked erased party must refuse the write")
+            .isInstanceOf(com.openbank.pid.application.usecase.PartyErasedException::class.java)
+        assertThat(
+            count(
+                "SELECT count(*) FROM identity_verification_case WHERE id = '$caseId' AND status <> 'DECIDED' AND ?::uuid IS NOT NULL",
+                victim,
+            ),
+        ).isEqualTo(1)
     }
 
     private companion object {

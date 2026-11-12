@@ -57,16 +57,17 @@ class VerificationCaseRepositoryImpl :
 
     override suspend fun update(case: VerificationCase): VerificationCase {
         Panache.withTransaction {
-            find("id", case.id).firstResult().flatMap { existing ->
+            // Lock order: case row first, then its link-target party rows in sorted id order. The erase
+            // path never holds a party lock while waiting on a case row (party and case steps are
+            // separate transactions), so there is no opposite ordering to deadlock against.
+            find("id", case.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().flatMap { existing ->
                 val current = requireNotNull(existing) { "verification case ${case.id} not found" }
                 // GDPR Art. 17 (#15755): an erased case is closed history; no step may write to it.
                 if (current.erasedAt != null) throw PartyErasedException("verification case ${case.id} was erased")
-                // A newly chosen link target is locked (FOR UPDATE) and checked in THIS transaction, so
-                // it cannot be erased between the check and the write (PartyRepositoryImpl.anonymize
-                // takes the same lock).
-                val newTargets = listOfNotNull(case.firstLinkPartyId, case.finalLinkPartyId)
-                    .distinct()
-                    .filter { it != current.firstLinkPartyId && it != current.finalLinkPartyId }
+                // EVERY link target of the incoming case is locked (FOR UPDATE) and checked in THIS
+                // transaction, not only newly chosen ones: a target erased after it was linked must
+                // also stop the write (PartyRepositoryImpl.anonymize takes the same lock).
+                val newTargets = listOfNotNull(case.firstLinkPartyId, case.finalLinkPartyId).distinct().sorted()
                 lockLiveTargets(newTargets).map { applyDecision(current, case) }
             }
         }.awaitSuspending()
