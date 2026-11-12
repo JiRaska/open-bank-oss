@@ -168,6 +168,8 @@ def derive() -> tuple[dict[str, str], dict[str, dict], list[str]]:
 # are not configured in this tree at all and tolerate every NoSchedule taint (`operator: Exists`,
 # no key); `--live` checks them, and everything else, against a `kubectl get ds -A -o json`.
 STATEFUL_TAINT = ("openbank.io/stateful", "true")
+# Taint keys the stateful Kyverno policy must add while the node keys move to open-bank.tech.
+MIGRATION_STATEFUL_TAINT_KEYS = ("openbank.io/stateful", "open-bank.tech/stateful")
 OBS_TAINT = ("workload", "observability")
 # Unpinned observability tolerations that are NOT node agents. Reason required; an entry that no
 # longer matches an unpinned list is itself a finding, so the exemption cannot outlive its cause.
@@ -405,8 +407,10 @@ def kyverno() -> int:
         sp = (doc or {}).get("spec") or {}
         req = json.dumps(((sp.get("affinity") or {}).get("nodeAffinity") or {}).get(
             "requiredDuringSchedulingIgnoredDuringExecution") or {})
-        routed = '"on-demand"' in req and "karpenter.sh/capacity-type" in req and any(
-            t.get("key") == "openbank.io/stateful" for t in sp.get("tolerations") or [])
+        tol_keys = {t.get("key") for t in sp.get("tolerations") or []}
+        # Node-key migration to open-bank.tech, stage 1: the policy must add BOTH taint keys.
+        routed = ('"on-demand"' in req and "karpenter.sh/capacity-type" in req
+                  and all(k in tol_keys for k in MIGRATION_STATEFUL_TAINT_KEYS))
         got[res.strip()] = "on-demand" if routed else "untouched"
     bad = [f"{r}: expected {e}, got {got.get(r, 'NOT EVALUATED')}" for r, e in expect.items() if got.get(r) != e]
     for b in bad:

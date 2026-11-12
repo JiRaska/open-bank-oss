@@ -87,6 +87,30 @@ quarkus:
       outgoing:
         sanctions-events-out:
           connector: smallrye-in-memory
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS listener (8443) beside the plain port (#15723). `client-auth` is a
+      # BUILD-TIME property: the container env QUARKUS_HTTP_SSL_CLIENT_AUTH cannot set it, so it
+      # lives in the file the image is built from. Under `%prod` only: at the top level every dev
+      # run and @QuarkusTest would see TLS intended with no certificate and refuse to start.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth required Quarkus defaults `insecure-requests`
+      # to `disabled` and drops the HTTP listener, so the readiness probe and every existing
+      # plaintext caller would get connection refused (#10441). mTLS applies to 8443 only.
+      insecure-requests: enabled
+      # Listener parity (#12511): with client-auth on, Quarkus also registers its mTLS
+      # authentication mechanism, which makes any trusted client certificate an authenticated
+      # identity on 8443. The API accepts the bearer mechanism ONLY, on both listeners; the
+      # certificate stays transport authentication. SanctionsListenerAuthParityIT holds both
+      # listeners to it with the production listener shape.
+      auth:
+        permission:
+          bearer-only:
+            paths: /api/*
+            policy: permit
+            auth-mechanism: bearer
 
 kafka:
   bootstrap:

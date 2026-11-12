@@ -4,8 +4,10 @@
 """Exercise admission boundaries and workflow wiring without credentials or network."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -108,6 +110,33 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
+
+    def test_admission_warns_on_low_core_quota_without_an_extra_api_call(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/ci.yml').read_text())
+        step = next(s for s in workflow['jobs']['agent-admission']['steps'] if s.get('name') == 'quota-meter start')
+        probe = '''gh() {
+            printf '%s\n' "$1 $2" >> "$METER_CALLS"
+            if [ "$METER_FAIL" = true ]; then return 1; fi
+            jq -r "$4" <<< "$METER_PAYLOAD"
+        }
+''' + step['run']
+        cases = [(1001, 5000, False, False), (1000, 5000, False, True),
+                 (200, 1000, False, True), (None, 5000, False, False), (0, 5000, True, False)]
+        for remaining, limit, unavailable, warns in cases:
+            with self.subTest(remaining=remaining, limit=limit, unavailable=unavailable), tempfile.TemporaryDirectory() as tmp:
+                calls = Path(tmp) / 'calls'
+                summary = Path(tmp) / 'summary'
+                payload = {'resources': {'core': {'used': limit - (remaining or 0), 'remaining': remaining,
+                                                  'limit': limit, 'reset': 123}}}
+                env = dict(os.environ, METER_CALLS=str(calls), METER_FAIL=str(unavailable).lower(),
+                           METER_PAYLOAD=json.dumps(payload), GITHUB_STEP_SUMMARY=str(summary),
+                           GITHUB_WORKFLOW='CI', GITHUB_JOB='agent-admission')
+                result = subprocess.run(['bash', '-e', '-c', probe], env=env, capture_output=True, text=True, check=True)
+                self.assertEqual(calls.read_text(), 'api rate_limit\n')
+                self.assertIn('::notice title=quota-meter::', result.stdout)
+                self.assertEqual('::warning title=GitHub API quota nearing exhaustion::' in result.stdout, warns)
+                if unavailable:
+                    self.assertIn('start unavailable', summary.read_text())
 
     def test_services_ci_admission_reads_current_trusted_base(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())

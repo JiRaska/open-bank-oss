@@ -41,6 +41,20 @@ that is balance-service).
 - Four-eyes approval-decide endpoint: same role set as the gated action, plus a domain-level
   segregation-of-duties check (checker id != maker id) — see §4a.
 
+### GSFT deposit roster (issue #15356)
+
+`tax-reporting-service` calls `GET /api/v1/accounts/reporting/deposits` as its named OIDC
+service account. The endpoint requires `ROLE_API`, checks the verified client identity in
+application code and declares the same caller in OPA. A generic machine role, a human role,
+or a matching display name alone does not grant the roster. The response contains account and
+party identifiers, account number, type and currency. It omits balances and holder details
+and sends `Cache-Control: no-store`.
+
+Each page uses the same Czech reporting day and an immutable account-ID cursor. The query
+uses opening and closure timestamps, and stops the report when a closed record has no
+closure timestamp. This is the account roster source. Eligibility, balance, FX and verified
+holder facts remain separate data sources for the GSFT completeness checks.
+
 ## 4. STRIDE
 
 | Threat | Vector | Mitigation |

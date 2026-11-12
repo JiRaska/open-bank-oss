@@ -342,6 +342,7 @@ class PartyServiceTest {
         val eventSlot = slot<DomainEvent>()
 
         coEvery { relationshipRepository.findById(relationship.id) } returns relationship
+        coEvery { partyRepository.findById(party.id) } returns party
         coEvery { relationshipRepository.update(capture(updatedSlot)) } answers { updatedSlot.captured }
         coEvery { eventPublisher.publish(capture(eventSlot)) } returns Unit
 
@@ -438,6 +439,51 @@ class PartyServiceTest {
         initialRole = PartyRole.CUSTOMER,
         onboardingChannel = OnboardingChannel.BANKID,
     )
+
+    @Test
+    fun `addRelationship refuses an erased party`(): Unit = runBlocking {
+        val erased = testParty().copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+        coEvery { partyRepository.findById(erased.id) } returns erased
+
+        assertThatThrownBy {
+            runBlocking {
+                service.addRelationship(
+                    com.openbank.pid.application.port.`in`.AddRelationshipCommand(
+                        erased.id,
+                        PartyRole.CUSTOMER,
+                        com.openbank.pid.domain.model.OnboardingChannel.values().first(),
+                    ),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { relationshipRepository.save(any()) }
+    }
+
+    @Test
+    fun `terminateRelationship refuses an erased party and writes no free-text reason`(): Unit = runBlocking {
+        val erased = testParty().copy(erasedAt = OffsetDateTime.parse("2026-11-12T10:00:00Z"))
+        val rel = PartyRelationship(
+            UUID.randomUUID(),
+            erased.id,
+            PartyRole.CUSTOMER,
+            RelationshipStatus.ACTIVE,
+            OffsetDateTime.parse("2024-01-01T00:00:00Z"),
+            com.openbank.pid.domain.model.OnboardingChannel.values().first(),
+            null,
+            null,
+        )
+        coEvery { relationshipRepository.findById(rel.id) } returns rel
+        coEvery { partyRepository.findById(erased.id) } returns erased
+
+        assertThatThrownBy {
+            runBlocking {
+                service.terminateRelationship(
+                    com.openbank.pid.application.port.`in`.TerminateRelationshipCommand(erased.id, rel.id, "personal"),
+                )
+            }
+        }.isInstanceOf(PartyErasedException::class.java)
+        coVerify(exactly = 0) { relationshipRepository.update(any()) }
+    }
 
     private fun testParty(id: UUID = UUID.randomUUID()) = Party(
         id = id,
