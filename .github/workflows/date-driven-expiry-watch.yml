@@ -1,0 +1,167 @@
+# -----------------------------------------------------------------------------
+# Date-driven expiry watch (#15483).
+#
+# Two CI failure classes arrive on a calendar date nobody chose, and both broke CI on the day
+# with no warning: a GitHub PAT expiring (merged-past-red-check-watch, 401 Bad credentials,
+# 2026-11-12) and apt version pins dropping out of the Ubuntu archive (the service runtime
+# image, Dockerfile.deploy). Both can be seen coming:
+#   - GitHub reports a PAT's expiry on every authenticated response;
+#   - a pin is SUPERSEDED (a newer version is published) before it is gone from every pocket.
+# This watch asks both questions daily and opens or refreshes ONE tracking issue per class.
+# Reasoning lives in the two script headers; this file only wires them.
+#
+# PR lane: self-tests + the offline credential-coverage check, no secrets, no network probes.
+# -----------------------------------------------------------------------------
+name: Date-driven expiry watch
+
+on:
+  schedule:
+    - cron: "40 6 * * *"
+  pull_request:
+    paths:
+      - ".github/scripts/check-credential-expiry.py"
+      - ".github/scripts/check-apt-pins.py"
+      - ".github/workflows/date-driven-expiry-watch.yml"
+      - ".github/workflows/Dockerfile.deploy"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: date-driven-expiry-watch-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  credentials:
+    name: credential-expiry
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      # Derived-coverage list: `--coverage` fails if a workflow reads a *_PAT/*_TOKEN secret
+      # that is neither here nor excluded with a reason in the script.
+      CREDENTIALS: "RULESET_AUDIT_TOKEN OPENBANK_APP_RO_TOKEN GOVERNANCE_GH_PAT"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the credential verdicts
+        run: python3 .github/scripts/check-credential-expiry.py --self-test
+
+      - name: Check every PAT/token secret is covered (offline)
+        run: python3 .github/scripts/check-credential-expiry.py --coverage .github/workflows/date-driven-expiry-watch.yml
+
+      - name: Probe each credential
+        id: probe
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          RULESET_AUDIT_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
+          OPENBANK_APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+          GOVERNANCE_GH_PAT: ${{ secrets.GOVERNANCE_GH_PAT }}
+        run: |
+          set +e
+          python3 .github/scripts/check-credential-expiry.py > "$RUNNER_TEMP/cred.txt"
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/cred.txt"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) ;;
+            2) echo "::warning::A CI credential is expired or expires within 7 days - owner must rotate it." ;;
+            3) echo "::error::A credential could not be probed - that is not a clean verdict."; exit 3 ;;
+            *) exit "$code" ;;
+          esac
+
+      - name: Open or refresh the tracking issue
+        if: ${{ github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "CI credential expired or expiring - owner rotation needed"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="$RUNNER_TEMP/issue-body.md"
+          {
+            echo "The daily credential probe found a GitHub token that is expired (401) or expires within 7 days."
+            echo "Only the repository owner can rotate these. Update the named repository secret, then re-run the watch."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/cred.txt"
+            echo '```'
+            echo
+            echo "Probe: \`.github/scripts/check-credential-expiry.py\` (no token value is ever printed)."
+            echo "Run: $RUN_URL"
+          } > "$body"
+          status_file="$RUNNER_TEMP/resolve-status"
+          issue=$(bash .github/scripts/resolve-tracking-issue.sh --title "$TITLE" \
+            --create-body-file "$body" --create-label tech-debt --create-label "severity:high" \
+            --status-file "$status_file")
+          if [ "$(cat "$status_file")" = "existing" ]; then
+            gh issue comment "$issue" -R "$GH_REPO" --body-file "$body"
+          fi
+          echo "Tracking issue: #$issue"
+
+  apt-pins:
+    name: apt-pin-freshness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the pin verdicts
+        run: python3 .github/scripts/check-apt-pins.py --self-test
+
+      # Runs on PRs too: a PR that adds or bumps a pin learns at once whether it resolves.
+      - name: Ask the archive about every pin
+        id: probe
+        run: |
+          set +e
+          python3 .github/scripts/check-apt-pins.py --root . > "$RUNNER_TEMP/pins.txt" 2>&1
+          code=$?
+          set -e
+          cat "$RUNNER_TEMP/pins.txt"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) ;;
+            2) if grep -q '^MISSING' "$RUNNER_TEMP/pins.txt"; then
+                 echo "::error::An apt pin is no longer in the archive - every service image build fails."; exit 2
+               fi
+               echo "::warning::An apt pin is superseded - bump it before it leaves the archive." ;;
+            3) echo "::error::The archive could not be queried (network/DNS) - not a verdict about the pins."; exit 3 ;;
+            *) exit "$code" ;;
+          esac
+
+      - name: Open or refresh the tracking issue
+        if: ${{ always() && github.event_name != 'pull_request' && steps.probe.outputs.code == '2' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "apt version pin superseded or gone from the Ubuntu archive"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="$RUNNER_TEMP/issue-body.md"
+          {
+            echo "The daily apt-pin probe found a pinned \`pkg=version\` that is SUPERSEDED (a newer version is published;"
+            echo "the pin breaks once the old one leaves every pocket) or MISSING (image builds fail now)."
+            echo "Bump the pin to the version the archive now offers, in the Dockerfile named below."
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/pins.txt"
+            echo '```'
+            echo
+            echo "Probe: \`.github/scripts/check-apt-pins.py\`. Run: $RUN_URL"
+          } > "$body"
+          status_file="$RUNNER_TEMP/resolve-status"
+          issue=$(bash .github/scripts/resolve-tracking-issue.sh --title "$TITLE" \
+            --create-body-file "$body" --create-label tech-debt --create-label "severity:high" \
+            --status-file "$status_file")
+          if [ "$(cat "$status_file")" = "existing" ]; then
+            gh issue comment "$issue" -R "$GH_REPO" --body-file "$body"
+          fi
+          echo "Tracking issue: #$issue"

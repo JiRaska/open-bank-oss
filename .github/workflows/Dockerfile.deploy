@@ -25,7 +25,11 @@ FROM eclipse-temurin:25-jre@sha256:dbb43d81099eec91e0800226ed2296d03146ee7857165
 
 # Ubuntu USN-8954-1 and USN-8956-1 fix zlib and Brotli in this pinned Resolute base.
 # Install the vendor fixes for CVE-2026-109518 in apt and libapt-pkg7.0 as well.
-RUN apt-get update \
+# `--error-on=any` + retries: on 2026-11-11 a DNS failure left apt with no index, and the build
+# then reported every pin as "Version ... was not found" — indistinguishable from a pin that
+# really left the archive. Failing at `update` names the real cause. Pin freshness is watched
+# daily by .github/scripts/check-apt-pins.py (date-driven-expiry-watch.yml).
+RUN apt-get -o Acquire::Retries=3 update --error-on=any \
  && apt-get install -y --no-install-recommends --only-upgrade \
       apt=3.2.1ubuntu0.1 \
       libapt-pkg7.0=3.2.1ubuntu0.1 \
