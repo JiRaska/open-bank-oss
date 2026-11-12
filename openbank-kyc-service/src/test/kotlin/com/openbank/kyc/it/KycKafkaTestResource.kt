@@ -13,7 +13,7 @@ import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
 import java.util.concurrent.TimeUnit
 
-class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
+open class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
     private val postgres = PostgresTestResource()
     private var broker: RedpandaContainer? = null
 
@@ -51,12 +51,15 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
                 "quarkus.scheduler.enabled" to "false",
                 "quarkus.rest-client.sanctions-service.url" to "http://127.0.0.1:1",
                 "authz.enforce" to "false",
-            )
+            ) + overrides()
         } catch (failure: Exception) {
             stop()
             throw failure
         }
     }
+
+    /** Settings a subclass layers over the defaults (applied last, so they win). */
+    protected open fun overrides(): Map<String, String> = emptyMap()
 
     override fun stop() {
         try {

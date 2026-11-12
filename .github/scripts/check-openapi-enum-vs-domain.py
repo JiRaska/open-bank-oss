@@ -140,7 +140,7 @@ BASELINE: dict[str, str] = {
         "atomic, APPROVED/WITHDRAWN are unpersistable by construction.",
     "openbank-lending-service:EXECUTED,PROPOSED,REJECTED":
         "#8896 — Czech credit policy revisions deliberately expose a subset of ProposalState. "
-        "V32 allows only PROPOSED, EXECUTED and REJECTED, and the response rejects all other states.",
+        "V33 allows only PROPOSED, EXECUTED and REJECTED, and the response rejects all other states.",
     # NOT drift — a DELIBERATE SUBSET (ADR-0353 D4). fraud-service's verdict is the shared
     # openbank-libs-fincrime `FraudVerdict`, whose UNKNOWN is what a CONSUMER reads when an answer
     # cannot be parsed (#4403). fraud-service never renders it (`RuleHit` rejects it) and never emits

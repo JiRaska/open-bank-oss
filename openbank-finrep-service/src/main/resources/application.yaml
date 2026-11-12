@@ -95,7 +95,13 @@ quarkus:
     always-include: true
     path: /api/docs
 
+authz:
+  enforce: ${AUTHZ_ENFORCE:false}
+
 openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
   finrep:
     risk-engine:
       # Off until finrep's own identity, its risk-engine read grant and the network edge are live

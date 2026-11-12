@@ -48,6 +48,8 @@ class PartyResourceAuditTest {
             every { it.get() } returns token
         }
         val identity = mockk<io.quarkus.security.identity.SecurityIdentity>().also {
+            every { it.principal } returns java.security.Principal { actorSub }
+            every { it.hasRole("ROLE_OPERATOR") } returns false
             every { it.hasRole("ROLE_ADMIN") } returns true
             every { it.hasRole("ROLE_DPO") } returns false
         }

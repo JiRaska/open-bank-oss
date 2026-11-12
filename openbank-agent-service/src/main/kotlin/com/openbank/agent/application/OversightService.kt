@@ -88,10 +88,11 @@ class OversightService {
         //   BlockedThreadChecker: event-loop-thread-0 blocked for 19s
         //   Tool call failed: sanctions_list_pending: BlockingNotAllowedException
         //   OPA decision query failed ... failing closed: BlockingNotAllowedException
-        //   agent policy BLOCK but PDP errored — falling back to ADVISORY
-        // The last line is the damage: the PDP is unreachable for reasons that have nothing to do
-        // with OPA, so ENFORCEMENT SILENTLY DOWNGRADES on every sweep while the run still reports
-        // "oversight sweep done" and the liveness heartbeat still records success.
+        //   agent policy BLOCK but PDP errored — falling back to ADVISORY   (the old gate behaviour)
+        // The last line was the damage: the PDP is unreachable for reasons that have nothing to do
+        // with OPA, so enforcement silently downgraded on every sweep while the run still reported
+        // "oversight sweep done". The gate now fails closed instead (outcome pdp_unavailable_denied,
+        // #15758), so the same mistake would show as denied tool calls rather than a quiet downgrade.
         //
         // Only the SCHEDULED path needs this. A sweep triggered over HTTP or Kafka already arrives
         // on a worker thread; wrapping there would add a hop for nothing.

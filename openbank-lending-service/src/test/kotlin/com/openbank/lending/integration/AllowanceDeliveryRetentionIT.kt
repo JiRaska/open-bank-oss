@@ -150,8 +150,9 @@ class AllowanceDeliveryRetentionIT {
                 "DROP FUNCTION check_cz_credit_policy_future_approval(); " +
                 "DROP FUNCTION cz_credit_policy_prague_day(); " +
                 "DROP FUNCTION protect_cz_credit_policy_revision(); " +
+                "DROP TABLE loan_decline_review; " +
                 "DROP TABLE lending_close_required_job; " +
-                "DELETE FROM flyway_schema_history WHERE version IN ('31', '32'); " +
+                "DELETE FROM flyway_schema_history WHERE version IN ('31', '32', '33'); " +
                 "DROP TRIGGER record_lending_allowance_delivery ON lending_outbox; " +
                 "DROP FUNCTION record_lending_allowance_delivery(); " +
                 "DROP INDEX idx_lending_allowance_outbox_date_status; " +
