@@ -2,6 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import com.openbank.buildlogic.pactBrokerSystemProperties
 import java.util.zip.ZipFile
 
 plugins {
@@ -112,6 +113,8 @@ dependencies {
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
+    testImplementation(libs.quarkus.test.security.oidc)
+    testImplementation(libs.pact.provider)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
@@ -139,9 +142,35 @@ allOpen {
 }
 // The default `test` run stays unit-only and infra-free (preserves the offline-buildable promise):
 // the Docker-backed `@Tag("integration")` adapter ITs are excluded unless `-PwithDocker` is passed.
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform()
+    systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.http.test-ssl-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
+}
 tasks.test {
     useJUnitPlatform { if (!project.hasProperty("withDocker")) excludeTags("integration") }
-    systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+}
+
+// Publish broker verification separately from offline build/test, like convention-managed services.
+val providerPactTestSourceSet =
+    sourceSets.create("providerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*PactBrokerProviderVerificationTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath += sourceSets.main.get().output + sourceSets.test.get().output +
+            configurations.testCompileClasspath.get()
+        runtimeClasspath += output + compileClasspath + sourceSets.test.get().runtimeClasspath
+    }
+tasks.register<Test>("providerPactTest") {
+    description = "Replays analytics-sink consumer contracts from the Pact Broker."
+    group = "verification"
+    testClassesDirs = providerPactTestSourceSet.output.classesDirs
+    classpath = providerPactTestSourceSet.runtimeClasspath
+    pactBrokerSystemProperties.forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    outputs.upToDateWhen { false }
+    outputs.cacheIf { false }
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had no kover

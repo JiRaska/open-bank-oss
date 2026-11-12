@@ -177,6 +177,11 @@ mp:
       # class. OrphanedPartyDetectionSchedulerIT re-enables it, with a shrunk cron and a stub port.
       orphan-detection:
         enabled: false
+      # The retry sweep would re-screen, behind a test's back, the very cases whose "screen
+      # unavailable, check stays PENDING" state other suites assert. UnscreenedCaseRetrySchedulerIT
+      # re-enables it with a shrunk interval.
+      screening-retry:
+        enabled: false
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
@@ -224,6 +229,16 @@ openbank:
       grace-period: "${KYC_ORPHAN_DETECTION_GRACE:PT1H}"
       page-size: "${KYC_ORPHAN_DETECTION_PAGE_SIZE:100}"
       max-pages: "${KYC_ORPHAN_DETECTION_MAX_PAGES:500}"
+    # Retry of the customer screen for cases opened while sanctions-service was unavailable
+    # (#15723). Such a case keeps its sanctions check PENDING; this sweep re-runs the same screen
+    # with the same idempotency key until it gets an answer. min-age is the wait after the last
+    # attempt (the open path itself, or an earlier retry); batch-size bounds one tick.
+    # Disabling it stops the retries, not openbank_kyc_sanctions_unscreened_cases.
+    screening-retry:
+      enabled: "${KYC_SCREENING_RETRY_ENABLED:true}"
+      interval: "${KYC_SCREENING_RETRY_INTERVAL:1m}"
+      min-age: "${KYC_SCREENING_RETRY_MIN_AGE:PT2M}"
+      batch-size: "${KYC_SCREENING_RETRY_BATCH_SIZE:50}"
     # ADR-0256 trigger loop (SANCTIONS_LIST_CHANGED → case coordinator). Deployed DISABLED by
     # default per the contract's rollout sequence (Pact + sandbox coordinator exercise + operator
     # metrics land before enablement); a missing CASE_COORDINATOR_URL maps triggers to the

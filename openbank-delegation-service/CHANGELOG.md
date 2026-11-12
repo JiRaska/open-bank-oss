@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.7](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.6...delegation-service-v0.23.7) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** bind approval replay to the frozen payment payload ([#15716](https://github.com/JiRaska/open-bank-oss/issues/15716)) ([ad63d63](https://github.com/JiRaska/open-bank-oss/commit/ad63d6306340cfff8c9be9350bfd6e3c399034f5))
+
+## [0.23.6](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.5...delegation-service-v0.23.6) (2026-11-12)
+
+
+### Bug Fixes
+
+* **delegation:** require explicit sole authority for offers ([#15639](https://github.com/JiRaska/open-bank-oss/issues/15639)) ([25b2de9](https://github.com/JiRaska/open-bank-oss/commit/25b2de9c4040af4f3b22ac6f988834f894f6cb79))
+
 ## [0.23.5](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.23.4...delegation-service-v0.23.5) (2026-11-06)
 
 
