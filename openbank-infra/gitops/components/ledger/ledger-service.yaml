@@ -173,6 +173,14 @@ spec:
             # Rollback is this value alone: set back to "shadow".
             - name: LEDGER_DAY_LOCK_MODE
               value: "enforce"
+            # Period freeze lock (ADR-0096 D1) shadow -> enforce. Shadow only counts a
+            # journal dated into a FROZEN month, so the ledger could diverge from figures
+            # already reported. Readout of openbank_ledger_period_lock_decisions_total over
+            # the last 30 days (2026-11-11): 13 decisions, all outcome=allowed, zero
+            # would_refuse, so enforce refuses no posting seen in that window.
+            # Rollback is this line alone: remove it (the code default is shadow).
+            - name: LEDGER_PERIOD_LOCK_MODE
+              value: "enforce"
           startupProbe:
             tcpSocket:
               port: management
