@@ -111,27 +111,35 @@ def blames_row(finding: tuple, rows: set[tuple[str, str]]) -> bool:
                for row, mitigation in rows)
 
 
-def _declaring_files(ref: str, root: pathlib.Path, comp: str, cls: str, run=subprocess.run) -> set[str]:
-    """Files under `<comp>/src/test` at `ref` that DECLARE class/object `cls` (a mention is not a declaration)."""
-    decl = re.compile(rf"^[ \t]*(?:(?:public|internal|private|protected|abstract|open|final|data|sealed|static)\s+)*"
-                      rf"(?:class|object)\s+{re.escape(cls)}\b", re.M)
-    listed = run(["git", "-C", str(root), "grep", "-l", "-w", "-F", "-e", cls, ref, "--", f"{comp}/src/test"],
-                 capture_output=True, text=True, timeout=60)
-    if listed.returncode not in (0, 1):
-        raise subprocess.SubprocessError(listed.stderr)
+def _mentioned_at(ref: str, root: pathlib.Path, comp: str, cls: str, run=subprocess.run) -> bool:
+    """Fail closed, no parsing: does ANY file under `<comp>/src/test` at `ref` have the stem `cls` or contain
+    it as a whole word? A truly new class is mentioned nowhere, so this never refuses a real new test."""
+    tree = run(["git", "-C", str(root), "ls-tree", "-r", "--name-only", ref, "--", f"{comp}/src/test"],
+               capture_output=True, text=True, timeout=60, check=True).stdout
+    if any(pathlib.PurePosixPath(f).stem == cls for f in tree.splitlines()):
+        return True
+    hit = run(["git", "-C", str(root), "grep", "-l", "-w", "-F", "-e", cls, ref, "--", f"{comp}/src/test"],
+              capture_output=True, text=True, timeout=60)
+    if hit.returncode not in (0, 1):
+        raise subprocess.SubprocessError(hit.stderr)
+    return hit.returncode == 0
+
+
+def _declaring_files_head(root: pathlib.Path, comp: str, cls: str, claims) -> set[str]:
+    """Files at HEAD that declare `cls` by the claims module's own test: stem == class, masked `class <cls>`."""
     out = set()
-    for line in listed.stdout.splitlines():
-        path = line.split(":", 1)[1] if ":" in line else line
-        text = run(["git", "-C", str(root), "show", f"{ref}:{path}"], capture_output=True, text=True,
-                   timeout=60, check=True).stdout
-        if decl.search(text):
-            out.add(path)
+    for path in (root / comp / "src/test").rglob("*"):
+        if path.suffix not in (".kt", ".java") or path.stem != cls:
+            continue
+        code = claims.evidence_collector().mask_kotlin_comments(path.read_text(encoding="utf-8"), mask_strings=True)
+        if re.search(r"\bclass\s+" + re.escape(cls) + r"\b", code):
+            out.add(path.relative_to(root).as_posix())
     return out
 
 
 def added_test_classes(base: str, root: pathlib.Path, run=subprocess.run) -> set[tuple[str, str]]:
     """(component, class) for classes that are truly NEW in this diff: a file under `<component>/src/test/`
-    is added, no file in that component declared the class at the merge-base, and at HEAD exactly one file
+    is added, no file in that component has the class as stem or whole word at the merge-base, and at HEAD exactly one file
     declares it (an added one). A second file reusing an existing class's name must not launder its result."""
     if not base:
         return set()
@@ -147,9 +155,9 @@ def added_test_classes(base: str, root: pathlib.Path, run=subprocess.run) -> set
                 added.setdefault((m.group(1), m.group(2)), set()).add(line.strip())
         out = set()
         for (comp, cls), files in added.items():
-            if _declaring_files(point, root, comp, cls, run):
+            if _mentioned_at(point, root, comp, cls, run):
                 continue
-            if len(heads := _declaring_files("HEAD", root, comp, cls, run)) == 1 and heads <= files:
+            if len(heads := _declaring_files_head(root, comp, cls, _claims_module())) == 1 and heads <= files:
                 out.add((comp, cls))
         return out
     except (OSError, subprocess.SubprocessError):
@@ -345,6 +353,21 @@ def git_ratchet_self_test(parse) -> int:
         git("add", "."); git("commit", "-qm", "re-add under same name")
         cases.append(("a class declared at the base is not new even when only one declaration remains",
                       added_test_classes("pre4", root), set()))
+        for i, (label, body) in enumerate((
+                ("an annotated declaration", '@Tag("x") class N0 {}\n'),
+                ("an enum declaration", "internal enum class N1 { A }\n"),
+                ("an inner declaration", "class O { inner class N2 }\n"),
+                ("only a mention", "class Other { val a = N3() }\n"),
+                ("a new, unmentioned class (control)", "class Unrelated\n"))):
+            name = f"N{i}"
+            (root / "m/src/test/kotlin/q").mkdir(exist_ok=True)
+            (root / f"m/src/test/kotlin/q/Holder{i}.kt").write_text(body)
+            git("add", "."); git("commit", "-qm", "holder")
+            git("branch", "-f", f"pre{i}x")
+            (root / f"m/src/test/kotlin/q/{name}.kt").write_text(f"class {name} {{ fun n() = 2 }}\n")
+            git("add", "."); git("commit", "-qm", "name")
+            want = {("m", name)} if i == 4 else set()
+            cases.append((f"base with {label}: {'exempt' if want else 'not new'}", added_test_classes(f"pre{i}x", root), want))
         cases.append(("no base knows no added tests", added_test_classes("", root), set()))
     bad = [name for name, got, want in cases if got != want]
     print(f"git ratchet self-test: {len(cases)} cases, failed={bad}")
