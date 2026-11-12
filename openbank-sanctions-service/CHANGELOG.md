@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.6...sanctions-service-v0.19.0) (2026-11-12)
+
+
+### Features
+
+* **sanctions:** add screening profiles, country and bank identifier to the v3 screen ([#15743](https://github.com/JiRaska/open-bank-oss/issues/15743)) ([07180dd](https://github.com/JiRaska/open-bank-oss/commit/07180dd5547acb6b35e0916f2d522d044c29f030))
+* **sanctions:** serve a private-CA mTLS listener on 8443 beside the plain port ([#15783](https://github.com/JiRaska/open-bank-oss/issues/15783)) ([9abdbd5](https://github.com/JiRaska/open-bank-oss/commit/9abdbd5705b9b6c0fa0b20136338bedff37ad2d0))
+
 ## [0.18.6](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.18.5...sanctions-service-v0.18.6) (2026-11-12)
 
 

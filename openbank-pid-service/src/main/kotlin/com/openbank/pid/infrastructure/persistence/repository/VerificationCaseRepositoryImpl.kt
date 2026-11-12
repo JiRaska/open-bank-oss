@@ -6,6 +6,8 @@ package com.openbank.pid.infrastructure.persistence.repository
 
 import com.openbank.pid.application.port.out.VerificationCaseRepository
 import com.openbank.pid.application.usecase.PartyErasedException
+import com.openbank.pid.domain.model.CaseVerdict
+import com.openbank.pid.domain.model.ErasedIdentifierKey
 import com.openbank.pid.domain.model.VerificationCase
 import com.openbank.pid.domain.model.VerificationCaseStatus
 import com.openbank.pid.infrastructure.persistence.entity.PartyEntity
@@ -26,6 +28,7 @@ import java.util.UUID
  * request-scoped auto-session is not propagated across the coroutine (mirrors PartyRepositoryImpl).
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // the port plus the small private steps of the GDPR erasure queries
 class VerificationCaseRepositoryImpl :
     VerificationCaseRepository,
     PanacheRepository<VerificationCaseEntity> {
@@ -107,17 +110,38 @@ class VerificationCaseRepositoryImpl :
     }
 
     override suspend fun anonymizeLinkedTo(partyId: UUID, erasedAt: Instant): Int = Panache.withTransaction {
-        update(
-            "applicantGivenName = ?2, applicantFamilyName = ?2, applicantBirthdate = ?3, " +
-                "applicantBirthplace = null, applicantNationalities = '', blindIndex = null, " +
-                "dedupKey = concat('ERASED:', cast(id as string)), firstNotes = null, erasedAt = ?4 " +
-                "where (firstLinkPartyId = ?1 or finalLinkPartyId = ?1) and erasedAt is null",
-            partyId,
-            ERASED,
-            ERASED_BIRTHDATE,
-            erasedAt,
-        )
+        anonymiseWhere("(firstLinkPartyId = ?4 or finalLinkPartyId = ?4)", erasedAt, partyId)
     }.awaitSuspending()
+
+    override suspend fun removeErasedIdentifier(blindIndex: String): Int = Panache.withTransaction {
+        // REJECT first: keep the decision effective under the opaque key (port KDoc).
+        update(
+            "blindIndex = null, dedupKey = ?2 where blindIndex = ?1 and erasedAt is null and status = ?3 " +
+                "and finalVerdict = ?4",
+            blindIndex,
+            ErasedIdentifierKey.rejectBlock(blindIndex),
+            VerificationCaseStatus.DECIDED.name,
+            CaseVerdict.REJECT.name,
+        ).flatMap { rejected ->
+            update(
+                "blindIndex = null, dedupKey = concat('ERASED:', cast(id as string)) " +
+                    "where blindIndex = ?1 and erasedAt is null",
+                blindIndex,
+            ).map { stripped -> rejected + stripped }
+        }
+    }.awaitSuspending()
+
+    /** The full anonymisation of a case row; [condition] uses ?4 onwards for [params]. */
+    private fun anonymiseWhere(condition: String, erasedAt: Instant, vararg params: Any): Uni<Int> = update(
+        "applicantGivenName = ?1, applicantFamilyName = ?1, applicantBirthdate = ?2, " +
+            "applicantBirthplace = null, applicantNationalities = '', blindIndex = null, " +
+            "dedupKey = concat('ERASED:', cast(id as string)), firstNotes = null, erasedAt = ?3 " +
+            "where $condition and erasedAt is null",
+        ERASED,
+        ERASED_BIRTHDATE,
+        erasedAt,
+        *params,
+    )
 
     private companion object {
         const val ERASED = "GDPR_ERASED"
