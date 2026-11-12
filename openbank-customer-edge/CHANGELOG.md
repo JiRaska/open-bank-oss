@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.9.0...customer-edge-v1.10.0) (2026-11-12)
+
+
+### Features
+
+* **document:** ownership projection for delegated object grants, with ADR-0375 and its D4 gate ([#15824](https://github.com/JiRaska/open-bank-oss/issues/15824)) ([f15f8c1](https://github.com/JiRaska/open-bank-oss/commit/f15f8c133d3afbabd9bc34b65749559c1bc8eaf3))
+
 ## [1.9.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v1.8.0...customer-edge-v1.9.0) (2026-11-12)
 
 
