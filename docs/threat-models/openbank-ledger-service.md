@@ -883,3 +883,16 @@ zero-journal run after close. Frozen reports are never replaced by later success
 receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
 receipt and preserve the proof. Producers must refresh the current and immediately prior month,
 including closed days, and explicitly revoke completion while source work is pending.
+
+### Period freeze lock enforced in sandbox (#15760 item 6)
+- **Threat:** back-dating a journal into an already reported (FROZEN) month changes the live ledger
+  without changing the reported figures (tampering, repudiation of reported numbers).
+- **Before:** `LEDGER_PERIOD_LOCK_MODE` was unset, so the lock ran in shadow: the attempt was counted
+  as `would_refuse` and posted anyway (detect-only).
+- **Now:** the sandbox manifest sets `enforce`, so the posting is refused with `FrozenPeriodException`
+  and the correction must be booked in the current open period. The 30-day shadow counter showed 13
+  decisions, all `allowed`, none `would_refuse`.
+- **Residual:** the code default in `application.yaml` stays `shadow`, so any environment that does not
+  set the variable remains detect-only. Flipping the default is a follow-up once enforce has run in
+  sandbox. Reversal routing and `evaluate()` are unchanged.
+- **Tests:** `PeriodFreezeLockTest` (shadow records without refusing, enforce refuses).
