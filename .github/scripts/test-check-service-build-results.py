@@ -484,6 +484,16 @@ class ThinCalleeTest(unittest.TestCase):
 
     BODIES['consumer-pact-handoff.sh'] = ('build', 'Collect consumer pacts for hand-off to the contract job', '7d716b91874e1793c69f537e0a7a58593033a79d48b05d310b2b6d5da691babe', {'SERVICE': '${{ inputs.service }}'})
 
+    BODIES['verify-provider.sh'] = (
+        'contract', 'Provider verification (:${{ inputs.service }}:providerPactTest)',
+        'd708676358224c364de491746b60b56c25a35bb743c31fcdc874ce87c8dba89e',
+        {
+            'BRANCH': '${{ github.head_ref || github.ref_name }}',
+            'PACT_CONSUMER': '${{ inputs.consumer }}',
+            'SERVICE': '${{ inputs.service }}',
+        },
+    )
+
     def test_exact_bodies_and_explicit_environment(self):
         import hashlib
         import subprocess

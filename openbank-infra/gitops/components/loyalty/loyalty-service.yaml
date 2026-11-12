@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: loyalty-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-loyalty-service:sandbox-27e19a17@sha256:1da855c8c7a8f87d4aa0233ddf99a007793e8c3257c98944616863f0e557d87b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-loyalty-service:sandbox-548fa683@sha256:c12d2bc7c5f41ace65c6dd019f97ad91df4dcdc67fd8dd6d02fe1ad830599d8e
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8157 and management 8085 — both read off the service's own application.yaml

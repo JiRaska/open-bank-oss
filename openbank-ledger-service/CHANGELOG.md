@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.44.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.43.0...ledger-service-v1.44.0) (2026-11-12)
+
+
+### Features
+
+* **transaction,ledger:** preserve synthetic origin across transfer booking ([#15651](https://github.com/JiRaska/open-bank-oss/issues/15651)) ([598e95a](https://github.com/JiRaska/open-bank-oss/commit/598e95a8b82d024258202d5bd176b57b089c7913))
+
+
+### Bug Fixes
+
+* **ledger:** keep outbox claims compatible with additive schema changes ([#15634](https://github.com/JiRaska/open-bank-oss/issues/15634)) ([706cf7d](https://github.com/JiRaska/open-bank-oss/commit/706cf7daf4c73fafebc56684a2e0bca324a84b98))
+
 ## [1.43.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.42.0...ledger-service-v1.43.0) (2026-11-11)
 
 

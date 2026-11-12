@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.16.0...engagement-service-v0.16.1) (2026-11-12)
+
+
+### Security
+
+* **campaign:** drop baked-in datasource password fallbacks + gate ([#15540](https://github.com/JiRaska/open-bank-oss/issues/15540)) ([d5d111d](https://github.com/JiRaska/open-bank-oss/commit/d5d111df2bda173c5645fc9e05e52aebc4cd1cb0))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.15.1...engagement-service-v0.16.0) (2026-11-08)
 
 

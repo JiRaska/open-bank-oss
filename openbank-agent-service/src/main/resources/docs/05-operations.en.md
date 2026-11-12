@@ -74,7 +74,7 @@ The gateway degraded gracefully on a model error. Check: `AGENT_DEFAULT_MODEL`, 
 A whole tool round errored (auth/connectivity). Verify: OIDC `openbank-services` client secret, the downstream service URLs (`quarkus.rest-client.*.url`), and that the downstream services are up. The loop stops offering tools after a failed round and answers in text — that is by design, not a crash.
 
 ### Every tool call is DENIED
-Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-Agent-Id` was asserted on `/mcp`. Under `block`: check the OPA sidecar (8181) is reachable and the `agents.yaml` charter bundle is loaded. If the **PDP itself is unreachable**, the gate degrades to advisory + WARN (it does **not** lock the assistant out) — fix the OPA sidecar to restore enforcement.
+Expected under `advisory` only if a tool is unmapped (deny-by-default) or no `X-Agent-Id` was asserted on `/mcp`. Under `block`: check the OPA sidecar (8181) is reachable and the `agents.yaml` charter bundle is loaded. If the **PDP itself is unreachable**, `block` mode now fails closed: every tool call is denied with the outcome `pdp_unavailable_denied` (counter `openbank.agent.policy.gate.decisions{outcome}`, ERROR log), including the scheduled oversight sweep. Under `advisory` the call still proceeds. Alert on that outcome and fix the OPA sidecar to restore agent tool calls.
 
 ### Flip enforcement on
 Set `AGENT_POLICY_ENFORCEMENT=block` in the deployment env once an OPA sidecar is present in the target. No redeploy of code needed; the kill-switch / charter changes live in `agents.yaml` + OPA bundle.
