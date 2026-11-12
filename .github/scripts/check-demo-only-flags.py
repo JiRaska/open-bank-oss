@@ -562,7 +562,7 @@ def check(root: Path, reg: dict):
                 if isinstance(n, str):
                     cm_files.setdefault(n, set()).add(rel)
     for rel, hits in file_hits.items():
-        for nm, val, kind in hits:
+        for nm, val, _kind in hits:
             if nm == ENVFROM_REF:
                 if val in cm_files:
                     for cm_rel in cm_files[val]:
