@@ -82,6 +82,26 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 3. Spusť manuální obnovu přes API: `POST /api/v1/sanctions/lists/{listType}/refresh`
 4. Pokud je zdrojová URL nedostupná, aktualizuj ji přes `PUT /api/v1/sanctions/lists/{id}`.
 
+### Stárnutí referenčních dat jurisdikcí
+
+`sanctions_jurisdictions` se přebírá z vydaných seznamů migrací, takže stárne bez jakékoli chyby.
+Viditelné to dělají tři metriky podle `source_list`
+(`prometheus-rules-sanctions-jurisdictions.yaml`):
+
+| Série | Význam |
+|---|---|
+| `openbank_sanctions_jurisdiction_rows` | aktivní řádky; `0` = očekávaný seznam, který není načten (`JurisdictionReferenceDataNotLoaded`, info) |
+| `openbank_sanctions_jurisdiction_publication_age_seconds` | stáří nejnovějšího načteného vydání |
+| `openbank_sanctions_jurisdiction_verification_age_seconds` | doba od posledního porovnání se zdrojem; nad 150 dní spustí `JurisdictionReferenceDataNotReverified` |
+
+Stáří se počítá z dat uložených v tabulce, ne od startu podu, takže je správné i na čerstvě
+spuštěném podu a alert restartem nezmizí. Jak jej uzavřít:
+
+1. Načti aktuální vydání přímo od vydavatele (nikdy zpaměti ani z druhotného shrnutí).
+2. Pokud se změnilo, přidej migraci, která vloží nové řádky s `version + 1` a novým
+   `published_on` a nahrazeným řádkům nastaví `active = false`.
+3. Pokud se nezměnilo, přidej migraci, která jen posune `verified_on` pro daný `source_list`.
+
 ### Velký backlog přezkumů POTENTIAL_HIT
 
 1. Zkontroluj frontu čekajících: `GET /api/v1/sanctions/pending`

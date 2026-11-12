@@ -171,6 +171,54 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
+  review band for customer names (#15723).** V22 loads the EU list of high-risk third countries
+  (Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29;
+  26 countries, all `HIGH_RISK`), so a screen's `country` / BIC country can now match. No row is
+  `EMBARGO` and the FATF lists are not loaded: their publisher could not be retrieved and no row
+  is written from memory. **STRIDE-T / data integrity:** the rows are reference data copied by
+  hand from a publication, and the failure mode is silent — a newly listed country keeps
+  screening CLEAR. Each row therefore carries `published_on` and `verified_on`, and
+  `JurisdictionReferenceDataGauge` publishes their age per `source_list` from the stored dates
+  (correct on a cold pod; a restart cannot reset it). `JurisdictionReferenceDataNotReverified`
+  fires past 150 days without a comparison against the source, `…NotLoaded` reports an expected
+  list with no rows, `…Unknown` an unreadable or missing row count. Still no write endpoint:
+  rows change only by reviewed migration. **Name matching:** the candidate search used the HIT
+  threshold (0.85) as its floor for every caller, so `POTENTIAL_HIT` was unreachable from a name
+  and a near-miss spelling of a listed person screened CLEAR. `profile=CUSTOMER` now searches
+  down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
+  **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
+  identity on the check, and a jurisdiction match was identified by list and country only — so
+  a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country
+  after a superseding `EMBARGO`. A clearance dismisses a name false positive; a jurisdiction
+  match is a fact about the country. No clearance covers one now: name matches on the check may
+  be cleared, the status is then the jurisdiction match's own, never `WHITELISTED`
+  (`JurisdictionClearanceIT`), and `matchedId` carries source list, measure and version.
+  **Residual:** `profile=PAYMENT` and profile-less screens keep the 0.85 floor on purpose —
+  the payment admission chain has no held state to park a review in (#15724) — so a near-miss
+  spelling still clears a payment. A country listed only by a FATF statement and not by the EU
+  regulation is not matched. A `HIGH_RISK` row sends every screen naming that country to review;
+  no rail passes `country` yet, so this is latent until a caller opts in. Evidence:
+  `JurisdictionReferenceDataIT`, `SanctionsFuzzyNameBandIT` (real Postgres, must-hit and
+  must-clear), `sanctions_jurisdiction_alerts_test.yaml` (promtool).
+- **2026-11-11** — **Screening profiles, country and bank identifier on `/api/v3/sanctions/screen`
+  (#15723).** Three optional inputs; a request without them is unchanged, and `/api/v1` rejects
+  them (400). `profile=PAYMENT` consults the sanctions lists, the national terrorist list and the
+  jurisdiction data and no PEP list; `profile=CUSTOMER` adds the PEP list and reports it apart
+  (`matchKind: PEP`, `pepStatus`), never in `status`. A listed `country`, or the country inside a
+  BIC, matches independently of the name (`EMBARGO` = HIT, `HIGH_RISK` = POTENTIAL_HIT at 0.65).
+  **STRIDE-T:** `profile` and `listTypes` together are refused, so a caller cannot name a profile
+  and silently narrow it; an unknown profile, country or BIC shape is a 400, never a narrower
+  screen. The jurisdiction table has no write endpoint: rows arrive only by reviewed migration,
+  so a single operator cannot delist an embargoed country at run time. **STRIDE-E:** no new
+  action or role; the operation keeps `sanctions.create`. **Residual:** the jurisdiction table
+  ships EMPTY and has no feed — until compliance adds rows a country never matches, so this
+  change alone embargoes nothing. Existing rails still call `/api/v1` without a profile and keep
+  the old list set (PEP counted, national terrorist list absent) until each opts in. A BIC is
+  checked for its country only; listed banks are not matched by identifier. A WHITELISTED
+  clearance now also requires the same profile, country and BIC. Evidence:
+  `SanctionsScreeningProfileIT` (real Postgres, must-hit and must-clear per profile). Rollback:
+  revert the PR; V21 only adds nullable columns and a new table.
 - **2026-11-04** — **Deferred single-list refresh trigger, v2 (#14780).** New `POST
   /api/v2/sanctions/lists/{listType}/refresh` flags the list (`refresh_requested_at`, the #9048
   refresh-all mechanism) and answers 202 without downloading anything. The import runs through the
