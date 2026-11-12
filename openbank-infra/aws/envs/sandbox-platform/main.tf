@@ -734,6 +734,24 @@ resource "helm_release" "argocd" {
       name  = "controller.tolerations[0].operator"
       value = "Equal"
     },
+    # Node-key migration to open-bank.tech, stage 1: tolerate both taint keys.
+    {
+      name  = "controller.tolerations[1].key"
+      value = "open-bank.tech/stateful"
+    },
+    {
+      name  = "controller.tolerations[1].operator"
+      value = "Equal"
+    },
+    {
+      name  = "controller.tolerations[1].value"
+      value = "true"
+      type  = "string"
+    },
+    {
+      name  = "controller.tolerations[1].effect"
+      value = "NoSchedule"
+    },
     {
       name  = "controller.tolerations[0].value"
       value = "true"

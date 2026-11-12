@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.1...notification-service-v0.40.2) (2026-11-12)
+
+
+### Bug Fixes
+
+* **notification:** close abandoned PENDING rows and count retired channels ([#15542](https://github.com/JiRaska/open-bank-oss/issues/15542)) ([6db6df3](https://github.com/JiRaska/open-bank-oss/commit/6db6df3d3cffb1334d4b44a7c6eae713f2a9204d))
+
 ## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.40.0...notification-service-v0.40.1) (2026-11-06)
 
 

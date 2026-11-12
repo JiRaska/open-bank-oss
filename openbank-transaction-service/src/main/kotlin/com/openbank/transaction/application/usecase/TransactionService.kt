@@ -7,6 +7,7 @@ package com.openbank.transaction.application.usecase
 import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
+import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.domain.money.RoundingPolicy
@@ -137,7 +138,7 @@ class TransactionService(
     @Suppress("LongMethod")
     private suspend fun initiateTransactionInternal(command: InitiateTransactionCommand): Transaction {
         val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) return existing
+        if (existing != null) return existing.verifyReplayOrigin(command.synthetic)
 
         val currency = CurrencyCode.of(command.currencyCode)
         // Normalize the principal to the currency's minor units at the booking ingest (ADR-0108).
@@ -235,6 +236,7 @@ class TransactionService(
             instructionType = command.instructionType,
             reversalOf = command.reversalOf,
             isReversal = command.type == TransactionType.REVERSAL,
+            synthetic = command.synthetic,
         )
 
         val saved = try {
@@ -244,12 +246,13 @@ class TransactionService(
                     aggregateId = transaction.id,
                     eventType = TRANSACTION_INITIATED_EVENT,
                     payload = eventPublisher.initiatedPayload(transaction),
+                    synthetic = transaction.synthetic,
                 ),
             )
         } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return recoverConcurrentReplay(e, command)
         } catch (e: PgException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return recoverConcurrentReplay(e, command)
         }
 
         // ADR-0120 Phase 5: Temporal is the sole orchestrator — PaymentSagaOrchestrator removed.
@@ -281,12 +284,12 @@ class TransactionService(
             ?: throw TransactionNotFoundException("Transaction not found: ${query.transactionId}")
 
     override suspend fun reverseTransaction(command: ReverseTransactionCommand): Transaction {
-        // Idempotency: return existing reversal if already processed with the same key
-        val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
-        if (existing != null) return existing
-
         val original = transactionRepository.findById(command.originalTransactionId)
-            ?: throw IllegalArgumentException("Transaction ${command.originalTransactionId} not found")
+        // Idempotency: return the existing reversal in the same origin context.
+        val existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey)
+        if (existing != null) return existing.verifyReplayOrigin(original?.synthetic == true)
+
+        requireNotNull(original) { "Transaction ${command.originalTransactionId} not found" }
         check(original.status == TransactionStatus.COMPLETED) {
             "Cannot reverse a ${original.status} transaction"
         }
@@ -306,6 +309,7 @@ class TransactionService(
                 aggregateId = reversed.id,
                 eventType = TRANSACTION_REVERSED_EVENT,
                 payload = eventPublisher.reversedPayload(reversed, command.reason),
+                synthetic = reversed.synthetic,
             ),
         )
 
@@ -323,6 +327,7 @@ class TransactionService(
                 valueDate = java.time.LocalDate.now(clock),
                 initiatedBy = UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 reversalOf = original.id,
+                synthetic = original.synthetic,
             ),
         )
     }
@@ -382,9 +387,17 @@ class TransactionService(
      * start no second payment workflow. Anything that is not the idempotency-key conflict
      * propagates untouched.
      */
-    private suspend fun recoverConcurrentReplay(e: RuntimeException, idempotencyKey: String): Transaction {
+    private suspend fun recoverConcurrentReplay(e: RuntimeException, command: InitiateTransactionCommand): Transaction {
         if (!TransactionIdempotencyConflict.isConflict(e)) throw e
-        return transactionRepository.findByIdempotencyKey(idempotencyKey) ?: throw e
+        return transactionRepository.findByIdempotencyKey(command.idempotencyKey)
+            ?.verifyReplayOrigin(command.synthetic) ?: throw e
+    }
+
+    private fun Transaction.verifyReplayOrigin(expectedSynthetic: Boolean): Transaction {
+        if (synthetic != expectedSynthetic) {
+            throw ResourceConflictException("Idempotency key is bound to a different transaction origin")
+        }
+        return this
     }
 
     private fun generateReferenceNumber(): String {
