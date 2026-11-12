@@ -379,6 +379,24 @@ make the in-memory registry shared. A pack approved on one replica still reaches
 by the convergence path, so the at-most-once guarantee here is about the durable decision, not about
 every pod agreeing at the same instant (#3467, and see the replica-convergence work tracked there).
 
+## 8a. Czech consumer credit policy revisions (issue #8896)
+
+The risk console submits complete policy bundles to Lending through the existing session relay.
+Only `ROLE_CREDIT_RISK` with a verified interactive staff JWT can read pending versions or write
+proposals and decisions. Lending records the token subject as the actor. Database constraints
+reject a checker equal to the maker and prevent two approvals with the same version or effective
+day. Each decision locks its proposal and checks the prior state. The database permits only the
+transition from a proposed row to a terminal decision and preserves the payload, SHA-256 digest,
+actors, timestamps and reason. The UI presents the exact proposed rules before deciding. A receipt
+bound to the staff subject, idempotency key and request fingerprint commits with each mutation.
+A concurrent or interrupted retry can recover the original response from the same evidence.
+
+Approval schedules a future revision for Czech consumer credit. PostgreSQL checks its Prague
+business day at commit so a delay acquiring locks cannot backdate approval. Origination still
+applies compliance pack checks and requires adverse bureau, DSTI and DTI evidence. Earlier dates resolve
+to the revision that was effective then. Storage or evaluation errors propagate to the existing
+assessment failure path. Proposal text is for rule and decision rationale only.
+
 ## 9. Customer self-service origination intake (ADR-0211) — STRIDE supplement
 
 `CustomerIntakeResource` (`POST /api/v1/lending/intake/applications`) is the first path by which a
@@ -568,8 +586,40 @@ loan's remaining schedule, so the engine pulls it at snapshot time.
 | **D**oS / availability | A snapshot storm loads lending's database | Snapshots are operator-triggered and idempotent on their input; each read is three indexed queries. Not rate-limited beyond the fleet limiter — accepted for a single internal caller, revisit if the engine gains a scheduler. |
 | **R**epudiation | Which book did a risk run see | The risk engine hashes this response into its run's input hash (ADR-0314 D2), so a figure is tied to the exact book read. |
 
+## 9g. Customer-requested human review of an engine decline — STRIDE supplement
+
+A decision-engine decline is terminal (`DECLINED`, ADR-0211 D1). GDPR Art. 22(3), EU AI Act Art. 86
+and EBA/GL/2020/06 par. 54 require a route to a human, so the applicant can request one
+(`POST /api/v1/lending/intake/applications/{id}/decline-review`, customer-edge principal only). The
+declined application never leaves its terminal state and the shared origination graph is untouched:
+the review is its own record (`loan_decline_review`, one per application). This slice records the
+request; the staff decision (confirm, or overturn into a successor application that enters four-eyes)
+is a separate change and gets its own supplement.
+
+**What it is not.** It decides nothing and moves no money: a request only records that the customer
+asked, with the engine's reasons snapshotted for the future reviewer.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **S**poofing | A caller asks for a review of someone else's decline | Customer route is the named customer-edge principal only (the §9 check); the party is `X-Customer-Party-Id`, never a body field, and the application is read filtered by owner, so a foreign id answers 404, indistinguishable from an absent one. |
+| **T**ampering | A decline made by a person is re-opened, or an engine decline is re-reviewed in a loop | Reviewable only when `DECLINED` with a stored engine outcome and no recorded human decider; a human decision records `decidedBy`, which ends it. One review per application (unique constraint), repeats are idempotent. |
+| **T**ampering | Two first requests race | Serialised under the application row lock; the unique constraint is the backstop. The review row and its event commit in one transaction. |
+| **R**epudiation | "What did the engine say that the reviewer will see?" | The engine's reason codes, policy versions and decision time are snapshotted on the review at request time; the event carries ids and machine codes only. |
+| **I**nformation disclosure | The customer reads internal data | The customer DTO carries status and timestamps only; the engine's own reason codes are already on the journey projection. The event carries no free-text personal data. |
+| **D**oS | Review requests flood the future staff queue | Bounded by construction to one review per application and by the window (`lending.decline-review.window-days`, default 30); a request needs an engine-declined application of the caller. The edge's rate limiting sits in front. |
+| **E**oP | A request becomes a credit approval | It cannot: nothing in this slice changes the application or creates one. |
+
+**Residual risks / gaps:**
+
+- **Not yet reachable by a customer**: no customer-edge proxy route exists in this change.
+- **Reviews stay `REQUESTED`** until the staff decision lands; there is no SLA timer on a pending review.
+
 ## 10. Change log
 
+- **2026-11-12** — **Customer request for human review of an engine decline (#15751).** New table
+  `loan_decline_review` (V32), outbox event `credit.decline_review.requested`, endpoint
+  `POST /api/v1/lending/intake/applications/{id}/decline-review` (customer-edge only, action
+  `lending.intake`). See §9g.
 - **2026-10-23** — **Lending is a day-close participant (ADR-0342, #13167).** New outbound edge:
   `PUT /api/v1/ledger/accounting-days/{date}/participants/lending` to ledger-service, over the same
   `ledger-service` base URL and named oidc-client `m2m` (Keycloak `openbank-lending`) as the existing
@@ -1040,3 +1090,13 @@ The migration briefly excludes writers/retention while establishing this boundar
 under the retained deployment hold. Rollback retains receipts, coverage and financial history.
 
 - **2026-11-09 — Missing-job obligation review correction (#13167).** A missing run cannot be erased by disabling its scheduler after REFUSED: observed `(business_date, job)` obligations are insert-only and retained independently of real run receipts. The observation transaction reads the retained union and all legacy run keys before reporting. It creates no completion, journal, or new authorization. Run completion or an attributable ledger waiver is still required; never infer unobserved historical schedules. Rollback retains both evidence tables. Existing holds and shadow/off defaults remain.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

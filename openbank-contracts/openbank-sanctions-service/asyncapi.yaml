@@ -5,7 +5,9 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Sanctions Service — events
-  version: 1.0.0
+  # 1.0.0 -> 1.1.0 (#15723): additive optional screening-profile fields; CZ_TERRORISTS, which
+  # /api/v3 screens already emit, added to the match list enum.
+  version: 1.1.0
   description: |
     Screening, review and list-change events on openbank.sanctions.screening.event, plus minimal,
     non-PII oversight wake-ups for high-risk screening (ADR-0031 D9). All use the durable outbox.
@@ -221,7 +223,7 @@ components:
           type: array
           items:
             type: string
-            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         reviewedBy:
           type: [string, 'null']
         reviewNote:
@@ -239,6 +241,22 @@ components:
           type: [string, 'null']
           format: date-time
           description: Optional expiry of WHITELISTED clearance for later fresh screens.
+        profile:
+          type: string
+          enum: [PAYMENT, CUSTOMER]
+          description: Present only when the screen was requested with an explicit profile.
+        country:
+          type: string
+          description: Present only when the screen request carried a counterparty country.
+        bankIdentifier:
+          type: string
+          description: Present only when the screen request carried a bank identifier (BIC).
+        pepStatus:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT]
+          description: >-
+            PEP outcome of a CUSTOMER-profile screen. On a profiled check PEP matches never raise
+            `status`; a consumer that cares about PEP exposure reads this field.
         occurredAt:
           type: string
           format: date-time
@@ -251,7 +269,7 @@ components:
       properties:
         listType:
           type: string
-          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC, CZ_TERRORISTS]
         matchType:
           type: string
           enum: [EXACT, FUZZY, PHONETIC, ALIAS]
@@ -269,6 +287,10 @@ components:
           type: array
           items:
             type: string
+        matchKind:
+          type: string
+          enum: [SANCTIONS, TERRORIST, PEP, JURISDICTION]
+          description: Present only on checks screened with an explicit profile.
 
     SanctionsListChangedPayload:
       type: object

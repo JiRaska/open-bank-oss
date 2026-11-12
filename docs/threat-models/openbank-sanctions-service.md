@@ -80,6 +80,7 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 | T4 | Committed list changes | **Silent loss** — entry batches commit but the process fails before publishing their changes | V15 appends journal evidence in the same PostgreSQL transaction as each entry mutation, including old-version writers during rollout. The publisher locks an exact selection and writes outbox rows plus journal deletion in one repeatable-read Panache transaction. Failure rolls back the publication; the scheduled loop retries retained evidence outside the feed cron too. | Broker delivery remains at-least-once; consumers must deduplicate ce-id. The KYC re-screen consumer is a separate integration; an outbox row does not prove a completed re-screen. |
 | T5 | Withheld list changes | **DoS / missed re-screening** — a bulk source reformat or unaddressable identifier causes excessive or incomplete targeted work | Actual population and changed targets are summarized in SQL before paging. A share above the configured threshold, missing source ID, or oversized ID withholds targeted events and retains the journal. A distinct count-only signal is deduplicated across identical retries. Normal events contain at most 64 bounded identifiers; transaction-local SQL tables and flush/clear between pages bound publisher heap. | Retained evidence and SQL temporary storage grow with pending changes. Operator handling and KYC re-screening remain separate integrations; the count event alone is not an operational resolution. A legitimate bulk update can require deliberate intervention. |
 | T6 | Concurrent list refresh | **DoS** — another pod publishes an early committed batch before the rest of a large refresh arrives, letting each fragment pass the storm threshold | A per-list PostgreSQL advisory lock serializes refreshes. A durable active generation is checked inside every independent batch, metadata update, and publication transaction. Publishers defer while the generation is active, even if the lock owner loses its database connection; a successor advances the generation and fences the stale writer. | A failed import can leave committed partial changes; their journal remains fenced and publication stays deferred until a subsequent complete refresh. Repeated source failure leaves the evidence pending for operator review. A stalled source stream can hold the lock and queue same-list refreshes while publishers defer (D1). |
+| S3 | mTLS listener (8443) | **Spoofing / Elevation** — a second inbound listener (private-CA TLS, client certificate REQUIRED, TLSv1.3) beside the plain port; a workload holding any fleet-CA certificate and no token could be treated as an authenticated caller, or a caller without a certificate could reach the API over it | `quarkus.http.ssl.client-auth: required` is baked into the `%prod` image, so the handshake refuses a client with no trusted certificate; `/api/*` accepts the bearer mechanism ONLY on both listeners, so the certificate is transport authentication and the OIDC bearer stays the identity `@RolesAllowed` and OPA decide on. The NetworkPolicy admits the same declared caller namespaces on 8443 as on 8123. A listener-parity integration test in this module drives both ports with the production listener shape (no certificate: handshake refused; certificate without bearer: 401; bearer: served identically); it is named in the notes below and is cited in this row only once scheduled evidence on main shows it green. Gates `mtls-bearer-only`, `mtls-keeps-http-port` | The plain port (8123) stays open for the existing callers until each is migrated, so the listener adds a confidential path and removes none. Any fleet-CA certificate passes the handshake (no per-caller certificate allow-list); caller identity rests on the bearer. |
 
 ## 4. Key invariants (must never regress)
 
@@ -95,6 +96,10 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 - Import parsers **never buffer an entire feed body in memory** — SAX streaming (OFAC) / line
   buffered reading (OpenSanctions CSV) only, so a large feed (the PEP dataset is ~190 MB) cannot
   exhaust heap.
+- **A client certificate on the 8443 listener is never an identity.** The API is authenticated by
+  the OIDC bearer alone, identically on 8443 and on the plain port (`SanctionsListenerAuthParityIT`);
+  removing the bearer-only permission while `client-auth` stays on turns every fleet-CA
+  certificate into a login.
 - The **domain layer is framework-free** (ADR-0002); `SanctionsEntry`/`SanctionsList` have zero
   Quarkus/Panache imports.
 - The Czech national list (`CNB_DOMESTIC`, kept by MZV under Act No. 1/2023 Coll.) is imported
@@ -171,6 +176,54 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-11-11** — **Jurisdiction reference data loaded, its ageing made observable, and a
+  review band for customer names (#15723).** V22 loads the EU list of high-risk third countries
+  (Commission Delegated Regulation (EU) 2016/1675, Annex, consolidated version of 2026-01-29;
+  26 countries, all `HIGH_RISK`), so a screen's `country` / BIC country can now match. No row is
+  `EMBARGO` and the FATF lists are not loaded: their publisher could not be retrieved and no row
+  is written from memory. **STRIDE-T / data integrity:** the rows are reference data copied by
+  hand from a publication, and the failure mode is silent — a newly listed country keeps
+  screening CLEAR. Each row therefore carries `published_on` and `verified_on`, and
+  `JurisdictionReferenceDataGauge` publishes their age per `source_list` from the stored dates
+  (correct on a cold pod; a restart cannot reset it). `JurisdictionReferenceDataNotReverified`
+  fires past 150 days without a comparison against the source, `…NotLoaded` reports an expected
+  list with no rows, `…Unknown` an unreadable or missing row count. Still no write endpoint:
+  rows change only by reviewed migration. **Name matching:** the candidate search used the HIT
+  threshold (0.85) as its floor for every caller, so `POTENTIAL_HIT` was unreachable from a name
+  and a near-miss spelling of a listed person screened CLEAR. `profile=CUSTOMER` now searches
+  down to 0.65 and returns such a name as `POTENTIAL_HIT` (PEP entries: `pepStatus`).
+  **Clearances (STRIDE-E):** an analyst's `WHITELISTED` decision used to cover every match
+  identity on the check, and a jurisdiction match was identified by list and country only — so
+  a clearance recorded while a country was `HIGH_RISK` went on to whitelist the same country
+  after a superseding `EMBARGO`. A clearance dismisses a name false positive; a jurisdiction
+  match is a fact about the country. No clearance covers one now: name matches on the check may
+  be cleared, the status is then the jurisdiction match's own, never `WHITELISTED`
+  (`JurisdictionClearanceIT`), and `matchedId` carries source list, measure and version.
+  **Residual:** `profile=PAYMENT` and profile-less screens keep the 0.85 floor on purpose —
+  the payment admission chain has no held state to park a review in (#15724) — so a near-miss
+  spelling still clears a payment. A country listed only by a FATF statement and not by the EU
+  regulation is not matched. A `HIGH_RISK` row sends every screen naming that country to review;
+  no rail passes `country` yet, so this is latent until a caller opts in. Evidence:
+  `JurisdictionReferenceDataIT`, `SanctionsFuzzyNameBandIT` (real Postgres, must-hit and
+  must-clear), `sanctions_jurisdiction_alerts_test.yaml` (promtool).
+- **2026-11-11** — **Screening profiles, country and bank identifier on `/api/v3/sanctions/screen`
+  (#15723).** Three optional inputs; a request without them is unchanged, and `/api/v1` rejects
+  them (400). `profile=PAYMENT` consults the sanctions lists, the national terrorist list and the
+  jurisdiction data and no PEP list; `profile=CUSTOMER` adds the PEP list and reports it apart
+  (`matchKind: PEP`, `pepStatus`), never in `status`. A listed `country`, or the country inside a
+  BIC, matches independently of the name (`EMBARGO` = HIT, `HIGH_RISK` = POTENTIAL_HIT at 0.65).
+  **STRIDE-T:** `profile` and `listTypes` together are refused, so a caller cannot name a profile
+  and silently narrow it; an unknown profile, country or BIC shape is a 400, never a narrower
+  screen. The jurisdiction table has no write endpoint: rows arrive only by reviewed migration,
+  so a single operator cannot delist an embargoed country at run time. **STRIDE-E:** no new
+  action or role; the operation keeps `sanctions.create`. **Residual:** the jurisdiction table
+  ships EMPTY and has no feed — until compliance adds rows a country never matches, so this
+  change alone embargoes nothing. Existing rails still call `/api/v1` without a profile and keep
+  the old list set (PEP counted, national terrorist list absent) until each opts in. A BIC is
+  checked for its country only; listed banks are not matched by identifier. A WHITELISTED
+  clearance now also requires the same profile, country and BIC. Evidence:
+  `SanctionsScreeningProfileIT` (real Postgres, must-hit and must-clear per profile). Rollback:
+  revert the PR; V21 only adds nullable columns and a new table.
 - **2026-11-04** — **Deferred single-list refresh trigger, v2 (#14780).** New `POST
   /api/v2/sanctions/lists/{listType}/refresh` flags the list (`refresh_requested_at`, the #9048
   refresh-all mechanism) and answers 202 without downloading anything. The import runs through the
@@ -359,3 +412,13 @@ and network allowance remain until Phase 5.
 - **2026-10-17** — **Listener and header config now inherited, values unchanged (#13137).** This service's `application.yaml` no longer declares the HTTP security response headers (`quarkus.http.header.*`) and the management listener (`quarkus.management.*`: port 8085, host 0.0.0.0, root `/q`). The same values now come from the fleet default `openbank-libs-runtime/src/main/resources/application.yaml`, which is on the classpath at a lower precedence than the service file. **No trust-boundary change:** the effective per-key config was asserted identical before and after, and a `@QuarkusTest` config dump on ledger-service matched key for key. **Residual risk:** a later edit to the shared default now changes this listener and these headers too; such an edit is a fleet-wide boundary change and must update every affected threat model. Rollback: revert the commit.
 
 - **2026-11-12** — **New inbound caller: kyb-service screens entities and related parties over mTLS (#15771, for #15768).** kyb-service now calls this service's private-CA mTLS listener (8443, client authentication required) with its own `kyb-internal-tls` certificate (new cert-manager Certificate in the kyb namespace, issued by `openbank-ca`). The generated sanctions-namespace NetworkPolicy now admits the kyb namespace on the sanctions pod's shared port list (8123 and 8443), so at network level kyb could also reach the plain 8123 listener; that kyb uses only 8443 rests on the `https://...:8443` URL and the `%prod` TLS bucket. The plain listener stays unchanged for existing callers. Spoofing: a caller without a private-CA certificate fails the handshake. Elevation: kyb calls only `POST /api/v3/sanctions/screen`; this PR changes no authorization rule, so what that call is allowed to do is whatever the service's existing policy grants a caller with kyb's identity (not re-verified here). Denial of service: kyb treats an unavailable screen as not screened and holds approval. Rollback: remove `SANCTIONS_SERVICE_URL` from kyb-service and the Certificate; the ingress rule then no longer admits kyb.
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

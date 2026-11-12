@@ -66,7 +66,7 @@ isolation from transport/persistence.
 | R1 | All mutations | **Repudiation** — operator denies posting/reversal | `postedBy`/`reversedBy`/`createdBy` captured per entry; `entryNumber` monotone; reversal records `reason`; audit via outbox event stream | Strengthen with signed audit (ADR-0029 evidence bundle) — *planned* |
 | I1 | Reads | **Information disclosure** — book-of-record / customer sub-ledger balances leak | Reads **now role-gated** to `SERVICE, AUDITOR, VIEWER, OPERATOR, ADMIN` (K7 — previously `@PermitAll`); `subAccountId` filter is server-side; no cross-customer enumeration endpoint; base `rest.rego` `operator-read-any`/`compliance-read-any` now ENFORCED on every `ledger.read`/`ledger.list` action | Role-coarse — per-tenant scoping still not resource-scoped for reads (no `party-self-service` equivalent on ledger reads; reads are role-gated, not tenant-gated) — *open* |
 | I2 | Metrics / observability | **Information disclosure** — domain metrics leak PII or enable per-customer inference via high-cardinality labels | `DomainMetrics` enforces a low-cardinality tag contract: ledger postings are tagged only by `currency` + `type` (`posting`/`reversal`), the outbox-backlog gauge only by `service` — **never** an account id, IBAN, amount, party, or entry id (amounts belong in histograms, not labels). Increments happen **after** the posting commits and only for genuinely new entries (idempotent replays return early), so a replay cannot inflate counts. The backlog is a read-only `SELECT count(*) WHERE status IN ('PENDING','FAILED')` refreshed by a 10 s scheduled tick **on the event loop** — no scrape-thread DB access (`HR000068`-safe) and no new write path. `/q/metrics` is cluster-internal (not Ingress-exposed). | Low — labels bounded by ISO-4217 currency × a closed `type` set |
-| D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Cursor pagination on journals; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
+| D1 | Posting path | **DoS** — flood of postings / expensive trial-balance scans | Journal reads limit each cursor page in PostgreSQL before hydrating entries and lines; partial index on `(sub_account_id, base_currency)`; reactive non-blocking stack; per-service resource limits (k8s) | Rate-limiting at gateway — infra scope |
 | D2 | Outbox relay | **DoS** — a poison outbox row retried forever starves the dispatch batch | **Bounded retries → terminal `DEAD` + operator alert** (ADR-0050 N5); `concurrentExecution=SKIP`; sequential per-aggregate dispatch | The atomic `FOR UPDATE SKIP LOCKED` claim projects only mapped columns, so additive outbox columns cannot interrupt the compatible relay during a schema rollout. |
 | E1 | Roles | **Elevation** — reader triggers a posting | Mutations gated by `ROLE_OPERATOR`; read roles exclude write capability; no posting logic on read endpoints; **OPA enforce mode is now ON (ADR-0034 Phase 5)** — a call with no matching `allowed_reasons` (e.g. a compliance/viewer role attempting `ledger.create`) is 403'd by `data.openbank.rest.allow`'s default-deny, in addition to the `@RolesAllowed` outer gate | Two independent gates (RBAC + OPA) both currently key off the SAME role set (`ROLE_OPERATOR`/`ROLE_ADMIN`) — OPA does not yet add attribute-based conditions (e.g. tenant/value-band) beyond role membership for ledger writes — *open* |
 | E2 | Attestation / year-close | **Elevation** — a SERVICE principal or a non-operator attests a fiscal year | `ledger.approve` (year-close attest) has **NO service-\* OPA grant**, and since #3765 the `operator-year-close-attest` rule also **excludes every `service-account-*` identity outright** (`not startswith(input.principal.id, "service-account-")`). That exclusion is what makes the "no M2M path" claim true: *absence of a service-\* rule was never sufficient* — the rule was role-only, and both `service-account-openbank-services` and `service-account-openbank-edge` are classified `HUMAN` while holding `ROLE_OPERATOR` in a realm, so `opa eval` against the deployed bundle returned `allow=true, reason="operator-year-close-attest"` for both. Measured before and after: the fix denies exactly `ledger.approve` for both service-accounts and changes no other decision, with staff (`ROLE_OPERATOR`/`ROLE_ADMIN`) still allowed. In-service four-eyes (draftedBy ≠ attestedBy, see §4) is a second, independent control on top | Low — two independent controls (OPA identity+role gate and in-service four-eyes) must both be defeated. **Was Medium until #3765**: a single compromised shared-client credential satisfied the OPA gate on its own |
@@ -789,6 +789,11 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ### Synthetic taint request carrier (#4348, #14058, #14059)
 
+- **Required-origin posting (#7284):** `POST /api/v1/journals/synthetic` applies the existing
+  ledger.create policy and checks the trusted taint before opening a journal write. Existing
+  ledger images reject this path. The ledger binds idempotent replay to the journal's stored
+  classification, including a request that lost a concurrent duplicate race. The route requires
+  the existing authenticated workload allowlist.
 - **Classification integrity:** a false synthetic flag can include canary activity in real-only
   ledger views; an unjustified true flag can exclude real activity. Fail-to-real rejects untrusted
   self-exclusion but is not a universally safe accounting fallback for a trusted canary.
@@ -878,3 +883,26 @@ zero-journal run after close. Frozen reports are never replaced by later success
 receipt sequences cannot prove that sources stayed unchanged. Stable source retries append no new
 receipt and preserve the proof. Producers must refresh the current and immediately prior month,
 including closed days, and explicitly revoke completion while source work is pending.
+
+### Period freeze lock enforced in sandbox (#15760 item 6)
+- **Threat:** back-dating a journal into an already reported (FROZEN) month changes the live ledger
+  without changing the reported figures (tampering, repudiation of reported numbers).
+- **Before:** `LEDGER_PERIOD_LOCK_MODE` was unset, so the lock ran in shadow: the attempt was counted
+  as `would_refuse` and posted anyway (detect-only).
+- **Now:** the sandbox manifest sets `enforce`, so the posting is refused with `FrozenPeriodException`
+  and the correction must be booked in the current open period. The 30-day shadow counter showed 13
+  decisions, all `allowed`, none `would_refuse`.
+- **Residual:** the code default in `application.yaml` stays `shadow`, so any environment that does not
+  set the variable remains detect-only. Flipping the default is a follow-up once enforce has run in
+  sandbox. Reversal routing and `evaluate()` are unchanged.
+- **Tests:** `PeriodFreezeLockTest` (shadow records without refusing, enforce refuses).
+
+## 2026-11-11 - Label key domain rename (no reach change)
+
+The NetworkPolicies that admit or reach this service select pods by `open-bank.tech/*` label keys
+(`plane`, `money-path-service`, `allow-internet-egress`, ...) instead of `openbank.io/*`. The project
+does not own the `openbank.io` domain. The selectors and the pod labels they match move in the same
+change, so every allowed peer, port and direction is unchanged: no new caller, no new egress, no new
+listener. Residual risk: for the length of one Argo sync, a policy and the pod it selects can briefly
+carry different keys. NetworkPolicy fails closed (unselected traffic is denied), so a mismatch drops
+traffic rather than widening it.

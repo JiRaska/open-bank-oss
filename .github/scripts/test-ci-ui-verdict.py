@@ -18,7 +18,7 @@ class VerdictTest(unittest.TestCase):
         cls.command = "\n".join(line[10:] for line in step.split("        run: |\n", 1)[1].splitlines())
 
     def verdict(self, expected, **overrides):
-        env = dict(os.environ, RESULT="success", DETECTION_RESULT="success", UI_CHANGED="true",
+        env = dict(os.environ, RESULT="success", COVERAGE_RESULT="success", DETECTION_RESULT="success", UI_CHANGED="true",
                    RBAC_TESTS="", REGISTRY_TEST="false", RBAC_RESULT="skipped",
                    EVENT="pull_request", REF="refs/pull/1/merge")
         env.update(overrides)
@@ -31,7 +31,15 @@ class VerdictTest(unittest.TestCase):
                 self.verdict(result == "success", RESULT=result)
 
     def test_unchanged_ui_may_skip(self):
-        self.verdict(True, UI_CHANGED="false", RESULT="skipped")
+        self.verdict(True, UI_CHANGED="false", RESULT="skipped", COVERAGE_RESULT="skipped")
+
+    def test_coverage_required_for_changed_ui(self):
+        # ADR-0370 U3: the coverage floors are part of the same required verdict as the build.
+        for result in ("success", "failure", "cancelled", "skipped", "", "unknown"):
+            with self.subTest(result=result):
+                self.verdict(result == "success", COVERAGE_RESULT=result)
+        self.verdict(True, EVENT="push", COVERAGE_RESULT="cancelled")
+        self.verdict(False, EVENT="push", COVERAGE_RESULT="failure")
 
     def test_detection_is_required_and_decision_must_be_known(self):
         for result in ("failure", "cancelled", "skipped", ""):
@@ -52,7 +60,7 @@ class VerdictTest(unittest.TestCase):
     def test_aggregates_share_one_verdict_without_serial_queue(self):
         validate = self.workflow.split("  validate:\n", 1)[1].split("\n  app-status:", 1)[0]
         needs = re.search(r"    needs: \[(.+)\]", validate).group(1).split(", ")
-        self.assertEqual(set(needs), {"agent-admission", "ruleset-evidence", "gates", "changes-ui", "ui-build", "ui-rbac-contract"})
+        self.assertEqual(set(needs), {"agent-admission", "ruleset-evidence", "gates", "changes-ui", "ui-build", "ui-coverage", "ui-rbac-contract"})
         self.assertIn("      - *admin-ui-verdict", validate)
         self.assertNotIn("needs.ui.result", validate)
         self.assertIn("    name: Admin UI\n", self.workflow)

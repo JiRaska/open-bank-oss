@@ -92,7 +92,27 @@ data class KycCase(
     val createdAt: Instant,
     val updatedAt: Instant,
     val subjectType: SubjectType = SubjectType.INDIVIDUAL,
-)
+) {
+    /**
+     * True when an automated customer screen settled this case clear: the sanctions check was
+     * PASSED by the screening provider (not by default, and not while still pending), and the PEP
+     * check, where the subject has one, is PASSED too.
+     *
+     * Deliberately not named `is…`/`get…`: Jackson would publish it as a property of the case on
+     * the API, in events and in stored payloads.
+     */
+    fun hasClearScreen(): Boolean {
+        val sanctions = checks.firstOrNull { it.checkType == CheckType.SANCTIONS_SCREENING } ?: return false
+        val pep = checks.firstOrNull { it.checkType == CheckType.PEP_SCREENING }
+        return sanctions.status == CheckStatus.PASSED &&
+            sanctions.provider == CUSTOMER_SCREENING_PROVIDER &&
+            (pep == null || pep.status == CheckStatus.PASSED)
+    }
+
+    companion object {
+        const val CUSTOMER_SCREENING_PROVIDER = "openbank-sanctions-service:CUSTOMER"
+    }
+}
 
 data class KycCheck(
     val id: UUID,

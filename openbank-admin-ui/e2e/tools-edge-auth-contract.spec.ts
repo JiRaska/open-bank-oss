@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 
 // These HTTP request checks run only against the deployed Gateway, with no route mocks or local
 // stand-ins. They cover the unauthenticated auth-edge contract for tool roots and nested URLs;
