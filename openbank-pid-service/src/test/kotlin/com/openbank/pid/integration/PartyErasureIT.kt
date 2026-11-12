@@ -491,6 +491,41 @@ class PartyErasureIT {
         ).isEqualTo(1)
     }
 
+    @Test
+    fun `re-pointing a case away from an erased stored link is refused`() {
+        val victim = UUID.randomUUID()
+        val live = UUID.randomUUID()
+        val caseId = UUID.randomUUID()
+        seedParty(victim, "blind-victim-$victim")
+        seedParty(live, "blind-live-$live")
+        seedCase(caseId, null, "blind-case-$caseId")
+        jdbc { c ->
+            c.prepareStatement(
+                "UPDATE identity_verification_case SET status = 'AWAITING_SECOND_APPROVAL', first_approver = 'op-1', " +
+                    "first_verdict = 'LINK_TO_EXISTING', first_link_party_id = ?, final_link_party_id = NULL, " +
+                    "first_at = now() WHERE id = ?",
+            ).use { ps ->
+                ps.setObject(1, victim)
+                ps.setObject(2, caseId)
+                ps.executeUpdate()
+            }
+            c.prepareStatement("UPDATE parties SET erased_at = now() WHERE id = ?").use { ps ->
+                ps.setObject(1, victim)
+                ps.executeUpdate()
+            }
+        }
+
+        val thrown = runCatching {
+            onEventLoop {
+                val case = repository.findById(caseId)!!
+                repository.update(case.copy(firstLinkPartyId = live, updatedAt = java.time.Instant.now()))
+            }
+        }.exceptionOrNull()
+
+        assertThat(thrown).describedAs("a stored link to an erased party must refuse a re-point")
+            .isInstanceOf(com.openbank.pid.application.usecase.PartyErasedException::class.java)
+    }
+
     private companion object {
         const val ATTEMPTS = 100
         const val POLL_MILLIS = 100L

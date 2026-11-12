@@ -67,7 +67,12 @@ class VerificationCaseRepositoryImpl :
                 // EVERY link target of the incoming case is locked (FOR UPDATE) and checked in THIS
                 // transaction, not only newly chosen ones: a target erased after it was linked must
                 // also stop the write (PartyRepositoryImpl.anonymize takes the same lock).
-                val newTargets = listOfNotNull(case.firstLinkPartyId, case.finalLinkPartyId).distinct().sorted()
+                val newTargets = listOfNotNull(
+                    current.firstLinkPartyId,
+                    current.finalLinkPartyId,
+                    case.firstLinkPartyId,
+                    case.finalLinkPartyId,
+                ).distinct().sorted()
                 lockLiveTargets(newTargets).map { applyDecision(current, case) }
             }
         }.awaitSuspending()
