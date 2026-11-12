@@ -70,6 +70,8 @@ Flyway, immutable historical scripts, forward-only:
 | `V5__technical_accounts.sql` | Extends `type` with `TECHNICAL`, partial index |
 | `V6__create_account_outbox.sql` | Table `account_outbox` (transactional outbox pattern) |
 
+| `V34__account_freeze_origin.sql` | Column `accounts.freeze_origin` (`OPERATOR`, `PARTY_STANDING`, null unless `FROZEN`) and `chk_accounts_freeze_origin`. Records who froze the account, so a party returning to good standing lifts only its own freezes (ADR-0374 D4). Rows frozen earlier keep null and count as operator freezes |
+
 > Note: V3 was merged into V4 (faulty design rejected in review).
 
 ## Indexes
