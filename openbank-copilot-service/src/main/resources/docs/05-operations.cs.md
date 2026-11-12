@@ -41,7 +41,13 @@ Soubor `build.gradle.kts` této služby neuvádí závislosti, které sdílí ka
 
 ## Označení odpovědi jako vygenerované AI (EU AI Act čl. 50 odst. 1)
 
-Každá `ChatReply` z `POST /api/v1/copilot/chat` (odpovědi, odmítnutí i záložní chybové odpovědi) nese
+Každá `ChatReply` z nestreamovaného `POST /api/v1/copilot/chat` (odpovědi, odmítnutí i záložní chybové odpovědi) nese
 `aiGenerated: true` a krátký český text `disclosure` (API kontrakt 1.6.0, aditivní). Klient musí označení
 zákazníkovi zobrazit. Zatím nehotovo: pravidlo v systémovém promptu, že se asistent na dotaz přizná k AI
 (vyžaduje novou verzi promptu a živé přenahrání evalů), a zobrazení označení v mobilní aplikaci.
+
+Stream (`POST /api/v1/copilot/chat/stream`): stejné označení se posílá jako hlavičky odpovědi při každém
+výsledku, `X-AI-Generated: true` a `X-AI-Disclosure` (stejný český text, UTF-8 percent-kódovaný), ještě před
+první událostí (API kontrakt 1.7.0, aditivní). Použity jsou hlavičky, protože stávající klienti streamu
+zobrazují každý řádek `data:` jako text odpovědi, takže vložený prvek by viděl zákazník, kdežto nečtená
+hlavička se ignoruje. Zatím nehotovo: lokalizace textu a čtení hlaviček v mobilní aplikaci.
