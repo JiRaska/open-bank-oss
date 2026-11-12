@@ -117,6 +117,16 @@ sanctions nastavuje `openbank.warmup.protected-path: /api/v1/sanctions/pending`,
 
 Importy OFAC a EU FSF používají sdílený zabezpečený SAX parser `SecureXml`. Listina s DOCTYPE se odmítne, včetně externích DTD a deklarací entit. Při chybě parsování import ponechá dosavadní seznam a oznámí `FAILED_KEPT_EXISTING`; prošetřete zdrojovou listinu a nevypínejte ochranu parseru kvůli vynucení obnovy. Odmítnutí ověřují `SanctionsImportServiceTest` a `EuFsfSaxParserTest`.
 
+## Interní mTLS listener v produkci
+
+V produkci služba naslouchá na dvou portech. Nešifrovaný HTTP port (8123) se nemění a dál obsluhuje sondy i všechny stávající volající. Port 8443 je druhý listener pro volání mezi službami: TLS 1.3 s certifikátem z privátní CA platformy a klientský certifikát je povinný. Deployment připojuje certifikát, klíč a CA bundle do `/mnt/internal-tls` ze secretu `sanctions-service-internal-tls`; secret není volitelný, takže bez něj pod nenastartuje.
+
+Klientský certifikát je pouze autentizace transportu. API se na obou portech autentizuje OIDC bearer tokenem a požadavek na 8443 s platným certifikátem a bez tokenu dostane 401, stejně jako na nešifrovaném portu.
+
+`quarkus.http.ssl.client-auth` je pevně dané při sestavení image, v profilu `%prod` v `application.yaml`. Proměnná `QUARKUS_HTTP_SSL_CLIENT_AUTH` v deploymentu jen uvádí stejnou hodnotu a změnit ji nemůže. Lokální vývoj a testy běží bez tohoto listeneru, takže úspěšný lokální běh nedokazuje nasazený handshake.
+
+Pokud volání na 8443 po rolloutu selhávají, zkontrolujte společně: připojený secret a jeho platnost, zda volající předkládá certifikát ze stejné CA, síťovou politiku k portu 8443 a zda volající stále posílá bearer token.
+
 ## Sdílené výchozí konfigurace
 
 Soubor `application.yaml` této služby nedeklaruje bezpečnostní hlavičky HTTP odpovědí (`quarkus.http.header.*`) ani management rozhraní (`quarkus.management.*`: zapnuto, port 8085, host 0.0.0.0, kořenová cesta `/q`). Hodnoty pocházejí z výchozí konfigurace flotily v `openbank-libs-runtime/src/main/resources/application.yaml`, která je na classpath každé služby s nižší prioritou než vlastní soubor služby. Hodnoty jsou shodné s tím, co služba dříve deklarovala sama. Pro změnu jen v této službě nastavte hodnotu v jejím `application.yaml`; soubor služby má přednost.

@@ -167,6 +167,16 @@ sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so t
 
 OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.
 
+## Internal mTLS listener in production
+
+In production the service listens on two ports. The plain HTTP port (8123) is unchanged and still serves the probes and every existing caller. Port 8443 is a second listener for east-west callers: TLS 1.3 with a certificate from the platform's private CA, and a client certificate is required. The deployment mounts the certificate, key and CA bundle at `/mnt/internal-tls` from the `sanctions-service-internal-tls` secret; the secret is not optional, so the pod does not start without it.
+
+The client certificate is transport authentication only. The API is authenticated by the OIDC bearer token on both ports, and a request on 8443 with a valid certificate and no token is answered 401, exactly as on the plain port.
+
+`quarkus.http.ssl.client-auth` is fixed when the image is built, under the `%prod` profile in `application.yaml`. The `QUARKUS_HTTP_SSL_CLIENT_AUTH` variable in the deployment only states the same value and cannot change it. Local development and tests run without the listener, so a passing local run does not prove the deployed handshake.
+
+If calls to 8443 fail after a rollout, check together: the mounted secret and its expiry, that the caller presents a certificate from the same CA, the network policy path to 8443, and that the caller still sends a bearer token.
+
 ## Shared configuration defaults
 
 This service's `application.yaml` does not declare the HTTP security response headers (`quarkus.http.header.*`) or the management interface (`quarkus.management.*`: enabled, port 8085, host 0.0.0.0, root path `/q`). These values come from the fleet defaults in `openbank-libs-runtime/src/main/resources/application.yaml`, which is on every service classpath at a lower precedence than the service's own file. The values are identical to what this service used to declare itself. To change one for this service only, set it in this service's `application.yaml`; the service file takes precedence.
