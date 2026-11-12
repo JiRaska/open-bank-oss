@@ -50,13 +50,14 @@ class FinrepResource(private val finrepUseCase: FinrepUseCase, private val clock
         @QueryParam("evidence") @DefaultValue("FROZEN") evidence: String = "FROZEN",
     ): Response {
         val date = if (asOf.isBlank()) LocalDate.now(clock) else LocalDate.parse(asOf)
+        val sourceEvidence = TrialBalanceEvidence.valueOf(evidence.uppercase())
         val template: FinrepTemplate = finrepUseCase.getTemplate(
             GetFinrepTemplateQuery(
                 templateId = templateId,
                 asOf = date,
-                evidence = TrialBalanceEvidence.valueOf(evidence.uppercase()),
+                evidence = sourceEvidence,
             ),
         )
-        return Response.ok(template).build()
+        return Response.ok(template.copy(sourceEvidence = sourceEvidence.name)).build()
     }
 }
