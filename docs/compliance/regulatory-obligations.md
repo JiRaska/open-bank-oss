@@ -184,7 +184,7 @@ Celkem povinností: **70**.
 - **Druh / kanál:** periodic-aggregate · SDAT (XBRL-CSV)
 - **Osobní údaje:** no
 - **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-finrep`; služby `openbank-finrep-service`; sleduje #5914
-- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### COREP – kapitál a kapitálové požadavky
 
@@ -197,7 +197,7 @@ Celkem povinností: **70**.
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
 - **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-capital`; služby `openbank-finrep-service`; sleduje #5914
-- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### Ukazatel krytí likviditou (LCR)
 
@@ -210,7 +210,7 @@ Celkem povinností: **70**.
 - **Druh / kanál:** periodic-aggregate · SDAT
 - **Osobní údaje:** no
 - **Pokrytí:** `computed-preview` — backend počítá náhled, nelze podat (chybí podací dokument a transport); výkazy `cnb-lcr`; služby `openbank-finrep-service`, `openbank-risk-engine`; sleduje #5914
-- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz
+- **Poznámka:** Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
 
 ### Ukazatel čistého stabilního financování (NSFR)
 

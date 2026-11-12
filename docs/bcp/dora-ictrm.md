@@ -17,10 +17,10 @@ Owner: CTO / Maintainer Lead
 | Art. 8 — Identification | Maintain asset register | `service-graph.json` (ADR-0029 D3); fleet port map; SBOM per service (ADR-0121) | ✓ |
 | Art. 9 — Protection and prevention | Access control, encryption, patch management | OpenBao secrets; mTLS Kafka (ADR-0137); OPA authz (ADR-0034); Keycloak OIDC | ✓ |
 | Art. 10 — Detection | Continuous monitoring | Grafana + Pyrra SLOs; GoAlert alerting; Falco runtime; HolmesGPT; GlitchTip | ✓ |
-| Art. 11 — Response and recovery | BCP, DRP, RTO/RPO | bcp-policy.md; runbooks 0001–0005; CNPG S3 WAL; ArgoCD rollback. Application-level RTO and RPO are unmeasured (see `dr-test-log.md`) | partial (#8347) |
-| Art. 11(3)(c) — DR plan | Documented, tested DR plan | runbook-0002; dr-test-log.md. One live restore drill (ledger database only, database-level RTO ~84 s); the other CNPG databases have none, and no failover has been exercised | partial (#8347) |
-| Art. 12 — Backup policies | Backup and restore procedures | CNPG continuous WAL + 14-day retention; S3 lifecycle rule. Restore tested for one database only; backups share the account and region of the data and have no object lock | partial (#8347, #15754) |
-| Art. 13 — Learning and evolving | Post-incident review, lessons learned | dr-test-log.md §3; OpenBank issue tracker | ✓ |
+| Art. 11 — Response and recovery | BCP, DRP, RTO/RPO | bcp-policy.md (its runbook table names `runbook-0001`…`0005` files that do not exist under that name in `docs/runbooks/`; those numbers there are unrelated upgrade/migration runbooks); the only restore procedure is the drill record in `docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md` § Restore Drill Result, plus `automated-dr-restore.md`; CNPG S3 WAL; ArgoCD rollback. Application-level RTO and RPO are unmeasured (see `dr-test-log.md`) | partial (#8347) |
+| Art. 11(3)(c) — DR plan | Documented, tested DR plan | No dedicated DR runbook exists (`docs/runbooks/0002-*` is a Vault upgrade runbook, not a DR plan); restore procedure is `docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md` § Restore Drill Result, `automated-dr-restore.md`, `dr-test-log.md`. One live restore drill (ledger database only, database-level RTO ~84 s); the other CNPG databases have none, and no failover has been exercised | partial (#8347) |
+| Art. 12 — Backup policies | Backup and restore procedures | CNPG continuous WAL; CNPG `retentionPolicy` is 30 days on every ledger/service cluster in `openbank-infra/gitops` except the goalert database (7 days); the sandbox backup bucket lifecycle expires objects after 35 days (`openbank-infra/aws/envs/sandbox-platform/db-backups.tf`, the legal 10-year retention applies to prod and is not configured there). Restore tested for one database only; backups share the account and region of the data and have no object lock | partial (#8347, #15754) |
+| Art. 13 — Learning and evolving | Post-incident review, lessons learned | the `Lessons learned` and `Actions` fields of each entry in `dr-test-log.md` (the log has no numbered sections); OpenBank issue tracker | ✓ |
 | Art. 14 — Communication | Crisis communication plan | bcp-policy.md §5; GoAlert on-call | ✓ |
 | Art. 17 — ICT-related incident management and classification | Classify by the RTS criteria (clients, transactions, duration, geography, data loss, criticality) | Operator-typed severity (P1–P4) on `IctIncident`; GlitchTip severity + Pyrra burn-rate; T0–T3 tiers. No classification criteria are evaluated in code | not met (#15752) |
 | Art. 18–19 — Classification of major incidents and reporting | Initial, intermediate and final reports in the prescribed time limits | BCP Owner responsibility; bcp-policy.md §5. The incident record has a reported-to-regulator flag only; there are no staged reports, and the incident return is `bff-only` in `regulatory-obligations.yaml` | not met (#15752) |
@@ -55,7 +55,7 @@ Articles 5–10 and 13–14 are marked ✓ as documented controls; they have not
 
 ### Availability
 
-- CNPG S3 WAL archiving — continuous database backup (RPO 15 min for T0)
+- CNPG S3 WAL archiving — continuous database backup (RPO 15 min for T0 is a target; no RPO has been measured, see `dr-test-log.md`)
 - Karpenter — node auto-replacement within ~30 min
 - ArgoCD GitOps — infrastructure state recoverable from git in < 1 h
 - Kafka replication factor 1 (sandbox), 3 (production) — message durability
@@ -67,14 +67,14 @@ Articles 5–10 and 13–14 are marked ✓ as documented controls; they have not
 
 | Risk ID | Risk description | Likelihood | Impact | Mitigating control | Residual |
 |---------|-----------------|-----------|--------|-------------------|---------|
-| R-01 | Database data loss | Low | Critical | CNPG WAL S3; 14-day retention; PITR | Low |
+| R-01 | Database data loss | Low | Critical | CNPG WAL S3; 30-day CNPG retentionPolicy (35-day sandbox bucket lifecycle); PITR drilled for ledger-db only | Low |
 | R-02 | Kafka message loss | Low | High | 7-day retention; idempotent producers | Low |
 | R-03 | Secret compromise | Low | Critical | OpenBao; break-glass in AWS SM; mTLS | Low |
 | R-04 | Image supply chain attack | Low | Critical | Cosign + KMS; SBOM; Kyverno verify | Low |
 | R-05 | Single-AZ node failure | Medium | High | Karpenter replacement; ArgoCD resync | Medium |
 | R-06 | Multi-region outage | Low | Critical | M6 not yet deployed; T0 RTO = 4 h only | High until M6 |
 | R-07 | Third-party cloud failure | Low | Critical | Cloud-agnostic architecture (ADR-0027) | Medium |
-| R-08 | Insider threat / misconfiguration | Low | High | OPA authz; Falco; 2-approver money-path | Low |
+| R-08 | Insider threat / misconfiguration | Low | High | OPA authz; Falco; required status checks and money-path gates on `main`; signed commits; independent LLM review. No second human approval is required (single maintainer, see GOVERNANCE.md) | Low |
 
 ---
 

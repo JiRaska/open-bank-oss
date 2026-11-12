@@ -247,7 +247,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: computed-preview, reports: [cnb-finrep], services: [openbank-finrep-service], tracking: "#5914" }
-    note: Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-corep-own-funds
     area: prudential
     name: { cs: COREP – kapitál a kapitálové požadavky, en: COREP own funds and requirements }
@@ -263,7 +263,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: computed-preview, reports: [cnb-capital], services: [openbank-finrep-service], tracking: "#5914" }
-    note: Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-lcr
     area: prudential
     name: { cs: Ukazatel krytí likviditou (LCR), en: Liquidity Coverage Ratio }
@@ -279,7 +279,7 @@ obligations:
     personal_data: "no"
     applicability: always
     coverage: { status: computed-preview, reports: [cnb-lcr], services: [openbank-finrep-service, openbank-risk-engine], tracking: "#5914" }
-    note: Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914.
+    note: "Backend počítá náhled; podací dokument (XBRL/DPM) se nevytváří a jediný transport je dry-run (DryRunSupervisoryReturnTransport). Viz #5914."
   - id: eba-nsfr
     area: prudential
     name: { cs: Ukazatel čistého stabilního financování (NSFR), en: Net Stable Funding Ratio }
