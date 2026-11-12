@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: aml-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-c521c8e5@sha256:3e74b32fad3817c4814924f4a12e899a176669ec16ba949c6237e6d3b91119bf
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-aml-service:sandbox-229a1a2c@sha256:c757557ea3878dc23b69ec26f8c7e95fd60e761b6e1e1fa78458f3a4d4bfafcf
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
