@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: pid-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-722359e2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pid-service:sandbox-548fa683@sha256:63cf44151a9f3c2cdeb364af6dab601d6e2775739b3a6b88bd28651ff3085e65
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -106,8 +106,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — bounded context, not yet modelled",
     "openbank-finops-agent":
         "#9167 — agent, not yet modelled",
-    "openbank-finrep-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-flaky-test-hunter":
         "#9167 — agent, not yet modelled",
     "openbank-governance-auditor":

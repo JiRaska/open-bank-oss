@@ -288,3 +288,13 @@ test_shared_and_other_api_principals_denied_catalog_read if {
 			with data.rules as rules_mock
 	}
 }
+
+test_tax_reporting_can_read_gsft_roster if {
+	principal := object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "openbank-tax-reporting"})
+	rest.allow.allow with input as {"principal": principal, "action": "account.gsft.roster"}
+}
+
+test_other_service_cannot_read_gsft_roster if {
+	principal := object.union(tax_reporting_guard_identity, {"service_account": true, "client_id": "another-client"})
+	not rest.allow.allow with input as {"principal": principal, "action": "account.gsft.roster"}
+}

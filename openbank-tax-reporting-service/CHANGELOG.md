@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.54.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.53.0...tax-reporting-service-v0.54.0) (2026-11-12)
+
+
+### Features
+
+* **account:** serve the GSFT deposit roster as of a Czech date ([#15652](https://github.com/JiRaska/open-bank-oss/issues/15652)) ([c68575d](https://github.com/JiRaska/open-bank-oss/commit/c68575daf7fe2e346e97951c22e2ac4fdbc04340))
+
+## [0.53.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.52.0...tax-reporting-service-v0.53.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** file the GSFT depositor batch on the statutory-return lifecycle ([#15563](https://github.com/JiRaska/open-bank-oss/issues/15563)) ([45a7c95](https://github.com/JiRaska/open-bank-oss/commit/45a7c951a22d943d69c5265a05038d42431617f2))
+
+## [0.52.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.51.0...tax-reporting-service-v0.52.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** source the GSFT depositor snapshot from admitted read models ([#15524](https://github.com/JiRaska/open-bank-oss/issues/15524)) ([850e9a8](https://github.com/JiRaska/open-bank-oss/commit/850e9a8e3b52ec79ac95cdc2599d41ff4328509d))
+
+## [0.51.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.50.0...tax-reporting-service-v0.51.0) (2026-11-11)
+
+
+### Features
+
+* **tax-reporting:** package the GSFT batch as one ZIP encrypted with PGP ([#15546](https://github.com/JiRaska/open-bank-oss/issues/15546)) ([27e19a1](https://github.com/JiRaska/open-bank-oss/commit/27e19a170bad72e55c2684d2734b6478d8b1d666))
+
+## [0.50.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.49.0...tax-reporting-service-v0.50.0) (2026-11-10)
+
+
+### Features
+
+* **tax-reporting:** render the GSFT DII file for special-regime accounts ([#15518](https://github.com/JiRaska/open-bank-oss/issues/15518)) ([5a99a15](https://github.com/JiRaska/open-bank-oss/commit/5a99a15c6f382377e2dced97b9ad81d59e198cd4))
+
 ## [0.49.0](https://github.com/JiRaska/open-bank-oss/compare/tax-reporting-service-v0.48.0...tax-reporting-service-v0.49.0) (2026-11-10)
 
 

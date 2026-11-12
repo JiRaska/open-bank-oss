@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.4](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.3...fraud-service-v0.18.4) (2026-11-12)
+
+
+### Performance
+
+* **fraud:** move the outbox onto the kernel repository (ADR-0327 phase 2) ([#15535](https://github.com/JiRaska/open-bank-oss/issues/15535)) ([489f162](https://github.com/JiRaska/open-bank-oss/commit/489f1629c8afc3ba5bbb138bcb4f10c8a95cab28))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.18.2...fraud-service-v0.18.3) (2026-11-06)
 
 

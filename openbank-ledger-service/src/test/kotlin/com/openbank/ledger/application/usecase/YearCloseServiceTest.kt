@@ -43,6 +43,7 @@ class YearCloseServiceTest {
     private lateinit var journalRepository: JournalRepository
     private lateinit var yearCloseRepository: YearCloseRepository
     private lateinit var service: YearCloseService
+    private val allocations = mockk<com.openbank.ledger.application.port.out.YearEndAllocationRepository>()
 
     // Fixed bank time: 2026-03-01 in Europe/Prague — fiscal year 2025 has ended, 2026 has not.
     private val clock: Clock = Clock.fixed(Instant.parse("2026-03-01T10:00:00Z"), ZoneId.of("Europe/Prague"))
@@ -88,7 +89,13 @@ class YearCloseServiceTest {
             clock,
             // ADR-0207: the accounting date is no longer derived from `clock` inside the service.
             AccountingClock.bank(clock),
+            allocations,
         )
+        coEvery { allocations.unattributedJournalKeys(any()) } returns emptyList()
+        coEvery { allocations.inYearCloseLock<Any?>(any(), any()) } coAnswers {
+            secondArg<suspend (Boolean) -> Any?>().invoke(true)
+        }
+        coEvery { allocations.allocators(any()) } returns emptySet()
         coEvery { yearCloseRepository.saveDraft(any()) } answers { firstArg() }
         coEvery { yearCloseRepository.saveAttested(any(), any()) } answers { firstArg() }
     }
@@ -305,6 +312,35 @@ class YearCloseServiceTest {
                 .hasMessageContaining("Four-eyes")
                 .hasMessageContaining("differ from the draft author maker-sub")
             // The control must never let a self-attest reach persistence.
+            coVerify(exactly = 0) { yearCloseRepository.saveAttested(any(), any()) }
+            Unit
+        }
+
+        @Test
+        fun `four-eyes - ANY result allocator cannot attest even after someone else refreshed the draft`(): Unit =
+            runBlocking {
+                stubPeriodLines(2025, balancedLines())
+                coEvery { yearCloseRepository.findByFiscalYear(2025) } returns
+                    draftFor(balancedLines(), draftedBy = "refresher-sub")
+                coEvery { allocations.allocators(2025) } returns setOf("first-sub", "second-sub")
+
+                assertThatThrownBy {
+                    runBlocking { service.attest(AttestYearCloseCommand(2025, attestedBy = "first-sub")) }
+                }
+                    .isInstanceOf(YearCloseConflictException::class.java)
+                    .hasMessageContaining("attestor first-sub allocated")
+                coVerify(exactly = 0) { yearCloseRepository.saveAttested(any(), any()) }
+                Unit
+            }
+
+        @Test
+        fun `an unattributed closing journal blocks attestation`(): Unit = runBlocking {
+            stubPeriodLines(2025, balancedLines())
+            coEvery { yearCloseRepository.findByFiscalYear(2025) } returns draftFor(balancedLines())
+            coEvery { allocations.unattributedJournalKeys(2025) } returns listOf("year-end-result:2025:abc:0")
+            assertThatThrownBy {
+                runBlocking { service.attest(AttestYearCloseCommand(2025, attestedBy = "checker-sub")) }
+            }.isInstanceOf(YearCloseConflictException::class.java).hasMessageContaining("no allocator attribution")
             coVerify(exactly = 0) { yearCloseRepository.saveAttested(any(), any()) }
             Unit
         }
