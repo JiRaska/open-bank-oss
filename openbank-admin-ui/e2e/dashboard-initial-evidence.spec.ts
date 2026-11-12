@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { expect, test } from '@playwright/test'
+import { expect, test } from './helpers/test'
 import { signInAsOperator } from './helpers/auth'
 
 test('dashboard does not present zero fleet metrics before the first verified response', async ({ page, context, baseURL }) => {
